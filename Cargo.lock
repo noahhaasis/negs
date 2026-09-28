@@ -3911,12 +3911,12 @@ dependencies = [
  "exr",
  "image 0.25.10",
  "imagepipe",
- "rawler",
  "rawloader",
  "rayon",
  "serde_json",
  "spektrafilm-core",
  "spektrafilm-gpu",
+ "spektrafilm-io",
  "spektrafilm-math",
  "tiff 0.10.3",
  "tracing",
@@ -3973,16 +3973,27 @@ dependencies = [
  "imagepipe",
  "objc2 0.5.2",
  "raw-window-handle",
- "rawler",
  "rawloader",
  "rayon",
  "rfd",
  "serde_json",
  "spektrafilm-core",
  "spektrafilm-gpu",
+ "spektrafilm-io",
  "spektrafilm-math",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "spektrafilm-io"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "image 0.25.10",
+ "rawler",
+ "rayon",
+ "spektrafilm-math",
 ]
 
 [[package]]

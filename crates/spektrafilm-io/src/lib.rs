@@ -1,0 +1,269 @@
+//! Image and camera-RAW loading shared by the GUI, the CLI and
+//! `decode_raw_gui`.
+//!
+//! Every loader returns an [`ImageBuf`] of **linear** RGB values:
+//! - RAW files go through `rawler` and come out in linear sRGB primaries.
+//! - PNG is sRGB gamma-encoded and is decoded to linear here.
+//! - TIFF (and any other `image`-crate format) passes through unchanged.
+//!
+//! Use [`input_is_linear_srgb`] to decide the pipeline's input colour
+//! space for a given file.
+
+use std::path::Path;
+
+use anyhow::{Context, Result, bail};
+use rayon::prelude::*;
+use spektrafilm_math::image::ImageBuf;
+use spektrafilm_math::precision::{Scalar, from_f32, srgb_decode};
+
+/// Which non-RAW formats [`load_image`] accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Formats {
+    /// Any format the `image` crate can decode (GUI).
+    Any,
+    /// Only TIFF, PNG and camera RAW; anything else is an error (CLI).
+    TiffPngRaw,
+}
+
+/// Lower-cased file extension of `path`, or `""` when it has none.
+fn extension(path: &Path) -> String {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase()
+}
+
+/// True if `ext` (lower case, without the dot) is a camera RAW
+/// extension. The list only decides when to use the RAW decoder.
+pub fn is_raw_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "dng"
+            | "cr2"
+            | "cr3"
+            | "nef"
+            | "nrw"
+            | "arw"
+            | "srf"
+            | "sr2"
+            | "raf"
+            | "orf"
+            | "rw2"
+            | "pef"
+            | "ptx"
+            | "srw"
+            | "x3f"
+            | "iiq"
+            | "3fr"
+            | "ari"
+            | "bay"
+            | "crw"
+            | "dcr"
+            | "drf"
+            | "erf"
+            | "fff"
+            | "k25"
+            | "kdc"
+            | "mef"
+            | "mos"
+            | "mrw"
+            | "rwl"
+    )
+}
+
+/// True if the loaders return linear sRGB for this file (PNG after its
+/// sRGB decode, RAW after rawler's develop step). The pipeline should
+/// then use `input_color_space = "sRGB"` and
+/// `input_cctf_decoding = false`, so the gamma isn't decoded twice.
+pub fn input_is_linear_srgb(path: &Path) -> bool {
+    let ext = extension(path);
+    ext == "png" || is_raw_extension(&ext)
+}
+
+/// Load an image as linear RGB, applying its EXIF orientation. RAW
+/// extensions go to [`load_raw`] in both modes.
+pub fn load_image(path: &Path, formats: Formats) -> Result<ImageBuf> {
+    let ext = extension(path);
+    if is_raw_extension(&ext) {
+        return load_raw(path);
+    }
+    if formats == Formats::TiffPngRaw && !matches!(ext.as_str(), "tif" | "tiff" | "png") {
+        bail!("unsupported image format: .{ext} (supported: tiff, png, raw)");
+    }
+    let img = decode_no_limits(path)?;
+    let rgb = img.to_rgb32f();
+    let (w, h) = (rgb.width(), rgb.height());
+    let data: Vec<f32> = rgb.into_raw();
+    let scalars: Vec<Scalar> = match ext.as_str() {
+        // PNG is sRGB gamma-encoded: widen to Scalar first, then decode
+        // to linear.
+        "png" => data
+            .into_par_iter()
+            .map(|v| srgb_decode(from_f32(v)))
+            .collect(),
+        _ => data.into_par_iter().map(from_f32).collect(),
+    };
+    Ok(ImageBuf::from_data(w, h, scalars))
+}
+
+/// Decode with the `image` crate's memory limits disabled and apply the
+/// EXIF/TIFF orientation tag. The default 512 MiB cap rejects large float
+/// TIFFs (a 60 MP 32-bit RGB frame alone is ~720 MiB). Local files are
+/// trusted.
+fn decode_no_limits(path: &Path) -> Result<image::DynamicImage> {
+    let mut reader = image::ImageReader::open(path)
+        .with_context(|| format!("opening image: {}", path.display()))?
+        .with_guessed_format()
+        .with_context(|| format!("detecting image format: {}", path.display()))?;
+    reader.no_limits();
+    let mut decoder = reader
+        .into_decoder()
+        .with_context(|| format!("decoding image: {}", path.display()))?;
+    let orientation = image::ImageDecoder::orientation(&mut decoder)
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut img = image::DynamicImage::from_decoder(decoder)
+        .with_context(|| format!("decoding image: {}", path.display()))?;
+    img.apply_orientation(orientation);
+    Ok(img)
+}
+
+/// Decode a camera RAW file to **linear** sRGB primaries, with its EXIF
+/// orientation applied.
+///
+/// `rawler::RawDevelop::default()` already does rescale → demosaic →
+/// crop → white balance → camera→sRGB matrix. We drop the final `SRgb`
+/// gamma step to get linear sRGB, because the spektrafilm pipeline
+/// applies its own sRGB encoding at the end. Negative values are
+/// clamped to 0.
+///
+/// Limitation: rawler can't read Lightroom-exported "lossy DNG"
+/// (`ljpeg sof.precision 8`); those files return an error.
+pub fn load_raw(path: &Path) -> Result<ImageBuf> {
+    load_raw_impl(path, true)
+}
+
+/// Same as [`load_raw`], but without applying the EXIF orientation.
+/// The output keeps the sensor's native layout.
+pub fn load_raw_unoriented(path: &Path) -> Result<ImageBuf> {
+    load_raw_impl(path, false)
+}
+
+fn load_raw_impl(path: &Path, orient: bool) -> Result<ImageBuf> {
+    use rawler::{
+        decoders::RawDecodeParams,
+        imgop::develop::{ProcessingStep, RawDevelop},
+        rawsource::RawSource,
+    };
+    let src =
+        RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
+    let decode_params = RawDecodeParams::default();
+    let raw = rawler::decode(&src, &decode_params)
+        .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
+    let mut dev = RawDevelop::default();
+    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb));
+    let intermediate = dev
+        .develop_intermediate(&raw)
+        .map_err(|e| anyhow::anyhow!("RAW develop failed: {e:?}"))?;
+    let img = intermediate_to_image_buf(intermediate);
+    if !orient {
+        return Ok(img);
+    }
+    // rawler 0.7 always sets `RawImage::orientation` to Normal (an
+    // upstream TODO), so read the EXIF tag ourselves.
+    let orientation = raw_exif_orientation(&src, &decode_params);
+    Ok(img.oriented(orientation))
+}
+
+/// EXIF orientation tag (1..=8) of a RAW file, or 1 if it is missing or
+/// unreadable. rawler only guards `decode` against panics, not the
+/// metadata parsers. Orientation is best-effort (and the GUI calls this
+/// on its UI thread), so a panic falls back to 1.
+fn raw_exif_orientation(
+    src: &rawler::rawsource::RawSource,
+    params: &rawler::decoders::RawDecodeParams,
+) -> u16 {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rawler::get_decoder(src)
+            .and_then(|d| d.raw_metadata(src, params))
+            .ok()
+            .and_then(|m| m.exif.orientation)
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or(1)
+}
+
+/// Convert rawler's developed output to RGB, clamping negatives to 0.
+/// Monochrome is copied into all three channels; FourColor drops the
+/// fourth channel.
+fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate) -> ImageBuf {
+    use rawler::imgop::develop::Intermediate;
+
+    let floor = |v: f32| from_f32(v.max(0.0));
+    let (w, h, scalars): (usize, usize, Vec<Scalar>) = match intermediate {
+        Intermediate::Monochrome(pixels) => (
+            pixels.width,
+            pixels.height,
+            pixels
+                .data
+                .par_iter()
+                .flat_map_iter(|&v| {
+                    let v = floor(v);
+                    [v, v, v]
+                })
+                .collect(),
+        ),
+        Intermediate::ThreeColor(pixels) => (
+            pixels.width,
+            pixels.height,
+            pixels
+                .data
+                .par_iter()
+                .flat_map_iter(|px| [floor(px[0]), floor(px[1]), floor(px[2])])
+                .collect(),
+        ),
+        Intermediate::FourColor(pixels) => (
+            pixels.width,
+            pixels.height,
+            pixels
+                .data
+                .par_iter()
+                .flat_map_iter(|px| [floor(px[0]), floor(px[1]), floor(px[2])])
+                .collect(),
+        ),
+    };
+    ImageBuf::from_data(w as u32, h as u32, scalars)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_extension_list() {
+        for ext in ["nef", "dng", "cr3", "arw", "raf", "orf", "rwl"] {
+            assert!(is_raw_extension(ext), "{ext}");
+        }
+        for ext in ["png", "tif", "jpg", "NEF", ""] {
+            assert!(!is_raw_extension(ext), "{ext}");
+        }
+    }
+
+    #[test]
+    fn linear_srgb_detection() {
+        assert!(input_is_linear_srgb(Path::new("a/b.PNG")));
+        assert!(input_is_linear_srgb(Path::new("x.Nef")));
+        assert!(!input_is_linear_srgb(Path::new("x.tiff")));
+        assert!(!input_is_linear_srgb(Path::new("x.jpg")));
+        assert!(!input_is_linear_srgb(Path::new("noext")));
+    }
+
+    #[test]
+    fn cli_mode_rejects_other_formats() {
+        let err = load_image(Path::new("does-not-matter.jpg"), Formats::TiffPngRaw).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "unsupported image format: .jpg (supported: tiff, png, raw)"
+        );
+    }
+}

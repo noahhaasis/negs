@@ -187,43 +187,8 @@ fn cmd_process(
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
-    if ext == "png"
-        || matches!(
-            ext.as_str(),
-            "dng"
-                | "cr2"
-                | "cr3"
-                | "nef"
-                | "nrw"
-                | "arw"
-                | "srf"
-                | "sr2"
-                | "raf"
-                | "orf"
-                | "rw2"
-                | "pef"
-                | "srw"
-                | "x3f"
-                | "iiq"
-                | "3fr"
-                | "crw"
-                | "rwl"
-                | "mrw"
-                | "mef"
-                | "kdc"
-                | "ari"
-                | "bay"
-                | "dcr"
-                | "drf"
-                | "erf"
-                | "fff"
-                | "k25"
-                | "mos"
-                | "ptx"
-        )
-    {
-        // PNG and RAW both deliver linear sRGB after our loader's
-        // sRGB-decode (PNG) or disabled-basecurve+gamma (RAW) step.
+    if spektrafilm_io::input_is_linear_srgb(input) {
+        // PNG and RAW come out of the loader as linear sRGB.
         // Tell the pipeline so it doesn't decode gamma a second time.
         params.io.input_color_space = "sRGB".to_string();
         params.io.input_cctf_decoding = false;
@@ -231,7 +196,7 @@ fn cmd_process(
 
     // Load image
     let t = Instant::now();
-    let image = load_image(input)?;
+    let image = spektrafilm_io::load_image(input, spektrafilm_io::Formats::TiffPngRaw)?;
     eprintln!(
         "Image loaded: {}x{} ({} MP), {} ms",
         image.width,
@@ -417,172 +382,6 @@ fn cmd_export_lut(
         .with_context(|| format!("writing CUBE file: {}", output.display()))?;
     eprintln!("LUT saved: {}", output.display());
     Ok(())
-}
-
-/// Load an image from TIFF or PNG into an ImageBuf (f32, linear, [0-1]).
-fn load_image(path: &Path) -> Result<ImageBuf> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    match ext.as_str() {
-        "tif" | "tiff" => load_tiff(path),
-        "png" => load_png(path),
-        // Camera RAW formats — same set as the GUI's loader.
-        "dng" | "cr2" | "cr3" | "nef" | "nrw" | "arw" | "srf" | "sr2" | "raf" | "orf" | "rw2"
-        | "pef" | "srw" | "x3f" | "iiq" | "3fr" | "crw" | "rwl" | "mrw" | "mef" | "kdc" | "ari"
-        | "bay" | "dcr" | "drf" | "erf" | "fff" | "k25" | "mos" | "ptx" => load_raw(path),
-        _ => bail!("unsupported image format: .{ext} (supported: tiff, png, raw)"),
-    }
-}
-
-/// Decode a camera RAW file via `rawler` — same code path the GUI uses
-/// (`crates/spektrafilm-gui/src/main.rs::load_raw`). Earlier versions
-/// used `imagepipe`+`rawloader` which produces DIFFERENT pixel values
-/// for the same ORF (different demosaic algorithm, different camera
-/// matrix), giving the f64 CPU export a visible warm/magenta cast vs
-/// the GUI preview. They must share a decoder for the export to match
-/// the preview byte-for-byte at the input boundary.
-fn load_raw(path: &Path) -> Result<ImageBuf> {
-    use rawler::{
-        decoders::RawDecodeParams,
-        imgop::develop::{ProcessingStep, RawDevelop},
-        rawsource::RawSource,
-    };
-    let src =
-        RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
-    let decode_params = RawDecodeParams::default();
-    let raw = rawler::decode(&src, &decode_params)
-        .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
-    let mut dev = RawDevelop::default();
-    // Drop the sRGB gamma step — we want linear sRGB primaries; the
-    // spektrafilm pipeline applies its own sRGB OETF at the very end.
-    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb));
-    let intermediate = dev
-        .develop_intermediate(&raw)
-        .map_err(|e| anyhow::anyhow!("RAW develop failed: {e:?}"))?;
-    // rawler 0.7 leaves `RawImage::orientation` hardcoded to Normal, so
-    // read the EXIF tag ourselves. Must match the GUI's loader.
-    let orientation = raw_exif_orientation(&src, &decode_params);
-    Ok(rawler_intermediate_to_image_buf(intermediate)?.oriented(orientation))
-}
-
-/// EXIF orientation tag (1..=8) of a RAW file; 1 when absent/unreadable.
-/// The metadata parsers aren't panic-guarded by rawler (only `decode`
-/// is), and orientation is best-effort, so a panic falls back to 1.
-fn raw_exif_orientation(
-    src: &rawler::rawsource::RawSource,
-    params: &rawler::decoders::RawDecodeParams,
-) -> u16 {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        rawler::get_decoder(src)
-            .and_then(|d| d.raw_metadata(src, params))
-            .ok()
-            .and_then(|m| m.exif.orientation)
-    }))
-    .ok()
-    .flatten()
-    .unwrap_or(1)
-}
-
-fn rawler_intermediate_to_image_buf(
-    intermediate: rawler::imgop::develop::Intermediate,
-) -> Result<ImageBuf> {
-    use rayon::prelude::*;
-    use rawler::imgop::develop::Intermediate;
-
-    let floor = |v: f32| spektrafilm_math::precision::from_f32(v.max(0.0));
-    match intermediate {
-        Intermediate::Monochrome(pixels) => {
-            let scalars: Vec<spektrafilm_math::precision::Scalar> = pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|&v| {
-                    let v = floor(v);
-                    [v, v, v]
-                })
-                .collect();
-            Ok(ImageBuf::from_data(
-                pixels.width as u32,
-                pixels.height as u32,
-                scalars,
-            ))
-        }
-        Intermediate::ThreeColor(pixels) => {
-            let scalars: Vec<spektrafilm_math::precision::Scalar> = pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|px| [floor(px[0]), floor(px[1]), floor(px[2])])
-                .collect();
-            Ok(ImageBuf::from_data(
-                pixels.width as u32,
-                pixels.height as u32,
-                scalars,
-            ))
-        }
-        Intermediate::FourColor(pixels) => {
-            let scalars: Vec<spektrafilm_math::precision::Scalar> = pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|px| [floor(px[0]), floor(px[1]), floor(px[2])])
-                .collect();
-            Ok(ImageBuf::from_data(
-                pixels.width as u32,
-                pixels.height as u32,
-                scalars,
-            ))
-        }
-    }
-}
-
-/// Decode an image with the decoder's memory limits disabled. The
-/// `image` crate caps allocation at 512 MiB by default, which rejects
-/// large float TIFFs (a 60 MP 32-bit RGB frame alone is ~720 MiB). We
-/// trust local files, so lift the cap.
-fn decode_no_limits(path: &Path) -> Result<image::DynamicImage> {
-    let mut reader = image::ImageReader::open(path)
-        .with_context(|| format!("opening image: {}", path.display()))?
-        .with_guessed_format()
-        .with_context(|| format!("detecting image format: {}", path.display()))?;
-    reader.no_limits();
-    let mut decoder = reader
-        .into_decoder()
-        .with_context(|| format!("decoding image: {}", path.display()))?;
-    // Honour the EXIF/TIFF orientation tag — the GUI loader does the
-    // same, so the export must too or it won't match the preview.
-    let orientation = image::ImageDecoder::orientation(&mut decoder)
-        .unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut img = image::DynamicImage::from_decoder(decoder)
-        .with_context(|| format!("decoding image: {}", path.display()))?;
-    img.apply_orientation(orientation);
-    Ok(img)
-}
-
-fn load_tiff(path: &Path) -> Result<ImageBuf> {
-    let img = decode_no_limits(path)?;
-    let rgb = img.to_rgb32f();
-    let (w, h) = (rgb.width(), rgb.height());
-    let data: Vec<f32> = rgb.into_raw();
-    let scalars: Vec<spektrafilm_math::precision::Scalar> = data
-        .into_iter()
-        .map(spektrafilm_math::precision::from_f32)
-        .collect();
-    Ok(ImageBuf::from_data(w, h, scalars))
-}
-
-fn load_png(path: &Path) -> Result<ImageBuf> {
-    let img = decode_no_limits(path)?;
-    let rgb = img.to_rgb32f();
-    let (w, h) = (rgb.width(), rgb.height());
-    let data: Vec<f32> = rgb.into_raw();
-    // PNG is sRGB gamma-encoded — promote to Scalar then decode to linear
-    let scalars: Vec<spektrafilm_math::precision::Scalar> = data
-        .into_iter()
-        .map(|v| spektrafilm_math::precision::srgb_decode(spektrafilm_math::precision::from_f32(v)))
-        .collect();
-    Ok(ImageBuf::from_data(w, h, scalars))
 }
 
 /// Save an ImageBuf to TIFF (16-bit) or PNG (8-bit).

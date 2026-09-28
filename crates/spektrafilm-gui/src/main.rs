@@ -20,7 +20,7 @@ use spektrafilm_core::pipeline::Pipeline;
 use spektrafilm_core::profile;
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::precision::{Scalar, from_f32, srgb_decode, to_f32};
+use spektrafilm_math::precision::{Scalar, from_f32, to_f32};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(120);
 const IN_FLIGHT_REPAINT: Duration = Duration::from_millis(16);
@@ -361,18 +361,11 @@ impl App {
 
     fn load_image_from_path(&mut self, path: &Path) {
         let t = Instant::now();
-        match load_image(path) {
+        match spektrafilm_io::load_image(path, spektrafilm_io::Formats::Any) {
             Ok(img) => {
-                let ext = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                // PNG (post sRGB-decode) and RAW (linear sRGB after
-                // disabling imagepipe's gamma+basecurve) both deliver
-                // linear sRGB. Tell the pipeline accordingly so it
-                // doesn't double-decode the gamma.
-                if ext == "png" || is_raw_extension(&ext) {
+                // PNG and RAW come out of the loader as linear sRGB.
+                // Tell the pipeline so it doesn't decode the gamma twice.
+                if spektrafilm_io::input_is_linear_srgb(path) {
                     self.params.io.input_color_space = "sRGB".to_string();
                     self.params.io.input_cctf_decoding = false;
                 }
@@ -1851,192 +1844,6 @@ fn pick_default_stock(entries: &[ProfileEntry], preferred: &str) -> String {
             .first()
             .map(|e| e.stock.clone())
             .unwrap_or_else(|| preferred.to_string())
-    }
-}
-
-fn load_image(path: &Path) -> Result<ImageBuf> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    if is_raw_extension(&ext) {
-        return load_raw(path);
-    }
-    // Disable the `image` crate's default 512 MiB allocation cap — a 60 MP
-    // 32-bit float TIFF alone needs ~720 MiB and would otherwise be
-    // rejected with "Memory limit exceeded". Local files are trusted.
-    let mut reader = image::ImageReader::open(path)
-        .with_context(|| format!("opening image: {}", path.display()))?
-        .with_guessed_format()
-        .with_context(|| format!("detecting image format: {}", path.display()))?;
-    reader.no_limits();
-    let mut decoder = reader
-        .into_decoder()
-        .with_context(|| format!("decoding image: {}", path.display()))?;
-    // Honour the EXIF orientation tag (JPEG/TIFF from phones etc.).
-    let orientation = image::ImageDecoder::orientation(&mut decoder)
-        .unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut img = image::DynamicImage::from_decoder(decoder)
-        .with_context(|| format!("decoding image: {}", path.display()))?;
-    img.apply_orientation(orientation);
-    let rgb = img.to_rgb32f();
-    let (w, h) = (rgb.width(), rgb.height());
-    let data: Vec<f32> = rgb.into_raw();
-    let scalars: Vec<Scalar> = match ext.as_str() {
-        "png" => data
-            .into_par_iter()
-            .map(|v| srgb_decode(from_f32(v)))
-            .collect(),
-        _ => data.into_par_iter().map(from_f32).collect(),
-    };
-    Ok(ImageBuf::from_data(w, h, scalars))
-}
-
-/// Camera RAW extensions supported via `imagepipe` / `rawloader`. The
-/// underlying decoder handles many proprietary formats; this list is
-/// the dispatch trigger only (we still try the decoder for unknown
-/// extensions).
-fn is_raw_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "dng"
-            | "cr2"
-            | "cr3"
-            | "nef"
-            | "nrw"
-            | "arw"
-            | "srf"
-            | "sr2"
-            | "raf"
-            | "orf"
-            | "rw2"
-            | "pef"
-            | "ptx"
-            | "srw"
-            | "x3f"
-            | "iiq"
-            | "3fr"
-            | "ari"
-            | "bay"
-            | "crw"
-            | "dcr"
-            | "drf"
-            | "erf"
-            | "fff"
-            | "k25"
-            | "kdc"
-            | "mef"
-            | "mos"
-            | "mrw"
-            | "rwl"
-    )
-}
-
-/// Decode a camera RAW file and return a **linear** image in sRGB
-/// primaries. The pipeline runs `rawler` (a modern fork of rawloader
-/// with broader camera coverage — Sony ARW, newer Nikon NEF, recent
-/// DNGs) instead of the older `imagepipe` chain.
-///
-/// `rawler::RawDevelop::default()` already covers rescale → demosaic →
-/// crop → white balance → camera→sRGB matrix. We drop the final
-/// `SRgb` gamma step so we get LINEAR sRGB out (the spektrafilm
-/// pipeline applies its own sRGB encoding at the very end).
-///
-/// Limitations: Lightroom-exported "lossy DNG" (`ljpeg sof.precision 8`)
-/// is not supported by rawler — those files come back as an error,
-/// which we surface in the GUI status bar.
-fn load_raw(path: &Path) -> Result<ImageBuf> {
-    use rawler::{
-        decoders::RawDecodeParams,
-        imgop::develop::{ProcessingStep, RawDevelop},
-        rawsource::RawSource,
-    };
-    let src =
-        RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
-    let decode_params = RawDecodeParams::default();
-    let raw = rawler::decode(&src, &decode_params)
-        .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
-    let mut dev = RawDevelop::default();
-    // Drop the sRGB gamma step — we want linear sRGB primaries, the
-    // spektrafilm pipeline applies its own sRGB OETF at the end.
-    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb));
-    let intermediate = dev
-        .develop_intermediate(&raw)
-        .map_err(|e| anyhow::anyhow!("RAW develop failed: {e:?}"))?;
-    // rawler 0.7 leaves `RawImage::orientation` hardcoded to Normal
-    // (upstream TODO), so portrait shots came out sideways. Read the
-    // EXIF tag from the decoder's metadata and apply it ourselves.
-    // Must stay in sync with the CLI loader used by Export.
-    let orientation = raw_exif_orientation(&src, &decode_params);
-    Ok(rawler_intermediate_to_image_buf(intermediate)?.oriented(orientation))
-}
-
-/// EXIF orientation tag (1..=8) of a RAW file; 1 when absent/unreadable.
-/// The metadata parsers aren't panic-guarded by rawler (only `decode`
-/// is), and this runs on the UI thread — orientation is best-effort, so
-/// a panic falls back to 1 instead of taking the app down.
-fn raw_exif_orientation(
-    src: &rawler::rawsource::RawSource,
-    params: &rawler::decoders::RawDecodeParams,
-) -> u16 {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        rawler::get_decoder(src)
-            .and_then(|d| d.raw_metadata(src, params))
-            .ok()
-            .and_then(|m| m.exif.orientation)
-    }))
-    .ok()
-    .flatten()
-    .unwrap_or(1)
-}
-
-fn rawler_intermediate_to_image_buf(
-    intermediate: rawler::imgop::develop::Intermediate,
-) -> Result<ImageBuf> {
-    use rawler::imgop::develop::Intermediate;
-
-    let floor = |v: f32| from_f32(v.max(0.0));
-    match intermediate {
-        Intermediate::Monochrome(pixels) => {
-            let scalars: Vec<Scalar> = pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|&v| {
-                    let v = floor(v);
-                    [v, v, v]
-                })
-                .collect();
-            Ok(ImageBuf::from_data(
-                pixels.width as u32,
-                pixels.height as u32,
-                scalars,
-            ))
-        }
-        Intermediate::ThreeColor(pixels) => {
-            let scalars: Vec<Scalar> = pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|px| [floor(px[0]), floor(px[1]), floor(px[2])])
-                .collect();
-            Ok(ImageBuf::from_data(
-                pixels.width as u32,
-                pixels.height as u32,
-                scalars,
-            ))
-        }
-        Intermediate::FourColor(pixels) => {
-            let scalars: Vec<Scalar> = pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|px| [floor(px[0]), floor(px[1]), floor(px[2])])
-                .collect();
-            Ok(ImageBuf::from_data(
-                pixels.width as u32,
-                pixels.height as u32,
-                scalars,
-            ))
-        }
     }
 }
 

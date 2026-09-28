@@ -1,11 +1,15 @@
-// Decode a camera RAW file with the SAME rawler settings the GUI uses,
-// and write the linear-sRGB result as a 32-bit float TIFF. This lets
-// the parity harness drive both pipelines (Python and Rust) from the
-// pixels the GUI actually sees, isolating any RAW-decoder differences
-// out of the comparison.
+// Decode a camera RAW file with the SAME loader the GUI uses
+// (`spektrafilm_io::load_raw`) and write the linear-sRGB result as a
+// 32-bit float TIFF. The parity harness can then run both pipelines
+// (Python and Rust) on the pixels the GUI actually sees, so RAW-decoder
+// differences don't affect the comparison.
 //
 // Usage:
-//   decode_raw_gui <input.orf> <output.tif>
+//   decode_raw_gui [--no-orient] <input.raw> <output.tif>
+//
+// The EXIF orientation is applied by default, as in the GUI.
+// `--no-orient` keeps the sensor's native layout (the output of older
+// versions of this tool).
 //
 // Linear sRGB primaries, AlphaMode::None, no gamma. The pipeline will
 // decode the input as `input_color_space = "sRGB"` with
@@ -16,32 +20,34 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
-use rawler::{
-    decode_file,
-    imgop::develop::{Intermediate, ProcessingStep, RawDevelop},
-};
+use spektrafilm_math::precision::to_f32;
 use tiff::encoder::{TiffEncoder, colortype::RGB32Float};
 
+const USAGE: &str = "usage: decode_raw_gui [--no-orient] <input.raw> <output.tif>";
+
 fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
-    let input = args
-        .next()
-        .ok_or_else(|| anyhow!("usage: decode_raw_gui <input.raw> <output.tif>"))?;
-    let output = args
-        .next()
-        .ok_or_else(|| anyhow!("usage: decode_raw_gui <input.raw> <output.tif>"))?;
+    let mut orient = true;
+    let mut positional = Vec::new();
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "--no-orient" => orient = false,
+            _ => positional.push(arg),
+        }
+    }
+    let [input, output] = <[String; 2]>::try_from(positional).map_err(|_| anyhow!(USAGE))?;
     let input = Path::new(&input);
     let output = Path::new(&output);
 
     eprintln!("[decode_raw_gui] decoding {} via rawler …", input.display());
-    let raw = decode_file(input).map_err(|e| anyhow!("RAW decode failed: {e:?}"))?;
-    let mut dev = RawDevelop::default();
-    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb));
-    let intermediate = dev
-        .develop_intermediate(&raw)
-        .map_err(|e| anyhow!("RAW develop failed: {e:?}"))?;
-    let (w, h, floats) = intermediate_to_rgb32f(intermediate);
+    let img = if orient {
+        spektrafilm_io::load_raw(input)?
+    } else {
+        spektrafilm_io::load_raw_unoriented(input)?
+    };
+    let (w, h) = (img.width, img.height);
     eprintln!("[decode_raw_gui] decoded {}×{} → linear sRGB", w, h);
+    // Exact: every value started out as an f32.
+    let floats: Vec<f32> = img.data.into_iter().map(to_f32).collect();
 
     let f = File::create(output).with_context(|| format!("creating {}", output.display()))?;
     let mut encoder = TiffEncoder::new(BufWriter::new(f)).context("init TiffEncoder")?;
@@ -50,32 +56,4 @@ fn main() -> Result<()> {
         .context("write TIFF image")?;
     eprintln!("[decode_raw_gui] wrote {}", output.display());
     Ok(())
-}
-
-fn intermediate_to_rgb32f(intermediate: Intermediate) -> (u32, u32, Vec<f32>) {
-    let floor = |v: f32| v.max(0.0);
-    match intermediate {
-        Intermediate::Monochrome(pixels) => {
-            let mut out = Vec::with_capacity(pixels.data.len() * 3);
-            for v in pixels.data {
-                let v = floor(v);
-                out.extend_from_slice(&[v, v, v]);
-            }
-            (pixels.width as u32, pixels.height as u32, out)
-        }
-        Intermediate::ThreeColor(pixels) => {
-            let mut out = Vec::with_capacity(pixels.data.len() * 3);
-            for px in pixels.data {
-                out.extend_from_slice(&[floor(px[0]), floor(px[1]), floor(px[2])]);
-            }
-            (pixels.width as u32, pixels.height as u32, out)
-        }
-        Intermediate::FourColor(pixels) => {
-            let mut out = Vec::with_capacity(pixels.data.len() * 3);
-            for px in pixels.data {
-                out.extend_from_slice(&[floor(px[0]), floor(px[1]), floor(px[2])]);
-            }
-            (pixels.width as u32, pixels.height as u32, out)
-        }
-    }
 }

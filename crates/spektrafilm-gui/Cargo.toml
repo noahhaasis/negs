@@ -13,12 +13,14 @@ precision-f64 = [
     "spektrafilm-math/precision-f64",
     "spektrafilm-core/precision-f64",
     "spektrafilm-gpu/precision-f64",
+    "spektrafilm-io/precision-f64",
 ]
 
 [dependencies]
 spektrafilm-core.workspace = true
 spektrafilm-gpu.workspace = true
 spektrafilm-math.workspace = true
+spektrafilm-io.workspace = true
 eframe.workspace = true
 egui.workspace = true
 image.workspace = true
@@ -30,7 +32,6 @@ rfd = "0.15"
 rayon.workspace = true
 imagepipe = "0.5"
 rawloader = "0.37"
-rawler = "0.7"
 raw-window-handle = "0.6"
 
 # macOS-only: tag the CAMetalLayer's colorspace as sRGB so the OS

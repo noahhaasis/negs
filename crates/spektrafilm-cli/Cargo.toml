@@ -22,12 +22,14 @@ precision-f64 = [
     "spektrafilm-math/precision-f64",
     "spektrafilm-core/precision-f64",
     "spektrafilm-gpu/precision-f64",
+    "spektrafilm-io/precision-f64",
 ]
 
 [dependencies]
 spektrafilm-core.workspace = true
 spektrafilm-gpu.workspace = true
 spektrafilm-math.workspace = true
+spektrafilm-io.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 image.workspace = true
@@ -38,5 +40,4 @@ tracing-subscriber.workspace = true
 rayon.workspace = true
 imagepipe = "0.5"
 rawloader = "0.37"
-rawler = "0.7"
 tiff = "0.10"
