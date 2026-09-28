@@ -30,8 +30,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 rfd = "0.15"
 rayon.workspace = true
-imagepipe = "0.5"
-rawloader = "0.37"
 raw-window-handle = "0.6"
 
 # macOS-only: tag the CAMetalLayer's colorspace as sRGB so the OS
