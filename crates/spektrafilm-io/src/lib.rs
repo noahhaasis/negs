@@ -258,6 +258,78 @@ mod tests {
         assert!(!input_is_linear_srgb(Path::new("noext")));
     }
 
+    // No real camera file reliably reaches every `Intermediate` variant:
+    // FourColor survives rawler's develop only when a 4-colour sensor has
+    // no colour matrix (Calibrate turns it into ThreeColor otherwise), and
+    // Monochrome needs a true monochrome sensor. So test the conversion
+    // on synthetic data. 3 px wide x 2 px high so width/height mixups show.
+    mod intermediate {
+        use super::super::intermediate_to_image_buf;
+        use rawler::imgop::develop::Intermediate;
+        use rawler::pixarray::{Color2D, PixF32};
+        use spektrafilm_math::precision::{Scalar, from_f32};
+
+        fn s(v: &[f32]) -> Vec<Scalar> {
+            v.iter().copied().map(from_f32).collect()
+        }
+
+        #[test]
+        fn monochrome_is_copied_into_rgb_and_clamped() {
+            let px = vec![0.25, -0.5, 1.5, 0.0, -0.0, 0.125];
+            let img =
+                intermediate_to_image_buf(Intermediate::Monochrome(PixF32::new_with(px, 3, 2)));
+            assert_eq!((img.width, img.height), (3, 2));
+            #[rustfmt::skip]
+            let want = s(&[
+                0.25, 0.25, 0.25,  0.0, 0.0, 0.0,  1.5, 1.5, 1.5,
+                0.0, 0.0, 0.0,     0.0, 0.0, 0.0,  0.125, 0.125, 0.125,
+            ]);
+            assert_eq!(img.data, want);
+        }
+
+        #[test]
+        fn three_color_keeps_channel_order_and_clamps() {
+            let px = vec![
+                [0.1, 0.2, 0.3],
+                [-1.0, 0.5, 2.0],
+                [0.0, -0.25, 0.75],
+                [1.0, 1.0, -1.0],
+                [0.4, 0.5, 0.6],
+                [0.7, 0.8, 0.9],
+            ];
+            let img =
+                intermediate_to_image_buf(Intermediate::ThreeColor(Color2D::new_with(px, 3, 2)));
+            assert_eq!((img.width, img.height), (3, 2));
+            #[rustfmt::skip]
+            let want = s(&[
+                0.1, 0.2, 0.3,  0.0, 0.5, 2.0,  0.0, 0.0, 0.75,
+                1.0, 1.0, 0.0,  0.4, 0.5, 0.6,  0.7, 0.8, 0.9,
+            ]);
+            assert_eq!(img.data, want);
+        }
+
+        #[test]
+        fn four_color_drops_fourth_channel_and_clamps() {
+            let px = vec![
+                [0.1, 0.2, 0.3, 9.0],
+                [-1.0, 0.5, 2.0, 9.0],
+                [0.0, -0.25, 0.75, -9.0],
+                [1.0, 1.0, -1.0, 9.0],
+                [0.4, 0.5, 0.6, 9.0],
+                [0.7, 0.8, 0.9, 9.0],
+            ];
+            let img =
+                intermediate_to_image_buf(Intermediate::FourColor(Color2D::new_with(px, 3, 2)));
+            assert_eq!((img.width, img.height), (3, 2));
+            #[rustfmt::skip]
+            let want = s(&[
+                0.1, 0.2, 0.3,  0.0, 0.5, 2.0,  0.0, 0.0, 0.75,
+                1.0, 1.0, 0.0,  0.4, 0.5, 0.6,  0.7, 0.8, 0.9,
+            ]);
+            assert_eq!(img.data, want);
+        }
+    }
+
     #[test]
     fn cli_mode_rejects_other_formats() {
         let err = load_image(Path::new("does-not-matter.jpg"), Formats::TiffPngRaw).unwrap_err();
