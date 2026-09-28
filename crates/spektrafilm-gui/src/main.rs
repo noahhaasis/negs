@@ -200,6 +200,9 @@ struct App {
     print_dev_times: Vec<f64>,
     params: RuntimeParams,
     image_path: Option<PathBuf>,
+    /// Destination chosen in the most recent export dialog, independent
+    /// of the folder used to open images.
+    last_export_dir: Option<PathBuf>,
     image: Option<Arc<ImageBuf>>,
     /// Last rendered pipeline output (post sRGB encode + clip). Retained
     /// so the Save button can write it without re-running the pipeline.
@@ -331,6 +334,7 @@ impl App {
             print_dev_times,
             params,
             image_path: None,
+            last_export_dir: None,
             image: None,
             output_image: None,
             output_tex: None,
@@ -743,13 +747,18 @@ impl App {
             .and_then(|s| s.to_str())
             .unwrap_or("spektrafilm");
         let default_name = format!("{stem}_{}_spektra_f64.png", self.film_name);
-        let Some(out_path) = rfd::FileDialog::new()
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(dir) = self.last_export_dir.as_deref().filter(|dir| dir.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(out_path) = dialog
             .add_filter("Image", &["png", "tif", "tiff", "jpg", "jpeg"])
             .set_file_name(&default_name)
             .save_file()
         else {
             return;
         };
+        self.last_export_dir = out_path.parent().map(Path::to_path_buf);
 
         // Spawn the export on a worker thread so the egui event loop
         // keeps drawing. The cancel flag is shared with the worker so
