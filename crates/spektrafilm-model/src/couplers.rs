@@ -3,7 +3,7 @@
 
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::precision::{from_f32, from_f64};
+use spektrafilm_math::precision::from_f64;
 use rayon::prelude::*;
 
 use crate::density_curves::normalize_density_curves;
@@ -44,7 +44,6 @@ pub fn compute_exposure_correction(
     diffusion_tail_pixel: f32,
     diffusion_tail_weight: f64,
     positive: bool,
-    backend: &dyn ComputeBackend,
 ) -> ImageBuf {
     let mut density_silver = density_cmy.clone();
 
@@ -192,7 +191,6 @@ pub fn apply_density_correction(
         diffusion_tail_px,
         diffusion_tail_weight,
         positive,
-        backend,
     );
 
     let log_exposure_f64: Vec<f64> = log_exposure.iter().map(|&v| v as f64).collect();

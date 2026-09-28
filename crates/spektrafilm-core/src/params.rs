@@ -767,21 +767,6 @@ fn default_001() -> f32 {
 fn default_unsharp() -> [f32; 2] {
     [0.7, 0.7]
 }
-fn default_02() -> f32 {
-    0.2
-}
-fn default_particle_scale() -> [f32; 3] {
-    [0.8, 1.0, 2.0]
-}
-fn default_particle_scale_layers() -> [f32; 3] {
-    [2.5, 1.0, 0.5]
-}
-fn default_density_min() -> [f32; 3] {
-    [0.07, 0.08, 0.12]
-}
-fn default_uniformity() -> [f32; 3] {
-    [0.97, 0.97, 0.99]
-}
 fn default_065() -> f32 {
     0.65
 }
@@ -791,50 +776,14 @@ fn default_micro_structure() -> [f32; 2] {
 fn default_1i() -> u32 {
     1
 }
-fn default_scatter_core() -> [f32; 3] {
-    [2.2, 2.0, 1.6]
-}
-fn default_scatter_tail() -> [f32; 3] {
-    [9.3, 9.7, 9.1]
-}
-fn default_scatter_tail_weight() -> [f32; 3] {
-    [0.78, 0.65, 0.67]
-}
 fn default_03() -> f32 {
     0.3
 }
 fn default_4() -> f32 {
     4.0
 }
-fn default_halation_strength() -> [f32; 3] {
-    [0.05, 0.015, 0.0]
-}
-fn default_halation_sigma() -> [f32; 3] {
-    [65.0, 65.0, 65.0]
-}
 fn default_3i() -> u32 {
     3
-}
-fn default_gamma_same() -> [f32; 3] {
-    [0.341, 0.324, 0.273]
-}
-fn default_gamma_r_gb() -> [f32; 2] {
-    [0.355, 0.305]
-}
-fn default_gamma_g_rb() -> [f32; 2] {
-    [0.154, 0.358]
-}
-fn default_gamma_b_rg() -> [f32; 2] {
-    [0.171, 0.225]
-}
-fn default_20() -> f32 {
-    20.0
-}
-fn default_200() -> f32 {
-    200.0
-}
-fn default_006() -> f32 {
-    0.06
 }
 fn default_003() -> f32 {
     0.03

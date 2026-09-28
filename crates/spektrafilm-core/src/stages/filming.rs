@@ -422,7 +422,6 @@ pub fn develop(
     // f32 versions kept for DIR couplers (still f32 API) and grain (legacy).
     let log_exposure = &film.log_exposure_f32();
     let density_curves = &film.density_curves_f32();
-    let norm_curves = spektrafilm_model::density_curves::normalize_density_curves(density_curves);
     let gamma = params.film_render.density_curve_gamma;
 
     // Filming.develop uses NORMALIZED curves (Python `develop` subtracts nanmin).

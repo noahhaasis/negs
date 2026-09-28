@@ -18,7 +18,6 @@
 //!   * `rk_binomial_inversion`— inverse CDF (n·p ≤ 30)
 //!   * `rk_binomial_btpe`     — Kachitvichyanukul-Schmeiser BTPE (n·p > 30)
 
-use rand::RngCore as _;
 use rand_mt::Mt;
 
 /// Numpy's `rk_double`: build a 53-bit double from two MT19937 outputs.
