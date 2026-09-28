@@ -532,6 +532,9 @@ impl Default for PrintCurvesMorphParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IoParams {
+    /// Input RAW development only; independent of scanner white correction.
+    #[serde(default)]
+    pub raw_white_balance: spektrafilm_io::RawWhiteBalance,
     #[serde(default = "default_prophoto")]
     pub input_color_space: String,
     #[serde(default)]
@@ -565,6 +568,7 @@ pub struct IoParams {
 impl Default for IoParams {
     fn default() -> Self {
         Self {
+            raw_white_balance: spektrafilm_io::RawWhiteBalance::default(),
             input_color_space: "ProPhoto RGB".into(),
             input_cctf_decoding: false,
             output_color_space: "sRGB".into(),

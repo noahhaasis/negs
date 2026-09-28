@@ -33,15 +33,14 @@ cargo build --release -p spektrafilm-cli
 cargo build --release -p spektrafilm-cli --features spektrafilm-gpu/cuda-backend
 
 # f64 CLI — reference precision (CPU only; WGSL has no f64)
-cargo build --release --features precision-f64 -p spektrafilm-cli
-cp target/release/spektrafilm target/release/spektrafilm-f64
+cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64
 
 # Parity helper: decodes a RAW exactly like the GUI and writes a float TIFF
 # (EXIF orientation applied; pass --no-orient to skip it)
 cargo build --release -p spektrafilm-cli --bin decode_raw_gui
 ```
 
-The GUI auto-detects the f64 binary via `$SPEKTRAFILM_F64_CLI`, then `spektrafilm-f64` on `PATH`, then next to its own executable, then `target/release/spektrafilm-f64`.
+Build the GUI and f64 companion separately when updating: building only `spektrafilm-gui` does not rebuild the export executable. The GUI auto-detects the f64 binary via `$SPEKTRAFILM_F64_CLI`, then next to its own executable, then `spektrafilm-f64` on `PATH`, then `target/release/spektrafilm-f64`.
 
 Windows builds use the WGSL/wgpu backend by default. The CPU fallback path avoids requiring a system OpenBLAS install on Windows, while macOS and Unix-like targets still use native BLAS providers.
 
@@ -56,6 +55,7 @@ WGSL is the default GPU backend and can be selected explicitly with `SPEKTRAFILM
 ```
 
 - **Open…** — load a TIFF, PNG, or camera RAW (DNG/CR2/CR3/NEF/ARW/ORF/RW2/etc., decoded via [`rawler`](https://github.com/dnglab/dnglab)).
+- **RAW white balance** — As shot (unchanged default), Daylight, Tungsten, or Custom temperature/tint. Edits re-develop the RAW for preview and final export. Disabled for non-RAW inputs; independent of Scanner → White correction. See [controls and decoder differences](docs/raw-white-balance.md).
 - **Sliders** — exposure, film format, halation, DIR couplers, grain, glare, scanner, enlarger, output. All live-updating against the GPU preview.
 - **Profiles** — film stock and print paper combo boxes; picking a film auto-selects its paired paper (`target_print` in the profile).
 - **Zoom** — scroll wheel or trackpad pinch over the preview (cursor-anchored), click-drag to pan, double-click to reset.
@@ -81,6 +81,10 @@ SPEKTRAFILM_BACKEND=cpu \
 
 # Override any params via JSON (matches RuntimeParams struct)
 ... --params my_params.json
+
+# RAW input WB (also available via io.raw_white_balance in --params)
+./target/release/spektrafilm process input.ORF -o out.png \
+    --film kodak_gold_200 --raw-wb custom --raw-temperature 3200 --raw-tint 0.85
 
 # List available film + paper profiles
 ./target/release/spektrafilm list-profiles --data-dir data

@@ -14,9 +14,11 @@
 
 pub mod metadata;
 pub mod save;
+mod white_balance;
 
 pub use metadata::{ImageMetadata, read_metadata};
 pub use save::save_image;
+pub use white_balance::{RawWhiteBalance, RawWhiteBalanceMode};
 
 use std::path::Path;
 
@@ -89,12 +91,23 @@ pub fn input_is_linear_srgb(path: &Path) -> bool {
     ext == "png" || is_raw_extension(&ext)
 }
 
+/// Whether the file extension selects the RAW decoder (case-insensitive).
+pub fn is_raw(path: &Path) -> bool {
+    is_raw_extension(&extension(path))
+}
+
 /// Load an image as linear RGB, applying its EXIF orientation. RAW
 /// extensions go to [`load_raw`] in both modes.
 pub fn load_image(path: &Path, formats: Formats) -> Result<ImageBuf> {
+    load_image_with_wb(path, formats, RawWhiteBalance::default())
+}
+
+/// Shared preview/export loader. RAW WB is ignored for non-RAW inputs,
+/// whose white balance is already baked into their RGB pixels.
+pub fn load_image_with_wb(path: &Path, formats: Formats, wb: RawWhiteBalance) -> Result<ImageBuf> {
     let ext = extension(path);
     if is_raw_extension(&ext) {
-        return load_raw(path);
+        return load_raw_with_wb(path, wb);
     }
     if formats == Formats::TiffPngRaw && !matches!(ext.as_str(), "tif" | "tiff" | "png") {
         bail!("unsupported image format: .{ext} (supported: tiff, png, raw)");
@@ -148,25 +161,32 @@ fn decode_no_limits(path: &Path) -> Result<image::DynamicImage> {
 /// Limitation: rawler can't read Lightroom-exported "lossy DNG"
 /// (`ljpeg sof.precision 8`); those files return an error.
 pub fn load_raw(path: &Path) -> Result<ImageBuf> {
-    load_raw_impl(path, true)
+    load_raw_with_wb(path, RawWhiteBalance::default())
+}
+
+/// Like [`load_raw`], using the selected input white balance. As shot
+/// preserves the original default development path exactly.
+pub fn load_raw_with_wb(path: &Path, wb: RawWhiteBalance) -> Result<ImageBuf> {
+    load_raw_impl(path, true, wb)
 }
 
 /// Same as [`load_raw`], but without applying the EXIF orientation.
 /// The output keeps the sensor's native layout.
 pub fn load_raw_unoriented(path: &Path) -> Result<ImageBuf> {
-    load_raw_impl(path, false)
+    load_raw_impl(path, false, RawWhiteBalance::default())
 }
 
-fn load_raw_impl(path: &Path, orient: bool) -> Result<ImageBuf> {
+fn load_raw_impl(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<ImageBuf> {
     use rawler::{
         decoders::RawDecodeParams,
         imgop::develop::{ProcessingStep, RawDevelop},
         rawsource::RawSource,
     };
+    wb.validate()?;
     let src =
         RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
     let decode_params = RawDecodeParams::default();
-    let raw = rawler::decode(&src, &decode_params)
+    let mut raw = rawler::decode(&src, &decode_params)
         .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
     let mut dev = RawDevelop::default();
     dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb));
@@ -175,11 +195,16 @@ fn load_raw_impl(path: &Path, orient: bool) -> Result<ImageBuf> {
     // files (e.g. Fuji SuperCCD with an active area, non-3x3 colour matrices
     // without a D65 entry). The GUI loads on its UI thread, so turn a panic
     // into an error instead of taking the app down.
-    let intermediate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        dev.develop_intermediate(&raw)
+    let intermediate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<_> {
+        white_balance::prepare(&mut raw, wb)?;
+        let mut intermediate = dev
+            .develop_intermediate(&raw)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        white_balance::finish(&mut intermediate, wb, white_balance::is_monochrome(&raw))?;
+        Ok(intermediate)
     }))
     .map_err(|p| anyhow::anyhow!("RAW develop failed: panicked: {}", panic_message(&p)))?
-    .map_err(|e| anyhow::anyhow!("RAW develop failed: {e:?}"))?;
+    .context("RAW develop failed")?;
     let img = intermediate_to_image_buf(intermediate);
     if !orient {
         return Ok(img);
@@ -261,6 +286,9 @@ fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate)
     };
     ImageBuf::from_data(w as u32, h as u32, scalars)
 }
+
+#[cfg(test)]
+mod wb_tests;
 
 #[cfg(test)]
 mod tests {

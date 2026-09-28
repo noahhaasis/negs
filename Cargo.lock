@@ -3740,6 +3740,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spektrafilm-gpu",
+ "spektrafilm-io",
  "spektrafilm-math",
  "spektrafilm-model",
  "thiserror 2.0.18",
@@ -3796,6 +3797,8 @@ dependencies = [
  "image",
  "rawler",
  "rayon",
+ "serde",
+ "serde_json",
  "spektrafilm-math",
 ]
 

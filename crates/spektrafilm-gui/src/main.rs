@@ -82,7 +82,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "spektrafilm",
         options,
-        Box::new(|cc| Ok(Box::new(App::new(cc, backend, initial_image)))),
+        Box::new(|_cc| Ok(Box::new(App::new(backend, initial_image)))),
     )
 }
 
@@ -204,6 +204,10 @@ struct App {
     /// of the folder used to open images.
     last_export_dir: Option<PathBuf>,
     image: Option<Arc<ImageBuf>>,
+    /// WB of the currently developed input, which can lag behind a UI edit.
+    loaded_raw_wb: spektrafilm_io::RawWhiteBalance,
+    /// Invalidates in-flight results when opening an image or editing RAW WB.
+    input_revision: u64,
     /// Last rendered pipeline output (post sRGB encode + clip). Retained
     /// so the Save button can write it without re-running the pipeline.
     output_image: Option<ImageBuf>,
@@ -259,9 +263,12 @@ struct App {
 struct RenderJob {
     rx: mpsc::Receiver<Result<RenderResult, String>>,
     handle: Option<JoinHandle<()>>,
+    input_revision: u64,
+    raw_wb: spektrafilm_io::RawWhiteBalance,
 }
 
 struct RenderResult {
+    input: Arc<ImageBuf>,
     output: ImageBuf,
     preview: PreviewTextureData,
     input_clone_ms: f32,
@@ -291,13 +298,7 @@ struct ExportJob {
 }
 
 impl App {
-    fn new(
-        cc: &eframe::CreationContext<'_>,
-        backend: Arc<dyn ComputeBackend>,
-        initial_image: Option<PathBuf>,
-    ) -> Self {
-        let _ = cc;
-
+    fn new(backend: Arc<dyn ComputeBackend>, initial_image: Option<PathBuf>) -> Self {
         let data_dir = pick_data_dir();
         let (films, papers) = scan_profiles(&data_dir);
         let film_name = pick_default_stock(&films, "kodak_gold_200");
@@ -336,6 +337,8 @@ impl App {
             image_path: None,
             last_export_dir: None,
             image: None,
+            loaded_raw_wb: spektrafilm_io::RawWhiteBalance::default(),
+            input_revision: 0,
             output_image: None,
             output_tex: None,
             pipeline_cache_key: None,
@@ -365,7 +368,11 @@ impl App {
 
     fn load_image_from_path(&mut self, path: &Path) {
         let t = Instant::now();
-        match spektrafilm_io::load_image(path, spektrafilm_io::Formats::Any) {
+        match spektrafilm_io::load_image_with_wb(
+            path,
+            spektrafilm_io::Formats::Any,
+            self.params.io.raw_white_balance,
+        ) {
             Ok(img) => {
                 // PNG and RAW come out of the loader as linear sRGB.
                 // Tell the pipeline so it doesn't decode the gamma twice.
@@ -381,6 +388,8 @@ impl App {
                     t.elapsed().as_secs_f32() * 1000.0
                 );
                 self.image = Some(Arc::new(img));
+                self.loaded_raw_wb = self.params.io.raw_white_balance;
+                self.invalidate_input_preview();
                 self.image_path = Some(path.to_path_buf());
                 // A manual turn belongs to the previous photo.
                 self.params.io.rotate_cw = 0;
@@ -391,6 +400,21 @@ impl App {
                 self.status = format!("Load error: {e:#}");
             }
         }
+    }
+
+    fn invalidate_input_preview(&mut self) {
+        self.input_revision += 1;
+        self.output_image = None;
+        self.output_tex = None;
+        self.dirty = true;
+        self.dirty_since = Some(Instant::now());
+    }
+
+    fn raw_wb_pending(&self) -> bool {
+        self.image_path
+            .as_deref()
+            .is_some_and(spektrafilm_io::is_raw)
+            && self.loaded_raw_wb != self.params.io.raw_white_balance
     }
 
     fn preview_pipeline(
@@ -404,7 +428,10 @@ impl App {
         if self.pipeline_cache_key.as_deref() == Some(key.as_str())
             && let Some(pipeline) = self.pipeline_cache.as_ref()
         {
-            return Ok((pipeline.clone().with_params(params.clone()), t.elapsed().as_secs_f32() * 1000.0));
+            return Ok((
+                pipeline.clone().with_params(params.clone()),
+                t.elapsed().as_secs_f32() * 1000.0,
+            ));
         }
 
         let film = profile::load_profile_by_name(&self.data_dir, film_name)
@@ -438,6 +465,12 @@ impl App {
             return;
         };
         let input_clone_ms = t_clone.elapsed().as_secs_f32() * 1000.0;
+        let reload_path = self
+            .raw_wb_pending()
+            .then(|| self.image_path.clone())
+            .flatten();
+        let raw_wb = self.params.io.raw_white_balance;
+        let input_revision = self.input_revision;
         let film_name = self.film_name.clone();
         let print_name = self.print_name.clone();
         let mut params = self.params.clone();
@@ -461,13 +494,28 @@ impl App {
                 // and the user gets a uselessly vague status line.
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let t_total = Instant::now();
+                    // Re-develop from the RAW, never multiply the already
+                    // balanced self.image. Use exactly the CLI's loading path.
+                    let image = if let Some(path) = reload_path {
+                        Arc::new(
+                            spektrafilm_io::load_image_with_wb(
+                                &path,
+                                spektrafilm_io::Formats::Any,
+                                raw_wb,
+                            )
+                            .map_err(|e| format!("RAW reload: {e:#}"))?,
+                        )
+                    } else {
+                        image
+                    };
                     let working_factor = params.io.upscale_factor;
                     let t_scale = Instant::now();
-                    let scaled_image = if working_factor <= 0.0 || (working_factor - 1.0).abs() < 1e-6 {
-                        None
-                    } else {
-                        Some(rescale_preview_input_fast(image.clone(), working_factor))
-                    };
+                    let scaled_image =
+                        if working_factor <= 0.0 || (working_factor - 1.0).abs() < 1e-6 {
+                            None
+                        } else {
+                            Some(rescale_preview_input_fast(image.clone(), working_factor))
+                        };
                     let scale_ms = t_scale.elapsed().as_secs_f32() * 1000.0;
                     params.io.upscale_factor = 1.0;
                     let pipeline = pipeline_template.with_params(params);
@@ -479,7 +527,9 @@ impl App {
                         }
                         None => pipeline
                             .process_resident_borrowed(image.as_ref(), backend.as_ref())
-                            .unwrap_or_else(|| pipeline.process((*image).clone(), backend.as_ref())),
+                            .unwrap_or_else(|| {
+                                pipeline.process((*image).clone(), backend.as_ref())
+                            }),
                     };
                     let render_ms = t.elapsed().as_secs_f32() * 1000.0;
                     let t_preview = Instant::now();
@@ -487,6 +537,7 @@ impl App {
                     let preview_ms = t_preview.elapsed().as_secs_f32() * 1000.0;
                     let worker_total_ms = t_total.elapsed().as_secs_f32() * 1000.0;
                     Ok(RenderResult {
+                        input: image,
                         output,
                         preview,
                         input_clone_ms,
@@ -505,6 +556,8 @@ impl App {
         self.render_job = Some(RenderJob {
             rx,
             handle: Some(handle),
+            input_revision,
+            raw_wb,
         });
     }
 
@@ -639,9 +692,20 @@ impl App {
         if let Some(h) = job.handle.take() {
             let _ = h.join();
         }
+        let input_revision = job.input_revision;
+        let raw_wb = job.raw_wb;
         self.render_job = None;
+        // A WB edit or a newly opened file must not be overwritten by an
+        // older in-flight render, including its developed input buffer.
+        if input_revision != self.input_revision {
+            self.pending_dirty = false;
+            self.dirty = true;
+            return;
+        }
         match result {
             Ok(r) => {
+                self.image = Some(r.input);
+                self.loaded_raw_wb = raw_wb;
                 self.last_input_clone_ms = r.input_clone_ms;
                 self.last_scale_ms = r.scale_ms;
                 self.last_pipeline_build_ms = r.pipeline_build_ms;
@@ -658,6 +722,12 @@ impl App {
                 self.output_image = Some(r.output);
             }
             Err(msg) => {
+                if self.raw_wb_pending() {
+                    // Keep the last successfully loaded image and settings
+                    // paired. Export must never use a failed WB selection.
+                    self.params.io.raw_white_balance = self.loaded_raw_wb;
+                    self.dirty = true;
+                }
                 eprintln!("[spektrafilm] render error: {msg}");
                 self.status = format!("Render error: {msg}");
             }
@@ -728,8 +798,7 @@ impl App {
     /// The f64 CLI is located via, in order: `$SPEKTRAFILM_F64_CLI`,
     /// then `spektrafilm-f64` on `PATH`, then `target/release/spektrafilm-f64`
     /// relative to `CARGO_MANIFEST_DIR`. Build it with
-    /// `cargo build --release --features precision-f64 -p spektrafilm-cli`
-    /// and either rename / symlink it to `spektrafilm-f64` or set the env var.
+    /// `cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64`.
     fn export_dialog(&mut self, ctx: &egui::Context) {
         let Some(input_path) = self.image_path.clone() else {
             self.status = "Load an image before exporting.".into();
@@ -919,7 +988,7 @@ impl App {
                     self.cancel_export();
                 }
             } else {
-                let export_enabled = self.image_path.is_some();
+                let export_enabled = self.image_path.is_some() && !self.raw_wb_pending();
                 if ui
                     .add_enabled(export_enabled, egui::Button::new("Export…"))
                     .on_hover_text(
@@ -927,7 +996,9 @@ impl App {
                          CLI subprocess) and write a PNG/TIFF/JPEG. The live preview stays \
                          at f32 GPU for speed; export trades time for precision.",
                     )
-                    .on_disabled_hover_text("Load an image first")
+                    .on_disabled_hover_text(
+                        "Load an image and wait for RAW white balance to finish",
+                    )
                     .clicked()
                 {
                     self.export_dialog(ctx);
@@ -940,6 +1011,41 @@ impl App {
             );
         }
         ui.add_space(4.0);
+
+        egui::CollapsingHeader::new("RAW white balance")
+            .default_open(true)
+            .show(ui, |ui| {
+                let is_raw = self.image_path.as_deref().is_some_and(spektrafilm_io::is_raw);
+                let before = self.params.io.raw_white_balance;
+                ui.add_enabled_ui(is_raw, |ui| {
+                    use spektrafilm_io::RawWhiteBalanceMode;
+                    let wb = &mut self.params.io.raw_white_balance;
+                    egui::ComboBox::from_label("Mode")
+                        .selected_text(wb.mode.label())
+                        .show_ui(ui, |ui| {
+                            for mode in RawWhiteBalanceMode::ALL {
+                                ui.selectable_value(&mut wb.mode, mode, mode.label());
+                            }
+                        });
+                    ui.add_enabled_ui(wb.mode == RawWhiteBalanceMode::Custom, |ui| {
+                        ui.add(egui::Slider::new(&mut wb.temperature, 1667.0..=25000.0)
+                            .logarithmic(true).text("Temperature (K)"));
+                        ui.add(egui::Slider::new(&mut wb.tint, 0.01..=4.0).text("Tint"))
+                            .on_hover_text("Green multiplier in linear ACES: 1 is neutral; higher is greener, lower is more magenta.");
+                    });
+                });
+                if !is_raw {
+                    ui.small("RAW files only; RGB inputs already have white balance applied.");
+                } else {
+                    ui.small("Re-develops the input RAW for preview and export.");
+                    if self.raw_wb_pending() {
+                        ui.small("Updating RAW white balance…");
+                    }
+                }
+                if before != self.params.io.raw_white_balance {
+                    self.invalidate_input_preview();
+                }
+            });
 
         // ── Profiles ────────────────────────────────────────────────────
         egui::CollapsingHeader::new("Profiles")
@@ -1506,10 +1612,7 @@ impl App {
             "clone/scale:   {:>6.1} / {:>5.1} ms",
             self.last_input_clone_ms, self.last_scale_ms
         ));
-        ui.monospace(format!(
-            "preview pack:  {:>6.1} ms",
-            self.last_preview_ms
-        ));
+        ui.monospace(format!("preview pack:  {:>6.1} ms", self.last_preview_ms));
         ui.monospace(format!(
             "worker total:  {:>6.1} ms",
             self.last_worker_total_ms
@@ -1784,11 +1887,7 @@ fn fps_label(ms: f32) -> &'static str {
     }
 }
 
-fn preview_pipeline_cache_key(
-    film_name: &str,
-    print_name: &str,
-    params: &RuntimeParams,
-) -> String {
+fn preview_pipeline_cache_key(film_name: &str, print_name: &str, params: &RuntimeParams) -> String {
     serde_json::json!({
         "film": film_name,
         "print": print_name,
@@ -1842,12 +1941,8 @@ fn rescale_preview_input_fast(image: Arc<ImageBuf>, factor: f32) -> ImageBuf {
     }
 
     let f32buf: Vec<f32> = image.data.par_iter().map(|&v| to_f32(v)).collect();
-    let src = image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(
-        image.width,
-        image.height,
-        f32buf,
-    )
-    .expect("ImageBuf dims match its data length");
+    let src = image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(image.width, image.height, f32buf)
+        .expect("ImageBuf dims match its data length");
     let dst = image::imageops::resize(&src, new_w, new_h, image::imageops::FilterType::CatmullRom);
     let data: Vec<Scalar> = dst.into_raw().into_par_iter().map(from_f32).collect();
     ImageBuf::from_data(new_w, new_h, data)
@@ -2014,8 +2109,7 @@ fn locate_f64_cli() -> Result<PathBuf, String> {
         }
     }
     Err("no f64 CLI found. Build it with \
-         `cargo build --release --features precision-f64 -p spektrafilm-cli`, \
-         rename `target/release/spektrafilm` to `spektrafilm-f64`, \
+         `cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64`, \
          and either put it on PATH or set $SPEKTRAFILM_F64_CLI."
         .into())
 }
@@ -2049,6 +2143,24 @@ struct TempPath(PathBuf);
 impl Drop for TempPath {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// JSON readers in older companions ignore unknown fields. Explicit flags
+/// ensure a stale CLI rejects RAW WB rather than silently exporting As shot.
+fn append_raw_wb_args(
+    cmd: &mut std::process::Command,
+    input: &Path,
+    wb: spektrafilm_io::RawWhiteBalance,
+) {
+    if spektrafilm_io::is_raw(input) {
+        cmd.arg("--raw-wb").arg(wb.mode.as_str());
+        if wb.mode == spektrafilm_io::RawWhiteBalanceMode::Custom {
+            cmd.arg("--raw-temperature")
+                .arg(wb.temperature.to_string())
+                .arg("--raw-tint")
+                .arg(wb.tint.to_string());
+        }
     }
 }
 
@@ -2106,6 +2218,7 @@ fn run_f64_export(
     if params.io.scan_film {
         cmd.arg("--scan-film");
     }
+    append_raw_wb_args(&mut cmd, input, params.io.raw_white_balance);
 
     let mut child = cmd
         .spawn()
@@ -2134,6 +2247,14 @@ fn run_f64_export(
 
     if !status.success() {
         let trimmed = stderr_buf.trim();
+        if trimmed.contains("unexpected argument") && trimmed.contains("--raw-wb") {
+            anyhow::bail!(
+                "Export companion {} is too old to apply RAW white balance. Rebuild it with \
+                 `cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64` \
+                 and update that executable.\n{trimmed}",
+                cli_path.display()
+            );
+        }
         let code = status
             .code()
             .map(|c| c.to_string())
@@ -2148,6 +2269,176 @@ fn run_f64_export(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod raw_wb_tests {
+    use super::*;
+    use spektrafilm_io::{RawWhiteBalance, RawWhiteBalanceMode};
+
+    fn app() -> App {
+        let mut app = App::new(Arc::new(spektrafilm_gpu::cpu_backend::CpuBackend), None);
+        app.image_path = Some(PathBuf::from("test.NEF"));
+        app.image = Some(Arc::new(ImageBuf::from_data(1, 1, vec![from_f32(0.1); 3])));
+        app
+    }
+
+    fn completed_job(app: &mut App, revision: u64, result: Result<RenderResult, String>) {
+        let (tx, rx) = mpsc::channel();
+        assert!(tx.send(result).is_ok());
+        app.render_job = Some(RenderJob {
+            rx,
+            handle: None,
+            input_revision: revision,
+            raw_wb: app.params.io.raw_white_balance,
+        });
+    }
+
+    fn result() -> RenderResult {
+        let output = ImageBuf::from_data(1, 1, vec![from_f32(0.25); 3]);
+        RenderResult {
+            input: Arc::new(output.clone()),
+            preview: make_preview_texture_data(&output),
+            output,
+            input_clone_ms: 0.0,
+            scale_ms: 0.0,
+            pipeline_build_ms: 0.0,
+            render_ms: 0.0,
+            preview_ms: 0.0,
+            worker_total_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn wb_edit_discards_old_worker_input_and_output() {
+        let mut app = app();
+        completed_job(&mut app, 0, Ok(result()));
+        app.params.io.raw_white_balance.mode = RawWhiteBalanceMode::Daylight;
+        app.invalidate_input_preview();
+        assert!(app.raw_wb_pending());
+        app.poll_render_job(&egui::Context::default());
+        assert!(app.output_image.is_none());
+        assert!(app.output_tex.is_none());
+        assert_eq!(app.image.as_ref().unwrap().data, vec![from_f32(0.1); 3]);
+        assert_eq!(app.loaded_raw_wb, RawWhiteBalance::default());
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn successful_reload_updates_input_and_export_settings_together() {
+        let mut app = app();
+        app.params.io.raw_white_balance = RawWhiteBalance {
+            mode: RawWhiteBalanceMode::Custom,
+            temperature: 3200.0,
+            tint: 0.85,
+        };
+        app.params.io.rotate_cw = 1;
+        app.params.scanner.white_correction = true;
+        app.invalidate_input_preview();
+        completed_job(&mut app, 1, Ok(result()));
+        app.poll_render_job(&egui::Context::default());
+        assert!(!app.raw_wb_pending());
+        assert_eq!(app.image.as_ref().unwrap().data, vec![from_f32(0.25); 3]);
+        // The same RuntimeParams serialization is used by run_f64_export.
+        let export: RuntimeParams =
+            serde_json::from_str(&serde_json::to_string(&app.params).unwrap()).unwrap();
+        assert_eq!(export.io.raw_white_balance, app.loaded_raw_wb);
+        assert_eq!(export.io.rotate_cw, 1);
+        assert!(export.scanner.white_correction);
+        assert!(app.output_image.is_some());
+    }
+
+    #[test]
+    fn failed_reload_restores_settings_for_retained_input() {
+        let mut app = app();
+        app.params.io.raw_white_balance.mode = RawWhiteBalanceMode::Daylight;
+        app.invalidate_input_preview();
+        completed_job(&mut app, 1, Err("missing matrix".into()));
+        app.poll_render_job(&egui::Context::default());
+        assert!(!app.raw_wb_pending());
+        assert_eq!(app.params.io.raw_white_balance, RawWhiteBalance::default());
+        assert_eq!(app.image.as_ref().unwrap().data, vec![from_f32(0.1); 3]);
+        assert!(app.status.contains("missing matrix"));
+        assert!(app.dirty); // regenerate the retained image's preview
+    }
+
+    #[test]
+    fn export_command_carries_current_wb_with_custom_values_only_when_active() {
+        for mode in RawWhiteBalanceMode::ALL {
+            let wb = RawWhiteBalance {
+                mode,
+                temperature: 4321.5,
+                tint: 0.875,
+            };
+            let mut cmd = std::process::Command::new("spektrafilm-f64");
+            append_raw_wb_args(&mut cmd, Path::new("photo.NEF"), wb);
+            let args: Vec<_> = cmd.get_args().map(|arg| arg.to_str().unwrap()).collect();
+            let serialized = serde_json::to_value(wb).unwrap();
+            assert_eq!(args[0], "--raw-wb");
+            assert_eq!(args[1], serialized["mode"].as_str().unwrap());
+            if mode == RawWhiteBalanceMode::Custom {
+                assert_eq!(
+                    args[2..],
+                    ["--raw-temperature", "4321.5", "--raw-tint", "0.875"]
+                );
+            } else {
+                assert_eq!(args.len(), 2);
+            }
+            let mut non_raw = std::process::Command::new("spektrafilm-f64");
+            append_raw_wb_args(&mut non_raw, Path::new("photo.png"), wb);
+            assert_eq!(non_raw.get_args().count(), 0);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn legacy_export_companion_cannot_silently_ignore_raw_wb() {
+        use std::os::unix::fs::PermissionsExt;
+        let legacy_cli = TempPath(std::env::temp_dir().join(format!(
+            "spektrafilm-legacy-wb-test-{}.sh",
+            std::process::id()
+        )));
+        // Emulate the old CLI: JSON's new fields would be silently ignored,
+        // whereas unknown CLI flags fail during argument parsing.
+        std::fs::write(
+            &legacy_cli.0,
+            br#"#!/bin/sh
+for arg do
+    if [ "$arg" = "--raw-wb" ]; then
+        printf '%s\n' "error: unexpected argument '--raw-wb' found" >&2
+        exit 2
+    fi
+done
+exit 0
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&legacy_cli.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut params = RuntimeParams::default();
+        params.io.raw_white_balance = RawWhiteBalance {
+            mode: RawWhiteBalanceMode::Custom,
+            temperature: 7200.0,
+            tint: 1.1,
+        };
+        let error = run_f64_export(
+            &legacy_cli.0,
+            Path::new("photo.NEF"),
+            Path::new("unused.png"),
+            "kodak_gold_200",
+            "kodak_portra_endura",
+            &params,
+            Path::new("data"),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("too old to apply RAW white balance"),
+            "{error}"
+        );
+        assert!(error.contains(legacy_cli.0.to_str().unwrap()));
+        assert!(error.contains("--bin spektrafilm-f64"));
+    }
 }
 
 /// macOS only: walk from the eframe `RawWindowHandle` down to the

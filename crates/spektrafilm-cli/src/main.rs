@@ -22,7 +22,7 @@ struct Cli {
 enum Commands {
     /// Process an image through the film simulation pipeline.
     Process {
-        /// Input image (TIFF, EXR, or PNG).
+        /// Input image (TIFF, PNG, or camera RAW).
         input: PathBuf,
         /// Output image path.
         #[arg(short, long)]
@@ -43,6 +43,15 @@ enum Commands {
         /// Path to JSON params file for overrides.
         #[arg(long)]
         params: Option<PathBuf>,
+        /// RAW input WB (overrides io.raw_white_balance.mode in --params).
+        #[arg(long, value_parser = ["as_shot", "daylight", "tungsten", "custom"])]
+        raw_wb: Option<String>,
+        /// Custom RAW WB temperature in kelvin (1667..25000; default 5500).
+        #[arg(long, requires = "raw_wb")]
+        raw_temperature: Option<f64>,
+        /// Custom RAW WB green multiplier (>0..4; default 1).
+        #[arg(long, requires = "raw_wb")]
+        raw_tint: Option<f64>,
         /// Dump the raw f64 output buffer (HxWx3, row-major, channel-interleaved)
         /// before sRGB encoding/clipping. Used for bit-exact parity comparison.
         #[arg(long)]
@@ -101,6 +110,9 @@ fn main() -> Result<()> {
             scan_film,
             timings,
             params: params_file,
+            raw_wb,
+            raw_temperature,
+            raw_tint,
             raw_out,
             iters,
             data_dir,
@@ -113,6 +125,9 @@ fn main() -> Result<()> {
                 scan_film,
                 timings,
                 params_file.as_deref(),
+                raw_wb.as_deref(),
+                raw_temperature,
+                raw_tint,
                 raw_out.as_deref(),
                 iters,
                 &data_dir,
@@ -144,6 +159,9 @@ fn cmd_process(
     scan_film: bool,
     show_timings: bool,
     params_file: Option<&Path>,
+    raw_wb: Option<&str>,
+    raw_temperature: Option<f64>,
+    raw_tint: Option<f64>,
     raw_out: Option<&Path>,
     iters: usize,
     data_dir: &Path,
@@ -179,6 +197,12 @@ fn cmd_process(
         RuntimeParams::default()
     };
     params.io.scan_film = scan_film;
+    apply_raw_wb_overrides(
+        &mut params.io.raw_white_balance,
+        raw_wb,
+        raw_temperature,
+        raw_tint,
+    )?;
     let rotate_cw = params.io.rotate_cw;
 
     // Auto-detect input color space from file extension
@@ -196,7 +220,11 @@ fn cmd_process(
 
     // Load image
     let t = Instant::now();
-    let image = spektrafilm_io::load_image(input, spektrafilm_io::Formats::TiffPngRaw)?;
+    let image = spektrafilm_io::load_image_with_wb(
+        input,
+        spektrafilm_io::Formats::TiffPngRaw,
+        params.io.raw_white_balance,
+    )?;
     eprintln!(
         "Image loaded: {}x{} ({} MP), {} ms",
         image.width,
@@ -284,6 +312,34 @@ fn cmd_process(
 
 fn bytemuck_cast_f64_to_bytes(v: &[f64]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, std::mem::size_of_val(v)) }
+}
+
+fn apply_raw_wb_overrides(
+    wb: &mut spektrafilm_io::RawWhiteBalance,
+    mode: Option<&str>,
+    temperature: Option<f64>,
+    tint: Option<f64>,
+) -> Result<()> {
+    use spektrafilm_io::RawWhiteBalanceMode;
+    if let Some(mode) = mode {
+        wb.mode = match mode {
+            "as_shot" => RawWhiteBalanceMode::AsShot,
+            "daylight" => RawWhiteBalanceMode::Daylight,
+            "tungsten" => RawWhiteBalanceMode::Tungsten,
+            "custom" => RawWhiteBalanceMode::Custom,
+            _ => bail!("unknown RAW WB mode: {mode}"),
+        };
+    }
+    if (temperature.is_some() || tint.is_some()) && wb.mode != RawWhiteBalanceMode::Custom {
+        bail!("--raw-temperature and --raw-tint require --raw-wb custom");
+    }
+    if let Some(t) = temperature {
+        wb.temperature = t;
+    }
+    if let Some(t) = tint {
+        wb.tint = t;
+    }
+    wb.validate()
 }
 
 fn cmd_list_profiles(data_dir: &Path) {
@@ -383,4 +439,72 @@ fn cmd_export_lut(
         .with_context(|| format!("writing CUBE file: {}", output.display()))?;
     eprintln!("LUT saved: {}", output.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod raw_wb_tests {
+    use super::*;
+    use spektrafilm_io::{RawWhiteBalance, RawWhiteBalanceMode};
+
+    #[test]
+    fn old_params_default_to_as_shot_and_export_json_preserves_selection() {
+        for json in ["{}", r#"{"io":{}}"#] {
+            let p: RuntimeParams = serde_json::from_str(json).unwrap();
+            assert_eq!(p.io.raw_white_balance, RawWhiteBalance::default());
+        }
+        let mut p: RuntimeParams = serde_json::from_str(r#"{"io":{"raw_white_balance":{"mode":"custom","temperature":4200,"tint":0.9}},"scanner":{"white_correction":true}}"#).unwrap();
+        let selected = p.io.raw_white_balance;
+        apply_raw_wb_overrides(&mut p.io.raw_white_balance, None, None, None).unwrap();
+        assert_eq!(p.io.raw_white_balance, selected);
+        assert!(p.scanner.white_correction);
+        apply_raw_wb_overrides(&mut p.io.raw_white_balance, Some("daylight"), None, None).unwrap();
+        assert_eq!(p.io.raw_white_balance.mode, RawWhiteBalanceMode::Daylight);
+        assert_eq!(p.io.raw_white_balance.temperature, 4200.0);
+        assert!(p.scanner.white_correction);
+    }
+
+    #[test]
+    fn cli_parses_custom_wb_and_rejects_invalid_combinations() {
+        let base = [
+            "spektrafilm",
+            "process",
+            "input.NEF",
+            "-o",
+            "out.png",
+            "--film",
+            "kodak_gold_200",
+        ];
+        let cli = Cli::try_parse_from(base.into_iter().chain([
+            "--raw-wb",
+            "custom",
+            "--raw-temperature",
+            "3200",
+            "--raw-tint",
+            "0.85",
+        ]))
+        .unwrap();
+        let Commands::Process {
+            raw_wb,
+            raw_temperature,
+            raw_tint,
+            ..
+        } = cli.command
+        else {
+            panic!()
+        };
+        let mut wb = RawWhiteBalance::default();
+        apply_raw_wb_overrides(&mut wb, raw_wb.as_deref(), raw_temperature, raw_tint).unwrap();
+        assert_eq!(
+            wb,
+            RawWhiteBalance {
+                mode: RawWhiteBalanceMode::Custom,
+                temperature: 3200.0,
+                tint: 0.85
+            }
+        );
+        assert!(Cli::try_parse_from(base.into_iter().chain(["--raw-wb", "auto"])).is_err());
+        assert!(Cli::try_parse_from(base.into_iter().chain(["--raw-tint", "0.8"])).is_err());
+        assert!(apply_raw_wb_overrides(&mut wb, Some("daylight"), Some(3200.0), None).is_err());
+        assert!(apply_raw_wb_overrides(&mut wb, Some("custom"), Some(0.0), None).is_err());
+    }
 }

@@ -9,12 +9,14 @@ precision-f64 = [
     "spektrafilm-math/precision-f64",
     "spektrafilm-gpu/precision-f64",
     "spektrafilm-model/precision-f64",
+    "spektrafilm-io/precision-f64",
 ]
 
 [dependencies]
 spektrafilm-math.workspace = true
 spektrafilm-gpu.workspace = true
 spektrafilm-model.workspace = true
+spektrafilm-io.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rayon.workspace = true

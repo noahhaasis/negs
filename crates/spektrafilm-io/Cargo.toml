@@ -12,4 +12,8 @@ spektrafilm-math.workspace = true
 image.workspace = true
 anyhow.workspace = true
 rayon.workspace = true
+serde.workspace = true
 rawler = "0.8"
+
+[dev-dependencies]
+serde_json.workspace = true
