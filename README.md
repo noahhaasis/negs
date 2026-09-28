@@ -36,7 +36,8 @@ cargo build --release -p spektrafilm-cli --features spektrafilm-gpu/cuda-backend
 cargo build --release --features precision-f64 -p spektrafilm-cli
 cp target/release/spektrafilm target/release/spektrafilm-f64
 
-# Helper used by the GUI's Export button — bit-identical RAW decode
+# Parity helper: decodes a RAW exactly like the GUI and writes a float TIFF
+# (EXIF orientation applied; pass --no-orient to skip it)
 cargo build --release -p spektrafilm-cli --bin decode_raw_gui
 ```
 
@@ -127,6 +128,7 @@ crates/
   spektrafilm-core/    pipeline orchestration, profiles, stage definitions
   spektrafilm-gpu/     ComputeBackend trait + CPU (rayon + BLAS) and wgpu backends
   spektrafilm-shaders/ WGSL / Metal / CUDA compute shaders
+  spektrafilm-io/      image + camera RAW loading (rawler) shared by the CLI and GUI
   spektrafilm-cli/     `spektrafilm` (process, list-profiles, gen-lut) + `decode_raw_gui`
   spektrafilm-gui/     egui/eframe preview (wgpu renderer, Metal-backed on macOS)
 data/
