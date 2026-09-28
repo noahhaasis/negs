@@ -829,7 +829,19 @@ impl App {
         // ── File ────────────────────────────────────────────────────────
         ui.horizontal(|ui| {
             if ui.button("Open…").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+                let mut dialog = rfd::FileDialog::new();
+                // Re-open the picker where the previously loaded file
+                // lives, with that file preselected where the platform
+                // supports it (macOS/Windows).
+                if let Some(prev) = &self.image_path {
+                    if let Some(dir) = prev.parent().filter(|d| d.is_dir()) {
+                        dialog = dialog.set_directory(dir);
+                        if let Some(name) = prev.file_name().and_then(|n| n.to_str()) {
+                            dialog = dialog.set_file_name(name);
+                        }
+                    }
+                }
+                if let Some(path) = dialog
                     .add_filter(
                         "Image",
                         &[
