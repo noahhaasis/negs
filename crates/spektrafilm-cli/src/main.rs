@@ -252,9 +252,10 @@ fn cmd_process(
     // User rotation from the GUI (post-pipeline, matches the preview).
     let result = result.rotated_cw(rotate_cw);
 
-    // Save output
+    // Save output, carrying over the input's camera metadata (EXIF).
     let t = Instant::now();
-    save_image(&result, output)?;
+    let metadata = spektrafilm_io::read_metadata(input);
+    spektrafilm_io::save_image(&result, output, metadata.as_ref())?;
     eprintln!(
         "Saved: {} ({}x{}), {} ms",
         output.display(),
@@ -381,87 +382,5 @@ fn cmd_export_lut(
     std::fs::write(output, &cube_data)
         .with_context(|| format!("writing CUBE file: {}", output.display()))?;
     eprintln!("LUT saved: {}", output.display());
-    Ok(())
-}
-
-/// Save an ImageBuf to TIFF (16-bit) or PNG (8-bit).
-fn save_image(img: &ImageBuf, path: &Path) -> Result<()> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    match ext.as_str() {
-        "tif" | "tiff" => save_tiff(img, path),
-        "png" => save_png(img, path),
-        "jpg" | "jpeg" => save_jpeg(img, path),
-        _ => bail!("unsupported output format: .{ext} (supported: tiff, png, jpg)"),
-    }
-}
-
-fn save_tiff(img: &ImageBuf, path: &Path) -> Result<()> {
-    // Convert to 16-bit
-    let data_u16: Vec<u16> = img
-        .data
-        .iter()
-        .map(|&v| ((v.clamp(0.0, 1.0) * 65535.0).round_ties_even()) as u16)
-        .collect();
-
-    let buf: image::ImageBuffer<image::Rgb<u16>, Vec<u16>> =
-        image::ImageBuffer::from_raw(img.width, img.height, data_u16)
-            .context("creating image buffer")?;
-
-    buf.save(path)
-        .with_context(|| format!("saving TIFF: {}", path.display()))?;
-    Ok(())
-}
-
-fn save_jpeg(img: &ImageBuf, path: &Path) -> Result<()> {
-    // Same 8-bit quantize as PNG; round_ties_even keeps the pre-encode
-    // pixel values numpy-identical. Quality 95 — defending the f64
-    // export path against silent quality loss; `image`'s default of 75
-    // would defeat the point of running the pipeline at f64.
-    use image::ImageEncoder;
-    let data_u8: Vec<u8> = img
-        .data
-        .iter()
-        .map(|&v| ((v.clamp(0.0, 1.0) * 255.0).round_ties_even()) as u8)
-        .collect();
-    let mut file = std::io::BufWriter::new(
-        std::fs::File::create(path)
-            .with_context(|| format!("creating JPEG: {}", path.display()))?,
-    );
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, 95)
-        .write_image(
-            &data_u8,
-            img.width,
-            img.height,
-            image::ExtendedColorType::Rgb8,
-        )
-        .with_context(|| format!("saving JPEG: {}", path.display()))?;
-    Ok(())
-}
-
-fn save_png(img: &ImageBuf, path: &Path) -> Result<()> {
-    // Python: `np.round(x * 255).astype(np.uint8)`. Numpy uses
-    // round-half-to-even (banker's rounding), *not* round-half-up.
-    // `f64::round()` in Rust is round-half-away-from-zero so it
-    // disagrees with numpy at exact x.5 inputs — a rare but real
-    // diff that prevented the bare-chain output from being
-    // bit-identical with Python. `round_ties_even` (stable since
-    // Rust 1.77) matches numpy literally.
-    let data_u8: Vec<u8> = img
-        .data
-        .iter()
-        .map(|&v| ((v.clamp(0.0, 1.0) * 255.0).round_ties_even()) as u8)
-        .collect();
-
-    let buf: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
-        image::ImageBuffer::from_raw(img.width, img.height, data_u8)
-            .context("creating image buffer")?;
-
-    buf.save(path)
-        .with_context(|| format!("saving PNG: {}", path.display()))?;
     Ok(())
 }

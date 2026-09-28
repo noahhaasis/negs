@@ -683,16 +683,24 @@ impl App {
             }
             None => "spektrafilm.png".into(),
         };
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("Image", &["png", "tif", "tiff"])
+        let Some(mut path) = rfd::FileDialog::new()
+            .add_filter("Image", &["png", "tif", "tiff", "jpg", "jpeg"])
             .set_file_name(&default_name)
             .save_file()
         else {
             return;
         };
+        if path.extension().is_none() {
+            path.set_extension("png");
+        }
         let t = Instant::now();
         let out = out.rotated_cw(self.params.io.rotate_cw);
-        match save_image(&out, &path) {
+        // Carry the source's camera metadata (EXIF) over to the output.
+        let metadata = self
+            .image_path
+            .as_deref()
+            .and_then(spektrafilm_io::read_metadata);
+        match spektrafilm_io::save_image(&out, &path, metadata.as_ref()) {
             Ok(()) => {
                 self.status = format!(
                     "Saved {} in {:.0} ms",
@@ -1845,51 +1853,6 @@ fn pick_default_stock(entries: &[ProfileEntry], preferred: &str) -> String {
             .map(|e| e.stock.clone())
             .unwrap_or_else(|| preferred.to_string())
     }
-}
-
-/// Write the pipeline's RGB ImageBuf to disk. PNG is 8-bit (matches what
-/// the preview shows); TIFF is 16-bit (more headroom — recommended for
-/// further editing). The pipeline already emits sRGB-encoded values
-/// clamped to [0, 1] when `output_cctf_encoding` is on, which is the
-/// default for the GUI.
-fn save_image(out: &ImageBuf, path: &Path) -> Result<()> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("png")
-        .to_lowercase();
-    let w = out.width;
-    let h = out.height;
-    match ext.as_str() {
-        "tif" | "tiff" => {
-            // Pack into 16-bit RGB.
-            let n = (w as usize) * (h as usize) * 3;
-            let mut buf = vec![0u16; n];
-            buf.par_iter_mut()
-                .zip(out.data.par_iter())
-                .for_each(|(dst, &src)| {
-                    *dst = (to_f32(src).clamp(0.0, 1.0) * 65535.0).round() as u16;
-                });
-            let img = image::ImageBuffer::<image::Rgb<u16>, _>::from_raw(w, h, buf)
-                .context("packing 16-bit TIFF buffer")?;
-            img.save_with_format(path, image::ImageFormat::Tiff)
-                .with_context(|| format!("writing TIFF {}", path.display()))?;
-        }
-        _ => {
-            let n = (w as usize) * (h as usize) * 3;
-            let mut buf = vec![0u8; n];
-            buf.par_iter_mut()
-                .zip(out.data.par_iter())
-                .for_each(|(dst, &src)| {
-                    *dst = (to_f32(src).clamp(0.0, 1.0) * 255.0).round() as u8;
-                });
-            let img = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(w, h, buf)
-                .context("packing 8-bit PNG buffer")?;
-            img.save_with_format(path, image::ImageFormat::Png)
-                .with_context(|| format!("writing PNG {}", path.display()))?;
-        }
-    }
-    Ok(())
 }
 
 /// Convert the pipeline's post-sRGB-encoded RGB ImageBuf into an RGBA preview.

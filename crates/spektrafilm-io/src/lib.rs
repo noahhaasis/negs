@@ -8,6 +8,15 @@
 //!
 //! Use [`input_is_linear_srgb`] to decide the pipeline's input colour
 //! space for a given file.
+//!
+//! [`save_image`] writes the rendered result as TIFF/PNG/JPEG, carrying
+//! over the source file's camera metadata read by [`read_metadata`].
+
+pub mod metadata;
+pub mod save;
+
+pub use metadata::{ImageMetadata, read_metadata};
+pub use save::save_image;
 
 use std::path::Path;
 

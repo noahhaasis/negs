@@ -128,7 +128,8 @@ crates/
   spektrafilm-core/    pipeline orchestration, profiles, stage definitions
   spektrafilm-gpu/     ComputeBackend trait + CPU (rayon + BLAS) and wgpu backends
   spektrafilm-shaders/ WGSL / Metal / CUDA compute shaders
-  spektrafilm-io/      image + camera RAW loading (rawler) shared by the CLI and GUI
+  spektrafilm-io/      image + camera RAW loading (rawler) and PNG/JPEG/TIFF saving
+                       with the source's camera EXIF, shared by the CLI and GUI
   spektrafilm-cli/     `spektrafilm` (process, list-profiles, gen-lut) + `decode_raw_gui`
   spektrafilm-gui/     egui/eframe preview (wgpu renderer, Metal-backed on macOS)
 data/
