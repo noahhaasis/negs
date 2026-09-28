@@ -554,6 +554,12 @@ pub struct IoParams {
     pub output_gamut_compress: OutputGamutCompressParams,
     #[serde(default)]
     pub input_gamut_compress: InputGamutCompressParams,
+    /// User-requested rotation in 90° clockwise steps (mod 4), applied
+    /// to the final output image after the pipeline runs. This is on
+    /// top of the EXIF orientation, which the loaders apply at decode
+    /// time so the pipeline always sees an upright image.
+    #[serde(default)]
+    pub rotate_cw: i32,
 }
 
 impl Default for IoParams {
@@ -570,6 +576,7 @@ impl Default for IoParams {
             scan_film: false,
             output_gamut_compress: OutputGamutCompressParams::default(),
             input_gamut_compress: InputGamutCompressParams::default(),
+            rotate_cw: 0,
         }
     }
 }

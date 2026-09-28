@@ -179,6 +179,7 @@ fn cmd_process(
         RuntimeParams::default()
     };
     params.io.scan_film = scan_film;
+    let rotate_cw = params.io.rotate_cw;
 
     // Auto-detect input color space from file extension
     let ext = input
@@ -282,6 +283,9 @@ fn cmd_process(
         eprintln!("Pipeline: {} ms", t.elapsed().as_millis());
         r
     };
+
+    // User rotation from the GUI (post-pipeline, matches the preview).
+    let result = result.rotated_cw(rotate_cw);
 
     // Save output
     let t = Instant::now();
@@ -443,10 +447,15 @@ fn load_image(path: &Path) -> Result<ImageBuf> {
 /// the preview byte-for-byte at the input boundary.
 fn load_raw(path: &Path) -> Result<ImageBuf> {
     use rawler::{
-        decode_file,
+        decoders::RawDecodeParams,
         imgop::develop::{ProcessingStep, RawDevelop},
+        rawsource::RawSource,
     };
-    let raw = decode_file(path).map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
+    let src =
+        RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
+    let decode_params = RawDecodeParams::default();
+    let raw = rawler::decode(&src, &decode_params)
+        .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
     let mut dev = RawDevelop::default();
     // Drop the sRGB gamma step — we want linear sRGB primaries; the
     // spektrafilm pipeline applies its own sRGB OETF at the very end.
@@ -454,7 +463,28 @@ fn load_raw(path: &Path) -> Result<ImageBuf> {
     let intermediate = dev
         .develop_intermediate(&raw)
         .map_err(|e| anyhow::anyhow!("RAW develop failed: {e:?}"))?;
-    rawler_intermediate_to_image_buf(intermediate)
+    // rawler 0.7 leaves `RawImage::orientation` hardcoded to Normal, so
+    // read the EXIF tag ourselves. Must match the GUI's loader.
+    let orientation = raw_exif_orientation(&src, &decode_params);
+    Ok(rawler_intermediate_to_image_buf(intermediate)?.oriented(orientation))
+}
+
+/// EXIF orientation tag (1..=8) of a RAW file; 1 when absent/unreadable.
+/// The metadata parsers aren't panic-guarded by rawler (only `decode`
+/// is), and orientation is best-effort, so a panic falls back to 1.
+fn raw_exif_orientation(
+    src: &rawler::rawsource::RawSource,
+    params: &rawler::decoders::RawDecodeParams,
+) -> u16 {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rawler::get_decoder(src)
+            .and_then(|d| d.raw_metadata(src, params))
+            .ok()
+            .and_then(|m| m.exif.orientation)
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or(1)
 }
 
 fn rawler_intermediate_to_image_buf(
@@ -517,9 +547,17 @@ fn decode_no_limits(path: &Path) -> Result<image::DynamicImage> {
         .with_guessed_format()
         .with_context(|| format!("detecting image format: {}", path.display()))?;
     reader.no_limits();
-    reader
-        .decode()
-        .with_context(|| format!("decoding image: {}", path.display()))
+    let mut decoder = reader
+        .into_decoder()
+        .with_context(|| format!("decoding image: {}", path.display()))?;
+    // Honour the EXIF/TIFF orientation tag — the GUI loader does the
+    // same, so the export must too or it won't match the preview.
+    let orientation = image::ImageDecoder::orientation(&mut decoder)
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut img = image::DynamicImage::from_decoder(decoder)
+        .with_context(|| format!("decoding image: {}", path.display()))?;
+    img.apply_orientation(orientation);
+    Ok(img)
 }
 
 fn load_tiff(path: &Path) -> Result<ImageBuf> {

@@ -385,6 +385,9 @@ impl App {
                 );
                 self.image = Some(Arc::new(img));
                 self.image_path = Some(path.to_path_buf());
+                // A manual turn belongs to the previous photo.
+                self.params.io.rotate_cw = 0;
+                self.pan = egui::Vec2::ZERO;
                 self.dirty = true;
             }
             Err(e) => {
@@ -513,7 +516,15 @@ impl App {
     /// `self.zoom = 1.0` means fit-to-panel; values >1 zoom in.
     fn draw_preview_with_zoom(&mut self, ui: &mut egui::Ui, tex: &egui::TextureHandle) {
         let avail = ui.available_size();
-        let img_size = tex.size_vec2();
+        let rotation = self.params.io.rotate_cw.rem_euclid(4);
+        // Rotation is applied at display time (and at save/export time)
+        // so turning the photo is instant — no pipeline re-render.
+        let img_size = if rotation % 2 == 1 {
+            let s = tex.size_vec2();
+            egui::vec2(s.y, s.x)
+        } else {
+            tex.size_vec2()
+        };
         let fit_scale = (avail.x / img_size.x).min(avail.y / img_size.y).min(1.0);
         let scale = fit_scale * self.zoom;
         let drawn_size = img_size * scale;
@@ -567,26 +578,49 @@ impl App {
 
         let centre = rect.center() + self.pan;
         let draw_rect = egui::Rect::from_center_size(centre, drawn_size);
-        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         // Clip to the central panel so panned-off pixels don't leak.
         let painter = ui.painter_at(rect);
-        painter.image(tex.id(), draw_rect, uv, egui::Color32::WHITE);
+        painter.add(rotated_image_mesh(tex.id(), draw_rect, rotation));
 
-        // Zoom indicator + reset chip in the corner.
+        // Rotate buttons + zoom indicator in the corner.
         let pct = (self.zoom * fit_scale * 100.0).round() as i32;
         let text = if (self.zoom - 1.0).abs() < 0.001 && self.pan.length_sq() < 1.0 {
             "fit".to_string()
         } else {
             format!("{pct} %  (double-click to reset)")
         };
-        let pos = rect.left_top() + egui::vec2(8.0, 8.0);
-        painter.text(
-            pos,
-            egui::Align2::LEFT_TOP,
-            text,
-            egui::FontId::monospace(12.0),
-            egui::Color32::from_rgba_premultiplied(220, 220, 220, 200),
+        let bar_rect = egui::Rect::from_min_size(
+            rect.left_top() + egui::vec2(8.0, 6.0),
+            egui::vec2(rect.width() - 16.0, 22.0),
         );
+        let mut turn = 0;
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bar_rect), |ui| {
+            ui.horizontal(|ui| {
+                if ui.small_button("⟲").on_hover_text("Rotate left").clicked() {
+                    turn = -1;
+                }
+                if ui.small_button("⟳").on_hover_text("Rotate right").clicked() {
+                    turn = 1;
+                }
+                ui.label(
+                    egui::RichText::new(text)
+                        .monospace()
+                        .size(12.0)
+                        .color(egui::Color32::from_rgba_premultiplied(220, 220, 220, 200)),
+                );
+            });
+        });
+        if turn != 0 {
+            self.rotate(turn);
+        }
+    }
+
+    /// Turn the photo by `quarter_turns` × 90° clockwise (negative =
+    /// counter-clockwise). Display-only until Save/Export, which both
+    /// apply `params.io.rotate_cw` to the rendered output.
+    fn rotate(&mut self, quarter_turns: i32) {
+        self.params.io.rotate_cw = (self.params.io.rotate_cw + quarter_turns).rem_euclid(4);
+        self.pan = egui::Vec2::ZERO;
     }
 
     /// Called once per `update()`. If the in-flight render finished,
@@ -664,6 +698,7 @@ impl App {
             return;
         };
         let t = Instant::now();
+        let out = out.rotated_cw(self.params.io.rotate_cw);
         match save_image(&out, &path) {
             Ok(()) => {
                 self.status = format!(
@@ -1836,9 +1871,15 @@ fn load_image(path: &Path) -> Result<ImageBuf> {
         .with_guessed_format()
         .with_context(|| format!("detecting image format: {}", path.display()))?;
     reader.no_limits();
-    let img = reader
-        .decode()
+    let mut decoder = reader
+        .into_decoder()
         .with_context(|| format!("decoding image: {}", path.display()))?;
+    // Honour the EXIF orientation tag (JPEG/TIFF from phones etc.).
+    let orientation = image::ImageDecoder::orientation(&mut decoder)
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut img = image::DynamicImage::from_decoder(decoder)
+        .with_context(|| format!("decoding image: {}", path.display()))?;
+    img.apply_orientation(orientation);
     let rgb = img.to_rgb32f();
     let (w, h) = (rgb.width(), rgb.height());
     let data: Vec<f32> = rgb.into_raw();
@@ -1907,10 +1948,15 @@ fn is_raw_extension(ext: &str) -> bool {
 /// which we surface in the GUI status bar.
 fn load_raw(path: &Path) -> Result<ImageBuf> {
     use rawler::{
-        decode_file,
+        decoders::RawDecodeParams,
         imgop::develop::{ProcessingStep, RawDevelop},
+        rawsource::RawSource,
     };
-    let raw = decode_file(path).map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
+    let src =
+        RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
+    let decode_params = RawDecodeParams::default();
+    let raw = rawler::decode(&src, &decode_params)
+        .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
     let mut dev = RawDevelop::default();
     // Drop the sRGB gamma step — we want linear sRGB primaries, the
     // spektrafilm pipeline applies its own sRGB OETF at the end.
@@ -1918,7 +1964,31 @@ fn load_raw(path: &Path) -> Result<ImageBuf> {
     let intermediate = dev
         .develop_intermediate(&raw)
         .map_err(|e| anyhow::anyhow!("RAW develop failed: {e:?}"))?;
-    rawler_intermediate_to_image_buf(intermediate)
+    // rawler 0.7 leaves `RawImage::orientation` hardcoded to Normal
+    // (upstream TODO), so portrait shots came out sideways. Read the
+    // EXIF tag from the decoder's metadata and apply it ourselves.
+    // Must stay in sync with the CLI loader used by Export.
+    let orientation = raw_exif_orientation(&src, &decode_params);
+    Ok(rawler_intermediate_to_image_buf(intermediate)?.oriented(orientation))
+}
+
+/// EXIF orientation tag (1..=8) of a RAW file; 1 when absent/unreadable.
+/// The metadata parsers aren't panic-guarded by rawler (only `decode`
+/// is), and this runs on the UI thread — orientation is best-effort, so
+/// a panic falls back to 1 instead of taking the app down.
+fn raw_exif_orientation(
+    src: &rawler::rawsource::RawSource,
+    params: &rawler::decoders::RawDecodeParams,
+) -> u16 {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rawler::get_decoder(src)
+            .and_then(|d| d.raw_metadata(src, params))
+            .ok()
+            .and_then(|m| m.exif.orientation)
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or(1)
 }
 
 fn rawler_intermediate_to_image_buf(
@@ -2066,6 +2136,43 @@ fn make_preview_texture_data(out: &ImageBuf) -> PreviewTextureData {
             }
         });
     PreviewTextureData { size: [w, h], rgba }
+}
+
+/// Textured quad filling `rect`, with the texture rotated by
+/// `quarter_turns_cw` × 90° clockwise. `rect` must already have the
+/// rotated aspect ratio. Rotating via UVs keeps the turn instant.
+fn rotated_image_mesh(
+    tex: egui::TextureId,
+    rect: egui::Rect,
+    quarter_turns_cw: i32,
+) -> egui::Shape {
+    // Texture corners in screen order TL, TR, BR, BL.
+    let uvs = [
+        egui::pos2(0.0, 0.0),
+        egui::pos2(1.0, 0.0),
+        egui::pos2(1.0, 1.0),
+        egui::pos2(0.0, 1.0),
+    ];
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ];
+    let k = quarter_turns_cw.rem_euclid(4) as usize;
+    let mut mesh = egui::Mesh::with_texture(tex);
+    for (i, &pos) in corners.iter().enumerate() {
+        // After a CW turn, the screen's top-left shows the texture's
+        // bottom-left, i.e. the UV one step "behind" in corner order.
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos,
+            uv: uvs[(i + 4 - k) % 4],
+            color: egui::Color32::WHITE,
+        });
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    egui::Shape::mesh(mesh)
 }
 
 /// Upload a prepared preview texture. The pipeline emits values already
