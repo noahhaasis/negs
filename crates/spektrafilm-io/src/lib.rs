@@ -161,17 +161,35 @@ fn load_raw_impl(path: &Path, orient: bool) -> Result<ImageBuf> {
         .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
     let mut dev = RawDevelop::default();
     dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb));
-    let intermediate = dev
-        .develop_intermediate(&raw)
-        .map_err(|e| anyhow::anyhow!("RAW develop failed: {e:?}"))?;
+    // rawler guards `decode` against panics but not `develop_intermediate`,
+    // which still has `panic!`/`unimplemented!`/`assert!` paths for unusual
+    // files (e.g. Fuji SuperCCD with an active area, non-3x3 colour matrices
+    // without a D65 entry). The GUI loads on its UI thread, so turn a panic
+    // into an error instead of taking the app down.
+    let intermediate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        dev.develop_intermediate(&raw)
+    }))
+    .map_err(|p| anyhow::anyhow!("RAW develop failed: panicked: {}", panic_message(&p)))?
+    .map_err(|e| anyhow::anyhow!("RAW develop failed: {e:?}"))?;
     let img = intermediate_to_image_buf(intermediate);
     if !orient {
         return Ok(img);
     }
-    // rawler 0.7 always sets `RawImage::orientation` to Normal (an
+    // rawler 0.8 still always sets `RawImage::orientation` to Normal (an
     // upstream TODO), so read the EXIF tag ourselves.
     let orientation = raw_exif_orientation(&src, &decode_params);
     Ok(img.oriented(orientation))
+}
+
+/// Text of a caught panic payload (`panic!` with a literal or a format).
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
 }
 
 /// EXIF orientation tag (1..=8) of a RAW file, or 1 if it is missing or
@@ -259,10 +277,10 @@ mod tests {
     }
 
     // No real camera file reliably reaches every `Intermediate` variant:
-    // FourColor survives rawler's develop only when a 4-colour sensor has
-    // no colour matrix (Calibrate turns it into ThreeColor otherwise), and
-    // Monochrome needs a true monochrome sensor. So test the conversion
-    // on synthetic data. 3 px wide x 2 px high so width/height mixups show.
+    // with rawler 0.8's default steps, Calibrate always turns FourColor
+    // into ThreeColor (falling back to an identity matrix), and Monochrome
+    // needs a true monochrome sensor. So test the conversion on synthetic
+    // data. 3 px wide x 2 px high so width/height mixups show.
     mod intermediate {
         use super::super::intermediate_to_image_buf;
         use rawler::imgop::develop::Intermediate;
@@ -328,6 +346,16 @@ mod tests {
             ]);
             assert_eq!(img.data, want);
         }
+    }
+
+    #[test]
+    fn panic_message_reads_str_and_string_payloads() {
+        // libtest captures the panic output, so no need to touch the
+        // (process-global) panic hook.
+        let quiet = |f: fn()| panic_message(&std::panic::catch_unwind(f).unwrap_err());
+        assert_eq!(quiet(|| panic!("literal")), "literal");
+        assert_eq!(quiet(|| panic!("formatted {}", 42)), "formatted 42");
+        assert_eq!(quiet(|| std::panic::panic_any(7u8)), "unknown panic");
     }
 
     #[test]

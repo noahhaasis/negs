@@ -18,7 +18,7 @@ The same spectral integration the original Python project does (RGB → film dye
 
 ## Build
 
-Requires Rust stable (≥ 1.80) and the standard system toolchain.
+Requires Rust stable (≥ 1.89) and the standard system toolchain.
 
 ```bash
 git clone <this-repo> && cd spektrafilm-rs
