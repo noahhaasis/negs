@@ -206,11 +206,6 @@ fn cmd_process(
     let rotate_cw = params.io.rotate_cw;
 
     // Auto-detect input color space from file extension
-    let ext = input
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
     if spektrafilm_io::input_is_linear_srgb(input) {
         // PNG and RAW come out of the loader as linear sRGB.
         // Tell the pipeline so it doesn't decode gamma a second time.
@@ -239,21 +234,11 @@ fn cmd_process(
 
     // Run pipeline (with full Hanatos2025 spectral upsampling)
     let t = Instant::now();
-    let pipeline = Pipeline::new_with_spectral(film, print, params, data_dir).unwrap_or_else(|e| {
-        eprintln!("Warning: spectral LUT not available ({e}), using simplified path");
-        Pipeline::new(
-            profile::load_profile_by_name(data_dir, film_name).unwrap(),
-            profile::load_profile_by_name(data_dir, &print_stock).unwrap(),
-            {
-                let mut p = RuntimeParams::default();
-                p.io.scan_film = scan_film;
-                if ext == "png" {
-                    p.io.input_color_space = "sRGB".to_string();
-                }
-                p
-            },
-        )
-    });
+    // A missing LUT or invalid configuration must fail the export. Falling
+    // back used to silently discard the user's parameters and spectral model.
+    let pipeline = Pipeline::new_with_spectral(film, print, params, data_dir)
+        .map_err(anyhow::Error::msg)
+        .context("building spectral pipeline")?;
     let result = if iters > 1 {
         // Warm-cache bench: process the image `iters` times in the same backend
         // instance. The first iteration pays shader-compile cost; subsequent ones

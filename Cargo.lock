@@ -3737,6 +3737,7 @@ dependencies = [
  "image",
  "libm",
  "rayon",
+ "rustfft",
  "serde",
  "serde_json",
  "spektrafilm-gpu",

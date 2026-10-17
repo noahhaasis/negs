@@ -226,14 +226,8 @@ extern "C" __global__ void hanatos_front_kernel(
     float y = matrix[3] * r + matrix[4] * g + matrix[5] * b;
     float z = matrix[6] * r + matrix[7] * g + matrix[8] * b;
     float brightness = x + y + z;
-    if (brightness <= 1e-10f) {
-        raw_out[base] = 0.0f;
-        raw_out[base + 1u] = 0.0f;
-        raw_out[base + 2u] = 0.0f;
-        return;
-    }
-    float xc = x / brightness;
-    float yc = y / brightness;
+    float xc = x / fmaxf(brightness, 1e-10f);
+    float yc = y / fmaxf(brightness, 1e-10f);
     float omx = fmaxf(1.0f - xc, 1e-10f);
     float tx = fminf(fmaxf((1.0f - xc) * (1.0f - xc), 0.0f), 1.0f);
     float ty = fminf(fmaxf(yc / omx, 0.0f), 1.0f);

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ICON_SOURCE="${ICON_SOURCE:-assets/spektrafilm-icon.jpg}"
+ICON_ICNS="${ICON_ICNS:-}"
 BUILD_TARGET_DIR="${BUILD_TARGET_DIR:-target/macos-app}"
 DIST_DIR="${DIST_DIR:-dist/spektrafilm-macos}"
 APP_NAME="${APP_NAME:-Spektrafilm}"
@@ -10,9 +11,12 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-cargo build --release -p spektrafilm-gui --target-dir "$BUILD_TARGET_DIR"
-cargo build --release -p spektrafilm-cli --bin spektrafilm --target-dir "$BUILD_TARGET_DIR"
-cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 --target-dir "$BUILD_TARGET_DIR"
+# Keep the binary deployment target consistent with Info.plist.
+export MACOSX_DEPLOYMENT_TARGET=12.0
+
+cargo build --locked --release -p spektrafilm-gui --target-dir "$BUILD_TARGET_DIR"
+cargo build --locked --release -p spektrafilm-cli --bin spektrafilm --target-dir "$BUILD_TARGET_DIR"
+cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 --target-dir "$BUILD_TARGET_DIR"
 
 rm -rf "$DIST_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
@@ -21,6 +25,7 @@ cp "$BUILD_TARGET_DIR/release/spektrafilm-gui" "$APP_BUNDLE/Contents/MacOS/spekt
 cp "$BUILD_TARGET_DIR/release/spektrafilm" "$APP_BUNDLE/Contents/MacOS/spektrafilm"
 cp "$BUILD_TARGET_DIR/release/spektrafilm-f64" "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
 cp -R data "$APP_BUNDLE/Contents/Resources/data"
+cp LICENSE "$APP_BUNDLE/Contents/Resources/LICENSE.txt"
 chmod +x "$APP_BUNDLE/Contents/MacOS/spektrafilm-gui" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
@@ -59,7 +64,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-if [[ -f "$ICON_SOURCE" ]]; then
+if [[ -n "$ICON_ICNS" ]]; then
+    cp "$ICON_ICNS" "$APP_BUNDLE/Contents/Resources/spektrafilm.icns"
+elif [[ -f "$ICON_SOURCE" ]]; then
     iconset="$BUILD_TARGET_DIR/spektrafilm.iconset"
     rm -rf "$iconset"
     mkdir -p "$iconset"
@@ -79,7 +86,9 @@ fi
 cat > "$DIST_DIR/README.txt" <<'README'
 spektrafilm-rs macOS
 
-Run Spektrafilm.app for the GUI.
+Unzip the download, drag Spektrafilm.app to Applications, and double-click it.
+No Rust, Homebrew, or separate data download is needed.
+This build requires macOS 12 or newer; see BUILD-INFO.txt for its CPU architecture.
 
 Backends:
 - macOS uses the WGSL/wgpu backend through Metal by default.
@@ -89,14 +98,40 @@ f64 export:
 - spektrafilm-f64 is bundled inside Spektrafilm.app/Contents/MacOS.
 - The GUI uses it for CPU f64 Export.
 
+Black and white stocks:
+- Film: Kodak Double-X 5222 or Kodak Tri-X 7266 reversal.
+- For Double-X prints, select Kodak 2302 in the paper/print selector.
+- Tri-X uses direct film scan. Development times are available for Double-X/2302.
+- The experimental gamut preset is available to the CLI as
+  Contents/Resources/data/presets/experimental-gamut.json inside the app.
+
+Source:
+- SOURCE.tar.gz contains the exact application source and data for this build.
+
 Gatekeeper:
-- This package is ad-hoc signed for local testing. It is not Apple-notarized.
-- If macOS blocks it after download, right-click Spektrafilm.app and choose Open.
+- This package is ad-hoc signed. It is not Apple-notarized.
+- If macOS blocks it after download, dismiss the alert, open System Settings >
+  Privacy & Security, and click Open Anyway for Spektrafilm. Confirm Open.
+  You only need to do this on the first launch.
 README
 
-if command -v codesign >/dev/null 2>&1; then
-    codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
-fi
+{
+    date -u '+Built: %Y-%m-%dT%H:%M:%SZ'
+    uname -m
+    rustc -vV
+    git rev-parse HEAD
+    git status --short
+} > "$DIST_DIR/BUILD-INFO.txt"
+
+# Snapshot the actual working source, including uncommitted port changes.
+# Exclude build products and local files unrelated to reproducing the app.
+COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' \
+    -czf "$DIST_DIR/SOURCE.tar.gz" Cargo.toml Cargo.lock LICENSE README.md \
+    crates data assets scripts docs .github
+
+codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+plutil -lint "$APP_BUNDLE/Contents/Info.plist"
 
 zip_path="$DIST_DIR.zip"
 rm -f "$zip_path"

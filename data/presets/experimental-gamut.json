@@ -1,0 +1,16 @@
+{
+  "io": {
+    "input_gamut_compress": {
+      "algorithm": "xy",
+      "boundary": "inscribed_hull",
+      "hull_detail": 5.0,
+      "center": "D65",
+      "knee": [0.815, 1.0, 1.2]
+    },
+    "output_gamut_compress": {
+      "algorithm": "oklch",
+      "knee": [0.95, 1.0, 1.6],
+      "lightness_compression": [0.95, 1.0, 1.6]
+    }
+  }
+}

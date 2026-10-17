@@ -4,7 +4,7 @@
 
 A Rust port of [andreavolpato/spektrafilm](https://github.com/andreavolpato/spektrafilm) — a spectral simulator for analogue colour film and the print-and-scan chain.
 
-The same spectral integration the original Python project does (RGB → film dye density → enlarger illuminant → print paper → scanner RGB), reimplemented in Rust with a GPU preview and a parity-faithful CPU export. The point of the port is **bit-identical output to the Python reference** at f64 precision while running in a fraction of the wall time.
+The same spectral integration the original Python project does (RGB → film dye density → enlarger illuminant → print paper → scanner RGB), reimplemented in Rust with a GPU preview and a CPU export targeting numerical parity with a pinned Python reference at f64 precision.
 
 ---
 
@@ -12,9 +12,10 @@ The same spectral integration the original Python project does (RGB → film dye
 
 - **Spectral pipeline.** Hanatos2025 RGB→raw spectral upsampling, full 81-wavelength film/print/scanner spectral integration, density-curve interpolation, halation, DIR couplers, grain (bit-exact numpy `MT19937` port), glare, output CCTF encoding.
 - **Live interactive preview** on the GPU (wgpu / Metal on macOS) — slider drags update at 60 fps on a 6 MP working image.
-- **Reference-quality export** on the CPU at f64 — verified bit-identical to the Python reference for the bare chain (max diff 1/255 from 8-bit quantisation, mean 0.00004).
+- **Reference-quality export** on the CPU at f64 — deterministic print-chain comparisons against Python main pass within `1e-6`; see [scope and measured results](docs/upstream-sync.md).
 - **Decoupled preview + export.** GUI uses f32 GPU for iteration, then shells out to the f64 CPU binary for the final write. The export runs in a worker thread with a cancel button and proper child-process lifecycle.
 - **Profiles bundled.** 30+ film and paper profiles in `data/profiles/` — Kodak Gold/Portra/Ektar, Fuji Velvia/Provia, Kodak Endura papers, Fuji Crystal Archive papers.
+- **B&W stocks.** Updated upstream Double-X 5222, Tri-X Reversal 7266, and Kodak 2302 print-film calibrations, including development-time families. See [usage, provenance, and parity scope](docs/handoff-bw-stocks.md).
 
 ## Build
 
@@ -82,6 +83,9 @@ SPEKTRAFILM_BACKEND=cpu \
 # Override any params via JSON (matches RuntimeParams struct)
 ... --params my_params.json
 
+# Opt into pinned experimental 28bf883 gamut settings
+... --params data/presets/experimental-gamut.json
+
 # RAW input WB (also available via io.raw_white_balance in --params)
 ./target/release/spektrafilm process input.ORF -o out.png \
     --film kodak_gold_200 --raw-wb custom --raw-temperature 3200 --raw-tint 0.85
@@ -92,11 +96,19 @@ SPEKTRAFILM_BACKEND=cpu \
 
 ## Parity
 
-Verified against the upstream Python `spektrafilm` v0.3.2 reference on the bare-chain (no stochastic FX):
+The optional [experimental gamut preset](docs/handoff-experimental-gamut.md)
+adds the smooth input boundary and D65 compression center. All 24 tested
+B&W cases pass against pinned Python `28bf883`, including saturated inputs,
+with maximum final RGB error `5.313e-10`. The existing runtime defaults are
+preserved; colour-profile normalization remains a separate port.
+
+The [repeatable parity runner](scripts/parity/README.md) checks intermediate f64 arrays and final RGB against an explicitly selected Python checkout. The [October 2026 audit](docs/upstream-sync.md) passes all 12 tested cases against upstream main `3bb2c2d`, with maximum final linear RGB error `3.631e-9`. The sibling Python checkout is on experimental `28bf883`, which changes the model and fails all six tested Portra/Endura cases. Version `0.3.4` alone does not identify a stable reference.
+
+Historical measurements from the initial port against Python v0.3.2 (bare chain, no stochastic FX) follow. They are numerical comparisons, not byte identity, and were not reproduced on the original image in the current audit:
 
 | Stage | Max diff | Mean diff | Identical pixels |
 |---|---|---|---|
-| `log_raw` (post-Hanatos + log10) | **8.9 × 10⁻¹⁵** (one f64 ULP) | 3.4 × 10⁻¹⁶ | — |
+| `log_raw` (post-Hanatos + log10) | **8.9 × 10⁻¹⁵** | 3.4 × 10⁻¹⁶ | — |
 | Film density CMY | **1.1 × 10⁻¹⁵** | 1.7 × 10⁻¹⁶ | — |
 | Print density CMY | **3.1 × 10⁻¹⁵** | 3.0 × 10⁻¹⁶ | — |
 | Final PNG (8-bit) | **1 / 255** | 0.00004 / 255 | **99.9962 %** |
@@ -141,8 +153,7 @@ data/
   luts/                Hanatos2025 spectral basis + standard observer CMFs (.npy)
   filters/             neutral-print enlarger filter database
 scripts/parity/        Python ↔ Rust comparison harness (spektra_compare.py, etc.)
-tests/                 reference outputs + integration test fixtures
-docs/upstream-sync.md  porting status of upstream 0.3.4 colour features + backlog
+docs/upstream-sync.md  verified Python references, parity results, porting backlog
 ```
 
 ## Credits

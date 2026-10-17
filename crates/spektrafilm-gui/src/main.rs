@@ -182,6 +182,7 @@ fn gui_renderer() -> eframe::Renderer {
 struct ProfileEntry {
     stock: String,
     display: String,
+    is_bw: bool,
 }
 
 struct App {
@@ -301,6 +302,7 @@ impl App {
     fn new(backend: Arc<dyn ComputeBackend>, initial_image: Option<PathBuf>) -> Self {
         let data_dir = pick_data_dir();
         let (films, papers) = scan_profiles(&data_dir);
+        tracing::info!(data_dir = %data_dir.display(), films = films.len(), prints = papers.len(), "loaded profile catalog");
         let film_name = pick_default_stock(&films, "kodak_gold_200");
         // Load the default film once to derive two start-up choices:
         //   - the paired print paper (`target_print`): each profile is
@@ -415,6 +417,29 @@ impl App {
             .as_deref()
             .is_some_and(spektrafilm_io::is_raw)
             && self.loaded_raw_wb != self.params.io.raw_white_balance
+    }
+
+    fn reset_settings(&mut self) {
+        let previous_wb = self.params.io.raw_white_balance;
+        let mut params = RuntimeParams::default();
+        // Match the defaults chosen when this image and film were loaded.
+        if self
+            .image_path
+            .as_deref()
+            .is_some_and(spektrafilm_io::input_is_linear_srgb)
+        {
+            params.io.input_color_space = "sRGB".into();
+            params.io.input_cctf_decoding = false;
+        }
+        params.io.scan_film = profile::load_profile_by_name(&self.data_dir, &self.film_name)
+            .is_ok_and(|film| film.is_positive());
+        self.params = params;
+        self.pan = egui::Vec2::ZERO;
+        if previous_wb != self.params.io.raw_white_balance {
+            self.invalidate_input_preview();
+        } else {
+            self.dirty = true;
+        }
     }
 
     fn preview_pipeline(
@@ -713,6 +738,12 @@ impl App {
                 self.last_preview_ms = r.preview_ms;
                 self.last_worker_total_ms = r.worker_total_ms;
                 self.output_tex = Some(make_texture(ctx, r.preview));
+                tracing::info!(
+                    width = r.output.width,
+                    height = r.output.height,
+                    render_ms = r.render_ms,
+                    "preview texture ready"
+                );
                 self.status = format!(
                     "Rendered {} × {} ({:.1} MP)",
                     r.output.width,
@@ -1096,7 +1127,7 @@ impl App {
                 // letting it silently affect nothing.
                 if self.params.io.scan_film {
                     ui.label(
-                        egui::RichText::new("Slide film — scanned directly (no print paper).")
+                        egui::RichText::new("Direct film scan — printing is skipped.")
                             .italics()
                             .small(),
                     );
@@ -1106,7 +1137,7 @@ impl App {
                         profile_combo(
                             ui,
                             "paper",
-                            "Print paper",
+                            "Print paper / film",
                             &self.papers,
                             &mut self.print_name,
                         )
@@ -1595,6 +1626,15 @@ impl App {
                 }
             });
 
+        ui.add_space(8.0);
+        if ui
+            .button("Reset settings")
+            .on_hover_text("Restore all defaults except the selected film stock and print paper.")
+            .clicked()
+        {
+            self.reset_settings();
+        }
+
         // ── Metrics ─────────────────────────────────────────────────────
         ui.add_space(10.0);
         ui.separator();
@@ -1781,15 +1821,22 @@ fn scan_profiles(data_dir: &Path) -> (Vec<ProfileEntry>, Vec<ProfileEntry>) {
         // Cheap probe: just deserialize the file's `info` field. We
         // could skip the rest of the profile but `Profile` already does
         // the right thing — and we pay this once at startup.
-        let (display, is_paper) = match profile::load_profile_by_name(data_dir, &stock) {
+        let (display, is_paper, is_bw) = match profile::load_profile_by_name(data_dir, &stock) {
             Ok(p) => {
                 let display = p.info.name.clone().unwrap_or_else(|| stock.clone());
                 let is_paper = p.info.support == "paper" || p.info.stage == "printing";
-                (display, is_paper)
+                (display, is_paper, p.is_bw())
             }
-            Err(_) => (stock.clone(), false),
+            Err(err) => {
+                tracing::warn!(%stock, %err, "could not load profile for catalog");
+                (stock.clone(), false, false)
+            }
         };
-        let entry = ProfileEntry { stock, display };
+        let entry = ProfileEntry {
+            stock,
+            display,
+            is_bw,
+        };
         if is_paper {
             papers.push(entry);
         } else {
@@ -1864,8 +1911,13 @@ fn profile_combo(
         .selected_text(&display)
         .width(ui.available_width().min(280.0))
         .show_ui(ui, |ui| {
-            for entry in entries {
-                ui.selectable_value(selected_stock, entry.stock.clone(), &entry.display);
+            for (is_bw, heading) in [(true, "Black & white"), (false, "Colour")] {
+                if entries.iter().any(|entry| entry.is_bw == is_bw) {
+                    ui.strong(heading);
+                    for entry in entries.iter().filter(|entry| entry.is_bw == is_bw) {
+                        ui.selectable_value(selected_stock, entry.stock.clone(), &entry.display);
+                    }
+                }
             }
         });
     prev != *selected_stock
@@ -2438,6 +2490,96 @@ exit 0
         );
         assert!(error.contains(legacy_cli.0.to_str().unwrap()));
         assert!(error.contains("--bin spektrafilm-f64"));
+    }
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+    use spektrafilm_io::RawWhiteBalanceMode;
+
+    #[test]
+    fn gui_catalog_includes_bw_camera_and_print_films_in_the_correct_pickers() {
+        let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let (films, prints) = scan_profiles(&data_dir);
+        let bw_films: Vec<_> = films
+            .iter()
+            .filter(|p| p.is_bw)
+            .map(|p| p.stock.as_str())
+            .collect();
+        let bw_prints: Vec<_> = prints
+            .iter()
+            .filter(|p| p.is_bw)
+            .map(|p| p.stock.as_str())
+            .collect();
+        assert_eq!(bw_films, ["kodak_doublex", "kodak_trix"]);
+        assert_eq!(bw_prints, ["kodak_2302"]);
+        assert_eq!(films.len() + prints.len(), 31);
+        assert_eq!(
+            films
+                .iter()
+                .find(|p| p.stock == "kodak_doublex")
+                .unwrap()
+                .display,
+            "Kodak Double-X Negative Film 5222"
+        );
+        assert_eq!(
+            prints
+                .iter()
+                .find(|p| p.stock == "kodak_2302")
+                .unwrap()
+                .display,
+            "Kodak Print Film 2302"
+        );
+    }
+
+    #[test]
+    fn reset_restores_all_params_but_keeps_selected_profiles_and_slide_defaults() {
+        let mut app = App::new(Arc::new(spektrafilm_gpu::cpu_backend::CpuBackend), None);
+        app.film_name = "kodak_ektachrome_100".into();
+        app.print_name = "kodak_2302".into();
+        app.image_path = Some(PathBuf::from("photo.png"));
+        app.params.camera.exposure_compensation_ev = 2.0;
+        app.params.film_render.development_time = Some(10.0);
+        app.params.print_render.development_time = Some(5.0);
+        app.params.enlarger.print_exposure = 3.0;
+        app.params.scanner.white_correction = true;
+        app.params.settings.use_cat16 = false;
+        app.params.io.output_cctf_encoding = false;
+        app.params.io.scan_film = false;
+        app.params.io.rotate_cw = 2;
+
+        app.reset_settings();
+
+        let mut expected = RuntimeParams::default();
+        expected.io.input_color_space = "sRGB".into();
+        expected.io.scan_film = true;
+        assert_eq!(
+            serde_json::to_value(&app.params).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(app.film_name, "kodak_ektachrome_100");
+        assert_eq!(app.print_name, "kodak_2302");
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn reset_raw_white_balance_invalidates_previously_developed_input() {
+        let mut app = App::new(Arc::new(spektrafilm_gpu::cpu_backend::CpuBackend), None);
+        app.image_path = Some(PathBuf::from("photo.NEF"));
+        app.image = Some(Arc::new(ImageBuf::from_data(1, 1, vec![from_f32(0.1); 3])));
+        app.output_image = Some(ImageBuf::from_data(1, 1, vec![from_f32(0.25); 3]));
+        app.loaded_raw_wb.mode = RawWhiteBalanceMode::Daylight;
+        app.params.io.raw_white_balance.mode = RawWhiteBalanceMode::Daylight;
+
+        app.reset_settings();
+
+        assert_eq!(app.params.io.raw_white_balance, Default::default());
+        assert!(!app.params.io.scan_film);
+        assert!(app.raw_wb_pending());
+        assert_eq!(app.input_revision, 1);
+        assert!(app.output_image.is_none());
+        assert!(app.dirty);
     }
 }
 

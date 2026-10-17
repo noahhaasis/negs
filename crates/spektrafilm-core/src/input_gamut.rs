@@ -5,12 +5,14 @@
 //! remap-resample: `new_lut[xy] = old_lut[compress(xy)]`. The per-pixel
 //! runtime path (RGB → CIE xy → tc → bilinear LUT sample) therefore stays
 //! compression-agnostic. Only the production `"xy"` algorithm (ACES-RGC-style
-//! radial compression toward the visible spectral locus) is ported; the
-//! inspection-only `"oklch"` input variant is not.
+//! radial compression toward the visible spectral locus) is ported, including
+//! experimental 28bf883's optional smooth inscribed hull.
 
+use rustfft::{FftPlanner, num_complex::Complex};
 use spektrafilm_math::spectral::{self, CMF_X_F64, CMF_Y_F64, CMF_Z_F64, TcLut};
 
 use crate::gamut_compression::reinhard_knee;
+use crate::params::InputGamutCompressParams;
 
 /// CIE 1931 2° visible spectral locus as a closed xy polygon, sampled at 5 nm
 /// from 380 to 700 nm (65 vertices + the first repeated). Mirrors upstream
@@ -46,11 +48,51 @@ fn ray_polygon_distance(origin: [f64; 2], direction: [f64; 2], polygon: &[[f64; 
         // origin + t·direction = a + s·edge
         let t = (-ox * ey + oy * ex) / denom;
         let s = (-ox * dy + oy * dx) / denom;
-        if t > 1e-9 && (0.0..=1.0).contains(&s) && t < t_min {
+        // Match experimental's endpoint guard: dense hull vertices can fall
+        // exactly on a ray, with s a rounding error outside the adjacent edge.
+        if t > 1e-9 && (-1e-9..=1.0 + 1e-9).contains(&s) && t < t_min {
             t_min = t;
         }
     }
     t_min
+}
+
+/// Sample radial reach at 1024 angles, Gaussian-filter its Fourier modes,
+/// then scale by the worst overshoot to inscribe the smoothed boundary.
+/// Mirrors `inscribed_locus_hull` at pinned Python experimental 28bf883.
+fn inscribed_locus_hull(white: [f64; 2], detail: f64, locus: &[[f64; 2]]) -> Vec<[f64; 2]> {
+    const N: usize = 1024;
+    let directions: Vec<_> = (0..N)
+        .map(|i| {
+            let theta = i as f64 * (std::f64::consts::TAU / N as f64);
+            [theta.cos(), theta.sin()]
+        })
+        .collect();
+    let reach: Vec<_> = directions
+        .iter()
+        .map(|&dir| ray_polygon_distance(white, dir, locus))
+        .collect();
+    let mut modes: Vec<_> = reach.iter().map(|&r| Complex::new(r, 0.0)).collect();
+    let mut planner = FftPlanner::<f64>::new();
+    planner.plan_fft_forward(N).process(&mut modes);
+    for (k, mode) in modes.iter_mut().enumerate() {
+        let frequency = k.min(N - k) as f64;
+        *mode *= (-0.5 * (frequency / detail).powi(2)).exp();
+    }
+    planner.plan_fft_inverse(N).process(&mut modes);
+    let smoothed: Vec<_> = modes.iter().map(|m| (m.re / N as f64).max(1e-12)).collect();
+    let scale = reach
+        .iter()
+        .zip(&smoothed)
+        .map(|(r, s)| r / s)
+        .fold(f64::INFINITY, f64::min);
+    let mut hull: Vec<_> = directions
+        .iter()
+        .zip(&smoothed)
+        .map(|(dir, r)| [white[0] + r * scale * dir[0], white[1] + r * scale * dir[1]])
+        .collect();
+    hull.push(hull[0]);
+    hull
 }
 
 /// ACES-RGC-style radial compression of a single CIE xy toward the spectral
@@ -86,6 +128,8 @@ pub struct InputGamutCompress {
     active: bool,
     knee: (f64, f64, f64),
     locus: Vec<[f64; 2]>,
+    hull_detail: Option<f64>,
+    center_d65: bool,
 }
 
 impl InputGamutCompress {
@@ -93,23 +137,49 @@ impl InputGamutCompress {
     /// `"xy"` → active radial compression. Any other value errors. The knee is
     /// validated as in upstream `InputGamutCompressSpec.__post_init__`.
     pub fn build(algorithm: &str, knee: [f32; 3]) -> Result<Self, String> {
+        Self::from_params(&InputGamutCompressParams {
+            algorithm: algorithm.into(),
+            knee,
+            ..Default::default()
+        })
+    }
+
+    /// Resolve the legacy locus or experimental inscribed-hull boundary.
+    pub fn from_params(params: &InputGamutCompressParams) -> Result<Self, String> {
+        let algorithm = params.algorithm.as_str();
+        let knee = params.knee;
         let active = match algorithm {
             "off" => false,
             "xy" => true,
             other => return Err(format!("unknown input gamut algorithm: {other}")),
         };
+        let hull_detail = match params.boundary.as_str() {
+            "locus" => None,
+            "inscribed_hull" => Some(params.hull_detail),
+            other => return Err(format!("unknown input gamut boundary: {other}")),
+        };
+        let center_d65 = match params.center.as_str() {
+            "reference" => false,
+            "D65" => true,
+            other => return Err(format!("unknown input gamut center: {other}")),
+        };
+        if !params.hull_detail.is_finite() || params.hull_detail <= 0.0 {
+            return Err("hull_detail must be positive and finite".into());
+        }
         let [t, l, p] = knee;
         if !(0.0..1.0).contains(&t) {
             return Err(format!("knee threshold must be in [0, 1), got {t}"));
         }
-        if l <= 0.0 {
+        if !l.is_finite() || l <= 0.0 {
             return Err(format!("knee limit must be > 0, got {l}"));
         }
-        if p <= 0.0 {
+        if !p.is_finite() || p <= 0.0 {
             return Err(format!("knee power must be > 0, got {p}"));
         }
         Ok(Self {
             active,
+            hull_detail,
+            center_d65,
             knee: (knee[0] as f64, knee[1] as f64, knee[2] as f64),
             locus: if active {
                 spectral_locus_xy()
@@ -127,12 +197,23 @@ impl InputGamutCompress {
     /// LUT cell we decode its tc index to CIE xy, compress, re-encode to tc,
     /// and bilinearly sample the original LUT there (clamp-to-edge boundary,
     /// matching `scipy.ndimage.map_coordinates(order=1, mode="nearest")`).
-    /// `ref_xy` is the film reference illuminant chromaticity — the
-    /// compression's achromatic axis. Returns `lut` unchanged when inactive.
+    /// `ref_xy` is the upsampler's reference-white chromaticity. An explicit
+    /// D65 center overrides it, independently of film spectral adaptation.
+    /// Returns `lut` unchanged when inactive.
     pub fn remap(&self, lut: &TcLut, ref_xy: [f64; 2]) -> TcLut {
         if !self.active {
             return lut.clone();
         }
+        let ref_xy = if self.center_d65 {
+            let (x, y) = spectral::illuminant_to_xy(&spectral::ILLUMINANT_D65);
+            [x, y]
+        } else {
+            ref_xy
+        };
+        let hull = self
+            .hull_detail
+            .map(|detail| inscribed_locus_hull(ref_xy, detail, &self.locus));
+        let boundary = hull.as_deref().unwrap_or(&self.locus);
         let size = lut.size;
         let ch = lut.channels;
         let inv = 1.0 / (size as f64 - 1.0);
@@ -142,7 +223,7 @@ impl InputGamutCompress {
                 // Step 1: tc cell → CIE xy.
                 let (x, y) = spectral::tc_to_xy(i as f64 * inv, j as f64 * inv);
                 // Step 2: compress.
-                let cxy = compress_xy_radial([x, y], ref_xy, self.knee, &self.locus);
+                let cxy = compress_xy_radial([x, y], ref_xy, self.knee, boundary);
                 // Step 3: compressed xy → tc.
                 let (tx, ty) = spectral::xy_to_tc(cxy[0], cxy[1]);
                 // Step 4: bilinear sample original LUT at (tx, ty) grid coords.
@@ -193,6 +274,90 @@ fn bilinear_sample(lut: &TcLut, ci: f64, cj: f64) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct HullFixture {
+        input_cases: Vec<HullCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct HullCase {
+        white: [f64; 2],
+        spec: InputGamutCompressParams,
+        hull_every_64: Vec<[f64; 2]>,
+        remapped_lut: Vec<f64>,
+    }
+
+    #[test]
+    fn experimental_hull_and_remap_match_python() {
+        let fixture: HullFixture =
+            serde_json::from_str(include_str!("../tests/fixtures/gamut_python_28bf883.json"))
+                .unwrap();
+        let locus = spectral_locus_xy();
+        for case in fixture.input_cases {
+            let hull = inscribed_locus_hull(case.white, case.spec.hull_detail, &locus);
+            assert_eq!(hull.len(), 1025);
+            assert_eq!(hull.first(), hull.last());
+            for (actual, expected) in hull.iter().step_by(64).zip(case.hull_every_64) {
+                for c in 0..2 {
+                    assert!((actual[c] - expected[c]).abs() < 1e-11);
+                }
+            }
+            // Every hull vertex remains inside the locus; rays aligned with
+            // vertices must intersect rather than produce NaNs in compression.
+            for &vertex in &hull[..1024] {
+                let delta = [vertex[0] - case.white[0], vertex[1] - case.white[1]];
+                let radius = delta[0].hypot(delta[1]);
+                let direction = [delta[0] / radius, delta[1] / radius];
+                assert!(radius <= ray_polygon_distance(case.white, direction, &locus) + 1e-11);
+                assert!(
+                    (ray_polygon_distance(case.white, direction, &hull) - radius).abs() < 1e-11
+                );
+            }
+            let compressor = InputGamutCompress::from_params(&case.spec).unwrap();
+            let actual = compressor.remap(&synthetic_lut(16), case.white);
+            assert_eq!(actual.data.len(), case.remapped_lut.len());
+            for (i, (a, e)) in actual.data.iter().zip(&case.remapped_lut).enumerate() {
+                assert!(
+                    (a - e).abs() < 1e-6,
+                    "detail {} component {i}: {a} vs {e}",
+                    case.spec.hull_detail
+                );
+            }
+            assert_eq!(
+                compress_xy_radial(case.white, case.white, compressor.knee, &hull),
+                case.white
+            );
+        }
+    }
+
+    #[test]
+    fn boundary_configuration_preserves_legacy_defaults_and_rejects_invalid_values() {
+        let legacy: InputGamutCompressParams =
+            serde_json::from_str(r#"{"algorithm":"xy","knee":[0,1,6]}"#).unwrap();
+        assert_eq!(legacy, InputGamutCompressParams::default());
+        for detail in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let params = InputGamutCompressParams {
+                boundary: "inscribed_hull".into(),
+                hull_detail: detail,
+                ..legacy.clone()
+            };
+            assert!(InputGamutCompress::from_params(&params).is_err());
+        }
+        let params = InputGamutCompressParams {
+            boundary: "unknown".into(),
+            ..legacy
+        };
+        assert!(InputGamutCompress::from_params(&params).is_err());
+        for knee in [
+            [f32::NAN, 1.0, 6.0],
+            [0.0, f32::NAN, 6.0],
+            [0.0, 1.0, f32::INFINITY],
+        ] {
+            assert!(InputGamutCompress::build("xy", knee).is_err());
+        }
+    }
 
     /// Deterministic synthetic LUT, mirrored bit-for-bit in the Python
     /// reference (`tmp/igc_ref.py`): cell (i, j, c) = `((i² + 3j + 7c) % 97) / 97`.

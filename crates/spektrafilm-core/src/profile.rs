@@ -90,7 +90,10 @@ fn default_d50() -> String {
 pub struct ProfileData {
     #[serde(default)]
     pub wavelengths: Vec<f64>,
-    #[serde(default, deserialize_with = "deser_zero_matrix")]
+    // A missing log sensitivity must stay NaN until the spectral code maps
+    // 10^NaN to zero. Mapping null to 0 here would give 10^0 = 1 sensitivity
+    // outside a stock's measured band (especially harmful for B&W stocks).
+    #[serde(default, deserialize_with = "deser_nullable_matrix")]
     pub log_sensitivity: Vec<Vec<f64>>,
     #[serde(default, deserialize_with = "deser_zero_vec")]
     pub hanatos2025_adaptation_window_params: Vec<f64>,
@@ -159,7 +162,7 @@ impl DensityCurvesModel {
     }
 }
 
-/// Deserialize with null → 0.0 (for data that must be finite: sensitivity, density curves).
+/// Deserialize with null → 0.0 (for data that must be finite, e.g. density curves).
 /// Whole-field `null` (B&W profiles null out unused fields) reads as empty.
 fn deser_zero_vec<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
 where
@@ -350,6 +353,7 @@ pub fn load_profile(path: &Path) -> Result<Profile, ProfileError> {
     let reader = std::io::BufReader::new(file);
     let mut profile: Profile = serde_json::from_reader(reader)
         .map_err(|e| ProfileError::Parse(path.display().to_string(), e))?;
+    refresh_bw_density_curves(&mut profile)?;
     validate_profile(&profile)?;
     // Resolve the default base+fog column so the field is usable straight
     // after load. `resolve_for_render` re-selects it for B&W development-time
@@ -357,6 +361,58 @@ pub fn load_profile(path: &Path) -> Result<Profile, ProfileError> {
     let idx = development_time_index(&profile.data.development_time, None);
     profile.data.base_density = base_density_column(&profile.data.base_density_rows, idx);
     Ok(profile)
+}
+
+/// Upstream's fitted model is authoritative for the updated B&W profiles.
+/// Rebuild the whole development-time family before choosing a member; the
+/// JSON sample curves are rounded and differ from the model by ~1e-5.
+/// Keep legacy colour profiles on their existing calibration path.
+fn refresh_bw_density_curves(profile: &mut Profile) -> Result<(), ProfileError> {
+    if !profile.is_bw() {
+        return Ok(());
+    }
+    let positive = profile.is_positive();
+    let d = &mut profile.data;
+    let Some(model) = &d.density_curves_model else {
+        return Ok(());
+    };
+    let n_times = d.development_time.len().max(1);
+    let n_layers = model.n_layers();
+    if !matches!(model.model_type.as_str(), "cdfs" | "norm_cdfs")
+        || n_layers == 0
+        || [&model.centers, &model.amplitudes, &model.sigmas]
+            .iter()
+            .any(|m| {
+                m.len() != n_times
+                    || m.iter()
+                        .any(|row| row.len() != n_layers || row.iter().any(|v| !v.is_finite()))
+            })
+        || model.sigmas.iter().flatten().any(|&v| v <= 0.0)
+    {
+        return Err(ProfileError::Validation(
+            "invalid B&W density curve model".into(),
+        ));
+    }
+    let sign = if positive { -1.0 } else { 1.0 };
+    d.density_curves = vec![vec![0.0; n_times]; d.log_exposure.len()];
+    d.density_curves_layers = if n_layers > 1 {
+        vec![vec![vec![0.0; n_times]; n_layers]; d.log_exposure.len()]
+    } else {
+        Vec::new()
+    };
+    for (i, &x) in d.log_exposure.iter().enumerate() {
+        for time in 0..n_times {
+            for layer in 0..n_layers {
+                let z = sign * (x - model.centers[time][layer]) / model.sigmas[time][layer];
+                let density = model.amplitudes[time][layer] * crate::print_morph::norm_cdf(z);
+                d.density_curves[i][time] += density;
+                if n_layers > 1 {
+                    d.density_curves_layers[i][layer][time] = density;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Load a profile by stock name from a data directory.
@@ -565,6 +621,33 @@ mod tests {
         assert!(p.data.hanatos2025_adaptation_window_params.is_empty());
     }
 
+    #[test]
+    fn bw_missing_sensitivity_remains_inactive_after_resolution() {
+        for stock in ["kodak_doublex", "kodak_trix", "kodak_2302"] {
+            let p = data_profile(stock).expect("bundled B&W profile");
+            let missing: Vec<_> = p
+                .data
+                .log_sensitivity
+                .iter()
+                .enumerate()
+                .filter_map(|(i, row)| row[0].is_nan().then_some(i))
+                .collect();
+            assert!(
+                !missing.is_empty(),
+                "{stock} must contain unmeasured wavelengths"
+            );
+            let resolved = resolve_for_render(p, None);
+            for i in missing {
+                for log_sensitivity in resolved.log_sensitivity_f64()[i] {
+                    assert!(log_sensitivity.is_nan(), "{stock} wavelength index {i}");
+                    let raw = 10.0f64.powf(log_sensitivity);
+                    let sensitivity = if raw.is_nan() { 0.0 } else { raw };
+                    assert_eq!(sensitivity, 0.0);
+                }
+            }
+        }
+    }
+
     /// Resolving collapses the family to the requested (nearest) time and
     /// broadcasts the single channel to the 3-channel engine layout with the
     /// `[dye, 0, 0]` spectral encoding.
@@ -577,12 +660,9 @@ mod tests {
         let want_curve: Vec<f64> = p.data.density_curves.iter().map(|r| r[3]).collect();
         let r = resolve_for_render(p, Some(10.0));
         assert_eq!(r.data.development_time, vec![9.0]);
-        assert!(
-            r.data
-                .log_sensitivity
-                .iter()
-                .all(|row| row.len() == 3 && row[0] == row[1] && row[1] == row[2])
-        );
+        assert!(r.data.log_sensitivity.iter().all(|row| row.len() == 3
+            && row[0].to_bits() == row[1].to_bits()
+            && row[1].to_bits() == row[2].to_bits()));
         for (row, want) in r.data.density_curves.iter().zip(&want_curve) {
             assert_eq!(row.len(), 3);
             assert_eq!(row[0], *want);

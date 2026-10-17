@@ -273,9 +273,8 @@ impl Pipeline {
                     // Bake input gamut compression into the LUT at build time, around
                     // the film reference illuminant (the runtime's achromatic axis).
                     // The per-pixel path then stays compression-agnostic.
-                    let input_gamut = crate::input_gamut::InputGamutCompress::build(
-                        &params.io.input_gamut_compress.algorithm,
-                        params.io.input_gamut_compress.knee,
+                    let input_gamut = crate::input_gamut::InputGamutCompress::from_params(
+                        &params.io.input_gamut_compress,
                     )?;
                     let tc_lut = if input_gamut.is_active() {
                         let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(ref_illuminant);
@@ -293,9 +292,8 @@ impl Pipeline {
                         &sensitivity,
                         ref_illuminant_f64,
                     );
-                    let input_gamut = crate::input_gamut::InputGamutCompress::build(
-                        &params.io.input_gamut_compress.algorithm,
-                        params.io.input_gamut_compress.knee,
+                    let input_gamut = crate::input_gamut::InputGamutCompress::from_params(
+                        &params.io.input_gamut_compress,
                     )?;
                     let tc_lut = if input_gamut.is_active() {
                         let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(

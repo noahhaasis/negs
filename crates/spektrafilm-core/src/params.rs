@@ -587,7 +587,7 @@ impl Default for IoParams {
 
 /// Input gamut compression config — mirrors upstream `InputGamutCompressSpec`.
 /// Baked into the tc_lut at build time, so the per-pixel path stays
-/// compression-agnostic. `"xy"` (the default, matching upstream 0.3.4) applies
+/// compression-agnostic. `"xy"` (the default, matching upstream main 3bb2c2d) applies
 /// the ACES-RGC-style radial compression toward the spectral locus;
 /// `algorithm = "off"` passes input chromaticities through unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -596,6 +596,17 @@ pub struct InputGamutCompressParams {
     pub algorithm: String,
     #[serde(default = "default_gamut_knee")]
     pub knee: [f32; 3],
+    /// `"locus"` preserves the main baseline; `"inscribed_hull"` opts into the
+    /// smooth boundary introduced in experimental 28bf883.
+    #[serde(default = "default_gamut_boundary")]
+    pub boundary: String,
+    /// Gaussian Fourier width (modes kept) for the inscribed hull.
+    #[serde(default = "default_hull_detail")]
+    pub hull_detail: f64,
+    /// `"reference"` uses the upsampler's reference white (legacy behavior);
+    /// `"D65"` uses experimental's fixed compression center.
+    #[serde(default = "default_gamut_center")]
+    pub center: String,
 }
 
 impl Default for InputGamutCompressParams {
@@ -603,12 +614,15 @@ impl Default for InputGamutCompressParams {
         Self {
             algorithm: "xy".into(),
             knee: [0.0, 1.0, 6.0],
+            boundary: default_gamut_boundary(),
+            hull_detail: default_hull_detail(),
+            center: default_gamut_center(),
         }
     }
 }
 
 /// Output gamut compression config — mirrors upstream `OutputGamutCompressSpec`.
-/// `"cam16ucs"` (the default, matching upstream 0.3.4) applies the CAM16-UCS
+/// `"cam16ucs"` (the default, matching upstream main 3bb2c2d) applies the CAM16-UCS
 /// chroma knee + one-sided lightness roll-off; `"off"` passes RGB through
 /// unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -633,6 +647,15 @@ impl Default for OutputGamutCompressParams {
 
 fn default_xy() -> String {
     "xy".into()
+}
+fn default_gamut_boundary() -> String {
+    "locus".into()
+}
+fn default_hull_detail() -> f64 {
+    5.0
+}
+fn default_gamut_center() -> String {
+    "reference".into()
 }
 fn default_cam16ucs() -> String {
     "cam16ucs".into()

@@ -894,14 +894,13 @@ pub fn rgb_to_tc_b(
 
     // Step 3: XYZ → xy → tc, b — fully f64 (Python parity).
     let b = xyz[0] + xyz[1] + xyz[2];
-    if b <= 1e-10 {
-        return ((0.5, 0.5), 0.0);
-    }
     // No xy clip (upstream 0.3.4 removed it): the input gamut compression
     // baked into the tc_lut handles OOG chromaticities; `xy_to_tc` clamps
     // each tc component to [0, 1] so the LUT lookup stays in-bounds.
-    let x_chrom = xyz[0] / b;
-    let y_chrom = xyz[1] / b;
+    // Python floors only the chromaticity denominator, retaining scene energy
+    // even below 1e-10. Discarding it shifts near-black log exposure.
+    let x_chrom = xyz[0] / b.max(1e-10);
+    let y_chrom = xyz[1] / b.max(1e-10);
     let tc = xy_to_tc(x_chrom, y_chrom);
     (tc, b)
 }
@@ -940,15 +939,9 @@ pub fn hanatos2025_rgb_to_raw_with_matrix(
                 + rgb_to_adapted_xyz[2][1] * g
                 + rgb_to_adapted_xyz[2][2] * b_in;
             let b = xyz0 + xyz1 + xyz2;
-            if b <= 1e-10 {
-                out[0] = crate::precision::from_f64(0.0);
-                out[1] = crate::precision::from_f64(0.0);
-                out[2] = crate::precision::from_f64(0.0);
-                return;
-            }
             // No xy clip (upstream 0.3.4) — `xy_to_tc` clamps the tc output.
-            let xc = xyz0 / b;
-            let yc = xyz1 / b;
+            let xc = xyz0 / b.max(1e-10);
+            let yc = xyz1 / b.max(1e-10);
             let tc = xy_to_tc(xc, yc);
 
             // Python: `lut[tc[0]_idx, tc[1]_idx]` — first axis = tc.0.
@@ -1027,13 +1020,8 @@ pub fn hanatos2025_rgb_to_raw_prepared(
                     + adapt[2][2] * xyz_native[2],
             ];
             let brightness = xyz[0] + xyz[1] + xyz[2];
-            if brightness <= 1e-10 {
-                out[0] = crate::precision::from_f64(0.0);
-                out[1] = crate::precision::from_f64(0.0);
-                out[2] = crate::precision::from_f64(0.0);
-                return;
-            }
-            let tc = xy_to_tc(xyz[0] / brightness, xyz[1] / brightness);
+            let denominator = brightness.max(1e-10);
+            let tc = xy_to_tc(xyz[0] / denominator, xyz[1] / denominator);
 
             let lut_x = tc.0 * (size - 1) as f64;
             let lut_y = tc.1 * (size - 1) as f64;
@@ -1116,5 +1104,44 @@ mod tests {
             tc.1,
             d55_tc.1
         );
+    }
+
+    #[test]
+    fn hanatos_preserves_near_black_energy() {
+        use crate::precision::from_f64;
+        let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        // A constant response spectrum makes the expected raw analytical:
+        // channel response * sum(XYZ), including below the xy divisor floor.
+        let tc_lut = TcLut {
+            size: 4,
+            channels: 3,
+            data: [1.0, 2.0, 3.0].repeat(16),
+        };
+        let input = ImageBuf::from_data(
+            3,
+            1,
+            [0.0, 1e-12, 1e-9]
+                .into_iter()
+                .flat_map(|v| [from_f64(v); 3])
+                .collect(),
+        );
+        for output in [
+            hanatos2025_rgb_to_raw_prepared(&input, &tc_lut, &identity, &identity),
+            hanatos2025_rgb_to_raw_with_matrix(&input, &tc_lut, &identity),
+        ] {
+            for pixel in 0..3 {
+                for channel in 0..3 {
+                    let expected = input.data[pixel * 3] as f64 * 3.0 * (channel + 1) as f64;
+                    let got = output.data[pixel * 3 + channel] as f64;
+                    assert!(
+                        (got - expected).abs() <= expected.abs() * 1e-6,
+                        "{got} vs {expected}"
+                    );
+                }
+            }
+        }
+        let (tc, b) = rgb_to_tc_b([from_f64(1e-12); 3], "sRGB", &ILLUMINANT_D55, true);
+        assert!(b > 0.0 && b < 1e-10);
+        assert!(tc.0.is_finite() && tc.1.is_finite());
     }
 }

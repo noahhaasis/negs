@@ -26,7 +26,7 @@ const SIGMA_FLOOR: f64 = 0.05;
 
 /// Standard-normal CDF — cephes `ndtr` (the implementation behind
 /// `scipy.stats.norm.cdf`), piecewise on `erf`/`erfc` for precision.
-fn norm_cdf(a: f64) -> f64 {
+pub(crate) fn norm_cdf(a: f64) -> f64 {
     const SQRTH: f64 = std::f64::consts::FRAC_1_SQRT_2; // sqrt(1/2)
     let x = a * SQRTH;
     let z = x.abs();

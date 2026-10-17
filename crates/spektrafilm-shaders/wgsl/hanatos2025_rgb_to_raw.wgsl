@@ -129,19 +129,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let xyz = params.rgb_to_xyz_adapted * rgb;
     let b = xyz.x + xyz.y + xyz.z;
 
-    if b <= 1e-10 {
-        raw_out[base] = 0.0;
-        raw_out[base + 1u] = 0.0;
-        raw_out[base + 2u] = 0.0;
-        return;
-    }
-
     // xy chromaticity + tc transform (Python _tri2quad). No xy clip
     // (upstream 0.3.4 removed it — the input gamut compression baked into
     // the tc_lut handles OOG chromaticities); the tc clamps below keep the
     // LUT lookup coordinates in-bounds.
-    let xc = xyz.x / b;
-    let yc = xyz.y / b;
+    // Floor the chromaticity denominator, preserving near-black scene energy.
+    let xc = xyz.x / max(b, 1e-10);
+    let yc = xyz.y / max(b, 1e-10);
     let omx = max(1.0 - xc, 1e-10);
     let tx = clamp((1.0 - xc) * (1.0 - xc), 0.0, 1.0);
     let ty = clamp(yc / omx, 0.0, 1.0);
