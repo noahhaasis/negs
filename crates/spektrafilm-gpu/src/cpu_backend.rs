@@ -144,6 +144,10 @@ impl ComputeBackend for CpuBackend {
         spektrafilm_math::gaussian::gaussian_blur(img, sigma)
     }
 
+    fn gaussian_blur_owned(&self, img: ImageBuf, sigma: f32) -> ImageBuf {
+        spektrafilm_math::gaussian::gaussian_blur_owned(img, sigma)
+    }
+
     fn table_lookup(&self, img: &ImageBuf, table_x: &[f32], table_y: &[[f32; 3]]) -> ImageBuf {
         let mut out = img.clone();
         out.par_pixels_mut().for_each(|px| {

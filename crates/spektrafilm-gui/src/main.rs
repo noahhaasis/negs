@@ -396,7 +396,6 @@ impl App {
                 // A manual turn belongs to the previous photo.
                 self.params.io.rotate_cw = 0;
                 self.pan = egui::Vec2::ZERO;
-                self.dirty = true;
             }
             Err(e) => {
                 self.status = format!("Load error: {e:#}");
@@ -408,7 +407,13 @@ impl App {
         self.input_revision += 1;
         self.output_image = None;
         self.output_tex = None;
+        self.mark_dirty();
+    }
+
+    fn mark_dirty(&mut self) {
         self.dirty = true;
+        // Debounce from the latest edit, including edits made while a render
+        // is in flight. Otherwise intermediate slider values can be rendered.
         self.dirty_since = Some(Instant::now());
     }
 
@@ -438,7 +443,7 @@ impl App {
         if previous_wb != self.params.io.raw_white_balance {
             self.invalidate_input_preview();
         } else {
-            self.dirty = true;
+            self.mark_dirty();
         }
     }
 
@@ -735,6 +740,14 @@ impl App {
             self.dirty = true;
             return;
         }
+        // A slider may have changed after this job captured its params.
+        // Keep the last complete preview until a render of the latest state
+        // is ready; displaying this result causes a visible intermediate flash.
+        if self.dirty || self.pending_dirty {
+            self.pending_dirty = false;
+            self.dirty = true;
+            return;
+        }
         match result {
             Ok(r) => {
                 self.image = Some(r.input);
@@ -770,10 +783,6 @@ impl App {
                 eprintln!("[spektrafilm] render error: {msg}");
                 self.status = format!("Render error: {msg}");
             }
-        }
-        if self.pending_dirty {
-            self.pending_dirty = false;
-            self.dirty = true;
         }
     }
 
@@ -1114,7 +1123,7 @@ impl App {
                             self.params.print_render.development_time = None;
                         }
                     }
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
                 // B&W stocks are profiled at several development times —
                 // pick one (longer = more contrast). Hidden for the
@@ -1128,7 +1137,7 @@ impl App {
                         &mut self.params.film_render.development_time,
                     )
                 {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
                 // Slide films are scanned directly, so the print paper is
                 // unused — disable the picker and say why rather than
@@ -1154,7 +1163,7 @@ impl App {
                 if paper_changed {
                     self.print_dev_times = profile_dev_times(&self.data_dir, &self.print_name);
                     self.params.print_render.development_time = None;
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
                 if !self.params.io.scan_film
                     && self.print_dev_times.len() > 1
@@ -1166,7 +1175,7 @@ impl App {
                         &mut self.params.print_render.development_time,
                     )
                 {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1221,7 +1230,7 @@ impl App {
                     )
                     .changed();
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1266,7 +1275,7 @@ impl App {
                     .checkbox(&mut h.halation_renormalize, "Renormalize")
                     .changed();
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1299,7 +1308,7 @@ impl App {
                     )
                     .changed();
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1351,7 +1360,7 @@ impl App {
                     .add(egui::Slider::new(&mut df.bloom_size, 0.1..=3.0).text("Bloom size"))
                     .changed();
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1375,7 +1384,7 @@ impl App {
                     .add(egui::Slider::new(&mut g.n_sub_layers, 1..=4).text("Sub-layers"))
                     .changed();
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1396,7 +1405,7 @@ impl App {
                     .add(egui::Slider::new(&mut g.blur, 0.0..=5.0).text("Blur σ (px)"))
                     .changed();
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1448,7 +1457,7 @@ impl App {
                         .changed();
                 }
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1488,7 +1497,7 @@ impl App {
                         .changed();
                 }
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1539,7 +1548,7 @@ impl App {
                         }
                     });
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1593,7 +1602,7 @@ impl App {
                         .changed();
                 }
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
             });
 
@@ -1630,7 +1639,7 @@ impl App {
                     .checkbox(&mut io.output_cctf_encoding, "Output sRGB encoded")
                     .changed();
                 if changed {
-                    self.dirty = true;
+                    self.mark_dirty();
                 }
                 // This preference affects the next export, not the preview.
                 ui.checkbox(
@@ -1705,7 +1714,6 @@ impl eframe::App for App {
             if self.render_job.is_some() {
                 self.pending_dirty = true;
                 self.dirty = false;
-                self.dirty_since = None;
             } else {
                 let elapsed = now.saturating_duration_since(dirty_since);
                 if elapsed >= PREVIEW_DEBOUNCE {
@@ -1720,7 +1728,6 @@ impl eframe::App for App {
         if self.render_job.is_some() {
             ctx.request_repaint_after(IN_FLIGHT_REPAINT);
         }
-        self.poll_render_job(ctx);
         self.poll_export_job(ctx);
         egui::SidePanel::right("controls")
             .resizable(false)
@@ -1728,6 +1735,9 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| self.controls_panel(ui, ctx));
             });
+        // Poll after controls so an edit made on this frame can invalidate a
+        // just-finished render before its texture is shown in the center panel.
+        self.poll_render_job(ctx);
         egui::CentralPanel::default().show(ctx, |ui| {
             // Clone the texture handle (cheap — internally `Arc`) so we
             // can take `&mut self` to mutate `zoom` / `pan` from the
@@ -1735,10 +1745,21 @@ impl eframe::App for App {
             let tex = self.output_tex.clone();
             if let Some(tex) = tex {
                 self.draw_preview_with_zoom(ui, &tex);
-            } else {
+            } else if self.image.is_none() {
                 ui.centered_and_justified(|ui| {
                     ui.label(egui::RichText::new("Drop or open an image to start.").size(18.0));
                 });
+            }
+            if self.image.is_some()
+                && (self.dirty || self.pending_dirty || self.render_job.is_some())
+            {
+                let center = ui.max_rect().center();
+                ui.painter()
+                    .circle_filled(center, 18.0, egui::Color32::from_black_alpha(160));
+                egui::Spinner::new().color(egui::Color32::WHITE).paint_at(
+                    ui,
+                    egui::Rect::from_center_size(center, egui::vec2(22.0, 22.0)),
+                );
             }
         });
 
@@ -2356,6 +2377,9 @@ mod raw_wb_tests {
     fn completed_job(app: &mut App, revision: u64, result: Result<RenderResult, String>) {
         let (tx, rx) = mpsc::channel();
         assert!(tx.send(result).is_ok());
+        // A dispatched render has consumed the dirty state.
+        app.dirty = false;
+        app.dirty_since = None;
         app.render_job = Some(RenderJob {
             rx,
             handle: None,
@@ -2392,6 +2416,46 @@ mod raw_wb_tests {
         assert_eq!(app.image.as_ref().unwrap().data, vec![from_f32(0.1); 3]);
         assert_eq!(app.loaded_raw_wb, RawWhiteBalance::default());
         assert!(app.dirty);
+    }
+
+    #[test]
+    fn exposure_edit_discards_intermediate_render_and_restarts_debounce() {
+        let mut app = app();
+        app.output_image = Some(ImageBuf::from_data(1, 1, vec![from_f32(0.1); 3]));
+        completed_job(&mut app, 0, Ok(result()));
+        app.params.enlarger.print_exposure = 0.8;
+        app.mark_dirty();
+        let first_edit = app.dirty_since.unwrap();
+        app.dirty_since = Some(first_edit - PREVIEW_DEBOUNCE);
+        app.params.enlarger.print_exposure = 0.75;
+        app.mark_dirty();
+        assert!(app.dirty_since.unwrap() > first_edit - PREVIEW_DEBOUNCE);
+
+        app.poll_render_job(&egui::Context::default());
+
+        assert_eq!(
+            app.output_image.as_ref().unwrap().data,
+            vec![from_f32(0.1); 3]
+        );
+        assert!(app.dirty);
+        assert!(app.render_job.is_none());
+    }
+
+    #[test]
+    fn queued_edit_discards_completed_render_without_replacing_preview() {
+        let mut app = app();
+        app.output_image = Some(ImageBuf::from_data(1, 1, vec![from_f32(0.1); 3]));
+        completed_job(&mut app, 0, Ok(result()));
+        app.pending_dirty = true;
+
+        app.poll_render_job(&egui::Context::default());
+
+        assert_eq!(
+            app.output_image.as_ref().unwrap().data,
+            vec![from_f32(0.1); 3]
+        );
+        assert!(app.dirty);
+        assert!(!app.pending_dirty);
     }
 
     #[test]

@@ -337,7 +337,7 @@ pub fn scan(
 
     // Lens blur
     if params.scanner.lens_blur > 0.0 {
-        rgb = backend.gaussian_blur(&rgb, params.scanner.lens_blur);
+        rgb = backend.gaussian_blur_owned(rgb, params.scanner.lens_blur);
     }
 
     // Unsharp mask

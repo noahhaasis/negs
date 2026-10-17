@@ -17,6 +17,11 @@ pub trait ComputeBackend: Send + Sync {
     fn cctf_decode_srgb(&self, img: &ImageBuf) -> ImageBuf;
     fn gaussian_blur(&self, img: &ImageBuf, sigma: f32) -> ImageBuf;
 
+    /// Allow backends to reuse an image when the caller no longer needs it.
+    fn gaussian_blur_owned(&self, img: ImageBuf, sigma: f32) -> ImageBuf {
+        self.gaussian_blur(&img, sigma)
+    }
+
     /// Blur `img` with each of `sigmas`, returning one image per sigma.
     /// GPU backends fuse the work into a single command buffer (one upload,
     /// one submit, one readback) — much cheaper than N independent

@@ -68,17 +68,33 @@ pub fn layer_particle_model(
         let saturation = 1.0 - p * gu * (1.0 - 1e-6);
         (p, saturation)
     };
+    // In f64 mode, preserve each u64 Poisson result in the output plane's
+    // bits until its binomial draw. `from_bits`/`to_bits` round-trip every
+    // u64 without arithmetic, so this uses one allocation for both passes.
+    #[cfg(feature = "precision-f64")]
+    let mut grain: Vec<Scalar> = Vec::with_capacity(n);
+    #[cfg(not(feature = "precision-f64"))]
     let mut seeds = Vec::with_capacity(n);
     for &d in density {
         let (_, sat) = probability_and_saturation(d);
-        seeds.push(spektrafilm_math::numpy_rng::rk_poisson(&mut rng, npp / sat));
+        let seed = spektrafilm_math::numpy_rng::rk_poisson(&mut rng, npp / sat);
+        #[cfg(feature = "precision-f64")]
+        grain.push(f64::from_bits(seed));
+        #[cfg(not(feature = "precision-f64"))]
+        seeds.push(seed);
     }
+    #[cfg(not(feature = "precision-f64"))]
     let mut grain = vec![ZERO; n];
-    for (i, slot) in grain.iter_mut().enumerate() {
+    for i in 0..n {
+        #[cfg(feature = "precision-f64")]
+        let seed = grain[i].to_bits();
+        #[cfg(not(feature = "precision-f64"))]
+        let seed = seeds[i];
         let (p, sat) = probability_and_saturation(density[i]);
-        let developed = spektrafilm_math::numpy_rng::rk_binomial(&mut rng, seeds[i], p);
-        *slot = from_f64((developed as f64) * od_particle * sat);
+        let developed = spektrafilm_math::numpy_rng::rk_binomial(&mut rng, seed, p);
+        grain[i] = from_f64((developed as f64) * od_particle * sat);
     }
+    #[cfg(not(feature = "precision-f64"))]
     drop(seeds);
 
     if blur_particle > 0.4 {
@@ -187,7 +203,7 @@ pub fn apply_grain_to_density(
     // GPU separable kernel wins.
     if grain_blur > 0.4 {
         let t = Instant::now();
-        out = backend.gaussian_blur(&out, grain_blur);
+        out = backend.gaussian_blur_owned(out, grain_blur);
         print_stage_timing(stage_timings, "grain.final_blur", t);
     }
 

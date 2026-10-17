@@ -1362,9 +1362,8 @@ impl WgpuBackend {
         // full-image storage, but keep every input/output of a dispatch distinct.
         // See docs/memory-scratch-reuse.md for the pass/lifetime table.
         // This pool is per-render: no full images enter the backend cache.
-        let scratch_count = if p.dir_couplers.is_some() {
-            3
-        } else if p.halation.is_some()
+        let scratch_count = if p.dir_couplers.is_some()
+            || p.halation.is_some()
             || p.unsharp.is_some()
             || p.diffusion.is_some()
             || (!p.scan_film && p.enlarger_diffusion.is_some())
@@ -1521,11 +1520,10 @@ impl WgpuBackend {
         // Allocated lazily when the DIR stage is active. Reads buf_a
         // (density_cmy from film density curve) and buf_b (log_raw),
         // produces a corrected buf_a via re-interpolation of
-        // `density_curves_0` against `log_raw - correction`. Uses three
-        // shared scratch buffers (correction, gaussian, mix). buf_a is
-        // reused as blur mid since density_cmy is no longer needed once
-        // the matmul has consumed it (the final density_curve_interp
-        // overwrites buf_a anyway).
+        // `density_curves_0` against `log_raw - correction`. Uses two
+        // shared scratch buffers (correction, gaussian). After matmul
+        // consumes density_cmy, buf_a serves as blur mid and then as the
+        // weighted mix destination. The final density curve overwrites it.
         let dir_state = p.dir_couplers.as_ref().map(|dp| {
             build_dir_state(
                 &self.device,
@@ -3746,7 +3744,7 @@ fn build_dir_state(
     let n_pixels = (width as usize) * (height as usize);
     let buf_correction = scratch[0].clone();
     let buf_gaussian = scratch[1].clone();
-    let buf_mix = scratch[2].clone();
+    let buf_mix = buf_a.clone();
 
     // ── 1. dir_matmul ─────────────────────────────────────────────────
     let matmul_pipe = backend.cached_pipeline(
@@ -3827,7 +3825,8 @@ fn build_dir_state(
 
     // Both blurs use A as intermediate after matmul consumes the density.
     // The first writes S1 (Gaussian), the second overwrites S0 (tail).
-    // The weighted mix writes S2, keeping its input bindings distinct.
+    // After both vertical blurs, A is free for the weighted mix. Its
+    // inputs S0 and S1 remain distinct from the destination A.
     let make_blur_job =
         |sigma: f32, src: &wgpu::Buffer, out: &wgpu::Buffer, label: &str| -> BlurJob {
             let sigma = sigma.max(0.01);

@@ -61,6 +61,28 @@ pub fn gaussian_blur(img: &ImageBuf, sigma: f32) -> ImageBuf {
         return img.clone();
     }
 
+    let channels = blurred_channels(img, sigma);
+    let mut out = ImageBuf::new(img.width, img.height);
+    for c in 0..3 {
+        out.write_channel(c, &channels[c]);
+    }
+    out
+}
+
+/// Blur an owned image, reusing its interleaved RGB allocation for the result.
+pub fn gaussian_blur_owned(mut img: ImageBuf, sigma: f32) -> ImageBuf {
+    if sigma <= 0.0 {
+        return img;
+    }
+
+    let channels = blurred_channels(&img, sigma);
+    for c in 0..3 {
+        img.write_channel(c, &channels[c]);
+    }
+    img
+}
+
+fn blurred_channels(img: &ImageBuf, sigma: f32) -> Vec<Vec<Scalar>> {
     let w = img.width as usize;
     let h = img.height as usize;
     let sigma_s = from_f32(sigma);
@@ -76,11 +98,7 @@ pub fn gaussian_blur(img: &ImageBuf, sigma: f32) -> ImageBuf {
         blur_1d_parallel(&tmp, chan, w, h, sigma_s, false);
     });
 
-    let mut out = ImageBuf::new(img.width, img.height);
-    for c in 0..3 {
-        out.write_channel(c, &channels[c]);
-    }
-    out
+    channels
 }
 
 /// 1D blur pass — either horizontal (along rows) or vertical (along columns).
