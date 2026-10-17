@@ -89,6 +89,7 @@ pub fn compute_exposure_correction(
             }
         });
 
+    drop(density_silver);
     if diffusion_size_pixel > 0.0 {
         // Python: `(1 - w) * fast_gaussian_filter(corr, σ_size)
         //         + w * fast_exponential_filter(corr, σ_tail)`.
@@ -101,18 +102,14 @@ pub fn compute_exposure_correction(
         let n_pix = (w_img as usize) * (h_img as usize);
         let w = from_f64(diffusion_tail_weight);
         let one = from_f64(1.0);
-        let mut blended_channels: [Vec<spektrafilm_math::precision::Scalar>; 3] =
-            [vec![one; n_pix], vec![one; n_pix], vec![one; n_pix]];
         for c in 0..3 {
             let ch = correction.extract_channel(c);
-            let g = gaussian_blur_channel(&ch, w_img, h_img, diffusion_size_pixel);
+            let mut g = gaussian_blur_channel(&ch, w_img, h_img, diffusion_size_pixel);
             let t = exponential_filter_channel(&ch, w_img, h_img, diffusion_tail_pixel);
             for i in 0..n_pix {
-                blended_channels[c][i] = (one - w) * g[i] + w * t[i];
+                g[i] = (one - w) * g[i] + w * t[i];
             }
-        }
-        for c in 0..3 {
-            correction.write_channel(c, &blended_channels[c]);
+            correction.write_channel(c, &g);
         }
     }
 

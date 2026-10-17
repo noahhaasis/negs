@@ -475,6 +475,14 @@ impl App {
         Ok((pipeline, t.elapsed().as_secs_f32() * 1000.0))
     }
 
+    fn preview_params(&self) -> RuntimeParams {
+        let mut params = self.params.clone();
+        // Serial grain is an export preference, including when preview falls
+        // back to the CPU. Keep the user's stored choice for the export JSON.
+        params.settings.serial_grain = false;
+        params
+    }
+
     /// Spawn a render on a worker thread. The UI stays interactive
     /// during the 250–500 ms pipeline run (previously this blocked
     /// the main thread, dropping mid-drag slider events). If a job
@@ -498,7 +506,7 @@ impl App {
         let input_revision = self.input_revision;
         let film_name = self.film_name.clone();
         let print_name = self.print_name.clone();
-        let mut params = self.params.clone();
+        let mut params = self.preview_params();
         let (pipeline_template, pipeline_build_ms) =
             match self.preview_pipeline(&film_name, &print_name, &params) {
                 Ok(p) => p,
@@ -1624,6 +1632,16 @@ impl App {
                 if changed {
                     self.dirty = true;
                 }
+                // This preference affects the next export, not the preview.
+                ui.checkbox(
+                    &mut self.params.settings.serial_grain,
+                    "Serial grain for export (less RAM)",
+                )
+                .on_hover_text(
+                    "Process grain channels one at a time during export. Uses less memory \
+                     when grain is enabled, but exports take longer. Image quality and \
+                     resolution are unchanged.",
+                );
             });
 
         ui.add_space(8.0);
@@ -2545,6 +2563,7 @@ mod reset_tests {
         app.params.enlarger.print_exposure = 3.0;
         app.params.scanner.white_correction = true;
         app.params.settings.use_cat16 = false;
+        app.params.settings.serial_grain = true;
         app.params.io.output_cctf_encoding = false;
         app.params.io.scan_film = false;
         app.params.io.rotate_cw = 2;
@@ -2680,4 +2699,72 @@ fn tag_metal_layer_srgb<H: raw_window_handle::HasWindowHandle>(h: &H) -> Result<
         tracing::info!("tagged CAMetalLayer.colorspace = sRGB");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod serial_grain_tests {
+    use super::*;
+
+    #[test]
+    fn serial_grain_is_opt_in_and_does_not_change_preview_params() {
+        let old: RuntimeParams = serde_json::from_str(r#"{"settings":{}}"#).unwrap();
+        assert!(!old.settings.serial_grain);
+        let mut app = App::new(Arc::new(spektrafilm_gpu::cpu_backend::CpuBackend), None);
+        assert!(!app.params.settings.serial_grain);
+        let before = serde_json::to_value(app.preview_params()).unwrap();
+        app.params.settings.serial_grain = true;
+        assert_eq!(serde_json::to_value(app.preview_params()).unwrap(), before);
+        assert!(app.params.settings.serial_grain);
+        assert_eq!(app.params.io.upscale_factor, 1.0);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn export_child_receives_serial_grain_choice_in_params() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir();
+        let cli = TempPath(dir.join(format!(
+            "spektrafilm-export-params-{}.sh",
+            std::process::id()
+        )));
+        let captured = TempPath(dir.join(format!(
+            "spektrafilm-export-params-{}.json",
+            std::process::id()
+        )));
+        // Capture exactly the JSON the GUI sends to its subprocess.
+        std::fs::write(
+            &cli.0,
+            br#"#!/bin/sh
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --params) params="$2"; shift ;;
+        -o) output="$2"; shift ;;
+    esac
+    shift
+done
+cp "$params" "$output"
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for serial in [false, true] {
+            let mut params = RuntimeParams::default();
+            params.settings.serial_grain = serial;
+            run_f64_export(
+                &cli.0,
+                Path::new("photo.tiff"),
+                &captured.0,
+                "kodak_gold_200",
+                "kodak_portra_endura",
+                &params,
+                Path::new("data"),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+            let received: RuntimeParams =
+                serde_json::from_reader(std::fs::File::open(&captured.0).unwrap()).unwrap();
+            assert_eq!(received.settings.serial_grain, serial);
+            assert_eq!(received.io.upscale_factor, 1.0);
+        }
+    }
 }

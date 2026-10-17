@@ -681,6 +681,10 @@ pub struct SettingsParams {
     pub use_enlarger_lut: bool,
     #[serde(default)]
     pub use_scanner_lut: bool,
+    /// Process CPU grain channels sequentially to reduce peak memory.
+    /// The GUI applies this only to exports; previews keep parallel grain.
+    #[serde(default)]
+    pub serial_grain: bool,
     #[serde(default = "default_17")]
     pub lut_resolution: u32,
     #[serde(default)]
@@ -708,6 +712,7 @@ impl Default for SettingsParams {
             spectral_gaussian_blur: 0.0,
             use_enlarger_lut: false,
             use_scanner_lut: false,
+            serial_grain: false,
             lut_resolution: 17,
             use_fast_stats: false,
             preview_max_size: 640,

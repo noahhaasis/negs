@@ -510,10 +510,14 @@ impl Pipeline {
             color_ref.filming_exposure_correction,
         );
         print_stage_timing(stage_timings, "filming_expose", t);
+        // A full-resolution f64 RGB frame can exceed 1 GiB. Release each
+        // stage's input before allocating scratch for the next stage.
+        drop(image);
         dump_if_env("SPEKTRAFILM_DUMP_FILM_LOG_RAW", &log_raw);
         let t = Instant::now();
         let filmed = stages::filming::develop(&log_raw, &self.film, &self.params, backend);
         print_stage_timing(stage_timings, "filming_develop", t);
+        drop(log_raw);
         tracing::info!("pipeline: filming complete");
         dump_if_env("SPEKTRAFILM_DUMP_FILM_DENSITY", &filmed);
 
@@ -544,6 +548,7 @@ impl Pipeline {
                 color_ref.printing_exposure_correction,
             );
             print_stage_timing(stage_timings, "printing", t);
+            drop(filmed);
             tracing::info!("pipeline: printing complete");
             dump_if_env("SPEKTRAFILM_DUMP_PRINT_DENSITY", &printed);
             let t = Instant::now();

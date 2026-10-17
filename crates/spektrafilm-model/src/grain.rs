@@ -1,11 +1,11 @@
 // Stochastic grain generation.
 // Poisson-binomial particle model with dye cloud blur and lognormal micro-structure.
 
+use rayon::prelude::*;
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::gaussian;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{Scalar, ZERO, from_f64};
-use rayon::prelude::*;
 use std::time::Instant;
 
 fn stage_timings_enabled() -> bool {
@@ -60,36 +60,33 @@ pub fn layer_particle_model(
     // completely different grain pattern.
     let n = density.len();
     let mut rng = rand_mt::Mt::new(seed as u32);
-    let mut p_arr = Vec::with_capacity(n);
-    let mut sat_arr = Vec::with_capacity(n);
-    for &d in density.iter() {
+    // Recompute these cheap scalars for the binomial pass rather than
+    // retaining two f64 planes per channel (2.7 GiB total at 60 MP).
+    // Keep the whole-image Poisson-then-binomial RNG order unchanged.
+    let probability_and_saturation = |d: Scalar| {
         let p = ((d as f64) / dmax).clamp(1e-6, 1.0 - 1e-6);
         let saturation = 1.0 - p * gu * (1.0 - 1e-6);
-        p_arr.push(p);
-        sat_arr.push(saturation);
-    }
+        (p, saturation)
+    };
     let mut seeds = Vec::with_capacity(n);
-    for sat in &sat_arr {
+    for &d in density {
+        let (_, sat) = probability_and_saturation(d);
         seeds.push(spektrafilm_math::numpy_rng::rk_poisson(&mut rng, npp / sat));
     }
     let mut grain = vec![ZERO; n];
     for (i, slot) in grain.iter_mut().enumerate() {
-        let developed = spektrafilm_math::numpy_rng::rk_binomial(&mut rng, seeds[i], p_arr[i]);
-        *slot = from_f64((developed as f64) * od_particle * sat_arr[i]);
+        let (p, sat) = probability_and_saturation(density[i]);
+        let developed = spektrafilm_math::numpy_rng::rk_binomial(&mut rng, seeds[i], p);
+        *slot = from_f64((developed as f64) * od_particle * sat);
     }
+    drop(seeds);
 
     if blur_particle > 0.4 {
         // Match Python: `sigma = blur_particle * np.sqrt(od_particle)`
         // — keep the multiplication in f64 and narrow at the end.
         let sigma = (blur_particle as f64 * od_particle.sqrt()) as f32;
         if sigma > 0.1 {
-            let mut img = ImageBuf::from_data(
-                width,
-                height,
-                grain.iter().flat_map(|&v| [v, v, v]).collect(),
-            );
-            img = gaussian::gaussian_blur(&img, sigma);
-            grain = img.extract_channel(0);
+            grain = gaussian::gaussian_blur_channel(&grain, width, height, sigma);
         }
     }
 
@@ -111,6 +108,7 @@ pub fn apply_grain_to_density(
     grain_blur: f32,
     n_sub_layers: u32,
     monochrome: bool,
+    serial_channels: bool,
     backend: &dyn ComputeBackend,
 ) -> ImageBuf {
     let stage_timings = stage_timings_enabled();
@@ -123,58 +121,61 @@ pub fn apply_grain_to_density(
         density_max_curves[2] + density_min[2],
     ];
 
-    let channels: Vec<(usize, Vec<Scalar>)> = (0..3)
-        .into_par_iter()
-        .map(|ch| {
-            let t_ch = Instant::now();
-            let particle_area = agx_particle_area_um2 * agx_particle_scale[ch];
-            let mut n_particles = pixel_area / particle_area;
-            if n_sub_layers > 1 {
-                n_particles /= n_sub_layers as f64;
-            }
+    let process_channel = |ch: usize| {
+        let t_ch = Instant::now();
+        let particle_area = agx_particle_area_um2 * agx_particle_scale[ch];
+        let mut n_particles = pixel_area / particle_area;
+        if n_sub_layers > 1 {
+            n_particles /= n_sub_layers as f64;
+        }
 
-            // Add density_min to input (kept in Scalar precision)
-            let dmin_s = from_f64(density_min[ch]);
+        // Add density_min to input (kept in Scalar precision)
+        let dmin_s = from_f64(density_min[ch]);
+        let t = Instant::now();
+        let density_ch: Vec<Scalar> = density_cmy.pixels().map(|px| px[ch] + dmin_s).collect();
+        print_stage_timing(stage_timings, "grain.extract_channel", t);
+
+        let mut grain_sum = vec![ZERO; density_ch.len()];
+
+        for sl in 0..n_sub_layers {
             let t = Instant::now();
-            let density_ch: Vec<Scalar> =
-                density_cmy.pixels().map(|px| px[ch] + dmin_s).collect();
-            print_stage_timing(stage_timings, "grain.extract_channel", t);
-
-            let mut grain_sum = vec![ZERO; density_ch.len()];
-
-            for sl in 0..n_sub_layers {
-                let t = Instant::now();
-                // Monochrome (B&W): one shared noise field — every lane draws
-                // from channel 0's RNG stream (upstream n_channels==1 has a
-                // single emulsion, seed ch=0).
-                let seed_ch = if monochrome { 0 } else { ch as u64 };
-                let seed = seed_ch + (sl as u64) * 10;
-                let g = layer_particle_model(
-                    &density_ch,
-                    w,
-                    h,
-                    density_max[ch],
-                    n_particles,
-                    grain_uniformity[ch],
-                    seed,
-                    0.0,
-                );
-                print_stage_timing(stage_timings, "grain.layer_particle_model", t);
-                for (s, &v) in grain_sum.iter_mut().zip(g.iter()) {
-                    *s += v;
-                }
+            // Monochrome (B&W): one shared noise field — every lane draws
+            // from channel 0's RNG stream (upstream n_channels==1 has a
+            // single emulsion, seed ch=0).
+            let seed_ch = if monochrome { 0 } else { ch as u64 };
+            let seed = seed_ch + (sl as u64) * 10;
+            let g = layer_particle_model(
+                &density_ch,
+                w,
+                h,
+                density_max[ch],
+                n_particles,
+                grain_uniformity[ch],
+                seed,
+                0.0,
+            );
+            print_stage_timing(stage_timings, "grain.layer_particle_model", t);
+            for (s, &v) in grain_sum.iter_mut().zip(g.iter()) {
+                *s += v;
             }
+        }
 
-            // Average sub-layers
-            let scale = from_f64(1.0 / n_sub_layers as f64);
-            for v in &mut grain_sum {
-                *v = *v * scale - dmin_s;
-            }
+        // Average sub-layers
+        let scale = from_f64(1.0 / n_sub_layers as f64);
+        for v in &mut grain_sum {
+            *v = *v * scale - dmin_s;
+        }
 
-            print_stage_timing(stage_timings, "grain.channel_total", t_ch);
-            (ch, grain_sum)
-        })
-        .collect();
+        print_stage_timing(stage_timings, "grain.channel_total", t_ch);
+        (ch, grain_sum)
+    };
+    // Only channel scheduling changes in the optional serial mode;
+    // each channel retains its original seed and row-major RNG sequence.
+    let channels: Vec<(usize, Vec<Scalar>)> = if serial_channels {
+        (0..3).map(process_channel).collect()
+    } else {
+        (0..3).into_par_iter().map(process_channel).collect()
+    };
 
     let mut out = ImageBuf::new(w, h);
     for (ch, grain_sum) in channels {
@@ -190,4 +191,55 @@ pub fn apply_grain_to_density(
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spektrafilm_gpu::cpu_backend::CpuBackend;
+
+    #[test]
+    fn serial_and_parallel_grain_are_bit_identical() {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(3)
+            .build()
+            .unwrap();
+        let mut density = ImageBuf::new(11, 7);
+        for (i, px) in density.pixels_mut().enumerate() {
+            let v = from_f64((i % 17) as f64 * 0.2 - 0.1);
+            px.copy_from_slice(&[v, v, v]);
+        }
+        for monochrome in [false, true] {
+            for layers in [1, 3] {
+                let render = |serial| {
+                    apply_grain_to_density(
+                        &density,
+                        2.0,
+                        0.2,
+                        [1.6; 3],
+                        [0.03; 3],
+                        [2.0; 3],
+                        [0.97; 3],
+                        0.65,
+                        layers,
+                        monochrome,
+                        serial,
+                        &CpuBackend,
+                    )
+                };
+                let parallel = pool.install(|| render(false));
+                let serial = pool.install(|| render(true));
+                assert!(serial.data.iter().all(|v| v.is_finite()));
+                assert_eq!(
+                    parallel
+                        .data
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>(),
+                    serial.data.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    "monochrome={monochrome}, layers={layers}",
+                );
+            }
+        }
+    }
 }

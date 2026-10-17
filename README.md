@@ -61,6 +61,7 @@ WGSL is the default GPU backend and can be selected explicitly with `SPEKTRAFILM
 - **Profiles** — film stock and print paper combo boxes; picking a film auto-selects its paired paper (`target_print` in the profile).
 - **Zoom** — scroll wheel or trackpad pinch over the preview (cursor-anchored), click-drag to pan, double-click to reset.
 - **Export…** — re-runs the pipeline at f64 precision on the CPU and writes a PNG/TIFF/JPEG. Status bar shows elapsed time; **Cancel** kills the child cleanly. Closing the GUI mid-export also kills the child (no orphans).
+- **Serial grain for export (less RAM)** — optional checkbox under Output, off by default. Processes grain channels one at a time during CPU export: less peak memory, identical output, but slower. Previews keep parallel grain. CLI users can set `settings.serial_grain: true` in their params JSON.
 - **Save…** — write the f32 GPU preview directly (instant, less precise).
 
 ### CLI
@@ -118,6 +119,11 @@ With grain on, the binomial sampler's rejection step is sensitive to upstream UL
 The LUT path (`use_enlarger_lut` + `use_scanner_lut`, the typical export config) uses a bit-exact port of Python's PCHIP 3D interpolation (`crates/spektrafilm-math/src/pchip3d.rs` ↔ `spektrafilm/utils/fast_interp_lut.py`). Parity numbers above hold for both the LUT and non-LUT paths.
 
 ## Performance
+
+The [Leica Q3 memory investigation](docs/memory-study-q3.md) measures the current
+memory reductions and optional serial grain. The [memory optimization handoff](docs/handoff-memory.md)
+records the agreed next steps: GPU scratch reuse, then CPU buffer ownership/reuse,
+while retaining full-resolution previews.
 
 f64 CPU export on a 16 MP Olympus ORF (kodak_gold_200 → kodak_portra_endura, full FX):
 

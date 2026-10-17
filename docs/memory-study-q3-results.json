@@ -1,0 +1,471 @@
+{
+  "date": "2026-10-17",
+  "baseline_commit": "3704ff2",
+  "host": "Apple M1 Pro, 10 CPU cores, 32 GB",
+  "input": {
+    "camera": "Leica Q3",
+    "width": 9520,
+    "height": 6336,
+    "local_copy": "target/memory-study/leica-q3.dng"
+  },
+  "notes": [
+    "Live heap and production timings are measured in separate runs.",
+    "GPU measurements cover the CLI rendering path, not the full GUI plus export.",
+    "Footprint is sampled macOS process accounting, not total system memory.",
+    "No simultaneous benchmark/build was intentionally run during measured commands."
+  ],
+  "measurements": {
+    "baseline": {
+      "command": [
+        "target/memory-study/baseline-f64",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/baseline.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 55.76163066600566,
+      "user_seconds": 175.881879,
+      "system_seconds": 20.849796,
+      "peak_rss_bytes": 10302783488,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 10807,
+        "filming_develop.density_interp": 800,
+        "filming_develop.dir_couplers": 10611,
+        "grain.extract_channel": 217,
+        "grain.layer_particle_model": 13987,
+        "grain.channel_total": 14460,
+        "grain.final_blur": 979,
+        "filming_develop.grain": 15863,
+        "filming_develop": 27275,
+        "printing": 1512,
+        "scanning": 10664
+      }
+    },
+    "baseline-repeat": {
+      "command": [
+        "target/memory-study/baseline-f64",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/baseline-repeat.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 39.9474878750043,
+      "user_seconds": 175.526302,
+      "system_seconds": 9.88405,
+      "peak_rss_bytes": 13069139968,
+      "sampled_peak_footprint_bytes": 16162238584,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 5884,
+        "filming_develop.density_interp": 277,
+        "filming_develop.dir_couplers": 5812,
+        "grain.extract_channel": 167,
+        "grain.layer_particle_model": 14471,
+        "grain.channel_total": 14802,
+        "grain.final_blur": 965,
+        "filming_develop.grain": 17363,
+        "filming_develop": 23455,
+        "printing": 1297,
+        "scanning": 7318
+      }
+    },
+    "baseline-profile": {
+      "command": [
+        "target/memory-study/baseline-build/release/examples/memory_profile",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/baseline-profile.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 54.00659437500872,
+      "user_seconds": 285.73866,
+      "system_seconds": 10.624835,
+      "peak_rss_bytes": 11578474496,
+      "sampled_peak_footprint_bytes": 14846455112,
+      "peak_live_heap_bytes": 13037174482,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 18527,
+        "filming_develop.density_interp": 286,
+        "filming_develop.dir_couplers": 7734,
+        "grain.extract_channel": 56,
+        "grain.layer_particle_model": 13807,
+        "grain.channel_total": 13937,
+        "grain.final_blur": 591,
+        "filming_develop.grain": 15767,
+        "filming_develop": 23787,
+        "printing": 1469,
+        "scanning": 7497
+      }
+    },
+    "lifetimes": {
+      "command": [
+        "target/memory-study/lifetimes-f64",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/lifetimes.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 38.17725470899313,
+      "user_seconds": 175.584857,
+      "system_seconds": 6.308557,
+      "peak_rss_bytes": 11856822272,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 5978,
+        "filming_develop.density_interp": 285,
+        "filming_develop.dir_couplers": 4219,
+        "grain.extract_channel": 57,
+        "grain.layer_particle_model": 14502,
+        "grain.channel_total": 14747,
+        "grain.final_blur": 824,
+        "filming_develop.grain": 15932,
+        "filming_develop": 20437,
+        "printing": 1545,
+        "scanning": 7626
+      }
+    },
+    "optimized": {
+      "command": [
+        "target/memory-study/optimized-profile-f64",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/optimized.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 49.91741979100334,
+      "user_seconds": 297.331846,
+      "system_seconds": 5.835017,
+      "peak_rss_bytes": 11410751488,
+      "sampled_peak_footprint_bytes": 11981055240,
+      "peak_live_heap_bytes": 8694226635,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 19119,
+        "filming_develop.density_interp": 325,
+        "filming_develop.dir_couplers": 4577,
+        "grain.extract_channel": 62,
+        "grain.layer_particle_model": 13390,
+        "grain.channel_total": 13585,
+        "grain.final_blur": 619,
+        "filming_develop.grain": 14465,
+        "filming_develop": 19367,
+        "printing": 1749,
+        "scanning": 7065
+      }
+    },
+    "optimized-normal": {
+      "command": [
+        "target/memory-study/final-f64",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/optimized-normal.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 34.23370716700447,
+      "user_seconds": 177.278415,
+      "system_seconds": 3.533945,
+      "peak_rss_bytes": 12699926528,
+      "sampled_peak_footprint_bytes": 12686092128,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 5854,
+        "filming_develop.density_interp": 276,
+        "filming_develop.dir_couplers": 4076,
+        "grain.extract_channel": 61,
+        "grain.layer_particle_model": 12813,
+        "grain.channel_total": 12940,
+        "grain.final_blur": 843,
+        "filming_develop.grain": 13909,
+        "filming_develop": 18262,
+        "printing": 1000,
+        "scanning": 6643
+      }
+    },
+    "serial-profile": {
+      "command": [
+        "target/memory-study/final-profile-f64",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/serial-profile.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 71.09980133299541,
+      "user_seconds": 310.379353,
+      "system_seconds": 3.135749,
+      "peak_rss_bytes": 10645192704,
+      "sampled_peak_footprint_bytes": 10639892904,
+      "peak_live_heap_bytes": 7247084112,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 19479,
+        "filming_develop.density_interp": 275,
+        "filming_develop.dir_couplers": 4019,
+        "grain.extract_channel": 57,
+        "grain.layer_particle_model": 11846,
+        "grain.channel_total": 11938,
+        "grain.final_blur": 522,
+        "filming_develop.grain": 37459,
+        "filming_develop": 41754,
+        "printing": 958,
+        "scanning": 6631
+      }
+    },
+    "serial-normal": {
+      "command": [
+        "target/memory-study/final-f64",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/serial-normal.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 56.6666232090065,
+      "user_seconds": 175.534337,
+      "system_seconds": 2.997623,
+      "peak_rss_bytes": 10696769536,
+      "sampled_peak_footprint_bytes": 10691813728,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 5667,
+        "filming_develop.density_interp": 278,
+        "filming_develop.dir_couplers": 3967,
+        "grain.extract_channel": 29,
+        "grain.layer_particle_model": 11872,
+        "grain.channel_total": 11939,
+        "grain.final_blur": 523,
+        "filming_develop.grain": 37557,
+        "filming_develop": 41804,
+        "printing": 960,
+        "scanning": 6585
+      }
+    },
+    "f32-cpu": {
+      "command": [
+        "target/release/spektrafilm",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/f32-cpu.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/export.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 31.98358983300568,
+      "user_seconds": 169.646325,
+      "system_seconds": 2.209514,
+      "peak_rss_bytes": 6335479808,
+      "sampled_peak_footprint_bytes": 6260954080,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0,
+        "filming_expose": 5139,
+        "filming_develop.density_interp": 257,
+        "filming_develop.dir_couplers": 3510,
+        "grain.extract_channel": 26,
+        "grain.layer_particle_model": 12994,
+        "grain.channel_total": 13038,
+        "grain.final_blur": 346,
+        "filming_develop.grain": 13470,
+        "filming_develop": 17238,
+        "printing": 969,
+        "scanning": 6322
+      }
+    },
+    "half-normal": {
+      "command": [
+        "target/memory-study/final-f64",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/half-normal.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/half.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 10.711342374997912,
+      "user_seconds": 44.550936,
+      "system_seconds": 1.597609,
+      "peak_rss_bytes": 6096125952,
+      "sampled_peak_footprint_bytes": 6022059144,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 2296,
+        "color_reference": 0,
+        "filming_expose": 1310,
+        "filming_develop.density_interp": 70,
+        "filming_develop.dir_couplers": 931,
+        "grain.extract_channel": 13,
+        "grain.layer_particle_model": 2619,
+        "grain.channel_total": 2656,
+        "grain.final_blur": 103,
+        "filming_develop.grain": 2791,
+        "filming_develop": 3793,
+        "printing": 241,
+        "scanning": 1641
+      }
+    },
+    "gpu-full": {
+      "command": [
+        "target/release/spektrafilm",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/gpu-full.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/gpu.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 6.4102029589994345,
+      "user_seconds": 3.488115,
+      "system_seconds": 1.437382,
+      "peak_rss_bytes": 3807002624,
+      "sampled_peak_footprint_bytes": 8879868376,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 0,
+        "color_reference": 0
+      }
+    },
+    "gpu-preview": {
+      "command": [
+        "target/release/spektrafilm",
+        "process",
+        "target/memory-study/leica-q3.dng",
+        "-o",
+        "target/memory-study/gpu-preview.tiff",
+        "--film",
+        "kodak_gold_200",
+        "--params",
+        "target/memory-study/gpu-preview.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.829730458004633,
+      "user_seconds": 4.577835,
+      "system_seconds": 0.651883,
+      "peak_rss_bytes": 3030777856,
+      "sampled_peak_footprint_bytes": 3230485048,
+      "peak_live_heap_bytes": null,
+      "stages_ms": {
+        "rescale": 1301,
+        "color_reference": 0
+      }
+    }
+  },
+  "output_validation": {
+    "f32_vs_f64_tiff16": {
+      "max_code_difference": 53041,
+      "mean_code_difference": 3416.0613055062618,
+      "changed_channel_fraction": 0.9997734368368559
+    },
+    "baseline_tiff_sha256": "333eedff0b3a0394e6623d175fb8d43950673fd51a88fc98ccb4a6a06e961ca7",
+    "lifetimes_tiff_sha256": "333eedff0b3a0394e6623d175fb8d43950673fd51a88fc98ccb4a6a06e961ca7",
+    "optimized_tiff_sha256": "333eedff0b3a0394e6623d175fb8d43950673fd51a88fc98ccb4a6a06e961ca7",
+    "optimized-normal_tiff_sha256": "333eedff0b3a0394e6623d175fb8d43950673fd51a88fc98ccb4a6a06e961ca7",
+    "serial-normal_tiff_sha256": "333eedff0b3a0394e6623d175fb8d43950673fd51a88fc98ccb4a6a06e961ca7",
+    "baseline-repeat_tiff_sha256": "333eedff0b3a0394e6623d175fb8d43950673fd51a88fc98ccb4a6a06e961ca7",
+    "synthetic_no_grain_glare_f32_vs_f64": {
+      "max_abs": 3.156333583387294e-07,
+      "mean_abs": 5.629519747964394e-08
+    }
+  },
+  "implementation_validation": {
+    "serial_grain_control": "settings.serial_grain, default false; GUI export-only",
+    "workspace_tests": {
+      "default": {
+        "passed": 126,
+        "ignored": 1
+      },
+      "f64": {
+        "passed": 128,
+        "ignored": 1
+      }
+    },
+    "release_builds": [
+      "spektrafilm-gui",
+      "spektrafilm",
+      "spektrafilm-f64"
+    ],
+    "synthetic_comparisons": {
+      "colour": {
+        "parallel": true,
+        "serial": true
+      },
+      "no_lut": {
+        "parallel": true,
+        "serial": true
+      },
+      "bw": {
+        "parallel": true,
+        "serial": true
+      },
+      "slide": {
+        "parallel": true,
+        "serial": true
+      }
+    },
+    "full_q3_serial_json_matches_original_tiff": true,
+    "full_q3_correctness_run_is_not_a_performance_benchmark": true,
+    "gui_verification": "headless parameter/subprocess tests; no manual window interaction"
+  }
+}

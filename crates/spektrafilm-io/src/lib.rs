@@ -205,6 +205,8 @@ fn load_raw_impl(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Image
     }))
     .map_err(|p| anyhow::anyhow!("RAW develop failed: panicked: {}", panic_message(&p)))?
     .context("RAW develop failed")?;
+    // The developed pixels no longer depend on the sensor buffer.
+    drop(raw);
     let img = intermediate_to_image_buf(intermediate);
     if !orient {
         return Ok(img);

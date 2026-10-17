@@ -322,6 +322,7 @@ pub fn expose(
         // Simplified fallback: treat RGB values as proportional to raw exposure
         rgb.clone()
     };
+    drop(rgb);
 
     // Order mirrors Python filming: boost → diffusion → lens_blur → halation.
 
@@ -485,6 +486,7 @@ pub fn develop(
             grain.blur,
             grain.n_sub_layers,
             grain.monochrome,
+            params.settings.serial_grain,
             backend,
         );
         print_stage_timing(stage_timings, "filming_develop.grain", t);

@@ -41,14 +41,9 @@ pub fn compute_random_glare_amount(
         .collect();
 
     if blur > 0.0 {
-        // 2D gaussian filter via our 3-channel image kernel; broadcast scalar field to RGB.
-        let mut img = ImageBuf::from_data(
-            width,
-            height,
-            glare.iter().flat_map(|&v| [v, v, v]).collect(),
-        );
-        img = gaussian::gaussian_blur(&img, blur);
-        glare = img.extract_channel(0);
+        // Glare is a scalar field: use the same separable filter directly
+        // instead of allocating and blurring three identical RGB channels.
+        glare = gaussian::gaussian_blur_channel(&glare, width, height, blur);
     }
 
     // Divide by 100 (CC-style fraction).
