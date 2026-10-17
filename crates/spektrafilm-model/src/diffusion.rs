@@ -7,25 +7,20 @@ use spektrafilm_math::precision::{Scalar, ZERO, from_f32, from_f64};
 /// Apply unsharp mask to an image. `backend` provides the Gaussian blur
 /// implementation (CPU rayon or wgpu compute shader).
 pub fn apply_unsharp_mask(
-    image: &ImageBuf,
+    mut image: ImageBuf,
     sigma: f32,
     amount: f32,
     backend: &dyn ComputeBackend,
 ) -> ImageBuf {
     if sigma <= 0.0 || amount <= 0.0 {
-        return image.clone();
+        return image;
     }
-    let blurred = backend.gaussian_blur(image, sigma);
+    let blurred = backend.gaussian_blur(&image, sigma);
     let amount_s = from_f32(amount);
-    let mut result = image.clone();
-    for (r, (o, b)) in result
-        .data
-        .iter_mut()
-        .zip(image.data.iter().zip(blurred.data.iter()))
-    {
-        *r = o + amount_s * (o - b);
+    for (o, b) in image.data.iter_mut().zip(blurred.data.iter()) {
+        *o = *o + amount_s * (*o - b);
     }
-    result
+    image
 }
 
 /// Apply Gaussian blur in physical units (micrometers).

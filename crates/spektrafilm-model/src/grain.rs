@@ -98,7 +98,7 @@ pub fn layer_particle_model(
 /// Port of Python `apply_grain_to_density`.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_grain_to_density(
-    density_cmy: &ImageBuf,
+    density_cmy: ImageBuf,
     pixel_size_um: f32,
     agx_particle_area_um2: f64,
     agx_particle_scale: [f64; 3],
@@ -177,7 +177,8 @@ pub fn apply_grain_to_density(
         (0..3).into_par_iter().map(process_channel).collect()
     };
 
-    let mut out = ImageBuf::new(w, h);
+    // Channel workers have finished reading density; reuse its allocation.
+    let mut out = density_cmy;
     for (ch, grain_sum) in channels {
         out.write_channel(ch, &grain_sum);
     }
@@ -213,7 +214,7 @@ mod tests {
             for layers in [1, 3] {
                 let render = |serial| {
                     apply_grain_to_density(
-                        &density,
+                        density.clone(),
                         2.0,
                         0.2,
                         [1.6; 3],

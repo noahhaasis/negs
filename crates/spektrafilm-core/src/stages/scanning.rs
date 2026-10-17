@@ -87,7 +87,7 @@ fn scanner_lut_bounds(profile: &Profile, params: &RuntimeParams) -> ([f64; 3], [
 /// for bit-identical parity with Python's LUT path.
 #[allow(clippy::too_many_arguments)]
 fn scan_spectral_via_lut(
-    density_cmy: &ImageBuf,
+    density_cmy: ImageBuf,
     channel_density: &[[f64; 3]],
     base_density: &[f64],
     illuminant: &[f64],
@@ -116,47 +116,41 @@ fn scan_spectral_via_lut(
         scale / (data_max[1] - data_min[1]),
         scale / (data_max[2] - data_min[2]),
     ];
-    let mut out = density_cmy.clone();
-    out.data
-        .par_chunks_exact_mut(3)
-        .zip(density_cmy.data.par_chunks_exact(3))
-        .for_each(|(dst, src)| {
-            let r = (src[0] as f64 - data_min[0]) * inv[0];
-            let g = (src[1] as f64 - data_min[1]) * inv[1];
-            let b = (src[2] as f64 - data_min[2]) * inv[2];
-            let log_xyz = pchip_interp(&prepared, r, g, b);
-            // Post-LUT: 10^log_xyz → CAT → xyz_to_rgb, mirroring Python's
-            // `_density_to_rgb` AFTER the LUT call. bw_correction and
-            // glare run after this returns (RGB space).
-            let mut xyz = [
-                10.0f64.powf(log_xyz[0]),
-                10.0f64.powf(log_xyz[1]),
-                10.0f64.powf(log_xyz[2]),
-            ];
-            // B&W/slide luminance remap on the pre-CAT scan XYZ (Python's
-            // black_white_xyz_correction). Scalar scale from the Y channel;
-            // no-op when color_ref has no remap.
-            let scale = color_ref.xyz_scale(xyz[1]);
-            if scale != 1.0 {
-                xyz[0] *= scale;
-                xyz[1] *= scale;
-                xyz[2] *= scale;
-            }
-            let xa = cat[0][0] * xyz[0] + cat[0][1] * xyz[1] + cat[0][2] * xyz[2];
-            let ya = cat[1][0] * xyz[0] + cat[1][1] * xyz[1] + cat[1][2] * xyz[2];
-            let za = cat[2][0] * xyz[0] + cat[2][1] * xyz[1] + cat[2][2] * xyz[2];
-            dst[0] =
-                from_f64(xyz_to_rgb[0][0] * xa + xyz_to_rgb[0][1] * ya + xyz_to_rgb[0][2] * za);
-            dst[1] =
-                from_f64(xyz_to_rgb[1][0] * xa + xyz_to_rgb[1][1] * ya + xyz_to_rgb[1][2] * za);
-            dst[2] =
-                from_f64(xyz_to_rgb[2][0] * xa + xyz_to_rgb[2][1] * ya + xyz_to_rgb[2][2] * za);
-        });
+    let mut out = density_cmy;
+    out.data.par_chunks_exact_mut(3).for_each(|dst| {
+        let r = (dst[0] as f64 - data_min[0]) * inv[0];
+        let g = (dst[1] as f64 - data_min[1]) * inv[1];
+        let b = (dst[2] as f64 - data_min[2]) * inv[2];
+        let log_xyz = pchip_interp(&prepared, r, g, b);
+        // Post-LUT: 10^log_xyz → CAT → xyz_to_rgb, mirroring Python's
+        // `_density_to_rgb` AFTER the LUT call. bw_correction and
+        // glare run after this returns (RGB space).
+        let mut xyz = [
+            10.0f64.powf(log_xyz[0]),
+            10.0f64.powf(log_xyz[1]),
+            10.0f64.powf(log_xyz[2]),
+        ];
+        // B&W/slide luminance remap on the pre-CAT scan XYZ (Python's
+        // black_white_xyz_correction). Scalar scale from the Y channel;
+        // no-op when color_ref has no remap.
+        let scale = color_ref.xyz_scale(xyz[1]);
+        if scale != 1.0 {
+            xyz[0] *= scale;
+            xyz[1] *= scale;
+            xyz[2] *= scale;
+        }
+        let xa = cat[0][0] * xyz[0] + cat[0][1] * xyz[1] + cat[0][2] * xyz[2];
+        let ya = cat[1][0] * xyz[0] + cat[1][1] * xyz[1] + cat[1][2] * xyz[2];
+        let za = cat[2][0] * xyz[0] + cat[2][1] * xyz[1] + cat[2][2] * xyz[2];
+        dst[0] = from_f64(xyz_to_rgb[0][0] * xa + xyz_to_rgb[0][1] * ya + xyz_to_rgb[0][2] * za);
+        dst[1] = from_f64(xyz_to_rgb[1][0] * xa + xyz_to_rgb[1][1] * ya + xyz_to_rgb[1][2] * za);
+        dst[2] = from_f64(xyz_to_rgb[2][0] * xa + xyz_to_rgb[2][1] * ya + xyz_to_rgb[2][2] * za);
+    });
     out
 }
 
 pub fn scan(
-    density_cmy: &ImageBuf,
+    density_cmy: ImageBuf,
     profile: &Profile,
     params: &RuntimeParams,
     backend: &dyn ComputeBackend,
@@ -252,15 +246,17 @@ pub fn scan(
             color_ref,
         )
     } else {
-        backend.scan_spectral(
-            density_cmy,
+        let rgb = backend.scan_spectral(
+            &density_cmy,
             &channel_density,
             &base_density,
             &illuminant,
             normalization,
             &adapt,
             &base_xyz_to_rgb,
-        )
+        );
+        drop(density_cmy);
+        rgb
     };
 
     // White/black correction is fully handled by color_ref's XYZ luminance
@@ -347,8 +343,7 @@ pub fn scan(
     // Unsharp mask
     let [usm_sigma, usm_amount] = params.scanner.unsharp_mask;
     if usm_sigma > 0.0 && usm_amount > 0.0 {
-        rgb =
-            spektrafilm_model::diffusion::apply_unsharp_mask(&rgb, usm_sigma, usm_amount, backend);
+        rgb = spektrafilm_model::diffusion::apply_unsharp_mask(rgb, usm_sigma, usm_amount, backend);
     }
 
     // CCTF encoding + clip.
@@ -413,7 +408,7 @@ fn rgb_to_rgb_identity_matrix(name: &str) -> [[f64; 3]; 3] {
 }
 
 pub fn process(
-    density_cmy: &ImageBuf,
+    density_cmy: ImageBuf,
     profile: &Profile,
     params: &RuntimeParams,
     backend: &dyn ComputeBackend,

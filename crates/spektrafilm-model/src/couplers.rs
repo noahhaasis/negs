@@ -1,10 +1,10 @@
 // DIR (Development Inhibitor Release) coupler model.
 // Handles same-layer and inter-layer inhibition with spatial diffusion.
 
+use rayon::prelude::*;
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::from_f64;
-use rayon::prelude::*;
 
 use crate::density_curves::normalize_density_curves;
 
@@ -36,8 +36,8 @@ pub fn compute_dir_couplers_matrix(
 /// The inhibitor diffuses spatially (Gaussian + exponential tail).
 #[allow(clippy::too_many_arguments)]
 pub fn compute_exposure_correction(
-    log_raw: &ImageBuf,
-    density_cmy: &ImageBuf,
+    log_raw: ImageBuf,
+    density_cmy: ImageBuf,
     density_max: [f64; 3],
     couplers_matrix: &[[f64; 3]; 3],
     diffusion_size_pixel: f32,
@@ -45,7 +45,7 @@ pub fn compute_exposure_correction(
     diffusion_tail_weight: f64,
     positive: bool,
 ) -> ImageBuf {
-    let mut density_silver = density_cmy.clone();
+    let mut density_silver = density_cmy;
 
     if positive {
         let dmax = [
@@ -78,18 +78,15 @@ pub fn compute_exposure_correction(
             from_f64(couplers_matrix[2][2]),
         ],
     ];
-    let mut correction = ImageBuf::new(log_raw.width, log_raw.height);
-    correction
-        .data
-        .par_chunks_exact_mut(3)
-        .zip(density_silver.data.par_chunks_exact(3))
-        .for_each(|(out, px)| {
-            for m in 0..3 {
-                out[m] = px[0] * cm[0][m] + px[1] * cm[1][m] + px[2] * cm[2][m];
-            }
-        });
+    // Each pixel's three source lanes must be captured before overwriting.
+    let mut correction = density_silver;
+    correction.data.par_chunks_exact_mut(3).for_each(|out| {
+        let px = [out[0], out[1], out[2]];
+        for m in 0..3 {
+            out[m] = px[0] * cm[0][m] + px[1] * cm[1][m] + px[2] * cm[2][m];
+        }
+    });
 
-    drop(density_silver);
     if diffusion_size_pixel > 0.0 {
         // Python: `(1 - w) * fast_gaussian_filter(corr, σ_size)
         //         + w * fast_exponential_filter(corr, σ_tail)`.
@@ -113,10 +110,14 @@ pub fn compute_exposure_correction(
         }
     }
 
-    let mut result = log_raw.clone();
-    result.data.par_iter_mut().zip(correction.data.par_iter()).for_each(|(r, c)| {
-        *r -= c;
-    });
+    let mut result = log_raw;
+    result
+        .data
+        .par_iter_mut()
+        .zip(correction.data.par_iter())
+        .for_each(|(r, c)| {
+            *r -= c;
+        });
     result
 }
 
@@ -125,8 +126,8 @@ pub fn compute_exposure_correction(
 /// Port of Python `apply_density_correction_dir_couplers`.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_density_correction(
-    density_cmy: &ImageBuf,
-    log_raw: &ImageBuf,
+    density_cmy: ImageBuf,
+    log_raw: ImageBuf,
     pixel_size_um: f32,
     log_exposure: &[f32],
     density_curves: &[[f32; 3]],

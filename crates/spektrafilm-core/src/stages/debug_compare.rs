@@ -350,7 +350,7 @@ mod tests {
 
         let img = ImageBuf::from_data(1, 1, vec![from_f64(0.184); 3]);
         let log_raw = crate::stages::filming::expose(
-            &img,
+            img,
             &pipeline.film,
             &pipeline.params,
             &backend,
@@ -370,7 +370,7 @@ mod tests {
         );
 
         let density_cmy =
-            crate::stages::filming::develop(&log_raw, &pipeline.film, &pipeline.params, &backend);
+            crate::stages::filming::develop(log_raw, &pipeline.film, &pipeline.params, &backend);
         check(
             "cmy_film",
             density_cmy.get(0, 0),
@@ -382,7 +382,7 @@ mod tests {
         );
 
         let log_raw_print = crate::stages::printing::expose_calibrated(
-            &density_cmy,
+            density_cmy,
             &pipeline.film,
             &pipeline.print,
             &pipeline.params,

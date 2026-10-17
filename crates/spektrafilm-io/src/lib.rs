@@ -255,36 +255,31 @@ fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate)
 
     let floor = |v: f32| from_f32(v.max(0.0));
     let (w, h, scalars): (usize, usize, Vec<Scalar>) = match intermediate {
-        Intermediate::Monochrome(pixels) => (
-            pixels.width,
-            pixels.height,
-            pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|&v| {
-                    let v = floor(v);
-                    [v, v, v]
-                })
-                .collect(),
-        ),
-        Intermediate::ThreeColor(pixels) => (
-            pixels.width,
-            pixels.height,
-            pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|px| [floor(px[0]), floor(px[1]), floor(px[2])])
-                .collect(),
-        ),
-        Intermediate::FourColor(pixels) => (
-            pixels.width,
-            pixels.height,
-            pixels
-                .data
-                .par_iter()
-                .flat_map_iter(|px| [floor(px[0]), floor(px[1]), floor(px[2])])
-                .collect(),
-        ),
+        Intermediate::Monochrome(pixels) => {
+            let mut out = vec![from_f32(0.0); pixels.width * pixels.height * 3];
+            out.par_chunks_exact_mut(3)
+                .zip(pixels.data.par_iter())
+                .for_each(|(dst, &v)| dst.fill(floor(v)));
+            (pixels.width, pixels.height, out)
+        }
+        Intermediate::ThreeColor(pixels) => {
+            let mut out = vec![from_f32(0.0); pixels.width * pixels.height * 3];
+            out.par_chunks_exact_mut(3)
+                .zip(pixels.data.par_iter())
+                .for_each(|(dst, src)| {
+                    dst.copy_from_slice(&[floor(src[0]), floor(src[1]), floor(src[2])]);
+                });
+            (pixels.width, pixels.height, out)
+        }
+        Intermediate::FourColor(pixels) => {
+            let mut out = vec![from_f32(0.0); pixels.width * pixels.height * 3];
+            out.par_chunks_exact_mut(3)
+                .zip(pixels.data.par_iter())
+                .for_each(|(dst, src)| {
+                    dst.copy_from_slice(&[floor(src[0]), floor(src[1]), floor(src[2])]);
+                });
+            (pixels.width, pixels.height, out)
+        }
     };
     ImageBuf::from_data(w as u32, h as u32, scalars)
 }

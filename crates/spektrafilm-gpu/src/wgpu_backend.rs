@@ -146,11 +146,15 @@ impl WgpuBackend {
         // upload/readback. On unified-memory GPUs this skips the slow
         // Private↔Shared staging blits (~0.5 GB/s) that otherwise dominate the
         // per-frame cost. No-op (falls back to the blit path) if unsupported.
-        let opt_feats = if adapter_info.device_type == wgpu::DeviceType::IntegratedGpu {
-            wgpu::Features::MAPPABLE_PRIMARY_BUFFERS & adapter.features()
-        } else {
-            wgpu::Features::empty()
-        };
+        // Diagnostic override to exercise the dedicated upload/readback path
+        // on integrated GPUs that normally map the primary image buffers.
+        let force_staging = std::env::var_os("SPEKTRAFILM_WGPU_FORCE_STAGING").is_some();
+        let opt_feats =
+            if adapter_info.device_type == wgpu::DeviceType::IntegratedGpu && !force_staging {
+                wgpu::Features::MAPPABLE_PRIMARY_BUFFERS & adapter.features()
+            } else {
+                wgpu::Features::empty()
+            };
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("spektrafilm"),
@@ -1354,9 +1358,32 @@ impl WgpuBackend {
             })
         });
 
+        // Effects execute sequentially in separate compute passes. Share their
+        // full-image storage, but keep every input/output of a dispatch distinct.
+        // See docs/memory-scratch-reuse.md for the pass/lifetime table.
+        // This pool is per-render: no full images enter the backend cache.
+        let scratch_count = if p.dir_couplers.is_some() {
+            3
+        } else if p.halation.is_some()
+            || p.unsharp.is_some()
+            || p.diffusion.is_some()
+            || (!p.scan_film && p.enlarger_diffusion.is_some())
+        {
+            2
+        } else if p.glare.is_some()
+            || p.camera_lens_blur_px.is_some_and(|sigma| sigma > 0.0)
+            || p.scanner_lens_blur_px.is_some_and(|sigma| sigma > 0.0)
+        {
+            1
+        } else {
+            0
+        };
+        let scratch: Vec<_> = (0..scratch_count)
+            .map(|i| make_img_buf(&format!("effect_scratch_{i}")))
+            .collect();
+
         // ── Halation auxiliary buffers + bind groups (only if active) ────
-        // Allocated up-front so they live for the encoder. The two ping-pong
-        // buffers `buf_a` / `buf_b` are reused as blur input/mid; the new
+        // The two ping-pong buffers are reused as blur input/mid; shared
         // `buf_c` and `buf_d` hold the scatter outputs and the halation
         // accumulator. None of this is touched when `p.halation` is `None`.
         let halation_state = p.halation.as_ref().map(|hp| {
@@ -1367,22 +1394,32 @@ impl WgpuBackend {
                 image.height,
                 &buf_a,
                 &buf_b,
+                &scratch,
                 self,
             )
         });
 
         // ── Highlight boost state ────────────────────────────────────────
         // Runs on raw film exposure immediately after the front pass.
-        let highlight_state = p.highlight_boost.as_ref().map(|hp| {
-            build_highlight_boost_state(&self.device, hp, n_pixels, &buf_b, self)
-        });
+        let highlight_state = p
+            .highlight_boost
+            .as_ref()
+            .map(|hp| build_highlight_boost_state(&self.device, hp, n_pixels, &buf_b, self));
 
         // ── Camera diffusion filter state ────────────────────────────────
         // Applied on the raw film exposure (buf_b) right after hanatos and
         // before halation, matching the CPU filming order. Owns its own
         // downsampled scratch buffers.
         let diffusion_state = p.diffusion.as_ref().map(|plan| {
-            build_diffusion_state(&self.device, plan, image.width, image.height, &buf_b, self)
+            build_diffusion_state(
+                &self.device,
+                plan,
+                image.width,
+                image.height,
+                &buf_b,
+                &scratch,
+                self,
+            )
         });
 
         let camera_lens_blur_state = p.camera_lens_blur_px.and_then(|sigma| {
@@ -1395,6 +1432,7 @@ impl WgpuBackend {
                     &buf_b,
                     &buf_a,
                     "camera_lens",
+                    &scratch,
                     self,
                 )
             })
@@ -1413,6 +1451,7 @@ impl WgpuBackend {
                 image.height,
                 &buf_a,
                 &buf_b,
+                &scratch,
                 self,
             )
         });
@@ -1431,7 +1470,7 @@ impl WgpuBackend {
         // readback. Generates per-pixel lognormal noise into a scratch
         // buffer, optionally blurs it, then adds `g * rgb_offset[c]` to
         // the image. Uses buf_a (free after scan_spectral consumed
-        // density_cmy) and one fresh scratch buffer.
+        // density_cmy) and one shared scratch buffer.
         let glare_state = p.glare.as_ref().map(|gp| {
             build_glare_state(
                 &self.device,
@@ -1440,6 +1479,7 @@ impl WgpuBackend {
                 image.height,
                 &buf_a,
                 &buf_b,
+                &scratch,
                 self,
             )
         });
@@ -1454,6 +1494,7 @@ impl WgpuBackend {
                     &buf_b,
                     &buf_a,
                     "scanner_lens",
+                    &scratch,
                     self,
                 )
             })
@@ -1481,7 +1522,7 @@ impl WgpuBackend {
         // (density_cmy from film density curve) and buf_b (log_raw),
         // produces a corrected buf_a via re-interpolation of
         // `density_curves_0` against `log_raw - correction`. Uses three
-        // owned scratch buffers (correction, mid, accumulator). buf_a is
+        // shared scratch buffers (correction, gaussian, mix). buf_a is
         // reused as blur mid since density_cmy is no longer needed once
         // the matmul has consumed it (the final density_curve_interp
         // overwrites buf_a anyway).
@@ -1493,6 +1534,7 @@ impl WgpuBackend {
                 image.height,
                 &buf_a,
                 &buf_b,
+                &scratch,
                 self,
             )
         });
@@ -1500,9 +1542,21 @@ impl WgpuBackend {
         let enlarger_log_to_linear_state = p.enlarger_diffusion.as_ref().map(|_| {
             build_log_to_linear_state(&self.device, n_pixels, print_exposure_scale, &buf_b, self)
         });
-        let enlarger_diffusion_state = p.enlarger_diffusion.as_ref().map(|plan| {
-            build_diffusion_state(&self.device, plan, image.width, image.height, &buf_b, self)
-        });
+        let enlarger_diffusion_state =
+            p.enlarger_diffusion
+                .as_ref()
+                .filter(|_| !p.scan_film)
+                .map(|plan| {
+                    build_diffusion_state(
+                        &self.device,
+                        plan,
+                        image.width,
+                        image.height,
+                        &buf_b,
+                        &scratch,
+                        self,
+                    )
+                });
         let enlarger_linear_to_log_state = p
             .enlarger_diffusion
             .as_ref()
@@ -2135,7 +2189,7 @@ impl ComputeBackend for WgpuBackend {
 ///
 /// The CPU equivalent is `spektrafilm_model::diffusion::apply_halation_um`.
 /// All passes operate on the resident image buffer (passed in as `buf_b`),
-/// using `buf_a` as blur intermediate and two newly-allocated buffers
+/// using `buf_a` as blur intermediate and two shared scratch buffers
 /// `buf_c` / `buf_d` for scatter outputs and the halation accumulator.
 #[cfg(feature = "wgpu-backend")]
 struct HalationState {
@@ -2176,24 +2230,13 @@ fn build_halation_state(
     height: u32,
     buf_a: &wgpu::Buffer,
     buf_b: &wgpu::Buffer,
+    scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> HalationState {
     use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
-    let img_bytes = (n_pixels * 3 * 4) as u64;
-
-    let mk_buf = |label: &str| {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: img_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        })
-    };
-    let buf_c = mk_buf("halation_c"); // scatter core / blur output
-    let buf_d = mk_buf("halation_d"); // scatter tail / accumulator
+    let buf_c = scratch[0].clone();
+    let buf_d = scratch[1].clone();
 
     let blur_layout = &[
         wgpu::BufferBindingType::Uniform,
@@ -2701,6 +2744,7 @@ fn build_diffusion_state(
     width: u32,
     height: u32,
     buf_b: &wgpu::Buffer,
+    scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> DiffusionState {
     use wgpu::util::DeviceExt;
@@ -2708,7 +2752,6 @@ fn build_diffusion_state(
     let small_h = plan.small_h;
     let n_full = (width as usize) * (height as usize);
     let n_small = (small_w as usize) * (small_h as usize);
-    let full_bytes = (n_full * 3 * 4) as u64;
     let small_bytes = (n_small * 3 * 4) as u64;
 
     let mk = |label: &str, bytes: u64| {
@@ -2725,8 +2768,8 @@ fn build_diffusion_state(
     let small_mid = mk("diff_small_mid", small_bytes);
     let small_out = mk("diff_small_out", small_bytes);
     let small_acc = mk("diff_small_acc", small_bytes);
-    let upsampled = mk("diff_upsampled", full_bytes);
-    let buf_mix = mk("diff_mix", full_bytes);
+    let upsampled = scratch[0].clone();
+    let buf_mix = scratch[1].clone();
 
     // ── Downsample buf_b → small_in ───────────────────────────────────
     let grid_layout = &[
@@ -3157,16 +3200,12 @@ fn build_simple_blur_state(
     src: &wgpu::Buffer,
     mid: &wgpu::Buffer,
     label: &str,
+    scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> SimpleBlurState {
     use wgpu::util::DeviceExt;
     let n_bytes = (width as u64) * (height as u64) * 3 * 4;
-    let dst = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(&format!("{label}_blur_dst")),
-        size: n_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
+    let dst = scratch[0].clone();
 
     let blur_layout = &[
         wgpu::BufferBindingType::Uniform,
@@ -3700,31 +3739,14 @@ fn build_dir_state(
     height: u32,
     buf_a: &wgpu::Buffer,
     buf_b: &wgpu::Buffer,
+    scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> DirState {
     use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
-    let img_bytes = (n_pixels * 3 * 4) as u64;
-
-    let mk_buf = |label: &str| {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: img_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        })
-    };
-    // buf_correction holds the matmul output, then is overwritten by the
-    // tail blur (in-place via the V pass of a separable blur — H and V
-    // are separate compute passes so wgpu does NOT see the input/output
-    // as aliasing). buf_gaussian holds the first blur's output.
-    // buf_mix holds the weighted lerp result that ultimately gets
-    // subtracted from log_raw.
-    let buf_correction = mk_buf("dir_correction");
-    let buf_gaussian = mk_buf("dir_gaussian");
-    let buf_mix = mk_buf("dir_mix");
+    let buf_correction = scratch[0].clone();
+    let buf_gaussian = scratch[1].clone();
+    let buf_mix = scratch[2].clone();
 
     // ── 1. dir_matmul ─────────────────────────────────────────────────
     let matmul_pipe = backend.cached_pipeline(
@@ -3803,23 +3825,9 @@ fn build_dir_state(
         blur_layout,
     );
 
-    // Blur reads `buf_correction`, uses `buf_a` as mid (free after matmul),
-    // writes to `output`. Two blurs: gaussian → buf_correction (overwrite),
-    // tail → buf_acc. Wait — we can't blur buf_correction in-place because
-    // the V pass reads mid, and our first blur uses buf_a as mid, output to
-    // … hmm we'd need a 3rd buffer or sequential reuse.
-    //
-    // Sequential reuse: blur1 reads buf_correction → writes mid into buf_a
-    // → writes output into buf_acc. Then buf_correction is still untouched
-    // and ready for blur2. Blur2 reads buf_correction → mid into buf_a →
-    // output into… we already wrote buf_acc. Solution: swap roles. The
-    // gaussian part can go into buf_acc, tail into buf_correction
-    // (overwriting the matmul output — fine, we don't need it after both
-    // blurs are done).
-    //
-    // After blur2 buf_acc = gaussian_part, buf_correction = tail_part.
-    // The weighted lerp writes the result into buf_acc (`buf_acc *=
-    // (1-w)` then `buf_acc += w * buf_correction`).
+    // Both blurs use A as intermediate after matmul consumes the density.
+    // The first writes S1 (Gaussian), the second overwrites S0 (tail).
+    // The weighted mix writes S2, keeping its input bindings distinct.
     let make_blur_job =
         |sigma: f32, src: &wgpu::Buffer, out: &wgpu::Buffer, label: &str| -> BlurJob {
             let sigma = sigma.max(0.01);
@@ -4231,27 +4239,15 @@ fn build_unsharp_state(
     height: u32,
     buf_a: &wgpu::Buffer,
     buf_b: &wgpu::Buffer,
+    scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> UnsharpState {
     use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
-    let img_bytes = (n_pixels * 3 * 4) as u64;
+    let out_buf = scratch[0].clone();
+    let blur_dst = &scratch[1];
 
-    // Output buffer for the combine pass. Cleared each render — fine,
-    // it's only used between the combine dispatch and the copy_buffer.
-    let out_buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("unsharp_out"),
-        size: img_bytes,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-
-    // ── Blur (buf_b → buf_a (mid) → out_buf as the blurred destination
-    // tmp). We re-use out_buf for two purposes: it first holds the
-    // blurred image, then the combine overwrites it with the final
-    // sharpened image.
+    // Blur B → A → S1, then combine B + S1 → S0 and copy S0 → B.
     let blur_layout = &[
         wgpu::BufferBindingType::Uniform,
         wgpu::BufferBindingType::Storage { read_only: true },
@@ -4304,14 +4300,6 @@ fn build_unsharp_state(
         label: Some("unsharp_blur_params"),
         contents: bytemuck::bytes_of(&params),
         usage: wgpu::BufferUsages::UNIFORM,
-    });
-    // Need a separate buffer for blur output since out_buf is the
-    // combine destination. Use a small fresh allocation.
-    let blur_dst = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("unsharp_blur_dst"),
-        size: img_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
     });
     let bg_h = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("unsharp_blur_h_bg"),
@@ -4420,26 +4408,13 @@ fn build_unsharp_state(
         bg: combine_bg,
     };
 
-    // Drop blur_dst's strong ref into UnsharpState via an owned vec.
-    // We need to keep it alive for the encoder lifetime; tucking it
-    // into the BlurJob is awkward, so use a separate field.
-    let mut state = UnsharpState {
+    UnsharpState {
         blur,
         combine,
         blur_pipe_h,
         blur_pipe_v,
         out_buf,
-    };
-    // Leak the blur output into the combine's owned buffers list by
-    // creating it inside the state; here we tuck it into a global
-    // owner. Simpler: keep it alive via a sidecar field.
-    // (Reusing _params_buf would be confusing; just attach as another
-    // implicit slot.)
-    let _ = blur_dst; // moved into bind groups, lives via wgpu's Arc
-    // wgpu::Buffer is Arc-backed under the hood — the bind groups keep
-    // it alive. Nothing to leak here.
-    let _ = &mut state;
-    state
+    }
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -4494,7 +4469,7 @@ impl UnsharpState {
 /// CPU equivalent:
 /// `spektrafilm_model::glare::{compute_random_glare_amount,
 /// add_glare_with_amount}`. Operates on buf_b (the RGB output of
-/// scan_spectral) in place; the lognormal noise is held in a fresh
+/// scan_spectral) in place; the lognormal noise is held in a shared
 /// scratch buffer, blurred via the existing 3-channel separable
 /// Gaussian.
 #[cfg(feature = "wgpu-backend")]
@@ -4515,20 +4490,12 @@ fn build_glare_state(
     height: u32,
     buf_a: &wgpu::Buffer,
     buf_b: &wgpu::Buffer,
+    scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> GlareState {
     use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
-    let img_bytes = (n_pixels * 3 * 4) as u64;
-
-    let scratch = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("glare_scratch"),
-        size: img_bytes,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
+    let scratch = scratch[0].clone();
 
     // ── Noise generation ──────────────────────────────────────────────
     let gen_pipe = backend.cached_pipeline(

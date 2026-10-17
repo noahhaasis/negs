@@ -1,5 +1,10 @@
 # Memory optimization handoff
 
+> Follow-up status (2026-10-17): The GPU scratch reuse and CPU buffer-ownership
+> work described below has been implemented in the current working tree.
+> See [the pass table and matched measurements](memory-scratch-reuse.md).
+> The remaining sections document the starting point and reproduction steps.
+
 ## User decisions — authoritative scope
 
 The goal is to **reduce overall memory usage**, not meet an absolute 8 GB limit. The working CPU prototype and optional serial-grain UI setting are included in this change. The next agent should proceed in this order:

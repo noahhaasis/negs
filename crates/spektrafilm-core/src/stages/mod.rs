@@ -238,11 +238,7 @@ mod integration_tests {
             .unwrap()
             .with_params(params);
         assert_eq!(
-            pipeline
-                .params
-                .film_render
-                .dir_couplers
-                .gamma_samelayer_rgb,
+            pipeline.params.film_render.dir_couplers.gamma_samelayer_rgb,
             [0.12, 0.08, 0.06],
             "GUI-style with_params must preserve positive-film DIR parameters"
         );
@@ -316,11 +312,19 @@ mod debug_tests {
         eprintln!("Input: {:?}", img.get(0, 0));
 
         let ref_illuminant = stages::filming::select_illuminant(&film.info.reference_illuminant);
-        let log_raw =
-            stages::filming::expose(&img, &film, &params, &backend, None, None, ref_illuminant, 1.0);
+        let log_raw = stages::filming::expose(
+            img,
+            &film,
+            &params,
+            &backend,
+            None,
+            None,
+            ref_illuminant,
+            1.0,
+        );
         eprintln!("log_raw: {:?}", log_raw.get(0, 0));
 
-        let density_cmy = stages::filming::develop(&log_raw, &film, &params, &backend);
+        let density_cmy = stages::filming::develop(log_raw, &film, &params, &backend);
         eprintln!("density_cmy: {:?}", density_cmy.get(0, 0));
 
         // Use simplified printing path for debug trace
@@ -328,7 +332,7 @@ mod debug_tests {
         eprintln!("density_print: {:?}", printed.get(0, 0));
         let density_print = printed;
         let rgb_out = stages::scanning::scan(
-            &density_print,
+            density_print,
             &print,
             &params,
             &backend,

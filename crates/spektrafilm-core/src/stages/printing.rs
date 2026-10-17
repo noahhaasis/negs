@@ -46,7 +46,7 @@ fn build_lut_grid(steps: usize, data_min: [f64; 3], data_max: [f64; 3]) -> Image
 /// `_lut_service.spectral_compute_enlarger(use_lut=True)` path.
 #[allow(clippy::too_many_arguments)]
 fn print_spectral_via_lut(
-    cmy_film: &ImageBuf,
+    cmy_film: ImageBuf,
     channel_density: &[[f64; 3]],
     base_density: &[f64],
     print_illuminant: &[f64],
@@ -81,7 +81,7 @@ fn print_spectral_via_lut(
 /// followed by `_apply_lut_pchip_3d_prepared` (which multiplies by
 /// `size - 1` and interpolates). Rayon-parallel per pixel.
 fn apply_pchip_lut(
-    image: &ImageBuf,
+    image: ImageBuf,
     prepared: &PreparedPchip3d,
     data_min: [f64; 3],
     data_max: [f64; 3],
@@ -92,19 +92,16 @@ fn apply_pchip_lut(
         scale / (data_max[1] - data_min[1]),
         scale / (data_max[2] - data_min[2]),
     ];
-    let mut out = image.clone();
-    out.data
-        .par_chunks_exact_mut(3)
-        .zip(image.data.par_chunks_exact(3))
-        .for_each(|(dst, src)| {
-            let r = (src[0] as f64 - data_min[0]) * inv[0];
-            let g = (src[1] as f64 - data_min[1]) * inv[1];
-            let b = (src[2] as f64 - data_min[2]) * inv[2];
-            let v = pchip_interp(prepared, r, g, b);
-            dst[0] = from_f64(v[0]);
-            dst[1] = from_f64(v[1]);
-            dst[2] = from_f64(v[2]);
-        });
+    let mut out = image;
+    out.data.par_chunks_exact_mut(3).for_each(|dst| {
+        let r = (dst[0] as f64 - data_min[0]) * inv[0];
+        let g = (dst[1] as f64 - data_min[1]) * inv[1];
+        let b = (dst[2] as f64 - data_min[2]) * inv[2];
+        let v = pchip_interp(prepared, r, g, b);
+        dst[0] = from_f64(v[0]);
+        dst[1] = from_f64(v[1]);
+        dst[2] = from_f64(v[2]);
+    });
     out
 }
 
@@ -151,7 +148,7 @@ fn enlarger_lut_bounds(film: &Profile, params: &RuntimeParams) -> ([f64; 3], [f6
 /// stage's remaining parity drift.
 #[allow(clippy::too_many_arguments)]
 pub fn expose_calibrated(
-    cmy_film: &ImageBuf,
+    cmy_film: ImageBuf,
     film: &Profile,
     print: &Profile,
     params: &RuntimeParams,
@@ -213,15 +210,17 @@ pub fn expose_calibrated(
             params.settings.lut_resolution as usize,
         )
     } else {
-        backend.print_spectral(
-            cmy_film,
+        let log_raw = backend.print_spectral(
+            &cmy_film,
             &channel_density,
             &base_density,
             print_illuminant,
             &print_sensitivity,
             exposure_factor,
             preflash,
-        )
+        );
+        drop(cmy_film);
+        log_raw
     };
 
     // Stage 2: 10^log_raw_print, scale by print_exposure × bw, then
@@ -335,7 +334,7 @@ pub fn develop(
 /// Full printing stage with pre-calibrated enlarger.
 #[allow(clippy::too_many_arguments)]
 pub fn process_with_calibration(
-    cmy_film: &ImageBuf,
+    cmy_film: ImageBuf,
     film: &Profile,
     print: &Profile,
     params: &RuntimeParams,

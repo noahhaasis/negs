@@ -500,7 +500,7 @@ impl Pipeline {
 
         let t = Instant::now();
         let log_raw = stages::filming::expose(
-            &image,
+            image,
             &self.film,
             &self.params,
             backend,
@@ -510,21 +510,17 @@ impl Pipeline {
             color_ref.filming_exposure_correction,
         );
         print_stage_timing(stage_timings, "filming_expose", t);
-        // A full-resolution f64 RGB frame can exceed 1 GiB. Release each
-        // stage's input before allocating scratch for the next stage.
-        drop(image);
         dump_if_env("SPEKTRAFILM_DUMP_FILM_LOG_RAW", &log_raw);
         let t = Instant::now();
-        let filmed = stages::filming::develop(&log_raw, &self.film, &self.params, backend);
+        let filmed = stages::filming::develop(log_raw, &self.film, &self.params, backend);
         print_stage_timing(stage_timings, "filming_develop", t);
-        drop(log_raw);
         tracing::info!("pipeline: filming complete");
         dump_if_env("SPEKTRAFILM_DUMP_FILM_DENSITY", &filmed);
 
         if self.params.io.scan_film {
             let t = Instant::now();
             let result = stages::scanning::process(
-                &filmed,
+                filmed,
                 &self.film,
                 &self.params,
                 backend,
@@ -537,7 +533,7 @@ impl Pipeline {
         } else {
             let t = Instant::now();
             let printed = stages::printing::process_with_calibration(
-                &filmed,
+                filmed,
                 &self.film,
                 &self.print,
                 &self.params,
@@ -548,12 +544,11 @@ impl Pipeline {
                 color_ref.printing_exposure_correction,
             );
             print_stage_timing(stage_timings, "printing", t);
-            drop(filmed);
             tracing::info!("pipeline: printing complete");
             dump_if_env("SPEKTRAFILM_DUMP_PRINT_DENSITY", &printed);
             let t = Instant::now();
             let result = stages::scanning::process(
-                &printed,
+                printed,
                 &self.print,
                 &self.params,
                 backend,
@@ -578,7 +573,10 @@ impl Pipeline {
         if self.tc_lut.is_none() && self.mallett_core.is_none() {
             return None;
         }
-        tracing::info!(backend = backend.name(), "pipeline: borrowed resident start");
+        tracing::info!(
+            backend = backend.name(),
+            "pipeline: borrowed resident start"
+        );
         let color_ref = crate::color_reference::ColorReference::compute(
             &self.film,
             &self.print,
