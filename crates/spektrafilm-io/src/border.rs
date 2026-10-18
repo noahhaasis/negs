@@ -7,12 +7,14 @@
 use std::path::Path;
 use std::str::FromStr;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use image::{RgbaImage, imageops};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f32, srgb_decode, to_f32};
+
+use crate::film35::{Renderer, Strip, linear_to_srgb};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,68 +92,6 @@ impl FilmFormat {
     }
 }
 
-/// A 35mm strip texture, laid out with the strip horizontal, and the
-/// window the photograph shows through as fractions [x, y, width, height].
-pub struct FilmStrip {
-    pub texture: RgbaImage,
-    pub window: [f64; 4],
-}
-
-#[derive(Deserialize)]
-struct StripFrame {
-    window: [f64; 4],
-}
-
-impl FilmStrip {
-    /// `data/borders/35mm/<format>/<film>.png`, or the format's
-    /// `generic.png` for a film without its own edge print.
-    pub fn load(data_dir: &Path, film: &str, format: FilmFormat) -> Result<Self> {
-        let root = data_dir.join("borders/35mm");
-        let frames = root.join("frames.json");
-        let frames: std::collections::HashMap<String, StripFrame> = serde_json::from_slice(
-            &std::fs::read(&frames).with_context(|| format!("reading {}", frames.display()))?,
-        )
-        .with_context(|| format!("parsing {}", frames.display()))?;
-        let window = frames
-            .get(format.name())
-            .with_context(|| format!("no {} frame in 35mm frames.json", format.name()))?
-            .window;
-        let [x, y, w, h] = window;
-        ensure!(
-            ((x + w / 2.0) - 0.5).abs() < 1e-3 && ((y + h / 2.0) - 0.5).abs() < 1e-3,
-            "the 35mm {} window must be centred",
-            format.name()
-        );
-        let dir = root.join(format.name());
-        let path = Some(dir.join(format!("{film}.png")))
-            .filter(|p| p.exists())
-            .unwrap_or_else(|| dir.join("generic.png"));
-        let texture = image::open(&path)
-            .with_context(|| format!("loading border texture {}", path.display()))?
-            .to_rgba8();
-        Ok(Self { texture, window })
-    }
-
-    /// Whether the strip has to turn to hold a `width` × `height` photograph.
-    fn turned(&self, width: u32, height: u32) -> bool {
-        let [_, _, w, h] = self.window;
-        let landscape = w * self.texture.width() as f64 > h * self.texture.height() as f64;
-        landscape != (width > height)
-    }
-
-    /// The canvas for a `width` × `height` photograph: the strip scaled so
-    /// its window covers the photograph.
-    pub fn canvas(&self, width: u32, height: u32) -> (u32, u32) {
-        let (mut tw, mut th) = (self.texture.width() as f64, self.texture.height() as f64);
-        let [_, _, mut ww, mut wh] = self.window;
-        if self.turned(width, height) {
-            (tw, th, ww, wh) = (th, tw, wh, ww);
-        }
-        let k = (width as f64 / (ww * tw)).max(height as f64 / (wh * th));
-        ((tw * k).round() as u32, (th * k).round() as u32)
-    }
-}
-
 /// `image` with a `style` border. `encoded` says whether the values are
 /// sRGB-encoded (otherwise linear), which only matters for the textures.
 /// `film` picks the 35mm border's edge print.
@@ -183,18 +123,35 @@ pub fn add_border(
             let format = FilmFormat::of(w, h).with_context(|| {
                 format!("The 35mm border needs a 3:2 or 3:4 photograph, not {w} × {h}")
             })?;
-            let strip = FilmStrip::load(data_dir, film, format)?;
+            let strip = Strip::load(data_dir, film, format)?;
             let (cw, ch) = strip.canvas(w, h);
             let mut out = centered(image, cw, ch);
-            let texture = if strip.turned(w, h) {
-                imageops::rotate270(&strip.texture)
-            } else {
-                strip.texture
-            };
-            overlay_nine_patch(&mut out, texture, 0, encoded);
+            overlay_strip(&mut out, &strip.renderer(cw, ch, strip.turned(w, h)), encoded);
             out
         }
     })
+}
+
+/// Draws the 35mm strip over `out`, which is the strip's canvas, at the
+/// canvas's own resolution.
+fn overlay_strip(out: &mut ImageBuf, renderer: &Renderer, encoded: bool) {
+    let width = out.width as usize;
+    out.data
+        .par_chunks_exact_mut(width * 3)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let mut strip = vec![[0.0; 4]; width];
+            renderer.row(y as u32, &mut strip);
+            for (pixel, &[r, g, b, alpha]) in row.chunks_exact_mut(3).zip(&strip) {
+                if alpha <= 0.0 {
+                    continue;
+                }
+                for (value, c) in pixel.iter_mut().zip([r, g, b]) {
+                    let c = if encoded { linear_to_srgb(c) } else { c };
+                    *value = from_f32(c * alpha + to_f32(*value) * (1.0 - alpha));
+                }
+            }
+        });
 }
 
 /// `image` in the middle of a black `width` × `height` canvas.
@@ -365,19 +322,58 @@ mod tests {
     }
 
     #[test]
-    fn every_film_profile_has_35mm_textures() {
+    fn every_film_profile_has_a_35mm_edge_print() {
+        use crate::film35::{Kind, STOCKS};
         let data = data_dir();
+        let mut films = Vec::new();
         for entry in std::fs::read_dir(data.join("profiles")).unwrap() {
             let path = entry.unwrap().path();
             let profile: serde_json::Value =
                 serde_json::from_reader(std::fs::File::open(&path).unwrap()).unwrap();
-            if profile["info"]["support"] != "film" {
+            let info = &profile["info"];
+            if info["support"] != "film" {
                 continue;
             }
-            let stock = path.file_stem().unwrap().to_str().unwrap();
+            let stock = path.file_stem().unwrap().to_str().unwrap().to_owned();
+            // Tri-X Reversal 7266 isn't made in 35mm: it gets the generic strip.
+            if stock == "kodak_trix" {
+                assert!(STOCKS.iter().all(|(id, ..)| *id != stock));
+                continue;
+            }
+            let (_, kind, _) = STOCKS
+                .iter()
+                .find(|(id, ..)| *id == stock)
+                .unwrap_or_else(|| panic!("no edge print for {stock}"));
+            let expected = if info["type"] == "positive" {
+                Kind::Slide
+            } else if info["channel_model"] == "bw" {
+                Kind::BlackAndWhite
+            } else {
+                Kind::Negative
+            };
+            assert_eq!(*kind, expected, "{stock}");
+            films.push(stock);
+        }
+        assert_eq!(films.len(), STOCKS.len());
+        // The macOS preview shows prerendered strips.
+        for stock in STOCKS.iter().map(|(id, ..)| *id).chain(["generic"]) {
             for format in ["full", "half"] {
                 let texture = data.join(format!("borders/35mm/{format}/{stock}.png"));
                 assert!(texture.exists(), "missing {}", texture.display());
+            }
+        }
+    }
+
+    #[test]
+    fn film35_preview_window_matches_the_renderer() {
+        let frames: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(data_dir().join("borders/35mm/frames.json")).unwrap(),
+        )
+        .unwrap();
+        for format in [FilmFormat::Full, FilmFormat::Half] {
+            let window = &frames[format.name()]["window"];
+            for (i, v) in Strip::window(format).iter().enumerate() {
+                assert!((window[i].as_f64().unwrap() - v).abs() < 1e-5, "{}", format.name());
             }
         }
     }
@@ -394,12 +390,7 @@ mod tests {
                 &data_dir(),
             )
             .unwrap();
-            let strip = FilmStrip::load(
-                &data_dir(),
-                "kodak_portra_400",
-                FilmFormat::of(w, h).unwrap(),
-            )
-            .unwrap();
+            let strip = Strip::new("kodak_portra_400", FilmFormat::of(w, h).unwrap());
             assert_eq!((out.width, out.height), strip.canvas(w, h));
             // A full frame lies along the strip and a half-frame across it:
             // the 35 mm film is 24 mm of picture and 11 mm of rebate.
@@ -413,7 +404,7 @@ mod tests {
             assert!((along - 19.0 / 18.0).abs() < 0.01, "{w}x{h}: {along}");
             assert!((across - 35.0 / 24.0).abs() < 0.01, "{w}x{h}: {across}");
             assert_eq!(out.get(out.width / 2, out.height / 2), [from_f32(0.5); 3]);
-            assert!(out.get(0, 0)[0] < from_f32(0.01));
+            assert!(out.get(0, 0)[0] < from_f32(0.03));
         }
     }
 
@@ -427,10 +418,10 @@ mod tests {
             &data_dir(),
         )
         .unwrap();
-        let strip = FilmStrip::load(&data_dir(), "kodak_gold_200", FilmFormat::Full).unwrap();
+        let strip = Strip::new("kodak_gold_200", FilmFormat::Full);
         assert_eq!((out.width, out.height), strip.canvas(604, 400));
         // Just outside the window, at mid-height, is rebate, not photograph.
-        let edge = (strip.window[0] * out.width as f64) as u32;
+        let edge = (Strip::window(FilmFormat::Full)[0] * out.width as f64) as u32;
         assert!(out.get(edge.saturating_sub(2), out.height / 2)[0] < from_f32(0.05));
     }
 

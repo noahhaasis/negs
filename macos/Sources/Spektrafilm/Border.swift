@@ -64,7 +64,7 @@ enum BorderStyle: String, CaseIterable, Identifiable {
 struct BorderSettings: Equatable {
     var enabled = false
     var style = BorderStyle.white
-    var export = false
+    var export = true
 
     /// The border around a photograph of `size`, if the style fits it.
     func shown(for size: CGSize) -> BorderStyle? { enabled && style.fits(size) ? style : nil }

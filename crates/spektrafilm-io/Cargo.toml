@@ -15,7 +15,7 @@ rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rawler = "0.8"
+ab_glyph = "0.2.32"
 
 [dev-dependencies]
-ab_glyph = "0.2.32"
 serde_json.workspace = true
