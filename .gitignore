@@ -14,3 +14,7 @@ AGENTS.md
 /*.tif
 /*.tiff
 /*.jpg
+
+# SwiftPM local build and IDE state
+macos/.build/
+macos/.swiftpm/

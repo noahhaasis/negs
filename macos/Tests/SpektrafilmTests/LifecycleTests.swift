@@ -1,0 +1,213 @@
+import AppKit
+import SwiftUI
+import XCTest
+@testable import SpektrafilmApp
+
+@MainActor final class LifecycleTests: XCTestCase {
+    private func paths() -> EnginePaths {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return EnginePaths(helper: root.appendingPathComponent("target/release/spektrafilm-native"), exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: root.appendingPathComponent("data"))
+    }
+
+    func testLatestEditWinsAndUndoRestoresParameters() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths())
+        XCTAssertTrue(model.ready, model.error ?? "Engine did not start")
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        undo.beginUndoGrouping()
+        model.set("camera.exposure_compensation_ev", .number(1.5))
+        undo.endUndoGrouping()
+        undo.undo()
+        XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(0))
+        undo.redo()
+        XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
+        model.undoManager = nil
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        model.open(fixture)
+        try await waitUntil { model.rendering }
+        // Change state while the first request is in flight. Only the latest
+        // working size and turn may become saveable or replace the canvas.
+        model.set("io.upscale_factor", .number(0.5))
+        model.rotate()
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.imageSize, CGSize(width: 48, height: 32))
+        XCTAssertEqual(model.imageRotation, 1)
+        XCTAssertTrue(model.canSave)
+        model.chooseFilm("kodak_trix")
+        XCTAssertTrue(model.value("io.scan_film").bool)
+        model.chooseFilm("kodak_gold_200")
+        XCTAssertFalse(model.value("io.scan_film").bool)
+        XCTAssertEqual(model.state.paper, "kodak_portra_endura")
+    }
+
+    func testCancelExportPreservesExistingDestinationAndRemovesStaging() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fake = directory.appendingPathComponent("exporter")
+        try Data("#!/bin/sh\nexec /bin/sleep 30\n".utf8).write(to: fake)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+        let destination = directory.appendingPathComponent("existing.png")
+        let original = Data("original photograph".utf8)
+        try original.write(to: destination)
+        let job = ExportJob()
+        let scratch = try ScratchSpace(root: directory.appendingPathComponent("scratch"))
+        let task = Task {
+            try await job.run(paths: EnginePaths(helper: fake, exporter: fake, data: directory), scratch: scratch, source: directory.appendingPathComponent("source.png"), destination: destination, state: EditState())
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        job.cancel()
+        do { try await task.value; XCTFail("Expected cancellation") } catch is CancellationError {} catch { XCTFail(error.localizedDescription) }
+        XCTAssertEqual(try Data(contentsOf: destination), original)
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".spektrafilm-") })
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: scratch.directory.path), [])
+    }
+
+    func testNextLaunchRemovesWhatACrashLeftBehind() throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = directory.appendingPathComponent("scratch")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+        let running = try ScratchSpace(root: root)
+        // A crashed launch: an unlocked lock file, a preview buffer, and an
+        // export whose exporter is still running and staging beside its destination.
+        let crashed = root.appendingPathComponent("crashed", isDirectory: true)
+        let job = crashed.appendingPathComponent("export-1")
+        try fm.createDirectory(at: job, withIntermediateDirectories: true)
+        fm.createFile(atPath: root.appendingPathComponent("crashed.lock").path, contents: nil)
+        try Data(count: 1024).write(to: crashed.appendingPathComponent("preview.rgba"))
+        let staging = directory.appendingPathComponent(".spektrafilm-1.png")
+        try Data("partial".utf8).write(to: staging)
+        let unrelated = directory.appendingPathComponent("photo.png")
+        try Data("keep".utf8).write(to: unrelated)
+        let exporter = Process()
+        exporter.executableURL = URL(fileURLWithPath: "/bin/sleep"); exporter.arguments = ["30"]
+        try exporter.run()
+        defer { if exporter.isRunning { exporter.terminate() } }
+        try ExportRecord(staging: staging.path, exporter: ExportRecord.resolvedPath(exporter.executableURL!), pid: exporter.processIdentifier).write(to: job)
+        let other = crashed.appendingPathComponent("export-2")
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        try ExportRecord(staging: unrelated.path, exporter: "/bin/sleep").write(to: other)
+
+        let next = try ScratchSpace(root: root)
+        exporter.waitUntilExit()
+        XCTAssertEqual(exporter.terminationReason, .uncaughtSignal)
+        XCTAssertFalse(fm.fileExists(atPath: crashed.path))
+        XCTAssertFalse(fm.fileExists(atPath: staging.path))
+        XCTAssertTrue(fm.fileExists(atPath: unrelated.path), "Only Spektrafilm staging files are removed")
+        XCTAssertTrue(fm.fileExists(atPath: running.directory.path), "A folder still in use is kept")
+        running.remove(); next.remove()
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: root.path), [])
+    }
+
+    func testNativeWindowSnapshot() async throws {
+        guard let folder = ProcessInfo.processInfo.environment["SPEKTRAFILM_UI_SNAPSHOTS"] else { throw XCTSkip("Set SPEKTRAFILM_UI_SNAPSHOTS for the window smoke test") }
+        _ = NSApplication.shared
+        let model = EditorModel()
+        await model.start(paths: paths())
+        XCTAssertTrue(model.ready, model.error ?? "No engine")
+        let fixture = try makeFixture()
+        model.open(fixture)
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
+        let controller = NSHostingController(rootView: EditorWindow(model: model))
+        let window = NSWindow(contentViewController: controller)
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 1320, height: 860))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); model.shutdown(); try? FileManager.default.removeItem(at: fixture) }
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            try await Task.sleep(nanoseconds: 400_000_000)
+            let view = window.contentView!
+            view.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: folder).appendingPathComponent("\(name).png"))
+            // Layer-backed system materials don't rasterize through cacheDisplay.
+            // Opt in to a window-only capture when screen recording is available.
+            if ProcessInfo.processInfo.environment["SPEKTRAFILM_CAPTURE_WINDOW"] == "1" {
+                guard CGPreflightScreenCaptureAccess() else {
+                    throw XCTSkip("Window capture requires screen-recording permission; native view smoke test completed")
+                }
+                let capture = Process()
+                capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), "\(folder)/\(name)-window.png"]
+                try capture.run(); capture.waitUntilExit()
+                XCTAssertEqual(capture.terminationStatus, 0)
+            }
+        }
+    }
+
+    /// Drags a slider at 60 Hz for real while the window is on screen, and
+    /// measures how long the main thread goes without servicing the run loop.
+    func testSliderDragIsOneUndoStepAndSnapsToSteps() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths())
+        XCTAssertTrue(model.ready, model.error ?? "Engine did not start")
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        undo.beginUndoGrouping()
+        model.beginInteraction()
+        for value in [1.1, 1.37, 2.05] { model.set("enlarger.print_exposure", .number(value)) }
+        model.endInteraction()
+        undo.endUndoGrouping()
+        XCTAssertEqual(model.value("enlarger.print_exposure"), .number(2.05))
+        XCTAssertTrue(model.isModified("enlarger.print_exposure"))
+        undo.undo()
+        XCTAssertFalse(model.isModified("enlarger.print_exposure"), "One undo reverts the whole drag")
+        XCTAssertFalse(undo.canUndo)
+        // Continuous sliders snap to the engine's steps; integer fields stay integral.
+        XCTAssertEqual(EditorModel.snap(2.6, to: 1...5, step: 1), 3)
+        XCTAssertEqual(EditorModel.snap(0.30000001, to: 0...1, step: 0.01), 0.3)
+        XCTAssertEqual(EditorModel.snap(9, to: 0.1...5, step: 0.01), 5)
+        XCTAssertEqual(EditorModel.snap(-1, to: 0.1...5, step: 0.01), 0.1)
+        XCTAssertEqual(EditorModel.snap(1667.4, to: 1667...25000, step: 1), 1667)
+    }
+
+    func testCanvasRotatesClockwiseAndFillsItsFrame() throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 3, height: 2, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        let view = PhotographView(frame: .zero)
+        view.show(image, size: CGSize(width: 300, height: 200), rotation: 1)
+        view.setFrameSize(NSSize(width: 200, height: 300))
+        view.layoutSubtreeIfNeeded()
+        let photo = try XCTUnwrap(view.layer?.sublayers?.first)
+        for (actual, expected) in zip([photo.frame.minX, photo.frame.minY, photo.frame.width, photo.frame.height], [0.0, 0, 200, 300]) {
+            XCTAssertEqual(actual, expected, accuracy: 0.001)
+        }
+        // AppKit layers are y-up, so a negative angle turns clockwise like the exporter.
+        let corner = photo.convert(CGPoint(x: 0, y: 200), to: view.layer) // the photograph's top-left
+        XCTAssertEqual(corner.x, 200, accuracy: 0.001)
+        XCTAssertEqual(corner.y, 300, accuracy: 0.001)
+        XCTAssertTrue(photo.contents as AnyObject === image)
+    }
+
+    private func waitUntil(_ predicate: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(20)
+        while !predicate(), Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(predicate(), "Timed out waiting for image engine")
+    }
+
+    private func makeFixture() throws -> URL {
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 96 * 3, bitsPerPixel: 24)!
+        for y in 0..<64 {
+            for x in 0..<96 {
+                let index = y * bitmap.bytesPerRow + x * 3
+                bitmap.bitmapData![index] = UInt8(x * 255 / 96)
+                bitmap.bitmapData![index + 1] = UInt8(y * 255 / 64)
+                bitmap.bitmapData![index + 2] = 100
+            }
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("spektrafilm-fixture-\(UUID().uuidString).png")
+        try bitmap.representation(using: .png, properties: [:])!.write(to: url)
+        return url
+    }
+}

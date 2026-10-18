@@ -12,21 +12,25 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 # Keep the binary deployment target consistent with Info.plist.
-export MACOSX_DEPLOYMENT_TARGET=12.0
+export MACOSX_DEPLOYMENT_TARGET=14.0
 
-cargo build --locked --release -p spektrafilm-gui --target-dir "$BUILD_TARGET_DIR"
+cargo build --locked --release -p spektrafilm-native --target-dir "$BUILD_TARGET_DIR"
+swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release
+swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --show-bin-path)"
 cargo build --locked --release -p spektrafilm-cli --bin spektrafilm --target-dir "$BUILD_TARGET_DIR"
 cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 --target-dir "$BUILD_TARGET_DIR"
 
 rm -rf "$DIST_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
-cp "$BUILD_TARGET_DIR/release/spektrafilm-gui" "$APP_BUNDLE/Contents/MacOS/spektrafilm-gui"
+cp "$swift_bin_dir/SpektrafilmApp" "$APP_BUNDLE/Contents/MacOS/SpektrafilmApp"
+cp "$BUILD_TARGET_DIR/release/spektrafilm-native" "$APP_BUNDLE/Contents/MacOS/spektrafilm-native"
 cp "$BUILD_TARGET_DIR/release/spektrafilm" "$APP_BUNDLE/Contents/MacOS/spektrafilm"
 cp "$BUILD_TARGET_DIR/release/spektrafilm-f64" "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
 cp -R data "$APP_BUNDLE/Contents/Resources/data"
 cp LICENSE "$APP_BUNDLE/Contents/Resources/LICENSE.txt"
-chmod +x "$APP_BUNDLE/Contents/MacOS/spektrafilm-gui" \
+chmod +x "$APP_BUNDLE/Contents/MacOS/SpektrafilmApp" \
+    "$APP_BUNDLE/Contents/MacOS/spektrafilm-native" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
 
@@ -41,7 +45,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key>
   <string>Spektrafilm</string>
   <key>CFBundleExecutable</key>
-  <string>spektrafilm-gui</string>
+  <string>SpektrafilmApp</string>
   <key>CFBundleIconFile</key>
   <string>spektrafilm.icns</string>
   <key>CFBundleIdentifier</key>
@@ -57,7 +61,15 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<'PLIST'
   <key>CFBundleVersion</key>
   <string>0.1.2</string>
   <key>LSMinimumSystemVersion</key>
-  <string>12.0</string>
+  <string>14.0</string>
+  <key>CFBundleDocumentTypes</key>
+  <array><dict>
+    <key>CFBundleTypeName</key><string>Photograph</string>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+    <key>LSHandlerRank</key><string>Alternate</string>
+    <key>LSItemContentTypes</key>
+    <array><string>public.png</string><string>public.tiff</string><string>public.jpeg</string><string>public.camera-raw-image</string></array>
+  </dict></array>
   <key>NSHighResolutionCapable</key>
   <true/>
 </dict>
@@ -88,7 +100,13 @@ spektrafilm-rs macOS
 
 Unzip the download, drag Spektrafilm.app to Applications, and double-click it.
 No Rust, Homebrew, or separate data download is needed.
-This build requires macOS 12 or newer; see BUILD-INFO.txt for its CPU architecture.
+The native SwiftUI interface requires macOS 14 or newer; see BUILD-INFO.txt for its CPU architecture.
+
+Native interface:
+- Standard macOS menus, toolbar, adjustment inspector, and open/save dialogs.
+- Pinch to zoom, scroll or drag to pan, double-click to fit.
+- Cmd-O opens, Cmd-S saves the preview, Shift-Cmd-E exports at f64 precision.
+- Cmd-0 fits, Cmd-1 shows actual size, Cmd-R rotates, Option-Cmd-I toggles adjustments.
 
 Backends:
 - macOS uses the WGSL/wgpu backend through Metal by default.
@@ -125,9 +143,9 @@ README
 
 # Snapshot the actual working source, including uncommitted port changes.
 # Exclude build products and local files unrelated to reproducing the app.
-COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' \
+COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='.build' --exclude='.swiftpm' \
     -czf "$DIST_DIR/SOURCE.tar.gz" Cargo.toml Cargo.lock LICENSE README.md \
-    crates data assets scripts docs .github
+    crates macos data assets scripts docs .github
 
 codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"

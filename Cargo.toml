@@ -8,6 +8,7 @@ members = [
     "crates/spektrafilm-io",
     "crates/spektrafilm-cli",
     "crates/spektrafilm-gui",
+    "crates/spektrafilm-native",
 ]
 
 [workspace.package]

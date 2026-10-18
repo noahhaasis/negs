@@ -217,7 +217,7 @@ fn cmd_process(
     let t = Instant::now();
     let image = spektrafilm_io::load_image_with_wb(
         input,
-        spektrafilm_io::Formats::TiffPngRaw,
+        spektrafilm_io::Formats::Any,
         params.io.raw_white_balance,
     )?;
     eprintln!(

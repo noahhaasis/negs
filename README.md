@@ -24,7 +24,11 @@ Requires Rust stable (≥ 1.89) and the standard system toolchain.
 ```bash
 git clone <this-repo> && cd spektrafilm-rs
 
-# GUI (wgpu/Metal preview, eframe)
+# Native macOS app (macOS 14+, Xcode / Swift 5.9+)
+bash scripts/package_macos_app.sh
+open dist/spektrafilm-macos/Spektrafilm.app
+
+# Cross-platform GUI (wgpu preview, eframe; Windows/Linux or legacy macOS)
 cargo build --release -p spektrafilm-gui
 
 # f32 CLI — fast batch processor, defaults to GPU backend
@@ -50,6 +54,17 @@ WGSL is the default GPU backend and can be selected explicitly with `SPEKTRAFILM
 ## Usage
 
 ### GUI
+
+The macOS package uses a native **SwiftUI and AppKit interface** with a standard
+toolbar, adjustment inspector, menus, undo/redo, native file dialogs, and
+color-managed image display. Pinch to zoom, scroll or drag to pan, and double-click
+to fit. Use **⌘O** to open, **⌘S** to save the preview, **⇧⌘E** for f64 export,
+**⌘R** to rotate, **⌘0 / ⌘1** for fit / actual size, and **⌥⌘I** to toggle adjustments.
+Export remains cancellable and uses the original image at the selected working
+resolution. All existing adjustment groups are available in the inspector.
+
+See the [native UI plan, architecture, and development guide](docs/native-macos-ui.md).
+The cross-platform egui UI remains available with:
 
 ```bash
 ./target/release/spektrafilm-gui [optional/path/to/image.orf]
@@ -144,6 +159,8 @@ GPU preview path uses wgpu compute shaders (`crates/spektrafilm-shaders/wgsl/`).
 
 ## Layout
 
+For an interactive, source-linked walkthrough of RAW decoding, stock simulation, printing, scanning, and export, open [the Anatomy explainer](docs/anatomy/index.html) in a browser. Its charts use samples from the bundled profile JSON; regenerate it with `node docs/anatomy/build.mjs` after profile changes.
+
 ```
 crates/
   spektrafilm-math/    f64 reference math (spectral, interp, PCHIP, RNG, vForce bindings)
@@ -155,6 +172,8 @@ crates/
                        with the source's camera EXIF, shared by the CLI and GUI
   spektrafilm-cli/     `spektrafilm` (process, list-profiles, gen-lut) + `decode_raw_gui`
   spektrafilm-gui/     egui/eframe preview (wgpu renderer, Metal-backed on macOS)
+  spektrafilm-native/  persistent image-engine helper for the native macOS app
+macos/                SwiftUI interface, AppKit image canvas, and Swift tests
 data/
   profiles/            film + paper JSON profiles (spectral sensitivities, density curves, etc.)
   luts/                Hanatos2025 spectral basis + standard observer CMFs (.npy)
