@@ -220,8 +220,9 @@ final class EngineClient: @unchecked Sendable {
     private var cancelled = false
     private var temporaryFiles: [URL] = []
 
-    /// Develops `source` at full resolution with `state`, adding `border`.
-    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, border: BorderStyle?) async throws {
+    /// Develops `source` at full resolution with `state`, cropping and
+    /// straightening to `crop`, and adding `border`.
+    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderStyle?) async throws {
         let fm = FileManager.default
         let work = scratch.directory.appendingPathComponent("export-\(UUID().uuidString)")
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
@@ -240,6 +241,10 @@ final class EngineClient: @unchecked Sendable {
         child.executableURL = paths.exporter
         child.arguments = ["process", source.path, "-o", staging.path, "--film", state.film, "--paper", state.paper, "--params", params.path, "--data-dir", paths.data.path]
         if state.params["io.scan_film"].bool { child.arguments!.append("--scan-film") }
+        if let crop {
+            let r = crop.rect
+            child.arguments! += ["--crop", [r.minX, r.minY, r.width, r.height, crop.angle].map { "\(Double($0))" }.joined(separator: ",")]
+        }
         if let border { child.arguments! += ["--border", border.rawValue] }
         var environment = ProcessInfo.processInfo.environment
         environment["SPEKTRAFILM_BACKEND"] = "cpu"; child.environment = environment

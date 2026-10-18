@@ -19,6 +19,9 @@ import UniformTypeIdentifiers
     private(set) var paper = EditState().paper
     private(set) var limitsPreview = false
     private(set) var border = BorderSettings()
+    private(set) var crop = CropSettings()
+    /// The crop being drawn; nil unless cropping.
+    private(set) var cropSession: CropSession?
     /// The film border's frame, loaded from the engine's data folder.
     private(set) var filmTexture: CGImage?
     /// The 35mm strip for the film and the photograph's format, loaded while
@@ -70,9 +73,13 @@ import UniformTypeIdentifiers
     var paperGroups: [StockGroup] { StockGroup.papers(papers) }
     var filmName: String { films.first { $0.id == film }?.name ?? film }
     var paperName: String { papers.first { $0.id == paper }?.name ?? paper }
-    var canSave: Bool { previewCurrent && image != nil && !rendering && !saving }
-    /// The shown photograph's size, before rotation; zero before one opens.
-    var photoSize: CGSize { image != nil ? imageSize : placeholderSize }
+    var canSave: Bool { previewCurrent && image != nil && !rendering && !saving && !cropping }
+    var cropping: Bool { cropSession != nil }
+    /// The shown photograph's size after cropping, before rotation; zero
+    /// before one opens. Borders fit this size.
+    var photoSize: CGSize { crop.size(of: image != nil ? imageSize : placeholderSize) }
+    /// The developed photograph as shown, uncropped, after rotation.
+    private var shownImageSize: CGSize { imageRotation % 2 != 0 ? CGSize(width: imageSize.height, height: imageSize.width) : imageSize }
     /// A slider is being dragged; its edits share one undo step.
     var interacting: Bool { interactionStart != nil }
 
@@ -146,6 +153,7 @@ import UniformTypeIdentifiers
         if paper != state.paper { paper = state.paper }
         if limitsPreview != state.limitPreview { limitsPreview = state.limitPreview }
         if border != state.border { border = state.border }
+        if crop != state.crop { crop = state.crop }
         updateFilmStrip()
     }
     func defaultValue(_ path: String) -> JSONValue { defaults[path] }
@@ -217,8 +225,9 @@ import UniformTypeIdentifiers
             var next = self.state; next.border[keyPath: setting] = $0; self.apply(next, action: "Change Border")
         })
     }
-    /// Keeps the border, like the film, paper, and rotation.
+    /// Keeps the border and crop, like the film, paper, and rotation.
     func reset() {
+        guard !cropping else { return }
         var next = state; next.params = defaults; next.limitPreview = false
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
@@ -244,10 +253,40 @@ import UniformTypeIdentifiers
         undoManager?.setActionName(action)
     }
     func rotate() {
-        set("io.rotate_cw", .number(Double((Int(value("io.rotate_cw").double) + 1) % 4)))
-        zoom(fit: true)
+        let turned = JSONValue.number(Double((Int(value("io.rotate_cw").double) + 1) % 4))
+        if cropping {
+            // Turns with the crop: one undo step on Done, undone by Cancel.
+            var next = state; next.params["io.rotate_cw"] = turned; replaceState(next)
+        } else {
+            set("io.rotate_cw", turned)
+            zoom(fit: true)
+        }
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
+
+    // MARK: Cropping
+
+    /// Shows the whole developed photograph, without the border, to crop it.
+    func beginCrop() {
+        guard !cropping, image != nil, imageSize != .zero else { return }
+        cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation)
+    }
+    /// Done applies the crop, and any rotation while cropping, as one undo
+    /// step. Cancel restores the rotation and keeps the previous crop.
+    func endCrop(apply: Bool) {
+        guard let session = cropSession else { return }
+        cropSession = nil
+        let rotation = session.start.params["io.rotate_cw"]
+        if apply {
+            var previous = state; previous.crop = session.start.crop; previous.params["io.rotate_cw"] = rotation
+            var next = state; next.crop = session.settings
+            if next != previous { registerUndo(restoring: previous, action: "Crop") }
+            replaceState(next)
+        } else if state.params["io.rotate_cw"] != rotation {
+            var next = state; next.params["io.rotate_cw"] = rotation; replaceState(next)
+        }
+        zoom(fit: true)
+    }
 
     // MARK: Opening
 
@@ -275,10 +314,11 @@ import UniformTypeIdentifiers
             return
         }
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
-        interactionStart = nil
+        interactionStart = nil; cropSession = nil
         sourceGeneration += 1
         let generation = sourceGeneration
         state.params["io.rotate_cw"] = .number(0)
+        state.crop = CropSettings()
         imageRotation = 0
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()
@@ -368,6 +408,7 @@ import UniformTypeIdentifiers
             imageSize = CGSize(width: result["output_width"].double, height: result["output_height"].double)
             imageRotation = Int(snapshot.params["io.rotate_cw"].double)
             image = developed; placeholder = nil
+            cropSession?.update(photo: shownImageSize, rotation: imageRotation)
             updateFilmStrip()
             isRaw = result["raw"].bool
             if revision == currentRevision {
@@ -436,13 +477,14 @@ import UniformTypeIdentifiers
     // MARK: Saving
 
     func savePanel(export: Bool) {
-        guard let source, export ? !exporting : canSave else { return }
+        guard let source, !cropping, export ? !exporting : canSave else { return }
         let panel = NSSavePanel()
         panel.title = export ? "Export Photograph" : "Save Preview"
         panel.canCreateDirectories = true
         let picker = FormatPicker(panel: panel, selected: OutputFormat.last)
         panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).\(picker.format.type.preferredFilenameExtension ?? "png")"
         panel.message = export ? "Render at reference precision using the current working resolution." : "Save the current preview at its rendered resolution."
+        if state.crop.cropped { panel.message += " Crops the photograph." }
         if let border = state.border.exported(for: photoSize) { panel.message += " Adds the \(border.title.lowercased()) border." }
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
@@ -470,7 +512,11 @@ import UniformTypeIdentifiers
         defer { saving = false }
         do {
             var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path)]
-            if let border = state.border.exported(for: imageSize) { command["border"] = .string(border.rawValue) }
+            if state.crop.cropped {
+                let r = state.crop.rect
+                command["crop"] = .object(["x": .number(r.minX), "y": .number(r.minY), "width": .number(r.width), "height": .number(r.height), "angle": .number(state.crop.angle)])
+            }
+            if let border = state.border.exported(for: photoSize) { command["border"] = .string(border.rawValue) }
             _ = try await engine.request(command)
             status = "Saved \(url.lastPathComponent)"
         } catch { report(error) }
@@ -482,7 +528,7 @@ import UniformTypeIdentifiers
         defer { exporting = false; exportJob = nil }
         do {
             try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: state,
-                              border: state.border.exported(for: photoSize))
+                              crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: photoSize))
             status = "Exported \(url.lastPathComponent)"
         } catch is CancellationError { status = "Export cancelled" }
         catch { report(error) }

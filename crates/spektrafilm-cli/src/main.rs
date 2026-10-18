@@ -56,7 +56,12 @@ enum Commands {
         /// before sRGB encoding/clipping. Used for bit-exact parity comparison.
         #[arg(long)]
         raw_out: Option<PathBuf>,
-        /// Add a border around the result (after rotation).
+        /// Crop the result to x,y,width,height[,angle]: fractions of the
+        /// unrotated image with the origin top left (before rotation), then
+        /// degrees to straighten it clockwise.
+        #[arg(long)]
+        crop: Option<spektrafilm_io::crop::Crop>,
+        /// Add a border around the result (after rotation and crop).
         #[arg(long, value_parser = ["white", "film", "keyline", "35mm"])]
         border: Option<String>,
         /// Run the pipeline N times in the same process. Each iteration is
@@ -117,6 +122,7 @@ fn main() -> Result<()> {
             raw_temperature,
             raw_tint,
             raw_out,
+            crop,
             border,
             iters,
             data_dir,
@@ -134,6 +140,7 @@ fn main() -> Result<()> {
                 raw_temperature,
                 raw_tint,
                 raw_out.as_deref(),
+                crop,
                 border,
                 iters,
                 &data_dir,
@@ -169,6 +176,7 @@ fn cmd_process(
     raw_temperature: Option<f64>,
     raw_tint: Option<f64>,
     raw_out: Option<&Path>,
+    crop: Option<spektrafilm_io::crop::Crop>,
     border: Option<spektrafilm_io::border::BorderStyle>,
     iters: usize,
     data_dir: &Path,
@@ -270,7 +278,11 @@ fn cmd_process(
         r
     };
 
-    // User rotation from the GUI (post-pipeline, matches the preview).
+    // User crop and rotation from the GUI (post-pipeline, matches the preview).
+    let result = match crop {
+        Some(crop) => crop.apply(&result),
+        None => result,
+    };
     let result = result.rotated_cw(rotate_cw);
     let result = match border {
         Some(style) => {

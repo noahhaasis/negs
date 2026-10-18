@@ -13,6 +13,7 @@
 //! over the source file's camera metadata read by [`read_metadata`].
 
 pub mod border;
+pub mod crop;
 pub mod metadata;
 pub mod save;
 mod white_balance;

@@ -77,6 +77,14 @@ def main():
                 request("save", expect_error=True, render_id=first_id, output=str(saved))
                 request("save", render_id=second_id, output=str(saved))
                 assert struct.unpack(">II", saved.read_bytes()[16:24]) == (24, 32), "Saved rotation must match the UI"
+                # The crop is in the unrotated photograph: the left half, then turned.
+                request("save", render_id=second_id, output=str(saved), crop=dict(x=0, y=0, width=0.5, height=1))
+                assert struct.unpack(">II", saved.read_bytes()[16:24]) == (24, 16), "Saved crop must match the UI"
+                request("save", expect_error=True, render_id=second_id, output=str(saved), crop=dict(x=0.6, y=0, width=0.5, height=1))
+                # Straightened: the sides round (25.6 × 19.2), then the quarter turn.
+                request("save", render_id=second_id, output=str(saved), crop=dict(x=0.1, y=0.1, width=0.8, height=0.8, angle=5))
+                assert struct.unpack(">II", saved.read_bytes()[16:24]) == (19, 26), "Saved straightened crop must match the UI"
+                request("save", expect_error=True, render_id=second_id, output=str(saved), crop=dict(x=0, y=0, width=1, height=1, angle=60))
                 request("render", expect_error=True, **(render_args | {"input": str(work / "missing.png")}))
                 request("catalog")  # Errors leave the process usable.
                 # Explicitly reopening a path must reload an externally changed file.
@@ -102,6 +110,12 @@ def main():
                                env=dict(os.environ, SPEKTRAFILM_BACKEND="cpu"), check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
                 assert struct.unpack(">II", exported.read_bytes()[16:24]) == (12, 16)
+                subprocess.run([args.exporter.resolve(), "process", str(source), "-o", str(exported),
+                                "--film", "kodak_gold_200", "--paper", "kodak_portra_endura", "--crop", "0,0,0.5,1,-2",
+                                "--params", str(export_params), "--data-dir", str(args.data_dir.resolve())],
+                               env=dict(os.environ, SPEKTRAFILM_BACKEND="cpu"), check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                assert struct.unpack(">II", exported.read_bytes()[16:24]) == (12, 8), "Exported crop must match the UI"
                 child.stdin.close()
                 assert child.wait(timeout=10) == 0, "EOF should cleanly release the engine"
                 print(json.dumps({"passed": True, "requests": sequence, "backend": result["backend"], "profiles": len(catalog["profiles"]), "f64_export": True}))

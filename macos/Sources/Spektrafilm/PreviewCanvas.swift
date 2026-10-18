@@ -9,6 +9,7 @@ struct PreviewCanvas: NSViewRepresentable {
     let image: AnyObject
     let size: CGSize
     let rotation: Int
+    let crop: CropSettings
     let border: BorderStyle?
     let filmTexture: CGImage?
     let filmStrip: FilmStrip?
@@ -30,11 +31,15 @@ struct PreviewCanvas: NSViewRepresentable {
 
     func updateNSView(_ scroll: ImageScrollView, context: Context) {
         let photo = scroll.documentView as! PhotographView
-        let displaySize = rotation % 2 != 0 ? CGSize(width: size.height, height: size.width) : size
+        let cropped = crop.size(of: size)
+        let displaySize = rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
         let documentSize = border?.canvas(for: displaySize, strip: filmStrip) ?? displaySize
         let oldSize = photo.frame.size, oldPhotoSize = photo.displaySize
         let commanded = scroll.lastCommand != zoomCommand
-        photo.show(image, size: size, rotation: rotation, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
+        // A different crop (such as an undone one) is a new picture: fit it.
+        let recropped = photo.crop != crop && oldSize.width != 0
+        if recropped { scroll.fitting = true }
+        photo.show(image, size: size, rotation: rotation, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
         if oldSize != documentSize {
             if commanded || scroll.fitting || oldSize.width == 0 {
                 photo.setFrameSize(documentSize)
@@ -48,7 +53,7 @@ struct PreviewCanvas: NSViewRepresentable {
         if commanded {
             scroll.lastCommand = zoomCommand; scroll.fitting = fit
             scroll.applyZoom()
-        } else if oldSize != documentSize, scroll.fitting { scroll.applyZoom() }
+        } else if oldSize != documentSize || recropped, scroll.fitting { scroll.applyZoom() }
     }
 }
 
@@ -110,16 +115,23 @@ final class ImageScrollView: NSScrollView {
 }
 
 final class PhotographView: NSView {
+    /// The crop: it clips the photograph and takes the quarter turns.
+    private let clip = CALayer()
+    /// The whole photograph, straightened inside the crop.
     private let photo = CALayer()
     private var borderLayers: BorderLayers!
     private var image: AnyObject?
     private var size = CGSize.zero
     private var rotation = 0
+    private(set) var crop = CropSettings()
     private var border: BorderStyle?
     private var filmTexture: CGImage?
     private var filmStrip: FilmStrip?
-    /// The photograph's size on the canvas, after rotation.
-    var displaySize: CGSize { rotation % 2 != 0 ? CGSize(width: size.height, height: size.width) : size }
+    /// The photograph's size on the canvas, after cropping and rotation.
+    var displaySize: CGSize {
+        let cropped = crop.size(of: size)
+        return rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
+    }
     override var acceptsFirstResponder: Bool { true }
     override var wantsUpdateLayer: Bool { true }
 
@@ -131,16 +143,19 @@ final class PhotographView: NSView {
         photo.minificationFilter = .trilinear
         photo.magnificationFilter = .linear
         photo.isOpaque = true
-        photo.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull()]
-        layer?.addSublayer(photo)
-        borderLayers = BorderLayers(in: layer!, around: photo)
+        let none = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull()]
+        photo.actions = none; clip.actions = none
+        clip.masksToBounds = true
+        clip.addSublayer(photo)
+        layer?.addSublayer(clip)
+        borderLayers = BorderLayers(in: layer!, around: clip)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ image: AnyObject, size: CGSize, rotation: Int, border: BorderStyle? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
-        guard image !== self.image || size != self.size || rotation != self.rotation
+    func show(_ image: AnyObject, size: CGSize, rotation: Int, crop: CropSettings = CropSettings(), border: BorderStyle? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
+        guard image !== self.image || size != self.size || rotation != self.rotation || crop != self.crop
             || border != self.border || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
-        self.image = image; self.size = size; self.rotation = rotation
+        self.image = image; self.size = size; self.rotation = rotation; self.crop = crop
         self.border = border; self.filmTexture = filmTexture; self.filmStrip = filmStrip
         photo.contents = image
         needsLayout = true
@@ -149,9 +164,15 @@ final class PhotographView: NSView {
     override func layout() {
         super.layout()
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        // The crop's pixels, as the exporter cuts them. Layers are y-up, so
+        // the rectangle's top-left origin flips, and clockwise is negative.
+        let pixels = crop.pixels(in: size)
+        clip.bounds = CGRect(origin: .zero, size: pixels.size)
+        clip.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        clip.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
         photo.bounds = CGRect(origin: .zero, size: size)
-        photo.position = CGPoint(x: bounds.midX, y: bounds.midY)
-        photo.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
+        photo.position = CGPoint(x: size.width / 2 - pixels.minX, y: pixels.height - (size.height / 2 - pixels.minY))
+        photo.setAffineTransform(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180))
         borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
         CATransaction.commit()
     }

@@ -6,7 +6,10 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use spektrafilm_core::{params::RuntimeParams, pipeline::Pipeline, preview::*, profile};
 use spektrafilm_gpu::ComputeBackend;
-use spektrafilm_io::border::{BorderStyle, add_border};
+use spektrafilm_io::{
+    border::{BorderStyle, add_border},
+    crop::Crop,
+};
 use spektrafilm_math::{image::ImageBuf, precision::to_f32};
 use std::{
     io::{BufRead, Write},
@@ -40,6 +43,8 @@ enum Command {
         output: PathBuf,
         #[serde(default)]
         border: Option<BorderStyle>,
+        #[serde(default)]
+        crop: Option<Crop>,
     },
 }
 
@@ -89,6 +94,7 @@ impl Session {
                 render_id,
                 output,
                 border,
+                crop,
             } => {
                 let (id, source, film, rotation, encoded, image) =
                     self.output.as_ref().context("No preview to save")?;
@@ -100,7 +106,13 @@ impl Session {
                     source != &output,
                     "Choose a different output path to preserve the source"
                 );
+                if let Some(crop) = &crop {
+                    crop.validate()?;
+                }
                 let metadata = spektrafilm_io::read_metadata(source);
+                // Crop in the unrotated orientation, then rotate, then add the border.
+                let cropped = crop.map(|crop| crop.apply(image));
+                let image = cropped.as_ref().unwrap_or(image);
                 let rotated =
                     (rotation.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(*rotation));
                 let image = rotated.as_ref().unwrap_or(image);
@@ -349,6 +361,7 @@ mod tests {
                 render_id: 1,
                 output: "unused.png".into(),
                 border: None,
+                crop: None,
             },
         };
         assert!(
