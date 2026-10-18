@@ -1,7 +1,6 @@
 //! Private, serial JSON-lines protocol for the native macOS client.
 //! stdout is protocol-only; diagnostics go to stderr. EOF releases all caches.
 use anyhow::{Context, Result, bail, ensure};
-use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use spektrafilm_core::{params::RuntimeParams, pipeline::Pipeline, preview::*, profile};
@@ -10,12 +9,15 @@ use spektrafilm_io::{
     border::{BorderStyle, add_border},
     crop::Crop,
 };
-use spektrafilm_math::{image::ImageBuf, precision::to_f32};
+use spektrafilm_math::image::ImageBuf;
 use std::{
     io::{BufRead, Write},
     path::{Path, PathBuf},
     time::Instant,
 };
+
+/// EditorModel.readPreview rejects larger preview buffers.
+const DISPLAY_MAX_DIM: usize = 8192;
 
 #[derive(Deserialize)]
 struct Request {
@@ -217,7 +219,8 @@ impl Session {
                 };
                 // Transport raw RGBA, avoiding PNG compression on every slider edit.
                 // Save retains the original float output, independent of this display proxy.
-                let (width, height, bytes) = display_rgba(&output, params.io.output_cctf_encoding);
+                let (width, height, bytes) =
+                    display_rgba(&output, DISPLAY_MAX_DIM, params.io.output_cctf_encoding);
                 std::fs::write(&preview_path, bytes).context("Writing preview buffer")?;
                 let response = json!({
                     "width": width, "height": height, "output_width": output.width, "output_height": output.height,
@@ -254,33 +257,6 @@ fn working_source<'a>(
         *scaled = Some((dimensions, rescale_preview_input_fast(source, dimensions)));
     }
     &scaled.as_ref().unwrap().1
-}
-
-fn display_rgba(image: &ImageBuf, encoded: bool) -> (u32, u32, Vec<u8>) {
-    let scale = (8192.0 / image.width.max(image.height) as f64).min(1.0);
-    let width = (image.width as f64 * scale).round().max(1.0) as u32;
-    let height = (image.height as f64 * scale).round().max(1.0) as u32;
-    let small = (width != image.width || height != image.height)
-        .then(|| rescale_preview_input_fast(image, (width, height)));
-    let display = small.as_ref().unwrap_or(image);
-    let mut bytes = vec![255; width as usize * height as usize * 4];
-    bytes
-        .par_chunks_exact_mut(4)
-        .zip(display.data.par_chunks_exact(3))
-        .for_each(|(dst, src)| {
-            for c in 0..3 {
-                let mut v = to_f32(src[c]);
-                if !encoded {
-                    v = if v <= 0.0031308 {
-                        v * 12.92
-                    } else {
-                        1.055 * v.powf(1.0 / 2.4) - 0.055
-                    };
-                }
-                dst[c] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-            }
-        });
-    (width, height, bytes)
 }
 
 fn main() -> Result<()> {
@@ -328,8 +304,14 @@ mod tests {
     #[test]
     fn linear_display_is_encoded_without_mutating_output() {
         let image = ImageBuf::from_data(1, 1, vec![0.0, 0.18, 1.0]);
-        assert_eq!(display_rgba(&image, false).2, vec![0, 118, 255, 255]);
-        assert_eq!(display_rgba(&image, true).2, vec![0, 46, 255, 255]);
+        assert_eq!(
+            display_rgba(&image, DISPLAY_MAX_DIM, false).2,
+            vec![0, 118, 255, 255]
+        );
+        assert_eq!(
+            display_rgba(&image, DISPLAY_MAX_DIM, true).2,
+            vec![0, 46, 255, 255]
+        );
         assert_eq!(image.data[1], 0.18);
     }
     #[test]

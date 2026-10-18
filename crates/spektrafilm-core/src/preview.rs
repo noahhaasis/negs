@@ -2,9 +2,7 @@
 use crate::params::RuntimeParams;
 use rayon::prelude::*;
 use spektrafilm_math::image::ImageBuf;
-#[cfg(feature = "precision-f64")]
-use spektrafilm_math::precision::to_f32;
-use spektrafilm_math::precision::{Scalar, from_f32};
+use spektrafilm_math::precision::{Scalar, from_f32, to_f32};
 
 pub fn preview_pipeline_cache_key(
     film_name: &str,
@@ -91,4 +89,67 @@ pub fn rescale_preview_input_fast(image: &ImageBuf, (new_w, new_h): (u32, u32)) 
     let dst = image::imageops::resize(&src, new_w, new_h, image::imageops::FilterType::CatmullRom);
     let data: Vec<Scalar> = dst.into_raw().into_par_iter().map(from_f32).collect();
     ImageBuf::from_data(new_w, new_h, data)
+}
+
+/// An RGBA8 display proxy of `image`, fitted within `max_dim` on its longer
+/// side. Bilinear and parallel, writing bytes directly: a general-purpose
+/// resampler would add a float copy and, being serial, seconds at 60 MP.
+/// `encoded` says whether `image` is already sRGB-encoded; if not, each
+/// interpolated value is encoded here. `image` itself is never modified.
+pub fn display_rgba(image: &ImageBuf, max_dim: usize, encoded: bool) -> (usize, usize, Vec<u8>) {
+    let src_w = image.width as usize;
+    let src_h = image.height as usize;
+    let max_src_dim = src_w.max(src_h).max(1);
+    let scale_num = max_dim.min(max_src_dim);
+    let w = ((src_w * scale_num + max_src_dim / 2) / max_src_dim).max(1);
+    let h = ((src_h * scale_num + max_src_dim / 2) / max_src_dim).max(1);
+    let mut rgba = vec![0u8; w * h * 4];
+    rgba.par_chunks_exact_mut(w * 4)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let gy = if h == src_h {
+                y as f32
+            } else {
+                (y as f32 + 0.5) * (src_h as f32 / h as f32) - 0.5
+            };
+            let y0 = gy.floor().clamp(0.0, (src_h - 1) as f32) as usize;
+            let y1 = (y0 + 1).min(src_h - 1);
+            let ty = (gy - y0 as f32).clamp(0.0, 1.0);
+
+            for x in 0..w {
+                let gx = if w == src_w {
+                    x as f32
+                } else {
+                    (x as f32 + 0.5) * (src_w as f32 / w as f32) - 0.5
+                };
+                let x0 = gx.floor().clamp(0.0, (src_w - 1) as f32) as usize;
+                let x1 = (x0 + 1).min(src_w - 1);
+                let tx = (gx - x0 as f32).clamp(0.0, 1.0);
+                let p00 = (y0 * src_w + x0) * 3;
+                let p10 = (y0 * src_w + x1) * 3;
+                let p01 = (y1 * src_w + x0) * 3;
+                let p11 = (y1 * src_w + x1) * 3;
+                let dst = x * 4;
+
+                for c in 0..3 {
+                    let v00 = to_f32(image.data[p00 + c]);
+                    let v10 = to_f32(image.data[p10 + c]);
+                    let v01 = to_f32(image.data[p01 + c]);
+                    let v11 = to_f32(image.data[p11 + c]);
+                    let top = v00 + (v10 - v00) * tx;
+                    let bot = v01 + (v11 - v01) * tx;
+                    let mut v = top + (bot - top) * ty;
+                    if !encoded {
+                        v = if v <= 0.0031308 {
+                            v * 12.92
+                        } else {
+                            1.055 * v.powf(1.0 / 2.4) - 0.055
+                        };
+                    }
+                    row[dst + c] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                }
+                row[dst + 3] = 255;
+            }
+        });
+    (w, h, rgba)
 }

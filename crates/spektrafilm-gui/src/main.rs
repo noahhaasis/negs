@@ -14,20 +14,18 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use eframe::egui;
-use rayon::prelude::*;
 use spektrafilm_core::params::RuntimeParams;
 use spektrafilm_core::pipeline::Pipeline;
 #[cfg(test)]
 use spektrafilm_core::preview::PREVIEW_PIXEL_LIMIT;
 use spektrafilm_core::preview::{
-    preview_dimensions, preview_pipeline_cache_key, rescale_preview_input_fast,
+    display_rgba, preview_dimensions, preview_pipeline_cache_key, rescale_preview_input_fast,
 };
 use spektrafilm_core::profile;
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::image::ImageBuf;
 #[cfg(test)]
-use spektrafilm_math::precision::from_f32;
-use spektrafilm_math::precision::to_f32;
+use spektrafilm_math::precision::{from_f32, to_f32};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(120);
 const IN_FLIGHT_REPAINT: Duration = Duration::from_millis(16);
@@ -2066,52 +2064,7 @@ fn pick_default_stock(entries: &[ProfileEntry], preferred: &str) -> String {
 /// The full output remains available for saving, but the interactive texture is
 /// capped so a large RAW does not force a full-size upload into egui every pass.
 fn make_preview_texture_data(out: &ImageBuf) -> PreviewTextureData {
-    let src_w = out.width as usize;
-    let src_h = out.height as usize;
-    let max_src_dim = src_w.max(src_h).max(1);
-    let scale_num = PREVIEW_TEXTURE_MAX_DIM.min(max_src_dim);
-    let w = ((src_w * scale_num + max_src_dim / 2) / max_src_dim).max(1);
-    let h = ((src_h * scale_num + max_src_dim / 2) / max_src_dim).max(1);
-    let mut rgba = vec![0u8; w * h * 4];
-    rgba.par_chunks_exact_mut(w * 4)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let gy = if h == src_h {
-                y as f32
-            } else {
-                (y as f32 + 0.5) * (src_h as f32 / h as f32) - 0.5
-            };
-            let y0 = gy.floor().clamp(0.0, (src_h - 1) as f32) as usize;
-            let y1 = (y0 + 1).min(src_h - 1);
-            let ty = (gy - y0 as f32).clamp(0.0, 1.0);
-
-            for x in 0..w {
-                let gx = if w == src_w {
-                    x as f32
-                } else {
-                    (x as f32 + 0.5) * (src_w as f32 / w as f32) - 0.5
-                };
-                let x0 = gx.floor().clamp(0.0, (src_w - 1) as f32) as usize;
-                let x1 = (x0 + 1).min(src_w - 1);
-                let tx = (gx - x0 as f32).clamp(0.0, 1.0);
-                let p00 = (y0 * src_w + x0) * 3;
-                let p10 = (y0 * src_w + x1) * 3;
-                let p01 = (y1 * src_w + x0) * 3;
-                let p11 = (y1 * src_w + x1) * 3;
-                let dst = x * 4;
-
-                for c in 0..3 {
-                    let v00 = to_f32(out.data[p00 + c]);
-                    let v10 = to_f32(out.data[p10 + c]);
-                    let v01 = to_f32(out.data[p01 + c]);
-                    let v11 = to_f32(out.data[p11 + c]);
-                    let top = v00 + (v10 - v00) * tx;
-                    let bot = v01 + (v11 - v01) * tx;
-                    row[dst + c] = ((top + (bot - top) * ty).clamp(0.0, 1.0) * 255.0).round() as u8;
-                }
-                row[dst + 3] = 255;
-            }
-        });
+    let (w, h, rgba) = display_rgba(out, PREVIEW_TEXTURE_MAX_DIM, true);
     PreviewTextureData { size: [w, h], rgba }
 }
 
