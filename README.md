@@ -63,6 +63,7 @@ WGSL is the default GPU backend and can be selected explicitly with `SPEKTRAFILM
 - **Export…** — re-runs the pipeline at f64 precision on the CPU and writes a PNG/TIFF/JPEG. Status bar shows elapsed time; **Cancel** kills the child cleanly. Closing the GUI mid-export also kills the child (no orphans).
 - **Serial grain for export (less RAM)** — optional checkbox under Output, off by default. Processes grain channels one at a time during CPU export: less peak memory, identical output, but slower. Previews keep parallel grain. CLI users can set `settings.serial_grain: true` in their params JSON.
 - **Save…** — write the f32 GPU preview directly (instant, less precise).
+- **Limit preview to 12 MP** — optional checkbox under Output, off by default. Caps the image before preview processing to reduce memory and rendering time while preserving aspect ratio. Smaller images are not enlarged. Export still uses the Working resolution setting (full resolution at 1.0); Save writes the reduced preview. Disable the cap to inspect fine grain and detail at full working resolution. The full decoded source remains in memory, and RAW loading and full-resolution export peaks are unaffected.
 
 ### CLI
 

@@ -185,6 +185,31 @@ struct ProfileEntry {
     is_bw: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Png,
+    Jpeg,
+    Tiff,
+}
+
+impl OutputFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+            Self::Tiff => "tiff",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Png => "PNG (lossless, 8-bit)",
+            Self::Jpeg => "JPEG (smaller, 8-bit)",
+            Self::Tiff => "TIFF (16-bit)",
+        }
+    }
+}
+
 struct App {
     backend: Arc<dyn ComputeBackend>,
     data_dir: PathBuf,
@@ -200,6 +225,10 @@ struct App {
     film_dev_times: Vec<f64>,
     print_dev_times: Vec<f64>,
     params: RuntimeParams,
+    /// GUI-only resolution cap; never serialized into export parameters.
+    limit_preview_12mp: bool,
+    /// Suggested format for Save and Export; a typed extension can override it.
+    output_format: OutputFormat,
     image_path: Option<PathBuf>,
     /// Destination chosen in the most recent export dialog, independent
     /// of the folder used to open images.
@@ -336,6 +365,8 @@ impl App {
             film_dev_times,
             print_dev_times,
             params,
+            limit_preview_12mp: false,
+            output_format: OutputFormat::Png,
             image_path: None,
             last_export_dir: None,
             image: None,
@@ -439,6 +470,7 @@ impl App {
         params.io.scan_film = profile::load_profile_by_name(&self.data_dir, &self.film_name)
             .is_ok_and(|film| film.is_positive());
         self.params = params;
+        self.limit_preview_12mp = false;
         self.pan = egui::Vec2::ZERO;
         if previous_wb != self.params.io.raw_white_balance {
             self.invalidate_input_preview();
@@ -512,6 +544,7 @@ impl App {
         let film_name = self.film_name.clone();
         let print_name = self.print_name.clone();
         let mut params = self.preview_params();
+        let limit_preview_12mp = self.limit_preview_12mp;
         let (pipeline_template, pipeline_build_ms) =
             match self.preview_pipeline(&film_name, &print_name, &params) {
                 Ok(p) => p,
@@ -546,14 +579,15 @@ impl App {
                     } else {
                         image
                     };
-                    let working_factor = params.io.upscale_factor;
                     let t_scale = Instant::now();
-                    let scaled_image =
-                        if working_factor <= 0.0 || (working_factor - 1.0).abs() < 1e-6 {
-                            None
-                        } else {
-                            Some(rescale_preview_input_fast(image.clone(), working_factor))
-                        };
+                    let dimensions = preview_dimensions(
+                        image.width,
+                        image.height,
+                        params.io.upscale_factor,
+                        limit_preview_12mp,
+                    );
+                    let scaled_image = (dimensions != (image.width, image.height))
+                        .then(|| rescale_preview_input_fast(&image, dimensions));
                     let scale_ms = t_scale.elapsed().as_secs_f32() * 1000.0;
                     params.io.upscale_factor = 1.0;
                     let pipeline = pipeline_template.with_params(params);
@@ -788,8 +822,7 @@ impl App {
 
     /// Open a save dialog and write the most recent rendered output to
     /// disk. Suggested filename is the input stem + the chosen film
-    /// stock + the chosen extension; default extension is PNG (8-bit
-    /// sRGB-encoded, matching what's on screen).
+    /// stock + the selected output format.
     fn save_dialog(&mut self) {
         let Some(out) = self.output_image.clone() else {
             self.status = "Nothing to save yet — load an image first.".into();
@@ -801,9 +834,13 @@ impl App {
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("spektrafilm");
-                format!("{stem}_{}_spektra.png", self.film_name)
+                format!(
+                    "{stem}_{}_spektra.{}",
+                    self.film_name,
+                    self.output_format.extension()
+                )
             }
-            None => "spektrafilm.png".into(),
+            None => format!("spektrafilm.{}", self.output_format.extension()),
         };
         let Some(mut path) = rfd::FileDialog::new()
             .add_filter("Image", &["png", "tif", "tiff", "jpg", "jpeg"])
@@ -813,7 +850,7 @@ impl App {
             return;
         };
         if path.extension().is_none() {
-            path.set_extension("png");
+            path.set_extension(self.output_format.extension());
         }
         let t = Instant::now();
         let out = out.rotated_cw(self.params.io.rotate_cw);
@@ -863,18 +900,25 @@ impl App {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("spektrafilm");
-        let default_name = format!("{stem}_{}_spektra_f64.png", self.film_name);
+        let default_name = format!(
+            "{stem}_{}_spektra_f64.{}",
+            self.film_name,
+            self.output_format.extension()
+        );
         let mut dialog = rfd::FileDialog::new();
         if let Some(dir) = self.last_export_dir.as_deref().filter(|dir| dir.is_dir()) {
             dialog = dialog.set_directory(dir);
         }
-        let Some(out_path) = dialog
+        let Some(mut out_path) = dialog
             .add_filter("Image", &["png", "tif", "tiff", "jpg", "jpeg"])
             .set_file_name(&default_name)
             .save_file()
         else {
             return;
         };
+        if out_path.extension().is_none() {
+            out_path.set_extension(self.output_format.extension());
+        }
         self.last_export_dir = out_path.parent().map(Path::to_path_buf);
 
         // Spawn the export on a worker thread so the egui event loop
@@ -1018,9 +1062,20 @@ impl App {
                     self.load_image_from_path(&path);
                 }
             }
+            ui.label("Format:");
+            egui::ComboBox::from_id_salt("output_format")
+                .selected_text(self.output_format.label())
+                .show_ui(ui, |ui| {
+                    for format in [OutputFormat::Png, OutputFormat::Jpeg, OutputFormat::Tiff] {
+                        ui.selectable_value(&mut self.output_format, format, format.label());
+                    }
+                })
+                .response
+                .on_hover_text("Sets the suggested format for Save and Export. You can also change the filename extension. JPEG uses quality 95; TIFF is uncompressed.");
             let save_enabled = self.output_image.is_some();
             if ui
                 .add_enabled(save_enabled, egui::Button::new("Save…"))
+                .on_hover_text("Save the rendered preview at its displayed resolution. Use Export for the export resolution, independent of the 12 MP preview limit.")
                 .on_disabled_hover_text("Render an image first")
                 .clicked()
             {
@@ -1641,6 +1696,18 @@ impl App {
                 if changed {
                     self.mark_dirty();
                 }
+                if ui
+                    .checkbox(&mut self.limit_preview_12mp, "Limit preview to 12 MP")
+                    .on_hover_text(
+                        "Reduce preview memory and rendering time for large images. \
+                         Export keeps the Working resolution setting; Save writes this \
+                         smaller preview. Fine grain and detail can look different. \
+                         Disable to inspect at the full working resolution.",
+                    )
+                    .changed()
+                {
+                    self.mark_dirty();
+                }
                 // This preference affects the next export, not the preview.
                 ui.checkbox(
                     &mut self.params.settings.serial_grain,
@@ -2021,16 +2088,38 @@ fn preview_pipeline_cache_key(film_name: &str, print_name: &str, params: &Runtim
     .to_string()
 }
 
-fn rescale_preview_input_fast(image: Arc<ImageBuf>, factor: f32) -> ImageBuf {
-    if factor <= 0.0 || (factor - 1.0).abs() < 1e-6 {
-        return (*image).clone();
-    }
-    let new_w = (((image.width as f32) * factor).round() as u32).max(1);
-    let new_h = (((image.height as f32) * factor).round() as u32).max(1);
-    if new_w == image.width && new_h == image.height {
-        return (*image).clone();
-    }
+const PREVIEW_PIXEL_LIMIT: u64 = 12_000_000;
 
+fn preview_dimensions(width: u32, height: u32, factor: f32, limited: bool) -> (u32, u32) {
+    // Preserve the existing working-resolution behavior, then impose the
+    // preview-only cap. A smaller working image must never be enlarged.
+    let (width, height) = if factor <= 0.0 || (factor - 1.0).abs() < 1e-6 {
+        (width, height)
+    } else {
+        (
+            ((width as f32 * factor).round() as u32).max(1),
+            ((height as f32 * factor).round() as u32).max(1),
+        )
+    };
+    let pixels = u64::from(width) * u64::from(height);
+    if !limited || pixels <= PREVIEW_PIXEL_LIMIT {
+        return (width, height);
+    }
+    let scale = (PREVIEW_PIXEL_LIMIT as f64 / pixels as f64).sqrt();
+    // Floor so rounding cannot exceed the cap. Bound each axis for the
+    // degenerate case of a one-pixel-high or one-pixel-wide panorama.
+    (
+        ((width as f64 * scale).floor() as u32).clamp(1, PREVIEW_PIXEL_LIMIT as u32),
+        ((height as f64 * scale).floor() as u32).clamp(1, PREVIEW_PIXEL_LIMIT as u32),
+    )
+}
+
+fn rescale_preview_input_fast(image: &ImageBuf, (new_w, new_h): (u32, u32)) -> ImageBuf {
+    // The normal f32 GUI can resize directly from the retained source,
+    // avoiding another full-resolution RGB allocation just to downsample.
+    #[cfg(not(feature = "precision-f64"))]
+    let f32buf = image.data.as_slice();
+    #[cfg(feature = "precision-f64")]
     let f32buf: Vec<f32> = image.data.par_iter().map(|&v| to_f32(v)).collect();
     let src = image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(image.width, image.height, f32buf)
         .expect("ImageBuf dims match its data length");
@@ -2459,6 +2548,24 @@ mod raw_wb_tests {
     }
 
     #[test]
+    fn preview_limit_edit_discards_in_flight_result_and_preserves_export_params() {
+        let mut app = app();
+        assert!(!app.limit_preview_12mp);
+        let export_params = serde_json::to_value(&app.params).unwrap();
+        let source = app.image.as_ref().unwrap().clone();
+        completed_job(&mut app, 0, Ok(result()));
+        app.limit_preview_12mp = true;
+        app.mark_dirty();
+        app.poll_render_job(&egui::Context::default());
+        assert!(app.output_image.is_none());
+        assert!(app.dirty);
+        assert!(Arc::ptr_eq(app.image.as_ref().unwrap(), &source));
+        assert_eq!(serde_json::to_value(&app.params).unwrap(), export_params);
+        app.reset_settings();
+        assert!(!app.limit_preview_12mp);
+    }
+
+    #[test]
     fn successful_reload_updates_input_and_export_settings_together() {
         let mut app = app();
         app.params.io.raw_white_balance = RawWhiteBalance {
@@ -2763,6 +2870,53 @@ fn tag_metal_layer_srgb<H: raw_window_handle::HasWindowHandle>(h: &H) -> Result<
         tracing::info!("tagged CAMetalLayer.colorspace = sRGB");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod preview_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn cap_preserves_aspect_ratio_and_never_exceeds_twelve_megapixels() {
+        for (w, h) in [(9520, 6336), (6048, 4024), (6336, 9520), (8000, 2000)] {
+            let (pw, ph) = preview_dimensions(w, h, 1.0, true);
+            let pixels = u64::from(pw) * u64::from(ph);
+            assert!(pixels <= PREVIEW_PIXEL_LIMIT);
+            assert!(pixels > PREVIEW_PIXEL_LIMIT - 20_000);
+            assert!((f64::from(pw) / f64::from(ph) - f64::from(w) / f64::from(h)).abs() < 0.002);
+            assert_eq!(preview_dimensions(w, h, 1.0, false), (w, h));
+        }
+        for dimensions in [(1, u32::MAX), (u32::MAX, 1), (u32::MAX, u32::MAX)] {
+            let (w, h) = preview_dimensions(dimensions.0, dimensions.1, 1.0, true);
+            assert!(w > 0 && h > 0);
+            assert!(u64::from(w) * u64::from(h) <= PREVIEW_PIXEL_LIMIT);
+        }
+    }
+
+    #[test]
+    fn cap_respects_smaller_inputs_and_working_resolution() {
+        for dimensions in [(1, 1), (3000, 2000), (4000, 3000)] {
+            assert_eq!(
+                preview_dimensions(dimensions.0, dimensions.1, 1.0, true),
+                dimensions
+            );
+        }
+        assert_eq!(preview_dimensions(9520, 6336, 0.25, true), (2380, 1584));
+        assert_eq!(preview_dimensions(9520, 6336, 0.5, false), (4760, 3168));
+        let (w, h) = preview_dimensions(9520, 6336, 0.5, true);
+        assert!(u64::from(w) * u64::from(h) <= PREVIEW_PIXEL_LIMIT);
+    }
+
+    #[test]
+    fn resampling_leaves_retained_source_intact() {
+        let source = ImageBuf::from_data(12, 8, vec![from_f32(0.25); 12 * 8 * 3]);
+        let scaled = rescale_preview_input_fast(&source, (6, 4));
+        assert_eq!((scaled.width, scaled.height), (6, 4));
+        assert_eq!(scaled.data.len(), 6 * 4 * 3);
+        assert!(scaled.data.iter().all(|&v| (to_f32(v) - 0.25).abs() < 1e-6));
+        assert_eq!((source.width, source.height), (12, 8));
+        assert_eq!(source.data, vec![from_f32(0.25); 12 * 8 * 3]);
+    }
 }
 
 #[cfg(test)]
