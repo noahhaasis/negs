@@ -3794,6 +3794,7 @@ dependencies = [
 name = "spektrafilm-io"
 version = "0.1.2"
 dependencies = [
+ "ab_glyph",
  "anyhow",
  "image",
  "rawler",

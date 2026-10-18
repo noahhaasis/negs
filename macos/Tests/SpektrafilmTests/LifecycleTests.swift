@@ -57,7 +57,7 @@ import XCTest
         let job = ExportJob()
         let scratch = try ScratchSpace(root: directory.appendingPathComponent("scratch"))
         let task = Task {
-            try await job.run(paths: EnginePaths(helper: fake, exporter: fake, data: directory), scratch: scratch, source: directory.appendingPathComponent("source.png"), destination: destination, state: EditState())
+            try await job.run(paths: EnginePaths(helper: fake, exporter: fake, data: directory), scratch: scratch, source: directory.appendingPathComponent("source.png"), destination: destination, state: EditState(), border: nil)
         }
         try await Task.sleep(nanoseconds: 100_000_000)
         job.cancel()

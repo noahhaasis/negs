@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::str::FromStr;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use image::{RgbaImage, imageops};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,10 @@ pub enum BorderStyle {
     Film,
     /// White mat with a thin black line around the photograph.
     Keyline,
+    /// A 35mm negative strip with the film stock's edge print, for 3:2
+    /// (full frame) and 3:4 (half-frame) photographs.
+    #[serde(rename = "35mm")]
+    Film35,
 }
 
 impl FromStr for BorderStyle {
@@ -32,7 +36,8 @@ impl FromStr for BorderStyle {
             "white" => Self::White,
             "film" => Self::Film,
             "keyline" => Self::Keyline,
-            _ => bail!("unknown border style: {s} (expected white, film or keyline)"),
+            "35mm" => Self::Film35,
+            _ => bail!("unknown border style: {s} (expected white, film, keyline or 35mm)"),
         })
     }
 }
@@ -57,11 +62,103 @@ pub fn film_geometry(width: u32, height: u32) -> (u32, u32) {
     )
 }
 
+/// The 35mm frame a photograph fills, chosen by its aspect ratio.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilmFormat {
+    /// 36 × 24 mm, 3:2.
+    Full,
+    /// 18 × 24 mm, 3:4.
+    Half,
+}
+
+impl FilmFormat {
+    /// The format whose frame matches a `width` × `height` photograph in
+    /// either orientation, to within 1%. The border hides the difference.
+    pub fn of(width: u32, height: u32) -> Option<Self> {
+        let ratio = width.max(height) as f64 / width.min(height).max(1) as f64;
+        [(Self::Full, 1.5), (Self::Half, 4.0 / 3.0)]
+            .into_iter()
+            .find(|&(_, frame)| (ratio / frame - 1.0).abs() <= 0.01)
+            .map(|(format, _)| format)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Half => "half",
+        }
+    }
+}
+
+/// A 35mm strip texture, laid out with the strip horizontal, and the
+/// window the photograph shows through as fractions [x, y, width, height].
+pub struct FilmStrip {
+    pub texture: RgbaImage,
+    pub window: [f64; 4],
+}
+
+#[derive(Deserialize)]
+struct StripFrame {
+    window: [f64; 4],
+}
+
+impl FilmStrip {
+    /// `data/borders/35mm/<format>/<film>.png`, or the format's
+    /// `generic.png` for a film without its own edge print.
+    pub fn load(data_dir: &Path, film: &str, format: FilmFormat) -> Result<Self> {
+        let root = data_dir.join("borders/35mm");
+        let frames = root.join("frames.json");
+        let frames: std::collections::HashMap<String, StripFrame> = serde_json::from_slice(
+            &std::fs::read(&frames).with_context(|| format!("reading {}", frames.display()))?,
+        )
+        .with_context(|| format!("parsing {}", frames.display()))?;
+        let window = frames
+            .get(format.name())
+            .with_context(|| format!("no {} frame in 35mm frames.json", format.name()))?
+            .window;
+        let [x, y, w, h] = window;
+        ensure!(
+            ((x + w / 2.0) - 0.5).abs() < 1e-3 && ((y + h / 2.0) - 0.5).abs() < 1e-3,
+            "the 35mm {} window must be centred",
+            format.name()
+        );
+        let dir = root.join(format.name());
+        let path = Some(dir.join(format!("{film}.png")))
+            .filter(|p| p.exists())
+            .unwrap_or_else(|| dir.join("generic.png"));
+        let texture = image::open(&path)
+            .with_context(|| format!("loading border texture {}", path.display()))?
+            .to_rgba8();
+        Ok(Self { texture, window })
+    }
+
+    /// Whether the strip has to turn to hold a `width` × `height` photograph.
+    fn turned(&self, width: u32, height: u32) -> bool {
+        let [_, _, w, h] = self.window;
+        let landscape = w * self.texture.width() as f64 > h * self.texture.height() as f64;
+        landscape != (width > height)
+    }
+
+    /// The canvas for a `width` × `height` photograph: the strip scaled so
+    /// its window covers the photograph.
+    pub fn canvas(&self, width: u32, height: u32) -> (u32, u32) {
+        let (mut tw, mut th) = (self.texture.width() as f64, self.texture.height() as f64);
+        let [_, _, mut ww, mut wh] = self.window;
+        if self.turned(width, height) {
+            (tw, th, ww, wh) = (th, tw, wh, ww);
+        }
+        let k = (width as f64 / (ww * tw)).max(height as f64 / (wh * th));
+        ((tw * k).round() as u32, (th * k).round() as u32)
+    }
+}
+
 /// `image` with a `style` border. `encoded` says whether the values are
-/// sRGB-encoded (otherwise linear), which only matters for the film texture.
+/// sRGB-encoded (otherwise linear), which only matters for the textures.
+/// `film` picks the 35mm border's edge print.
 pub fn add_border(
     image: &ImageBuf,
     style: BorderStyle,
+    film: &str,
     encoded: bool,
     data_dir: &Path,
 ) -> Result<ImageBuf> {
@@ -71,15 +168,47 @@ pub fn add_border(
         BorderStyle::Keyline => framed(image, white_margin(w, h), keyline_width(w, h), 1.0),
         BorderStyle::Film => {
             let path = data_dir.join("borders/film.png");
-            let texture = image::open(&path)
+            let mut texture = image::open(&path)
                 .with_context(|| format!("loading border texture {}", path.display()))?
                 .to_rgba8();
+            if h > w {
+                texture = imageops::rotate270(&texture);
+            }
             let (inset, pad) = film_geometry(w, h);
             let mut out = framed(image, inset, 0, 0.0);
             overlay_nine_patch(&mut out, texture, pad, encoded);
             out
         }
+        BorderStyle::Film35 => {
+            let format = FilmFormat::of(w, h).with_context(|| {
+                format!("The 35mm border needs a 3:2 or 3:4 photograph, not {w} × {h}")
+            })?;
+            let strip = FilmStrip::load(data_dir, film, format)?;
+            let (cw, ch) = strip.canvas(w, h);
+            let mut out = centered(image, cw, ch);
+            let texture = if strip.turned(w, h) {
+                imageops::rotate270(&strip.texture)
+            } else {
+                strip.texture
+            };
+            overlay_nine_patch(&mut out, texture, 0, encoded);
+            out
+        }
     })
+}
+
+/// `image` in the middle of a black `width` × `height` canvas.
+fn centered(image: &ImageBuf, width: u32, height: u32) -> ImageBuf {
+    let (w, h) = (image.width as usize, image.height as usize);
+    let (cw, ch) = (width as usize, height as usize);
+    let (x0, y0) = ((cw - w) / 2, (ch - h) / 2);
+    let mut data = vec![from_f32(0.0); cw * ch * 3];
+    data.par_chunks_exact_mut(cw * 3)
+        .skip(y0)
+        .take(h)
+        .zip(image.data.par_chunks_exact(w * 3))
+        .for_each(|(row, src)| row[x0 * 3..(x0 + w) * 3].copy_from_slice(src));
+    ImageBuf::from_data(width, height, data)
 }
 
 /// `image` inside a `line`-wide ring of black, then a `margin` of `fill`.
@@ -106,11 +235,9 @@ fn framed(image: &ImageBuf, margin: u32, line: u32, fill: f32) -> ImageBuf {
 
 /// Stretches `texture` over `out` as a nine-patch whose corners are `pad`
 /// pixels, like upstream's `Border::custom`, and composites it on top.
+/// With no `pad` it scales the whole texture.
 fn overlay_nine_patch(out: &mut ImageBuf, mut texture: RgbaImage, pad: u32, encoded: bool) {
     let (dw, dh) = (out.width, out.height);
-    if dh > dw {
-        texture = imageops::rotate270(&texture);
-    }
     // Scale with the short side. Shrink once up front, so minification
     // doesn't alias; bilinear sampling is enough for magnification.
     let scale = dw.min(dh) as f64 / texture.width().min(texture.height()) as f64;
@@ -199,7 +326,7 @@ mod tests {
 
     #[test]
     fn white_border_matches_python_padding() {
-        let out = add_border(&photo(200, 100), BorderStyle::White, true, &data_dir()).unwrap();
+        let out = add_border(&photo(200, 100), BorderStyle::White, "", true, &data_dir()).unwrap();
         assert_eq!((out.width, out.height), (212, 112));
         assert_eq!(out.get(0, 0), [from_f32(1.0); 3]);
         assert_eq!(out.get(6, 6), [from_f32(0.5); 3]);
@@ -208,7 +335,14 @@ mod tests {
 
     #[test]
     fn keyline_surrounds_the_photo() {
-        let out = add_border(&photo(1000, 500), BorderStyle::Keyline, true, &data_dir()).unwrap();
+        let out = add_border(
+            &photo(1000, 500),
+            BorderStyle::Keyline,
+            "",
+            true,
+            &data_dir(),
+        )
+        .unwrap();
         // 30 px of white, a 4 px black line, then the photograph.
         assert_eq!((out.width, out.height), (1068, 568));
         assert_eq!(out.get(29, 100), [from_f32(1.0); 3]);
@@ -218,9 +352,118 @@ mod tests {
     }
 
     #[test]
+    fn film_format_follows_the_aspect_ratio() {
+        assert_eq!(FilmFormat::of(6000, 4000), Some(FilmFormat::Full));
+        assert_eq!(FilmFormat::of(4000, 6000), Some(FilmFormat::Full));
+        assert_eq!(FilmFormat::of(7952, 5304), Some(FilmFormat::Full));
+        assert_eq!(FilmFormat::of(3000, 4000), Some(FilmFormat::Half));
+        assert_eq!(FilmFormat::of(4032, 3024), Some(FilmFormat::Half));
+        // 1.52 is more than 1% off 3:2.
+        assert_eq!(FilmFormat::of(1520, 1000), None);
+        assert_eq!(FilmFormat::of(1920, 1080), None);
+        assert_eq!(FilmFormat::of(100, 100), None);
+    }
+
+    #[test]
+    fn every_film_profile_has_35mm_textures() {
+        let data = data_dir();
+        for entry in std::fs::read_dir(data.join("profiles")).unwrap() {
+            let path = entry.unwrap().path();
+            let profile: serde_json::Value =
+                serde_json::from_reader(std::fs::File::open(&path).unwrap()).unwrap();
+            if profile["info"]["support"] != "film" {
+                continue;
+            }
+            let stock = path.file_stem().unwrap().to_str().unwrap();
+            for format in ["full", "half"] {
+                let texture = data.join(format!("borders/35mm/{format}/{stock}.png"));
+                assert!(texture.exists(), "missing {}", texture.display());
+            }
+        }
+    }
+
+    #[test]
+    fn film35_strip_surrounds_the_photo() {
+        // Full frame in both orientations, then half-frame in both.
+        for (w, h) in [(600, 400), (400, 600), (300, 400), (400, 300)] {
+            let out = add_border(
+                &photo(w, h),
+                BorderStyle::Film35,
+                "kodak_portra_400",
+                false,
+                &data_dir(),
+            )
+            .unwrap();
+            let strip = FilmStrip::load(
+                &data_dir(),
+                "kodak_portra_400",
+                FilmFormat::of(w, h).unwrap(),
+            )
+            .unwrap();
+            assert_eq!((out.width, out.height), strip.canvas(w, h));
+            // A full frame lies along the strip and a half-frame across it:
+            // the 35 mm film is 24 mm of picture and 11 mm of rebate.
+            let full = w.max(h) * 2 == w.min(h) * 3;
+            let (along, across) = if full == (w > h) {
+                (out.width as f64 / w as f64, out.height as f64 / h as f64)
+            } else {
+                (out.height as f64 / h as f64, out.width as f64 / w as f64)
+            };
+            // 38 mm of strip per 36 mm frame, 19 mm per 18 mm half-frame.
+            assert!((along - 19.0 / 18.0).abs() < 0.01, "{w}x{h}: {along}");
+            assert!((across - 35.0 / 24.0).abs() < 0.01, "{w}x{h}: {across}");
+            assert_eq!(out.get(out.width / 2, out.height / 2), [from_f32(0.5); 3]);
+            assert!(out.get(0, 0)[0] < from_f32(0.01));
+        }
+    }
+
+    #[test]
+    fn film35_hides_a_slightly_wider_photo_under_the_rebate() {
+        let out = add_border(
+            &photo(604, 400),
+            BorderStyle::Film35,
+            "kodak_gold_200",
+            false,
+            &data_dir(),
+        )
+        .unwrap();
+        let strip = FilmStrip::load(&data_dir(), "kodak_gold_200", FilmFormat::Full).unwrap();
+        assert_eq!((out.width, out.height), strip.canvas(604, 400));
+        // Just outside the window, at mid-height, is rebate, not photograph.
+        let edge = (strip.window[0] * out.width as f64) as u32;
+        assert!(out.get(edge.saturating_sub(2), out.height / 2)[0] < from_f32(0.05));
+    }
+
+    #[test]
+    fn film35_needs_a_film_frame_ratio() {
+        let err = add_border(
+            &photo(160, 90),
+            BorderStyle::Film35,
+            "kodak_gold_200",
+            true,
+            &data_dir(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("3:2"), "{err}");
+    }
+
+    #[test]
+    fn film35_falls_back_to_the_generic_strip() {
+        let out = add_border(
+            &photo(600, 400),
+            BorderStyle::Film35,
+            "not_a_film",
+            true,
+            &data_dir(),
+        )
+        .unwrap();
+        assert!(out.width > 600);
+    }
+
+    #[test]
     fn film_frame_is_black_at_the_edges_and_clear_in_the_middle() {
         for (w, h) in [(600, 400), (400, 600), (6000, 4000)] {
-            let out = add_border(&photo(w, h), BorderStyle::Film, false, &data_dir()).unwrap();
+            let out = add_border(&photo(w, h), BorderStyle::Film, "", false, &data_dir()).unwrap();
             let (inset, _) = film_geometry(w, h);
             assert_eq!((out.width, out.height), (w + 2 * inset, h + 2 * inset));
             assert!(out.get(0, out.height / 2)[0] < from_f32(0.01));

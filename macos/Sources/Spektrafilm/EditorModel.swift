@@ -21,6 +21,9 @@ import UniformTypeIdentifiers
     private(set) var border = BorderSettings()
     /// The film border's frame, loaded from the engine's data folder.
     private(set) var filmTexture: CGImage?
+    /// The 35mm strip for the film and the photograph's format, loaded while
+    /// that border is chosen.
+    private(set) var filmStrip: FilmStrip?
     private(set) var stocks: [Stock] = []
     private(set) var source: URL?
     /// The developed preview. Nil until the first render of `source` completes.
@@ -59,6 +62,7 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var interactionStart: EditState?
     @ObservationIgnored private var closing = false
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
+    @ObservationIgnored private var stripRequest: (film: String, format: FilmFormat)?
 
     var films: [Stock] { stocks.filter { !$0.paper } }
     var papers: [Stock] { stocks.filter(\.paper) }
@@ -67,6 +71,8 @@ import UniformTypeIdentifiers
     var filmName: String { films.first { $0.id == film }?.name ?? film }
     var paperName: String { papers.first { $0.id == paper }?.name ?? paper }
     var canSave: Bool { previewCurrent && image != nil && !rendering && !saving }
+    /// The shown photograph's size, before rotation; zero before one opens.
+    var photoSize: CGSize { image != nil ? imageSize : placeholderSize }
     /// A slider is being dragged; its edits share one undo step.
     var interacting: Bool { interactionStart != nil }
 
@@ -103,6 +109,26 @@ import UniformTypeIdentifiers
 
     private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }
 
+    /// Loads the 35mm strip when that border is chosen and the film or the
+    /// photograph's format changes.
+    private func updateFilmStrip() {
+        guard border.enabled, border.style == .film35, let format = FilmFormat(photoSize), let data = engine?.paths.data else { return }
+        if let filmStrip, filmStrip.film == film, filmStrip.format == format { return }
+        if let stripRequest, stripRequest == (film, format) { return }
+        stripRequest = (film, format)
+        let film = film
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let strip = FilmStrip.load(data: data, film: film, format: format)
+            await self?.setFilmStrip(strip, film: film, format: format)
+        }
+    }
+    private func setFilmStrip(_ strip: FilmStrip?, film: String, format: FilmFormat) {
+        guard let stripRequest, stripRequest == (film, format) else { return }
+        self.stripRequest = nil
+        filmStrip = strip
+        if strip == nil { error = "The 35mm border for \(filmName) couldn’t be loaded." }
+    }
+
     // MARK: Parameters
 
     func value(_ path: String) -> JSONValue {
@@ -120,6 +146,7 @@ import UniformTypeIdentifiers
         if paper != state.paper { paper = state.paper }
         if limitsPreview != state.limitPreview { limitsPreview = state.limitPreview }
         if border != state.border { border = state.border }
+        updateFilmStrip()
     }
     func defaultValue(_ path: String) -> JSONValue { defaults[path] }
     func isModified(_ path: String) -> Bool {
@@ -270,6 +297,7 @@ import UniformTypeIdentifiers
     private func showPlaceholder(_ thumbnail: CGImage, size: CGSize, generation: Int) {
         guard generation == sourceGeneration, image == nil else { return }
         placeholderSize = size; placeholder = thumbnail
+        updateFilmStrip()
     }
     private func saveRecents() { UserDefaults.standard.set(recentFiles.map(\.path), forKey: "recentFiles") }
 
@@ -340,6 +368,7 @@ import UniformTypeIdentifiers
             imageSize = CGSize(width: result["output_width"].double, height: result["output_height"].double)
             imageRotation = Int(snapshot.params["io.rotate_cw"].double)
             image = developed; placeholder = nil
+            updateFilmStrip()
             isRaw = result["raw"].bool
             if revision == currentRevision {
                 renderID = id; previewCurrent = true; hideActivity()
@@ -414,7 +443,7 @@ import UniformTypeIdentifiers
         let picker = FormatPicker(panel: panel, selected: OutputFormat.last)
         panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).\(picker.format.type.preferredFilenameExtension ?? "png")"
         panel.message = export ? "Render at reference precision using the current working resolution." : "Save the current preview at its rendered resolution."
-        if let border = state.border.exported { panel.message += " Adds the \(border.title.lowercased()) border." }
+        if let border = state.border.exported(for: photoSize) { panel.message += " Adds the \(border.title.lowercased()) border." }
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
             guard !Self.sameFile(url, source) else {
@@ -441,7 +470,7 @@ import UniformTypeIdentifiers
         defer { saving = false }
         do {
             var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path)]
-            if let border = state.border.exported { command["border"] = .string(border.rawValue) }
+            if let border = state.border.exported(for: imageSize) { command["border"] = .string(border.rawValue) }
             _ = try await engine.request(command)
             status = "Saved \(url.lastPathComponent)"
         } catch { report(error) }
@@ -452,7 +481,8 @@ import UniformTypeIdentifiers
         let job = ExportJob(); exportJob = job; exporting = true; exportStarted = Date()
         defer { exporting = false; exportJob = nil }
         do {
-            try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: state)
+            try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: state,
+                              border: state.border.exported(for: photoSize))
             status = "Exported \(url.lastPathComponent)"
         } catch is CancellationError { status = "Export cancelled" }
         catch { report(error) }

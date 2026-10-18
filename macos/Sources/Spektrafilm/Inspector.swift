@@ -243,7 +243,12 @@ struct AdjustmentInspector: View {
             Section("Border") {
                 Toggle("Add border", isOn: model.border(\.enabled))
                 Group {
-                    BorderStylePicker(selection: model.border(\.style))
+                    let photo = model.photoSize == .zero ? nil : model.photoSize
+                    BorderStylePicker(selection: model.border(\.style), photo: photo)
+                    if let photo, !BorderStyle.film35.fits(photo) {
+                        Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Toggle("Include in export", isOn: model.border(\.export))
                         .help("Adds the border to exported photographs and saved previews.")
                 }
@@ -259,6 +264,13 @@ struct AdjustmentInspector: View {
     }
 
     private func control(_ adjustment: Adjustment) -> some View { AdjustmentControl(model: model, adjustment: adjustment) }
+    /// A photograph's aspect ratio as people name it, such as 16:9.
+    static func ratio(_ size: CGSize) -> String {
+        let ratio = max(size.width, size.height) / min(size.width, size.height)
+        let named = [(1.0, "1:1"), (5.0 / 4, "5:4"), (7.0 / 5, "7:5"), (16.0 / 9, "16:9"), (2.0, "2:1"), (21.0 / 9, "21:9")]
+        if let (_, name) = named.first(where: { abs(ratio / $0.0 - 1) <= 0.01 }) { return name }
+        return String(format: "%.2f:1", Double(ratio))
+    }
 
     @ViewBuilder private func groups(_ section: InspectorSection) -> some View {
         ForEach(adjustmentGroups.filter { $0.section == section }) { group in

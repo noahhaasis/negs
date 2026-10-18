@@ -57,7 +57,7 @@ enum Commands {
         #[arg(long)]
         raw_out: Option<PathBuf>,
         /// Add a border around the result (after rotation).
-        #[arg(long, value_parser = ["white", "film", "keyline"])]
+        #[arg(long, value_parser = ["white", "film", "keyline", "35mm"])]
         border: Option<String>,
         /// Run the pipeline N times in the same process. Each iteration is
         /// timed individually so you can see cold-start vs warm-cache speed.
@@ -273,7 +273,9 @@ fn cmd_process(
     // User rotation from the GUI (post-pipeline, matches the preview).
     let result = result.rotated_cw(rotate_cw);
     let result = match border {
-        Some(style) => spektrafilm_io::border::add_border(&result, style, encoded, data_dir)?,
+        Some(style) => {
+            spektrafilm_io::border::add_border(&result, style, film_name, encoded, data_dir)?
+        }
         None => result,
     };
 

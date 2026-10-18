@@ -11,6 +11,7 @@ struct PreviewCanvas: NSViewRepresentable {
     let rotation: Int
     let border: BorderStyle?
     let filmTexture: CGImage?
+    let filmStrip: FilmStrip?
     let zoomCommand: UUID
     let fit: Bool
 
@@ -30,11 +31,10 @@ struct PreviewCanvas: NSViewRepresentable {
     func updateNSView(_ scroll: ImageScrollView, context: Context) {
         let photo = scroll.documentView as! PhotographView
         let displaySize = rotation % 2 != 0 ? CGSize(width: size.height, height: size.width) : size
-        let inset = border?.inset(for: displaySize) ?? 0
-        let documentSize = CGSize(width: displaySize.width + 2 * inset, height: displaySize.height + 2 * inset)
+        let documentSize = border?.canvas(for: displaySize, strip: filmStrip) ?? displaySize
         let oldSize = photo.frame.size, oldPhotoSize = photo.displaySize
         let commanded = scroll.lastCommand != zoomCommand
-        photo.show(image, size: size, rotation: rotation, border: border, filmTexture: filmTexture)
+        photo.show(image, size: size, rotation: rotation, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
         if oldSize != documentSize {
             if commanded || scroll.fitting || oldSize.width == 0 {
                 photo.setFrameSize(documentSize)
@@ -117,6 +117,7 @@ final class PhotographView: NSView {
     private var rotation = 0
     private var border: BorderStyle?
     private var filmTexture: CGImage?
+    private var filmStrip: FilmStrip?
     /// The photograph's size on the canvas, after rotation.
     var displaySize: CGSize { rotation % 2 != 0 ? CGSize(width: size.height, height: size.width) : size }
     override var acceptsFirstResponder: Bool { true }
@@ -136,11 +137,11 @@ final class PhotographView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ image: AnyObject, size: CGSize, rotation: Int, border: BorderStyle? = nil, filmTexture: CGImage? = nil) {
+    func show(_ image: AnyObject, size: CGSize, rotation: Int, border: BorderStyle? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
         guard image !== self.image || size != self.size || rotation != self.rotation
-            || border != self.border || filmTexture !== self.filmTexture else { return }
+            || border != self.border || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
         self.image = image; self.size = size; self.rotation = rotation
-        self.border = border; self.filmTexture = filmTexture
+        self.border = border; self.filmTexture = filmTexture; self.filmStrip = filmStrip
         photo.contents = image
         needsLayout = true
     }
@@ -151,7 +152,7 @@ final class PhotographView: NSView {
         photo.bounds = CGRect(origin: .zero, size: size)
         photo.position = CGPoint(x: bounds.midX, y: bounds.midY)
         photo.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
-        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture)
+        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
         CATransaction.commit()
     }
 

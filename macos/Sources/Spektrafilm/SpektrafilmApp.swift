@@ -154,7 +154,8 @@ struct CanvasArea: View {
     }
 
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
-        PreviewCanvas(image: image, size: size, rotation: rotation, border: model.border.shown, filmTexture: model.filmTexture, zoomCommand: model.zoomCommand, fit: model.fitImage)
+        PreviewCanvas(image: image, size: size, rotation: rotation, border: model.border.shown(for: size), filmTexture: model.filmTexture,
+                      filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage)
     }
 }
 
