@@ -239,6 +239,7 @@ final class EngineClient: @unchecked Sendable {
         child.executableURL = paths.exporter
         child.arguments = ["process", source.path, "-o", staging.path, "--film", state.film, "--paper", state.paper, "--params", params.path, "--data-dir", paths.data.path]
         if state.params["io.scan_film"].bool { child.arguments!.append("--scan-film") }
+        if let border = state.border.exported { child.arguments! += ["--border", border.rawValue] }
         var environment = ProcessInfo.processInfo.environment
         environment["SPEKTRAFILM_BACKEND"] = "cpu"; child.environment = environment
         child.standardOutput = log; child.standardError = log

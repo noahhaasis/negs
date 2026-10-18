@@ -73,6 +73,15 @@ UI responsiveness depends on a few SwiftUI/AppKit details:
 - Finder opens are handled with `onOpenURL`. Overriding the app delegate's
   `application(_:open:)` makes Stage Manager swap the window off stage.
 
+Borders (white, film frame, white with keyline) are presentation only. They
+are not render parameters, so a border change never re-renders: the canvas
+draws them with Core Animation (the film texture `data/borders/film.png` is a
+`contentsCenter` nine-patch). Export and Save Preview add them only when
+"Include in export" is on, via `--border` on the f64 exporter and `border` on
+the helper's `save`, using `spektrafilm-io::border` after rotation. Both sides
+share the same proportional geometry; `BorderTests` pins the Swift sizes to
+the Rust tests' values.
+
 The preview buffer is capped at 8192 pixels on its longest side; saving retains
 the full processed preview resolution. Linear output is encoded only for display
 and tagged sRGB. Export uses an independent f64 process with the CPU backend

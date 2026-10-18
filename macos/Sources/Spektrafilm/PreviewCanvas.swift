@@ -9,6 +9,8 @@ struct PreviewCanvas: NSViewRepresentable {
     let image: AnyObject
     let size: CGSize
     let rotation: Int
+    let border: BorderStyle?
+    let filmTexture: CGImage?
     let zoomCommand: UUID
     let fit: Bool
 
@@ -28,18 +30,25 @@ struct PreviewCanvas: NSViewRepresentable {
     func updateNSView(_ scroll: ImageScrollView, context: Context) {
         let photo = scroll.documentView as! PhotographView
         let displaySize = rotation % 2 != 0 ? CGSize(width: size.height, height: size.width) : size
-        let oldSize = photo.frame.size
+        let inset = border?.inset(for: displaySize) ?? 0
+        let documentSize = CGSize(width: displaySize.width + 2 * inset, height: displaySize.height + 2 * inset)
+        let oldSize = photo.frame.size, oldPhotoSize = photo.displaySize
         let commanded = scroll.lastCommand != zoomCommand
-        photo.show(image, size: size, rotation: rotation)
-        if oldSize != displaySize {
-            if !commanded, !scroll.fitting, oldSize.width > 0 {
-                scroll.keepVisibleContent(resizingDocumentFrom: oldSize, to: displaySize)
-            } else { photo.setFrameSize(displaySize) }
+        photo.show(image, size: size, rotation: rotation, border: border, filmTexture: filmTexture)
+        if oldSize != documentSize {
+            if commanded || scroll.fitting || oldSize.width == 0 {
+                photo.setFrameSize(documentSize)
+            } else if oldPhotoSize != displaySize {
+                scroll.keepVisibleContent(resizingDocumentFrom: oldSize, to: documentSize)
+            } else {
+                // Only the border changed: keep the photograph where it is.
+                scroll.keepPhotographInPlace(resizingDocumentFrom: oldSize, to: documentSize)
+            }
         }
         if commanded {
             scroll.lastCommand = zoomCommand; scroll.fitting = fit
             scroll.applyZoom()
-        } else if oldSize != displaySize, scroll.fitting { scroll.applyZoom() }
+        } else if oldSize != documentSize, scroll.fitting { scroll.applyZoom() }
     }
 }
 
@@ -83,6 +92,13 @@ final class ImageScrollView: NSScrollView {
         contentView.scroll(to: CGPoint(x: center.x * new.width - bounds.width / 2, y: center.y * new.height - bounds.height / 2))
         reflectScrolledClipView(contentView)
     }
+    func keepPhotographInPlace(resizingDocumentFrom old: CGSize, to new: CGSize) {
+        guard let documentView else { return }
+        let origin = contentView.bounds.origin
+        documentView.setFrameSize(new)
+        contentView.scroll(to: CGPoint(x: origin.x + (new.width - old.width) / 2, y: origin.y + (new.height - old.height) / 2))
+        reflectScrolledClipView(contentView)
+    }
     override func magnify(with event: NSEvent) { fitting = false; super.magnify(with: event) }
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.option) {
@@ -95,9 +111,14 @@ final class ImageScrollView: NSScrollView {
 
 final class PhotographView: NSView {
     private let photo = CALayer()
+    private var borderLayers: BorderLayers!
     private var image: AnyObject?
     private var size = CGSize.zero
     private var rotation = 0
+    private var border: BorderStyle?
+    private var filmTexture: CGImage?
+    /// The photograph's size on the canvas, after rotation.
+    var displaySize: CGSize { rotation % 2 != 0 ? CGSize(width: size.height, height: size.width) : size }
     override var acceptsFirstResponder: Bool { true }
     override var wantsUpdateLayer: Bool { true }
 
@@ -111,12 +132,15 @@ final class PhotographView: NSView {
         photo.isOpaque = true
         photo.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull()]
         layer?.addSublayer(photo)
+        borderLayers = BorderLayers(in: layer!, around: photo)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ image: AnyObject, size: CGSize, rotation: Int) {
-        guard image !== self.image || size != self.size || rotation != self.rotation else { return }
+    func show(_ image: AnyObject, size: CGSize, rotation: Int, border: BorderStyle? = nil, filmTexture: CGImage? = nil) {
+        guard image !== self.image || size != self.size || rotation != self.rotation
+            || border != self.border || filmTexture !== self.filmTexture else { return }
         self.image = image; self.size = size; self.rotation = rotation
+        self.border = border; self.filmTexture = filmTexture
         photo.contents = image
         needsLayout = true
     }
@@ -127,6 +151,7 @@ final class PhotographView: NSView {
         photo.bounds = CGRect(origin: .zero, size: size)
         photo.position = CGPoint(x: bounds.midX, y: bounds.midY)
         photo.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
+        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture)
         CATransaction.commit()
     }
 

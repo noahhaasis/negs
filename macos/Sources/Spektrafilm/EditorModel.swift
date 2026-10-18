@@ -18,6 +18,9 @@ import UniformTypeIdentifiers
     private(set) var film = EditState().film
     private(set) var paper = EditState().paper
     private(set) var limitsPreview = false
+    private(set) var border = BorderSettings()
+    /// The film border's frame, loaded from the engine's data folder.
+    private(set) var filmTexture: CGImage?
     private(set) var stocks: [Stock] = []
     private(set) var source: URL?
     /// The developed preview. Nil until the first render of `source` completes.
@@ -78,6 +81,11 @@ import UniformTypeIdentifiers
             self.engine = engine
             let (_, catalog) = try await engine.request(["command": .string("catalog")])
             guard catalog["protocol"].double == 1 else { throw EngineError(message: "The image engine version doesn't match this app. Rebuild the app bundle.") }
+            let data = engine.paths.data
+            Task.detached(priority: .utility) { [weak self] in
+                let texture = BorderStyle.loadFilmTexture(data: data)
+                await self?.setFilmTexture(texture)
+            }
             stocks = catalog["profiles"].array.map(Stock.init)
             defaults = catalog["defaults"]
             // Keep anything already applied to the photograph, such as its rotation.
@@ -92,6 +100,8 @@ import UniformTypeIdentifiers
             if source != nil { changed() }
         } catch { report(error) }
     }
+
+    private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }
 
     // MARK: Parameters
 
@@ -109,6 +119,7 @@ import UniformTypeIdentifiers
         if film != state.film { film = state.film }
         if paper != state.paper { paper = state.paper }
         if limitsPreview != state.limitPreview { limitsPreview = state.limitPreview }
+        if border != state.border { border = state.border }
     }
     func defaultValue(_ path: String) -> JSONValue { defaults[path] }
     func isModified(_ path: String) -> Bool {
@@ -174,6 +185,12 @@ import UniformTypeIdentifiers
     func limitPreview(_ enabled: Bool) {
         var next = state; next.limitPreview = enabled; apply(next, action: "Change Preview Resolution")
     }
+    func border<Value>(_ setting: WritableKeyPath<BorderSettings, Value>) -> Binding<Value> {
+        Binding(get: { self.border[keyPath: setting] }, set: {
+            var next = self.state; next.border[keyPath: setting] = $0; self.apply(next, action: "Change Border")
+        })
+    }
+    /// Keeps the border, like the film, paper, and rotation.
     func reset() {
         var next = state; next.params = defaults; next.limitPreview = false
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
@@ -183,13 +200,19 @@ import UniformTypeIdentifiers
     private func apply(_ next: EditState, action: String) {
         guard next != state else { return }
         if !interacting { registerUndo(restoring: state, action: action) }
-        state = next; changed()
+        replaceState(next)
+    }
+    /// A border change only redraws the canvas; anything else re-renders.
+    private func replaceState(_ next: EditState) {
+        let render = next.rendered != state.rendered
+        state = next
+        if render { changed() }
     }
     private func registerUndo(restoring previous: EditState, action: String) {
         undoManager?.registerUndo(withTarget: self) { model in
             guard previous != model.state else { return }
             model.registerUndo(restoring: model.state, action: action)
-            model.state = previous; model.changed()
+            model.replaceState(previous)
         }
         undoManager?.setActionName(action)
     }
@@ -391,6 +414,7 @@ import UniformTypeIdentifiers
         let picker = FormatPicker(panel: panel, selected: OutputFormat.last)
         panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).\(picker.format.type.preferredFilenameExtension ?? "png")"
         panel.message = export ? "Render at reference precision using the current working resolution." : "Save the current preview at its rendered resolution."
+        if let border = state.border.exported { panel.message += " Adds the \(border.title.lowercased()) border." }
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
             guard !Self.sameFile(url, source) else {
@@ -416,7 +440,9 @@ import UniformTypeIdentifiers
         saving = true
         defer { saving = false }
         do {
-            _ = try await engine.request(["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path)])
+            var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path)]
+            if let border = state.border.exported { command["border"] = .string(border.rawValue) }
+            _ = try await engine.request(command)
             status = "Saved \(url.lastPathComponent)"
         } catch { report(error) }
     }

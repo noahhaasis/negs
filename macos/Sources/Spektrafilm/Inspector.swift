@@ -240,6 +240,15 @@ struct AdjustmentInspector: View {
                         .help("Processes grain channels one at a time. Same result, less memory, longer export.")
                 }
             }
+            Section("Border") {
+                Toggle("Add border", isOn: model.border(\.enabled))
+                Group {
+                    BorderStylePicker(selection: model.border(\.style))
+                    Toggle("Include in export", isOn: model.border(\.export))
+                        .help("Adds the border to exported photographs and saved previews.")
+                }
+                .disabled(!model.border.enabled)
+            }
             Section {
                 Button("Reset All Adjustments", action: model.reset).frame(maxWidth: .infinity)
                     .help("Restore defaults while keeping the film, paper, and rotation. You can undo this.")

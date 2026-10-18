@@ -12,6 +12,7 @@
 //! [`save_image`] writes the rendered result as TIFF/PNG/JPEG, carrying
 //! over the source file's camera metadata read by [`read_metadata`].
 
+pub mod border;
 pub mod metadata;
 pub mod save;
 mod white_balance;

@@ -179,7 +179,7 @@ import XCTest
         view.show(image, size: CGSize(width: 300, height: 200), rotation: 1)
         view.setFrameSize(NSSize(width: 200, height: 300))
         view.layoutSubtreeIfNeeded()
-        let photo = try XCTUnwrap(view.layer?.sublayers?.first)
+        let photo = try XCTUnwrap(view.layer?.sublayers?.first { $0.contents as AnyObject === image })
         for (actual, expected) in zip([photo.frame.minX, photo.frame.minY, photo.frame.width, photo.frame.height], [0.0, 0, 200, 300]) {
             XCTAssertEqual(actual, expected, accuracy: 0.001)
         }

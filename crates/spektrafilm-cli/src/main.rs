@@ -56,6 +56,9 @@ enum Commands {
         /// before sRGB encoding/clipping. Used for bit-exact parity comparison.
         #[arg(long)]
         raw_out: Option<PathBuf>,
+        /// Add a border around the result (after rotation).
+        #[arg(long, value_parser = ["white", "film", "keyline"])]
+        border: Option<String>,
         /// Run the pipeline N times in the same process. Each iteration is
         /// timed individually so you can see cold-start vs warm-cache speed.
         /// Default: 1 (no repetition).
@@ -114,9 +117,11 @@ fn main() -> Result<()> {
             raw_temperature,
             raw_tint,
             raw_out,
+            border,
             iters,
             data_dir,
         } => {
+            let border = border.as_deref().map(str::parse).transpose()?;
             cmd_process(
                 &input,
                 &output,
@@ -129,6 +134,7 @@ fn main() -> Result<()> {
                 raw_temperature,
                 raw_tint,
                 raw_out.as_deref(),
+                border,
                 iters,
                 &data_dir,
             )?;
@@ -163,6 +169,7 @@ fn cmd_process(
     raw_temperature: Option<f64>,
     raw_tint: Option<f64>,
     raw_out: Option<&Path>,
+    border: Option<spektrafilm_io::border::BorderStyle>,
     iters: usize,
     data_dir: &Path,
 ) -> Result<()> {
@@ -204,6 +211,7 @@ fn cmd_process(
         raw_tint,
     )?;
     let rotate_cw = params.io.rotate_cw;
+    let encoded = params.io.output_cctf_encoding;
 
     // Auto-detect input color space from file extension
     if spektrafilm_io::input_is_linear_srgb(input) {
@@ -264,6 +272,10 @@ fn cmd_process(
 
     // User rotation from the GUI (post-pipeline, matches the preview).
     let result = result.rotated_cw(rotate_cw);
+    let result = match border {
+        Some(style) => spektrafilm_io::border::add_border(&result, style, encoded, data_dir)?,
+        None => result,
+    };
 
     // Save output, carrying over the input's camera metadata (EXIF).
     let t = Instant::now();

@@ -126,4 +126,10 @@ struct EditState: Equatable {
     var film = "kodak_gold_200"
     var paper = "kodak_portra_endura"
     var limitPreview = false
+    /// Drawn around the developed photograph; not part of the render.
+    var border = BorderSettings()
+
+    /// The state without presentation-only settings, to decide whether an
+    /// edit needs a new render.
+    var rendered: EditState { var state = self; state.border = BorderSettings(); return state }
 }

@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use spektrafilm_core::{params::RuntimeParams, pipeline::Pipeline, preview::*, profile};
 use spektrafilm_gpu::ComputeBackend;
+use spektrafilm_io::border::{BorderStyle, add_border};
 use spektrafilm_math::{image::ImageBuf, precision::to_f32};
 use std::{
     io::{BufRead, Write},
@@ -37,6 +38,8 @@ enum Command {
     Save {
         render_id: u64,
         output: PathBuf,
+        #[serde(default)]
+        border: Option<BorderStyle>,
     },
 }
 
@@ -49,7 +52,8 @@ struct Session {
     /// don't change the size skip a full-resolution resample.
     scaled: Option<((u32, u32), ImageBuf)>,
     pipeline: Option<(String, Pipeline)>,
-    output: Option<(u64, PathBuf, i32, ImageBuf)>,
+    /// The last render: request ID, source, rotation, sRGB-encoded, image.
+    output: Option<(u64, PathBuf, i32, bool, ImageBuf)>,
 }
 
 fn catalog(data: &Path) -> Result<Value> {
@@ -81,8 +85,12 @@ impl Session {
     fn handle(&mut self, request: Request, data: &Path) -> Result<Value> {
         match request.command {
             Command::Catalog => catalog(data),
-            Command::Save { render_id, output } => {
-                let (id, source, rotation, image) =
+            Command::Save {
+                render_id,
+                output,
+                border,
+            } => {
+                let (id, source, rotation, encoded, image) =
                     self.output.as_ref().context("No preview to save")?;
                 ensure!(
                     *id == render_id,
@@ -93,14 +101,16 @@ impl Session {
                     "Choose a different output path to preserve the source"
                 );
                 let metadata = spektrafilm_io::read_metadata(source);
-                if rotation.rem_euclid(4) == 0 {
-                    spektrafilm_io::save_image(image, &output, metadata.as_ref())?;
-                } else {
-                    spektrafilm_io::save_image(
-                        &image.clone().rotated_cw(*rotation),
+                let rotated =
+                    (rotation.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(*rotation));
+                let image = rotated.as_ref().unwrap_or(image);
+                match border {
+                    Some(style) => spektrafilm_io::save_image(
+                        &add_border(image, style, *encoded, data)?,
                         &output,
                         metadata.as_ref(),
-                    )?;
+                    )?,
+                    None => spektrafilm_io::save_image(image, &output, metadata.as_ref())?,
                 }
                 Ok(json!({"saved": output}))
             }
@@ -198,7 +208,13 @@ impl Session {
                     "raw": spektrafilm_io::is_raw(&input), "backend": backend.name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 });
-                self.output = Some((request.id, input, params.io.rotate_cw, output));
+                self.output = Some((
+                    request.id,
+                    input,
+                    params.io.rotate_cw,
+                    params.io.output_cctf_encoding,
+                    output,
+                ));
                 Ok(response)
             }
         }
@@ -320,6 +336,7 @@ mod tests {
                 2,
                 "source.png".into(),
                 0,
+                true,
                 ImageBuf::from_data(1, 1, vec![0.0; 3]),
             )),
             ..Default::default()
@@ -329,6 +346,7 @@ mod tests {
             command: Command::Save {
                 render_id: 1,
                 output: "unused.png".into(),
+                border: None,
             },
         };
         assert!(
