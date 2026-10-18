@@ -208,6 +208,10 @@ import UniformTypeIdentifiers
         panel.title = "Open Photograph"
         panel.allowedContentTypes = [.png, .tiff, .jpeg, .rawImage] + Self.rawExtensions.compactMap { UTType(filenameExtension: $0) }
         panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
+        if let source {
+            // A file URL reveals and selects the file; a parent URL only opens its folder.
+            panel.directoryURL = source
+        }
         panel.begin { [weak self] response in
             if response == .OK, let url = panel.url { self?.open(url) }
         }
