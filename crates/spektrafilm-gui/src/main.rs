@@ -1062,7 +1062,6 @@ impl App {
                     self.load_image_from_path(&path);
                 }
             }
-            ui.label("Format:");
             egui::ComboBox::from_id_salt("output_format")
                 .selected_text(self.output_format.label())
                 .show_ui(ui, |ui| {
