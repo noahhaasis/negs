@@ -132,6 +132,11 @@ struct EditState: Equatable {
     var crop = CropSettings()
 
     /// The state without presentation-only settings, to decide whether an
-    /// edit needs a new render.
-    var rendered: EditState { var state = self; state.border = BorderSettings(); state.crop = CropSettings(); return state }
+    /// edit needs a new render. The preview is never rotated: the canvas
+    /// turns it, and saving and exporting rotate the result.
+    var rendered: EditState {
+        var state = self; state.border = BorderSettings(); state.crop = CropSettings()
+        state.params["io.rotate_cw"] = .null
+        return state
+    }
 }

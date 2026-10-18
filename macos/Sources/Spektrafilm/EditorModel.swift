@@ -154,6 +154,11 @@ import UniformTypeIdentifiers
         if limitsPreview != state.limitPreview { limitsPreview = state.limitPreview }
         if border != state.border { border = state.border }
         if crop != state.crop { crop = state.crop }
+        let rotation = Int(state.params["io.rotate_cw"].double)
+        if imageRotation != rotation {
+            imageRotation = rotation
+            cropSession?.update(photo: shownImageSize, rotation: rotation)
+        }
         updateFilmStrip()
     }
     func defaultValue(_ path: String) -> JSONValue { defaults[path] }
@@ -238,7 +243,8 @@ import UniformTypeIdentifiers
         if !interacting { registerUndo(restoring: state, action: action) }
         replaceState(next)
     }
-    /// A border change only redraws the canvas; anything else re-renders.
+    /// A border, crop, or rotation change only redraws the canvas; anything
+    /// else re-renders.
     private func replaceState(_ next: EditState) {
         let render = next.rendered != state.rendered
         state = next
@@ -319,7 +325,6 @@ import UniformTypeIdentifiers
         let generation = sourceGeneration
         state.params["io.rotate_cw"] = .number(0)
         state.crop = CropSettings()
-        imageRotation = 0
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()
         zoom(fit: true)
@@ -406,7 +411,6 @@ import UniformTypeIdentifiers
             }.value
             guard shouldShow(currentRevision, generation) else { return }
             imageSize = CGSize(width: result["output_width"].double, height: result["output_height"].double)
-            imageRotation = Int(snapshot.params["io.rotate_cw"].double)
             image = developed; placeholder = nil
             cropSession?.update(photo: shownImageSize, rotation: imageRotation)
             updateFilmStrip()
@@ -511,7 +515,8 @@ import UniformTypeIdentifiers
         saving = true
         defer { saving = false }
         do {
-            var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path)]
+            var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path),
+                                                "rotate_cw": .number(Double(imageRotation))]
             if state.crop.cropped {
                 let r = state.crop.rect
                 command["crop"] = .object(["x": .number(r.minX), "y": .number(r.minY), "width": .number(r.width), "height": .number(r.height), "angle": .number(state.crop.angle)])

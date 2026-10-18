@@ -205,7 +205,8 @@ import XCTest
         session.choose(.square)
         // Turning while cropping turns the square with the photograph.
         model.rotate()
-        try await waitUntil { model.previewCurrent && model.imageRotation == 1 }
+        XCTAssertEqual(model.imageRotation, 1, "Turning doesn't wait for a render")
+        XCTAssertTrue(model.previewCurrent)
         undo.beginUndoGrouping(); model.endCrop(apply: true); undo.endUndoGrouping()
         XCTAssertNil(model.cropSession)
         XCTAssertEqual(model.photoSize, CGSize(width: 64, height: 64))

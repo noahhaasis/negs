@@ -45,6 +45,10 @@ enum Command {
         border: Option<BorderStyle>,
         #[serde(default)]
         crop: Option<Crop>,
+        /// Clockwise quarter turns. The preview is never rotated, so turning
+        /// the photograph doesn't need a new render.
+        #[serde(default)]
+        rotate_cw: i32,
     },
 }
 
@@ -57,8 +61,8 @@ struct Session {
     /// don't change the size skip a full-resolution resample.
     scaled: Option<((u32, u32), ImageBuf)>,
     pipeline: Option<(String, Pipeline)>,
-    /// The last render: request ID, source, film, rotation, sRGB-encoded, image.
-    output: Option<(u64, PathBuf, String, i32, bool, ImageBuf)>,
+    /// The last render: request ID, source, film, sRGB-encoded, image.
+    output: Option<(u64, PathBuf, String, bool, ImageBuf)>,
 }
 
 fn catalog(data: &Path) -> Result<Value> {
@@ -95,8 +99,9 @@ impl Session {
                 output,
                 border,
                 crop,
+                rotate_cw,
             } => {
-                let (id, source, film, rotation, encoded, image) =
+                let (id, source, film, encoded, image) =
                     self.output.as_ref().context("No preview to save")?;
                 ensure!(
                     *id == render_id,
@@ -114,7 +119,7 @@ impl Session {
                 let cropped = crop.map(|crop| crop.apply(image));
                 let image = cropped.as_ref().unwrap_or(image);
                 let rotated =
-                    (rotation.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(*rotation));
+                    (rotate_cw.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(rotate_cw));
                 let image = rotated.as_ref().unwrap_or(image);
                 match border {
                     Some(style) => spektrafilm_io::save_image(
@@ -224,7 +229,6 @@ impl Session {
                     request.id,
                     input,
                     film,
-                    params.io.rotate_cw,
                     params.io.output_cctf_encoding,
                     output,
                 ));
@@ -349,7 +353,6 @@ mod tests {
                 2,
                 "source.png".into(),
                 "kodak_gold_200".into(),
-                0,
                 true,
                 ImageBuf::from_data(1, 1, vec![0.0; 3]),
             )),
@@ -362,6 +365,7 @@ mod tests {
                 output: "unused.png".into(),
                 border: None,
                 crop: None,
+                rotate_cw: 0,
             },
         };
         assert!(

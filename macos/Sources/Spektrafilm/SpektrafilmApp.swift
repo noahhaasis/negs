@@ -170,7 +170,7 @@ struct CanvasArea: View {
             } else if let image = model.image {
                 canvas(image, size: model.imageSize, rotation: model.imageRotation)
             } else if let placeholder = model.placeholder {
-                canvas(placeholder, size: model.placeholderSize, rotation: 0)
+                canvas(placeholder, size: model.placeholderSize, rotation: model.imageRotation)
             } else if model.source == nil {
                 EmptyState(model: model)
             }
