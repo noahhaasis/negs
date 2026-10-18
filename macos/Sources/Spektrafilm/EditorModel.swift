@@ -387,15 +387,16 @@ import UniformTypeIdentifiers
         guard let source, export ? !exporting : canSave else { return }
         let panel = NSSavePanel()
         panel.title = export ? "Export Photograph" : "Save Preview"
-        panel.allowedContentTypes = [.png, .tiff, .jpeg]
         panel.canCreateDirectories = true
-        panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).png"
+        let picker = FormatPicker(panel: panel, selected: OutputFormat.last)
+        panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).\(picker.format.type.preferredFilenameExtension ?? "png")"
         panel.message = export ? "Render at reference precision using the current working resolution." : "Save the current preview at its rendered resolution."
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
             guard !Self.sameFile(url, source) else {
                 self.error = "Choose a different filename to preserve the original photograph."; return
             }
+            OutputFormat.last = picker.format
             Task { if export { await self.export(to: url) } else { await self.savePreview(to: url) } }
         }
     }
@@ -442,4 +443,53 @@ import UniformTypeIdentifiers
 @Observable final class ObservedParameter {
     var value: JSONValue
     init(_ value: JSONValue) { self.value = value }
+}
+
+/// The engine picks the encoder from the file extension.
+enum OutputFormat: String, CaseIterable {
+    case png, jpeg, tiff
+
+    var type: UTType {
+        switch self {
+        case .png: .png
+        case .jpeg: .jpeg
+        case .tiff: .tiff
+        }
+    }
+    var title: String {
+        switch self {
+        case .png: "PNG (lossless, 8-bit)"
+        case .jpeg: "JPEG (smaller, 8-bit)"
+        case .tiff: "TIFF (16-bit)"
+        }
+    }
+
+    /// The format of the last save or export, offered first next time.
+    static var last: OutputFormat {
+        get { UserDefaults.standard.string(forKey: "outputFormat").flatMap(OutputFormat.init) ?? .png }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "outputFormat") }
+    }
+}
+
+/// The save panel's Format pop-up. Changing the format restricts the panel to
+/// that type, which also rewrites the extension in the name field.
+@MainActor private final class FormatPicker: NSObject {
+    private let popup = NSPopUpButton()
+    private weak var panel: NSSavePanel?
+    var format: OutputFormat { OutputFormat.allCases[max(popup.indexOfSelectedItem, 0)] }
+
+    init(panel: NSSavePanel, selected: OutputFormat) {
+        self.panel = panel
+        super.init()
+        popup.addItems(withTitles: OutputFormat.allCases.map(\.title))
+        popup.selectItem(at: OutputFormat.allCases.firstIndex(of: selected) ?? 0)
+        popup.target = self; popup.action = #selector(changed)
+        let row = NSStackView(views: [NSTextField(labelWithString: "Format:"), popup])
+        row.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
+        row.setFrameSize(row.fittingSize)
+        panel.accessoryView = row
+        panel.allowedContentTypes = [selected.type]
+    }
+
+    @objc private func changed() { panel?.allowedContentTypes = [format.type] }
 }

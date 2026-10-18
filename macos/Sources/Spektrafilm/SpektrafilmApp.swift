@@ -120,7 +120,7 @@ struct EditorWindow: View {
                     .help("Rotate clockwise (⌘R)").disabled(model.source == nil)
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { model.savePanel(export: true) } label: { Label("Export", systemImage: "square.and.arrow.up") }
+                Button { model.savePanel(export: true) } label: { Label("Export", systemImage: "square.and.arrow.down") }
                     .help("Export photograph (⇧⌘E)").disabled(model.source == nil || !model.ready || model.exporting)
                 Button { model.inspectorVisible.toggle() } label: { Label("Adjustments", systemImage: "slider.horizontal.3") }
                     .help("Show or hide adjustments (⌥⌘I)")
