@@ -82,6 +82,24 @@ the helper's `save`, using `spektrafilm-io::border` after rotation. Both sides
 share the same proportional geometry; `BorderTests` pins the Swift sizes to
 the Rust tests' values.
 
+Crop (toolbar crop button, ⌘K) is presentation only as well. Crop mode shows
+the whole developed photograph without its border, with a dimmed outside,
+corner and edge handles, a thirds grid while dragging, and an inspector panel
+for Original (the default), Freeform, Square, 16:9, 3:2, 4:3, 5:4, 7:5, and
+Custom ratios with a landscape/portrait switch. A dial below the photograph
+(and an Angle slider in the panel) straightens it by up to 45° either way,
+like the iPhone's: the crop shrinks about its centre to stay on the turned
+photograph, and grows back if the angle returns within the same drag. Done
+(Return) applies the crop and any rotation made while cropping as one undo
+step; Cancel (Escape) discards both. The rectangle is stored as a fraction of
+the unrotated photograph, in the frame turned by the angle, so it turns with
+quarter rotations. The canvas clips the photograph with a masking layer;
+Save Preview (`crop` on the helper's `save`) and Export (`--crop
+x,y,w,h,angle` on the exporter) cut the same pixels with
+`spektrafilm-io::crop` (bilinear when straightened) before rotation and the
+border. `CropTests` pins the
+Swift rounding to the Rust tests' values.
+
 The preview buffer is capped at 8192 pixels on its longest side; saving retains
 the full processed preview resolution. Linear output is encoded only for display
 and tagged sRGB. Export uses an independent f64 process with the CPU backend

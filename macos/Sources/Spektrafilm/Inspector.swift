@@ -246,7 +246,7 @@ struct AdjustmentInspector: View {
                     let photo = model.photoSize == .zero ? nil : model.photoSize
                     BorderStylePicker(selection: model.border(\.style), photo: photo)
                     if let photo, !BorderStyle.film35.fits(photo) {
-                        Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)).")
+                        Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)); crop it to 3:2 or 4:3 to use it.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle("Include in export", isOn: model.border(\.export))

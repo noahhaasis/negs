@@ -60,16 +60,21 @@ struct EditorCommands: Commands {
         }
         CommandGroup(replacing: .saveItem) {
             Button("Save Preview…") { model.savePanel(export: false) }.keyboardShortcut("s").disabled(!model.canSave)
-            Button("Export Photograph…") { model.savePanel(export: true) }.keyboardShortcut("e", modifiers: [.command, .shift]).disabled(model.source == nil || !model.ready || model.exporting)
+            Button("Export Photograph…") { model.savePanel(export: true) }.keyboardShortcut("e", modifiers: [.command, .shift]).disabled(model.source == nil || !model.ready || model.exporting || model.cropping)
         }
         CommandGroup(after: .toolbar) {
             Toggle("Show Adjustments", isOn: Bindable(model).inspectorVisible).keyboardShortcut("i", modifiers: [.command, .option])
             Divider()
-            Button("Fit Photograph") { model.zoom(fit: true) }.keyboardShortcut("0").disabled(model.source == nil)
-            Button("Actual Size") { model.zoom(fit: false) }.keyboardShortcut("1").disabled(model.source == nil)
+            Button("Fit Photograph") { model.zoom(fit: true) }.keyboardShortcut("0").disabled(model.source == nil || model.cropping)
+            Button("Actual Size") { model.zoom(fit: false) }.keyboardShortcut("1").disabled(model.source == nil || model.cropping)
             Button("Rotate Clockwise", action: model.rotate).keyboardShortcut("r").disabled(model.source == nil)
+            if model.cropping {
+                Button("Done Cropping") { model.endCrop(apply: true) }.keyboardShortcut("k")
+            } else {
+                Button("Crop", action: model.beginCrop).keyboardShortcut("k").disabled(model.image == nil)
+            }
             Divider()
-            Button("Reset All Adjustments", action: model.reset).keyboardShortcut("r", modifiers: [.command, .shift]).disabled(!model.ready)
+            Button("Reset All Adjustments", action: model.reset).keyboardShortcut("r", modifiers: [.command, .shift]).disabled(!model.ready || model.cropping)
         }
     }
 }
@@ -98,7 +103,9 @@ struct EditorWindow: View {
         // measuring the content, which would lay out every inspector row per edit.
         .frame(minWidth: 680, idealWidth: 980, maxWidth: .infinity, minHeight: 500, idealHeight: 860, maxHeight: .infinity)
         .inspector(isPresented: $model.inspectorVisible) {
-            AdjustmentInspector(model: model)
+            Group {
+                if let session = model.cropSession { CropInspector(model: model, session: session) } else { AdjustmentInspector(model: model) }
+            }
                 .frame(minWidth: 0, idealWidth: 340, maxWidth: .infinity, minHeight: 0, idealHeight: 860, maxHeight: .infinity)
                 .inspectorColumnWidth(min: 300, ideal: 340, max: 440)
         }
@@ -115,13 +122,29 @@ struct EditorWindow: View {
                     Button { model.zoom(fit: false) } label: { Label("Actual Size", systemImage: "1.magnifyingglass") }
                         .help("Actual size (⌘1)")
                 } label: { Label("Zoom", systemImage: "magnifyingglass") }
-                .disabled(model.source == nil)
+                .disabled(model.source == nil || model.cropping)
                 Button(action: model.rotate) { Label("Rotate", systemImage: "rotate.right") }
                     .help("Rotate clockwise (⌘R)").disabled(model.source == nil)
+                Toggle(isOn: Binding(get: { model.cropping }, set: { $0 ? model.beginCrop() : model.endCrop(apply: true) })) {
+                    Label("Crop", systemImage: "crop")
+                }
+                .help(model.cropping ? "Apply the crop (⌘K)" : "Crop the photograph (⌘K)")
+                .disabled(model.image == nil)
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { model.savePanel(export: true) } label: { Label("Export", systemImage: "square.and.arrow.down") }
-                    .help("Export photograph (⇧⌘E)").disabled(model.source == nil || !model.ready || model.exporting)
+                if let session = model.cropSession {
+                    // A ratio field being edited keeps its own Return and Escape.
+                    Button("Cancel") { model.endCrop(apply: false) }
+                        .keyboardShortcut(session.typing ? nil : .cancelAction)
+                        .help("Discard the crop (Esc)")
+                    Button("Done") { model.endCrop(apply: true) }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(session.typing ? nil : .defaultAction)
+                        .help("Apply the crop (Return)")
+                } else {
+                    Button { model.savePanel(export: true) } label: { Label("Export", systemImage: "square.and.arrow.down") }
+                        .help("Export photograph (⇧⌘E)").disabled(model.source == nil || !model.ready || model.exporting)
+                }
                 Button { model.inspectorVisible.toggle() } label: { Label("Adjustments", systemImage: "slider.horizontal.3") }
                     .help("Show or hide adjustments (⌥⌘I)")
             }
@@ -142,7 +165,9 @@ struct CanvasArea: View {
     var body: some View {
         ZStack {
             Color(nsColor: .underPageBackgroundColor)
-            if let image = model.image {
+            if let session = model.cropSession, let image = model.image {
+                CropEditor(session: session, image: image)
+            } else if let image = model.image {
                 canvas(image, size: model.imageSize, rotation: model.imageRotation)
             } else if let placeholder = model.placeholder {
                 canvas(placeholder, size: model.placeholderSize, rotation: 0)
@@ -154,7 +179,7 @@ struct CanvasArea: View {
     }
 
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
-        PreviewCanvas(image: image, size: size, rotation: rotation, border: model.border.shown(for: size), filmTexture: model.filmTexture,
+        PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage)
     }
 }

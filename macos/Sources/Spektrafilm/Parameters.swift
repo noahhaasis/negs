@@ -128,8 +128,10 @@ struct EditState: Equatable {
     var limitPreview = false
     /// Drawn around the developed photograph; not part of the render.
     var border = BorderSettings()
+    /// Trims the developed photograph; not part of the render.
+    var crop = CropSettings()
 
     /// The state without presentation-only settings, to decide whether an
     /// edit needs a new render.
-    var rendered: EditState { var state = self; state.border = BorderSettings(); return state }
+    var rendered: EditState { var state = self; state.border = BorderSettings(); state.crop = CropSettings(); return state }
 }
