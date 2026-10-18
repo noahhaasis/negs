@@ -1,0 +1,25 @@
+{
+  "workspace-baseline-f32": {
+    "passed": 144,
+    "failed": 0,
+    "ignored": 1
+  },
+  "workspace-f32": {
+    "passed": 149,
+    "failed": 0,
+    "ignored": 1
+  },
+  "workspace-f64": {
+    "passed": 151,
+    "failed": 0,
+    "ignored": 1
+  },
+  "parity-unit-tests": {
+    "passed": 7,
+    "failed": 0
+  },
+  "changed-rust-files-format": {
+    "edition": 2024,
+    "passed": true
+  }
+}

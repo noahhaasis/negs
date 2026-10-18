@@ -2624,9 +2624,12 @@ mod reset_tests {
             .filter(|p| p.is_bw)
             .map(|p| p.stock.as_str())
             .collect();
-        assert_eq!(bw_films, ["kodak_doublex", "kodak_trix"]);
-        assert_eq!(bw_prints, ["kodak_2302"]);
-        assert_eq!(films.len() + prints.len(), 31);
+        assert_eq!(
+            bw_films,
+            ["kodak_doublex", "kodak_trix400_d76_8min", "kodak_trix"]
+        );
+        assert_eq!(bw_prints, ["ilford_mgrc_deluxe_grade2", "kodak_2302"]);
+        assert_eq!(films.len() + prints.len(), 33);
         assert_eq!(
             films
                 .iter()

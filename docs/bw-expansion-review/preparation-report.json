@@ -1,0 +1,32 @@
+{
+  "film_source_exposure_origin": -1.472675865211774,
+  "paper_source_exposure_origin": 2.1789216682451795,
+  "film_sensitivity_log_shift": -3.425330972107071,
+  "film_midgray_raw": 0.9999999999999999,
+  "paper_base_reflection_density": 0.052434457,
+  "paper_max_reflection_density": 2.097378277,
+  "paper_unexposed_reflectance": 0.8862689678037858,
+  "paper_maximum_density_reflectance": 0.007991378907043184,
+  "source_points_sha256": {
+    "ilford-mgrc-grade2.csv": "769fd42343abee025bc18819e407f9f8d215dc4da31eac2a82827658a26454f9",
+    "trix400-d76-8min.csv": "0072018c977f4d71a20ef5b0c138e6200218e07e9de9b715440c1f983069e4bb",
+    "trix400-sensitivity.csv": "f10a8df016c7f4c61aa121dcf246dad6b6e4e1a0cbf08b38067aaf59e739c105"
+  },
+  "spectral_lut_sha256": "52f90c724811f5fab80769f8548bf24d08a521eb09e65ab6e016893258d2a783",
+  "profiles": {
+    "film": {
+      "id": "kodak_trix400_d76_8min",
+      "max_source_density_error": 0.004701661442205629,
+      "minimum_sampled_net_density": 0.0007858547,
+      "tolerance": 0.01,
+      "sha256": "7fee413efc7efd99a92daa38df641484c5c82d1809f0c04c3bdd835394171dd9"
+    },
+    "paper": {
+      "id": "ilford_mgrc_deluxe_grade2",
+      "max_source_density_error": 0.016644031146315186,
+      "minimum_sampled_net_density": 0.0,
+      "tolerance": 0.03,
+      "sha256": "cd87207e6c58a30b4785296429058ece6f3db35feb862a1d6ea58b1b0a24adcf"
+    }
+  }
+}

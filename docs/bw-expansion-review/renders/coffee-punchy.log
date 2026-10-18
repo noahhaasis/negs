@@ -1,0 +1,11 @@
+Profiles loaded: 0 ms
+Image loaded: 600x400 (0.2 MP), 5 ms
+2026-10-18T19:10:47.644039Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-18T19:10:47.650854Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_trix400_d76_8min" print_exposure_factor=1.731132705013022
+2026-10-18T19:10:47.650889Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-18T19:10:47.682804Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-18T19:10:47.722684Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-18T19:10:47.730936Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 86 ms
+Saved: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/renders/coffee-punchy.png (600x400), 2 ms

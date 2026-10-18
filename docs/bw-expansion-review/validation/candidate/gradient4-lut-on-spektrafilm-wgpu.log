@@ -1,0 +1,11 @@
+Profiles loaded: 0 ms
+Image loaded: 4x4 (0 MP), 0 ms
+2026-10-18T19:14:10.761495Z  INFO spektrafilm_gpu::wgpu_backend: wgpu backend initialized adapter="Apple M1 Pro" backend=Metal
+2026-10-18T19:14:10.761547Z  INFO spektrafilm_gpu: using wgpu GPU backend
+Backend: wgpu (GPU)
+2026-10-18T19:14:10.768604Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_trix400_d76_8min" print_exposure_factor=1.7311327050083856
+2026-10-18T19:14:10.768666Z  INFO spektrafilm_core::pipeline: pipeline: start backend="wgpu (GPU)"
+2026-10-18T19:14:10.891449Z  INFO spektrafilm_core::pipeline: pipeline: gpu-resident fast path complete
+Pipeline: 129 ms
+Saved: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/validation/candidate/gradient4-lut-on-spektrafilm-wgpu.png (4x4), 0 ms
+raw f64 buffer: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/validation/candidate/gradient4-lut-on-spektrafilm-wgpu.f64 (48 values)

@@ -45,7 +45,7 @@ def main():
     plist = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     report = {"zip_sha256": sha(args.zip), "app": str(app), "signature_verified": True,
               "minimum_macos": plist["LSMinimumSystemVersion"], "binaries": {}, "data": {}}
-    for name in [plist["CFBundleExecutable"], "spektrafilm", "spektrafilm-f64"] + (["spektrafilm-native"] if plist["CFBundleExecutable"] == "Spektrafilm" else []):
+    for name in [plist["CFBundleExecutable"], "spektrafilm", "spektrafilm-f64"] + (["spektrafilm-native"] if plist["CFBundleExecutable"] in {"Spektrafilm", "SpektrafilmApp"} else []):
         binary = app / "Contents/MacOS" / name
         arch = checked("/usr/bin/lipo", "-archs", str(binary)).strip()
         links = checked("/usr/bin/otool", "-L", str(binary))

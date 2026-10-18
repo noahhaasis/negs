@@ -335,8 +335,9 @@ mod tests {
                 continue;
             }
             let stock = path.file_stem().unwrap().to_str().unwrap().to_owned();
-            // Tri-X Reversal 7266 isn't made in 35mm: it gets the generic strip.
-            if stock == "kodak_trix" {
+            // Tri-X Reversal 7266 isn't made in 35mm, and no 400TX edge print
+            // was sourced: both get the generic strip.
+            if stock == "kodak_trix" || stock == "kodak_trix400_d76_8min" {
                 assert!(STOCKS.iter().all(|(id, ..)| *id != stock));
                 continue;
             }

@@ -42,5 +42,10 @@ strip), after changing the renderer or the material:
 
     cargo run --release -p spektrafilm-io --example film35_borders
 
+The `kodak_trix400_d76_8min.png` files are copies of `generic.png`.
+They intentionally carry no stock-specific edge print: no real 400TX border
+scan was sourced for the B&W expansion. The generator doesn't write them, so
+copy `generic.png` over them after regenerating.
+
 The edge print uses Barlow Condensed (SIL OFL, in
 `crates/spektrafilm-io/fonts`).

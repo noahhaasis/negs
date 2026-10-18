@@ -1,0 +1,10 @@
+{
+  "kodak_trix400_d76_8min.json": {
+    "identical": true,
+    "sha256": "7fee413efc7efd99a92daa38df641484c5c82d1809f0c04c3bdd835394171dd9"
+  },
+  "ilford_mgrc_deluxe_grade2.json": {
+    "identical": true,
+    "sha256": "cd87207e6c58a30b4785296429058ece6f3db35feb862a1d6ea58b1b0a24adcf"
+  }
+}
