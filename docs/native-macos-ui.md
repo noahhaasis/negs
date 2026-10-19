@@ -33,7 +33,7 @@ trailing inspector. The app uses one editing window and a recent-files menu.
 All five steps are implemented. macOS packaging now launches the Swift app;
 the cross-platform egui binary remains buildable but is unmaintained: it gets
 no new work or fixes, and the macOS app will later be ported to other platforms. The minimum native-app OS is
-macOS 14 (the SwiftUI inspector API). The packaging script bundles the f32 Rust
+macOS 14 (Observation and AppKit's inspector toolbar separator). The packaging script bundles the f32 Rust
 helper, f32 CLI, f64 exporter, profile/LUT data, and source archive, then ad-hoc
 signs the app. It does not notarize it.
 
@@ -64,15 +64,45 @@ UI responsiveness depends on a few SwiftUI/AppKit details:
   ~23,000, and laying them out took about 12 s at launch and again on edits.
 - The model uses Observation, and each parameter path has its own observable
   value, so an edit re-evaluates only its own row, not every control.
-- The window root and inspector have fully specified frames (including ideal
-  sizes), which cuts most of the work AppKit's min-size query did per edit by
-  re-measuring the inspector. SwiftUI's own inspector container still measures
-  the form, at a few milliseconds per edit.
+- The split view sizes the canvas and inspector columns. Their hosting
+  controllers have no sizing options, so SwiftUI never measures the form for
+  the window's size limits (SwiftUI's own inspector container did, at a few
+  milliseconds per edit).
 - Previews are sRGB-tagged IOSurfaces built off the main thread and shown as
   Core Animation layer contents. A `CGImage` was converted on the main thread
   at commit (~35 ms per 10 MP frame); `NSImage` drawing redrew on every zoom.
-- Finder opens are handled with `onOpenURL`. Overriding the app delegate's
-  `application(_:open:)` makes Stage Manager swap the window off stage.
+- Finder opens arrive at the app delegate's `application(_:open:)`. Under the
+  SwiftUI app lifecycle, overriding it made Stage Manager swap the window off
+  stage; under AppKit's it doesn't (checked with Stage Manager on).
+
+## Startup
+
+AppKit runs the application, menus, window, and toolbar
+(`EditorWindowController`, `MainMenu`); the canvas and inspector are SwiftUI
+views in `NSHostingController`s. Measured on an M1 Pro on battery, from launch
+to the window on screen (median of 10):
+
+| | Window | Responsive |
+|---|---|---|
+| SwiftUI `App`, toolbar, and `.inspector` | 925 ms | ~1,000 ms |
+| AppKit shell, adjustments in the first frame | 780 ms | 780 ms |
+| AppKit shell, adjustments once the window is on screen (shipped) | 550 ms | ~800 ms |
+
+- Main-thread layout is nearly all of it, not the Rust helper. SwiftUI toolbar
+  items cost ~20 ms each with SF Symbols (7 of them ~150 ms); the same
+  `NSToolbar` costs ~36 ms. The adjustments form costs ~220 ms with every
+  group collapsed and more per expanded group.
+- On macOS 26, standard controls are expensive whichever framework creates
+  them: an `NSSlider` runs a small SwiftUI graph per instance (~4 ms each),
+  and a 33-item pop-up measures every item (~19 ms). Fewer controls in the
+  first frame is what helps, not rewriting them in AppKit.
+- The adjustments column is empty for the window's first frame and fills in
+  once the window is on screen, with nothing moving.
+- `EditorModel.launch()` starts the helper and requests the catalog
+  synchronously in `applicationWillFinishLaunching`. The last catalog is
+  cached in UserDefaults, keyed by the helper binary, so the inspector shows
+  the stocks at once and isn't rebuilt when the helper answers. Edits are
+  possible as soon as the catalog is known; rendering waits for the helper.
 
 Borders (white, film frame, white with keyline) are presentation only. They
 are not render parameters, so a border change never re-renders: the canvas

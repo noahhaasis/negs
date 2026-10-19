@@ -212,15 +212,15 @@ import XCTest
         model.open(fixture)
         try await waitUntil { model.previewCurrent || model.error != nil }
         XCTAssertNil(model.error)
-        let controller = NSHostingController(rootView: EditorWindow(model: model))
-        let window = NSWindow(contentViewController: controller)
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1320, height: 860))
-        window.makeKeyAndOrderFront(nil)
+        controller.showWindow(nil)
         defer { window.orderOut(nil); model.shutdown(); try? FileManager.default.removeItem(at: fixture) }
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
+        for (name, appearance, crop) in [("light", NSAppearance.Name.aqua, false), ("dark", NSAppearance.Name.darkAqua, false), ("crop", NSAppearance.Name.darkAqua, true)] {
             window.appearance = NSAppearance(named: appearance)
+            if crop { model.beginCrop() }
             try await Task.sleep(nanoseconds: 400_000_000)
             let view = window.contentView!
             view.layoutSubtreeIfNeeded()
