@@ -1,0 +1,12 @@
+Profiles loaded: 0 ms
+Image loaded: 32x32 (0 MP), 0 ms
+2026-10-19T06:15:15.440819Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-19T06:15:15.447461Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_trix400_d76_8min" print_exposure_factor=1.731132705013022
+2026-10-19T06:15:15.447497Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-19T06:15:15.448327Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-19T06:15:15.452864Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-19T06:15:15.456727Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 15 ms
+Saved: /private/tmp/bw-expansion-resume-native-20261019/adversarial32-lut-on-spektrafilm-f64-cpu.png (32x32), 0 ms
+raw f64 buffer: /private/tmp/bw-expansion-resume-native-20261019/adversarial32-lut-on-spektrafilm-f64-cpu.f64 (3072 values)

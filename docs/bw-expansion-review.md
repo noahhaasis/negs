@@ -1,4 +1,4 @@
-# Tri-X 400 and Ilford paper review — 18 October 2026
+# Tri-X 400 and Ilford paper review — updated 19 October 2026
 
 **Recommendation: try Tri-X 400 with the balanced Ilford Grade 2 recipe.** It gives a useful, restrained B&W result with gentle blacks and preserved detail. Keep the paper labelled experimental until we have measured paper spectra and real print comparisons. The punchier recipe is an optional look, not a more accurate calibration.
 
@@ -9,7 +9,11 @@
 | Balanced recipe | Cleaner whites, subtle grain, no added blur | Deliberate scanner white correction and generic grain; not measured Tri-X grain | Ready to try within the paper's experimental scope | Preferred everyday look |
 | Punchy recipe | Deeper blacks and stronger contrast; less gradual tonal separation | Creative endpoint correction and density gamma 1.12 | Optional creative variant | Reserve for images that benefit from stronger contrast |
 
-The [candidate app](../dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app) is a separate Apple Silicon macOS build. Select **Kodak Tri-X 400 / 400TX - D-76, 8 min, 35 mm**; its target print is **Ilford Multigrade RC Deluxe - Grade 2 (experimental neutral)**. The catalogue contains 33 entries. No existing stock has been replaced. The balanced recipe is supplied as reproducible settings below; selecting a film does not automatically apply a new stock-specific texture preset.
+The [candidate app](../dist/spektrafilm-bw-sharing-20261019/Spektrafilm.app) and [ZIP](../dist/spektrafilm-bw-sharing-20261019.zip) are the Apple Silicon macOS sharing build, including the B&W expansion and the generated `KODAK 400TX` label on full-frame and half-frame 35mm borders. Select **Kodak Tri-X 400 / 400TX - D-76, 8 min, 35 mm**; its target print is **Ilford Multigrade RC Deluxe - Grade 2 (experimental neutral)**. The catalogue contains 33 entries. No existing stock has been replaced. The balanced recipe is supplied as reproducible settings below; selecting a film does not automatically apply a new stock-specific texture preset.
+
+The PM is keeping this version and sharing it with friends; detailed feedback is deferred. This Markdown review and its comparisons are retained for that feedback. Run the commands below from the repository root. All nine controlled photograph renders were repeated with the `9579d36` packaged exporter on 19 October and match these figures pixel-for-pixel. The creative grain variants remain the original renders. The subsequent border-only change is commit `aa20096`.
+
+The sharing build’s [package audit](../dist/spektrafilm-bw-sharing-20261019-package-report.json) and [validation files](../dist/spektrafilm-bw-sharing-20261019-validation/) accompany the ZIP. The [full-frame border](../data/borders/35mm/full/kodak_trix400_d76_8min.png) and [half-frame border](../data/borders/35mm/half/kodak_trix400_d76_8min.png) use the same stock table as exports.
 
 **Controlled film comparison.** Same Ilford paper, input, exposure and disabled effects in each column. The portrait remains close across the films; wood, coloured objects and darker tones show modest separation changes. There is no evidence here that one film universally produces better skin tones. Auto exposure is off and no image has its own corrective settings.
 
@@ -43,30 +47,30 @@ For neutral B&W negatives with normalized print exposure, the unknown common spe
 
 ![Neutral output ramp and intermediate film/paper densities](bw-expansion-review/diagnostic-ramps.png)
 
-**Checks completed.** These establish software consistency and usable behaviour; they do not prove an exact film/lab match.
+**Checks completed before the border follow-up.** These establish software consistency and usable behaviour; they do not prove an exact film/lab match.
 
 | Check | Result |
 |---|---|
-| Workspace f32 / f64 | 149 / 151 passed, zero failures, one existing external-RAW fixture test ignored in each |
+| Workspace f32 / f64 on the new base | 157 / 159 passed, zero failures, one existing external-RAW fixture test ignored in each; recorded in the [resume handoff](handoff-bw-expansion-resume.md) |
 | Python parity comparator unit tests | 7 passed |
-| Clean pinned Python comparison | 30 cases across new pair, Double-X/new paper and new film/2302; LUT on/off; all four intermediate/final stages pass at absolute tolerance 1e-6 |
+| Clean pinned Python comparison, repeated 19 October | 30 cases using the extracted current package across new pair, Double-X/new paper and new film/2302; LUT on/off; all four intermediate/final stages pass at absolute tolerance 1e-6 |
 | Physical diagnostics | Neutral ramp, coloured patches, exact black, near-black and HDR through 1e6 finite; monotonic neutral response; reflection-density check passes |
 | Stable preparation | Both profiles regenerate byte-identically in the pinned environment |
 | Packaged f64 CPU / f32 CPU / f32 Metal | All checked against Python; maximum Metal error 8.54e-6 versus 0.003 gate |
 | Native preview and export | Actual `wgpu (GPU)` backend on Apple M1 Pro; 512×512 portrait preview/save and f64 export agree within one 8-bit level; default target paper exercised |
 
-The extracted ZIP passed signature, architecture, dependency, bundled-data and source-snapshot verification. The [package report](../dist/spektrafilm-bw-candidate-20261018-1903-package-report.json) sits beside the candidate ZIP. The app is locally ad-hoc signed, not notarized or publicly released. Native catalogue, preview and export protocol were exercised; manual clicking through the SwiftUI controls was not assessed. Full-workspace formatting still reports pre-existing differences in unchanged CPU/CUDA backend files; changed Rust files pass formatting.
+The earlier `9579d36` ZIP passed signature, architecture, dependency, bundled-data and source-snapshot verification again on 19 October: four executables, 120 data files and 840 source files. See the [package report](bw-expansion-review/validation/resume-20261019/package-report.json) and [new verification summary](bw-expansion-review/validation/resume-20261019/summary.json). The native Metal preview/export check also passed again. The app is locally ad-hoc signed, not notarized or publicly released. Manual clicking through the SwiftUI controls was not assessed. The new base has pre-existing formatting complaints in `border.rs`; details and earlier CPU/CUDA formatting findings remain in the handoffs.
 
 To reproduce the balanced render from the repository root using the candidate's exact exporter and bundled profiles:
 
 ```sh
 SPEKTRAFILM_BACKEND=cpu \
-  dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/MacOS/spektrafilm-f64 \
+  dist/spektrafilm-bw-sharing-20261019/Spektrafilm.app/Contents/MacOS/spektrafilm-f64 \
   process docs/bw-expansion-review/inputs/astronaut.png \
   -o /tmp/trix-balanced.png \
   --film kodak_trix400_d76_8min --paper ilford_mgrc_deluxe_grade2 \
   --params docs/bw-expansion-review/recipes/balanced.json \
-  --data-dir dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/Resources/data
+  --data-dir dist/spektrafilm-bw-sharing-20261019/Spektrafilm.app/Contents/Resources/data
 ```
 
 [Controlled settings](bw-expansion-review/recipes/trix-paper.json), [balanced settings](bw-expansion-review/recipes/balanced.json) and [punchy settings](bw-expansion-review/recipes/punchy.json) are separate from material calibration. Render commands, input/profile hashes and backend are preserved in [the manifest](bw-expansion-review/render-manifest.json). Technical details and next steps are in [the results handoff](handoff-bw-expansion-results.md).

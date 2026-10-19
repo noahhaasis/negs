@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-19",
+  "application_commit": "9579d36c052467cb417fe32ce2504f5c6f3e4ed0",
+  "documentation_head_at_resume": "65410b5",
+  "python_commit": "28bf883e1672e884307edc75852549376e13644e",
+  "pinned_python_files_verified": 292,
+  "frozen_fixture_regenerated_identically": true,
+  "fixture_sha256": "3f7d69404a2e06ab621e0171c8329f1ed8aab0f099ad0187a49c57e39962e996",
+  "package_passed": true,
+  "zip_sha256": "e069c3d64460dba8e0ed5eb9e8cc310559667189f7c2c25bdd4fd02dea64f5de",
+  "source_files": 840,
+  "data_files": 120,
+  "parity": {
+    "pair": {
+      "passed": true,
+      "cases": 10,
+      "max_abs_by_stage": {
+        "log_e_film": 2.886579864025407e-15,
+        "cmy_film": 1.1102230246251565e-15,
+        "cmy_print": 1.1196599203344704e-13,
+        "rgb_out": 2.674527266322002e-13
+      }
+    },
+    "doublex": {
+      "passed": true,
+      "cases": 10,
+      "max_abs_by_stage": {
+        "log_e_film": 1.7763568394002505e-15,
+        "cmy_film": 6.661338147750939e-16,
+        "cmy_print": 3.114175584073564e-14,
+        "rgb_out": 2.341460358934455e-13
+      }
+    },
+    "2302": {
+      "passed": true,
+      "cases": 10,
+      "max_abs_by_stage": {
+        "log_e_film": 2.886579864025407e-15,
+        "cmy_film": 1.1102230246251565e-15,
+        "cmy_print": 8.482103908136196e-14,
+        "rgb_out": 3.198108444735226e-12
+      }
+    }
+  },
+  "native": {
+    "backend": "wgpu (GPU)",
+    "catalogue_entries": 33,
+    "preview_export_max_8bit_levels": 1,
+    "width": 512,
+    "height": 512,
+    "target_print_exercised": true
+  },
+  "controlled_photos": {
+    "passed": true,
+    "count": 9,
+    "max_8bit_difference": 0
+  }
+}

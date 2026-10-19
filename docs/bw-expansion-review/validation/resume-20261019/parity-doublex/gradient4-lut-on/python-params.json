@@ -1,0 +1,285 @@
+{
+  "camera": {
+    "exposure_compensation_ev": 0.0,
+    "auto_exposure": false,
+    "auto_exposure_method": "center_weighted",
+    "lens_blur_um": 0.0,
+    "film_format_mm": 35.0,
+    "color_filter": "none",
+    "diffusion_filter": {
+      "active": false,
+      "filter_family": "black_pro_mist",
+      "strength": 0.5,
+      "spatial_scale": 1.0,
+      "halo_warmth": 0.0,
+      "core_intensity": 1.0,
+      "core_size": 1.0,
+      "halo_intensity": 1.0,
+      "halo_size": 1.0,
+      "bloom_intensity": 1.0,
+      "bloom_size": 1.0
+    }
+  },
+  "film_render": {
+    "chemistry": {
+      "development_time": null,
+      "active": true,
+      "gamma_factor": 1.0,
+      "gamma_factor_fast": 1.0,
+      "gamma_factor_slow": 1.0,
+      "gamma_factor_red": 1.0,
+      "gamma_factor_green": 1.0,
+      "gamma_factor_blue": 1.0,
+      "developer_exhaustion": 0.0
+    },
+    "grain": {
+      "active": false,
+      "rms_granularity": [
+        14.0,
+        null,
+        null
+      ],
+      "density_min": [
+        0.01,
+        null,
+        null
+      ],
+      "uniformity": [
+        0.6,
+        null,
+        null
+      ],
+      "particle_scale_sublayers": [
+        1.0,
+        0.4,
+        0.25
+      ],
+      "blur": 0.89,
+      "mult_usm_sigma": 0.7,
+      "mult_usm_amount": 1.5,
+      "blur_dye_clouds_um": 2.0,
+      "micro_structure": [
+        0.2,
+        30
+      ],
+      "micro_sublayers": 1
+    },
+    "halation": {
+      "active": false,
+      "scatter_amount": 1.0,
+      "scatter_spatial_scale": 1.0,
+      "halation_amount": 1.0,
+      "halation_spatial_scale": 1.0,
+      "scatter_core_um": [
+        2.2,
+        2.0,
+        1.6
+      ],
+      "scatter_tail_um": [
+        9.3,
+        9.7,
+        9.1
+      ],
+      "scatter_tail_weight": [
+        0.78,
+        0.65,
+        0.67
+      ],
+      "boost_ev": 0.0,
+      "boost_range": 0.3,
+      "protect_ev": 4.0,
+      "halation_strength": [
+        0.015,
+        0.005,
+        0.0
+      ],
+      "halation_first_sigma_um": [
+        50.0,
+        50.0,
+        50.0
+      ],
+      "halation_n_bounces": 3,
+      "halation_bounce_decay": 0.5,
+      "halation_renormalize": true
+    },
+    "dir_couplers": {
+      "active": false,
+      "amount": 1.0,
+      "inhibition_samelayer": 1.0,
+      "inhibition_interlayer": 1.0,
+      "gamma_samelayer_rgb": [
+        0.5159,
+        0.5934,
+        0.2829
+      ],
+      "gamma_interlayer_r_to_gb": [
+        0.4032,
+        0.2488
+      ],
+      "gamma_interlayer_g_to_rb": [
+        0.2227,
+        0.434
+      ],
+      "gamma_interlayer_b_to_rg": [
+        0.1829,
+        0.1799
+      ],
+      "langmuir_donor_k_rgb": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "langmuir_receiver_k_rgb": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "diffusion_size_um": 20.0,
+      "diffusion_tail_um": 200.0,
+      "diffusion_tail_weight": 0.03
+    },
+    "glare": {
+      "active": false,
+      "percent": 0.03,
+      "roughness": 0.7,
+      "blur": 0.5
+    },
+    "base": {
+      "active": true,
+      "scale": 1.0,
+      "tilt": 0.0,
+      "cyan": 1.0,
+      "magenta": 1.0,
+      "yellow": 1.0
+    },
+    "convert": {
+      "scan_illuminant": "D55",
+      "exposure_compensation_ev": 0.0,
+      "base_percentile": 99.0,
+      "calibration": "1 0 0  0 1 0  0 0 1"
+    }
+  },
+  "print_render": {
+    "glare": {
+      "active": false,
+      "percent": 0.03,
+      "roughness": 0.7,
+      "blur": 0.5
+    },
+    "chemistry": {
+      "development_time": null,
+      "active": true,
+      "gamma_factor": 1.0,
+      "gamma_factor_fast": 1.0,
+      "gamma_factor_slow": 1.0,
+      "gamma_factor_red": 1.0,
+      "gamma_factor_green": 1.0,
+      "gamma_factor_blue": 1.0,
+      "developer_exhaustion": 0.0
+    },
+    "base": {
+      "active": true,
+      "scale": 1.0,
+      "cyan": 1.0,
+      "magenta": 1.0,
+      "yellow": 1.0
+    }
+  },
+  "scanner": {
+    "lens_blur": 0.0,
+    "white_correction": false,
+    "black_correction": false,
+    "white_level": 0.98,
+    "black_level": 0.01,
+    "unsharp_mask": [
+      0.0,
+      0.0
+    ]
+  },
+  "enlarger": {
+    "illuminant": "TH-KG3",
+    "print_exposure": 1.0,
+    "print_exposure_compensation": true,
+    "normalize_print_exposure": true,
+    "y_filter_shift": 0.0,
+    "m_filter_shift": 0.0,
+    "y_filter_neutral": 50.0,
+    "m_filter_neutral": 50.0,
+    "c_filter_neutral": 0.0,
+    "lens_blur": 0.0,
+    "diffusion_filter": {
+      "active": false,
+      "filter_family": "black_pro_mist",
+      "strength": 0.5,
+      "spatial_scale": 1.0,
+      "halo_warmth": 0.0,
+      "core_intensity": 1.0,
+      "core_size": 1.0,
+      "halo_intensity": 1.0,
+      "halo_size": 1.0,
+      "bloom_intensity": 1.0,
+      "bloom_size": 1.0
+    },
+    "preflash_exposure": 0.0,
+    "preflash_y_filter_shift": 0.0,
+    "preflash_m_filter_shift": 0.0
+  },
+  "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false,
+    "output_color_space": "sRGB",
+    "output_cctf_encoding": false,
+    "input_gamut_compress": {
+      "active": false,
+      "algorithm": "xy",
+      "boundary": "inscribed_hull",
+      "hull_detail": 5.0,
+      "knee": [
+        0.815,
+        1.0,
+        1.2
+      ]
+    },
+    "output_gamut_compress": {
+      "algorithm": "off",
+      "knee": [
+        0.95,
+        1.0,
+        1.6
+      ],
+      "lightness_compression": [
+        0.95,
+        1.0,
+        1.6
+      ]
+    },
+    "crop": false,
+    "crop_center": [
+      0.5,
+      0.5
+    ],
+    "crop_size": [
+      0.1,
+      0.1
+    ],
+    "upscale_factor": 1.0
+  },
+  "settings": {
+    "rgb_to_raw_method": "hanatos2025",
+    "apply_hanatos2025_adaptation_window": true,
+    "apply_hanatos2025_adaptation_surface": false,
+    "spectral_gaussian_blur": 0.0,
+    "use_enlarger_lut": true,
+    "use_scanner_lut": true,
+    "use_convert_lut": false,
+    "lut_resolution": 17,
+    "convert_lut_resolution": 33,
+    "use_fast_stats": true,
+    "preview_max_size": 640,
+    "preview_mode": false,
+    "neutral_print_filters_from_database": true
+  },
+  "workflow": {
+    "route": "input > film > print > scan"
+  }
+}

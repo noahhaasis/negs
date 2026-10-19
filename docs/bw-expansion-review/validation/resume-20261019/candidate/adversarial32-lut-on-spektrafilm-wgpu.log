@@ -1,0 +1,11 @@
+Profiles loaded: 0 ms
+Image loaded: 32x32 (0 MP), 0 ms
+2026-10-19T06:15:15.512821Z  INFO spektrafilm_gpu::wgpu_backend: wgpu backend initialized adapter="Apple M1 Pro" backend=Metal
+2026-10-19T06:15:15.512887Z  INFO spektrafilm_gpu: using wgpu GPU backend
+Backend: wgpu (GPU)
+2026-10-19T06:15:15.519778Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_trix400_d76_8min" print_exposure_factor=1.7311327050083856
+2026-10-19T06:15:15.519834Z  INFO spektrafilm_core::pipeline: pipeline: start backend="wgpu (GPU)"
+2026-10-19T06:15:15.527411Z  INFO spektrafilm_core::pipeline: pipeline: gpu-resident fast path complete
+Pipeline: 14 ms
+Saved: /private/tmp/bw-expansion-resume-native-20261019/adversarial32-lut-on-spektrafilm-wgpu.png (32x32), 0 ms
+raw f64 buffer: /private/tmp/bw-expansion-resume-native-20261019/adversarial32-lut-on-spektrafilm-wgpu.f64 (3072 values)
