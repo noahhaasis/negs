@@ -2329,10 +2329,9 @@ fn build_ref_blur(
         accumulate: u32,
         mask: [u32; 4],
         scale: [f32; 4],
-        a: [f32; 4],
-        b1: [f32; 4],
-        b2: [f32; 4],
-        b3: [f32; 4],
+        g1: [f32; 4],
+        g2: [f32; 4],
+        c2: [f32; 4],
     }
     // Channels at σ ≥ 3 share one IIR job (one thread per line filters all of
     // them); the rest get per-channel FIR passes.
@@ -2343,10 +2342,9 @@ fn build_ref_blur(
         accumulate: accumulate as u32,
         mask: [0; 4],
         scale: [scale[0], scale[1], scale[2], 0.0],
-        a: [0.0; 4],
-        b1: [0.0; 4],
-        b2: [0.0; 4],
-        b3: [0.0; 4],
+        g1: [0.0; 4],
+        g2: [0.0; 4],
+        c2: [0.0; 4],
     };
     let tiles = (width.div_ceil(16), height.div_ceil(16));
     let mut passes = Vec::with_capacity(6);
@@ -2406,27 +2404,14 @@ fn build_ref_blur(
                 });
             }
         } else {
-            // Same coefficients as `iir_blur_1d`, computed in f64.
-            let q = if s >= 2.5 {
-                0.98711 * s - 0.96330
-            } else {
-                3.97156 - 4.14554 * (1.0 - 0.26891 * s).sqrt()
-            };
-            let (q2, q3) = (q * q, q * q * q);
-            let b0 = 1.57825 + 2.44413 * q + 1.4281 * q2 + 0.422205 * q3;
-            let b1 = (2.44413 * q + 2.85619 * q2 + 1.26661 * q3) / b0;
-            let b2 = -(1.4281 * q2 + 1.26661 * q3) / b0;
-            let b3 = (0.422205 * q3) / b0;
-            // At large σ the b's sum to within ~1e-6 of 1, so rounding them
-            // to f32 changes 1 − Σb by percents. Derive `a` from the rounded
-            // values so each pass keeps unit gain (flat areas stay exact).
-            let (b1, b2, b3) = (b1 as f32, b2 as f32, b3 as f32);
+            // The same filter as `iir_blur_1d`, factored into a first- and a
+            // second-order section (see `IirCascade`).
+            let k = IirCascade::young_van_vliet(s);
             let ci = c as usize;
             iir.mask[ci] = 1;
-            iir.a[ci] = (1.0 - (b1 as f64 + b2 as f64 + b3 as f64)) as f32;
-            iir.b1[ci] = b1;
-            iir.b2[ci] = b2;
-            iir.b3[ci] = b3;
+            iir.g1[ci] = k.g1 as f32;
+            iir.g2[ci] = k.g2 as f32;
+            iir.c2[ci] = k.c2 as f32;
         }
     }
     if iir.mask.iter().any(|&m| m != 0) {
@@ -2458,6 +2443,70 @@ fn build_ref_blur(
         }
     }
     RefBlur { passes }
+}
+
+/// The third-order Young–van Vliet recursion of `iir_blur_1d`,
+/// `w = a·x + b1·w₁ + b2·w₂ + b3·w₃`, factored into a first-order section
+/// (its real pole p) and a second-order section (its complex pole pair),
+/// each normalized to unit DC gain:
+///
+/// ```text
+/// u  = u₁ + g1·(x − u₁)                       g1 = 1 − p
+/// d  = −c2·d₁ + g2·(u − y₁),  y = y₁ + d      g2 = 1 − c1 − c2
+/// ```
+///
+/// The direct form is ill-conditioned in f32: its poles crowd towards 1 as σ
+/// grows (a = 1 − Σb is 1.3e-6 at σ = 150), so each step's rounding error is
+/// amplified by up to 1/a. In a numpy simulation on image rows its f32 error
+/// relative to f64 was 4e-3 at σ = 20 and 0.3 at σ = 150; the cascade stays
+/// at 7e-6 for every σ. With every state set to the first sample, the cascade
+/// starts exactly like the CPU's direct form does with w₁ = w₂ = w₃ = x₀.
+#[cfg(feature = "wgpu-backend")]
+#[derive(Clone, Copy, Debug)]
+struct IirCascade {
+    g1: f64,
+    g2: f64,
+    c2: f64,
+    /// For tests: the second section's other coefficient and the real pole.
+    #[cfg_attr(not(test), allow(dead_code))]
+    c1: f64,
+    #[cfg_attr(not(test), allow(dead_code))]
+    p: f64,
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl IirCascade {
+    /// Coefficients for σ ≥ 3, from the same b's as `iir_blur_1d`, in f64.
+    fn young_van_vliet(sigma: f64) -> Self {
+        let (b1, b2, b3) = young_van_vliet_b(sigma);
+        // f(z) = z³ − b1·z² − b2·z − b3 has f(0) = −b3 < 0 and
+        // f(1) = 1 − Σb = a > 0, and its one real root lies in between.
+        let f = |z: f64| ((z - b1) * z - b2) * z - b3;
+        let (mut lo, mut hi) = (0.0f64, 1.0f64);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if f(mid) < 0.0 { lo = mid } else { hi = mid }
+        }
+        let p = 0.5 * (lo + hi);
+        // (z − p)(z² − c1·z − c2) = z³ − b1·z² − b2·z − b3
+        let c1 = b1 - p;
+        let c2 = -b3 / p;
+        assert!(c1 * c1 + 4.0 * c2 < 0.0, "σ = {sigma}: expected one real pole and a complex pair");
+        Self { g1: 1.0 - p, g2: 1.0 - c1 - c2, c2, c1, p }
+    }
+}
+
+/// b1, b2, b3 of `iir_blur_1d` (σ ≥ 2.5 branch), in f64.
+#[cfg(feature = "wgpu-backend")]
+fn young_van_vliet_b(sigma: f64) -> (f64, f64, f64) {
+    let q = 0.98711 * sigma - 0.96330;
+    let (q2, q3) = (q * q, q * q * q);
+    let b0 = 1.57825 + 2.44413 * q + 1.4281 * q2 + 0.422205 * q3;
+    (
+        (2.44413 * q + 2.85619 * q2 + 1.26661 * q3) / b0,
+        -(1.4281 * q2 + 1.26661 * q3) / b0,
+        (0.422205 * q3) / b0,
+    )
 }
 
 /// Blurs for `scale · exponential_filter(src, λ)` per channel: the three
@@ -5233,6 +5282,118 @@ mod grain_tests {
                 assert_eq!(out[b], expected, "block {b}, peak at {peak_at}");
             }
             assert_eq!(out[blocks as usize], -1.0, "wrote past the last block");
+        }
+    }
+
+    /// The cascade multiplies back out to the direct form's polynomial for
+    /// every σ the reference filters recursively.
+    #[test]
+    fn iir_cascade_factors_the_young_van_vliet_filter() {
+        let mut sigma = 3.0f64;
+        while sigma < 2000.0 {
+            let (b1, b2, b3) = young_van_vliet_b(sigma);
+            let k = IirCascade::young_van_vliet(sigma);
+            // (z − p)(z² − c1·z − c2) = z³ − (p + c1)·z² + (p·c1 − c2)·z + p·c2
+            assert!((k.p + k.c1 - b1).abs() < 1e-12, "σ {sigma}");
+            assert!((-(k.p * k.c1 - k.c2) - b2).abs() < 1e-12, "σ {sigma}");
+            assert!((-k.p * k.c2 - b3).abs() < 1e-12, "σ {sigma}");
+            assert!((k.g1 * k.g2 - (1.0 - b1 - b2 - b3)).abs() < 1e-12, "σ {sigma}: gain");
+            assert!(k.p > 0.0 && k.p < 1.0 && k.c2 < 0.0 && k.c2 > -1.0, "σ {sigma}: stable");
+            sigma *= 1.07;
+        }
+    }
+
+    /// `RefBlur` on the GPU against the CPU's recursion (`iir_filter_row`,
+    /// rows then columns) run in f64, at a small, a medium and the largest
+    /// σ the pipeline uses (the DIR tail on a 100 MP frame). Simulated in
+    /// numpy, the f32 direct form drifted by up to 40% of the mean on image
+    /// columns at σ = 190; the cascade measures about 1.5e-6 here.
+    #[test]
+    fn ref_blur_iir_matches_f64_recursion() {
+        let Some(backend) = WgpuBackend::new() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        let (w, h) = (2048usize, 700usize);
+        let sigma = [3.0f32, 40.0, 190.0];
+        // A smooth random walk plus edges, values 0.05..~2 like raw exposure.
+        let mut state = 0x9e3779b97f4a7c15u64;
+        let mut rnd = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut src = vec![0.0f64; w * h * 3];
+        for c in 0..3 {
+            for y in 0..h {
+                let mut v = 0.5 + 0.3 * rnd();
+                for x in 0..w {
+                    v = (v + 0.02 * (rnd() - 0.5)).clamp(0.05, 1.5);
+                    let edge = if (x / 300 + y / 200) % 2 == 0 { 0.4 } else { 0.0 };
+                    src[(y * w + x) * 3 + c] = v + edge;
+                }
+            }
+        }
+        // f64 reference: direct form, exactly as iir_filter_row.
+        let filter = |line: &mut Vec<f64>, b: (f64, f64, f64)| {
+            let (b1, b2, b3) = b;
+            let a = 1.0 - b1 - b2 - b3;
+            let n = line.len();
+            let (mut w1, mut w2, mut w3) = (line[0], line[0], line[0]);
+            for j in 0..n {
+                let v = a * line[j] + b1 * w1 + b2 * w2 + b3 * w3;
+                line[j] = v;
+                (w3, w2, w1) = (w2, w1, v);
+            }
+            let xn = line[n - 1];
+            (w1, w2, w3) = (xn, xn, xn);
+            for j in (0..n).rev() {
+                let v = a * line[j] + b1 * w1 + b2 * w2 + b3 * w3;
+                line[j] = v;
+                (w3, w2, w1) = (w2, w1, v);
+            }
+        };
+        let mut expected = src.clone();
+        for c in 0..3 {
+            let b = young_van_vliet_b(sigma[c] as f64);
+            for y in 0..h {
+                let mut line: Vec<f64> = (0..w).map(|x| expected[(y * w + x) * 3 + c]).collect();
+                filter(&mut line, b);
+                for x in 0..w {
+                    expected[(y * w + x) * 3 + c] = line[x];
+                }
+            }
+            for x in 0..w {
+                let mut line: Vec<f64> = (0..h).map(|y| expected[(y * w + x) * 3 + c]).collect();
+                filter(&mut line, b);
+                for y in 0..h {
+                    expected[(y * w + x) * 3 + c] = line[y];
+                }
+            }
+        }
+        let src_f32: Vec<f32> = src.iter().map(|&v| v as f32).collect();
+        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+        let src_buf = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("iir_test_src"),
+            contents: bytemuck::cast_slice(&src_f32),
+            usage,
+        });
+        let mk = |label| {
+            backend.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: (w * h * 3 * 4) as u64,
+                usage,
+                mapped_at_creation: false,
+            })
+        };
+        let (mid, out) = (mk("iir_test_mid"), mk("iir_test_out"));
+        let blur = build_ref_blur(&backend.device, &backend, w as u32, h as u32, &src_buf, &mid, &out, sigma, [1.0; 3], false, "iir_test");
+        let got = run_and_read(&backend, &out, w * h * 3 * 4, |encoder| blur.encode(encoder));
+        for c in 0..3 {
+            let err = (0..w * h).map(|i| (got[i * 3 + c] as f64 - expected[i * 3 + c]).abs()).fold(0.0, f64::max);
+            eprintln!("σ {}: max |GPU − f64| = {err:.2e}", sigma[c]);
+            assert!(err < 2e-5, "σ {}: max error {err}", sigma[c]);
         }
     }
 

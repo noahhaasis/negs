@@ -217,7 +217,12 @@ Three problems surfaced while doing this:
   the Young–van Vliet b's sum to within about 1e-6 of 1. Rounding them to f32
   shifted the filter's DC gain by percents, and the whole frame came out 0.25%
   darker (worst ΔE 1.0). `a` is now derived from the rounded b's, which gives
-  unit gain: worst ΔE 0.19, and no offset.
+  unit gain: worst ΔE 0.19, and no offset. *Superseded on 19 October (later
+  session):* the direct form also accumulates rounding error, amplified by up
+  to 1/(1 − Σb); at 100 MP (σ ≈ 190 px) it reached p99 0.089. The GPU now runs
+  the same filter as a first-order plus a second-order section in difference
+  form (`IirCascade`), which has unit gain by construction and is
+  well conditioned: Q3 det worst pixel 0.19 → 0.012, p99 0.040 → 0.004.
 - **Silently dropped dispatch.** With 1024-thread workgroups, as every other
   per-pixel pass uses, the heavier grain shader never ran on Metal and there
   was no error. Grain now uses 256-thread groups, on a 2D grid so 60 MP stays

@@ -103,8 +103,9 @@ the checkout they live in).
    other pass.
 4. **f32 IIR at large σ.** Young–van Vliet coefficients for σ ≈ 150 px sum to
    within about 1e-6 of 1; rounding them to f32 changed the DC gain by
-   percents. Fixed by deriving `a` from the rounded b's. Keep that if you
-   touch the IIR.
+   percents. Fixed by deriving `a` from the rounded b's. (Later replaced by
+   the cascade form, `IirCascade`, which has unit gain by construction and
+   far less rounding error; see Results.)
 5. **Benchmarks.** Before timing, check `pgrep -fl spektrafilm` (other
    sessions run renders), `pmset -g | grep lowpowermode` and
    `pmset -g batt`. The Mac is often on battery in Low Power Mode, and

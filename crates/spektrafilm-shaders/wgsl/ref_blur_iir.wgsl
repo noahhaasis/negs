@@ -4,7 +4,11 @@
 //
 // CPU equivalent: `iir_blur_1d` / `iir_filter_row` in spektrafilm-math
 // (σ ≥ 3): third-order forward then backward recursion, state initialized to
-// the first sample of each direction. The host computes a, b1..b3 in f64.
+// the first sample of each direction. The CPU runs the direct form in f64;
+// here the same filter runs as a first-order section followed by a
+// second-order section in difference form, which is well conditioned in f32
+// (the direct form's rounding error grows like 1/(1 − Σb), see `IirCascade`).
+// The host computes g1, g2, c2 in f64.
 //
 // Rows (vertical = 0): input → mid, filtered in place in mid.
 // Columns (vertical = 1): mid is filtered in place; the backward pass writes
@@ -17,10 +21,9 @@ struct Params {
     accumulate: u32,
     mask: vec4<u32>, // 1 = channel filtered here
     scale: vec4<f32>,
-    a: vec4<f32>,
-    b1: vec4<f32>,
-    b2: vec4<f32>,
-    b3: vec4<f32>,
+    g1: vec4<f32>,  // 1 − p (real pole p)
+    g2: vec4<f32>,  // 1 − c1 − c2 (complex pair: z² − c1·z − c2)
+    c2: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -76,22 +79,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let a = params.a.xyz;
-    let b1 = params.b1.xyz;
-    let b2 = params.b2.xyz;
-    let b3 = params.b3.xyz;
+    let g1 = params.g1.xyz;
+    let g2 = params.g2.xyz;
+    let c2 = params.c2.xyz;
 
     // Forward pass. Rows read the source; columns refilter mid in place
-    // (each sample is read before it is overwritten).
+    // (each sample is read before it is overwritten). State: u (first
+    // section), y and d = y − y₁ (second section), all starting at the
+    // first sample like the CPU's w₁ = w₂ = w₃ = x₀.
     var x0: vec3<f32>;
     if params.vertical != 0u {
         x0 = load_mid(pixel_index(line, 0u));
     } else {
         x0 = load_input(pixel_index(line, 0u));
     }
-    var w1 = x0;
-    var w2 = x0;
-    var w3 = x0;
+    var u = x0;
+    var y = x0;
+    var d = vec3<f32>(0.0);
     for (var j = 0u; j < n; j++) {
         let base = pixel_index(line, j);
         var s: vec3<f32>;
@@ -100,28 +104,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         } else {
             s = load_input(base);
         }
-        let w = a * s + b1 * w1 + b2 * w2 + b3 * w3;
-        store_mid(base, w);
-        w3 = w2;
-        w2 = w1;
-        w1 = w;
+        u = u + g1 * (s - u);
+        d = g2 * (u - y) - c2 * d;
+        y = y + d;
+        store_mid(base, y);
     }
 
-    // Backward pass.
+    // Backward pass, starting from the last forward output.
     let xn = load_mid(pixel_index(line, n - 1u));
-    w1 = xn;
-    w2 = xn;
-    w3 = xn;
+    u = xn;
+    y = xn;
+    d = vec3<f32>(0.0);
     for (var j = i32(n) - 1; j >= 0; j--) {
         let base = pixel_index(line, u32(j));
-        let w = a * load_mid(base) + b1 * w1 + b2 * w2 + b3 * w3;
+        u = u + g1 * (load_mid(base) - u);
+        d = g2 * (u - y) - c2 * d;
+        y = y + d;
         if params.vertical != 0u {
-            store_output(base, w);
+            store_output(base, y);
         } else {
-            store_mid(base, w);
+            store_mid(base, y);
         }
-        w3 = w2;
-        w2 = w1;
-        w1 = w;
     }
 }
