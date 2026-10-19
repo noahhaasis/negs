@@ -299,6 +299,9 @@ struct AdjustmentInspector: View {
                     Toggle(title, isOn: model.toggle(enable)).labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 }
             }
+            // As in Photos, clicking the title toggles the group, not only the chevron.
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation { isExpanded.wrappedValue.toggle() } }
         }
     }
 
