@@ -50,6 +50,61 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(next["profiles"], catalog["profiles"])
     }
 
+    func testLocateFindsEachToolByOverrideThenAppThenCheckout() throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: directory) }
+        let app = directory.appendingPathComponent("App/MacOS"), resources = directory.appendingPathComponent("App/Resources")
+        let checkout = directory.appendingPathComponent("checkout"), release = checkout.appendingPathComponent("target/release")
+        for folder in [app, resources.appendingPathComponent("data"), release, checkout.appendingPathComponent("data")] {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        func tool(_ url: URL) throws {
+            try Data("#!/bin/sh\n".utf8).write(to: url)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        for name in ["spektrafilm-native", "spektrafilm-f64", "spektrafilm"] { try tool(release.appendingPathComponent(name)) }
+        func locate(_ env: [String: String] = [:]) throws -> EnginePaths {
+            try EnginePaths.locate(environment: env.merging(["SPEKTRAFILM_ROOT": checkout.path]) { a, _ in a }, executableDir: app, resourceDir: resources, workingDir: directory)
+        }
+        var paths = try locate()
+        XCTAssertEqual(paths.exporter, release.appendingPathComponent("spektrafilm-f64"))
+        XCTAssertEqual(paths.fastExporter, release.appendingPathComponent("spektrafilm"))
+        XCTAssertEqual(paths.data, resources.appendingPathComponent("data"))
+        // The app bundle's copy wins over the checkout's.
+        try tool(app.appendingPathComponent("spektrafilm"))
+        paths = try locate()
+        XCTAssertEqual(paths.fastExporter, app.appendingPathComponent("spektrafilm"))
+        XCTAssertEqual(paths.exporter, release.appendingPathComponent("spektrafilm-f64"))
+        // The override wins over both.
+        let custom = directory.appendingPathComponent("custom-f32")
+        try tool(custom)
+        XCTAssertEqual(try locate(["SPEKTRAFILM_F32_CLI": custom.path]).fastExporter, custom)
+        // A missing f32 tool only disables fast export; the app still starts.
+        try fm.removeItem(at: app.appendingPathComponent("spektrafilm"))
+        try fm.removeItem(at: release.appendingPathComponent("spektrafilm"))
+        paths = try locate()
+        XCTAssertNil(paths.fastExporter)
+        XCTAssertThrowsError(try ExportEngine.fast.executable(in: paths))
+        XCTAssertEqual(try ExportEngine.reference.executable(in: paths), release.appendingPathComponent("spektrafilm-f64"))
+        XCTAssertNil(try locate(["SPEKTRAFILM_F32_CLI": directory.appendingPathComponent("missing").path]).fastExporter)
+    }
+
+    func testExportEngineDefaultsToReferenceAndDetectsTheBackend() {
+        XCTAssertEqual(ExportEngine.reference.backend, "cpu")
+        XCTAssertEqual(ExportEngine.fast.backend, "wgpu")
+        let key = "exportEngine", saved = UserDefaults.standard.string(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+        UserDefaults.standard.removeObject(forKey: key)
+        XCTAssertEqual(ExportEngine.selected, .reference)
+        ExportEngine.selected = .fast
+        XCTAssertEqual(ExportEngine.selected, .fast)
+        UserDefaults.standard.set("bogus", forKey: key)
+        XCTAssertEqual(ExportEngine.selected, .reference)
+        XCTAssertTrue(ExportEngine.ranOnGPU(log: "Image loaded\nBackend: wgpu (GPU)\nPipeline: 1 ms"))
+        XCTAssertFalse(ExportEngine.ranOnGPU(log: "WARN wgpu backend requested but unavailable; falling back\nBackend: CPU (rayon)"))
+    }
+
     func testSaveRefusesTheOriginalUnderAnotherSpelling() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

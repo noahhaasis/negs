@@ -215,6 +215,54 @@ impl OutputFormat {
     }
 }
 
+/// Which engine renders an export. The GPU engine was measured against the
+/// reference (docs/gpu-vs-cpu-quality.md); grain is statistically equal but
+/// drawn from different random numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExportEngine {
+    /// `spektrafilm-f64` on the CPU, with the enlarger and scanner LUTs.
+    Reference,
+    /// The f32 `spektrafilm` CLI on the GPU (wgpu), like the preview.
+    Fast,
+}
+
+impl ExportEngine {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Reference => "Reference (CPU, 64-bit)",
+            Self::Fast => "Fast (GPU)",
+        }
+    }
+
+    /// `SPEKTRAFILM_BACKEND` for the exporter process.
+    fn backend(self) -> &'static str {
+        match self {
+            Self::Reference => "cpu",
+            Self::Fast => "wgpu",
+        }
+    }
+
+    fn locate_cli(self) -> Result<PathBuf, String> {
+        match self {
+            Self::Reference => locate_f64_cli(),
+            Self::Fast => locate_f32_cli(),
+        }
+    }
+
+    /// The exporter's parameters. The reference export switches the
+    /// enlarger and scanner LUTs on (5-10x faster on the CPU); the GPU
+    /// computes the spectra exactly and ignores them, so the fast export
+    /// keeps the preview's settings.
+    fn export_params(self, params: &RuntimeParams) -> RuntimeParams {
+        let mut params = params.clone();
+        if self == Self::Reference {
+            params.settings.use_enlarger_lut = true;
+            params.settings.use_scanner_lut = true;
+        }
+        params
+    }
+}
+
 struct App {
     backend: Arc<dyn ComputeBackend>,
     data_dir: PathBuf,
@@ -234,6 +282,8 @@ struct App {
     limit_preview_12mp: bool,
     /// Suggested format for Save and Export; a typed extension can override it.
     output_format: OutputFormat,
+    /// Engine for the next export (session setting, like `output_format`).
+    export_engine: ExportEngine,
     image_path: Option<PathBuf>,
     /// Destination chosen in the most recent export dialog, independent
     /// of the folder used to open images.
@@ -325,11 +375,16 @@ struct PreviewTextureData {
 /// `Err("cancelled")` is also produced when the cancel flag is set.
 /// The join handle is held so we can `join()` after consuming the
 /// message and on `on_exit` to drain the worker before the process dies.
+/// What a finished export reports: seconds, file name, and whether a fast
+/// export fell back to the CPU.
+type ExportResult = Result<(f32, String, bool), String>;
+
 struct ExportJob {
-    rx: mpsc::Receiver<Result<(f32, String), String>>,
+    rx: mpsc::Receiver<ExportResult>,
     handle: Option<JoinHandle<()>>,
     cancel: Arc<AtomicBool>,
     started_at: Instant,
+    engine: ExportEngine,
 }
 
 impl App {
@@ -372,6 +427,7 @@ impl App {
             params,
             limit_preview_12mp: false,
             output_format: OutputFormat::Png,
+            export_engine: ExportEngine::Reference,
             image_path: None,
             last_export_dir: None,
             image: None,
@@ -894,7 +950,8 @@ impl App {
             self.status = "Load an image before exporting.".into();
             return;
         };
-        let cli_path = match locate_f64_cli() {
+        let engine = self.export_engine;
+        let cli_path = match engine.locate_cli() {
             Ok(p) => p,
             Err(e) => {
                 self.status = format!("Export: {e}");
@@ -906,8 +963,9 @@ impl App {
             .and_then(|s| s.to_str())
             .unwrap_or("spektrafilm");
         let default_name = format!(
-            "{stem}_{}_spektra_f64.{}",
+            "{stem}_{}_spektra_{}.{}",
             self.film_name,
+            if engine == ExportEngine::Fast { "gpu" } else { "f64" },
             self.output_format.extension()
         );
         let mut dialog = rfd::FileDialog::new();
@@ -931,16 +989,15 @@ impl App {
         // the Cancel button (and `on_exit`) can kill the child cleanly
         // instead of letting it orphan after the GUI window closes.
         //
-        // Enlarger + scanner LUTs are toggled on for the export only.
-        // The GUI preview runs on wgpu (fast at full spectral
-        // integration; LUT round-trip via CPU PCHIP would only slow
-        // it down), but the f64 CPU export gets a 5-10× speedup from
-        // the LUT path — matching Python's typical export config.
+        // Enlarger + scanner LUTs are toggled on for the reference export
+        // only (see `ExportEngine::export_params`). The GUI preview runs
+        // on wgpu (fast at full spectral integration; LUT round-trip via
+        // CPU PCHIP would only slow it down), but the f64 CPU export gets
+        // a 5-10× speedup from the LUT path — matching Python's typical
+        // export config.
         let film = self.film_name.clone();
         let paper = self.print_name.clone();
-        let mut params = self.params.clone();
-        params.settings.use_enlarger_lut = true;
-        params.settings.use_scanner_lut = true;
+        let params = engine.export_params(&self.params);
         let data_dir = self.data_dir.clone();
         let (tx, rx) = mpsc::channel();
         let ctx_for_worker = ctx.clone();
@@ -950,8 +1007,9 @@ impl App {
         let handle = std::thread::Builder::new()
             .name("spektrafilm-export".into())
             .spawn(move || {
-                let res = run_f64_export(
+                let res = run_export(
                     &cli_path,
+                    engine.backend(),
                     &input_path,
                     &out_path,
                     &film,
@@ -966,19 +1024,24 @@ impl App {
                     .unwrap_or("(file)")
                     .to_string();
                 let msg = match res {
-                    Ok(()) => Ok((started_at.elapsed().as_secs_f32(), name)),
+                    Ok(log) => Ok((
+                        started_at.elapsed().as_secs_f32(),
+                        name,
+                        engine == ExportEngine::Fast && !ran_on_gpu(&log),
+                    )),
                     Err(e) => Err(format!("{e:#}")),
                 };
                 let _ = tx.send(msg);
                 ctx_for_worker.request_repaint();
             })
             .expect("OS thread spawn");
-        self.status = "Exporting at f64 (CPU)…".into();
+        self.status = format!("Exporting with {}…", engine.label());
         self.export_job = Some(ExportJob {
             rx,
             handle: Some(handle),
             cancel,
             started_at,
+            engine,
         });
     }
 
@@ -1011,7 +1074,7 @@ impl App {
                 self.status = if job.cancel.load(Ordering::SeqCst) {
                     format!("Cancelling export… ({secs}s)")
                 } else {
-                    format!("Exporting at f64 (CPU)… ({secs}s)")
+                    format!("Exporting with {}… ({secs}s)", job.engine.label())
                 };
                 ctx.request_repaint_after(Duration::from_secs(1));
                 return;
@@ -1025,10 +1088,18 @@ impl App {
         if let Some(h) = job.handle.take() {
             let _ = h.join();
         }
+        let engine = job.engine;
         self.export_job = None;
         self.status = match msg {
-            Ok((secs, name)) => format!("Exported (f64 CPU) {name} in {secs:.1} s"),
+            Ok((secs, name, true)) => format!(
+                "Exported {name} in {secs:.1} s on the CPU (32-bit): no GPU was available for Fast export"
+            ),
+            Ok((secs, name, false)) => format!("Exported ({}) {name} in {secs:.1} s", engine.label()),
             Err(e) if e.contains("cancelled") => "Export cancelled.".into(),
+            Err(e) if engine == ExportEngine::Fast => format!(
+                "Export error: {e}\nIf the GPU ran out of memory, export with {} instead.",
+                ExportEngine::Reference.label()
+            ),
             Err(e) => format!("Export error: {e}"),
         };
     }
@@ -1076,6 +1147,15 @@ impl App {
                 })
                 .response
                 .on_hover_text("Sets the suggested format for Save and Export. You can also change the filename extension. JPEG uses quality 95; TIFF is uncompressed.");
+            egui::ComboBox::from_id_salt("export_engine")
+                .selected_text(self.export_engine.label())
+                .show_ui(ui, |ui| {
+                    for engine in [ExportEngine::Reference, ExportEngine::Fast] {
+                        ui.selectable_value(&mut self.export_engine, engine, engine.label());
+                    }
+                })
+                .response
+                .on_hover_text("Export engine. Reference re-runs the pipeline at f64 on the CPU (spektrafilm-f64). Fast renders on the GPU like the preview (spektrafilm), several times quicker; measured to match the reference closely, with grain that is statistically the same but not pixel-identical.");
             let save_enabled = self.output_image.is_some();
             if ui
                 .add_enabled(save_enabled, egui::Button::new("Save…"))
@@ -1089,7 +1169,7 @@ impl App {
             if export_busy {
                 if ui
                     .button("Cancel")
-                    .on_hover_text("Stop the in-flight f64 CPU export and kill the child process.")
+                    .on_hover_text("Stop the in-flight export and kill the child process.")
                     .clicked()
                 {
                     self.cancel_export();
@@ -1099,9 +1179,8 @@ impl App {
                 if ui
                     .add_enabled(export_enabled, egui::Button::new("Export…"))
                     .on_hover_text(
-                        "Re-run the pipeline at f64 precision (CPU, via the spektrafilm-f64 \
-                         CLI subprocess) and write a PNG/TIFF/JPEG. The live preview stays \
-                         at f32 GPU for speed; export trades time for precision.",
+                        "Re-run the pipeline at full resolution with the chosen export \
+                         engine (a CLI subprocess) and write a PNG/TIFF/JPEG.",
                     )
                     .on_disabled_hover_text(
                         "Load an image and wait for RAW white balance to finish",
@@ -2170,6 +2249,46 @@ fn locate_f64_cli() -> Result<PathBuf, String> {
         .into())
 }
 
+/// Locate the f32 `spektrafilm` CLI for Fast (GPU) export: `$SPEKTRAFILM_F32_CLI`,
+/// then next to the GUI executable, then on `PATH`, then `target/release`
+/// relative to `CARGO_MANIFEST_DIR`. Embedded Windows bundles ship only the
+/// f64 companion, so Fast export reports it missing there.
+fn locate_f32_cli() -> Result<PathBuf, String> {
+    let names: &[&str] = if cfg!(windows) { &["spektrafilm.exe", "spektrafilm"] } else { &["spektrafilm"] };
+    if let Ok(p) = std::env::var("SPEKTRAFILM_F32_CLI") {
+        let path = PathBuf::from(&p);
+        return if path.is_file() {
+            Ok(path)
+        } else {
+            Err(format!("SPEKTRAFILM_F32_CLI points at {p} but no such file"))
+        };
+    }
+    if let Some(dir) = std::env::current_exe().ok().as_deref().and_then(Path::parent) {
+        if let Some(p) = names.iter().map(|n| dir.join(n)).find(|p| p.is_file()) {
+            return Ok(p);
+        }
+    }
+    if let Some(p) = names.iter().find_map(|n| which_on_path(n)) {
+        return Ok(p);
+    }
+    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+        let release = PathBuf::from(manifest).join("../../target/release");
+        if let Some(p) = names.iter().map(|n| release.join(n)).find(|p| p.is_file()) {
+            return Ok(p);
+        }
+    }
+    Err("no f32 CLI found for Fast (GPU) export. Build it with \
+         `cargo build --release -p spektrafilm-cli --bin spektrafilm`, and either put it \
+         next to the GUI, on PATH, or set $SPEKTRAFILM_F32_CLI."
+        .into())
+}
+
+/// The CLI prints the backend it chose; a fast export without a GPU
+/// adapter falls back to the CPU (`Backend: CPU (rayon)`).
+fn ran_on_gpu(log: &str) -> bool {
+    log.contains("Backend: wgpu")
+}
+
 fn f64_cli_names() -> &'static [&'static str] {
     if cfg!(windows) {
         &["spektrafilm-f64.exe", "spektrafilm-f64"]
@@ -2227,6 +2346,8 @@ fn append_raw_wb_args(
 /// `cancel` is set the child is SIGKILLed and `Err("cancelled")` is
 /// returned — this prevents the orphan-process / system-freeze bug
 /// where closing the GUI mid-export left the CPU pipeline running.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 fn run_f64_export(
     cli_path: &Path,
     input: &Path,
@@ -2237,6 +2358,24 @@ fn run_f64_export(
     data_dir: &Path,
     cancel: &AtomicBool,
 ) -> Result<()> {
+    run_export(cli_path, "cpu", input, output, film, paper, params, data_dir, cancel).map(|_| ())
+}
+
+/// Run an export CLI (`spektrafilm-f64` or `spektrafilm`) with
+/// `SPEKTRAFILM_BACKEND=backend`, like [`run_f64_export`] describes, and
+/// return its stderr log on success.
+#[allow(clippy::too_many_arguments)]
+fn run_export(
+    cli_path: &Path,
+    backend: &str,
+    input: &Path,
+    output: &Path,
+    film: &str,
+    paper: &str,
+    params: &spektrafilm_core::params::RuntimeParams,
+    data_dir: &Path,
+    cancel: &AtomicBool,
+) -> Result<String> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -2253,10 +2392,10 @@ fn run_f64_export(
     }
 
     let mut cmd = std::process::Command::new(cli_path);
-    // Force the CPU backend: the wgpu shaders run f32 even in a
-    // precision-f64 build (WGSL has no f64). Letting the child default
+    // The reference forces the CPU backend: the wgpu shaders run f32 even
+    // in a precision-f64 build (WGSL has no f64). Letting the child default
     // to GPU would silently demote the export back to f32 math.
-    cmd.env("SPEKTRAFILM_BACKEND", "cpu")
+    cmd.env("SPEKTRAFILM_BACKEND", backend)
         .arg("process")
         .arg(input)
         .arg("-o")
@@ -2316,7 +2455,8 @@ fn run_f64_export(
             .map(|c| c.to_string())
             .unwrap_or_else(|| "(signal)".into());
         anyhow::bail!(
-            "f64 CLI exited {code} — {}",
+            "{} exited {code} — {}",
+            cli_path.file_name().and_then(|n| n.to_str()).unwrap_or("export CLI"),
             if trimmed.is_empty() {
                 "(no stderr)"
             } else {
@@ -2324,7 +2464,7 @@ fn run_f64_export(
             }
         );
     }
-    Ok(())
+    Ok(stderr_buf)
 }
 
 #[cfg(test)]
@@ -2862,6 +3002,71 @@ cp "$params" "$output"
                 serde_json::from_reader(std::fs::File::open(&captured.0).unwrap()).unwrap();
             assert_eq!(received.settings.serial_grain, serial);
             assert_eq!(received.io.upscale_factor, 1.0);
+        }
+    }
+}
+
+#[cfg(test)]
+mod export_engine_tests {
+    use super::*;
+
+    #[test]
+    fn reference_export_uses_luts_and_fast_keeps_the_preview_settings() {
+        let params = RuntimeParams::default();
+        assert!(!params.settings.use_enlarger_lut && !params.settings.use_scanner_lut);
+        let reference = ExportEngine::Reference.export_params(&params);
+        assert!(reference.settings.use_enlarger_lut && reference.settings.use_scanner_lut);
+        let fast = ExportEngine::Fast.export_params(&params);
+        assert!(!fast.settings.use_enlarger_lut && !fast.settings.use_scanner_lut);
+        assert_eq!(ExportEngine::Reference.backend(), "cpu");
+        assert_eq!(ExportEngine::Fast.backend(), "wgpu");
+    }
+
+    #[test]
+    fn cpu_fallback_is_detected_from_the_log() {
+        assert!(ran_on_gpu("Image loaded\nBackend: wgpu (GPU)\nPipeline: 1 ms"));
+        assert!(!ran_on_gpu("WARN wgpu backend requested but unavailable; falling back\nBackend: CPU (rayon)"));
+    }
+
+    /// The child gets the engine's backend and its stderr comes back for
+    /// the fallback check.
+    #[test]
+    #[cfg(unix)]
+    fn export_child_receives_the_backend() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir();
+        let cli = TempPath(dir.join(format!("spektrafilm-export-backend-{}.sh", std::process::id())));
+        let out = TempPath(dir.join(format!("spektrafilm-export-backend-{}.txt", std::process::id())));
+        std::fs::write(
+            &cli.0,
+            br#"#!/bin/sh
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) output="$2"; shift ;;
+    esac
+    shift
+done
+echo "$SPEKTRAFILM_BACKEND" > "$output"
+echo "Backend: CPU (rayon)" >&2
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for engine in [ExportEngine::Reference, ExportEngine::Fast] {
+            let log = run_export(
+                &cli.0,
+                engine.backend(),
+                Path::new("photo.tiff"),
+                &out.0,
+                "kodak_gold_200",
+                "kodak_portra_endura",
+                &engine.export_params(&RuntimeParams::default()),
+                Path::new("data"),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+            assert_eq!(std::fs::read_to_string(&out.0).unwrap().trim(), engine.backend());
+            assert!(!ran_on_gpu(&log));
         }
     }
 }

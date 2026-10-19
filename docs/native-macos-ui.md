@@ -102,9 +102,15 @@ Swift rounding to the Rust tests' values.
 
 The preview buffer is capped at 8192 pixels on its longest side; saving retains
 the full processed preview resolution. Linear output is encoded only for display
-and tagged sRGB. Export uses an independent f64 process with the CPU backend
-forced, writes to a temporary sibling of the destination, and renames it only
-after success. Cancel leaves any existing destination untouched. Quitting kills
+and tagged sRGB. Export runs an independent process: by default the f64
+reference (`spektrafilm-f64`, `SPEKTRAFILM_BACKEND=cpu`), or, when the export
+panel's Engine pop-up says Fast (GPU), the f32 `spektrafilm` with
+`SPEKTRAFILM_BACKEND=wgpu` (located via `SPEKTRAFILM_F32_CLI`, the app bundle,
+then `target/release`; a missing f32 tool only disables Fast export). The choice
+is stored in UserDefaults (`exportEngine`). A fast export whose log shows a CPU
+fallback is reported in the status bar, and a failed fast export suggests the
+reference engine. Either way the export writes to a temporary sibling of the
+destination, and renames it only after success. Cancel leaves any existing destination untouched. Quitting kills
 both child processes and removes their temporary files.
 
 Temporary files (the preview buffer, engine log, and export parameters) live in a
@@ -157,7 +163,11 @@ Swift tests cover full-schema preservation, inspector paths against Rust default
 profile metadata, protocol recovery, IOSurface preview conversion, rapid edits
 while a render is in flight, undo/redo including one step per slider drag,
 slider snapping, canvas rotation, cancellation preserving an existing output,
-and cleanup of files and exporters left by a crashed launch.
+cleanup of files and exporters left by a crashed launch, and the export engine
+choice (tool lookup, binary and backend, CPU-fallback detection).
+`testRealExportsFromJobList` runs real exports through `ExportJob` when
+`SPEKTRAFILM_EXPORT_JOBS` names a JSON job list (source, destination, params,
+film, paper, engine), for end-to-end engine comparisons.
 The Python integration check renders real images, checks rotation/resizing,
 rejects stale save requests, recovers from an invalid input, scans B&W reversal
 film, verifies clean EOF, and exports at f64. Run with `SPEKTRAFILM_BACKEND=cpu`

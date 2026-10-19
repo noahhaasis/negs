@@ -485,18 +485,26 @@ import UniformTypeIdentifiers
         let panel = NSSavePanel()
         panel.title = export ? "Export Photograph" : "Save Preview"
         panel.canCreateDirectories = true
-        let picker = FormatPicker(panel: panel, selected: OutputFormat.last)
+        var extras = ""
+        if state.crop.cropped { extras += " Crops the photograph." }
+        if let border = state.border.exported(for: photoSize) { extras += " Adds the \(border.title.lowercased()) border." }
+        let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: export ? ExportEngine.selected : nil) { engine in
+            switch engine {
+            case .reference?: "Render with the reference engine (CPU, 64-bit) at the current working resolution.\(extras)"
+            case .fast?: "Render on the GPU like the preview, at the current working resolution. Matches the reference within ΔE 0.25; grain is equally fine but not identical.\(extras)"
+            case nil: "Save the current preview at its rendered resolution.\(extras)"
+            }
+        }
         panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).\(picker.format.type.preferredFilenameExtension ?? "png")"
-        panel.message = export ? "Render at reference precision using the current working resolution." : "Save the current preview at its rendered resolution."
-        if state.crop.cropped { panel.message += " Crops the photograph." }
-        if let border = state.border.exported(for: photoSize) { panel.message += " Adds the \(border.title.lowercased()) border." }
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
             guard !Self.sameFile(url, source) else {
                 self.error = "Choose a different filename to preserve the original photograph."; return
             }
             OutputFormat.last = picker.format
-            Task { if export { await self.export(to: url) } else { await self.savePreview(to: url) } }
+            let engine = picker.engine ?? .reference
+            if export { ExportEngine.selected = engine }
+            Task { if export { await self.export(to: url, engine: engine) } else { await self.savePreview(to: url) } }
         }
     }
 
@@ -527,14 +535,16 @@ import UniformTypeIdentifiers
         } catch { report(error) }
     }
 
-    private func export(to url: URL) async {
+    private func export(to url: URL, engine exportEngine: ExportEngine) async {
         guard !exporting, let source, let engine else { return }
         let job = ExportJob(); exportJob = job; exporting = true; exportStarted = Date()
         defer { exporting = false; exportJob = nil }
         do {
-            try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: state,
-                              crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: photoSize))
-            status = "Exported \(url.lastPathComponent)"
+            let outcome = try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: state,
+                                            crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: photoSize), engine: exportEngine)
+            status = outcome.fellBackToCPU
+                ? "Exported \(url.lastPathComponent) on the CPU (32-bit): no GPU was available for Fast export"
+                : "Exported \(url.lastPathComponent)"
         } catch is CancellationError { status = "Export cancelled" }
         catch { report(error) }
     }
@@ -578,25 +588,43 @@ enum OutputFormat: String, CaseIterable {
     }
 }
 
-/// The save panel's Format pop-up. Changing the format restricts the panel to
-/// that type, which also rewrites the extension in the name field.
+/// The save panel's Format pop-up, and for exports the Engine pop-up.
+/// Changing the format restricts the panel to that type, which also rewrites
+/// the extension in the name field. Changing the engine updates the message.
 @MainActor private final class FormatPicker: NSObject {
     private let popup = NSPopUpButton()
+    private let enginePopup: NSPopUpButton?
+    private let message: (ExportEngine?) -> String
     private weak var panel: NSSavePanel?
     var format: OutputFormat { OutputFormat.allCases[max(popup.indexOfSelectedItem, 0)] }
+    /// nil for Save Preview.
+    var engine: ExportEngine? { enginePopup.map { ExportEngine.allCases[max($0.indexOfSelectedItem, 0)] } }
 
-    init(panel: NSSavePanel, selected: OutputFormat) {
+    init(panel: NSSavePanel, selected: OutputFormat, engine: ExportEngine?, message: @escaping (ExportEngine?) -> String) {
         self.panel = panel
+        self.message = message
+        enginePopup = engine.map { _ in NSPopUpButton() }
         super.init()
         popup.addItems(withTitles: OutputFormat.allCases.map(\.title))
         popup.selectItem(at: OutputFormat.allCases.firstIndex(of: selected) ?? 0)
         popup.target = self; popup.action = #selector(changed)
-        let row = NSStackView(views: [NSTextField(labelWithString: "Format:"), popup])
-        row.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
-        row.setFrameSize(row.fittingSize)
-        panel.accessoryView = row
+        var rows = [NSStackView(views: [NSTextField(labelWithString: "Format:"), popup])]
+        if let enginePopup, let engine {
+            enginePopup.addItems(withTitles: ExportEngine.allCases.map(\.title))
+            enginePopup.selectItem(at: ExportEngine.allCases.firstIndex(of: engine) ?? 0)
+            enginePopup.target = self; enginePopup.action = #selector(engineChanged)
+            enginePopup.toolTip = "Reference renders with the 64-bit CPU engine. Fast renders on the GPU like the preview: several times quicker, and measured to match the reference within ΔE 0.25."
+            rows.append(NSStackView(views: [NSTextField(labelWithString: "Engine:"), enginePopup]))
+        }
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
+        stack.setFrameSize(stack.fittingSize)
+        panel.accessoryView = stack
         panel.allowedContentTypes = [selected.type]
+        panel.message = message(self.engine)
     }
 
     @objc private func changed() { panel?.allowedContentTypes = [format.type] }
+    @objc private func engineChanged() { panel?.message = message(engine) }
 }
