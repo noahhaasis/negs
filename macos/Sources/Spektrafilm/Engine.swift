@@ -87,6 +87,8 @@ enum ExportEngine: String, CaseIterable {
     /// The exporter prints the backend it chose. A fast export without a GPU
     /// adapter falls back to the CPU (`Backend: CPU (rayon)`).
     static func ranOnGPU(log: String) -> Bool { log.contains("Backend: wgpu") }
+    /// Whether the helper's reported backend name is the wgpu GPU backend.
+    static func ranOnGPU(backend: String) -> Bool { backend.hasPrefix("wgpu") }
 
     /// The last choice, offered first next time. Reference until changed.
     static var selected: ExportEngine {

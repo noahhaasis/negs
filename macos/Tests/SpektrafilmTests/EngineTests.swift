@@ -103,6 +103,8 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(ExportEngine.selected, .reference)
         XCTAssertTrue(ExportEngine.ranOnGPU(log: "Image loaded\nBackend: wgpu (GPU)\nPipeline: 1 ms"))
         XCTAssertFalse(ExportEngine.ranOnGPU(log: "WARN wgpu backend requested but unavailable; falling back\nBackend: CPU (rayon)"))
+        XCTAssertTrue(ExportEngine.ranOnGPU(backend: "wgpu (GPU)"))
+        XCTAssertFalse(ExportEngine.ranOnGPU(backend: "CPU (rayon)"))
     }
 
     func testSaveRefusesTheOriginalUnderAnotherSpelling() throws {

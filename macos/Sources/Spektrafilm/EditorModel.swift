@@ -60,6 +60,10 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var sourceGeneration = 0
     @ObservationIgnored private var renderID = 0
+    /// The last render is at export size: saving it gives the same file as
+    /// a Fast export, byte for byte.
+    @ObservationIgnored private var renderAtExportSize = false
+    @ObservationIgnored private var renderOnGPU = false
     @ObservationIgnored private var pendingRender: Task<Void, Never>?
     @ObservationIgnored private var activityTimer: Task<Void, Never>?
     @ObservationIgnored private var interactionStart: EditState?
@@ -417,6 +421,8 @@ import UniformTypeIdentifiers
             isRaw = result["raw"].bool
             if revision == currentRevision {
                 renderID = id; previewCurrent = true; hideActivity()
+                renderAtExportSize = result["export_resolution"].bool
+                renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
             }
             let seconds = result["elapsed_ms"].double / 1000
             status = "\(Int(imageSize.width)) × \(Int(imageSize.height)) · developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
@@ -518,24 +524,52 @@ import UniformTypeIdentifiers
         return x.isEqual(y)
     }
 
+    /// Saves the current preview with the crop, rotation, and border.
+    private func saveCommand(to url: URL) -> [String: JSONValue] {
+        var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path),
+                                            "rotate_cw": .number(Double(imageRotation))]
+        if state.crop.cropped {
+            let r = state.crop.rect
+            command["crop"] = .object(["x": .number(r.minX), "y": .number(r.minY), "width": .number(r.width), "height": .number(r.height), "angle": .number(state.crop.angle)])
+        }
+        if let border = state.border.exported(for: photoSize) { command["border"] = .string(border.rawValue) }
+        return command
+    }
+
     private func savePreview(to url: URL) async {
         guard canSave, let engine else { return }
         saving = true
         defer { saving = false }
         do {
-            var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path),
-                                                "rotate_cw": .number(Double(imageRotation))]
-            if state.crop.cropped {
-                let r = state.crop.rect
-                command["crop"] = .object(["x": .number(r.minX), "y": .number(r.minY), "width": .number(r.width), "height": .number(r.height), "angle": .number(state.crop.angle)])
-            }
-            if let border = state.border.exported(for: photoSize) { command["border"] = .string(border.rawValue) }
-            _ = try await engine.request(command)
+            _ = try await engine.request(saveCommand(to: url))
             status = "Saved \(url.lastPathComponent)"
         } catch { report(error) }
     }
 
-    private func export(to url: URL, engine exportEngine: ExportEngine) async {
+    /// A current preview at export size is what a Fast export would render,
+    /// so save it instead of developing the photograph again. Like ExportJob,
+    /// write a sibling temporary file and rename it, so a failure leaves an
+    /// existing file untouched. False if the preview could not be saved.
+    private func exportPreview(to url: URL) async -> Bool {
+        guard canSave, renderAtExportSize, let engine else { return false }
+        saving = true
+        defer { saving = false }
+        let staging = url.deletingLastPathComponent().appendingPathComponent(".spektrafilm-\(UUID().uuidString).\(url.pathExtension)")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        guard (try? await engine.request(saveCommand(to: staging))) != nil else { return false }
+        guard rename(staging.path, url.path) == 0 else {
+            report(EngineError(message: "Could not move the completed export to \(url.path): \(String(cString: strerror(errno)))"))
+            return true
+        }
+        status = renderOnGPU
+            ? "Exported \(url.lastPathComponent)"
+            : "Exported \(url.lastPathComponent) on the CPU (32-bit): no GPU was available for Fast export"
+        return true
+    }
+
+    func export(to url: URL, engine exportEngine: ExportEngine) async {
+        // An edit made meanwhile makes the save fail; develop the photograph then.
+        if exportEngine == .fast, await exportPreview(to: url) { return }
         guard !exporting, let source, let engine else { return }
         let job = ExportJob(); exportJob = job; exporting = true; exportStarted = Date()
         defer { exporting = false; exportJob = nil }

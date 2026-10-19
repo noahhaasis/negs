@@ -66,7 +66,9 @@ resolution. The export panel's **Engine** pop-up chooses **Reference (CPU,
 several times quicker (Q3 60 MP: about 6 s instead of 33 s). Fast matches the
 reference within ΔE00 0.25 at default settings, at most one 8-bit step; grain is
 statistically the same but drawn from different random numbers. The choice is
-remembered. If no GPU is available, Fast falls back to the 32-bit CPU engine and
+remembered. When the preview is already at export size (not limited to 12 MP),
+a Fast export saves it directly instead of developing the photograph again,
+which is the same file byte for byte. If no GPU is available, Fast falls back to the 32-bit CPU engine and
 the status bar says so. All existing adjustment groups are available in the
 inspector.
 

@@ -110,7 +110,12 @@ panel's Engine pop-up says Fast (GPU), the f32 `spektrafilm` with
 then `target/release`; a missing f32 tool only disables Fast export). The choice
 is stored in UserDefaults (`exportEngine`). A fast export whose log shows a CPU
 fallback is reported in the status bar, and a failed fast export suggests the
-reference engine. Either way the export writes to a temporary sibling of the
+reference engine. A fast export skips the process when the current preview was
+rendered at export size (preview not limited, or the photograph within 12 MP):
+it saves that preview instead, which is byte-identical to the f32 exporter's
+file (render responses carry `export_resolution`; `scripts/check_native_macos.py`
+asserts the identity with grain on). If that save fails, for example because an
+edit arrived meanwhile, the exporter runs as usual. Either way the export writes to a temporary sibling of the
 destination, and renames it only after success. Cancel leaves any existing destination untouched. Quitting kills
 both child processes and removes their temporary files.
 

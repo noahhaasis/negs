@@ -44,6 +44,29 @@ import XCTest
         XCTAssertEqual(model.state.paper, "kodak_portra_endura")
     }
 
+    /// A Fast export of a current preview at export size saves the preview.
+    /// These paths have no Fast exporter, so developing again would fail.
+    func testFastExportSavesTheCurrentPreview() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        XCTAssertNil(paths().fastExporter)
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths())
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        model.open(fixture)
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("export.png")
+        await model.export(to: destination, engine: .fast)
+        XCTAssertNil(model.error)
+        XCTAssertTrue(model.status.hasPrefix("Exported export.png"), model.status)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["export.png"], "No staging file may remain")
+        XCTAssertEqual(NSImage(contentsOf: destination)?.representations.first?.pixelsWide, 96)
+    }
+
     func testCancelExportPreservesExistingDestinationAndRemovesStaging() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
