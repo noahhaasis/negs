@@ -408,6 +408,41 @@ GPU render's peak memory footprint grew from 9.2 GB to 13.7 GB, and it took
 in about 2.5–3 s, and at preview size (6 MP) it is as fast as the old
 downsampled version.
 
+### Speed (Task 4 of the handoff)
+
+`SPEKTRAFILM_GPU_PROFILE=1` makes the resident chain submit and wait after
+each stage and print per-stage times. At 24 MP (DSC_5009, default settings)
+the blurs dominated: halation 455 ms, DIR 259 ms, grain 139 ms of 1064 ms.
+The FIR blurs ran one dispatch per channel, and the recursive filter's row
+pass (one invocation per row, about 4000 in flight) took 48 ms against
+12.5 ms for the coalesced column pass. Three changes:
+
+- **FIR:** all channels in one dispatch, reading the three channels of each
+  tap at once; per-channel kernels are zero-padded to the largest radius,
+  so every channel sums the same products in the same order. Output
+  bit-identical.
+- **Recursive filter, columns:** one invocation per channel of a column
+  (12.5 → 7.5 ms). Bit-identical.
+- **Recursive filter, rows:** split into segments of about 256 samples. The
+  recursion is linear, so each segment first runs from a zero state, a short
+  scan combines the segments with A^L (from the host, in f64), and each
+  segment reruns from its true starting state (48 → about 29 ms). Not
+  bit-identical: up to 5.7e-6 in the encoded output, which the harness
+  does not see (det matrix: worst pixel 0.0048 and p99 0.0040 before and
+  after).
+
+Transposing tiles through workgroup memory and loading samples in blocks
+were tried for the row pass and were slower; per-stage GPU time went from
+1064 to 739 ms. End to end: best warm iteration of six, in two alternating
+rounds (one number per round), on AC power with Low Power Mode off (not
+comparable with the battery numbers above):
+
+| Case | Before (Task 3) | After |
+|---|---:|---:|
+| Z6, 6 MP preview size (incl. CPU resize) | 723 / 740 ms | 600 / 658 ms |
+| Z6, 24 MP full | 1098 / 1106 ms | 753 / 754 ms |
+| Q3, 60 MP full | 3789 / 3813 ms | 2017 / 2025 ms |
+
 ## What this does not prove
 
 It proves the GPU reproduces the f64 implementation. It says nothing about how
