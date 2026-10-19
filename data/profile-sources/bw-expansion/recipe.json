@@ -219,7 +219,7 @@
   },
   "film": {
     "id": "kodak_trix400_d76_8min",
-    "name": "Kodak Tri-X 400 / 400TX - D-76, 8 min, 35 mm",
+    "name": "Kodak Tri-X 400 (experimental)",
     "development_time_minutes": 8,
     "base_density": 0.28,
     "base_density_note": "Estimated asymptote just below the lowest plotted total density (about 0.288); separated once from net density. Not a separately measured film-base spectrum.",
@@ -232,7 +232,7 @@
   },
   "paper": {
     "id": "ilford_mgrc_deluxe_grade2",
-    "name": "Ilford Multigrade RC Deluxe - Grade 2 (experimental neutral)",
+    "name": "Ilford Multigrade RC Deluxe Grade 2 (experimental)",
     "development_time_minutes": 1,
     "midgray_reflectance": 0.184,
     "sensitivity_note": "Unit sensitivity on 380-550 nm, zero elsewhere: a neutral-negative integration weight, NOT a digitisation of the unscaled Ilford spectral plot. Cancels algebraically for spectrally neutral negatives under normalized print exposure. No calibrated colour-negative printing, absolute paper speed, spectral filtration, or continuously variable contrast claim.",
