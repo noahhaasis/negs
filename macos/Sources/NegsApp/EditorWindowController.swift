@@ -40,7 +40,7 @@ import SwiftUI
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: true)
-        window.title = "Spektrafilm"
+        window.title = "Negs"
         window.toolbarStyle = .unified
         window.isRestorable = false
         // Place the window before adding its content, so the first layout is at the final size.
@@ -90,7 +90,7 @@ import SwiftUI
     private func update() {
         guard let window else { return }
         let photo = model.source != nil
-        window.title = model.source?.lastPathComponent ?? "Spektrafilm"
+        window.title = model.source?.lastPathComponent ?? "Negs"
         window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
         showCropActions(model.cropping)
         setEnabled(.zoom, photo && !model.cropping)

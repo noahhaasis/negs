@@ -128,12 +128,12 @@ struct ExportOutcome: Equatable {
     var fellBackToCPU = false
 }
 
-/// Temporary files live in per-launch folders under $TMPDIR/Spektrafilm, each
+/// Temporary files live in per-launch folders under $TMPDIR/Negs, each
 /// beside a lock file held open while the folder is in use. A folder whose lock
 /// is free was left by a crash or force quit. Making a new folder removes those,
 /// along with the export staging files and exporter processes they recorded.
 final class ScratchSpace: @unchecked Sendable {
-    static let defaultRoot = FileManager.default.temporaryDirectory.appendingPathComponent("Spektrafilm", isDirectory: true)
+    static let defaultRoot = FileManager.default.temporaryDirectory.appendingPathComponent("Negs", isDirectory: true)
     let directory: URL
     private let lockPath: String
     private let lock = NSLock()
@@ -203,7 +203,7 @@ struct ExportRecord: Codable {
                   let record = try? JSONDecoder().decode(ExportRecord.self, from: data) else { continue }
             // Check the executable so a reused process ID is never killed.
             if let pid = record.pid, executablePath(of: pid) == record.exporter { kill(pid, SIGKILL) }
-            if URL(fileURLWithPath: record.staging).lastPathComponent.hasPrefix(".spektrafilm-") { unlink(record.staging) }
+            if URL(fileURLWithPath: record.staging).lastPathComponent.hasPrefix(".negs-") { unlink(record.staging) }
         }
     }
 
@@ -225,7 +225,7 @@ final class EngineClient: @unchecked Sendable {
     let paths: EnginePaths
     let scratch: ScratchSpace
     var directory: URL { scratch.directory }
-    private let queue = DispatchQueue(label: "dev.spektrafilm.engine", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "dev.negs.engine", qos: .userInitiated)
     private let lock = NSLock()
     private var process: Process?
     private var stopped = false
@@ -324,7 +324,7 @@ final class EngineClient: @unchecked Sendable {
         let executable = try engine.executable(in: paths)
         let work = scratch.directory.appendingPathComponent("export-\(UUID().uuidString)")
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
-        let staging = destination.deletingLastPathComponent().appendingPathComponent(".spektrafilm-\(UUID().uuidString).\(destination.pathExtension)")
+        let staging = destination.deletingLastPathComponent().appendingPathComponent(".negs-\(UUID().uuidString).\(destination.pathExtension)")
         temporaryFiles = [work, staging]
         var record = ExportRecord(staging: staging.path, exporter: ExportRecord.resolvedPath(executable))
         try record.write(to: work)

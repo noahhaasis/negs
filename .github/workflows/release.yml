@@ -87,11 +87,11 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: spektrafilm-macos
-          path: dist/spektrafilm-macos.zip
+          name: negs-macos
+          path: dist/negs-macos.zip
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/spektrafilm-macos.zip
+          files: dist/negs-macos.zip

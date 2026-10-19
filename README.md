@@ -1,4 +1,4 @@
-# spektrafilm-rs
+# negs
 
 ![banner](docs/card.jpg)
 
@@ -22,11 +22,11 @@ The same spectral integration the original Python project does (RGB → film dye
 Requires Rust stable (≥ 1.89) and the standard system toolchain.
 
 ```bash
-git clone <this-repo> && cd spektrafilm-rs
+git clone <this-repo> && cd negs
 
 # Native macOS app (macOS 14+, Xcode / Swift 5.9+)
 bash scripts/package_macos_app.sh
-open dist/spektrafilm-macos/Spektrafilm.app
+open dist/negs-macos/Negs.app
 
 # Cross-platform GUI (wgpu preview, eframe; Windows/Linux or legacy macOS)
 cargo build --release -p spektrafilm-gui

@@ -584,7 +584,7 @@ import UniformTypeIdentifiers
         guard canSave, renderAtExportSize, let engine else { return false }
         saving = true
         defer { saving = false }
-        let staging = url.deletingLastPathComponent().appendingPathComponent(".spektrafilm-\(UUID().uuidString).\(url.pathExtension)")
+        let staging = url.deletingLastPathComponent().appendingPathComponent(".negs-\(UUID().uuidString).\(url.pathExtension)")
         defer { try? FileManager.default.removeItem(at: staging) }
         guard (try? await engine.request(saveCommand(to: staging))) != nil else { return false }
         guard rename(staging.path, url.path) == 0 else {

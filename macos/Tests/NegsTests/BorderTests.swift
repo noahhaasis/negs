@@ -1,5 +1,5 @@
 import XCTest
-@testable import SpektrafilmApp
+@testable import NegsApp
 
 final class BorderTests: XCTestCase {
     private let data = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
