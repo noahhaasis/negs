@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// The menu bar. The standard items go to the responder chain; the app's own
 /// commands go to the model, and are enabled and titled from its state when a
@@ -6,15 +7,21 @@ import AppKit
 @MainActor final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
     let menu = NSMenu()
     private let model: EditorModel
+    private let updates: UpdateController
     private let recent = NSMenu(title: "Open Recent")
+    private var settings: NSWindow?
 
-    init(model: EditorModel) {
+    init(model: EditorModel, updates: UpdateController) {
         self.model = model
+        self.updates = updates
         super.init()
         let name = ProcessInfo.processInfo.processName == "NegsApp" ? "Negs" : ProcessInfo.processInfo.processName
 
         let app = submenu(name)
         app.addItem(withTitle: "About \(name)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        command(app, "Check for Updates…", #selector(checkForUpdates), "")
+        app.addItem(.separator())
+        command(app, "Settings…", #selector(showSettings), ",")
         app.addItem(.separator())
         let services = NSMenu(title: "Services")
         app.addItem(withTitle: "Services", action: nil, keyEquivalent: "").submenu = services
@@ -84,6 +91,18 @@ import AppKit
 
     // MARK: Commands
 
+    @objc private func checkForUpdates() { updates.check() }
+    @objc private func showSettings() {
+        if settings == nil {
+            let window = NSWindow(contentViewController: NSHostingController(rootView: UpdateSettings(updates: updates)))
+            window.title = "Settings"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            settings = window
+        }
+        settings?.makeKeyAndOrderFront(nil)
+    }
     @objc private func openPhotograph() { model.openPanel() }
     @objc private func showRecent() {}
     @objc private func openRecent(_ item: NSMenuItem) { if let url = item.representedObject as? URL { model.open(url) } }
@@ -99,6 +118,7 @@ import AppKit
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let photo = model.source != nil
         switch item.action {
+        case #selector(checkForUpdates): return updates.configured && updates.canCheck
         case #selector(showRecent): return !model.recentFiles.isEmpty
         case #selector(savePreview): return model.canSave
         case #selector(exportPhotograph): return photo && model.ready && !model.exporting && !model.cropping

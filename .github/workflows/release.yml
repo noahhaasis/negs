@@ -7,7 +7,11 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   windows-x64:
@@ -62,36 +66,108 @@ jobs:
           name: spektrafilm-windows-x64
           path: dist/spektrafilm-windows-x64.zip
 
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/spektrafilm-windows-x64.zip
 
   macos:
-    name: macOS
-    runs-on: macos-latest
-
+    name: macOS Apple Silicon
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+      # The repository URL is supplied by GitHub; no owner is hard-coded.
+      RELEASE_REPOSITORY: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository || '' }}
+      RELEASE_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+      SPARKLE_PUBLIC_KEY: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && vars.SPARKLE_PUBLIC_KEY || '' }}
+      UPDATE_FEED_URL: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && vars.UPDATE_FEED_URL || '' }}
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      name: ${{ steps.metadata.outputs.name }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Package app bundle
-        shell: bash
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate release metadata
+        id: metadata
+        run: python scripts/macos_release.py --github-output "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@1.93.1
+      - name: Record toolchains
         run: |
-          bash scripts/package_macos_app.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+          rustc -vV
+          swift --version
+          xcodebuild -version
+          test "$(uname -m)" = arm64
+      - name: Test release metadata
+        run: python -m unittest discover -s scripts -p 'test_macos_release.py'
+      - name: Build native engine for lifecycle tests
+        run: cargo build --locked --release -p spektrafilm-native
+      - name: Test native app and session restoration
+        run: swift test --package-path macos --force-resolved-versions
+      - name: Package and verify app, update ZIP and installer
+        env:
+          BUILD_TARGET_DIR: target
+        run: bash scripts/package_macos_app.sh
+      - name: Sign and verify update feed
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: python scripts/prepare_macos_update.py --tools target/swift-native/artifacts/sparkle/Sparkle/bin
+      - uses: actions/upload-artifact@v4
         with:
           name: negs-macos
-          path: dist/negs-macos.zip
-
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+          path: dist/releases/
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         with:
-          files: dist/negs-macos.zip
+          path: dist/update-site/
+
+  publish:
+    name: Publish complete release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [macos, windows-x64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: negs-macos
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: spektrafilm-windows-x64
+          path: release-assets
+      - name: Create draft, upload assets, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.macos.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.macos.outputs.version }}
+        run: |
+          # Never overwrite published artifacts. A failed draft can be removed
+          # explicitly before retrying; a failed Pages deploy can be rerun alone.
+          flags=()
+          if [[ "$RELEASE_VERSION" == 0.* ]]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" --verify-tag --draft "${flags[@]}" --title "Negs $RELEASE_VERSION" --notes-file "release/notes/$RELEASE_VERSION.md" release-assets/*
+          gh release edit "$RELEASE_TAG" --draft=false
+      - name: Check public update archive is downloadable
+        env:
+          RELEASE_TAG: ${{ needs.macos.outputs.tag }}
+          ASSET_NAME: ${{ needs.macos.outputs.name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: curl --fail --location --retry 5 --retry-all-errors --output /dev/null "https://github.com/$RELEASE_REPOSITORY/releases/download/$RELEASE_TAG/$ASSET_NAME.zip"
+
+  deploy-feed:
+    name: Publish update feed last
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

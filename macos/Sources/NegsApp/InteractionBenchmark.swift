@@ -19,7 +19,9 @@ import AppKit
             MainActor.assumeIsolated {
                 switch phase {
                 case 0 where model.ready:
-                    model.open(URL(fileURLWithPath: photo)); phase = 1
+                    report("editor ready in \(Int(Date().timeIntervalSince(launched) * 1000)) ms after launch")
+                    if model.source == nil { model.open(URL(fileURLWithPath: photo)) }
+                    phase = 1
                 case 1 where model.previewCurrent:
                     report("opened and developed in \(Int(Date().timeIntervalSince(launched) * 1000)) ms after launch")
                     model.beginInteraction(); dragStart = Date(); last = model.image; measuring = true; phase = 2

@@ -1,0 +1,159 @@
+{
+  "summary": {
+    "baseline": {
+      "ready_from_process_ms": 1429.5,
+      "preview_from_process_ms": 2009.8,
+      "ready_after_launch_ms": 534,
+      "preview_after_launch_ms": 1160
+    },
+    "candidate": {
+      "ready_from_process_ms": 1422.0,
+      "preview_from_process_ms": 2013.3,
+      "ready_after_launch_ms": 527,
+      "preview_after_launch_ms": 1106
+    },
+    "restored": {
+      "ready_from_process_ms": 1389.6,
+      "preview_from_process_ms": 2007.3,
+      "ready_after_launch_ms": 548,
+      "preview_after_launch_ms": 1134
+    }
+  },
+  "runs": [
+    {
+      "variant": "baseline",
+      "run": 1,
+      "ready_after_launch_ms": 1096,
+      "ready_from_process_ms": 1767.3,
+      "preview_after_launch_ms": 1947,
+      "preview_from_process_ms": 2618.2,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 21 ms, p99 45 ms, worst 79 ms over 405 passes"
+    },
+    {
+      "variant": "candidate",
+      "run": 1,
+      "ready_after_launch_ms": 433,
+      "ready_from_process_ms": 1800.9,
+      "preview_after_launch_ms": 1084,
+      "preview_from_process_ms": 2452.3,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 20 ms, p99 43 ms, worst 59 ms over 477 passes"
+    },
+    {
+      "variant": "restored",
+      "run": 1,
+      "ready_after_launch_ms": 548,
+      "ready_from_process_ms": 1382.6,
+      "preview_after_launch_ms": 1147,
+      "preview_from_process_ms": 1982.3,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 21 ms, p99 44 ms, worst 82 ms over 410 passes"
+    },
+    {
+      "variant": "restored",
+      "run": 2,
+      "ready_after_launch_ms": 568,
+      "ready_from_process_ms": 1450.3,
+      "preview_after_launch_ms": 1134,
+      "preview_from_process_ms": 2016.1,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 4 ms, p95 21 ms, p99 44 ms, worst 59 ms over 402 passes"
+    },
+    {
+      "variant": "candidate",
+      "run": 2,
+      "ready_after_launch_ms": 597,
+      "ready_from_process_ms": 1422.0,
+      "preview_after_launch_ms": 1189,
+      "preview_from_process_ms": 2013.3,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 3 ms, p95 20 ms, p99 45 ms, worst 59 ms over 409 passes"
+    },
+    {
+      "variant": "baseline",
+      "run": 2,
+      "ready_after_launch_ms": 532,
+      "ready_from_process_ms": 1429.5,
+      "preview_after_launch_ms": 1105,
+      "preview_from_process_ms": 2003.0,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 4 ms, p95 21 ms, p99 45 ms, worst 81 ms over 395 passes"
+    },
+    {
+      "variant": "baseline",
+      "run": 3,
+      "ready_after_launch_ms": 597,
+      "ready_from_process_ms": 1461.8,
+      "preview_after_launch_ms": 1196,
+      "preview_from_process_ms": 2061.4,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 20 ms, p99 43 ms, worst 59 ms over 417 passes"
+    },
+    {
+      "variant": "candidate",
+      "run": 3,
+      "ready_after_launch_ms": 559,
+      "ready_from_process_ms": 1446.7,
+      "preview_after_launch_ms": 1106,
+      "preview_from_process_ms": 1993.5,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 20 ms, p99 44 ms, worst 65 ms over 486 passes"
+    },
+    {
+      "variant": "restored",
+      "run": 3,
+      "ready_after_launch_ms": 476,
+      "ready_from_process_ms": 1368.3,
+      "preview_after_launch_ms": 1141,
+      "preview_from_process_ms": 2033.6,
+      "interaction": "benchmark: 4 s slider drag: 9 live previews, main run-loop busy p50 4 ms, p95 25 ms, p99 50 ms, worst 69 ms over 375 passes"
+    },
+    {
+      "variant": "restored",
+      "run": 4,
+      "ready_after_launch_ms": 576,
+      "ready_from_process_ms": 1469.6,
+      "preview_after_launch_ms": 1114,
+      "preview_from_process_ms": 2007.3,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 22 ms, p99 45 ms, worst 61 ms over 450 passes"
+    },
+    {
+      "variant": "candidate",
+      "run": 4,
+      "ready_after_launch_ms": 527,
+      "ready_from_process_ms": 1390.6,
+      "preview_after_launch_ms": 1182,
+      "preview_from_process_ms": 2045.6,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 21 ms, p99 45 ms, worst 68 ms over 392 passes"
+    },
+    {
+      "variant": "baseline",
+      "run": 4,
+      "ready_after_launch_ms": 534,
+      "ready_from_process_ms": 1417.7,
+      "preview_after_launch_ms": 1107,
+      "preview_from_process_ms": 1990.7,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 2 ms, p95 19 ms, p99 43 ms, worst 145 ms over 411 passes"
+    },
+    {
+      "variant": "baseline",
+      "run": 5,
+      "ready_after_launch_ms": 528,
+      "ready_from_process_ms": 1377.0,
+      "preview_after_launch_ms": 1160,
+      "preview_from_process_ms": 2009.8,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 19 ms, p99 43 ms, worst 99 ms over 408 passes"
+    },
+    {
+      "variant": "candidate",
+      "run": 5,
+      "ready_after_launch_ms": 521,
+      "ready_from_process_ms": 1367.5,
+      "preview_after_launch_ms": 1081,
+      "preview_from_process_ms": 1927.7,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 19 ms, p99 49 ms, worst 85 ms over 407 passes"
+    },
+    {
+      "variant": "restored",
+      "run": 5,
+      "ready_after_launch_ms": 531,
+      "ready_from_process_ms": 1389.6,
+      "preview_after_launch_ms": 1084,
+      "preview_from_process_ms": 1942.4,
+      "interaction": "benchmark: 4 s slider drag: 10 live previews, main run-loop busy p50 0 ms, p95 19 ms, p99 43 ms, worst 55 ms over 415 passes"
+    }
+  ]
+}

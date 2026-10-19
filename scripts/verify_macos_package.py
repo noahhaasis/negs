@@ -12,6 +12,8 @@ import re
 import subprocess
 import tarfile
 
+from macos_release import metadata
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,17 +34,21 @@ def require(condition, message):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--zip", required=True, type=Path)
+    parser.add_argument("--source", type=Path, help="Matching source release asset")
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
     out = args.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=False)
     checked("/usr/bin/ditto", "-x", "-k", str(args.zip.resolve()), str(out))
-    apps = list(out.glob("*/*.app"))
+    apps = list(out.glob("*.app")) + list(out.glob("*/*.app"))
     require(len(apps) == 1, "expected exactly one app bundle")
     app = apps[0]
     checked("/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app))
     checked("/usr/bin/plutil", "-lint", str(app / "Contents/Info.plist"))
     plist = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    expected = metadata()
+    require(plist["CFBundleShortVersionString"] == expected["version"], "app version differs from Cargo")
+    require(plist["CFBundleVersion"] == expected["build"], "app build number differs from release metadata")
     report = {"zip_sha256": sha(args.zip), "app": str(app), "signature_verified": True,
               "minimum_macos": plist["LSMinimumSystemVersion"], "binaries": {}, "data": {}}
     for name in [plist["CFBundleExecutable"], "spektrafilm", "spektrafilm-f64"] + (["spektrafilm-native"] if plist["CFBundleExecutable"] in {"Negs", "NegsApp"} else []):
@@ -50,7 +56,9 @@ def main():
         arch = checked("/usr/bin/lipo", "-archs", str(binary)).strip()
         links = checked("/usr/bin/otool", "-L", str(binary))
         dependencies = [line.strip().split(" (", 1)[0] for line in links.splitlines()[1:]]
-        require(all(p.startswith(("/System/Library/", "/usr/lib/")) for p in dependencies),
+        bundled_sparkle = "@rpath/Sparkle.framework/Versions/B/Sparkle"
+        require(all(p.startswith(("/System/Library/", "/usr/lib/")) or
+                    (name == plist["CFBundleExecutable"] and p == bundled_sparkle) for p in dependencies),
                 f"{name} has a non-system dynamic dependency: {dependencies}")
         build = checked("/usr/bin/xcrun", "vtool", "-show-build", str(binary))
         minimum = re.search(r"\bminos\s+([\d.]+)", build).group(1)
@@ -58,6 +66,14 @@ def main():
                 f"{name} requires a newer OS than Info.plist advertises")
         report["binaries"][name] = {"sha256": sha(binary), "architecture": arch,
                                      "minimum_macos": minimum, "dependencies": dependencies}
+        require(arch == "arm64", f"Unexpected release architecture: {name}: {arch}")
+    framework = app / "Contents/Frameworks/Sparkle.framework"
+    require(framework.is_dir(), "Sparkle framework missing")
+    checked("/usr/bin/codesign", "--verify", "--deep", "--strict", str(framework))
+    require((framework / "Versions/B/Autoupdate").is_file(), "Sparkle installer missing")
+    require((framework / "Versions/B/Updater.app").is_dir(), "Sparkle updater UI missing")
+    report["version"] = plist["CFBundleShortVersionString"]
+    report["build"] = plist["CFBundleVersion"]
     data = app / "Contents/Resources/data"
     expected_paths = {p.relative_to(ROOT / "data") for p in (ROOT / "data").rglob("*") if p.is_file()}
     actual_paths = {p.relative_to(data) for p in data.rglob("*") if p.is_file()}
@@ -66,11 +82,13 @@ def main():
         digest = sha(data / relative)
         require(digest == sha(ROOT / "data" / relative), f"stale packaged data: {relative}")
         report["data"][str(relative)] = digest
-    source = app.parent / "SOURCE.tar.gz"
+    source = args.source or app.parent / "SOURCE.tar.gz"
     with tarfile.open(source) as tar:
         count = 0
         for member in tar.getmembers():
             if member.isfile():
+                require(not Path(member.name).is_absolute() and ".." not in Path(member.name).parts,
+                        "invalid source archive path")
                 require(hashlib.sha256(tar.extractfile(member).read()).hexdigest() == sha(ROOT / member.name),
                         f"source snapshot mismatch: {member.name}")
                 count += 1

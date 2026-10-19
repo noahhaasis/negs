@@ -60,6 +60,20 @@ enum JSONValue: Codable, Equatable, Sendable {
     var bool: Bool { if case .bool(let v) = self { return v }; return false }
     var string: String { if case .string(let v) = self { return v }; return "" }
     var array: [JSONValue] { if case .array(let v) = self { return v }; return [] }
+
+    /// Keep new engine defaults, restore known fields, and discard removed fields.
+    func restoring(_ saved: JSONValue) -> JSONValue {
+        switch (self, saved) {
+        case (.object(let defaults), .object(let values)):
+            return .object(defaults.merging(values.filter { defaults[$0.key] != nil }) {
+                $0.restoring($1)
+            })
+        case (.array(let defaults), .array(let values)) where defaults.count == values.count:
+            return .array(zip(defaults, values).map { $0.restoring($1) })
+        case (.number, .number), (.bool, .bool), (.string, .string), (.null, _): return saved
+        default: return self
+        }
+    }
 }
 
 struct Stock: Identifiable, Sendable {
@@ -121,7 +135,7 @@ func optionTitle(_ option: String) -> String {
     return titles[option] ?? option.replacingOccurrences(of: "_", with: " ").capitalized
 }
 
-struct EditState: Equatable {
+struct EditState: Codable, Equatable, Sendable {
     var params: JSONValue = .object([:])
     var film = "kodak_gold_200"
     var paper = "kodak_portra_endura"

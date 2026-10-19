@@ -5,7 +5,7 @@ import SwiftUI
 /// Presentation borders. They are drawn around the developed photograph, so
 /// changing one never re-renders. Sizes match `spektrafilm-io::border`, which
 /// adds the same border on export; keep the two in sync.
-enum BorderStyle: String, CaseIterable, Identifiable {
+enum BorderStyle: String, Codable, Sendable, CaseIterable, Identifiable {
     case white, film, keyline
     case film35 = "35mm"
 
@@ -61,7 +61,7 @@ enum BorderStyle: String, CaseIterable, Identifiable {
     }
 }
 
-struct BorderSettings: Equatable {
+struct BorderSettings: Codable, Equatable, Sendable {
     var enabled = false
     var style = BorderStyle.white
     var export = true

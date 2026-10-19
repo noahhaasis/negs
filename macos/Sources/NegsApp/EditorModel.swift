@@ -70,6 +70,7 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var activityTimer: Task<Void, Never>?
     @ObservationIgnored private var interactionStart: EditState?
     @ObservationIgnored private var closing = false
+    @ObservationIgnored private var explicitOpenRequested = false
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
     @ObservationIgnored private var stripRequest: (film: String, format: FilmFormat)?
 
@@ -115,7 +116,7 @@ import UniformTypeIdentifiers
         } catch { report(error) }
     }
 
-    func start(paths: EnginePaths? = nil) async {
+    func start(paths: EnginePaths? = nil, restoration: Task<EditorSession?, Error>? = nil) async {
         launch(paths: paths)
         guard let request = catalogRequest, let engine else { return }
         catalogRequest = nil
@@ -127,8 +128,19 @@ import UniformTypeIdentifiers
                 apply(catalog: catalog)
                 CatalogCache.save(catalog, for: engine.paths)
             }
+            // The engine and session file load concurrently. Apply the restored
+            // parameters before ready/changed so no default render is wasted.
+            if let restoration, !explicitOpenRequested {
+                do {
+                    if let session = try await restoration.value, !explicitOpenRequested {
+                        try restore(session)
+                    }
+                } catch {
+                    if !explicitOpenRequested { status = error.localizedDescription }
+                }
+            }
             ready = true
-            if source == nil { status = "" }
+            if source == nil, status == "Starting…" { status = "" }
             if source != nil { changed() }
         } catch { report(error) }
     }
@@ -304,6 +316,23 @@ import UniformTypeIdentifiers
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
+    var session: EditorSession? {
+        guard ready, let source else { return nil }
+        var saved = state
+        // Include a crop being drawn, without forcing the user to press Done.
+        if let cropSession { saved.crop = cropSession.settings }
+        return EditorSession(source: source, state: saved, inspectorVisible: inspectorVisible, fitImage: fitImage)
+    }
+
+    private func restore(_ session: EditorSession) throws {
+        try session.validate()
+        guard films.contains(where: { $0.id == session.state.film }),
+              papers.contains(where: { $0.id == session.state.paper }) else {
+            throw EngineError(message: "The previous session uses an unavailable film or paper. Open a photograph to continue.")
+        }
+        open(session.source, restoring: session)
+    }
+
     // MARK: Cropping
 
     /// Shows the whole developed photograph, without the border, to crop it.
@@ -347,6 +376,11 @@ import UniformTypeIdentifiers
     }
 
     func open(_ url: URL) {
+        explicitOpenRequested = true
+        open(url, restoring: nil)
+    }
+
+    private func open(_ url: URL, restoring session: EditorSession?) {
         guard url.isFileURL else { return }
         guard FileManager.default.isReadableFile(atPath: url.path) else {
             recentFiles.removeAll { $0 == url }; saveRecents()
@@ -357,11 +391,18 @@ import UniformTypeIdentifiers
         interactionStart = nil; cropSession = nil
         sourceGeneration += 1
         let generation = sourceGeneration
-        state.params["io.rotate_cw"] = .number(0)
-        state.crop = CropSettings()
+        if let session {
+            var restored = session.state
+            restored.params = defaults.restoring(restored.params)
+            state = restored
+            inspectorVisible = session.inspectorVisible
+        } else {
+            state.params["io.rotate_cw"] = .number(0)
+            state.crop = CropSettings()
+        }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()
-        zoom(fit: true)
+        zoom(fit: session?.fitImage ?? true)
         recentFiles.removeAll { $0 == url }; recentFiles.insert(url, at: 0)
         recentFiles = Array(recentFiles.prefix(10)); saveRecents()
         NSDocumentController.shared.noteNewRecentDocumentURL(url)

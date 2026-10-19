@@ -19,7 +19,8 @@ The same spectral integration the original Python project does (RGB → film dye
 
 ## Build
 
-Requires Rust stable (≥ 1.89) and the standard system toolchain.
+Requires Rust stable (≥ 1.89) and the standard system toolchain. macOS packaging
+also requires Python 3.11+; set `PYTHON=/path/to/python3` if needed.
 
 ```bash
 git clone <this-repo> && cd negs
@@ -27,6 +28,7 @@ git clone <this-repo> && cd negs
 # Native macOS app (macOS 14+, Xcode / Swift 5.9+)
 bash scripts/package_macos_app.sh
 open dist/negs-macos/Negs.app
+# Installer and app-only update ZIP: dist/releases/
 
 # Cross-platform GUI (wgpu preview, eframe; Windows/Linux or legacy macOS)
 cargo build --release -p spektrafilm-gui
@@ -73,6 +75,13 @@ the status bar says so. All existing adjustment groups are available in the
 inspector.
 
 See the [native UI plan, architecture, and development guide](docs/native-macos-ui.md).
+Release builds support **Negs → Check for Updates…** and automatic checks
+configured in Settings. Normal quit and update restart save the current photograph,
+adjustments, crop, rotation, and borders for the next launch. Undo history and work
+lost to a crash are not restored. Local builds without a feed/key disable updates.
+The app is ad-hoc signed, without paid Apple signing or notarization; downloaded
+builds may need **System Settings → Privacy & Security → Open Anyway** on first
+launch. See [macOS installation, versioning, and releases](docs/macos-distribution.md).
 The cross-platform egui UI is **unmaintained**: it still builds and is the only
 UI on Windows and Linux for now, but it gets no new work or fixes. Development
 focuses on the macOS app, which will later be ported to other platforms. It
