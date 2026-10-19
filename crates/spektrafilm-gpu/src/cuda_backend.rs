@@ -1481,8 +1481,14 @@ impl CudaBackend {
         let mut tail = self.alloc_f32(n_pixels as usize * 3)?;
         let mut acc = self.alloc_f32(n_pixels as usize * 3)?;
 
-        self.blur_device(img, scratch, &mut core, width, height, hp.scatter_core_px)?;
-        self.blur_device(img, scratch, &mut tail, width, height, hp.scatter_tail_px)?;
+        // TODO(cuda): match the CPU reference like the wgpu backend did on
+        // 2026-10-19. Still channel-averaged scatter/halation sizes and a
+        // single-Gaussian scatter tail; the DIR tail and the grain sampler
+        // (normal approximation) have the same gaps. See `RefBlur`, `grain.wgsl`
+        // and docs/gpu-vs-cpu-quality.md; untested here (no NVIDIA GPU).
+        let avg = |v: [f32; 3]| (v[0] + v[1] + v[2]) / 3.0;
+        self.blur_device(img, scratch, &mut core, width, height, avg(hp.scatter_core_px))?;
+        self.blur_device(img, scratch, &mut tail, width, height, avg(hp.scatter_tail_px))?;
         {
             let [tr, tg, tb] = hp.scatter_tail_weight;
             let mut launch = self.stream.launch_builder(&self.scatter_mix_kernel);
@@ -1510,7 +1516,8 @@ impl CudaBackend {
                 }
             }
             for (k, wk) in decay.into_iter().enumerate() {
-                let sigma = hp.halation_first_sigma_px * ((k as f32) + 1.0).sqrt();
+                let first = hp.halation_first_sigma_px.iter().sum::<f64>() / 3.0;
+                let sigma = first as f32 * ((k as f32) + 1.0).sqrt();
                 self.blur_device(img, scratch, &mut core, width, height, sigma)?;
                 self.add_scaled(&core, n_pixels, wk, k == 0, &mut acc)?;
             }

@@ -1,0 +1,1 @@
+{"film_render": {"grain": {"active": false}, "halation": {"active": false}, "dir_couplers": {"active": false}, "glare": {"active": false}}, "print_render": {"glare": {"active": false}}, "io": {"input_color_space": "sRGB", "input_cctf_decoding": false}}

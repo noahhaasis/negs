@@ -1597,8 +1597,7 @@ impl WgpuBackend {
         //     input RGB image is no longer needed), buf_c / buf_d for the
         //     scatter outputs and halation accumulator.
         if let Some(hs) = halation_state.as_ref() {
-            let wg_xy = (image.width.div_ceil(16), image.height.div_ceil(16));
-            hs.encode_passes(&mut encoder, n_pixels, workgroup_size, wg_xy);
+            hs.encode_passes(&mut encoder, n_pixels, workgroup_size);
         }
         // 2. log10 in-place on buf_b: raw → log_raw (3 channels per thread).
         let (log10_pipe, log10_bg, _keepalive) = &bg_log10;
@@ -1613,13 +1612,12 @@ impl WgpuBackend {
         // 3b. DIR couplers (operates on buf_a, mutates buf_b → log_raw_corrected,
         //     re-interps density curve back into buf_a).
         if let Some(ds) = dir_state.as_ref() {
-            let wg_xy = (image.width.div_ceil(16), image.height.div_ceil(16));
-            ds.encode_passes(&mut encoder, n_pixels, workgroup_size, wg_xy);
+            ds.encode_passes(&mut encoder, n_pixels, workgroup_size);
         }
         // 3c. Grain (in-place on buf_a, optional post-blur via buf_b mid).
         if let Some(gs) = grain_state.as_ref() {
             let wg_xy = (image.width.div_ceil(16), image.height.div_ceil(16));
-            gs.encode_passes(&mut encoder, n_pixels, workgroup_size, wg_xy);
+            gs.encode_passes(&mut encoder, n_pixels, wg_xy);
         }
         // 4 + 5. Printing: print_spectral (buf_a → buf_b) then the print
         //     density curve (buf_b → buf_a). Skipped for scan_film — the
@@ -2195,14 +2193,11 @@ struct HalationState {
     // called from the hot path.
     buf_c: wgpu::Buffer,
     buf_d: wgpu::Buffer,
-    scatter_blurs: Vec<BlurJob>, // [core, tail]
+    scatter_blurs: Vec<RefBlur>, // [core, tail × 3]
     scatter_mix: DispatchJob,
-    halation_blurs: Vec<BlurJob>,          // one per bounce
-    halation_accumulate: Vec<DispatchJob>, // one add_scaled per bounce
+    halation_blurs: Vec<RefBlur>, // one per bounce, accumulating into buf_d
     halation_final_add: DispatchJob,
     halation_renormalize: Option<DispatchJob>,
-    blur_pipe_h: CachedPipelineRef,
-    blur_pipe_v: CachedPipelineRef,
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -2218,6 +2213,273 @@ struct DispatchJob {
     _params_buf: wgpu::Buffer,
     pipeline: CachedPipelineRef,
     bg: wgpu::BindGroup,
+}
+
+/// One dispatch of a [`RefBlur`].
+#[cfg(feature = "wgpu-backend")]
+struct RefBlurPass {
+    _params_buf: wgpu::Buffer,
+    _kernel_buf: Option<wgpu::Buffer>,
+    pipeline: CachedPipelineRef,
+    bg: wgpu::BindGroup,
+    workgroups: (u32, u32),
+}
+
+/// Per-channel separable Gaussian that reproduces the CPU reference
+/// `spektrafilm_math::gaussian::gaussian_blur_channel`: FIR with
+/// `radius = int(3σ + 0.5)` below σ = 3, Young–van Vliet IIR from σ = 3 on.
+/// Writes `out[c] = scale[c] * blur(src[c], σ[c])`, or adds it to `out` when
+/// `accumulate` is set. `src`, `mid` and `out` must be distinct buffers.
+#[cfg(feature = "wgpu-backend")]
+struct RefBlur {
+    passes: Vec<RefBlurPass>,
+}
+
+/// Amplitude and σ/λ ratio of the three Gaussians that approximate an
+/// exponential PSF. Same table as `exponential_filter_channel` (Python
+/// `_EXPONENTIAL_GAUSSIAN_FITS[3]`).
+#[cfg(feature = "wgpu-backend")]
+const EXPONENTIAL_GAUSSIAN_FIT: [(f64, f64); 3] = [(0.1633, 0.5360), (0.6496, 1.5236), (0.1870, 2.7684)];
+
+#[cfg(feature = "wgpu-backend")]
+#[allow(clippy::too_many_arguments)]
+fn build_ref_blur(
+    device: &wgpu::Device,
+    backend: &WgpuBackend,
+    width: u32,
+    height: u32,
+    src: &wgpu::Buffer,
+    mid: &wgpu::Buffer,
+    out: &wgpu::Buffer,
+    sigma: [f32; 3],
+    scale: [f32; 3],
+    accumulate: bool,
+    label: &str,
+) -> RefBlur {
+    use wgpu::util::DeviceExt;
+    let fir_pipe = backend.cached_pipeline(
+        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir.wgsl"),
+        &[
+            wgpu::BufferBindingType::Uniform,
+            wgpu::BufferBindingType::Storage { read_only: true },
+            wgpu::BufferBindingType::Storage { read_only: true },
+            wgpu::BufferBindingType::Storage { read_only: false },
+        ],
+    );
+    let iir_pipe = backend.cached_pipeline(
+        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_iir.wgsl"),
+        &[
+            wgpu::BufferBindingType::Uniform,
+            wgpu::BufferBindingType::Storage { read_only: true },
+            wgpu::BufferBindingType::Storage { read_only: false },
+            wgpu::BufferBindingType::Storage { read_only: false },
+        ],
+    );
+    #[repr(C)]
+    #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+    struct FirParams {
+        width: u32,
+        height: u32,
+        channel: u32,
+        radius: u32,
+        vertical: u32,
+        accumulate: u32,
+        scale: f32,
+        _pad: u32,
+    }
+    #[repr(C)]
+    #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+    struct IirParams {
+        width: u32,
+        height: u32,
+        vertical: u32,
+        accumulate: u32,
+        mask: [u32; 4],
+        scale: [f32; 4],
+        a: [f32; 4],
+        b1: [f32; 4],
+        b2: [f32; 4],
+        b3: [f32; 4],
+    }
+    // Channels at σ ≥ 3 share one IIR job (one thread per line filters all of
+    // them); the rest get per-channel FIR passes.
+    let mut iir = IirParams {
+        width,
+        height,
+        vertical: 0,
+        accumulate: accumulate as u32,
+        mask: [0; 4],
+        scale: [scale[0], scale[1], scale[2], 0.0],
+        a: [0.0; 4],
+        b1: [0.0; 4],
+        b2: [0.0; 4],
+        b3: [0.0; 4],
+    };
+    let tiles = (width.div_ceil(16), height.div_ceil(16));
+    let mut passes = Vec::with_capacity(6);
+    for c in 0..3u32 {
+        let s = sigma[c as usize] as f64;
+        let acc = accumulate as u32;
+        if s < 3.0 {
+            // Same kernel as `make_gaussian_kernel`, built in f64.
+            let radius = (3.0 * s + 0.5) as u32;
+            let s2 = 2.0 * s * s;
+            let kernel: Vec<f64> = (0..=2 * radius)
+                .map(|i| {
+                    let x = i as f64 - radius as f64;
+                    (-x * x / s2).exp()
+                })
+                .collect();
+            let sum: f64 = kernel.iter().sum();
+            let kernel_f32: Vec<f32> = kernel.iter().map(|v| (v / sum) as f32).collect();
+            for vertical in [0u32, 1] {
+                let (input, output) = if vertical == 0 { (src, mid) } else { (mid, out) };
+                let params = FirParams {
+                    width,
+                    height,
+                    channel: c,
+                    radius,
+                    vertical,
+                    accumulate: if vertical == 0 { 0 } else { acc },
+                    scale: if vertical == 0 { 1.0 } else { scale[c as usize] },
+                    _pad: 0,
+                };
+                let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("{label}_fir_params_{c}_{vertical}")),
+                    contents: bytemuck::bytes_of(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let kernel_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("{label}_fir_kernel_{c}_{vertical}")),
+                    contents: bytemuck::cast_slice(&kernel_f32),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("{label}_fir_bg_{c}_{vertical}")),
+                    layout: &fir_pipe.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: input.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: kernel_buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 3, resource: output.as_entire_binding() },
+                    ],
+                });
+                passes.push(RefBlurPass {
+                    _params_buf: params_buf,
+                    _kernel_buf: Some(kernel_buf),
+                    pipeline: fir_pipe.clone(),
+                    bg,
+                    workgroups: tiles,
+                });
+            }
+        } else {
+            // Same coefficients as `iir_blur_1d`, computed in f64.
+            let q = if s >= 2.5 {
+                0.98711 * s - 0.96330
+            } else {
+                3.97156 - 4.14554 * (1.0 - 0.26891 * s).sqrt()
+            };
+            let (q2, q3) = (q * q, q * q * q);
+            let b0 = 1.57825 + 2.44413 * q + 1.4281 * q2 + 0.422205 * q3;
+            let b1 = (2.44413 * q + 2.85619 * q2 + 1.26661 * q3) / b0;
+            let b2 = -(1.4281 * q2 + 1.26661 * q3) / b0;
+            let b3 = (0.422205 * q3) / b0;
+            // At large σ the b's sum to within ~1e-6 of 1, so rounding them
+            // to f32 changes 1 − Σb by percents. Derive `a` from the rounded
+            // values so each pass keeps unit gain (flat areas stay exact).
+            let (b1, b2, b3) = (b1 as f32, b2 as f32, b3 as f32);
+            let ci = c as usize;
+            iir.mask[ci] = 1;
+            iir.a[ci] = (1.0 - (b1 as f64 + b2 as f64 + b3 as f64)) as f32;
+            iir.b1[ci] = b1;
+            iir.b2[ci] = b2;
+            iir.b3[ci] = b3;
+        }
+    }
+    if iir.mask.iter().any(|&m| m != 0) {
+        for vertical in [0u32, 1] {
+            let params = IirParams { vertical, ..iir };
+            let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{label}_iir_params_{vertical}")),
+                contents: bytemuck::bytes_of(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("{label}_iir_bg_{vertical}")),
+                layout: &iir_pipe.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: src.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: mid.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: out.as_entire_binding() },
+                ],
+            });
+            let lines = if vertical == 0 { height } else { width };
+            passes.push(RefBlurPass {
+                _params_buf: params_buf,
+                _kernel_buf: None,
+                pipeline: iir_pipe.clone(),
+                bg,
+                workgroups: (lines.div_ceil(64), 1),
+            });
+        }
+    }
+    RefBlur { passes }
+}
+
+/// Blurs for `scale · exponential_filter(src, λ)` per channel: the three
+/// Gaussians of [`EXPONENTIAL_GAUSSIAN_FIT`] accumulated into `out`.
+#[cfg(feature = "wgpu-backend")]
+#[allow(clippy::too_many_arguments)]
+fn build_ref_exponential_blur(
+    device: &wgpu::Device,
+    backend: &WgpuBackend,
+    width: u32,
+    height: u32,
+    src: &wgpu::Buffer,
+    mid: &wgpu::Buffer,
+    out: &wgpu::Buffer,
+    lambda: [f32; 3],
+    scale: [f32; 3],
+    accumulate: bool,
+    label: &str,
+) -> Vec<RefBlur> {
+    EXPONENTIAL_GAUSSIAN_FIT
+        .iter()
+        .enumerate()
+        .map(|(k, &(amp, ratio))| {
+            let sigma = lambda.map(|l| (ratio * l as f64) as f32);
+            let s = [0, 1, 2].map(|c| (amp * scale[c] as f64) as f32);
+            build_ref_blur(
+                device,
+                backend,
+                width,
+                height,
+                src,
+                mid,
+                out,
+                sigma,
+                s,
+                accumulate || k > 0,
+                &format!("{label}_exp{k}"),
+            )
+        })
+        .collect()
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl RefBlur {
+    fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+        for p in &self.passes {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("ref_blur"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&p.pipeline.pipeline);
+            pass.set_bind_group(0, &p.bg, &[]);
+            pass.dispatch_workgroups(p.workgroups.0, p.workgroups.1, 1);
+        }
+    }
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -2236,120 +2498,40 @@ fn build_halation_state(
     let buf_c = scratch[0].clone();
     let buf_d = scratch[1].clone();
 
-    let blur_layout = &[
-        wgpu::BufferBindingType::Uniform,
-        wgpu::BufferBindingType::Storage { read_only: true },
-        wgpu::BufferBindingType::Storage { read_only: true },
-        wgpu::BufferBindingType::Storage { read_only: false },
-    ];
-    let blur_pipe_h = backend.cached_pipeline(
-        include_str!("../../spektrafilm-shaders/wgsl/gaussian_blur_h.wgsl"),
-        blur_layout,
-    );
-    let blur_pipe_v = backend.cached_pipeline(
-        include_str!("../../spektrafilm-shaders/wgsl/gaussian_blur_v.wgsl"),
-        blur_layout,
-    );
-
-    // Helper: build a single H/V blur job from source → output, using buf_a
-    // (the freed RGB upload) as blur scratch (mid).
-    let make_blur_job =
-        |sigma: f32, src: &wgpu::Buffer, out: &wgpu::Buffer, label: &str| -> BlurJob {
-            let sigma = sigma.max(0.01);
-            let radius = fir_blur_radius(sigma);
-            let kernel_size = (2 * radius + 1) as usize;
-            let sigma_f64 = sigma as f64;
-            let two_sigma_sq = 2.0 * sigma_f64 * sigma_f64;
-            let r_i32 = radius as i32;
-            let mut kernel = Vec::with_capacity(kernel_size);
-            for k in 0..kernel_size {
-                let x = (k as i32 - r_i32) as f64;
-                kernel.push((-x * x / two_sigma_sq).exp());
-            }
-            let sum: f64 = kernel.iter().sum();
-            let kernel_f32: Vec<f32> = kernel.into_iter().map(|v| (v / sum) as f32).collect();
-
-            let kernel_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("halation_blur_kernel_{label}")),
-                contents: bytemuck::cast_slice(&kernel_f32),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-            #[repr(C)]
-            #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-            struct BlurParams {
-                width: u32,
-                height: u32,
-                radius: u32,
-                _pad: u32,
-            }
-            let params = BlurParams {
-                width,
-                height,
-                radius,
-                _pad: 0,
-            };
-            let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("halation_blur_params_{label}")),
-                contents: bytemuck::bytes_of(&params),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-            let bg_h = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("halation_blur_h_{label}")),
-                layout: &blur_pipe_h.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: params_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: src.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: kernel_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: buf_a.as_entire_binding(),
-                    }, // mid
-                ],
-            });
-            let bg_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("halation_blur_v_{label}")),
-                layout: &blur_pipe_v.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: params_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: buf_a.as_entire_binding(),
-                    }, // mid
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: kernel_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: out.as_entire_binding(),
-                    },
-                ],
-            });
-            BlurJob {
-                _kernel_buf: kernel_buf,
-                _params_buf: params_buf,
-                bg_h,
-                bg_v,
-            }
-        };
-
-    // ── Scatter blurs (core → buf_c, tail → buf_d) ─────────────────────
-    let scatter_blurs = vec![
-        make_blur_job(hp.scatter_core_px, buf_b, &buf_c, "scatter_core"),
-        make_blur_job(hp.scatter_tail_px, buf_b, &buf_d, "scatter_tail"),
-    ];
+    // ── Scatter: core → buf_c, exponential tail → buf_d, per channel ──
+    // CPU: `scattered = (1-w)·G(σ_core) + w·exp_filter(λ_tail)`, skipped
+    // entirely when scatter_amount is 0.
+    let scatter_blurs = if hp.scatter_amount > 0.0 {
+        let mut blurs = vec![build_ref_blur(
+            device,
+            backend,
+            width,
+            height,
+            buf_b,
+            buf_a,
+            &buf_c,
+            hp.scatter_core_px,
+            [1.0; 3],
+            false,
+            "scatter_core",
+        )];
+        blurs.extend(build_ref_exponential_blur(
+            device,
+            backend,
+            width,
+            height,
+            buf_b,
+            buf_a,
+            &buf_d,
+            hp.scatter_tail_px,
+            [1.0; 3],
+            false,
+            "scatter_tail",
+        ));
+        blurs
+    } else {
+        Vec::new()
+    };
 
     // ── Scatter mix: result = (1-sa)*result + sa*((1-atw)*core + atw*tail)
     let scatter_mix_pipe = backend.cached_pipeline(
@@ -2416,84 +2598,43 @@ fn build_halation_state(
     };
 
     // ── Halation bounces ──────────────────────────────────────────────
+    // CPU: `hb = Σ_k decay_k · G(σ_first·√(k+1))` per channel, with decay
+    // normalized to sum to 1, computed in f64. Each bounce blur writes its
+    // weighted result straight into the accumulator buf_d. Skipped when no
+    // channel has any strength.
     let n = hp.halation_n_bounces as usize;
-    // Pre-compute normalized decay weights.
-    let mut decay = vec![0.0f32; n];
-    for k in 0..n {
-        decay[k] = hp.halation_bounce_decay.powi(k as i32);
+    let active = n >= 1 && hp.halation_a_tot.iter().any(|&a| a > 0.0);
+    let mut decay: Vec<f64> = (0..n).map(|k| (hp.halation_bounce_decay as f64).powi(k as i32)).collect();
+    let decay_sum: f64 = decay.iter().sum();
+    for d in &mut decay {
+        *d /= decay_sum;
     }
-    let decay_sum: f32 = decay.iter().sum();
-    if decay_sum > 0.0 {
-        for d in &mut decay {
-            *d /= decay_sum;
-        }
-    }
-
-    // Each bounce blurs buf_b → buf_c at sigma_k, then accumulates into
-    // buf_d. First bounce sets `clear_first` so we don't need a separate
-    // zero pass.
-    let add_scaled_pipe = backend.cached_pipeline(
-        include_str!("../../spektrafilm-shaders/wgsl/add_scaled.wgsl"),
-        &[
-            wgpu::BufferBindingType::Uniform,
-            wgpu::BufferBindingType::Storage { read_only: true },
-            wgpu::BufferBindingType::Storage { read_only: false },
-        ],
-    );
-    #[repr(C)]
-    #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-    struct AddScaledParams {
-        n_pixels: u32,
-        scale: f32,
-        clear_first: u32,
-        _pad: u32,
-    }
-
-    let mut halation_blurs = Vec::with_capacity(n);
-    let mut halation_accumulate = Vec::with_capacity(n);
-    for (k, &wk) in decay.iter().enumerate() {
-        let sigma_k = hp.halation_first_sigma_px * ((k as f32) + 1.0).sqrt();
-        halation_blurs.push(make_blur_job(
-            sigma_k,
-            buf_b,
-            &buf_c,
-            &format!("bounce_{k}"),
-        ));
-
-        let acc_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("halation_acc_params_{k}")),
-            contents: bytemuck::bytes_of(&AddScaledParams {
-                n_pixels: n_pixels as u32,
-                scale: wk,
-                clear_first: if k == 0 { 1 } else { 0 },
-                _pad: 0,
-            }),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let acc_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("halation_acc_bg_{k}")),
-            layout: &add_scaled_pipe.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: acc_params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: buf_c.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: buf_d.as_entire_binding(),
-                },
-            ],
-        });
-        halation_accumulate.push(DispatchJob {
-            _params_buf: acc_params,
-            pipeline: add_scaled_pipe.clone(),
-            bg: acc_bg,
-        });
-    }
+    let halation_blurs: Vec<RefBlur> = if active {
+        decay
+            .iter()
+            .enumerate()
+            .map(|(k, &wk)| {
+                let sigma = hp
+                    .halation_first_sigma_px
+                    .map(|s| (s * ((k as f64) + 1.0).sqrt()).max(1e-6) as f32);
+                build_ref_blur(
+                    device,
+                    backend,
+                    width,
+                    height,
+                    buf_b,
+                    buf_a,
+                    &buf_d,
+                    sigma,
+                    [wk as f32; 3],
+                    k > 0,
+                    &format!("halation_bounce_{k}"),
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     // Final add: result[c] += a_tot[c] * accumulator[c]. Per-channel
     // because halation_strength varies dramatically across channels
@@ -2622,11 +2763,8 @@ fn build_halation_state(
         scatter_blurs,
         scatter_mix: scatter_mix_job,
         halation_blurs,
-        halation_accumulate,
         halation_final_add,
         halation_renormalize,
-        blur_pipe_h,
-        blur_pipe_v,
     }
 }
 
@@ -2637,29 +2775,8 @@ impl HalationState {
         encoder: &mut wgpu::CommandEncoder,
         n_pixels: u32,
         workgroup_size: u32,
-        wg_xy: (u32, u32),
     ) {
         let _ = (&self.buf_c, &self.buf_d); // owned, just keepalive
-        let dispatch_blur = |enc: &mut wgpu::CommandEncoder, job: &BlurJob| {
-            {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("halation_blur_h"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.blur_pipe_h.pipeline);
-                pass.set_bind_group(0, &job.bg_h, &[]);
-                pass.dispatch_workgroups(wg_xy.0, wg_xy.1, 1);
-            }
-            {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("halation_blur_v"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.blur_pipe_v.pipeline);
-                pass.set_bind_group(0, &job.bg_v, &[]);
-                pass.dispatch_workgroups(wg_xy.0, wg_xy.1, 1);
-            }
-        };
         let dispatch_linear = |enc: &mut wgpu::CommandEncoder, job: &DispatchJob| {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("halation_linear"),
@@ -2672,20 +2789,15 @@ impl HalationState {
 
         // Scatter
         if !self.scatter_blurs.is_empty() {
-            for j in &self.scatter_blurs {
-                dispatch_blur(encoder, j);
+            for blur in &self.scatter_blurs {
+                blur.encode(encoder);
             }
             dispatch_linear(encoder, &self.scatter_mix);
         }
 
         // Halation bounces
-        for (blur_job, acc_job) in self
-            .halation_blurs
-            .iter()
-            .zip(self.halation_accumulate.iter())
-        {
-            dispatch_blur(encoder, blur_job);
-            dispatch_linear(encoder, acc_job);
+        for blur in &self.halation_blurs {
+            blur.encode(encoder);
         }
         if !self.halation_blurs.is_empty() {
             dispatch_linear(encoder, &self.halation_final_add);
@@ -3712,18 +3824,12 @@ fn build_post_scan_state(
 /// `add_scaled(scale=-1)` → re-interpolation of `density_curves_0`.
 #[cfg(feature = "wgpu-backend")]
 struct DirState {
-    _buf_correction: wgpu::Buffer, // matmul output → tail_part (after blur2)
-    _buf_gaussian: wgpu::Buffer,   // gaussian_part output (after blur1)
-    _buf_mix: wgpu::Buffer,        // weighted lerp output → final correction
+    _buf_correction: wgpu::Buffer, // matmul output (S0)
+    _buf_diffused: wgpu::Buffer,   // diffused correction (S1)
     matmul: DispatchJob,
-    blur_gaussian: BlurJob,
-    blur_tail: BlurJob,
-    lerp_clear: DispatchJob,      // buf_mix = (1-w) * buf_gaussian
-    lerp_accumulate: DispatchJob, // buf_mix += w * buf_correction (tail_part)
-    subtract: DispatchJob,        // buf_b -= buf_mix
+    blurs: Vec<RefBlur>,          // S0 → S1: (1-w)·Gaussian + w·exponential
+    subtract: DispatchJob,        // buf_b -= correction
     density_curve_0: DispatchJob, // re-interp density curves
-    blur_pipe_h: CachedPipelineRef,
-    blur_pipe_v: CachedPipelineRef,
     /// Buffers we own that the bind groups reference (log_exp, curves) —
     /// kept alive for the encoder's lifetime.
     _owned: Vec<wgpu::Buffer>,
@@ -3743,8 +3849,7 @@ fn build_dir_state(
     use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
     let buf_correction = scratch[0].clone();
-    let buf_gaussian = scratch[1].clone();
-    let buf_mix = buf_a.clone();
+    let buf_diffused = scratch[1].clone();
 
     // ── 1. dir_matmul ─────────────────────────────────────────────────
     let matmul_pipe = backend.cached_pipeline(
@@ -3807,137 +3912,45 @@ fn build_dir_state(
         bg: matmul_bg,
     };
 
-    // ── 2. Two Gaussian blurs of the correction ───────────────────────
-    let blur_layout = &[
-        wgpu::BufferBindingType::Uniform,
-        wgpu::BufferBindingType::Storage { read_only: true },
-        wgpu::BufferBindingType::Storage { read_only: true },
-        wgpu::BufferBindingType::Storage { read_only: false },
-    ];
-    let blur_pipe_h = backend.cached_pipeline(
-        include_str!("../../spektrafilm-shaders/wgsl/gaussian_blur_h.wgsl"),
-        blur_layout,
-    );
-    let blur_pipe_v = backend.cached_pipeline(
-        include_str!("../../spektrafilm-shaders/wgsl/gaussian_blur_v.wgsl"),
-        blur_layout,
-    );
+    // ── 2. Diffuse the correction (S0) into S1 ───────────────────────
+    // CPU: `(1-w)·G(σ_size) + w·exp_filter(λ_tail)` per channel, only when
+    // σ_size > 0; otherwise the correction is used undiffused. A is the
+    // blur intermediate now that the matmul has consumed the density.
+    let w = dp.diffusion_tail_weight;
+    let diffuse = dp.diffusion_size_px > 0.0;
+    let blurs = if diffuse {
+        let mut blurs = vec![build_ref_blur(
+            device,
+            backend,
+            width,
+            height,
+            &buf_correction,
+            buf_a,
+            &buf_diffused,
+            [dp.diffusion_size_px; 3],
+            [1.0 - w; 3],
+            false,
+            "dir_size",
+        )];
+        blurs.extend(build_ref_exponential_blur(
+            device,
+            backend,
+            width,
+            height,
+            &buf_correction,
+            buf_a,
+            &buf_diffused,
+            [dp.diffusion_tail_px; 3],
+            [w; 3],
+            true,
+            "dir_tail",
+        ));
+        blurs
+    } else {
+        Vec::new()
+    };
+    let correction = if diffuse { &buf_diffused } else { &buf_correction };
 
-    // Both blurs use A as intermediate after matmul consumes the density.
-    // The first writes S1 (Gaussian), the second overwrites S0 (tail).
-    // After both vertical blurs, A is free for the weighted mix. Its
-    // inputs S0 and S1 remain distinct from the destination A.
-    let make_blur_job =
-        |sigma: f32, src: &wgpu::Buffer, out: &wgpu::Buffer, label: &str| -> BlurJob {
-            let sigma = sigma.max(0.01);
-            let radius = fir_blur_radius(sigma);
-            let kernel_size = (2 * radius + 1) as usize;
-            let sigma_f64 = sigma as f64;
-            let two_sigma_sq = 2.0 * sigma_f64 * sigma_f64;
-            let r_i32 = radius as i32;
-            let mut kernel = Vec::with_capacity(kernel_size);
-            for k in 0..kernel_size {
-                let x = (k as i32 - r_i32) as f64;
-                kernel.push((-x * x / two_sigma_sq).exp());
-            }
-            let sum: f64 = kernel.iter().sum();
-            let kernel_f32: Vec<f32> = kernel.into_iter().map(|v| (v / sum) as f32).collect();
-
-            let kernel_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("dir_blur_kernel_{label}")),
-                contents: bytemuck::cast_slice(&kernel_f32),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-            #[repr(C)]
-            #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-            struct BlurParams {
-                width: u32,
-                height: u32,
-                radius: u32,
-                _pad: u32,
-            }
-            let params = BlurParams {
-                width,
-                height,
-                radius,
-                _pad: 0,
-            };
-            let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("dir_blur_params_{label}")),
-                contents: bytemuck::bytes_of(&params),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-            let bg_h = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("dir_blur_h_{label}")),
-                layout: &blur_pipe_h.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: params_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: src.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: kernel_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: buf_a.as_entire_binding(),
-                    }, // mid
-                ],
-            });
-            let bg_v = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("dir_blur_v_{label}")),
-                layout: &blur_pipe_v.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: params_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: buf_a.as_entire_binding(),
-                    }, // mid
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: kernel_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: out.as_entire_binding(),
-                    },
-                ],
-            });
-            BlurJob {
-                _kernel_buf: kernel_buf,
-                _params_buf: params_buf,
-                bg_h,
-                bg_v,
-            }
-        };
-    // Blur1: correction → buf_gaussian (gaussian_part)
-    let blur_gaussian = make_blur_job(
-        dp.diffusion_size_px,
-        &buf_correction,
-        &buf_gaussian,
-        "gaussian",
-    );
-    // Blur2: correction → correction (in place; H writes mid via buf_a,
-    // V reads mid and writes buf_correction in a separate compute pass
-    // so wgpu does not see input/output aliasing).
-    let blur_tail = make_blur_job(
-        dp.diffusion_tail_px,
-        &buf_correction,
-        &buf_correction,
-        "tail",
-    );
-
-    // ── 3. Weighted lerp via two add_scaled passes ────────────────────
-    // buf_mix = (1-w) * buf_gaussian   (clear_first writes scale*src into dst)
-    // buf_mix += w * buf_correction  (tail_part)
     let add_scaled_pipe = backend.cached_pipeline(
         include_str!("../../spektrafilm-shaders/wgsl/add_scaled.wgsl"),
         &[
@@ -3954,79 +3967,8 @@ fn build_dir_state(
         clear_first: u32,
         _pad: u32,
     }
-    let w = dp.diffusion_tail_weight;
-    let lerp_clear_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("dir_lerp_clear_params"),
-        contents: bytemuck::bytes_of(&AddScaledParams {
-            n_pixels: n_pixels as u32,
-            scale: 1.0 - w,
-            clear_first: 1,
-            _pad: 0,
-        }),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    // src = buf_gaussian (read), dst = buf_mix (write). With clear_first=1
-    // this is `buf_mix = (1-w) * buf_gaussian`. Different buffers, no
-    // aliasing.
-    let lerp_clear_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("dir_lerp_clear_bg"),
-        layout: &add_scaled_pipe.layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: lerp_clear_params.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: buf_gaussian.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: buf_mix.as_entire_binding(),
-            },
-        ],
-    });
-    let lerp_clear = DispatchJob {
-        _params_buf: lerp_clear_params,
-        pipeline: add_scaled_pipe.clone(),
-        bg: lerp_clear_bg,
-    };
 
-    let lerp_acc_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("dir_lerp_acc_params"),
-        contents: bytemuck::bytes_of(&AddScaledParams {
-            n_pixels: n_pixels as u32,
-            scale: w,
-            clear_first: 0,
-            _pad: 0,
-        }),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let lerp_acc_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("dir_lerp_acc_bg"),
-        layout: &add_scaled_pipe.layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: lerp_acc_params.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: buf_correction.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: buf_mix.as_entire_binding(),
-            },
-        ],
-    });
-    let lerp_accumulate = DispatchJob {
-        _params_buf: lerp_acc_params,
-        pipeline: add_scaled_pipe.clone(),
-        bg: lerp_acc_bg,
-    };
-
-    // ── 4. Subtract: buf_b -= buf_mix ────────────────────────────────
+    // ── 3. Subtract: buf_b -= correction ─────────────────────────────
     let subtract_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("dir_subtract_params"),
         contents: bytemuck::bytes_of(&AddScaledParams {
@@ -4047,7 +3989,7 @@ fn build_dir_state(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: buf_mix.as_entire_binding(),
+                resource: correction.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -4061,7 +4003,7 @@ fn build_dir_state(
         bg: subtract_bg,
     };
 
-    // ── 5. Final density curve re-interp using density_curves_0 ───────
+    // ── 4. Final density curve re-interp using density_curves_0 ───────
     let density_pipe = backend.cached_pipeline(
         include_str!("../../spektrafilm-shaders/wgsl/density_curve_interp.wgsl"),
         &[
@@ -4150,30 +4092,18 @@ fn build_dir_state(
     // owner Vec.
     DirState {
         _buf_correction: buf_correction,
-        _buf_gaussian: buf_gaussian,
-        _buf_mix: buf_mix,
+        _buf_diffused: buf_diffused,
         matmul,
-        blur_gaussian,
-        blur_tail,
-        lerp_clear,
-        lerp_accumulate,
+        blurs,
         subtract,
         density_curve_0,
-        blur_pipe_h,
-        blur_pipe_v,
         _owned: vec![log_exp_buf, curves_buf],
     }
 }
 
 #[cfg(feature = "wgpu-backend")]
 impl DirState {
-    fn encode_passes(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        n_pixels: u32,
-        workgroup_size: u32,
-        wg_xy: (u32, u32),
-    ) {
+    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, n_pixels: u32, workgroup_size: u32) {
         let dispatch_linear = |enc: &mut wgpu::CommandEncoder, job: &DispatchJob| {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("dir_linear"),
@@ -4183,33 +4113,12 @@ impl DirState {
             pass.set_bind_group(0, &job.bg, &[]);
             pass.dispatch_workgroups((n_pixels + workgroup_size - 1) / workgroup_size, 1, 1);
         };
-        let dispatch_blur = |enc: &mut wgpu::CommandEncoder, job: &BlurJob| {
-            {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("dir_blur_h"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.blur_pipe_h.pipeline);
-                pass.set_bind_group(0, &job.bg_h, &[]);
-                pass.dispatch_workgroups(wg_xy.0, wg_xy.1, 1);
-            }
-            {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("dir_blur_v"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&self.blur_pipe_v.pipeline);
-                pass.set_bind_group(0, &job.bg_v, &[]);
-                pass.dispatch_workgroups(wg_xy.0, wg_xy.1, 1);
-            }
-        };
 
-        dispatch_linear(encoder, &self.matmul);
-        dispatch_blur(encoder, &self.blur_gaussian); // buf_correction → buf_acc
-        dispatch_blur(encoder, &self.blur_tail); // buf_correction → buf_correction (overwrite)
-        dispatch_linear(encoder, &self.lerp_clear); // buf_acc *= (1-w)
-        dispatch_linear(encoder, &self.lerp_accumulate); // buf_acc += w * buf_correction
-        dispatch_linear(encoder, &self.subtract); // buf_b -= buf_acc
+        dispatch_linear(encoder, &self.matmul); // buf_a → S0
+        for blur in &self.blurs {
+            blur.encode(encoder); // S0 → S1
+        }
+        dispatch_linear(encoder, &self.subtract); // buf_b -= correction
         dispatch_linear(encoder, &self.density_curve_0); // buf_b → buf_a (corrected)
     }
 }
@@ -4889,6 +4798,20 @@ impl GamutState {
 /// follows up with a separable Gaussian blur that uses `buf_b` as mid
 /// (free at this point — DIR's `density_curve_0` already overwrote
 /// buf_b's role).
+/// Must match `@workgroup_size` in grain.wgsl.
+#[cfg(feature = "wgpu-backend")]
+const GRAIN_WORKGROUP_SIZE: u32 = 256;
+
+/// Workgroup grid for one grain thread per pixel: wraps into y so neither
+/// dimension exceeds the 65535 limit. The shader's flat index is
+/// `gid.y * groups.x * 256 + gid.x`.
+#[cfg(feature = "wgpu-backend")]
+fn grain_dispatch_grid(n_pixels: u32) -> (u32, u32) {
+    let groups = n_pixels.div_ceil(GRAIN_WORKGROUP_SIZE);
+    let y = groups.div_ceil(65535);
+    (groups.div_ceil(y), y)
+}
+
 #[cfg(feature = "wgpu-backend")]
 struct GrainState {
     grain_dispatch: DispatchJob,
@@ -5093,14 +5016,8 @@ fn build_grain_state(
 
 #[cfg(feature = "wgpu-backend")]
 impl GrainState {
-    fn encode_passes(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        n_pixels: u32,
-        workgroup_size: u32,
-        wg_xy: (u32, u32),
-    ) {
-        // Grain compute.
+    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, n_pixels: u32, wg_xy: (u32, u32)) {
+        // Grain compute, at the shader's own workgroup size.
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("grain_compute"),
@@ -5108,7 +5025,8 @@ impl GrainState {
             });
             pass.set_pipeline(&self.grain_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.grain_dispatch.bg, &[]);
-            pass.dispatch_workgroups((n_pixels + workgroup_size - 1) / workgroup_size, 1, 1);
+            let (x, y) = grain_dispatch_grid(n_pixels);
+            pass.dispatch_workgroups(x, y, 1);
         }
         // Optional post-blur.
         if let Some(b) = &self.blur {
@@ -5149,4 +5067,100 @@ fn is_uniform(xs: &[f64]) -> bool {
         }
     }
     true
+}
+
+#[cfg(all(test, feature = "wgpu-backend"))]
+mod grain_tests {
+    use super::*;
+    use wgpu::util::DeviceExt;
+
+    #[test]
+    fn grain_dispatch_grid_covers_every_pixel_within_limits() {
+        for n in [1, 255, 256, 257, 24_337_152, 60_318_720, 100_000_000] {
+            let (x, y) = grain_dispatch_grid(n);
+            assert!(x <= 65535 && y <= 65535, "{n}: {x} × {y}");
+            assert!(x as u64 * y as u64 * GRAIN_WORKGROUP_SIZE as u64 >= n as u64, "{n}: {x} × {y}");
+        }
+    }
+
+    /// Poisson(λ) thinned by Binomial(·, p) is Poisson(λp), so on a flat
+    /// density the GPU grain has a known mean and variance. The three
+    /// channels exercise every sampler branch: Poisson multiplication (λ < 10)
+    /// and PTRS, binomial inversion, BTPE, and the p > 0.5 mirror. Catches
+    /// samplers that are wrong or a dispatch the driver silently drops.
+    #[test]
+    fn grain_matches_poisson_binomial_moments() {
+        let Some(backend) = WgpuBackend::new() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        let (width, height) = (1024u32, 1024u32);
+        let n = (width * height) as usize;
+        let density = [0.3f32, 1.8, 1.0];
+        let density_min = [0.03f32; 3];
+        let density_max = [2.5f32 + 0.03; 3];
+        let npp = [4.0f32, 40.0, 400.0];
+        let uniformity = [0.97f32, 0.99, 0.97];
+        let gp = crate::GrainGpuParams {
+            density_min,
+            density_max,
+            n_particles_per_pixel: npp,
+            grain_uniformity: uniformity,
+            n_sub_layers: 1,
+            base_seed: 0,
+            grain_blur: 0.0,
+            monochrome: false,
+        };
+        let data: Vec<f32> = (0..n).flat_map(|_| density).collect();
+        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+        let buf_a = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("grain_test_density"),
+            contents: bytemuck::cast_slice(&data),
+            usage,
+        });
+        let buf_b = backend.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("grain_test_mid"),
+            size: (n * 3 * 4) as u64,
+            usage,
+            mapped_at_creation: false,
+        });
+        let readback = backend.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("grain_test_readback"),
+            size: (n * 3 * 4) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let state = build_grain_state(&backend.device, &gp, width, height, &buf_a, &buf_b, &backend);
+        let mut encoder = backend.device.create_command_encoder(&Default::default());
+        state.encode_passes(&mut encoder, n as u32, (width.div_ceil(16), height.div_ceil(16)));
+        encoder.copy_buffer_to_buffer(&buf_a, 0, &readback, 0, (n * 3 * 4) as u64);
+        backend.queue.submit(Some(encoder.finish()));
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
+        backend.device.poll(wgpu::Maintain::Wait);
+        let out: Vec<f32> = bytemuck::cast_slice(&slice.get_mapped_range()).to_vec();
+
+        for c in 0..3 {
+            let d_in = (density[c] + density_min[c]) as f64;
+            let dmax = density_max[c] as f64;
+            let p = (d_in / dmax).clamp(1e-6, 1.0 - 1e-6);
+            let sat = 1.0 - p * uniformity[c] as f64 * (1.0 - 1e-6);
+            let lambda = npp[c] as f64 / sat;
+            let od = dmax / npp[c] as f64;
+            let expected_mean = lambda * p * od * sat - density_min[c] as f64;
+            let expected_var = lambda * p * (od * sat).powi(2);
+            let values: Vec<f64> = out.iter().skip(c).step_by(3).map(|&v| v as f64).collect();
+            let mean = values.iter().sum::<f64>() / n as f64;
+            let var = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
+            let mean_tol = 5.0 * (expected_var / n as f64).sqrt() + 1e-5;
+            assert!(
+                (mean - expected_mean).abs() < mean_tol,
+                "channel {c}: mean {mean} vs expected {expected_mean}"
+            );
+            assert!(
+                (var / expected_var - 1.0).abs() < 0.02,
+                "channel {c}: variance {var} vs expected {expected_var}"
+            );
+        }
+    }
 }
