@@ -835,41 +835,26 @@ impl Pipeline {
         let print_norm_factor = self.print_exposure_factor * print_exposure_scale;
 
         // Halation in the resident chain — only built when the halation
-        // stage is active. Mirrors `apply_halation_um`: averages the
-        // per-channel µm sigmas, converts to pixel space, and passes the
-        // resulting scalars to the shaders.
+        // stage is active. Mirrors `apply_halation_um` channel for channel:
+        // the µm sizes are converted to pixels in f64 and clamped like the CPU.
         let halation = if self.params.film_render.halation.active {
             let pix_um = stages::filming::pixel_size_um(
                 self.params.camera.film_format_mm,
                 image.width,
                 image.height,
-            );
+            ) as f64;
             let h = &self.params.film_render.halation;
-            // GPU shaders take f32 — narrow at the boundary.
-            let avg_f64 = |a: [f64; 3]| (a[0] + a[1] + a[2]) / 3.0;
-            let strength_avg = (avg_f64(h.halation_strength) * h.halation_amount) as f32;
-            let a_tot = [
-                (h.halation_strength[0] * h.halation_amount) as f32,
-                (h.halation_strength[1] * h.halation_amount) as f32,
-                (h.halation_strength[2] * h.halation_amount) as f32,
-            ];
+            let px = |um: [f64; 3], scale: f64| um.map(|v| (v * scale / pix_um).max(1e-6) as f32);
             Some(spektrafilm_gpu::HalationGpuParams {
                 scatter_amount: h.scatter_amount as f32,
-                scatter_core_px: (avg_f64(h.scatter_core_um) * h.scatter_spatial_scale
-                    / pix_um as f64) as f32,
-                scatter_tail_px: (avg_f64(h.scatter_tail_um) * h.scatter_spatial_scale
-                    / pix_um as f64) as f32,
-                scatter_tail_weight: [
-                    h.scatter_tail_weight[0] as f32,
-                    h.scatter_tail_weight[1] as f32,
-                    h.scatter_tail_weight[2] as f32,
-                ],
+                scatter_core_px: px(h.scatter_core_um, h.scatter_spatial_scale),
+                scatter_tail_px: px(h.scatter_tail_um, h.scatter_spatial_scale),
+                scatter_tail_weight: h.scatter_tail_weight.map(|v| v as f32),
                 halation_amount: h.halation_amount as f32,
-                halation_strength_avg: strength_avg,
-                halation_a_tot: a_tot,
-                halation_first_sigma_px: (avg_f64(h.halation_first_sigma_um)
-                    * h.halation_spatial_scale
-                    / pix_um as f64) as f32,
+                halation_a_tot: h.halation_strength.map(|v| (v * h.halation_amount) as f32),
+                halation_first_sigma_px: h
+                    .halation_first_sigma_um
+                    .map(|v| v * h.halation_spatial_scale / pix_um),
                 halation_n_bounces: h.halation_n_bounces,
                 halation_bounce_decay: h.halation_bounce_decay as f32,
                 halation_renormalize: h.halation_renormalize,
@@ -974,9 +959,8 @@ impl Pipeline {
         });
 
         // Grain in the resident chain — same per-channel particle math as
-        // `apply_grain_to_density`. The GPU uses normal-approximation
-        // sampling; CPU does the same whenever λ > 30 / var > 9, which is
-        // the typical regime for ≥ 1 MP images.
+        // `apply_grain_to_density`, with the same exact Poisson/binomial
+        // algorithms; only the random stream differs.
         let grain = if self.params.film_render.grain.active {
             let pix_um = stages::filming::pixel_size_um(
                 self.params.camera.film_format_mm,

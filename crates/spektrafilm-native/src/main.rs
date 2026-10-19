@@ -192,12 +192,9 @@ impl Session {
                 }
                 let source = &self.source.as_ref().unwrap().2;
                 let (source_width, source_height) = (source.width, source.height);
-                let dimensions = preview_dimensions(
-                    source_width,
-                    source_height,
-                    params.io.upscale_factor,
-                    limit_preview,
-                );
+                let upscale_factor = params.io.upscale_factor;
+                let dimensions =
+                    preview_dimensions(source_width, source_height, upscale_factor, limit_preview);
                 params.io.upscale_factor = 1.0;
                 let pipeline = self
                     .pipeline
@@ -222,9 +219,14 @@ impl Session {
                 let (width, height, bytes) =
                     display_rgba(&output, DISPLAY_MAX_DIM, params.io.output_cctf_encoding);
                 std::fs::write(&preview_path, bytes).context("Writing preview buffer")?;
+                // At this size the output is byte-identical to a Fast (GPU)
+                // export, so the app can save it instead of rendering again.
+                let export_resolution = dimensions
+                    == preview_dimensions(source_width, source_height, upscale_factor, false);
                 let response = json!({
                     "width": width, "height": height, "output_width": output.width, "output_height": output.height,
                     "source_width": source_width, "source_height": source_height,
+                    "export_resolution": export_resolution,
                     "raw": spektrafilm_io::is_raw(&input), "backend": backend.name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 });

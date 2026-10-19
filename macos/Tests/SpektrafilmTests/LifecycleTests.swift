@@ -44,6 +44,29 @@ import XCTest
         XCTAssertEqual(model.state.paper, "kodak_portra_endura")
     }
 
+    /// A Fast export of a current preview at export size saves the preview.
+    /// These paths have no Fast exporter, so developing again would fail.
+    func testFastExportSavesTheCurrentPreview() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        XCTAssertNil(paths().fastExporter)
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths())
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        model.open(fixture)
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("export.png")
+        await model.export(to: destination, engine: .fast)
+        XCTAssertNil(model.error)
+        XCTAssertTrue(model.status.hasPrefix("Exported export.png"), model.status)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["export.png"], "No staging file may remain")
+        XCTAssertEqual(NSImage(contentsOf: destination)?.representations.first?.pixelsWide, 96)
+    }
+
     func testCancelExportPreservesExistingDestinationAndRemovesStaging() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -65,6 +88,80 @@ import XCTest
         XCTAssertEqual(try Data(contentsOf: destination), original)
         XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".spektrafilm-") })
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: scratch.directory.path), [])
+    }
+
+    /// Each engine runs its own binary with its own backend, and a fast export
+    /// that fell back to the CPU is reported rather than passed off as GPU.
+    func testExportEngineChoosesBinaryAndBackend() async throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+        func fake(_ name: String, backendLine: String) throws -> URL {
+            // Records how it was called, prints the CLI's backend line, and
+            // writes the output file (`process SRC -o OUT ...`).
+            let url = directory.appendingPathComponent(name)
+            let script = "#!/bin/sh\necho \"\(name) $SPEKTRAFILM_BACKEND $1\" > \"\(directory.path)/called\"\necho '\(backendLine)' >&2\necho out > \"$4\"\n"
+            try Data(script.utf8).write(to: url)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            return url
+        }
+        let reference = try fake("reference", backendLine: "Backend: CPU (rayon)")
+        let gpu = try fake("fast", backendLine: "Backend: wgpu (GPU)")
+        let noGPU = try fake("fast-without-gpu", backendLine: "Backend: CPU (rayon)")
+        let scratch = try ScratchSpace(root: directory.appendingPathComponent("scratch"))
+        defer { scratch.remove() }
+        let source = directory.appendingPathComponent("source.png")
+        func export(_ engine: ExportEngine, fast: URL?) async throws -> (ExportOutcome, String) {
+            let destination = directory.appendingPathComponent("out-\(UUID().uuidString).png")
+            let paths = EnginePaths(helper: reference, exporter: reference, data: directory, fastExporter: fast)
+            let outcome = try await ExportJob().run(paths: paths, scratch: scratch, source: source, destination: destination, state: EditState(), border: nil, engine: engine)
+            XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "out\n")
+            return (outcome, try String(contentsOf: directory.appendingPathComponent("called"), encoding: .utf8))
+        }
+        var (outcome, called) = try await export(.reference, fast: gpu)
+        XCTAssertEqual(called, "reference cpu process\n")
+        XCTAssertFalse(outcome.fellBackToCPU)
+        (outcome, called) = try await export(.fast, fast: gpu)
+        XCTAssertEqual(called, "fast wgpu process\n")
+        XCTAssertFalse(outcome.fellBackToCPU)
+        (outcome, called) = try await export(.fast, fast: noGPU)
+        XCTAssertEqual(called, "fast-without-gpu wgpu process\n")
+        XCTAssertTrue(outcome.fellBackToCPU)
+        do {
+            _ = try await export(.fast, fast: nil)
+            XCTFail("Fast export without the f32 tool must fail")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("Fast (GPU) export needs"), error.localizedDescription) }
+        XCTAssertFalse(try fm.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".spektrafilm-") })
+    }
+
+    /// Real exports through `ExportJob`, for the end-to-end engine comparison
+    /// (scripts/gpu_cpu_quality/app_export.sh). Skipped unless
+    /// SPEKTRAFILM_EXPORT_JOBS names a JSON list of jobs: source, destination,
+    /// params (a params JSON file), film, paper (omit to scan the film), and
+    /// engine (reference or fast). Uses the release tools in target/release.
+    func testRealExportsFromJobList() async throws {
+        guard let list = ProcessInfo.processInfo.environment["SPEKTRAFILM_EXPORT_JOBS"] else { throw XCTSkip("Set SPEKTRAFILM_EXPORT_JOBS to run real exports") }
+        struct Job: Decodable { let source, destination, params, film, engine: String; let paper: String? }
+        let jobs = try JSONDecoder().decode([Job].self, from: Data(contentsOf: URL(fileURLWithPath: list)))
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let release = root.appendingPathComponent("target/release")
+        let paths = EnginePaths(helper: release.appendingPathComponent("spektrafilm-native"), exporter: release.appendingPathComponent("spektrafilm-f64"),
+                                data: root.appendingPathComponent("data"), fastExporter: release.appendingPathComponent("spektrafilm"))
+        let scratch = try ScratchSpace(root: FileManager.default.temporaryDirectory.appendingPathComponent("spektrafilm-export-jobs"))
+        defer { scratch.remove() }
+        for job in jobs {
+            var state = EditState()
+            state.params = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: URL(fileURLWithPath: job.params)))
+            state.film = job.film
+            if let paper = job.paper { state.paper = paper } else { state.params["io.scan_film"] = .bool(true) }
+            let engine = try XCTUnwrap(ExportEngine(rawValue: job.engine))
+            let started = Date()
+            let outcome = try await ExportJob().run(paths: paths, scratch: scratch, source: URL(fileURLWithPath: job.source),
+                                                    destination: URL(fileURLWithPath: job.destination), state: state, border: nil, engine: engine)
+            XCTAssertFalse(outcome.fellBackToCPU, job.destination)
+            print("exported \(job.destination) with \(engine.title) in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
+        }
     }
 
     func testNextLaunchRemovesWhatACrashLeftBehind() throws {

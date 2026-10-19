@@ -13,7 +13,7 @@ The same spectral integration the original Python project does (RGB → film dye
 - **Spectral pipeline.** Hanatos2025 RGB→raw spectral upsampling, full 81-wavelength film/print/scanner spectral integration, density-curve interpolation, halation, DIR couplers, grain (bit-exact numpy `MT19937` port), glare, output CCTF encoding.
 - **Live interactive preview** on the GPU (wgpu / Metal on macOS) — slider drags update at 60 fps on a 6 MP working image.
 - **Reference-quality export** on the CPU at f64 — deterministic print-chain comparisons against Python main pass within `1e-6`; see [scope and measured results](docs/upstream-sync.md).
-- **Decoupled preview + export.** GUI uses f32 GPU for iteration, then shells out to the f64 CPU binary for the final write. The export runs in a worker thread with a cancel button and proper child-process lifecycle.
+- **Decoupled preview + export.** GUI uses f32 GPU for iteration, then shells out to a CLI for the final write: the f32 GPU binary (Fast, the default in the macOS app), which [measures within ΔE00 0.02 of the reference](docs/gpu-vs-cpu-quality.md), or the f64 CPU binary (Reference). The export runs in a worker thread with a cancel button and proper child-process lifecycle.
 - **Profiles bundled.** 30+ film and paper profiles in `data/profiles/` — Kodak Gold/Portra/Ektar, Fuji Velvia/Provia, Kodak Endura papers, Fuji Crystal Archive papers.
 - **B&W stocks.** Updated upstream Double-X 5222, Tri-X Reversal 7266, and Kodak 2302 print-film calibrations, including development-time families. See [usage, provenance, and parity scope](docs/handoff-bw-stocks.md).
 
@@ -58,13 +58,25 @@ WGSL is the default GPU backend and can be selected explicitly with `SPEKTRAFILM
 The macOS package uses a native **SwiftUI and AppKit interface** with a standard
 toolbar, adjustment inspector, menus, undo/redo, native file dialogs, and
 color-managed image display. Pinch to zoom, scroll or drag to pan, and double-click
-to fit. Use **⌘O** to open, **⌘S** to save the preview, **⇧⌘E** for f64 export,
+to fit. Use **⌘O** to open, **⌘S** to save the preview, **⇧⌘E** to export,
 **⌘R** to rotate, **⌘0 / ⌘1** for fit / actual size, and **⌥⌘I** to toggle adjustments.
 Export remains cancellable and uses the original image at the selected working
-resolution. All existing adjustment groups are available in the inspector.
+resolution. The export panel's **Engine** pop-up chooses **Fast (GPU)**, the
+default, which renders like the preview and is several times quicker (Q3 60 MP:
+about 6 s instead of 33 s), or **Reference (CPU, 64-bit)**. Fast matches the
+reference within ΔE00 0.02 at default settings, at most one 8-bit step; grain is
+statistically the same but drawn from different random numbers. The choice is
+remembered. When the preview is already at export size (not limited to 12 MP),
+a Fast export saves it directly instead of developing the photograph again,
+which is the same file byte for byte. If no GPU is available, Fast falls back to the 32-bit CPU engine and
+the status bar says so. All existing adjustment groups are available in the
+inspector.
 
 See the [native UI plan, architecture, and development guide](docs/native-macos-ui.md).
-The cross-platform egui UI remains available with:
+The cross-platform egui UI is **unmaintained**: it still builds and is the only
+UI on Windows and Linux for now, but it gets no new work or fixes. Development
+focuses on the macOS app, which will later be ported to other platforms. It
+runs with:
 
 ```bash
 ./target/release/spektrafilm-gui [optional/path/to/image.orf]
@@ -75,7 +87,7 @@ The cross-platform egui UI remains available with:
 - **Sliders** — exposure, film format, halation, DIR couplers, grain, glare, scanner, enlarger, output. All live-updating against the GPU preview.
 - **Profiles** — film stock and print paper combo boxes; picking a film auto-selects its paired paper (`target_print` in the profile).
 - **Zoom** — scroll wheel or trackpad pinch over the preview (cursor-anchored), click-drag to pan, double-click to reset.
-- **Export…** — re-runs the pipeline at f64 precision on the CPU and writes a PNG/TIFF/JPEG. Status bar shows elapsed time; **Cancel** kills the child cleanly. Closing the GUI mid-export also kills the child (no orphans).
+- **Export…** — re-runs the pipeline at full resolution and writes a PNG/TIFF/JPEG. The engine box next to the format picks **Reference (CPU, 64-bit)** (default; `spektrafilm-f64` with the enlarger and scanner LUTs on) or **Fast (GPU)** (`spektrafilm` on wgpu, like the preview; located via `$SPEKTRAFILM_F32_CLI`, next to the GUI, on `PATH`, or `target/release`; not bundled in the embedded Windows build). Status bar shows elapsed time and reports a Fast export that fell back to the CPU; **Cancel** kills the child cleanly. Closing the GUI mid-export also kills the child (no orphans).
 - **Serial grain for export (less RAM)** — optional checkbox under Output, off by default. Processes grain channels one at a time during CPU export: less peak memory, identical output, but slower. Previews keep parallel grain. CLI users can set `settings.serial_grain: true` in their params JSON.
 - **Save…** — write the f32 GPU preview directly (instant, less precise).
 - **Limit preview to 12 MP** — optional checkbox under Output, off by default. Caps the image before preview processing to reduce memory and rendering time while preserving aspect ratio. Smaller images are not enlarged. Export still uses the Working resolution setting (full resolution at 1.0); Save writes the reduced preview. Disable the cap to inspect fine grain and detail at full working resolution. The full decoded source remains in memory, and RAW loading and full-resolution export peaks are unaffected.
@@ -171,7 +183,7 @@ crates/
   spektrafilm-io/      image + camera RAW loading (rawler) and PNG/JPEG/TIFF saving
                        with the source's camera EXIF, shared by the CLI and GUI
   spektrafilm-cli/     `spektrafilm` (process, list-profiles, gen-lut) + `decode_raw_gui`
-  spektrafilm-gui/     egui/eframe preview (wgpu renderer, Metal-backed on macOS)
+  spektrafilm-gui/     egui/eframe preview, unmaintained (wgpu renderer, Metal-backed on macOS)
   spektrafilm-native/  persistent image-engine helper for the native macOS app
 macos/                SwiftUI interface, AppKit image canvas, and Swift tests
 data/

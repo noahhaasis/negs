@@ -8,15 +8,26 @@ struct EngineError: LocalizedError {
 
 struct EnginePaths {
     let helper: URL
+    /// The reference exporter, `spektrafilm-f64`.
     let exporter: URL
     let data: URL
+    /// The f32 command-line tool `spektrafilm`, for Fast (GPU) export. The
+    /// app still starts without it; only a fast export then fails.
+    var fastExporter: URL? = nil
 
     static func locate() throws -> EnginePaths {
+        try locate(environment: ProcessInfo.processInfo.environment,
+                   executableDir: Bundle.main.executableURL!.deletingLastPathComponent(),
+                   resourceDir: Bundle.main.resourceURL!,
+                   workingDir: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+    }
+
+    /// Each tool comes from its environment override, else next to the app's
+    /// executable, else `target/release` under `SPEKTRAFILM_ROOT` (default:
+    /// the working directory).
+    static func locate(environment env: [String: String], executableDir: URL, resourceDir: URL, workingDir: URL) throws -> EnginePaths {
         let fm = FileManager.default
-        let env = ProcessInfo.processInfo.environment
-        let executableDir = Bundle.main.executableURL!.deletingLastPathComponent()
-        let working = URL(fileURLWithPath: fm.currentDirectoryPath)
-        let root = env["SPEKTRAFILM_ROOT"].map { URL(fileURLWithPath: $0) } ?? working
+        let root = env["SPEKTRAFILM_ROOT"].map { URL(fileURLWithPath: $0) } ?? workingDir
         func find(_ override: String, _ candidates: [URL], executable: Bool) throws -> URL {
             let urls = env[override].map { [URL(fileURLWithPath: $0)] } ?? candidates
             guard let url = urls.first(where: {
@@ -24,12 +35,72 @@ struct EnginePaths {
             }) else { throw EngineError(message: "Missing \(override). Build the app with scripts/package_macos_app.sh, or set SPEKTRAFILM_ROOT to your checkout.") }
             return url
         }
+        func tool(_ override: String, _ name: String) throws -> URL {
+            try find(override, [executableDir.appendingPathComponent(name), root.appendingPathComponent("target/release/\(name)")], executable: true)
+        }
         return try EnginePaths(
-            helper: find("SPEKTRAFILM_NATIVE_HELPER", [executableDir.appendingPathComponent("spektrafilm-native"), root.appendingPathComponent("target/release/spektrafilm-native")], executable: true),
-            exporter: find("SPEKTRAFILM_F64_CLI", [executableDir.appendingPathComponent("spektrafilm-f64"), root.appendingPathComponent("target/release/spektrafilm-f64")], executable: true),
-            data: find("SPEKTRAFILM_DATA_DIR", [Bundle.main.resourceURL!.appendingPathComponent("data"), root.appendingPathComponent("data")], executable: false)
+            helper: tool("SPEKTRAFILM_NATIVE_HELPER", "spektrafilm-native"),
+            exporter: tool("SPEKTRAFILM_F64_CLI", "spektrafilm-f64"),
+            data: find("SPEKTRAFILM_DATA_DIR", [resourceDir.appendingPathComponent("data"), root.appendingPathComponent("data")], executable: false),
+            fastExporter: try? tool("SPEKTRAFILM_F32_CLI", "spektrafilm")
         )
     }
+}
+
+/// Which engine renders an export. Both use the same parameters, crop and
+/// border. The GPU engine was measured against the reference on 6 photographs
+/// x 7 stocks: worst pixel ΔE00 below 0.25, at most one 8-bit step, and grain
+/// statistically equal but from different random numbers
+/// (docs/gpu-vs-cpu-quality.md).
+enum ExportEngine: String, CaseIterable {
+    /// `spektrafilm-f64` on the CPU, the reference implementation.
+    case reference
+    /// `spektrafilm` (32-bit) on the GPU through wgpu/Metal, like the preview.
+    case fast
+
+    var title: String {
+        switch self {
+        case .reference: "Reference (CPU, 64-bit)"
+        case .fast: "Fast (GPU)"
+        }
+    }
+
+    /// `SPEKTRAFILM_BACKEND` for the exporter process.
+    var backend: String {
+        switch self {
+        case .reference: "cpu"
+        case .fast: "wgpu"
+        }
+    }
+
+    func executable(in paths: EnginePaths) throws -> URL {
+        switch self {
+        case .reference: return paths.exporter
+        case .fast:
+            guard let url = paths.fastExporter else {
+                throw EngineError(message: "Fast (GPU) export needs the spektrafilm command-line tool next to the app (or SPEKTRAFILM_F32_CLI). Export with Reference (CPU, 64-bit) instead, or rebuild the app with scripts/package_macos_app.sh.")
+            }
+            return url
+        }
+    }
+
+    /// The exporter prints the backend it chose. A fast export without a GPU
+    /// adapter falls back to the CPU (`Backend: CPU (rayon)`).
+    static func ranOnGPU(log: String) -> Bool { log.contains("Backend: wgpu") }
+    /// Whether the helper's reported backend name is the wgpu GPU backend.
+    static func ranOnGPU(backend: String) -> Bool { backend.hasPrefix("wgpu") }
+
+    /// The last choice, offered first next time. Fast until changed.
+    static var selected: ExportEngine {
+        get { UserDefaults.standard.string(forKey: "exportEngine").flatMap(ExportEngine.init) ?? .fast }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "exportEngine") }
+    }
+}
+
+/// What an export did beyond writing the file.
+struct ExportOutcome: Equatable {
+    /// A fast export ran on the CPU because no GPU was available.
+    var fellBackToCPU = false
 }
 
 /// Temporary files live in per-launch folders under $TMPDIR/Spektrafilm, each
@@ -221,14 +292,16 @@ final class EngineClient: @unchecked Sendable {
     private var temporaryFiles: [URL] = []
 
     /// Develops `source` at full resolution with `state`, cropping and
-    /// straightening to `crop`, and adding `border`.
-    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderStyle?) async throws {
+    /// straightening to `crop`, and adding `border`, with `engine`.
+    @discardableResult
+    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderStyle?, engine: ExportEngine = .reference) async throws -> ExportOutcome {
         let fm = FileManager.default
+        let executable = try engine.executable(in: paths)
         let work = scratch.directory.appendingPathComponent("export-\(UUID().uuidString)")
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
         let staging = destination.deletingLastPathComponent().appendingPathComponent(".spektrafilm-\(UUID().uuidString).\(destination.pathExtension)")
         temporaryFiles = [work, staging]
-        var record = ExportRecord(staging: staging.path, exporter: ExportRecord.resolvedPath(paths.exporter))
+        var record = ExportRecord(staging: staging.path, exporter: ExportRecord.resolvedPath(executable))
         try record.write(to: work)
         defer { try? fm.removeItem(at: work); try? fm.removeItem(at: staging); process = nil; temporaryFiles = [] }
         let params = work.appendingPathComponent("params.json")
@@ -238,7 +311,7 @@ final class EngineClient: @unchecked Sendable {
         let log = try FileHandle(forWritingTo: logURL)
         defer { try? log.close() }
         let child = Process()
-        child.executableURL = paths.exporter
+        child.executableURL = executable
         child.arguments = ["process", source.path, "-o", staging.path, "--film", state.film, "--paper", state.paper, "--params", params.path, "--data-dir", paths.data.path]
         if state.params["io.scan_film"].bool { child.arguments!.append("--scan-film") }
         if let crop {
@@ -247,7 +320,7 @@ final class EngineClient: @unchecked Sendable {
         }
         if let border { child.arguments! += ["--border", border.rawValue] }
         var environment = ProcessInfo.processInfo.environment
-        environment["SPEKTRAFILM_BACKEND"] = "cpu"; child.environment = environment
+        environment["SPEKTRAFILM_BACKEND"] = engine.backend; child.environment = environment
         child.standardOutput = log; child.standardError = log
         process = child
         let status: Int32 = try await withCheckedThrowingContinuation { continuation in
@@ -258,11 +331,13 @@ final class EngineClient: @unchecked Sendable {
             } catch { child.terminationHandler = nil; continuation.resume(throwing: error) }
         }
         if cancelled { throw CancellationError() }
+        let diagnostic = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
         guard status == 0 else {
-            let diagnostic = (try? String(contentsOf: logURL, encoding: .utf8)) ?? "Unknown exporter error"
-            throw EngineError(message: "Export failed.\n\(diagnostic.suffix(4000))")
+            let hint = engine == .fast ? " If the GPU ran out of memory, export with Reference (CPU, 64-bit) instead." : ""
+            throw EngineError(message: "Export failed.\(hint)\n\(diagnostic.isEmpty ? "Unknown exporter error" : String(diagnostic.suffix(4000)))")
         }
         guard rename(staging.path, destination.path) == 0 else { throw EngineError(message: "Could not move the completed export to \(destination.path): \(String(cString: strerror(errno)))") }
+        return ExportOutcome(fellBackToCPU: engine == .fast && !ExportEngine.ranOnGPU(log: diagnostic))
     }
 
     func cancel() {

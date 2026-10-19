@@ -73,8 +73,12 @@ fn interp_channel(xq: f32, gamma_inv_c: f32, channel: u32) -> f32 {
 }
 
 @compute @workgroup_size(1024)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let pixel_idx = gid.x;
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) groups: vec3<u32>,
+) {
+    // 2D grid above 65535 workgroups (see `linear_dispatch_grid`).
+    let pixel_idx = gid.y * groups.x * 1024u + gid.x;
     let total = params.width * params.height;
     if pixel_idx >= total {
         return;

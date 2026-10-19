@@ -204,8 +204,8 @@ pub struct FilmChainParams<'a> {
     pub dir_couplers: Option<DirCouplersGpuParams<'a>>,
     /// Optional grain pass — Poisson-binomial particle model on the film
     /// density buffer, after DIR couplers and before print spectral.
-    /// Uses normal-approximation sampling on the GPU (matches what the
-    /// CPU path does for typical λ > 30 / variance > 9 regimes).
+    /// Draws Poisson and binomial counts with the same exact algorithms as
+    /// the CPU (numpy's), from a per-pixel random stream.
     pub grain: Option<GrainGpuParams>,
     /// Optional viewing glare pass — applied after scan spectral on the
     /// final RGB buffer. Lognormal-distributed per-pixel surface noise +
@@ -270,12 +270,27 @@ pub enum FrontPass<'a> {
 /// adds `coeffs[i]` (per-channel) into the accumulator.
 #[derive(Debug, Clone)]
 pub struct DiffusionGpuPlan {
+    /// Downsample factor and working size for backends that blur a reduced
+    /// copy (CUDA). The wgpu backend convolves with `psf` by FFT instead.
     pub d: u32,
     pub small_w: u32,
     pub small_h: u32,
     pub p_s: f32,
+    /// σ at the downsampled working resolution (σ_full / d).
     pub sigmas: Vec<f32>,
     pub coeffs: Vec<[f32; 3]>,
+    /// The exact PSF, for backends that convolve by FFT (wgpu).
+    pub psf: DiffusionPsf,
+}
+
+/// The diffusion filter's exact PSF: kernel radius in pixels and, per
+/// channel, the radial exponentials `(λ_px, amplitude)` whose sum over the
+/// `(2·radius+1)²` square, normalized to unit sum, is the kernel the CPU
+/// reference convolves with.
+#[derive(Debug, Clone)]
+pub struct DiffusionPsf {
+    pub radius: u32,
+    pub components: [Vec<(f64, f64)>; 3],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -372,26 +387,26 @@ pub struct GlareGpuParams {
 }
 
 /// Halation parameters for the GPU-resident scatter + multi-bounce pass.
-/// Mirrors the field layout of the CPU `apply_halation_um`, but pre-converts
-/// the per-channel µm sigmas to a single pixel-space sigma (the GPU path
-/// uses the average across channels, matching the existing CPU impl).
+/// Mirrors the CPU `apply_halation_um` channel for channel, with the µm sizes
+/// pre-converted to pixels.
 #[derive(Debug, Clone, Copy)]
 pub struct HalationGpuParams {
     pub scatter_amount: f32,
-    pub scatter_core_px: f32,
-    pub scatter_tail_px: f32,
+    /// Per-channel Gaussian core σ, already clamped to ≥ 1e-6 like the CPU.
+    pub scatter_core_px: [f32; 3],
+    /// Per-channel exponential tail decay λ, already clamped to ≥ 1e-6.
+    pub scatter_tail_px: [f32; 3],
     /// Per-channel tail weight. Python applies these per channel
     /// (Portra 0.78 / 0.65 / 0.67); averaging is a noticeable
     /// chromatic drift.
     pub scatter_tail_weight: [f32; 3],
     pub halation_amount: f32,
-    pub halation_strength_avg: f32,
-    /// Per-channel `halation_strength[c] * halation_amount`. Used only
-    /// for the renormalize pass (which is per-channel even though the
-    /// blur/add use the averaged scalar). When `halation_renormalize`
-    /// is false this is ignored.
+    /// Per-channel `halation_strength[c] * halation_amount`, used by the
+    /// final add and the renormalize pass.
     pub halation_a_tot: [f32; 3],
-    pub halation_first_sigma_px: f32,
+    /// Per-channel σ of the first bounce. Bounce k uses σ·√(k+1), computed
+    /// in f64 like the CPU before narrowing.
+    pub halation_first_sigma_px: [f64; 3],
     pub halation_n_bounces: u32,
     pub halation_bounce_decay: f32,
     pub halation_renormalize: bool,

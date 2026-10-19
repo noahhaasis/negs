@@ -1,0 +1,9 @@
+{
+ "camera": {
+  "diffusion_filter": {
+   "active": true,
+   "filter_family": "black_pro_mist",
+   "strength": 0.5
+  }
+ }
+}

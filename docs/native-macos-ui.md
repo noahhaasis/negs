@@ -31,7 +31,8 @@ trailing inspector. The app uses one editing window and a recent-files menu.
 ## Implementation
 
 All five steps are implemented. macOS packaging now launches the Swift app;
-the cross-platform egui binary remains buildable. The minimum native-app OS is
+the cross-platform egui binary remains buildable but is unmaintained: it gets
+no new work or fixes, and the macOS app will later be ported to other platforms. The minimum native-app OS is
 macOS 14 (the SwiftUI inspector API). The packaging script bundles the f32 Rust
 helper, f32 CLI, f64 exporter, profile/LUT data, and source archive, then ad-hoc
 signs the app. It does not notarize it.
@@ -102,9 +103,20 @@ Swift rounding to the Rust tests' values.
 
 The preview buffer is capped at 8192 pixels on its longest side; saving retains
 the full processed preview resolution. Linear output is encoded only for display
-and tagged sRGB. Export uses an independent f64 process with the CPU backend
-forced, writes to a temporary sibling of the destination, and renames it only
-after success. Cancel leaves any existing destination untouched. Quitting kills
+and tagged sRGB. Export runs an independent process: by default the f32
+`spektrafilm` with `SPEKTRAFILM_BACKEND=wgpu` (Fast (GPU)), or, when the export
+panel's Engine pop-up says Reference (CPU, 64-bit), the f64 reference
+(`spektrafilm-f64`, `SPEKTRAFILM_BACKEND=cpu`). The f32 tool is located via `SPEKTRAFILM_F32_CLI`, the app bundle,
+then `target/release`; a missing f32 tool only disables Fast export. The choice
+is stored in UserDefaults (`exportEngine`); without one, Fast is offered. A fast export whose log shows a CPU
+fallback is reported in the status bar, and a failed fast export suggests the
+reference engine. A fast export skips the process when the current preview was
+rendered at export size (preview not limited, or the photograph within 12 MP):
+it saves that preview instead, which is byte-identical to the f32 exporter's
+file (render responses carry `export_resolution`; `scripts/check_native_macos.py`
+asserts the identity with grain on). If that save fails, for example because an
+edit arrived meanwhile, the exporter runs as usual. Either way the export writes to a temporary sibling of the
+destination, and renames it only after success. Cancel leaves any existing destination untouched. Quitting kills
 both child processes and removes their temporary files.
 
 Temporary files (the preview buffer, engine log, and export parameters) live in a
@@ -157,7 +169,11 @@ Swift tests cover full-schema preservation, inspector paths against Rust default
 profile metadata, protocol recovery, IOSurface preview conversion, rapid edits
 while a render is in flight, undo/redo including one step per slider drag,
 slider snapping, canvas rotation, cancellation preserving an existing output,
-and cleanup of files and exporters left by a crashed launch.
+cleanup of files and exporters left by a crashed launch, and the export engine
+choice (tool lookup, binary and backend, CPU-fallback detection).
+`testRealExportsFromJobList` runs real exports through `ExportJob` when
+`SPEKTRAFILM_EXPORT_JOBS` names a JSON job list (source, destination, params,
+film, paper, engine), for end-to-end engine comparisons.
 The Python integration check renders real images, checks rotation/resizing,
 rejects stale save requests, recovers from an invalid input, scans B&W reversal
 film, verifies clean EOF, and exports at f64. Run with `SPEKTRAFILM_BACKEND=cpu`

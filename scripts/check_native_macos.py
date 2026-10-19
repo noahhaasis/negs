@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--helper", type=Path, default=ROOT / "target/release/spektrafilm-native")
     parser.add_argument("--data-dir", type=Path, default=ROOT / "data")
     parser.add_argument("--exporter", type=Path, default=ROOT / "target/release/spektrafilm-f64")
+    parser.add_argument("--fast-exporter", type=Path, default=ROOT / "target/release/spektrafilm")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="spektrafilm-native-test-") as work:
         work = Path(work)
@@ -71,20 +72,20 @@ def main():
                 request("save", render_id=first_id, output=str(saved))
                 assert saved.read_bytes().startswith(b"\x89PNG")
                 params["camera"]["exposure_compensation_ev"] = 1.5
-                params["io"]["rotate_cw"] = 1
+                params["io"]["rotate_cw"] = 1  # The exporter rotates; the app passes it to save.
                 second_id, result = request("render", **render_args)
                 assert buffer.read_bytes() != first_bytes, "Exposure must affect rendered pixels"
                 request("save", expect_error=True, render_id=first_id, output=str(saved))
-                request("save", render_id=second_id, output=str(saved))
+                request("save", render_id=second_id, output=str(saved), rotate_cw=1)
                 assert struct.unpack(">II", saved.read_bytes()[16:24]) == (24, 32), "Saved rotation must match the UI"
                 # The crop is in the unrotated photograph: the left half, then turned.
-                request("save", render_id=second_id, output=str(saved), crop=dict(x=0, y=0, width=0.5, height=1))
+                request("save", render_id=second_id, output=str(saved), rotate_cw=1, crop=dict(x=0, y=0, width=0.5, height=1))
                 assert struct.unpack(">II", saved.read_bytes()[16:24]) == (24, 16), "Saved crop must match the UI"
-                request("save", expect_error=True, render_id=second_id, output=str(saved), crop=dict(x=0.6, y=0, width=0.5, height=1))
+                request("save", expect_error=True, render_id=second_id, output=str(saved), rotate_cw=1, crop=dict(x=0.6, y=0, width=0.5, height=1))
                 # Straightened: the sides round (25.6 × 19.2), then the quarter turn.
-                request("save", render_id=second_id, output=str(saved), crop=dict(x=0.1, y=0.1, width=0.8, height=0.8, angle=5))
+                request("save", render_id=second_id, output=str(saved), rotate_cw=1, crop=dict(x=0.1, y=0.1, width=0.8, height=0.8, angle=5))
                 assert struct.unpack(">II", saved.read_bytes()[16:24]) == (19, 26), "Saved straightened crop must match the UI"
-                request("save", expect_error=True, render_id=second_id, output=str(saved), crop=dict(x=0, y=0, width=1, height=1, angle=60))
+                request("save", expect_error=True, render_id=second_id, output=str(saved), rotate_cw=1, crop=dict(x=0, y=0, width=1, height=1, angle=60))
                 request("render", expect_error=True, **(render_args | {"input": str(work / "missing.png")}))
                 request("catalog")  # Errors leave the process usable.
                 # Explicitly reopening a path must reload an externally changed file.
@@ -101,6 +102,23 @@ def main():
                 params["io"]["upscale_factor"] = 0.5
                 _, reduced = request("render", **render_args)
                 assert (reduced["width"], reduced["height"]) == (16, 12)
+                assert reduced["export_resolution"], reduced
+                # The app exports Fast by saving a preview at export size: it
+                # must be the file the Fast exporter writes, grain included.
+                grain_params = copy.deepcopy(params)
+                grain_params["film_render"]["grain"]["active"] = True
+                grain_id, grain = request("render", **(render_args | {"params": grain_params}))
+                assert grain["export_resolution"], grain
+                crop = dict(x=0, y=0, width=0.5, height=1, angle=-2)
+                preview_export, fast_export = work / "preview-export.tiff", work / "fast-export.tiff"
+                request("save", render_id=grain_id, output=str(preview_export), crop=crop, rotate_cw=1)
+                (work / "grain.json").write_text(json.dumps(grain_params))
+                subprocess.run([args.fast_exporter.resolve(), "process", str(source), "-o", str(fast_export),
+                                "--film", "kodak_gold_200", "--paper", "kodak_portra_endura", "--crop", "0,0,0.5,1,-2",
+                                "--params", str(work / "grain.json"), "--data-dir", str(args.data_dir.resolve())],
+                               env=dict(os.environ, SPEKTRAFILM_BACKEND=os.environ.get("SPEKTRAFILM_BACKEND", "wgpu")), check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                assert preview_export.read_bytes() == fast_export.read_bytes(), "A saved preview at export size must equal the Fast export"
                 export_params = work / "params.json"
                 export_params.write_text(json.dumps(params))
                 exported = work / "reference.png"
@@ -118,7 +136,7 @@ def main():
                 assert struct.unpack(">II", exported.read_bytes()[16:24]) == (12, 8), "Exported crop must match the UI"
                 child.stdin.close()
                 assert child.wait(timeout=10) == 0, "EOF should cleanly release the engine"
-                print(json.dumps({"passed": True, "requests": sequence, "backend": result["backend"], "profiles": len(catalog["profiles"]), "f64_export": True}))
+                print(json.dumps({"passed": True, "requests": sequence, "backend": result["backend"], "profiles": len(catalog["profiles"]), "f64_export": True, "fast_export_from_preview": True}))
             finally:
                 if child.poll() is None:
                     child.kill()
