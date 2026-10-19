@@ -1,6 +1,6 @@
 import IOSurface
 import XCTest
-@testable import SpektrafilmApp
+@testable import NegsApp
 
 final class EngineTests: XCTestCase {
     func testParameterEditsPreserveUnknownFieldsAndArraySiblings() throws {
@@ -58,7 +58,7 @@ final class EngineTests: XCTestCase {
         defer { try? fm.removeItem(at: directory) }
         let helper = directory.appendingPathComponent("spektrafilm-native")
         try Data("#!/bin/sh\n".utf8).write(to: helper)
-        let suite = "spektrafilm-tests-\(UUID().uuidString)"
+        let suite = "negs-tests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let paths = EnginePaths(helper: helper, exporter: helper, data: directory)

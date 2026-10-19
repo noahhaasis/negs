@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "Spektrafilm",
+    name: "Negs",
     platforms: [.macOS(.v14)],
-    products: [.executable(name: "SpektrafilmApp", targets: ["SpektrafilmApp"])],
+    products: [.executable(name: "NegsApp", targets: ["NegsApp"])],
     targets: [
-        .executableTarget(name: "SpektrafilmApp"),
-        .testTarget(name: "SpektrafilmTests", dependencies: ["SpektrafilmApp"])
+        .executableTarget(name: "NegsApp"),
+        .testTarget(name: "NegsTests", dependencies: ["NegsApp"])
     ]
 )

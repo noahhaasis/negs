@@ -5,7 +5,7 @@ import SwiftUI
 /// inspector inside the window are SwiftUI. A SwiftUI scene with the same
 /// toolbar and inspector took about twice as long to show the window
 /// (docs/native-macos-ui.md, Startup).
-@main enum SpektrafilmMain {
+@main enum NegsMain {
     static func main() {
         MainActor.assumeIsolated {
             let app = NSApplication.shared
@@ -78,7 +78,7 @@ struct EditorCanvas: View {
                 StatusBar(model: model)
             }
         }
-        .alert("Spektrafilm", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+        .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
     }

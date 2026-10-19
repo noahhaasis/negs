@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import SpektrafilmApp
+@testable import NegsApp
 
 @MainActor final class LifecycleTests: XCTestCase {
     private func paths() -> EnginePaths {
@@ -86,7 +86,7 @@ import XCTest
         job.cancel()
         do { try await task.value; XCTFail("Expected cancellation") } catch is CancellationError {} catch { XCTFail(error.localizedDescription) }
         XCTAssertEqual(try Data(contentsOf: destination), original)
-        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".spektrafilm-") })
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".negs-") })
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: scratch.directory.path), [])
     }
 
@@ -132,7 +132,7 @@ import XCTest
             _ = try await export(.fast, fast: nil)
             XCTFail("Fast export without the f32 tool must fail")
         } catch { XCTAssertTrue(error.localizedDescription.contains("Fast (GPU) export needs"), error.localizedDescription) }
-        XCTAssertFalse(try fm.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".spektrafilm-") })
+        XCTAssertFalse(try fm.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".negs-") })
     }
 
     /// Real exports through `ExportJob`, for the end-to-end engine comparison
@@ -148,7 +148,7 @@ import XCTest
         let release = root.appendingPathComponent("target/release")
         let paths = EnginePaths(helper: release.appendingPathComponent("spektrafilm-native"), exporter: release.appendingPathComponent("spektrafilm-f64"),
                                 data: root.appendingPathComponent("data"), fastExporter: release.appendingPathComponent("spektrafilm"))
-        let scratch = try ScratchSpace(root: FileManager.default.temporaryDirectory.appendingPathComponent("spektrafilm-export-jobs"))
+        let scratch = try ScratchSpace(root: FileManager.default.temporaryDirectory.appendingPathComponent("negs-export-jobs"))
         defer { scratch.remove() }
         for job in jobs {
             var state = EditState()
@@ -178,7 +178,7 @@ import XCTest
         try fm.createDirectory(at: job, withIntermediateDirectories: true)
         fm.createFile(atPath: root.appendingPathComponent("crashed.lock").path, contents: nil)
         try Data(count: 1024).write(to: crashed.appendingPathComponent("preview.rgba"))
-        let staging = directory.appendingPathComponent(".spektrafilm-1.png")
+        let staging = directory.appendingPathComponent(".negs-1.png")
         try Data("partial".utf8).write(to: staging)
         let unrelated = directory.appendingPathComponent("photo.png")
         try Data("keep".utf8).write(to: unrelated)
@@ -196,7 +196,7 @@ import XCTest
         XCTAssertEqual(exporter.terminationReason, .uncaughtSignal)
         XCTAssertFalse(fm.fileExists(atPath: crashed.path))
         XCTAssertFalse(fm.fileExists(atPath: staging.path))
-        XCTAssertTrue(fm.fileExists(atPath: unrelated.path), "Only Spektrafilm staging files are removed")
+        XCTAssertTrue(fm.fileExists(atPath: unrelated.path), "Only Negs staging files are removed")
         XCTAssertTrue(fm.fileExists(atPath: running.directory.path), "A folder still in use is kept")
         running.remove(); next.remove()
         XCTAssertEqual(try fm.contentsOfDirectory(atPath: root.path), [])
@@ -304,7 +304,7 @@ import XCTest
                 bitmap.bitmapData![index + 2] = 100
             }
         }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("spektrafilm-fixture-\(UUID().uuidString).png")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("negs-fixture-\(UUID().uuidString).png")
         try bitmap.representation(using: .png, properties: [:])!.write(to: url)
         return url
     }

@@ -11,7 +11,7 @@ import AppKit
     init(model: EditorModel) {
         self.model = model
         super.init()
-        let name = ProcessInfo.processInfo.processName == "SpektrafilmApp" ? "Spektrafilm" : ProcessInfo.processInfo.processName
+        let name = ProcessInfo.processInfo.processName == "NegsApp" ? "Negs" : ProcessInfo.processInfo.processName
 
         let app = submenu(name)
         app.addItem(withTitle: "About \(name)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")

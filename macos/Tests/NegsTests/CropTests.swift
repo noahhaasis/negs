@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import SpektrafilmApp
+@testable import NegsApp
 
 @MainActor final class CropTests: XCTestCase {
     private func assertEqual(_ a: CGRect, _ b: CGRect, accuracy: CGFloat = 1e-9, file: StaticString = #filePath, line: UInt = #line) {
@@ -238,7 +238,7 @@ import XCTest
     private func makeFixture() throws -> URL {
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 96 * 3, bitsPerPixel: 24)!
         memset(bitmap.bitmapData!, 120, 96 * 64 * 3)
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("spektrafilm-crop-\(UUID().uuidString).png")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("negs-crop-\(UUID().uuidString).png")
         try bitmap.representation(using: .png, properties: [:])!.write(to: url)
         return url
     }

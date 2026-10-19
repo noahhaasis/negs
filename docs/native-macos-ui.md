@@ -150,11 +150,11 @@ destination, and renames it only after success. Cancel leaves any existing desti
 both child processes and removes their temporary files.
 
 Temporary files (the preview buffer, engine log, and export parameters) live in a
-per-launch folder under `$TMPDIR/Spektrafilm`, next to a lock file the app holds
+per-launch folder under `$TMPDIR/Negs`, next to a lock file the app holds
 open. After a crash or force quit the lock is released, and the next launch
 deletes that folder. It also kills a still-running exporter from that session
 (checking its executable path, so a reused process ID is safe) and deletes the
-export's `.spektrafilm-*` staging file next to the destination.
+export's `.negs-*` staging file next to the destination.
 
 The inspector includes film/paper profiles, development times, exposure, RAW WB,
 halation, DIR couplers, lens diffusion, grain, glare, print curves, scanner, color
@@ -168,7 +168,7 @@ From the repository root, with Rust and Xcode installed:
 
 ```sh
 bash scripts/package_macos_app.sh
-open dist/spektrafilm-macos/Spektrafilm.app
+open dist/negs-macos/Negs.app
 ```
 
 For an unpackaged development run:
@@ -176,7 +176,7 @@ For an unpackaged development run:
 ```sh
 cargo build --release -p spektrafilm-native
 cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64
-swift run --package-path macos --scratch-path target/swift-native Spektrafilm
+swift run --package-path macos --scratch-path target/swift-native NegsApp
 ```
 
 Build f32 and f64 targets separately to avoid Cargo feature unification. Open
@@ -192,7 +192,7 @@ cargo test -p spektrafilm-native -p spektrafilm-gui
 cargo test -p spektrafilm-cli --test process_failures
 swift test --package-path macos --scratch-path target/swift-native
 python3 scripts/check_native_macos.py
-python3 scripts/verify_macos_package.py --zip dist/spektrafilm-macos.zip --output-dir /tmp/spektrafilm-package-check
+python3 scripts/verify_macos_package.py --zip dist/negs-macos.zip --output-dir /tmp/negs-package-check
 ```
 
 Swift tests cover full-schema preservation, inspector paths against Rust defaults,
@@ -216,7 +216,7 @@ App Nap throttle background windows):
 
 ```sh
 swift build --package-path macos --scratch-path target/swift-bench -c release -Xswiftc -DSPEKTRAFILM_BENCHMARK
-SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BENCHMARK_PHOTO=/path/to/photo.jpg target/swift-bench/release/SpektrafilmApp
+SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BENCHMARK_PHOTO=/path/to/photo.jpg target/swift-bench/release/NegsApp
 ```
 
 On an M-series Mac with a 10 MP JPEG, busy time per pass is about 3–5 ms
@@ -225,7 +225,7 @@ median and 20 ms p95 (before: 32 ms median, with the main thread saturated).
 An optional native-window smoke test captures light/dark views:
 
 ```sh
-SPEKTRAFILM_UI_SNAPSHOTS=/tmp/spektrafilm-ui swift test --package-path macos --scratch-path target/swift-native --filter LifecycleTests/testNativeWindowSnapshot
+SPEKTRAFILM_UI_SNAPSHOTS=/tmp/negs-ui swift test --package-path macos --scratch-path target/swift-native --filter LifecycleTests/testNativeWindowSnapshot
 ```
 
 System material layers cannot be rasterized by AppKit's offscreen cache API.
