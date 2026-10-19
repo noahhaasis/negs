@@ -35,7 +35,8 @@ def metadata(root=ROOT, env=os.environ):
         feed = f"https://{owner.lower()}.github.io/{name}/appcast.xml"
     key = env.get("SPARKLE_PUBLIC_KEY", "")
     if bool(feed) != bool(key):
-        raise ValueError("Update feed and SPARKLE_PUBLIC_KEY must be provided together")
+        raise ValueError("Update feed and SPARKLE_PUBLIC_KEY must be provided together; "
+                         "tagged releases need the SPARKLE_PUBLIC_KEY repository variable")
     if feed:
         parsed = urlparse(feed)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:

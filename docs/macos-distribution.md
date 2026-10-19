@@ -96,7 +96,7 @@ renames. Keep the installed feed URL working if hosting changes.
 - GitHub marks `0.x` releases as prereleases. The update feed still offers these
   versions to pre-1.0 users; it does not use GitHub's “latest release” shortcut.
 
-The workflow builds Windows as before and macOS on the explicit `macos-15`
+The workflow builds only macOS, on the explicit `macos-15`
 Apple Silicon runner. macOS uses Rust 1.93.1, the committed Cargo/Swift lockfiles,
 and the runner's Swift/Xcode toolchain (reported in the CI log). It tests metadata
 and native lifecycle behavior, builds the DMG/update ZIP/source archive, and

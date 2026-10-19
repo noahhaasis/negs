@@ -14,59 +14,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  windows-x64:
-    name: Windows x64
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build GUI and f32 CLI
-        shell: pwsh
-        run: |
-          cargo build --release -p spektrafilm-gui --features spektrafilm-gpu/cuda-backend
-          cargo build --release -p spektrafilm-cli --bin spektrafilm --features spektrafilm-gpu/cuda-backend
-
-      - name: Build f64 exporter
-        shell: pwsh
-        run: |
-          cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64
-
-      - name: Package
-        shell: pwsh
-        run: |
-          $dist = "dist\spektrafilm-windows-x64"
-          New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          Copy-Item target\release\spektrafilm-gui.exe $dist\
-          Copy-Item target\release\spektrafilm.exe $dist\
-          Copy-Item target\release\spektrafilm-f64.exe $dist\
-          Copy-Item -Recurse data $dist\data
-          @"
-          spektrafilm-rs Windows x64
-
-          Run spektrafilm-gui.exe for the GUI.
-
-          Backends:
-          - WGSL/wgpu works on normal GPU drivers.
-          - CUDA mode is selected with SPEKTRAFILM_BACKEND=cuda and requires an NVIDIA GPU plus the CUDA NVRTC runtime available on the system.
-
-          f64 export:
-          - spektrafilm-f64.exe must stay next to spektrafilm-gui.exe.
-          - The GUI uses it for CPU f64 Export.
-          "@ | Set-Content -Encoding UTF8 "$dist\README.txt"
-          Compress-Archive -Path "$dist\*" -DestinationPath "dist\spektrafilm-windows-x64.zip" -Force
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: spektrafilm-windows-x64
-          path: dist/spektrafilm-windows-x64.zip
-
-
   macos:
     name: macOS Apple Silicon
     runs-on: macos-15
@@ -124,7 +71,7 @@ jobs:
   publish:
     name: Publish complete release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: [macos, windows-x64]
+    needs: macos
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -133,10 +80,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: negs-macos
-          path: release-assets
-      - uses: actions/download-artifact@v4
-        with:
-          name: spektrafilm-windows-x64
           path: release-assets
       - name: Create draft, upload assets, then publish
         env:
