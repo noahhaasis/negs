@@ -7,21 +7,34 @@ BUILD_TARGET_DIR="${BUILD_TARGET_DIR:-target/macos-app}"
 DIST_DIR="${DIST_DIR:-dist/spektrafilm-macos}"
 APP_NAME="${APP_NAME:-Spektrafilm}"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
+PYTHON="${PYTHON:-python3}"
+RELEASE_DIR="${RELEASE_DIR:-dist/releases}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+
+# Validate metadata before doing expensive build work. Public release settings
+# come from CI; local packages intentionally have no live update configuration.
+"$PYTHON" scripts/macos_release.py >/dev/null
+release_name="$("$PYTHON" scripts/macos_release.py --field name)"
+if [[ "$(uname -m)" != arm64 ]]; then
+    echo "The initial macOS package requires an Apple Silicon build host." >&2
+    exit 1
+fi
 
 # Keep the binary deployment target consistent with Info.plist.
 export MACOSX_DEPLOYMENT_TARGET=14.0
 
 cargo build --locked --release -p spektrafilm-native --target-dir "$BUILD_TARGET_DIR"
-swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release
-swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --show-bin-path)"
+swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions
+swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions --show-bin-path)"
 cargo build --locked --release -p spektrafilm-cli --bin spektrafilm --target-dir "$BUILD_TARGET_DIR"
 cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 --target-dir "$BUILD_TARGET_DIR"
 
 rm -rf "$DIST_DIR"
-mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Frameworks" "$RELEASE_DIR"
+# Preserve framework symlinks, executable bits and Sparkle’s nested signatures.
+ditto "$swift_bin_dir/Sparkle.framework" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
 
 cp "$swift_bin_dir/SpektrafilmApp" "$APP_BUNDLE/Contents/MacOS/SpektrafilmApp"
 cp "$BUILD_TARGET_DIR/release/spektrafilm-native" "$APP_BUNDLE/Contents/MacOS/spektrafilm-native"
@@ -34,47 +47,7 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/SpektrafilmApp" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
 
-cat > "$APP_BUNDLE/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleDevelopmentRegion</key>
-  <string>en</string>
-  <key>CFBundleDisplayName</key>
-  <string>Spektrafilm</string>
-  <key>CFBundleExecutable</key>
-  <string>SpektrafilmApp</string>
-  <key>CFBundleIconFile</key>
-  <string>spektrafilm.icns</string>
-  <key>CFBundleIdentifier</key>
-  <string>dev.spektrafilm.app</string>
-  <key>CFBundleInfoDictionaryVersion</key>
-  <string>6.0</string>
-  <key>CFBundleName</key>
-  <string>Spektrafilm</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleShortVersionString</key>
-  <string>0.1.2</string>
-  <key>CFBundleVersion</key>
-  <string>0.1.2</string>
-  <key>LSMinimumSystemVersion</key>
-  <string>14.0</string>
-  <key>CFBundleDocumentTypes</key>
-  <array><dict>
-    <key>CFBundleTypeName</key><string>Photograph</string>
-    <key>CFBundleTypeRole</key><string>Viewer</string>
-    <key>LSHandlerRank</key><string>Alternate</string>
-    <key>LSItemContentTypes</key>
-    <array><string>public.png</string><string>public.tiff</string><string>public.jpeg</string><string>public.camera-raw-image</string></array>
-  </dict></array>
-  <key>NSHighResolutionCapable</key>
-  <true/>
-</dict>
-</plist>
-PLIST
+"$PYTHON" scripts/macos_release.py --plist "$APP_BUNDLE/Contents/Info.plist" > "$DIST_DIR/release.json"
 
 if [[ -n "$ICON_ICNS" ]]; then
     cp "$ICON_ICNS" "$APP_BUNDLE/Contents/Resources/spektrafilm.icns"
@@ -98,7 +71,8 @@ fi
 cat > "$DIST_DIR/README.txt" <<'README'
 spektrafilm-rs macOS
 
-Unzip the download, drag Spektrafilm.app to Applications, and double-click it.
+Open the disk image, drag Spektrafilm.app to Applications, and double-click it.
+For ZIP downloads, unzip the app and move it to Applications.
 No Rust, Homebrew, or separate data download is needed.
 The native SwiftUI interface requires macOS 14 or newer; see BUILD-INFO.txt for its CPU architecture.
 
@@ -128,7 +102,13 @@ Black and white stocks:
   Contents/Resources/data/presets/experimental-gamut.json inside the app.
 
 Source:
-- SOURCE.tar.gz contains the exact application source and data for this build.
+- The matching source archive is available beside the download.
+
+Updates:
+- Spektrafilm > Check for Updates checks manually.
+- Settings lets you turn automatic checks off or on.
+- Your photograph and adjustments are restored after a normal quit or update.
+- Undo history and work after a crash are not restored.
 
 Gatekeeper:
 - This package is ad-hoc signed. It is not Apple-notarized.
@@ -143,24 +123,45 @@ README
     rustc -vV
     git rev-parse HEAD
     git status --short
+    "$PYTHON" scripts/macos_release.py
 } > "$DIST_DIR/BUILD-INFO.txt"
 
 # Snapshot the actual working source, including uncommitted port changes.
 # Exclude build products and local files unrelated to reproducing the app.
 COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='.build' --exclude='.swiftpm' \
     -czf "$DIST_DIR/SOURCE.tar.gz" Cargo.toml Cargo.lock LICENSE README.md \
-    crates macos data assets scripts docs .github
+    crates macos data assets scripts docs .github release
 
-codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+# Ad-hoc sign our own executables and the outer app. Do not recursively
+# overwrite Sparkle's supplied signatures. No Apple account is required.
+for binary in SpektrafilmApp spektrafilm-native spektrafilm spektrafilm-f64; do
+    codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/$binary"
+done
+codesign --force --sign - "$APP_BUNDLE"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 plutil -lint "$APP_BUNDLE/Contents/Info.plist"
 
-zip_path="$DIST_DIR.zip"
-rm -f "$zip_path"
-(
-    cd "$DIST_DIR/.."
-    ditto -c -k --sequesterRsrc --keepParent "$(basename "$DIST_DIR")" "$(basename "$zip_path")"
-)
+# Only the app goes in the update archive. Corresponding source is a separate
+# release asset so it doesn't double every updater download.
+zip_path="$RELEASE_DIR/$release_name.zip"
+ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$zip_path"
+cp "$DIST_DIR/SOURCE.tar.gz" "$RELEASE_DIR/$release_name-source.tar.gz"
+cp "$DIST_DIR/README.txt" "$RELEASE_DIR/INSTALL.txt"
+cp "$DIST_DIR/BUILD-INFO.txt" "$RELEASE_DIR/BUILD-INFO.txt"
 
-echo "Packaged: $repo_root/$DIST_DIR"
-echo "Zip:      $repo_root/$zip_path"
+# A native drag-to-Applications installer, with no system-wide components.
+stage="$(mktemp -d "$BUILD_TARGET_DIR/dmg.XXXXXX")"
+trap 'rm -rf "$stage"' EXIT
+ditto "$APP_BUNDLE" "$stage/$APP_NAME.app"
+ln -s /Applications "$stage/Applications"
+cp "$DIST_DIR/README.txt" "$stage/Installation.txt"
+hdiutil create -volname "Spektrafilm" -srcfolder "$stage" -format UDZO -ov "$RELEASE_DIR/$release_name.dmg"
+hdiutil verify "$RELEASE_DIR/$release_name.dmg"
+"$PYTHON" scripts/verify_macos_package.py --zip "$zip_path" \
+    --source "$RELEASE_DIR/$release_name-source.tar.gz" \
+    --output-dir "$(mktemp -d "$BUILD_TARGET_DIR/verify.XXXXXX")/unpacked"
+(
+    cd "$RELEASE_DIR"
+    shasum -a 256 "$release_name.zip" "$release_name.dmg" "$release_name-source.tar.gz" > SHA256SUMS
+)
+echo "Packaged: $repo_root/$RELEASE_DIR/$release_name.dmg"

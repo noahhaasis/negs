@@ -3,10 +3,23 @@ import SwiftUI
 
 @MainActor final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     let model = EditorModel()
+    let updates = UpdateController()
+    private let sessions = SessionStore()
+    private var terminating = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Start the engine while AppKit builds the window.
-        Task { await model.start() }
+        // Session I/O overlaps the engine catalog request, never window layout.
+        // Benchmarks and explicit launches must not reopen a previous photograph.
+        let benchmark = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] != nil
+        var restoration: Task<EditorSession?, Error>? = benchmark ? nil : Task { try await sessions.load() }
+        #if SPEKTRAFILM_BENCHMARK
+        if let path = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_SESSION"] {
+            let store = SessionStore(file: URL(fileURLWithPath: path))
+            restoration = Task { try await store.load() }
+        }
+        #endif
+        Task { await model.start(restoration: restoration) }
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -18,18 +31,38 @@ import SwiftUI
         #if SPEKTRAFILM_BENCHMARK
         InteractionBenchmark.start(model)
         #endif
+        updates.schedule(afterStartupOf: model)
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard model.exporting else { return .terminateNow }
-        let alert = NSAlert()
-        alert.messageText = "An export is still in progress."
-        alert.informativeText = "Quitting cancels it. Any existing file at the destination is left unchanged."
-        alert.addButton(withTitle: "Continue Exporting")
-        alert.addButton(withTitle: "Quit")
-        return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+        guard !terminating else { return .terminateLater }
+        if model.saving || (updates.installing && model.exporting) { return .terminateCancel }
+        if model.exporting {
+            let alert = NSAlert()
+            alert.messageText = "An export is still in progress."
+            alert.informativeText = "Quitting cancels it. Any existing file at the destination is left unchanged."
+            alert.addButton(withTitle: "Continue Exporting")
+            alert.addButton(withTitle: "Quit")
+            guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+        }
+        // Save once at quit/relaunch, not on slider changes or the rendering path.
+        // A failed write cancels termination instead of silently losing the edit.
+        guard let session = model.session,
+              ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] == nil else { return .terminateNow }
+        terminating = true
+        Task {
+            do {
+                try await sessions.save(session)
+                sender.reply(toApplicationShouldTerminate: true)
+            } catch {
+                terminating = false
+                sender.reply(toApplicationShouldTerminate: false)
+                model.error = "Could not save the editing session. Spektrafilm stayed open. \(error.localizedDescription)"
+            }
+        }
+        return .terminateLater
     }
-    func applicationWillTerminate(_ notification: Notification) { model.shutdown() }
+    func applicationWillTerminate(_ notification: Notification) { updates.stop(); model.shutdown() }
 }
 
 @main struct SpektrafilmApp: App {
@@ -42,14 +75,20 @@ import SwiftUI
         }
         .defaultSize(width: 1320, height: 860)
         .windowToolbarStyle(.unified)
-        .commands { EditorCommands(model: model) }
+        .commands { EditorCommands(model: model, updates: delegate.updates) }
+        Settings { UpdateSettings(updates: delegate.updates) }
     }
 }
 
 struct EditorCommands: Commands {
     let model: EditorModel
+    @ObservedObject var updates: UpdateController
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…", action: updates.check)
+                .disabled(!updates.configured || !updates.canCheck)
+        }
         CommandGroup(replacing: .newItem) {
             Button("Open Photograph…", action: model.openPanel).keyboardShortcut("o")
             Menu("Open Recent") {
@@ -94,7 +133,7 @@ struct EditorWindow: View {
                 .overlay {
                     if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
                 }
-            if model.source != nil || model.exporting {
+            if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
                 Divider()
                 StatusBar(model: model)
             }

@@ -9,7 +9,7 @@ import SwiftUI
 /// is then in that turned frame. Export and Save Preview crop with
 /// `spektrafilm-io::crop` before rotating and adding the border; keep the
 /// pixel rounding in sync.
-struct CropSettings: Equatable {
+struct CropSettings: Codable, Equatable, Sendable {
     static let full = CGRect(x: 0, y: 0, width: 1, height: 1)
     static let maxAngle = 45.0
     var rect = CropSettings.full
@@ -58,7 +58,7 @@ struct CropSettings: Equatable {
     }
 }
 
-enum CropAspect: String, CaseIterable, Identifiable {
+enum CropAspect: String, Codable, Sendable, CaseIterable, Identifiable {
     case original, freeform, square
     case sixteenNine = "16:9", threeTwo = "3:2", fourThree = "4:3", fiveFour = "5:4", sevenFive = "7:5"
     case custom
