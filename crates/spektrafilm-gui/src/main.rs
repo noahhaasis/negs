@@ -4,6 +4,9 @@
 // egui controls, and re-renders the full GPU-resident pipeline whenever
 // a control changes. The output texture is uploaded to egui once per
 // render; the panel scales it to fit.
+//
+// Unmaintained: kept building as the Windows/Linux UI until the macOS app
+// is ported, but it gets no new work or fixes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -71,7 +71,10 @@ the status bar says so. All existing adjustment groups are available in the
 inspector.
 
 See the [native UI plan, architecture, and development guide](docs/native-macos-ui.md).
-The cross-platform egui UI remains available with:
+The cross-platform egui UI is **unmaintained**: it still builds and is the only
+UI on Windows and Linux for now, but it gets no new work or fixes. Development
+focuses on the macOS app, which will later be ported to other platforms. It
+runs with:
 
 ```bash
 ./target/release/spektrafilm-gui [optional/path/to/image.orf]
@@ -178,7 +181,7 @@ crates/
   spektrafilm-io/      image + camera RAW loading (rawler) and PNG/JPEG/TIFF saving
                        with the source's camera EXIF, shared by the CLI and GUI
   spektrafilm-cli/     `spektrafilm` (process, list-profiles, gen-lut) + `decode_raw_gui`
-  spektrafilm-gui/     egui/eframe preview (wgpu renderer, Metal-backed on macOS)
+  spektrafilm-gui/     egui/eframe preview, unmaintained (wgpu renderer, Metal-backed on macOS)
   spektrafilm-native/  persistent image-engine helper for the native macOS app
 macos/                SwiftUI interface, AppKit image canvas, and Swift tests
 data/

@@ -331,6 +331,16 @@ Numbers are f64 CPU reference vs GPU unless stated; the full tables are in
 4. The macOS panel text says the GPU "matches the reference within
    ΔE 0.25"; measured is now 0.005. Kept conservative; tighten if wanted.
 
+Answers (user, 2026-10-19):
+
+1. egui is unmaintained; leave its export as it is. The focus is the macOS
+   app, which will later be ported to other platforms.
+2. Not yet: Reference stays the default.
+3. No automatic fallback, since Fast is not the default; the error message
+   suggesting Reference is enough.
+4. Keep the wording for now; the user will fine-tune the UI after approving
+   the change. The branch stays unmerged until the user has tested it.
+
 ### Not verified / not covered
 
 - No real 100 MP raw (GFX100, X2D): only the upscaled Q3 TIFF.

@@ -31,7 +31,8 @@ trailing inspector. The app uses one editing window and a recent-files menu.
 ## Implementation
 
 All five steps are implemented. macOS packaging now launches the Swift app;
-the cross-platform egui binary remains buildable. The minimum native-app OS is
+the cross-platform egui binary remains buildable but is unmaintained: it gets
+no new work or fixes, and the macOS app will later be ported to other platforms. The minimum native-app OS is
 macOS 14 (the SwiftUI inspector API). The packaging script bundles the f32 Rust
 helper, f32 CLI, f64 exporter, profile/LUT data, and source archive, then ad-hoc
 signs the app. It does not notarize it.
