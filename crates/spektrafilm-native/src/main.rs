@@ -302,6 +302,21 @@ fn main() -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn bw_expansion_catalog_keeps_negative_reversal_and_paper_distinct() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let result = catalog(&data).unwrap();
+        let profiles = result["profiles"].as_array().unwrap();
+        let stock = |id: &str| profiles.iter().find(|p| p["id"] == id).unwrap();
+        let film = stock("kodak_trix400_d76_8min");
+        let paper = stock("ilford_mgrc_deluxe_grade2");
+        assert_eq!(film["paper"], false);
+        assert_eq!(film["positive"], false);
+        assert_eq!(film["target_print"], paper["id"]);
+        assert_eq!(paper["paper"], true);
+        assert_eq!(paper["bw"], true);
+        assert_eq!(stock("kodak_trix")["positive"], true);
+    }
+    #[test]
     fn linear_display_is_encoded_without_mutating_output() {
         let image = ImageBuf::from_data(1, 1, vec![0.0, 0.18, 1.0]);
         assert_eq!(

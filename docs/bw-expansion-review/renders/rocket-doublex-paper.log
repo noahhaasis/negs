@@ -1,0 +1,11 @@
+Profiles loaded: 1 ms
+Image loaded: 640x427 (0.3 MP), 5 ms
+2026-10-18T19:10:46.319019Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-18T19:10:46.325829Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_doublex" print_exposure_factor=1.4706638814751527
+2026-10-18T19:10:46.325878Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-18T19:10:46.335966Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-18T19:10:46.382987Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-18T19:10:46.424733Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 105 ms
+Saved: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/renders/rocket-doublex-paper.png (640x427), 3 ms

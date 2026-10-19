@@ -1,0 +1,222 @@
+{
+  "passed": true,
+  "note": "Nine controlled review renders match the new-base packaged exporter pixel-for-pixel. Creative grain variants were not rerendered.",
+  "renders": [
+    {
+      "image": "astronaut-doublex-paper.png",
+      "dimensions": [
+        512,
+        512,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/astronaut.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/astronaut-doublex-paper.png",
+        "--film",
+        "kodak_doublex",
+        "--paper",
+        "ilford_mgrc_deluxe_grade2",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/doublex-paper.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    },
+    {
+      "image": "coffee-doublex-paper.png",
+      "dimensions": [
+        400,
+        600,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/coffee.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/coffee-doublex-paper.png",
+        "--film",
+        "kodak_doublex",
+        "--paper",
+        "ilford_mgrc_deluxe_grade2",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/doublex-paper.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    },
+    {
+      "image": "rocket-doublex-paper.png",
+      "dimensions": [
+        427,
+        640,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/rocket.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/rocket-doublex-paper.png",
+        "--film",
+        "kodak_doublex",
+        "--paper",
+        "ilford_mgrc_deluxe_grade2",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/doublex-paper.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    },
+    {
+      "image": "astronaut-trix-paper.png",
+      "dimensions": [
+        512,
+        512,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/astronaut.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/astronaut-trix-paper.png",
+        "--film",
+        "kodak_trix400_d76_8min",
+        "--paper",
+        "ilford_mgrc_deluxe_grade2",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/trix-paper.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    },
+    {
+      "image": "coffee-trix-paper.png",
+      "dimensions": [
+        400,
+        600,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/coffee.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/coffee-trix-paper.png",
+        "--film",
+        "kodak_trix400_d76_8min",
+        "--paper",
+        "ilford_mgrc_deluxe_grade2",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/trix-paper.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    },
+    {
+      "image": "rocket-trix-paper.png",
+      "dimensions": [
+        427,
+        640,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/rocket.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/rocket-trix-paper.png",
+        "--film",
+        "kodak_trix400_d76_8min",
+        "--paper",
+        "ilford_mgrc_deluxe_grade2",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/trix-paper.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    },
+    {
+      "image": "astronaut-trix-2302.png",
+      "dimensions": [
+        512,
+        512,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/astronaut.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/astronaut-trix-2302.png",
+        "--film",
+        "kodak_trix400_d76_8min",
+        "--paper",
+        "kodak_2302",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/trix-2302.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    },
+    {
+      "image": "coffee-trix-2302.png",
+      "dimensions": [
+        400,
+        600,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/coffee.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/coffee-trix-2302.png",
+        "--film",
+        "kodak_trix400_d76_8min",
+        "--paper",
+        "kodak_2302",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/trix-2302.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    },
+    {
+      "image": "rocket-trix-2302.png",
+      "dimensions": [
+        427,
+        640,
+        3
+      ],
+      "max_8bit_difference": 0,
+      "command": [
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/MacOS/spektrafilm-f64",
+        "process",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/inputs/rocket.png",
+        "-o",
+        "/private/tmp/bw-expansion-resume-photos-20261019/rocket-trix-2302.png",
+        "--film",
+        "kodak_trix400_d76_8min",
+        "--paper",
+        "kodak_2302",
+        "--params",
+        "/Users/noahhaasis/Projects/spektrafilm-rs/.claude/worktrees/bw-expansion/docs/bw-expansion-review/recipes/trix-2302.json",
+        "--data-dir",
+        "/private/tmp/bw-expansion-resume-package-20261019/spektrafilm-bw-expansion-9579d36/Spektrafilm.app/Contents/Resources/data"
+      ]
+    }
+  ]
+}

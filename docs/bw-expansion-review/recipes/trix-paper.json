@@ -1,0 +1,53 @@
+{
+  "camera": {
+    "auto_exposure": false,
+    "lens_blur_um": 0.0
+  },
+  "film_render": {
+    "grain": {
+      "active": false
+    },
+    "halation": {
+      "active": false
+    },
+    "dir_couplers": {
+      "active": false
+    },
+    "glare": {
+      "active": false
+    }
+  },
+  "print_render": {
+    "glare": {
+      "active": false
+    }
+  },
+  "scanner": {
+    "unsharp_mask": [
+      0.0,
+      0.0
+    ],
+    "lens_blur": 0.0
+  },
+  "enlarger": {
+    "lens_blur": 0.0
+  },
+  "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": true,
+    "output_color_space": "sRGB",
+    "output_cctf_encoding": true,
+    "input_gamut_compress": {
+      "algorithm": "off"
+    },
+    "output_gamut_compress": {
+      "algorithm": "off"
+    }
+  },
+  "settings": {
+    "use_enlarger_lut": false,
+    "use_scanner_lut": false,
+    "lut_resolution": 17,
+    "preview_mode": false
+  }
+}

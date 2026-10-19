@@ -1,0 +1,12 @@
+Matplotlib is building the font cache; this may take a moment.
+PASS midgray-lut-off: log_e_film=1.929e-16, cmy_film=0.000e+00, cmy_print=4.441e-16, rgb_out=4.441e-16
+PASS gradient4-lut-off: log_e_film=4.302e-16, cmy_film=3.331e-16, cmy_print=7.772e-16, rgb_out=1.721e-15
+PASS ramp16-lut-off: log_e_film=4.996e-16, cmy_film=4.441e-16, cmy_print=8.882e-16, rgb_out=1.887e-15
+PASS gamut-stress4-lut-off: log_e_film=3.938e-16, cmy_film=4.441e-16, cmy_print=5.551e-16, rgb_out=1.998e-15
+PASS adversarial32-lut-off: log_e_film=2.887e-15, cmy_film=1.110e-15, cmy_print=3.553e-15, rgb_out=2.887e-15
+PASS midgray-lut-on: log_e_film=1.929e-16, cmy_film=0.000e+00, cmy_print=1.343e-14, rgb_out=6.768e-13
+PASS gradient4-lut-on: log_e_film=4.302e-16, cmy_film=3.331e-16, cmy_print=7.622e-14, rgb_out=8.765e-13
+PASS ramp16-lut-on: log_e_film=4.996e-16, cmy_film=4.441e-16, cmy_print=8.482e-14, rgb_out=2.692e-12
+PASS gamut-stress4-lut-on: log_e_film=3.938e-16, cmy_film=4.441e-16, cmy_print=6.917e-14, rgb_out=3.144e-12
+PASS adversarial32-lut-on: log_e_film=2.887e-15, cmy_film=1.110e-15, cmy_print=8.449e-14, rgb_out=3.198e-12
+Report: /private/tmp/bw-expansion-resume-parity-2302-20261019/report.json

@@ -117,9 +117,13 @@ f64 export:
 - The GUI uses it for CPU f64 Export.
 
 Black and white stocks:
+- Film: Kodak Tri-X 400 / 400TX, D-76, 8 min, 35 mm (camera negative).
+- Tri-X 400 pairs automatically with the experimental neutral Ilford
+  Multigrade RC Deluxe grade-2 paper. This is a fixed-grade rendering for
+  neutral B&W negatives; paper tint and stock-specific grain are not measured.
 - Film: Kodak Double-X 5222 or Kodak Tri-X 7266 reversal.
 - For Double-X prints, select Kodak 2302 in the paper/print selector.
-- Tri-X uses direct film scan. Development times are available for Double-X/2302.
+- Tri-X 7266 uses direct film scan. Development times are available for Double-X/2302.
 - The experimental gamut preset is available to the CLI as
   Contents/Resources/data/presets/experimental-gamut.json inside the app.
 

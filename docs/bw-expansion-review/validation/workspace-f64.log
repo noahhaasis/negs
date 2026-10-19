@@ -1,0 +1,271 @@
+warning: /Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli/Cargo.toml: file `/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spektrafilm`
+  * `bin` target `spektrafilm-f64`
+   Compiling spektrafilm-core v0.1.2 (/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.92s
+     Running unittests src/bin/decode_raw_gui.rs (target/debug/deps/decode_raw_gui-c7a2bbc71a26d0ce)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/spektrafilm-0501f823f18bf24b)
+
+running 2 tests
+test raw_wb_tests::old_params_default_to_as_shot_and_export_json_preserves_selection ... ok
+test raw_wb_tests::cli_parses_custom_wb_and_rejects_invalid_combinations ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/spektrafilm_f64-f57d77d7df829a68)
+
+running 2 tests
+test raw_wb_tests::old_params_default_to_as_shot_and_export_json_preserves_selection ... ok
+test raw_wb_tests::cli_parses_custom_wb_and_rejects_invalid_combinations ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/process_failures.rs (target/debug/deps/process_failures-d219f6e0c14498da)
+
+running 1 test
+test invalid_spectral_setup_fails_without_writing_a_fallback_render ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.91s
+
+     Running unittests src/lib.rs (target/debug/deps/spektrafilm_core-92841933762cfed8)
+
+running 36 tests
+test gamut_compression::tests::aces_rgc_matches_python_reference ... ok
+test gamut_compression::tests::off_is_identity ... ok
+test input_gamut::tests::boundary_configuration_preserves_legacy_defaults_and_rejects_invalid_values ... ok
+test input_gamut::tests::off_is_identity ... ok
+test input_gamut::tests::remap_matches_python_reference ... ok
+test mallett::parity_tests::mallett_rgb_to_raw_matches_python ... ok
+test mallett::parity_tests::unknown_rgb_to_raw_method_errors ... ok
+test print_morph::parity_tests::morph_identity_reproduces_model ... ok
+test print_morph::parity_tests::morph_matches_python_reference ... ok
+test print_morph::parity_tests::morph_rejects_unknown_model_type ... ok
+test profile::tests::bw_missing_sensitivity_remains_inactive_after_resolution ... ok
+test profile::tests::loads_bw_development_time_family ... ok
+test profile::tests::resolve_bw_selects_time_and_broadcasts ... ok
+test gamut_compression::tests::oklrab_matches_python_reference ... ok
+test gamut_compression::tests::oklch_matches_python_reference ... ok
+test gamut_compression::tests::cam16ucs_matches_python_reference ... ok
+test stages::debug_compare::tests::erf4_window_parity ... ok
+test profile::tests::resolve_is_identity_for_colour ... ok
+test profile::tests::test_load_kodak_portra_400 ... ok
+test mallett::parity_tests::mallett_pipeline_calibrates_and_runs ... ok
+test stages::debug_tests::debug_pipeline_values ... ok
+test input_gamut::tests::experimental_hull_and_remap_match_python ... ok
+test stages::filming::tests::autoexposure_unknown_method_is_zero_ev ... ok
+test stages::filming::tests::autoexposure_methods_match_python_reference ... ok
+test stages::integration_tests::test_film_scan_pipeline ... ok
+test stages::integration_tests::test_full_pipeline_portra_400_to_endura ... ok
+test enlarger::parity_tests::preflash_off_is_zero ... ok
+test color_reference::parity_tests::print_bw_correction_matches_python ... ok
+test enlarger::parity_tests::preflash_raw_matches_python_reference ... ok
+test stages::debug_compare::tests::full_pipeline_parity_1x1_linear_184 ... ok
+test stages::integration_tests::full_chain_matches_python_0_3_4_defaults ... ok
+test stages::integration_tests::positive_slide_film_scan_stays_photographic ... ok
+test stages::integration_tests::test_full_pipeline_with_spectral_lut ... ok
+test stages::debug_compare::tests::compare_with_python_gray_card ... ok
+test stages::debug_compare::tests::hanatos_gpu_vs_cpu ... ok
+test mallett::parity_tests::mallett_gpu_resident_matches_cpu ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests/bw_expansion.rs (target/debug/deps/bw_expansion-639d32b20ccfdfa7)
+
+running 4 tests
+test paper_reflection_density_is_counted_once_including_base ... ok
+test loaded_models_still_agree_with_manufacturer_source_points ... ok
+test normalized_neutral_negative_printing_is_independent_of_paper_spectral_weight ... ok
+test new_materials_match_independent_python_extremes_and_colours ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.95s
+
+     Running tests/bw_profiles.rs (target/debug/deps/bw_profiles-a00bea9498d42f60)
+
+running 1 test
+test bw_stocks_match_python_with_and_without_luts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.15s
+
+     Running tests/experimental_gamut.rs (target/debug/deps/experimental_gamut-94272222b4844477)
+
+running 2 tests
+test experimental_output_gamut_matches_python ... ok
+test experimental_bw_gamut_pipeline_matches_python_with_and_without_luts ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.88s
+
+     Running unittests src/lib.rs (target/debug/deps/spektrafilm_gpu-06d3e7e27372746f)
+
+running 2 tests
+test cpu_backend::tests::test_srgb_roundtrip ... ok
+test cpu_backend::tests::test_colorspace_convert_identity ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/spektrafilm_gui-2d96121ac669bce3)
+
+running 16 tests
+test preview_resolution_tests::cap_preserves_aspect_ratio_and_never_exceeds_twelve_megapixels ... ok
+test preview_resolution_tests::cap_respects_smaller_inputs_and_working_resolution ... ok
+test raw_wb_tests::export_command_carries_current_wb_with_custom_values_only_when_active ... ok
+test preview_resolution_tests::resampling_leaves_retained_source_intact ... ok
+test reset_tests::gui_catalog_includes_bw_camera_and_print_films_in_the_correct_pickers ... ok
+test raw_wb_tests::successful_reload_updates_input_and_export_settings_together ... ok
+test raw_wb_tests::queued_edit_discards_completed_render_without_replacing_preview ... ok
+test raw_wb_tests::preview_limit_edit_discards_in_flight_result_and_preserves_export_params ... ok
+test raw_wb_tests::failed_reload_restores_settings_for_retained_input ... ok
+test raw_wb_tests::wb_edit_discards_old_worker_input_and_output ... ok
+test raw_wb_tests::exposure_edit_discards_intermediate_render_and_restarts_debounce ... ok
+test reset_tests::reset_raw_white_balance_invalidates_previously_developed_input ... ok
+test reset_tests::reset_restores_all_params_but_keeps_selected_profiles_and_slide_defaults ... ok
+test raw_wb_tests::legacy_export_companion_cannot_silently_ignore_raw_wb ... ok
+test serial_grain_tests::serial_grain_is_opt_in_and_does_not_change_preview_params ... ok
+test serial_grain_tests::export_child_receives_serial_grain_choice_in_params ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.73s
+
+     Running unittests src/lib.rs (target/debug/deps/spektrafilm_io-31eadacba6137971)
+
+running 37 tests
+test border::tests::film_format_follows_the_aspect_ratio ... ok
+test border::tests::film35_needs_a_film_frame_ratio ... ok
+test save::tests::exif_dimensions_follow_the_exported_image ... ok
+test save::tests::empty_strings_are_not_written ... ok
+test border::tests::white_border_matches_python_padding ... ok
+test save::tests::jpeg_roundtrip_keeps_metadata ... ok
+test save::tests::exported_tiff_loads_through_load_image ... ok
+test save::tests::quantize_rounds_half_to_even_and_clamps ... ok
+test save::tests::raw_container_finds_embedded_exif_block ... ok
+test save::tests::png_roundtrip_keeps_metadata ... ok
+test save::tests::rejects_unknown_extension ... ok
+test save::tests::read_metadata_is_none_for_missing_or_foreign_files ... ok
+test save::tests::metadata_survives_chained_exports ... ok
+test save::tests::tiff_roundtrip_keeps_metadata ... ok
+test tests::cli_mode_rejects_other_formats ... ok
+test tests::intermediate::four_color_drops_fourth_channel_and_clamps ... ok
+test tests::intermediate::monochrome_is_copied_into_rgb_and_clamped ... ok
+test save::tests::without_metadata_only_software_is_written ... ok
+test tests::linear_srgb_detection ... ok
+test tests::intermediate::three_color_keeps_channel_order_and_clamps ... ok
+test tests::raw_extension_list ... ok
+test tests::panic_message_reads_str_and_string_payloads ... ok
+test wb_tests::camera_raw_smoke ... ignored, requires local camera RAW files in SPEKTRAFILM_TEST_RAWS
+test wb_tests::as_shot_keeps_coefficients_and_missing_metadata_fallback ... ok
+test wb_tests::monochrome_is_not_tinted ... ok
+test white_balance::tests::daylight_coefficients_project_white_and_normalize_green ... ok
+test white_balance::tests::modes_and_validation ... ok
+test white_balance::tests::whitepoints_and_adjustment_match_colour_science_reference ... ok
+test border::tests::keyline_surrounds_the_photo ... ok
+test wb_tests::non_raw_ignores_wb_including_inapplicable_custom_values ... ok
+test save::tests::multi_strip_tiff_roundtrip ... ok
+test wb_tests::selection_reloads_raw_and_export_json_reproduces_preview_pixels ... ok
+test border::tests::every_film_profile_has_35mm_textures ... ok
+test border::tests::film_frame_is_black_at_the_edges_and_clear_in_the_middle ... ok
+test border::tests::film35_falls_back_to_the_generic_strip ... ok
+test border::tests::film35_hides_a_slightly_wider_photo_under_the_rebate ... ok
+test border::tests::film35_strip_surrounds_the_photo ... ok
+
+test result: ok. 36 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 29.24s
+
+     Running unittests src/lib.rs (target/debug/deps/spektrafilm_math-b5ae3a65221c0933)
+
+running 39 tests
+test colorspace::tests::cat16_matches_colour ... ok
+test colorspace::tests::test_identity_adaptation ... ok
+test colorspace::tests::test_srgb_roundtrip ... ok
+test colorspace::tests::test_srgb_xyz_roundtrip ... ok
+test gaussian::tests::test_gaussian_kernel_normalized ... ok
+test gaussian::tests::test_gaussian_blur_identity_zero_sigma ... ok
+test image::tests::test_extract_write_channel ... ok
+test image::tests::test_get_set_pixel ... ok
+test image::tests::test_new_and_dimensions ... ok
+test image::tests::test_orient_empty ... ok
+test image::tests::test_pixels_iter ... ok
+test interp::tests::test_interp_1d_clamp ... ok
+test interp::tests::test_interp_1d_exact ... ok
+test image::tests::test_rotate_cw ... ok
+test interp::tests::test_interp_1d_midpoint ... ok
+test interp::tests::test_interp_uniform ... ok
+test gaussian::tests::test_gaussian_blur_uniform_image ... ok
+test interp::tests::test_fast_interp_image ... ok
+test interp::tests::test_interp_uniform_3ch ... ok
+test image::tests::test_rotate_ccw_and_roundtrip ... ok
+test lut::tests::test_trilinear_corners ... ok
+test image::tests::test_exif_flips ... ok
+test lut::tests::test_trilinear_midpoint ... ok
+test numpy_rng::tests::binomial_n20_p03_matches_numpy_seed_0 ... ok
+test numpy_rng::tests::mt19937_matches_numpy_seed_0 ... ok
+test numpy_rng::tests::poisson_lam5_matches_numpy_seed_0 ... ok
+test spectral::tests::test_cmf_y_peak ... ok
+test spectral::tests::test_illuminant_to_xy_d65 ... ok
+test spectral::tests::test_rgb_to_tc_b_neutral_gray ... ok
+test pchip3d::tests::identity_lut_returns_input ... ok
+test spectral::tests::test_tc_xy_roundtrip ... ok
+test spectral::tests::test_wavelength_count ... ok
+test spectral::tests::hanatos_preserves_near_black_energy ... ok
+test spectral::tests::test_xyz_to_xy_white ... ok
+test stats::tests::test_poisson_zero ... ok
+test fft_conv::tests::fft_matches_direct_reflect_conv ... ok
+test fft_conv::tests::unit_kernel_is_identity ... ok
+test stats::tests::test_binomial_mean ... ok
+test stats::tests::test_poisson_mean ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests src/lib.rs (target/debug/deps/spektrafilm_model-a83dfaac8fe1c108)
+
+running 6 tests
+test density_curves::tests::test_interpolate_density_midpoint ... ok
+test density_curves::tests::test_max_density ... ok
+test density_curves::tests::test_normalize_density_curves ... ok
+test illuminants::tests::test_blackbody_peak_shifts_with_temperature ... ok
+test illuminants::tests::test_blackbody_normalized ... ok
+test grain::tests::serial_and_parallel_grain_are_bit_identical ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/spektrafilm_native-306b5ece61000514)
+
+running 4 tests
+test tests::stale_preview_cannot_be_saved ... ok
+test tests::linear_display_is_encoded_without_mutating_output ... ok
+test tests::working_source_is_resampled_once_per_size ... ok
+test tests::bw_expansion_catalog_keeps_negative_reversal_and_paper_distinct ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+   Doc-tests spektrafilm_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests spektrafilm_gpu
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests spektrafilm_io
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests spektrafilm_math
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests spektrafilm_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

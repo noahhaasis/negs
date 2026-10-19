@@ -1,0 +1,11 @@
+Profiles loaded: 1 ms
+Image loaded: 512x512 (0.3 MP), 6 ms
+2026-10-18T19:10:46.079429Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-18T19:10:46.086096Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_doublex" print_exposure_factor=1.4706638814751527
+2026-10-18T19:10:46.086151Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-18T19:10:46.096140Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-18T19:10:46.142266Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-18T19:10:46.181942Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 102 ms
+Saved: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/renders/astronaut-doublex-paper.png (512x512), 2 ms

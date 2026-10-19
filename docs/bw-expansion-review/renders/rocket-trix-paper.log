@@ -1,0 +1,11 @@
+Profiles loaded: 1 ms
+Image loaded: 640x427 (0.3 MP), 5 ms
+2026-10-18T19:10:46.674470Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-18T19:10:46.681044Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_trix400_d76_8min" print_exposure_factor=1.731132705013022
+2026-10-18T19:10:46.681094Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-18T19:10:46.689957Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-18T19:10:46.736025Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-18T19:10:46.785317Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 110 ms
+Saved: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/renders/rocket-trix-paper.png (640x427), 3 ms

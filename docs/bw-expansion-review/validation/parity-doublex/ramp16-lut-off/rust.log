@@ -1,0 +1,15 @@
+Profiles loaded: 1 ms
+Image loaded: 16x16 (0 MP), 0 ms
+2026-10-18T19:05:07.660522Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-18T19:05:07.667257Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_doublex" print_exposure_factor=1.4706638814751527
+2026-10-18T19:05:07.667321Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-18T19:05:07.667987Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_FILM_LOG_RAW path=/private/tmp/bw-expansion-parity-doublex/ramp16-lut-off/rust-log_e_film.f64 count=768
+2026-10-18T19:05:07.668158Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-18T19:05:07.668308Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_FILM_DENSITY path=/private/tmp/bw-expansion-parity-doublex/ramp16-lut-off/rust-cmy_film.f64 count=768
+2026-10-18T19:05:07.669055Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-18T19:05:07.669189Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_PRINT_DENSITY path=/private/tmp/bw-expansion-parity-doublex/ramp16-lut-off/rust-cmy_print.f64 count=768
+2026-10-18T19:05:07.669712Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 9 ms
+Saved: /private/tmp/bw-expansion-parity-doublex/ramp16-lut-off/rust.png (16x16), 0 ms
+raw f64 buffer: /private/tmp/bw-expansion-parity-doublex/ramp16-lut-off/rust-rgb_out.f64 (768 values)

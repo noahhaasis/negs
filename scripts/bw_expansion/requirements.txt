@@ -1,0 +1,8 @@
+numpy==2.4.6
+scipy==1.18.0
+colour-science==0.4.7
+matplotlib==3.11.0
+Pillow==12.2.0
+PyMuPDF==1.28.2
+OpenImageIO==3.1.14.1
+scikit-image==0.26.0

@@ -1,0 +1,265 @@
+{
+  "version": 1,
+  "run": {
+    "started_utc": "2026-10-18T15:26:19Z",
+    "target_finish_utc": "2026-10-18T17:26:19Z",
+    "baseline_rust_commit": "567a43132f64538ec6d877c8d015e319139b80b3",
+    "python_reference_commit": "28bf883e1672e884307edc75852549376e13644e"
+  },
+  "sources": {
+    "kodak": {
+      "url": "https://kodakprofessional.com/sites/default/files/wysiwyg/film/f4017_trix_320400.pdf",
+      "document": "Kodak F-4017, October 2021",
+      "sha256": "1d86b030cf7a8502e6f1414c630fa2cda30b68df53f49bccccce73c9c6562078",
+      "credit": "Eastman Kodak Company; original manufacturer measurements and graph copyright retained"
+    },
+    "ilford": {
+      "url": "https://www.ilfordphoto.com/wp/wp-content/uploads/2021/01/MULTIGRADE-RC-Papers-J20.pdf",
+      "document": "HARMAN/ILFORD MULTIGRADE RC PAPERS, October 2020",
+      "sha256": "62c93069b0ae5dc340444651dbbe8e1b17102f7e25f12449297504a8e1d391e1",
+      "credit": "HARMAN technology Limited; original manufacturer measurements and graph copyright retained"
+    }
+  },
+  "kodak_graphs": {
+    "trix400-d76-8min": {
+      "page_1based": 9,
+      "drawing_index": 22,
+      "x_label": "log10_exposure_lux_seconds",
+      "y_label": "total_diffuse_visual_density",
+      "x_origin_value": -4,
+      "x_origin_pdf_pt": 93.405,
+      "x_pt_per_unit": 36.8874,
+      "y_zero_pdf_pt": 250.979,
+      "y_pt_per_unit": 46.12425,
+      "crop_pdf_pt": [
+        60,
+        32,
+        291,
+        277
+      ],
+      "conditions": "400TX 35 mm; KODAK PROFESSIONAL Developer D-76; large tank; agitation at 1-minute intervals; 20 C; 8 minutes. Caption does not specify dilution; unqualified D-76 is interpreted as stock solution, not D-76 1+1."
+    },
+    "trix400-sensitivity": {
+      "page_1based": 8,
+      "drawing_index": 73,
+      "x_label": "wavelength_nm",
+      "y_label": "log10_sensitivity",
+      "x_origin_value": 300,
+      "x_origin_pdf_pt": 95.031,
+      "x_pt_per_unit": 0.4017228,
+      "y_zero_pdf_pt": 442.974,
+      "y_pt_per_unit": 37.82625,
+      "crop_pdf_pt": [
+        40,
+        273,
+        283,
+        492
+      ],
+      "conditions": "Solid curve, labelled D=1.0 above gross fog. Effective exposure 0.5 sec, diffuse visual. Sensitivity reciprocal of exposure in erg/cm^2. Processing not separately specified in this sensitivity panel; do not infer it from adjacent MTF graph. Use relative spectral shape only."
+    }
+  },
+  "paper_graph": {
+    "page_1based": 3,
+    "image_index": 6,
+    "image_size": [
+      646,
+      417
+    ],
+    "identity": "NEW MULTIGRADE RC DELUXE & PORTFOLIO (fifth generation), filter 2; second steepest curve in the 00,0,1,2,3 panel",
+    "conditions": "MULTIGRADE developer 1+9, 1 minute at 20 C; intermittent agitation per processing summary on page 4. Surface not identified by the graph; no surface-specific or texture claim.",
+    "x_zero_px": 4,
+    "x_px_per_unit": 129,
+    "y_zero_px": 340,
+    "y_px_per_unit": 133.5,
+    "trace_method": "Manual centreline clicks on the original embedded raster. Grade 2 is second from left above the crossover and second from right in the toe. Merged strokes are ambiguous by roughly 2-3 pixels. Shared plateaus traced as shared, not separate measurements.",
+    "manual_trace_pixels": [
+      [
+        4,
+        333
+      ],
+      [
+        133,
+        333
+      ],
+      [
+        190,
+        333
+      ],
+      [
+        205,
+        332
+      ],
+      [
+        216,
+        330
+      ],
+      [
+        229,
+        325
+      ],
+      [
+        235.5,
+        320
+      ],
+      [
+        240.5,
+        315
+      ],
+      [
+        245,
+        310
+      ],
+      [
+        252,
+        300
+      ],
+      [
+        257,
+        290
+      ],
+      [
+        264,
+        280
+      ],
+      [
+        275,
+        260
+      ],
+      [
+        281,
+        250
+      ],
+      [
+        286,
+        240
+      ],
+      [
+        292,
+        230
+      ],
+      [
+        295,
+        220
+      ],
+      [
+        303,
+        200
+      ],
+      [
+        306.5,
+        190
+      ],
+      [
+        310,
+        180
+      ],
+      [
+        313,
+        170
+      ],
+      [
+        316,
+        160
+      ],
+      [
+        319,
+        150
+      ],
+      [
+        325,
+        130
+      ],
+      [
+        327,
+        120
+      ],
+      [
+        331,
+        110
+      ],
+      [
+        335,
+        100
+      ],
+      [
+        339,
+        90
+      ],
+      [
+        345.5,
+        80
+      ],
+      [
+        359,
+        70
+      ],
+      [
+        375,
+        65
+      ],
+      [
+        391,
+        63
+      ],
+      [
+        430,
+        62
+      ],
+      [
+        480,
+        61
+      ],
+      [
+        530,
+        60
+      ]
+    ],
+    "density_tolerance": 0.03,
+    "log_exposure_tolerance": 0.025
+  },
+  "film": {
+    "id": "kodak_trix400_d76_8min",
+    "name": "Kodak Tri-X 400 / 400TX - D-76, 8 min, 35 mm",
+    "development_time_minutes": 8,
+    "base_density": 0.28,
+    "base_density_note": "Estimated asymptote just below the lowest plotted total density (about 0.288); separated once from net density. Not a separately measured film-base spectrum.",
+    "assumed_total_density_ceiling": 3.5,
+    "midgray_net_density": 0.75,
+    "exposure_origin_note": "Rendering convention: shift source exposure so net density 0.75 occurs at engine log exposure zero, matching the existing Double-X default anchor. This does not implement absolute ISO exposure metering.",
+    "sensitivity_last_nm": 665,
+    "sensitivity_note": "PCHIP of the labelled solid log-sensitivity trace; engine covers 380-780 nm. Truncate beyond 665 nm because the plot reaches its lower limit near 668 nm. This is an explicit unmeasured-tail approximation, not proof of zero red sensitivity.",
+    "density_tolerance": 0.01
+  },
+  "paper": {
+    "id": "ilford_mgrc_deluxe_grade2",
+    "name": "Ilford Multigrade RC Deluxe - Grade 2 (experimental neutral)",
+    "development_time_minutes": 1,
+    "midgray_reflectance": 0.184,
+    "sensitivity_note": "Unit sensitivity on 380-550 nm, zero elsewhere: a neutral-negative integration weight, NOT a digitisation of the unscaled Ilford spectral plot. Cancels algebraically for spectrally neutral negatives under normalized print exposure. No calibrated colour-negative printing, absolute paper speed, spectral filtration, or continuously variable contrast claim.",
+    "density_note": "Published reflection density is used once: reflectance = 10^(-D). Neutral base and image spectrum assumed. No double-pass multiplier; no measured warm tint or paper-surface scattering."
+  },
+  "sampling": {
+    "log_exposure_min": -3.0,
+    "log_exposure_max": 4.0,
+    "count": 256,
+    "method": "Constrained positive normal-CDF mixture (four mathematical components for film, three for paper); fit source points plus a 0.3-weight PCHIP/continuation prior. Model is authoritative; sampled curves and sublayers generated coherently. No microscopic layer claim.",
+    "fit_bounds": {
+      "centers": [
+        -6,
+        9
+      ],
+      "amplitudes": [
+        0.001,
+        4
+      ],
+      "sigmas": [
+        0.035,
+        4
+      ],
+      "max_nfev": 4000,
+      "tolerances": 1e-12
+    },
+    "film_runtime_min_note": "Runtime subtracts the minimum sampled film net density (about 0.0008 D) before development. This small offset is reported and included in source tolerance; base density is added once. The original source curve does not measure a shoulder."
+  },
+  "authorship": "New source extraction, preparation recipes and profiles prepared with Codex for this repository, 2026-10-18. No donor stock curves copied. Spektrafilm schema and pipeline by Andrea Volpato and contributors; see repository attribution. New profile preparation and profile data released under CC BY-SA 4.0; source-document rights remain with their respective holders."
+}

@@ -1,0 +1,15 @@
+Profiles loaded: 0 ms
+Image loaded: 4x4 (0 MP), 0 ms
+2026-10-19T06:15:13.020376Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-19T06:15:13.027134Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_trix400_d76_8min" print_exposure_factor=1.731132705013022
+2026-10-19T06:15:13.027198Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-19T06:15:13.027768Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_FILM_LOG_RAW path=/private/tmp/bw-expansion-resume-parity-pair-20261019/gradient4-lut-on/rust-log_e_film.f64 count=48
+2026-10-19T06:15:13.027993Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-19T06:15:13.028195Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_FILM_DENSITY path=/private/tmp/bw-expansion-resume-parity-pair-20261019/gradient4-lut-on/rust-cmy_film.f64 count=48
+2026-10-19T06:15:13.032165Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-19T06:15:13.032368Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_PRINT_DENSITY path=/private/tmp/bw-expansion-resume-parity-pair-20261019/gradient4-lut-on/rust-cmy_print.f64 count=48
+2026-10-19T06:15:13.036068Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 15 ms
+Saved: /private/tmp/bw-expansion-resume-parity-pair-20261019/gradient4-lut-on/rust.png (4x4), 0 ms
+raw f64 buffer: /private/tmp/bw-expansion-resume-parity-pair-20261019/gradient4-lut-on/rust-rgb_out.f64 (48 values)

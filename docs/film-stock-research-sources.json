@@ -1,0 +1,547 @@
+{
+  "research_date": "2026-10-18",
+  "report": "adding-film-stocks-research.md",
+  "scope_note": "Research only. No new film profile, physical measurement, new parity run, runtime change, or outgoing message was made. Sources were retrieved using public web pages/APIs; original documents are not redistributed here.",
+  "forum_threads": [
+    {
+      "title": "Spectral film simulations from scratch",
+      "topic_id": 48209,
+      "url": "https://discuss.pixls.us/t/48209",
+      "retrieved_post_count": 1023,
+      "highest_post_number": 1057,
+      "last_posted_at": "2026-09-16T16:33:44.781Z",
+      "coverage": "All post IDs returned by the public topic stream retrieved; full text searched; relevant technical posts examined. Deleted and inaccessible posts not recovered.",
+      "selected_primary_posts": [
+        {
+          "post_number": 1,
+          "post_id": 356352,
+          "author": "arctic",
+          "created_at": "2025-02-09T19:35:59.614Z",
+          "updated_at": "2026-05-30T04:01:14.533Z",
+          "url": "https://discuss.pixls.us/t/48209/1",
+          "research_role": "Original project goals and author background"
+        },
+        {
+          "post_number": 34,
+          "post_id": 356986,
+          "author": "arctic",
+          "created_at": "2025-02-14T08:41:01.340Z",
+          "updated_at": "2025-02-14T13:21:34.757Z",
+          "url": "https://discuss.pixls.us/t/48209/34",
+          "research_role": "Document archives and modelling sources"
+        },
+        {
+          "post_number": 143,
+          "post_id": 358685,
+          "author": "arctic",
+          "created_at": "2025-03-01T00:09:30.132Z",
+          "updated_at": "2025-03-01T00:09:30.132Z",
+          "url": "https://discuss.pixls.us/t/48209/143",
+          "research_role": "Direct explanation of manual profile creation"
+        },
+        {
+          "post_number": 230,
+          "post_id": 361422,
+          "author": "arctic",
+          "created_at": "2025-03-17T16:03:19.186Z",
+          "updated_at": "2025-03-17T16:03:19.186Z",
+          "url": "https://discuss.pixls.us/t/48209/230",
+          "research_role": "Granularity matching and physical aperture"
+        },
+        {
+          "post_number": 263,
+          "post_id": 362651,
+          "author": "NateWeatherly",
+          "created_at": "2025-03-24T17:01:19.041Z",
+          "updated_at": "2025-03-24T17:01:19.041Z",
+          "url": "https://discuss.pixls.us/t/48209/263",
+          "research_role": "German XTOL source pointer"
+        },
+        {
+          "post_number": 266,
+          "post_id": 363073,
+          "author": "arctic",
+          "created_at": "2025-03-27T01:11:13.770Z",
+          "updated_at": "2025-03-27T01:11:13.770Z",
+          "url": "https://discuss.pixls.us/t/48209/266",
+          "research_role": "Paper sensitivity measurement conditions"
+        },
+        {
+          "post_number": 410,
+          "post_id": 394255,
+          "author": "arctic",
+          "created_at": "2025-10-15T20:44:20.790Z",
+          "updated_at": "2025-10-15T20:46:22.885Z",
+          "url": "https://discuss.pixls.us/t/48209/410",
+          "research_role": "Datasheet-only origins and modelling distinctions"
+        },
+        {
+          "post_number": 489,
+          "post_id": 423791,
+          "author": "arctic",
+          "created_at": "2026-03-30T21:53:00.282Z",
+          "updated_at": "2026-03-30T21:53:00.282Z",
+          "url": "https://discuss.pixls.us/t/48209/489",
+          "research_role": "Schema evolution and reversal limitations"
+        },
+        {
+          "post_number": 523,
+          "post_id": 425855,
+          "author": "arctic",
+          "created_at": "2026-04-13T14:46:35.025Z",
+          "updated_at": "2026-04-13T14:46:35.025Z",
+          "url": "https://discuss.pixls.us/t/48209/523",
+          "research_role": "Neutral-ramp calibration"
+        },
+        {
+          "post_number": 548,
+          "post_id": 427220,
+          "author": "mikae1",
+          "created_at": "2026-04-23T14:42:10.718Z",
+          "updated_at": "2026-04-23T14:42:10.718Z",
+          "url": "https://discuss.pixls.us/t/48209/548",
+          "research_role": "Manufacturer and archived datasheet links"
+        },
+        {
+          "post_number": 549,
+          "post_id": 427224,
+          "author": "arctic",
+          "created_at": "2026-04-23T14:58:04.263Z",
+          "updated_at": "2026-04-23T15:07:26.942Z",
+          "url": "https://discuss.pixls.us/t/48209/549",
+          "research_role": "Digitisation errors and vector PDFs"
+        },
+        {
+          "post_number": 559,
+          "post_id": 427703,
+          "author": "arctic",
+          "created_at": "2026-04-27T19:12:45.574Z",
+          "updated_at": "2026-05-02T08:42:09.064Z",
+          "url": "https://discuss.pixls.us/t/48209/559",
+          "research_role": "Spectral reconstruction corrections"
+        },
+        {
+          "post_number": 600,
+          "post_id": 428370,
+          "author": "arctic",
+          "created_at": "2026-05-03T11:50:27.497Z",
+          "updated_at": "2026-05-03T11:50:27.497Z",
+          "url": "https://discuss.pixls.us/t/48209/600",
+          "research_role": "Granularity and physical comparison discussion"
+        },
+        {
+          "post_number": 601,
+          "post_id": 428373,
+          "author": "arctic",
+          "created_at": "2026-05-03T12:07:02.424Z",
+          "updated_at": "2026-05-03T12:28:05.586Z",
+          "url": "https://discuss.pixls.us/t/48209/601",
+          "research_role": "MTF comparison and approximate tuning"
+        },
+        {
+          "post_number": 672,
+          "post_id": 429112,
+          "author": "arctic",
+          "created_at": "2026-05-07T18:13:21.689Z",
+          "updated_at": "2026-05-08T07:24:14.418Z",
+          "url": "https://discuss.pixls.us/t/48209/672",
+          "research_role": "Metamerism and reconstruction limits"
+        },
+        {
+          "post_number": 918,
+          "post_id": 434315,
+          "author": "arctic",
+          "created_at": "2026-06-04T22:06:24.028Z",
+          "updated_at": "2026-06-04T22:06:44.737Z",
+          "url": "https://discuss.pixls.us/t/48209/918",
+          "research_role": "B&W work moved to digitisation campaign"
+        }
+      ]
+    },
+    {
+      "title": "spektrafilm tech discussions",
+      "topic_id": 57512,
+      "url": "https://discuss.pixls.us/t/57512",
+      "retrieved_post_count": 140,
+      "highest_post_number": 157,
+      "last_posted_at": "2026-08-09T17:23:49.929Z",
+      "coverage": "All post IDs returned by the public topic stream retrieved; full text searched; relevant technical posts examined. Deleted and inaccessible posts not recovered.",
+      "selected_primary_posts": [
+        {
+          "post_number": 28,
+          "post_id": 430919,
+          "author": "arctic",
+          "created_at": "2026-05-17T20:35:00.865Z",
+          "updated_at": "2026-05-17T20:44:56.304Z",
+          "url": "https://discuss.pixls.us/t/57512/28",
+          "research_role": "Camera spectra, metamerism, unavoidable information loss"
+        },
+        {
+          "post_number": 34,
+          "post_id": 431131,
+          "author": "arctic",
+          "created_at": "2026-05-18T21:39:39.435Z",
+          "updated_at": "2026-05-18T21:41:48.623Z",
+          "url": "https://discuss.pixls.us/t/57512/34",
+          "research_role": "General model versus scan matching"
+        },
+        {
+          "post_number": 38,
+          "post_id": 432417,
+          "author": "arctic",
+          "created_at": "2026-05-25T23:03:11.831Z",
+          "updated_at": "2026-05-25T23:03:11.831Z",
+          "url": "https://discuss.pixls.us/t/57512/38",
+          "research_role": "Reflectance corpus sources"
+        },
+        {
+          "post_number": 44,
+          "post_id": 433824,
+          "author": "arctic",
+          "created_at": "2026-06-01T07:42:21.433Z",
+          "updated_at": "2026-06-01T07:42:21.433Z",
+          "url": "https://discuss.pixls.us/t/57512/44",
+          "research_role": "Generalisation across laboratory workflows"
+        },
+        {
+          "post_number": 50,
+          "post_id": 435535,
+          "author": "arctic",
+          "created_at": "2026-06-10T09:15:38.514Z",
+          "updated_at": "2026-06-10T11:31:43.556Z",
+          "url": "https://discuss.pixls.us/t/57512/50",
+          "research_role": "Reflectance-based spectral upsampling"
+        },
+        {
+          "post_number": 56,
+          "post_id": 435931,
+          "author": "arctic",
+          "created_at": "2026-06-12T18:27:33.319Z",
+          "updated_at": "2026-06-12T21:33:39.821Z",
+          "url": "https://discuss.pixls.us/t/57512/56",
+          "research_role": "Expanded corpus and prior biases"
+        },
+        {
+          "post_number": 65,
+          "post_id": 436456,
+          "author": "arctic",
+          "created_at": "2026-06-15T14:10:21.634Z",
+          "updated_at": "2026-06-15T15:20:36.414Z",
+          "url": "https://discuss.pixls.us/t/57512/65",
+          "research_role": "Camera colour filters for B&W"
+        },
+        {
+          "post_number": 67,
+          "post_id": 436463,
+          "author": "arctic",
+          "created_at": "2026-06-15T14:36:54.305Z",
+          "updated_at": "2026-06-15T14:36:54.305Z",
+          "url": "https://discuss.pixls.us/t/57512/67",
+          "research_role": "Near-IR extrapolation limitations"
+        },
+        {
+          "post_number": 76,
+          "post_id": 437708,
+          "author": "arctic",
+          "created_at": "2026-06-22T07:28:36.967Z",
+          "updated_at": "2026-06-22T07:50:57.927Z",
+          "url": "https://discuss.pixls.us/t/57512/76",
+          "research_role": "IR realism limitations"
+        },
+        {
+          "post_number": 80,
+          "post_id": 440025,
+          "author": "jandren",
+          "created_at": "2026-06-30T20:00:25.165Z",
+          "updated_at": "2026-06-30T20:20:43.536Z",
+          "url": "https://discuss.pixls.us/t/57512/80",
+          "research_role": "Proposed spectral validation method"
+        },
+        {
+          "post_number": 83,
+          "post_id": 440316,
+          "author": "jandren",
+          "created_at": "2026-07-02T12:43:32.834Z",
+          "updated_at": "2026-07-02T12:43:32.834Z",
+          "url": "https://discuss.pixls.us/t/57512/83",
+          "research_role": "Digital-camera sensitivity measurement work"
+        },
+        {
+          "post_number": 131,
+          "post_id": 445850,
+          "author": "MegaWeitzel",
+          "created_at": "2026-08-02T17:00:10.353Z",
+          "updated_at": "2026-08-02T17:00:10.353Z",
+          "url": "https://discuss.pixls.us/t/57512/131",
+          "research_role": "Proposal for additional colour sublayers"
+        },
+        {
+          "post_number": 132,
+          "post_id": 445863,
+          "author": "niklasiivari",
+          "created_at": "2026-08-02T17:40:55.601Z",
+          "updated_at": "2026-08-02T17:40:55.601Z",
+          "url": "https://discuss.pixls.us/t/57512/132",
+          "research_role": "Limits of published sublayer data"
+        },
+        {
+          "post_number": 134,
+          "post_id": 445992,
+          "author": "MegaWeitzel",
+          "created_at": "2026-08-03T07:06:50.037Z",
+          "updated_at": "2026-08-03T07:06:50.037Z",
+          "url": "https://discuss.pixls.us/t/57512/134",
+          "research_role": "Acknowledged artistic assumptions in proposed sensitivity model"
+        },
+        {
+          "post_number": 141,
+          "post_id": 446325,
+          "author": "ggbutcher",
+          "created_at": "2026-08-04T16:42:20.629Z",
+          "updated_at": "2026-08-04T16:42:20.629Z",
+          "url": "https://discuss.pixls.us/t/57512/141",
+          "research_role": "Digital-camera grating setup"
+        },
+        {
+          "post_number": 156,
+          "post_id": 447385,
+          "author": "ho4",
+          "created_at": "2026-08-09T16:49:12.874Z",
+          "updated_at": "2026-08-09T16:49:12.874Z",
+          "url": "https://discuss.pixls.us/t/57512/156",
+          "research_role": "Unresolved Fuji preflash cast report"
+        }
+      ]
+    },
+    {
+      "title": "2026 Q2 data-sheets digitization campaign",
+      "topic_id": 58032,
+      "url": "https://discuss.pixls.us/t/58032",
+      "retrieved_post_count": 21,
+      "highest_post_number": 21,
+      "last_posted_at": "2026-06-28T08:50:19.441Z",
+      "coverage": "All post IDs returned by the public topic stream retrieved; full text searched; relevant technical posts examined. Deleted and inaccessible posts not recovered.",
+      "selected_primary_posts": [
+        {
+          "post_number": 1,
+          "post_id": 433314,
+          "author": "arctic",
+          "created_at": "2026-05-30T05:06:34.603Z",
+          "updated_at": "2026-05-30T05:11:03.066Z",
+          "url": "https://discuss.pixls.us/t/58032/1",
+          "research_role": "Additional-stock request campaign"
+        },
+        {
+          "post_number": 7,
+          "post_id": 433825,
+          "author": "arctic",
+          "created_at": "2026-06-01T07:48:38.732Z",
+          "updated_at": "2026-06-01T07:48:38.732Z",
+          "url": "https://discuss.pixls.us/t/58032/7",
+          "research_role": "Phoenix lacks developed-film absorption spectra"
+        },
+        {
+          "post_number": 11,
+          "post_id": 434314,
+          "author": "arctic",
+          "created_at": "2026-06-04T21:58:23.513Z",
+          "updated_at": "2026-06-04T21:58:32.316Z",
+          "url": "https://discuss.pixls.us/t/58032/11",
+          "research_role": "B&W digitisation and demonstrations"
+        },
+        {
+          "post_number": 15,
+          "post_id": 434669,
+          "author": "arctic",
+          "created_at": "2026-06-06T18:52:49.343Z",
+          "updated_at": "2026-06-06T19:02:47.869Z",
+          "url": "https://discuss.pixls.us/t/58032/15",
+          "research_role": "B&W stock roadmap and multigrade-paper challenge"
+        },
+        {
+          "post_number": 17,
+          "post_id": 435118,
+          "author": "ghost",
+          "created_at": "2026-06-09T01:03:03.714Z",
+          "updated_at": "2026-06-09T01:03:03.714Z",
+          "url": "https://discuss.pixls.us/t/58032/17",
+          "research_role": "Request for profile creation tools and provenance"
+        },
+        {
+          "post_number": 18,
+          "post_id": 435187,
+          "author": "arctic",
+          "created_at": "2026-06-09T08:42:54.765Z",
+          "updated_at": "2026-06-09T18:00:46.730Z",
+          "url": "https://discuss.pixls.us/t/58032/18",
+          "research_role": "Author explanation of artisanal profile construction and toolkit status"
+        }
+      ]
+    }
+  ],
+  "documents": [
+    {
+      "title": "Kodak F-4017 Tri-X 320 and 400",
+      "url": "https://kodakprofessional.com/sites/default/files/wysiwyg/film/f4017_trix_320400.pdf",
+      "document_revision": "2021-10",
+      "research_role": "B&W candidate; page 8 graph visually inspected; 400TX distinguished from 7266",
+      "sha256": "1d86b030cf7a8502e6f1414c630fa2cda30b68df53f49bccccce73c9c6562078",
+      "bytes": 788169
+    },
+    {
+      "title": "Kodak F-4016 T-MAX 100",
+      "url": "https://kodakprofessional.com/sites/default/files/wysiwyg/pro/resources/f4016_TMax_100.pdf",
+      "document_revision": null,
+      "research_role": "B&W candidate; sensitivity, curve families, granularity and MTF"
+    },
+    {
+      "title": "Fujifilm Acros II 135 AF3-0258E",
+      "url": "https://asset.fujifilm.com/www/us/files/2020-08/73080443d0289b1a7b116add14a9bdfc/films_neopan100acros2_135_01_0.pdf",
+      "document_revision": null,
+      "research_role": "B&W candidate; format and film generation need explicit identification"
+    },
+    {
+      "title": "Fujifilm Acros II 120 AF3-0259E",
+      "url": "https://asset.fujifilm.com/www/ca/files/2020-07/c5e78177ce869ce1ded8c8c79799d93f/AF3-0259E_PIB-NEOPAN-100-ACROSII-120-3_data-sheet.pdf",
+      "document_revision": null,
+      "research_role": "Manufacturer spectral, characteristic and granularity data"
+    },
+    {
+      "title": "Ilford HP5 Plus November 2018",
+      "url": "https://www.ilfordphoto.com/amfile/file/download/file/1903/product/691/",
+      "document_revision": "2018-11",
+      "research_role": "Manufacturer source; PDF text read via web tool"
+    },
+    {
+      "title": "Ilford HP5 Plus November 2018, mirror",
+      "url": "https://www.thephotoshop.ie/wp-content/uploads/2011/08/HP5-technical-data-sheet-.pdf",
+      "document_revision": "2018-11",
+      "research_role": "Manufacturer PDF mirrored externally; page 1 graph visually inspected",
+      "sha256": "f06f383d714bc9d13033f9e30a6aedf29d9b9f4d25c4a353d69e6526cb2f037f",
+      "bytes": 395876
+    },
+    {
+      "title": "Older Ilford HP5 Plus eight-page sheet, mirror",
+      "url": "https://www.99tarbox.com/rhoadescameras/Camera%20PDFs/Ilford%20HP5%20Plus.pdf",
+      "document_revision": null,
+      "research_role": "Manufacturer PDF mirrored externally; page 3 equal-energy relative log-sensitivity graph visually inspected; exact publication date not established",
+      "sha256": "eab081983588b87808f5c6da13e07e3441d1784bb40f5b50b3eceef77c73dfb8",
+      "bytes": 265790
+    },
+    {
+      "title": "Foma Fomapan 100 Classic",
+      "url": "https://www.foma.cz/en/fomapan-100",
+      "document_revision": null,
+      "research_role": "Manufacturer product data; verify tungsten spectrogram convention before numerical use"
+    },
+    {
+      "title": "Ilford XP2 Super",
+      "url": "https://www.ilfordphoto.com/amfile/file/download/file/1909/product/703/XP2",
+      "document_revision": "2018-11",
+      "research_role": "Chromogenic dye-image exception to conventional B&W assumptions"
+    },
+    {
+      "title": "Ilford Multigrade contrast control",
+      "url": "https://www.ilfordphoto.com/amfile/file/download/file/1824/product/2078/",
+      "document_revision": null,
+      "research_role": "Primary explanation of blue/green-sensitive mixed emulsions"
+    },
+    {
+      "title": "Kodak Basic Photographic Sensitometry Workbook H-740",
+      "url": "https://www.kodak.com/content/products-brochures/Film/Basic-Photographic-Sensitometry-Workbook.pdf",
+      "document_revision": "2006-11",
+      "research_role": "Beginner definitions and measurement framework"
+    },
+    {
+      "title": "Kodak German XTOL booklet, mirror",
+      "url": "https://125px.com/docs/techpubs/kodak/xtolEntwickler.pdf",
+      "document_revision": null,
+      "research_role": "Historical characteristic-curve families annotated with CI values, not merely development-time tables. Printed pages 32–34 / one-based PDF pages 34–36 visually inspected. Includes HP5 Plus, FP4 Plus, Delta 100/400, Pan F Plus, Kodak, Agfa, and Fuji films; historical generations and axis definitions need verification.",
+      "sha256": "3dff47f09f8ee4bd0269bc69904819f395f60dd3e92c7684896d6a3e64df9273",
+      "bytes": 1331908,
+      "visually_checked_example": {
+        "film": "ILFORD HP5 PLUS",
+        "developer": "KODAK XTOL",
+        "temperature_celsius": 21,
+        "development_times_minutes": [
+          4,
+          6,
+          8,
+          10,
+          13
+        ],
+        "captioned_ci_ascending_time": [
+          0.39,
+          0.53,
+          0.62,
+          0.75,
+          0.87
+        ],
+        "printed_page": 33,
+        "pdf_page_one_based": 35,
+        "note": "Transcript from graph legend; not a new measurement or guarantee of compatibility with current emulsions."
+      }
+    },
+    {
+      "title": "Kodak EXR 100T 5248/7248 H-1-7248, mirror",
+      "url": "https://125px.com/docs/motionpicture/kodak/5248.pdf",
+      "document_revision": "1999-03",
+      "research_role": "Colour candidate; sensitivity, characteristic, min/mid total spectral density, granularity and MTF; no separately measured pure dyes inferred",
+      "sha256": "4735518c66d406e508928715f932a626b9f1e23647d45fd84f8c3cd4133291fc",
+      "bytes": 87663
+    },
+    {
+      "title": "Kodak 5247 TI0835, mirror",
+      "url": "https://125px.com/docs/motionpicture/kodak/ti0835.pdf",
+      "document_revision": "1993-06",
+      "research_role": "Historical colour candidate; source revision matters"
+    },
+    {
+      "title": "Harman Phoenix II July 2025",
+      "url": "https://www.harmanphoto.co.uk/amfile/file/download/file/1968/product/2208/",
+      "document_revision": "2025-07",
+      "research_role": "Colour candidate with missing developed-film dye-absorption data"
+    },
+    {
+      "title": "WebPlotDigitizer chart calibration",
+      "url": "https://automeris.io/docs/digitize/",
+      "document_revision": null,
+      "research_role": "Axis calibration and digitisation workflow"
+    },
+    {
+      "title": "WebPlotDigitizer data handling",
+      "url": "https://www.automeris.io/docs/data/",
+      "document_revision": null,
+      "research_role": "Exporting numerical points and saving calibration projects"
+    }
+  ],
+  "code": {
+    "rust_checkout": "567a43132f64538ec6d877c8d015e319139b80b3",
+    "rust_profile_count": 31,
+    "rust_bw_profile_count": 3,
+    "python_sibling_checkout": "28bf883e1672e884307edc75852549376e13644e",
+    "public_main_tree_checked": "3bb2c2d2801ff68b92019cf1dbcbb133d60832bc",
+    "public_main_profile_count": 28,
+    "historical_data_and_factory_commit": "9428440eb2476910d8ada11a86ea11368ddd84d1",
+    "profile_creator_extraction_commit": "dfb0219405506e2393652e880f95c7bf6a5f68e5",
+    "public_author_repos_endpoint": "https://api.github.com/users/andreavolpato/repos?per_page=100",
+    "public_main_tree_endpoint": "https://api.github.com/repos/andreavolpato/spektrafilm/git/trees/main?recursive=1",
+    "public_creator_search_result": "No maintained public creator located in checked author repositories, main tree, sibling experimental checkout, or targeted web searches; this does not establish non-existence elsewhere.",
+    "local_paths_examined": [
+      "data/profiles/",
+      "crates/spektrafilm-core/src/profile.rs",
+      "crates/spektrafilm-core/src/pipeline.rs",
+      "crates/spektrafilm-core/src/neutral_filters.rs",
+      "crates/spektrafilm-core/src/params.rs",
+      "crates/spektrafilm-model/src/grain.rs",
+      "crates/spektrafilm-math/src/spectral.rs",
+      "crates/spektrafilm-native/src/main.rs",
+      "crates/spektrafilm-cli/src/main.rs",
+      "macos/Sources/Spektrafilm/Engine.swift",
+      "scripts/package_macos_app.sh",
+      "scripts/parity/README.md",
+      "docs/handoff-bw-stocks.md",
+      "docs/upstream-sync.md"
+    ]
+  }
+}

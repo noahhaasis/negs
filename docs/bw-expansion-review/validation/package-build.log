@@ -1,0 +1,39 @@
+warning: /Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli/Cargo.toml: file `/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spektrafilm`
+  * `bin` target `spektrafilm-f64`
+   Compiling spektrafilm-io v0.1.2 (/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-io)
+   Compiling spektrafilm-core v0.1.2 (/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-core)
+   Compiling spektrafilm-native v0.1.2 (/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-native)
+    Finished `release` profile [optimized] target(s) in 41.53s
+[0/1] Planning build
+Building for production...
+[0/4] Write sources
+[1/4] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Compiling SpektrafilmApp Border.swift
+[3/5] Write Objects.LinkFileList
+[4/5] Linking SpektrafilmApp
+Build complete! (8.44s)
+warning: /Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli/Cargo.toml: file `/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spektrafilm`
+  * `bin` target `spektrafilm-f64`
+   Compiling spektrafilm-cli v0.1.2 (/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli)
+    Finished `release` profile [optimized] target(s) in 27.20s
+warning: /Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli/Cargo.toml: file `/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `spektrafilm`
+  * `bin` target `spektrafilm-f64`
+   Compiling spektrafilm-io v0.1.2 (/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-io)
+   Compiling spektrafilm-core v0.1.2 (/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-core)
+   Compiling spektrafilm-cli v0.1.2 (/Users/noahhaasis/Projects/spektrafilm-rs/crates/spektrafilm-cli)
+    Finished `release` profile [optimized] target(s) in 39.41s
+dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app: replacing existing signature
+--prepared:/Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/MacOS/spektrafilm-native
+--prepared:/Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/MacOS/spektrafilm
+--prepared:/Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/MacOS/spektrafilm-f64
+--validated:/Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/MacOS/spektrafilm-native
+--validated:/Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/MacOS/spektrafilm
+--validated:/Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/MacOS/spektrafilm-f64
+dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app: valid on disk
+dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app: satisfies its Designated Requirement
+dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app/Contents/Info.plist: OK
+Packaged: /Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903
+Zip:      /Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903.zip

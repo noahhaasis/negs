@@ -1,0 +1,15 @@
+Profiles loaded: 1 ms
+Image loaded: 270x1 (0 MP), 0 ms
+2026-10-18T19:09:47.801035Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-18T19:09:47.807753Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_trix400_d76_8min" print_exposure_factor=12.678774326574153
+2026-10-18T19:09:47.807815Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-18T19:09:47.808569Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_FILM_LOG_RAW path=/Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/diagnostics/trix-2302-lut-off-film-log-raw.f64 count=810
+2026-10-18T19:09:47.808710Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-18T19:09:47.808850Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_FILM_DENSITY path=/Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/diagnostics/trix-2302-lut-off-film-density.f64 count=810
+2026-10-18T19:09:47.809470Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-18T19:09:47.809618Z  INFO spektrafilm_core::pipeline: dumped f64 buffer for SPEKTRAFILM_DUMP_PRINT_DENSITY path=/Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/diagnostics/trix-2302-lut-off-paper-density.f64 count=810
+2026-10-18T19:09:47.810145Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 9 ms
+Saved: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/diagnostics/trix-2302-lut-off.png (270x1), 0 ms
+raw f64 buffer: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/diagnostics/trix-2302-lut-off-rgb.f64 (810 values)

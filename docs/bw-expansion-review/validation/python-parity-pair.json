@@ -1,0 +1,430 @@
+{
+  "python": {
+    "commit": null,
+    "status": null,
+    "source": "/private/tmp/spektrafilm-bw-reference",
+    "import": "/private/tmp/spektrafilm-bw-reference/src/spektrafilm/__init__.py",
+    "tree_sha256": "140ff5549c6b467243b8f3ea28852cce3e11d31bcd1484b516a8fc9835ffc10c"
+  },
+  "rust": {
+    "commit": "567a43132f64538ec6d877c8d015e319139b80b3",
+    "status": "?? .claude/\n?? TODO.txt\n?? data/profile-sources/\n?? dist/\n?? docs/adding-film-stocks-research.md\n?? docs/bw-expansion-review/\n?? docs/film-stock-research-sources.json\n?? docs/handoff-bw-expansion.md\n?? docs/performance-options-2026-10.md\n?? docs/performance-study-prototype.patch\n?? docs/performance-study-results.json\n?? problem.txt\n?? scripts/bw_expansion/\n?? scripts/parity/__pycache__/",
+    "binary": "/Users/noahhaasis/Projects/spektrafilm-rs/target/release/spektrafilm-f64",
+    "binary_sha256": "2999f7df29dc00b58323773374346844243e7779150dcabca91326a939dd9ed8",
+    "data": "/private/tmp/spektrafilm-bw-provisional-data",
+    "data_sha256": "4956c32cd615073585a38b262813c90dc0bf62419302e33b659de63dd924a761"
+  },
+  "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+  "python_version": "3.13.5 (main, Jun 11 2025, 15:36:57) [Clang 17.0.0 (clang-1700.0.13.3)]",
+  "dependencies": {
+    "numpy": "2.4.6",
+    "scipy": "1.18.0",
+    "colour-science": "0.4.7",
+    "numba": "0.65.1",
+    "OpenImageIO": "3.1.14.1"
+  },
+  "film": "kodak_trix400_d76_8min",
+  "paper": "ilford_mgrc_deluxe_grade2",
+  "scan_film": false,
+  "film_development_time": null,
+  "print_development_time": null,
+  "gamut_off": true,
+  "experimental_gamut": false,
+  "gamut_stress": true,
+  "adversarial_input": true,
+  "atol": 1e-06,
+  "rtol": 0,
+  "cases": [
+    {
+      "id": "midgray-lut-off",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 1.9286549283422926e-16,
+          "mean_abs": 1.9286549283422926e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "byte_identical": true,
+          "equal_values_fraction": 1.0,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 3.3306690738754696e-16,
+          "mean_abs": 3.3306690738754696e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 2.220446049250313e-16,
+          "mean_abs": 1.1102230246251565e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "gradient4-lut-off",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 4.3021142204224816e-16,
+          "mean_abs": 2.0534789146875454e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 3.3306690738754696e-16,
+          "mean_abs": 1.0408340855860843e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.375,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 9.992007221626409e-16,
+          "mean_abs": 5.342948306008566e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 9.992007221626409e-16,
+          "mean_abs": 3.4752293635402037e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.041666666666666664,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "ramp16-lut-off",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 4.996003610813204e-16,
+          "mean_abs": 2.681299735192433e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.015625,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 4.440892098500626e-16,
+          "mean_abs": 1.643108392401782e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.20703125,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 1.3322676295501878e-15,
+          "mean_abs": 2.6481638062958446e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.08203125,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 2.55351295663786e-15,
+          "mean_abs": 4.759941175299746e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.036458333333333336,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "gamut-stress4-lut-off",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 3.937822290467352e-16,
+          "mean_abs": 1.7379760824942636e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.1875,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 4.440892098500626e-16,
+          "mean_abs": 1.231653667943533e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.375,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 1.1102230246251565e-15,
+          "mean_abs": 3.6505087147586934e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0625,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 2.220446049250313e-15,
+          "mean_abs": 4.729651277105932e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0625,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "adversarial32-lut-off",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 2.886579864025407e-15,
+          "mean_abs": 2.1519210838174402e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.5029296875,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 1.1102230246251565e-15,
+          "mean_abs": 4.9718888475026705e-17,
+          "byte_identical": false,
+          "equal_values_fraction": 0.6181640625,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 1.9984014443252818e-15,
+          "mean_abs": 9.161159824951413e-17,
+          "byte_identical": false,
+          "equal_values_fraction": 0.5947265625,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 2.886579864025407e-15,
+          "mean_abs": 2.46404143110802e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.021158854166666668,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "midgray-lut-on",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 1.9286549283422926e-16,
+          "mean_abs": 1.9286549283422926e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "byte_identical": true,
+          "equal_values_fraction": 1.0,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 1.3100631690576847e-14,
+          "mean_abs": 1.3100631690576847e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 2.1788126858268697e-14,
+          "mean_abs": 1.970645868709653e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "gradient4-lut-on",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 4.3021142204224816e-16,
+          "mean_abs": 2.0534789146875454e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 3.3306690738754696e-16,
+          "mean_abs": 1.0408340855860843e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.375,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 1.005029393041923e-13,
+          "mean_abs": 4.791479712995539e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 1.162403506782539e-13,
+          "mean_abs": 4.956509739676799e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "ramp16-lut-on",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 4.996003610813204e-16,
+          "mean_abs": 2.681299735192433e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.015625,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 4.440892098500626e-16,
+          "mean_abs": 1.643108392401782e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.20703125,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 1.1196599203344704e-13,
+          "mean_abs": 4.7128858975120647e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 2.291500322826323e-13,
+          "mean_abs": 6.746441242027473e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "gamut-stress4-lut-on",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 3.937822290467352e-16,
+          "mean_abs": 1.7379760824942636e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.1875,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 4.440892098500626e-16,
+          "mean_abs": 1.231653667943533e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.375,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 9.103828801926284e-14,
+          "mean_abs": 3.668013158833472e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 2.674527266322002e-13,
+          "mean_abs": 9.057992348080839e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    },
+    {
+      "id": "adversarial32-lut-on",
+      "stages": {
+        "log_e_film": {
+          "max_abs": 2.886579864025407e-15,
+          "mean_abs": 2.1519210838174402e-16,
+          "byte_identical": false,
+          "equal_values_fraction": 0.5029296875,
+          "passed": true
+        },
+        "cmy_film": {
+          "max_abs": 1.1102230246251565e-15,
+          "mean_abs": 4.9718888475026705e-17,
+          "byte_identical": false,
+          "equal_values_fraction": 0.6181640625,
+          "passed": true
+        },
+        "cmy_print": {
+          "max_abs": 1.115496583992126e-13,
+          "mean_abs": 6.852521624230643e-15,
+          "byte_identical": false,
+          "equal_values_fraction": 0.0009765625,
+          "passed": true
+        },
+        "rgb_out": {
+          "max_abs": 2.6334490144108713e-13,
+          "mean_abs": 8.956454047653276e-14,
+          "byte_identical": false,
+          "equal_values_fraction": 0.010091145833333334,
+          "passed": true
+        }
+      },
+      "quantized_linear_rgb": {
+        "max_levels": 0,
+        "identical_pixels_fraction": 1.0
+      },
+      "passed": true,
+      "first_divergent_stage": null
+    }
+  ],
+  "passed": true
+}

@@ -1,0 +1,56 @@
+{
+  "app": "/Users/noahhaasis/Projects/spektrafilm-rs/dist/spektrafilm-bw-candidate-20261018-1903/Spektrafilm.app",
+  "binaries": {
+    "spektrafilm": "def822ce1bfc3ae0692dce56a98c6e5f1a472d111d48a671963fdd0d1250152e",
+    "SpektrafilmApp": "29ad935da25d2e3fc07cbef07e30ac1f93270b8f06dd4361e70c875ae2ea3104",
+    "spektrafilm-native": "a575d728304ba46c565f01801f049a951fd89d8d5033610e5fe95436997be8ad",
+    "spektrafilm-f64": "55376762ab3d391c5c15e25b9d9130b0d787acc6527ef51cf06279f8c33f1eca"
+  },
+  "cli": [
+    {
+      "case": "gradient4-lut-on-spektrafilm-f64-cpu",
+      "backend": "cpu",
+      "max_abs_vs_python": 1.162403506782539e-13,
+      "tolerance": 1e-06
+    },
+    {
+      "case": "gradient4-lut-on-spektrafilm-cpu",
+      "backend": "cpu",
+      "max_abs_vs_python": 1.68347417173198e-07,
+      "tolerance": 0.003
+    },
+    {
+      "case": "gradient4-lut-on-spektrafilm-wgpu",
+      "backend": "wgpu",
+      "max_abs_vs_python": 4.098645759897934e-06,
+      "tolerance": 0.003
+    },
+    {
+      "case": "adversarial32-lut-on-spektrafilm-f64-cpu",
+      "backend": "cpu",
+      "max_abs_vs_python": 2.6334490144108713e-13,
+      "tolerance": 1e-06
+    },
+    {
+      "case": "adversarial32-lut-on-spektrafilm-cpu",
+      "backend": "cpu",
+      "max_abs_vs_python": 1.8234676835149344e-07,
+      "tolerance": 0.003
+    },
+    {
+      "case": "adversarial32-lut-on-spektrafilm-wgpu",
+      "backend": "wgpu",
+      "max_abs_vs_python": 8.539080875613614e-06,
+      "tolerance": 0.003
+    }
+  ],
+  "native": {
+    "backend": "wgpu (GPU)",
+    "catalogue_entries": 33,
+    "preview_export_max_8bit_levels": 1,
+    "width": 512,
+    "height": 512,
+    "target_print_exercised": true
+  },
+  "passed": true
+}

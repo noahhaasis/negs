@@ -1,0 +1,11 @@
+Profiles loaded: 0 ms
+Image loaded: 512x512 (0.3 MP), 6 ms
+2026-10-18T19:09:48.070872Z  INFO spektrafilm_gpu: using CPU backend
+Backend: CPU (rayon)
+2026-10-18T19:09:48.077521Z  INFO spektrafilm_core::pipeline: pipeline calibrated method="hanatos2025" lut_size=192 film="kodak_trix400_d76_8min" print_exposure_factor=0.7553642065737556
+2026-10-18T19:09:48.077588Z  INFO spektrafilm_core::pipeline: pipeline: start backend="CPU (rayon)"
+2026-10-18T19:09:48.084959Z  INFO spektrafilm_core::pipeline: pipeline: filming complete
+2026-10-18T19:09:48.125413Z  INFO spektrafilm_core::pipeline: pipeline: printing complete
+2026-10-18T19:09:48.159616Z  INFO spektrafilm_core::pipeline: pipeline: scanning complete
+Pipeline: 88 ms
+Saved: /Users/noahhaasis/Projects/spektrafilm-rs/docs/bw-expansion-review/diagnostics/bracket--2.png (512x512), 2 ms
