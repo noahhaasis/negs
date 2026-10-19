@@ -562,6 +562,9 @@ import UniformTypeIdentifiers
         let panel = NSSavePanel()
         panel.title = export ? "Export Photograph" : "Save Preview"
         panel.canCreateDirectories = true
+        // Without a directory the panel shows the last folder of any panel,
+        // usually the Open panel's, so start where the last save went.
+        if let folder = Self.lastSaveFolder { panel.directoryURL = folder }
         var extras = ""
         if state.crop.cropped { extras += " Crops the photograph." }
         if let border = state.border.exported(for: photoSize) { extras += " Adds the \(border.title.lowercased()) border." }
@@ -579,10 +582,21 @@ import UniformTypeIdentifiers
                 self.error = "Choose a different filename to preserve the original photograph."; return
             }
             OutputFormat.last = picker.format
+            Self.lastSaveFolder = url.deletingLastPathComponent()
             let engine = picker.engine ?? .reference
             if export { ExportEngine.selected = engine }
             Task { if export { await self.export(to: url, engine: engine) } else { await self.savePreview(to: url) } }
         }
+    }
+
+    /// The folder of the last save or export, if it still exists.
+    static var lastSaveFolder: URL? {
+        get {
+            guard let path = UserDefaults.standard.string(forKey: "lastSaveFolder") else { return nil }
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? URL(fileURLWithPath: path, isDirectory: true) : nil
+        }
+        set { UserDefaults.standard.set(newValue?.path, forKey: "lastSaveFolder") }
     }
 
     /// Path comparison misses case-only differences on case-insensitive
