@@ -260,7 +260,7 @@ struct AdjustmentInspector: View {
             }
         }
         .formStyle(.grouped)
-        .disabled(!model.ready)
+        .disabled(!model.hasCatalog)
     }
 
     private func control(_ adjustment: Adjustment) -> some View { AdjustmentControl(model: model, adjustment: adjustment) }

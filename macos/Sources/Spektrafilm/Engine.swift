@@ -47,6 +47,31 @@ struct EnginePaths {
     }
 }
 
+/// The helper's last catalog, keyed by the helper binary and data folder, so a
+/// launch can show the stocks before the helper answers. The helper's own
+/// answer always replaces it.
+enum CatalogCache {
+    private static let defaultsKey = "catalogCache"
+
+    private static func key(for paths: EnginePaths) -> String? {
+        // Not URL.resourceValues, which caches per URL instance.
+        guard let modified = (try? FileManager.default.attributesOfItem(atPath: paths.helper.path))?[.modificationDate] as? Date else { return nil }
+        return "\(paths.helper.path)|\(modified.timeIntervalSince1970)|\(paths.data.path)"
+    }
+
+    static func load(for paths: EnginePaths, defaults: UserDefaults = .standard) -> JSONValue? {
+        guard let key = key(for: paths), let data = defaults.data(forKey: defaultsKey),
+              let entry = try? JSONDecoder().decode(JSONValue.self, from: data),
+              entry["key"].string == key, entry["catalog"]["protocol"].double == 1 else { return nil }
+        return entry["catalog"]
+    }
+
+    static func save(_ catalog: JSONValue, for paths: EnginePaths, defaults: UserDefaults = .standard) {
+        guard let key = key(for: paths), let data = try? JSONEncoder().encode(JSONValue.object(["key": .string(key), "catalog": catalog])) else { return }
+        defaults.set(data, forKey: defaultsKey)
+    }
+}
+
 /// Which engine renders an export. Both use the same parameters, crop and
 /// border. The GPU engine was measured against the reference on 6 photographs
 /// x 7 stocks: worst pixel ΔE00 below 0.25, at most one 8-bit step, and grain

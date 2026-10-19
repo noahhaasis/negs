@@ -50,6 +50,27 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(next["profiles"], catalog["profiles"])
     }
 
+    /// A rebuilt helper or another data folder makes the cached catalog stale.
+    func testCatalogCacheIsKeyedByHelperAndData() throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+        let helper = directory.appendingPathComponent("spektrafilm-native")
+        try Data("#!/bin/sh\n".utf8).write(to: helper)
+        let suite = "spektrafilm-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let paths = EnginePaths(helper: helper, exporter: helper, data: directory)
+        let catalog = JSONValue.object(["protocol": .number(1), "profiles": .array([.object(["id": .string("kodak_gold_200")])])])
+        XCTAssertNil(CatalogCache.load(for: paths, defaults: defaults))
+        CatalogCache.save(catalog, for: paths, defaults: defaults)
+        XCTAssertEqual(CatalogCache.load(for: paths, defaults: defaults), catalog)
+        XCTAssertNil(CatalogCache.load(for: EnginePaths(helper: helper, exporter: helper, data: directory.appendingPathComponent("other")), defaults: defaults))
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: helper.path)
+        XCTAssertNil(CatalogCache.load(for: paths, defaults: defaults))
+    }
+
     func testLocateFindsEachToolByOverrideThenAppThenCheckout() throws {
         let fm = FileManager.default
         let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)

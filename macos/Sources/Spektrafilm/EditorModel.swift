@@ -55,6 +55,8 @@ import UniformTypeIdentifiers
     var recentFiles: [URL] = []
     @ObservationIgnored weak var undoManager: UndoManager?
     @ObservationIgnored private var defaults: JSONValue = .object([:])
+    @ObservationIgnored private var catalog: JSONValue = .null
+    @ObservationIgnored private var catalogRequest: Task<(Int, JSONValue), Error>?
     @ObservationIgnored private var engine: EngineClient?
     @ObservationIgnored private var exportJob: ExportJob?
     @ObservationIgnored private var revision = 0
@@ -71,6 +73,9 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
     @ObservationIgnored private var stripRequest: (film: String, format: FilmFormat)?
 
+    /// The stocks and defaults are known, from the helper or the last launch's
+    /// catalog. Edits are possible; rendering waits for `ready`.
+    var hasCatalog: Bool { !stocks.isEmpty }
     var films: [Stock] { stocks.filter { !$0.paper } }
     var papers: [Stock] { stocks.filter(\.paper) }
     var filmGroups: [StockGroup] { StockGroup.films(films, papers: papers) }
@@ -91,31 +96,56 @@ import UniformTypeIdentifiers
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
     }
 
-    func start(paths: EnginePaths? = nil) async {
+    /// Starts the helper and asks for its catalog at once, so both load while
+    /// AppKit builds the window. Call it before building the inspector: the
+    /// last launch's catalog, if the helper is unchanged, fills in the stocks
+    /// and defaults so the inspector's first frame is complete.
+    func launch(paths: EnginePaths? = nil) {
         guard engine == nil else { return }
         do {
             let engine = try EngineClient(paths: paths ?? EnginePaths.locate())
             self.engine = engine
-            let (_, catalog) = try await engine.request(["command": .string("catalog")])
-            guard catalog["protocol"].double == 1 else { throw EngineError(message: "The image engine version doesn't match this app. Rebuild the app bundle.") }
+            catalogRequest = Task.detached { try await engine.request(["command": .string("catalog")]) }
             let data = engine.paths.data
             Task.detached(priority: .utility) { [weak self] in
                 let texture = BorderStyle.loadFilmTexture(data: data)
                 await self?.setFilmTexture(texture)
             }
-            stocks = catalog["profiles"].array.map(Stock.init)
-            defaults = catalog["defaults"]
-            // Keep anything already applied to the photograph, such as its rotation.
-            let rotation = state.params["io.rotate_cw"]
-            state.params = defaults
-            if rotation != .null { state.params["io.rotate_cw"] = rotation }
-            if !films.contains(where: { $0.id == state.film }), let first = films.first { state.film = first.id }
-            if !papers.contains(where: { $0.id == state.paper }), let first = papers.first { state.paper = first.id }
-            pairFilm(in: &state)
+            if let cached = CatalogCache.load(for: engine.paths) { apply(catalog: cached) }
+        } catch { report(error) }
+    }
+
+    func start(paths: EnginePaths? = nil) async {
+        launch(paths: paths)
+        guard let request = catalogRequest, let engine else { return }
+        catalogRequest = nil
+        do {
+            let (_, catalog) = try await request.value
+            guard catalog["protocol"].double == 1 else { throw EngineError(message: "The image engine version doesn't match this app. Rebuild the app bundle.") }
+            // An unchanged catalog keeps edits made while the helper started.
+            if catalog != self.catalog {
+                apply(catalog: catalog)
+                CatalogCache.save(catalog, for: engine.paths)
+            }
             ready = true
             if source == nil { status = "" }
             if source != nil { changed() }
         } catch { report(error) }
+    }
+
+    private func apply(catalog: JSONValue) {
+        self.catalog = catalog
+        stocks = catalog["profiles"].array.map(Stock.init)
+        defaults = catalog["defaults"]
+        // Keep anything already applied to the photograph, such as its rotation.
+        let rotation = state.params["io.rotate_cw"]
+        var next = state
+        next.params = defaults
+        if rotation != .null { next.params["io.rotate_cw"] = rotation }
+        if !films.contains(where: { $0.id == next.film }), let first = films.first { next.film = first.id }
+        if !papers.contains(where: { $0.id == next.paper }), let first = papers.first { next.paper = first.id }
+        pairFilm(in: &next)
+        state = next
     }
 
     private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }

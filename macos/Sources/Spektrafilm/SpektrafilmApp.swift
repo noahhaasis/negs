@@ -1,23 +1,49 @@
 import AppKit
 import SwiftUI
 
+/// AppKit runs the application, menus, window, and toolbar; the canvas and
+/// inspector inside the window are SwiftUI. A SwiftUI scene with the same
+/// toolbar and inspector took about twice as long to show the window
+/// (docs/native-macos-ui.md, Startup).
+@main enum SpektrafilmMain {
+    static func main() {
+        MainActor.assumeIsolated {
+            let app = NSApplication.shared
+            let delegate = ApplicationDelegate()
+            app.delegate = delegate
+            withExtendedLifetime(delegate) { app.run() }
+        }
+    }
+}
+
 @MainActor final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     let model = EditorModel()
+    private var menu: MainMenu?
+    private var editor: EditorWindowController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // Start the engine while AppKit builds the window.
+        // The helper starts while AppKit builds the window, and the cached
+        // catalog fills in the inspector's first frame.
+        model.launch()
         Task { await model.start() }
+        menu = MainMenu(model: model)
+        NSApp.mainMenu = menu?.menu
+        editor = EditorWindowController(model: model)
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        editor?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
-        // Finder opens arrive through onOpenURL; a path argument is for `swift run`.
+        // Finder opens arrive through application(_:open:); a path argument is for `swift run`.
         if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }) {
             model.open(URL(fileURLWithPath: path))
         }
         #if SPEKTRAFILM_BENCHMARK
         InteractionBenchmark.start(model)
         #endif
+    }
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if let url = urls.first(where: \.isFileURL) { model.open(url) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -32,56 +58,9 @@ import SwiftUI
     func applicationWillTerminate(_ notification: Notification) { model.shutdown() }
 }
 
-@main struct SpektrafilmApp: App {
-    @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var delegate
-
-    var body: some Scene {
-        let model = delegate.model
-        Window("Spektrafilm", id: "editor") {
-            EditorWindow(model: model)
-        }
-        .defaultSize(width: 1320, height: 860)
-        .windowToolbarStyle(.unified)
-        .commands { EditorCommands(model: model) }
-    }
-}
-
-struct EditorCommands: Commands {
+/// The window's main column: the photograph, the drop target, and the status bar.
+struct EditorCanvas: View {
     let model: EditorModel
-
-    var body: some Commands {
-        CommandGroup(replacing: .newItem) {
-            Button("Open Photograph…", action: model.openPanel).keyboardShortcut("o")
-            Menu("Open Recent") {
-                ForEach(model.recentFiles, id: \.self) { url in
-                    Button(url.lastPathComponent) { model.open(url) }
-                }
-            }.disabled(model.recentFiles.isEmpty)
-        }
-        CommandGroup(replacing: .saveItem) {
-            Button("Save Preview…") { model.savePanel(export: false) }.keyboardShortcut("s").disabled(!model.canSave)
-            Button("Export Photograph…") { model.savePanel(export: true) }.keyboardShortcut("e", modifiers: [.command, .shift]).disabled(model.source == nil || !model.ready || model.exporting || model.cropping)
-        }
-        CommandGroup(after: .toolbar) {
-            Toggle("Show Adjustments", isOn: Bindable(model).inspectorVisible).keyboardShortcut("i", modifiers: [.command, .option])
-            Divider()
-            Button("Fit Photograph") { model.zoom(fit: true) }.keyboardShortcut("0").disabled(model.source == nil || model.cropping)
-            Button("Actual Size") { model.zoom(fit: false) }.keyboardShortcut("1").disabled(model.source == nil || model.cropping)
-            Button("Rotate Clockwise", action: model.rotate).keyboardShortcut("r").disabled(model.source == nil)
-            if model.cropping {
-                Button("Done Cropping") { model.endCrop(apply: true) }.keyboardShortcut("k")
-            } else {
-                Button("Crop", action: model.beginCrop).keyboardShortcut("k").disabled(model.image == nil)
-            }
-            Divider()
-            Button("Reset All Adjustments", action: model.reset).keyboardShortcut("r", modifiers: [.command, .shift]).disabled(!model.ready || model.cropping)
-        }
-    }
-}
-
-struct EditorWindow: View {
-    @Bindable var model: EditorModel
-    @Environment(\.undoManager) private var undoManager
     @State private var dropTargeted = false
 
     var body: some View {
@@ -99,62 +78,21 @@ struct EditorWindow: View {
                 StatusBar(model: model)
             }
         }
-        // Fully specified frames answer AppKit's window-size questions without
-        // measuring the content, which would lay out every inspector row per edit.
-        .frame(minWidth: 680, idealWidth: 980, maxWidth: .infinity, minHeight: 500, idealHeight: 860, maxHeight: .infinity)
-        .inspector(isPresented: $model.inspectorVisible) {
-            Group {
-                if let session = model.cropSession { CropInspector(model: model, session: session) } else { AdjustmentInspector(model: model) }
-            }
-                .frame(minWidth: 0, idealWidth: 340, maxWidth: .infinity, minHeight: 0, idealHeight: 860, maxHeight: .infinity)
-                .inspectorColumnWidth(min: 300, ideal: 340, max: 440)
-        }
-        .navigationTitle(model.source?.lastPathComponent ?? "Spektrafilm")
-        .navigationSubtitle(model.source == nil || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)")
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button(action: model.openPanel) { Label("Open", systemImage: "folder") }.help("Open photograph (⌘O)")
-            }
-            ToolbarItemGroup(placement: .principal) {
-                ControlGroup {
-                    Button { model.zoom(fit: true) } label: { Label("Fit", systemImage: "arrow.down.right.and.arrow.up.left") }
-                        .help("Fit photograph (⌘0)")
-                    Button { model.zoom(fit: false) } label: { Label("Actual Size", systemImage: "1.magnifyingglass") }
-                        .help("Actual size (⌘1)")
-                } label: { Label("Zoom", systemImage: "magnifyingglass") }
-                .disabled(model.source == nil || model.cropping)
-                Button(action: model.rotate) { Label("Rotate", systemImage: "rotate.right") }
-                    .help("Rotate clockwise (⌘R)").disabled(model.source == nil)
-                Toggle(isOn: Binding(get: { model.cropping }, set: { $0 ? model.beginCrop() : model.endCrop(apply: true) })) {
-                    Label("Crop", systemImage: "crop")
-                }
-                .help(model.cropping ? "Apply the crop (⌘K)" : "Crop the photograph (⌘K)")
-                .disabled(model.image == nil)
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                if let session = model.cropSession {
-                    // A ratio field being edited keeps its own Return and Escape.
-                    Button("Cancel") { model.endCrop(apply: false) }
-                        .keyboardShortcut(session.typing ? nil : .cancelAction)
-                        .help("Discard the crop (Esc)")
-                    Button("Done") { model.endCrop(apply: true) }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(session.typing ? nil : .defaultAction)
-                        .help("Apply the crop (Return)")
-                } else {
-                    Button { model.savePanel(export: true) } label: { Label("Export", systemImage: "square.and.arrow.down") }
-                        .help("Export photograph (⇧⌘E)").disabled(model.source == nil || !model.ready || model.exporting)
-                }
-                Button { model.inspectorVisible.toggle() } label: { Label("Adjustments", systemImage: "slider.horizontal.3") }
-                    .help("Show or hide adjustments (⌥⌘I)")
-            }
-        }
-        .onAppear { model.undoManager = undoManager }
-        .onChange(of: undoManager) { _, manager in model.undoManager = manager }
-        .onOpenURL { url in model.open(url) }
         .alert("Spektrafilm", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+    }
+}
+
+/// The inspector column: the adjustments, or the crop panel while cropping.
+struct InspectorPanel: View {
+    let model: EditorModel
+    /// False until the window is on screen; see EditorWindowController.
+    var built = true
+
+    var body: some View {
+        if !built { Color.clear }
+        else if let session = model.cropSession { CropInspector(model: model, session: session) } else { AdjustmentInspector(model: model) }
     }
 }
 
