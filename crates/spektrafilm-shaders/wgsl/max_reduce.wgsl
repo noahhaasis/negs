@@ -15,10 +15,14 @@ var<workgroup> partial: array<f32, 256>;
 @compute @workgroup_size(256)
 fn main(
     @builtin(workgroup_id) wid: vec3<u32>,
-    @builtin(local_invocation_id) lid: vec3<u32>
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(num_workgroups) groups: vec3<u32>,
 ) {
     let local = lid.x;
-    let base = wid.x * 2048u + local * 8u;
+    // Blocks wrap into y above 65535 workgroups (see `linear_dispatch_grid`);
+    // the grid can overshoot, and blocks past the input write nothing.
+    let block = wid.y * groups.x + wid.x;
+    let base = block * 2048u + local * 8u;
     var m = -3.402823466e38;
     for (var i = 0u; i < 8u; i++) {
         let idx = base + i;
@@ -41,7 +45,7 @@ fn main(
         stride = stride / 2u;
     }
 
-    if local == 0u {
-        output[wid.x] = partial[0];
+    if local == 0u && block * 2048u < params.n_values {
+        output[block] = partial[0];
     }
 }

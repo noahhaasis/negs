@@ -288,10 +288,12 @@ kernels it replaced, even with the extra exponential-tail passes.
 - **Other blurs** (unsharp mask, lens blurs, glare, grain blur, diffusion
   filter) still use the old 3σ FIR. They are within ΔE00 0.13 of the CPU but
   could move to `RefBlur`.
-- **About 67 MP limit on the GPU path.** Every other per-pixel pass dispatches
-  `ceil(n / 1024)` workgroups in x only, so above 65535 × 1024 pixels the
-  dispatch is invalid. A 100 MP file (GFX100, X2D) would fail. This predates
-  these changes; the 2D grid used for grain is the fix.
+- **About 67 MP limit on the GPU path (lifted on 19 October, see the
+  handoff's results).** Every other per-pixel pass dispatched `ceil(n / 1024)`
+  workgroups in x only, so above 65535 × 1024 pixels the dispatch was invalid
+  and a 100 MP file (GFX100, X2D) failed. Highlight boost, which runs one
+  thread per value, already failed above 21.8 MP. All linear passes now use
+  the 2D grid (`linear_dispatch_grid`).
 - **Any heavy per-pixel shader at 1024 threads** risks the same silent
   drop as grain. Today's set was verified by the matrix, but a new heavy pass
   should get a moment test like grain's.

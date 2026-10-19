@@ -19,8 +19,12 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> raw_out: array<f32>; // [H*W*3]
 
 @compute @workgroup_size(1024)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let pixel_idx = gid.x;
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) groups: vec3<u32>,
+) {
+    // 2D grid above 65535 workgroups (see `linear_dispatch_grid`).
+    let pixel_idx = gid.y * groups.x * 1024u + gid.x;
     if pixel_idx >= params.width * params.height {
         return;
     }

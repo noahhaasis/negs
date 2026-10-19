@@ -30,6 +30,43 @@ fn fir_blur_radius(sigma: f32) -> u32 {
     ((3.0_f32 * sigma).ceil() as u32).min(MAX_BLUR_RADIUS)
 }
 
+/// `@workgroup_size` of the flat per-pixel shaders (one thread per pixel or
+/// value, `idx = gid.y * groups.x * 1024 + gid.x`).
+#[cfg(feature = "wgpu-backend")]
+const LINEAR_WORKGROUP_SIZE: u32 = 1024;
+
+/// WebGPU's default (and Metal's actual) limit on workgroups per dispatch
+/// dimension.
+#[cfg(feature = "wgpu-backend")]
+const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
+
+/// Workgroup grid for `n_threads` threads in groups of `workgroup_size`.
+/// Wraps into y so neither dimension exceeds the 65535 limit: 1024-thread
+/// groups in x alone stop at 67.1 M threads, 256-thread groups at 16.7 M.
+/// The grid can overshoot `n_threads` by up to one row; shaders guard with
+/// `idx >= n`.
+#[cfg(feature = "wgpu-backend")]
+fn linear_dispatch_grid(n_threads: u32, workgroup_size: u32) -> (u32, u32) {
+    linear_dispatch_grid_capped(n_threads, workgroup_size, MAX_WORKGROUPS_PER_DIMENSION)
+}
+
+/// [`linear_dispatch_grid`] with an explicit per-dimension cap, so tests can
+/// force the wrapped (y > 1) layout at small sizes.
+#[cfg(feature = "wgpu-backend")]
+fn linear_dispatch_grid_capped(n_threads: u32, workgroup_size: u32, max_per_dim: u32) -> (u32, u32) {
+    let groups = n_threads.div_ceil(workgroup_size).max(1);
+    let y = groups.div_ceil(max_per_dim);
+    (groups.div_ceil(y), y)
+}
+
+/// Dispatch a flat per-pixel shader (`@workgroup_size(1024)`) over
+/// `n_threads` threads.
+#[cfg(feature = "wgpu-backend")]
+fn dispatch_linear(pass: &mut wgpu::ComputePass<'_>, n_threads: u32) {
+    let (x, y) = linear_dispatch_grid(n_threads, LINEAR_WORKGROUP_SIZE);
+    pass.dispatch_workgroups(x, y, 1);
+}
+
 #[cfg(all(feature = "wgpu-backend", feature = "precision-f64"))]
 #[inline]
 fn scalars_to_f32(v: &[spektrafilm_math::precision::Scalar]) -> std::borrow::Cow<'static, [f32]> {
@@ -132,10 +169,10 @@ impl WgpuBackend {
         limits.max_compute_workgroups_per_dimension =
             adapter_limits.max_compute_workgroups_per_dimension;
         limits.max_bind_groups = adapter_limits.max_bind_groups.max(limits.max_bind_groups);
-        // Our per-pixel shaders use `@workgroup_size(1024)` so the
-        // dispatch grid stays under the 65535-per-dimension limit even
-        // for 30+ MP images. The default Limits cap workgroup
-        // invocations at 256, so we have to lift that here too.
+        // Our per-pixel shaders use `@workgroup_size(1024)`; the default
+        // Limits cap workgroup invocations at 256, so lift that here too.
+        // Large images wrap the dispatch grid into y (`linear_dispatch_grid`)
+        // to stay under the 65535-workgroups-per-dimension limit.
         limits.max_compute_invocations_per_workgroup =
             adapter_limits.max_compute_invocations_per_workgroup;
         limits.max_compute_workgroup_size_x = adapter_limits.max_compute_workgroup_size_x;
@@ -306,8 +343,6 @@ impl WgpuBackend {
         });
 
         // Dispatch
-        let workgroup_size = 1024u32;
-        let num_workgroups = (n_pixels + workgroup_size - 1) / workgroup_size;
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         {
@@ -317,7 +352,7 @@ impl WgpuBackend {
             });
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(num_workgroups, 1, 1);
+            dispatch_linear(&mut pass, n_pixels);
         }
         encoder.copy_buffer_to_buffer(&gpu_buffers[output_idx], 0, &readback, 0, output_size);
         self.queue.submit(Some(encoder.finish()));
@@ -1099,7 +1134,6 @@ impl WgpuBackend {
         );
 
         // ── Build bind groups (per dispatch, but no buffer creation) ─────
-        let workgroup_size = 1024u32;
 
         // Front pass: hanatos (params + rgb_in + tc_lut + raw_out) or mallett
         // (params + rgb_in + raw_out). The tc_lut buffer rides along in the
@@ -1574,7 +1608,7 @@ impl WgpuBackend {
             });
             pass.set_pipeline(pipe);
             pass.set_bind_group(0, bg, &[]);
-            pass.dispatch_workgroups((n + workgroup_size - 1) / workgroup_size, 1, 1);
+            dispatch_linear(&mut pass, n);
         };
 
         // 1. Front pass (hanatos or mallett): buf_a (rgb in) → buf_b (raw)
@@ -1597,7 +1631,7 @@ impl WgpuBackend {
         //     input RGB image is no longer needed), buf_c / buf_d for the
         //     scatter outputs and halation accumulator.
         if let Some(hs) = halation_state.as_ref() {
-            hs.encode_passes(&mut encoder, n_pixels, workgroup_size);
+            hs.encode_passes(&mut encoder, n_pixels);
         }
         // 2. log10 in-place on buf_b: raw → log_raw (3 channels per thread).
         let (log10_pipe, log10_bg, _keepalive) = &bg_log10;
@@ -1612,7 +1646,7 @@ impl WgpuBackend {
         // 3b. DIR couplers (operates on buf_a, mutates buf_b → log_raw_corrected,
         //     re-interps density curve back into buf_a).
         if let Some(ds) = dir_state.as_ref() {
-            ds.encode_passes(&mut encoder, n_pixels, workgroup_size);
+            ds.encode_passes(&mut encoder, n_pixels);
         }
         // 3c. Grain (in-place on buf_a, optional post-blur via buf_b mid).
         if let Some(gs) = grain_state.as_ref() {
@@ -1647,12 +1681,12 @@ impl WgpuBackend {
         // 6b. Glare (in place on buf_b).
         if let Some(gs) = glare_state.as_ref() {
             let wg_xy = (image.width.div_ceil(16), image.height.div_ceil(16));
-            gs.encode_passes(&mut encoder, n_pixels, workgroup_size, wg_xy);
+            gs.encode_passes(&mut encoder, n_pixels, wg_xy);
         }
         // 6c. Output gamut compression (in place on buf_b) — after glare,
         //     before unsharp, mirroring the CPU scanning order.
         if let Some(gs) = gamut_state.as_ref() {
-            gs.encode_passes(&mut encoder, n_pixels, workgroup_size);
+            gs.encode_passes(&mut encoder, n_pixels);
         }
         // 6d. Scanner lens blur — after glare/gamut, before unsharp.
         if let Some(bs) = scanner_lens_blur_state.as_ref() {
@@ -1666,7 +1700,6 @@ impl WgpuBackend {
             us.encode_passes(
                 &mut encoder,
                 n_pixels,
-                workgroup_size,
                 wg_xy,
                 &buf_b,
                 img_bytes as u64,
@@ -2774,7 +2807,6 @@ impl HalationState {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         n_pixels: u32,
-        workgroup_size: u32,
     ) {
         let _ = (&self.buf_c, &self.buf_d); // owned, just keepalive
         let dispatch_linear = |enc: &mut wgpu::CommandEncoder, job: &DispatchJob| {
@@ -2784,7 +2816,7 @@ impl HalationState {
             });
             pass.set_pipeline(&job.pipeline.pipeline);
             pass.set_bind_group(0, &job.bg, &[]);
-            pass.dispatch_workgroups((n_pixels + workgroup_size - 1) / workgroup_size, 1, 1);
+            dispatch_linear(&mut pass, n_pixels);
         };
 
         // Scatter
@@ -3275,7 +3307,7 @@ impl DiffusionState {
             });
             pass.set_pipeline(&job.pipeline.pipeline);
             pass.set_bind_group(0, &job.bg, &[]);
-            pass.dispatch_workgroups(n.div_ceil(1024), 1, 1);
+            dispatch_linear(&mut pass, n);
         };
 
         // Zero the accumulator (add_scaled_per_channel has no clear).
@@ -3623,7 +3655,9 @@ impl HighlightBoostState {
             });
             pass.set_pipeline(&job.pipeline.pipeline);
             pass.set_bind_group(0, &job.bg, &[]);
-            pass.dispatch_workgroups(*blocks, 1, 1);
+            // One 256-thread workgroup per 2048-value block.
+            let (x, y) = linear_dispatch_grid(*blocks, 1);
+            pass.dispatch_workgroups(x, y, 1);
         }
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("highlight_boost"),
@@ -3631,7 +3665,7 @@ impl HighlightBoostState {
         });
         pass.set_pipeline(&self.boost.pipeline.pipeline);
         pass.set_bind_group(0, &self.boost.bg, &[]);
-        pass.dispatch_workgroups(self.n_values.div_ceil(1024), 1, 1);
+        dispatch_linear(&mut pass, self.n_values);
     }
 }
 
@@ -3649,7 +3683,7 @@ impl InplaceUnaryState {
         });
         pass.set_pipeline(&self.job.pipeline.pipeline);
         pass.set_bind_group(0, &self.job.bg, &[]);
-        pass.dispatch_workgroups(n_pixels.div_ceil(1024), 1, 1);
+        dispatch_linear(&mut pass, n_pixels);
     }
 }
 
@@ -4103,7 +4137,7 @@ fn build_dir_state(
 
 #[cfg(feature = "wgpu-backend")]
 impl DirState {
-    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, n_pixels: u32, workgroup_size: u32) {
+    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, n_pixels: u32) {
         let dispatch_linear = |enc: &mut wgpu::CommandEncoder, job: &DispatchJob| {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("dir_linear"),
@@ -4111,7 +4145,7 @@ impl DirState {
             });
             pass.set_pipeline(&job.pipeline.pipeline);
             pass.set_bind_group(0, &job.bg, &[]);
-            pass.dispatch_workgroups((n_pixels + workgroup_size - 1) / workgroup_size, 1, 1);
+            dispatch_linear(&mut pass, n_pixels);
         };
 
         dispatch_linear(encoder, &self.matmul); // buf_a → S0
@@ -4331,7 +4365,6 @@ impl UnsharpState {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         n_pixels: u32,
-        workgroup_size: u32,
         wg_xy: (u32, u32),
         buf_b: &wgpu::Buffer,
         img_bytes: u64,
@@ -4363,7 +4396,7 @@ impl UnsharpState {
             });
             pass.set_pipeline(&self.combine.pipeline.pipeline);
             pass.set_bind_group(0, &self.combine.bg, &[]);
-            pass.dispatch_workgroups((n_pixels + workgroup_size - 1) / workgroup_size, 1, 1);
+            dispatch_linear(&mut pass, n_pixels);
         }
         // Copy sharpened result back into buf_b so the downstream
         // readback sees it without needing to know we used a temp.
@@ -4628,7 +4661,6 @@ impl GlareState {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         n_pixels: u32,
-        workgroup_size: u32,
         wg_xy: (u32, u32),
     ) {
         // 1. Noise generation.
@@ -4639,7 +4671,7 @@ impl GlareState {
             });
             pass.set_pipeline(&self.gen_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.gen_dispatch.bg, &[]);
-            pass.dispatch_workgroups((n_pixels + workgroup_size - 1) / workgroup_size, 1, 1);
+            dispatch_linear(&mut pass, n_pixels);
         }
         // 2. Optional blur.
         if let Some(b) = &self.blur {
@@ -4670,7 +4702,7 @@ impl GlareState {
             });
             pass.set_pipeline(&self.apply_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.apply_dispatch.bg, &[]);
-            pass.dispatch_workgroups((n_pixels + workgroup_size - 1) / workgroup_size, 1, 1);
+            dispatch_linear(&mut pass, n_pixels);
         }
     }
 }
@@ -4778,7 +4810,6 @@ impl GamutState {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         n_pixels: u32,
-        workgroup_size: u32,
     ) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("gamut_compress"),
@@ -4786,7 +4817,7 @@ impl GamutState {
         });
         pass.set_pipeline(&self.dispatch.pipeline.pipeline);
         pass.set_bind_group(0, &self.dispatch.bg, &[]);
-        pass.dispatch_workgroups((n_pixels + workgroup_size - 1) / workgroup_size, 1, 1);
+        dispatch_linear(&mut pass, n_pixels);
     }
 }
 
@@ -4802,15 +4833,6 @@ impl GamutState {
 #[cfg(feature = "wgpu-backend")]
 const GRAIN_WORKGROUP_SIZE: u32 = 256;
 
-/// Workgroup grid for one grain thread per pixel: wraps into y so neither
-/// dimension exceeds the 65535 limit. The shader's flat index is
-/// `gid.y * groups.x * 256 + gid.x`.
-#[cfg(feature = "wgpu-backend")]
-fn grain_dispatch_grid(n_pixels: u32) -> (u32, u32) {
-    let groups = n_pixels.div_ceil(GRAIN_WORKGROUP_SIZE);
-    let y = groups.div_ceil(65535);
-    (groups.div_ceil(y), y)
-}
 
 #[cfg(feature = "wgpu-backend")]
 struct GrainState {
@@ -5025,7 +5047,7 @@ impl GrainState {
             });
             pass.set_pipeline(&self.grain_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.grain_dispatch.bg, &[]);
-            let (x, y) = grain_dispatch_grid(n_pixels);
+            let (x, y) = linear_dispatch_grid(n_pixels, GRAIN_WORKGROUP_SIZE);
             pass.dispatch_workgroups(x, y, 1);
         }
         // Optional post-blur.
@@ -5075,12 +5097,185 @@ mod grain_tests {
     use wgpu::util::DeviceExt;
 
     #[test]
-    fn grain_dispatch_grid_covers_every_pixel_within_limits() {
-        for n in [1, 255, 256, 257, 24_337_152, 60_318_720, 100_000_000] {
-            let (x, y) = grain_dispatch_grid(n);
-            assert!(x <= 65535 && y <= 65535, "{n}: {x} × {y}");
-            assert!(x as u64 * y as u64 * GRAIN_WORKGROUP_SIZE as u64 >= n as u64, "{n}: {x} × {y}");
+    fn linear_dispatch_grid_covers_every_thread_within_limits() {
+        // Up to 150 MP, and the 3-values-per-pixel highlight-boost pass at
+        // 100 MP. The overshoot is less than one row of workgroups.
+        for wg in [1, GRAIN_WORKGROUP_SIZE, LINEAR_WORKGROUP_SIZE] {
+            for n in [0, 1, 255, 256, 257, 24_337_152, 60_318_720, 67_107_840, 67_108_865, 100_663_296, 150_000_000, 301_989_888] {
+                let (x, y) = linear_dispatch_grid(n, wg);
+                assert!((1..=65535).contains(&x) && (1..=65535).contains(&y), "{n}/{wg}: {x} × {y}");
+                let threads = x as u64 * y as u64 * wg as u64;
+                assert!(threads >= n as u64, "{n}/{wg}: {x} × {y}");
+                assert!(threads < n as u64 + x as u64 * wg as u64 + wg as u64, "{n}/{wg}: {x} × {y}");
+            }
         }
+    }
+
+    /// Render a cheap flat shader over a grid that is forced to wrap into y
+    /// (as every pass does above 67 MP) and check each pixel is written
+    /// exactly once: `dst += 1 · src` with src = 1 leaves 0 where a thread
+    /// was missed and 2 where one ran twice.
+    #[test]
+    fn wrapped_linear_dispatch_writes_every_pixel_once() {
+        let Some(backend) = WgpuBackend::new() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        let n_pixels = 10 * LINEAR_WORKGROUP_SIZE + 5; // 11 groups
+        let (x, y) = linear_dispatch_grid_capped(n_pixels, LINEAR_WORKGROUP_SIZE, 4);
+        assert_eq!((x, y), (4, 3), "test must exercise an overshooting 2D grid");
+        let pipe = backend.cached_pipeline(
+            include_str!("../../spektrafilm-shaders/wgsl/add_scaled.wgsl"),
+            &[
+                wgpu::BufferBindingType::Uniform,
+                wgpu::BufferBindingType::Storage { read_only: true },
+                wgpu::BufferBindingType::Storage { read_only: false },
+            ],
+        );
+        let n_values = n_pixels as usize * 3;
+        // One spare pixel past the end must stay untouched too.
+        let ones = vec![1.0f32; n_values + 3];
+        let src = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wrap_src"),
+            contents: bytemuck::cast_slice(&ones),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let dst = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wrap_dst"),
+            contents: bytemuck::cast_slice(&vec![0.0f32; n_values + 3]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        let params: [u32; 4] = [n_pixels, 1.0f32.to_bits(), 0, 0];
+        let params = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wrap_params"),
+            contents: bytemuck::cast_slice(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bg = backend.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wrap_bg"),
+            layout: &pipe.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: src.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: dst.as_entire_binding() },
+            ],
+        });
+        let out = run_and_read(&backend, &dst, (n_values + 3) * 4, |encoder| {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipe.pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(x, y, 1);
+        });
+        let wrong: Vec<usize> = (0..n_values).filter(|&i| out[i] != 1.0).collect();
+        assert!(wrong.is_empty(), "{} values not written exactly once, first at {:?}", wrong.len(), wrong.first());
+        assert_eq!(&out[n_values..], &[0.0; 3], "wrote past n_pixels");
+    }
+
+    /// The highlight-boost max reduction over a wrapped grid of blocks (it
+    /// wraps above 134 M values, i.e. 45 MP) must still find the maximum,
+    /// wherever it sits.
+    #[test]
+    fn wrapped_max_reduce_finds_the_maximum() {
+        let Some(backend) = WgpuBackend::new() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        let n_values: u32 = 2048 * 10 + 7; // 11 blocks
+        let blocks = n_values.div_ceil(2048);
+        let (x, y) = linear_dispatch_grid_capped(blocks, 1, 4);
+        assert_eq!((x, y), (4, 3));
+        let pipe = backend.cached_pipeline(
+            include_str!("../../spektrafilm-shaders/wgsl/max_reduce.wgsl"),
+            &[
+                wgpu::BufferBindingType::Uniform,
+                wgpu::BufferBindingType::Storage { read_only: true },
+                wgpu::BufferBindingType::Storage { read_only: false },
+            ],
+        );
+        for peak_at in [0, 2048 * 5 + 3, n_values - 1] {
+            let data: Vec<f32> = (0..n_values).map(|i| if i == peak_at { 7.5 } else { (i % 97) as f32 * 0.01 }).collect();
+            let input = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("reduce_in"),
+                contents: bytemuck::cast_slice(&data),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+            // One sentinel slot past the last block must survive.
+            let output = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("reduce_out"),
+                contents: bytemuck::cast_slice(&vec![-1.0f32; blocks as usize + 1]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
+            let params: [u32; 8] = [n_values, 0, 0, 0, 0, 0, 0, 0];
+            let params = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("reduce_params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let bg = backend.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("reduce_bg"),
+                layout: &pipe.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: input.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: output.as_entire_binding() },
+                ],
+            });
+            let out = run_and_read(&backend, &output, (blocks as usize + 1) * 4, |encoder| {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&pipe.pipeline);
+                pass.set_bind_group(0, &bg, &[]);
+                pass.dispatch_workgroups(x, y, 1);
+            });
+            for b in 0..blocks as usize {
+                let lo = b * 2048;
+                let hi = (lo + 2048).min(n_values as usize);
+                let expected = data[lo..hi].iter().cloned().fold(f32::MIN, f32::max);
+                assert_eq!(out[b], expected, "block {b}, peak at {peak_at}");
+            }
+            assert_eq!(out[blocks as usize], -1.0, "wrote past the last block");
+        }
+    }
+
+    /// A 100 MP frame needs 1.2 GB per 3-channel f32 image buffer, bound
+    /// whole. Fails if the device can't bind that, rather than letting a
+    /// large render fail later.
+    #[test]
+    fn device_can_bind_a_100_mp_image() {
+        let Some(backend) = WgpuBackend::new() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        let limits = backend.device.limits();
+        let bytes = 12_288u64 * 8_192 * 3 * 4;
+        eprintln!(
+            "max_buffer_size {} B, max_storage_buffer_binding_size {} B, 100 MP image {} B",
+            limits.max_buffer_size, limits.max_storage_buffer_binding_size, bytes
+        );
+        assert!(limits.max_buffer_size >= bytes);
+        assert!(limits.max_storage_buffer_binding_size as u64 >= bytes);
+    }
+
+    fn run_and_read(
+        backend: &WgpuBackend,
+        buf: &wgpu::Buffer,
+        bytes: usize,
+        encode: impl FnOnce(&mut wgpu::CommandEncoder),
+    ) -> Vec<f32> {
+        let readback = backend.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("test_readback"),
+            size: bytes as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = backend.device.create_command_encoder(&Default::default());
+        encode(&mut encoder);
+        encoder.copy_buffer_to_buffer(buf, 0, &readback, 0, bytes as u64);
+        backend.queue.submit(Some(encoder.finish()));
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
+        backend.device.poll(wgpu::Maintain::Wait);
+        let out: Vec<f32> = bytemuck::cast_slice(&slice.get_mapped_range()).to_vec();
+        out
     }
 
     /// Poisson(λ) thinned by Binomial(·, p) is Poisson(λp), so on a flat
