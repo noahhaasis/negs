@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [features]
+default = ["apple-raw"]
+# Only compiled/linked on macOS. Disable for a portable rawler-only build.
+apple-raw = []
 precision-f64 = ["spektrafilm-math/precision-f64"]
 
 [dependencies]
@@ -16,6 +19,9 @@ serde.workspace = true
 serde_json.workspace = true
 rawler = "0.8"
 ab_glyph = "0.2.32"
+
+[build-dependencies]
+cc = "1"
 
 [dev-dependencies]
 serde_json.workspace = true

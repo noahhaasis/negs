@@ -82,8 +82,8 @@ runs with:
 ./target/release/spektrafilm-gui [optional/path/to/image.orf]
 ```
 
-- **Open…** — load a TIFF, PNG, or camera RAW (DNG/CR2/CR3/NEF/ARW/ORF/RW2/etc., decoded via [`rawler`](https://github.com/dnglab/dnglab)).
-- **RAW white balance** — As shot (unchanged default), Daylight, Tungsten, or Custom temperature/tint. Edits re-develop the RAW for preview and final export. Disabled for non-RAW inputs; independent of Scanner → White correction. See [controls and decoder differences](docs/raw-white-balance.md).
+- **Open…** — load a TIFF, PNG, or camera RAW (DNG/CR2/CR3/NEF/ARW/ORF/RW2/etc.). macOS uses Apple's RAW decoder, including supported Nikon HE/HE★ files; unsupported formats fall back to [`rawler`](https://github.com/dnglab/dnglab). Other platforms use rawler. See [decoder architecture and quality](docs/apple-raw-decoder.md).
+- **RAW white balance** — As shot (default), Daylight, Tungsten, or Custom temperature/tint. Edits re-develop the RAW for preview and final export. Disabled for non-RAW inputs; independent of Scanner → White correction. See [controls and decoder differences](docs/raw-white-balance.md).
 - **Sliders** — exposure, film format, halation, DIR couplers, grain, glare, scanner, enlarger, output. All live-updating against the GPU preview.
 - **Profiles** — film stock and print paper combo boxes; picking a film auto-selects its paired paper (`target_print` in the profile).
 - **Zoom** — scroll wheel or trackpad pinch over the preview (cursor-anchored), click-drag to pan, double-click to reset.

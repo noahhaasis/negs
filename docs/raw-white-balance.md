@@ -1,13 +1,32 @@
 # RAW input white balance
 
+## Decoder selection
+
+macOS now prefers Apple's `CIRAWFilter` RAW developer; other platforms retain
+rawler. Apple-unsupported profiles (including valid tiny/custom DNGs) fall back
+to rawler. Rendering and file-I/O errors are reported rather than silently
+changing the colour processing. See [decoder architecture](apple-raw-decoder.md).
+
+Apple As Shot uses the stored camera white balance. Other modes develop at D65
+(`neutralChromaticity = (0.3127, 0.3290)`) before applying the existing shared
+CAT02/ACES temperature/tint operation. Apple's own numerical tint control is
+not used, so Tint keeps its established Spektrafilm meaning. Custom 6504 K /
+tint 1 is exactly Daylight. Both preview and f64 export call the same loader.
+
+Apple uses its own demosaicing, active-area crop and camera calibration.
+Existing RAWs can therefore look different from earlier rawler builds. These
+are decoder differences, not changes to the film profiles. As Shot remains the
+default mode; exact old rawler pixel parity is not claimed on macOS. The
+matrix-derived daylight description below applies to the rawler fallback.
+
 ## Controls
 
 Open a camera RAW, then use **RAW white balance** above Profiles:
 
 | Mode | Behavior |
 | --- | --- |
-| **As shot** (default) | Uses the RAW's stored camera WB through rawler, exactly as before this feature. |
-| **Daylight** | Develops with daylight coefficients derived from the camera's color matrix (6504 K reference). |
+| **As shot** (default) | Uses the RAW's stored camera WB through the selected decoder. |
+| **Daylight** | Develops at D65 through Apple, or matrix-derived daylight coefficients through rawler. |
 | **Tungsten (2850 K)** | Starts from Daylight and adapts a 2850 K scene white to the daylight reference. |
 | **Custom** | Same adaptation using Temperature, then a green-channel multiplier in linear ACES2065-1 using Tint. |
 
@@ -162,7 +181,8 @@ reintroducing the original temperature-to-camera coefficient calculation.
   to the valid shared approximation domain (1667–25000 K) and tint to a
   finite positive value ≤4 instead of extrapolating or zeroing green.
 - Existing rawler limitations (e.g. unsupported lossy DNG and some unusual
-  sensor/calibration layouts) still apply. Monochrome RAW WB is a no-op.
+  sensor/calibration layouts) still apply when using that backend. Apple's
+  camera/profile support depends on the installed OS. Monochrome RAW WB is a no-op.
 
 ## Verification
 

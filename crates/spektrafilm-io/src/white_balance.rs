@@ -285,6 +285,32 @@ pub(crate) fn finish(
     Ok(())
 }
 
+/// Apply the same backend-independent adaptation to Apple's D65 linear RGB.
+pub(crate) fn finish_rgb(
+    rgb: &mut [f32],
+    settings: RawWhiteBalance,
+    monochrome: bool,
+) -> Result<()> {
+    settings.validate()?;
+    if monochrome {
+        return Ok(());
+    }
+    let Some((temperature, tint)) = settings.adjustment() else {
+        return Ok(());
+    };
+    if temperature == 6504.0 && tint == 1.0 {
+        return Ok(());
+    }
+    let matrix = adjustment_matrix(temperature, tint);
+    rgb.par_chunks_exact_mut(3).for_each(|p| {
+        let out = mv(matrix, [f64::from(p[0]), f64::from(p[1]), f64::from(p[2])]);
+        for (v, result) in p.iter_mut().zip(out) {
+            *v = result as f32;
+        }
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

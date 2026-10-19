@@ -2,7 +2,7 @@
 //! `decode_raw_gui`.
 //!
 //! Every loader returns an [`ImageBuf`] of **linear** RGB values:
-//! - RAW files go through `rawler` and come out in linear sRGB primaries.
+//! - RAW files use the platform decoder and come out in linear sRGB primaries.
 //! - PNG is sRGB gamma-encoded and is decoded to linear here.
 //! - TIFF (and any other `image`-crate format) passes through unchanged.
 //!
@@ -16,6 +16,7 @@ pub mod border;
 pub mod crop;
 pub mod film35;
 pub mod metadata;
+pub mod raw;
 pub mod save;
 mod white_balance;
 
@@ -86,7 +87,7 @@ pub fn is_raw_extension(ext: &str) -> bool {
 }
 
 /// True if the loaders return linear sRGB for this file (PNG after its
-/// sRGB decode, RAW after rawler's develop step). The pipeline should
+/// sRGB decode, RAW after the selected backend's development). The pipeline should
 /// then use `input_color_space = "sRGB"` and
 /// `input_cctf_decoding = false`, so the gamma isn't decoded twice.
 pub fn input_is_linear_srgb(path: &Path) -> bool {
@@ -155,20 +156,15 @@ fn decode_no_limits(path: &Path) -> Result<image::DynamicImage> {
 /// Decode a camera RAW file to **linear** sRGB primaries, with its EXIF
 /// orientation applied.
 ///
-/// `rawler::RawDevelop::default()` already does rescale → demosaic →
-/// crop → white balance → camera→sRGB matrix. We drop the final `SRgb`
-/// gamma step to get linear sRGB, because the spektrafilm pipeline
-/// applies its own sRGB encoding at the end. Negative values are
-/// clamped to 0.
-///
-/// Limitation: rawler can't read Lightroom-exported "lossy DNG"
-/// (`ljpeg sof.precision 8`); those files return an error.
+/// Auto selects Apple's full-resolution RAW developer on macOS and rawler
+/// elsewhere. Unsupported Apple formats fall back to rawler. Both produce
+/// linear sRGB; negatives are floored at zero, highlights are not clipped.
 pub fn load_raw(path: &Path) -> Result<ImageBuf> {
     load_raw_with_wb(path, RawWhiteBalance::default())
 }
 
-/// Like [`load_raw`], using the selected input white balance. As shot
-/// preserves the original default development path exactly.
+/// Like [`load_raw`], using the selected input white balance. As shot uses
+/// the camera white balance through the selected platform backend.
 pub fn load_raw_with_wb(path: &Path, wb: RawWhiteBalance) -> Result<ImageBuf> {
     load_raw_impl(path, true, wb)
 }
@@ -180,6 +176,18 @@ pub fn load_raw_unoriented(path: &Path) -> Result<ImageBuf> {
 }
 
 fn load_raw_impl(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<ImageBuf> {
+    Ok(raw::decode_raw(
+        path,
+        raw::RawDecodeOptions {
+            white_balance: wb,
+            apply_orientation: orient,
+        },
+        raw::RawDecoderPreference::Auto,
+    )?
+    .image)
+}
+
+fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<ImageBuf> {
     use rawler::{
         decoders::RawDecodeParams,
         imgop::develop::{ProcessingStep, RawDevelop},

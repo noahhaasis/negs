@@ -1,0 +1,537 @@
+{
+  "os": "macOS-26.5.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "iterations": 6,
+  "cases": [
+    {
+      "label": "zf_he_star_portrait",
+      "filename": "DSC_2533.NEF",
+      "sha256": "2ad5c5b22fe49e293547a5fd154ba749a3ea09242b301a73033797dc1e38b8bd",
+      "bytes": 8587776,
+      "backends": {
+        "apple": {
+          "above_one": 0,
+          "decode_ms": [
+            1286.5826249999998,
+            222.89475000000002,
+            201.985458,
+            210.640125,
+            208.457167,
+            206.64874999999998
+          ],
+          "decoder": "apple",
+          "height": 3984,
+          "input": "DSC_2533.NEF",
+          "max": [
+            0.5110273361206055,
+            0.4457911550998688,
+            0.37876126170158386
+          ],
+          "mean": [
+            0.04777409619461052,
+            0.07838847132264082,
+            0.13702546210201275
+          ],
+          "min": [
+            0.0,
+            0.00012717755453195423,
+            0.0
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Apple",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 2656,
+          "zeros": 12,
+          "exit_code": 0,
+          "peak_rss_mib": 538.65625,
+          "first_ms": 1286.5826249999998,
+          "warm_median_ms": 208.457167,
+          "warm_min_ms": 201.985458,
+          "warm_max_ms": 222.89475000000002
+        },
+        "rawler": {
+          "error": "RAW decode failed: DecoderFailed(\"NEF compression Some(HighEfficencyStar) is not supported\")",
+          "requested": "Rawler",
+          "success": false,
+          "exit_code": 1,
+          "peak_rss_mib": 45.953125
+        }
+      }
+    },
+    {
+      "label": "zf_he_star_landscape",
+      "filename": "DSC_1180.NEF",
+      "sha256": "a10f02d1beac01c7a8793b07c3a6e2f7e0362d5e98d2f6be6071432ba82aee7f",
+      "bytes": 9432064,
+      "backends": {
+        "apple": {
+          "above_one": 136786,
+          "decode_ms": [
+            490.947541,
+            209.522458,
+            210.381334,
+            207.843958,
+            205.402792,
+            203.67358299999998
+          ],
+          "decoder": "apple",
+          "height": 2656,
+          "input": "DSC_1180.NEF",
+          "max": [
+            2.0759894847869873,
+            1.3269649744033813,
+            0.8694688081741333
+          ],
+          "mean": [
+            0.21206288029974474,
+            0.2311811361053852,
+            0.2345057565979052
+          ],
+          "min": [
+            0.0,
+            0.002022672211751342,
+            0.0
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Apple",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 3984,
+          "zeros": 2718,
+          "exit_code": 0,
+          "peak_rss_mib": 537.84375,
+          "first_ms": 490.947541,
+          "warm_median_ms": 207.843958,
+          "warm_min_ms": 203.67358299999998,
+          "warm_max_ms": 210.381334
+        },
+        "rawler": {
+          "error": "RAW decode failed: DecoderFailed(\"NEF compression Some(HighEfficencyStar) is not supported\")",
+          "requested": "Rawler",
+          "success": false,
+          "exit_code": 1,
+          "peak_rss_mib": 46.671875
+        }
+      }
+    },
+    {
+      "label": "zf_lossless",
+      "filename": "DSC_4171.NEF",
+      "sha256": "607436c0497b6eec71d8575463edd0b0a5ed30d08e65c1be14aa235524183f54",
+      "bytes": 32797185,
+      "backends": {
+        "apple": {
+          "above_one": 301,
+          "decode_ms": [
+            591.7314580000001,
+            309.97625,
+            297.58229200000005,
+            307.175209,
+            296.100167,
+            295.41145800000004
+          ],
+          "decoder": "apple",
+          "height": 4032,
+          "input": "DSC_4171.NEF",
+          "max": [
+            2.5909552574157715,
+            1.7714815139770508,
+            1.7714813947677612
+          ],
+          "mean": [
+            0.08342745658750014,
+            0.0884912596410848,
+            0.10758275483822763
+          ],
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Apple",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 6048,
+          "zeros": 5889,
+          "exit_code": 0,
+          "peak_rss_mib": 900.859375,
+          "first_ms": 591.7314580000001,
+          "warm_median_ms": 297.58229200000005,
+          "warm_min_ms": 295.41145800000004,
+          "warm_max_ms": 309.97625
+        },
+        "rawler": {
+          "above_one": 150,
+          "decode_ms": [
+            474.581542,
+            413.088958,
+            384.914291,
+            386.017833,
+            390.81575000000004,
+            388.419917
+          ],
+          "decoder": "rawler",
+          "height": 4032,
+          "input": "DSC_4171.NEF",
+          "max": [
+            1.3072712421417236,
+            0.9783771634101868,
+            1.1273608207702637
+          ],
+          "mean": [
+            0.07841840856570974,
+            0.08292312301100363,
+            0.09690095775615105
+          ],
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Rawler",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 6048,
+          "zeros": 1087,
+          "exit_code": 0,
+          "peak_rss_mib": 952.890625,
+          "first_ms": 474.581542,
+          "warm_median_ms": 388.419917,
+          "warm_min_ms": 384.914291,
+          "warm_max_ms": 413.088958
+        }
+      }
+    },
+    {
+      "label": "z6_lossless",
+      "filename": "DSC_4987.NEF",
+      "sha256": "4794254495c2cfbe241a8acad205ec9d0c6ab9535402f91d64fc3308b70662ca",
+      "bytes": 29748260,
+      "backends": {
+        "apple": {
+          "above_one": 0,
+          "decode_ms": [
+            578.682458,
+            288.13575000000003,
+            287.159458,
+            296.37675,
+            305.068208,
+            312.146042
+          ],
+          "decoder": "apple",
+          "height": 4024,
+          "input": "DSC_4987.NEF",
+          "max": [
+            0.9385108351707458,
+            0.7656643390655518,
+            0.7778944969177246
+          ],
+          "mean": [
+            0.11653630172259698,
+            0.10653954789131416,
+            0.08722060150386934
+          ],
+          "min": [
+            0.0,
+            0.00048467691522091627,
+            0.0
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Apple",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 6048,
+          "zeros": 2,
+          "exit_code": 0,
+          "peak_rss_mib": 895.4375,
+          "first_ms": 578.682458,
+          "warm_median_ms": 296.37675,
+          "warm_min_ms": 287.159458,
+          "warm_max_ms": 312.146042
+        },
+        "rawler": {
+          "above_one": 0,
+          "decode_ms": [
+            440.833084,
+            379.35033400000003,
+            354.939083,
+            361.804167,
+            357.963584,
+            363.82320899999996
+          ],
+          "decoder": "rawler",
+          "height": 4024,
+          "input": "DSC_4987.NEF",
+          "max": [
+            0.9061082005500793,
+            0.7743183374404907,
+            0.7919944524765015
+          ],
+          "mean": [
+            0.10587313269741477,
+            0.09537150523940065,
+            0.0791906218016502
+          ],
+          "min": [
+            0.0,
+            0.0004965810803696513,
+            0.0
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Rawler",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 6048,
+          "zeros": 7,
+          "exit_code": 0,
+          "peak_rss_mib": 946.25,
+          "first_ms": 440.833084,
+          "warm_median_ms": 361.804167,
+          "warm_min_ms": 354.939083,
+          "warm_max_ms": 379.35033400000003
+        }
+      }
+    },
+    {
+      "label": "d750_lossless",
+      "filename": "_NHA2382.NEF",
+      "sha256": "2963a65aecb51f6f7d363df6ec53f041894742ef820c63ae84bb4cb80537e15b",
+      "bytes": 28874647,
+      "backends": {
+        "apple": {
+          "above_one": 16684241,
+          "decode_ms": [
+            677.2151250000001,
+            320.818834,
+            314.477083,
+            316.51275,
+            310.269375,
+            308.59920800000003
+          ],
+          "decoder": "apple",
+          "height": 6016,
+          "input": "_NHA2382.NEF",
+          "max": [
+            2.061182975769043,
+            2.0611824989318848,
+            2.061182737350464
+          ],
+          "mean": [
+            0.46130870610854496,
+            0.4614494305615772,
+            0.48462536325245426
+          ],
+          "min": [
+            0.0,
+            0.002790051745250821,
+            0.0014340614434331656
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Apple",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 4016,
+          "zeros": 14,
+          "exit_code": 0,
+          "peak_rss_mib": 890.90625,
+          "first_ms": 677.2151250000001,
+          "warm_median_ms": 314.477083,
+          "warm_min_ms": 308.59920800000003,
+          "warm_max_ms": 320.818834
+        },
+        "rawler": {
+          "above_one": 11394469,
+          "decode_ms": [
+            477.50541699999997,
+            414.84062500000005,
+            387.92458400000004,
+            383.939667,
+            385.451375,
+            384.01404099999996
+          ],
+          "decoder": "rawler",
+          "height": 6016,
+          "input": "_NHA2382.NEF",
+          "max": [
+            1.4522819519042969,
+            1.083244800567627,
+            1.2148994207382202
+          ],
+          "mean": [
+            0.4349602630478131,
+            0.3853868498002225,
+            0.43107966882019
+          ],
+          "min": [
+            0.0,
+            0.0030377202201634645,
+            0.001724607776850462
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Rawler",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 4016,
+          "zeros": 12,
+          "exit_code": 0,
+          "peak_rss_mib": 1210.9375,
+          "first_ms": 477.50541699999997,
+          "warm_median_ms": 385.451375,
+          "warm_min_ms": 383.939667,
+          "warm_max_ms": 414.84062500000005
+        }
+      }
+    },
+    {
+      "label": "dng",
+      "filename": "7858115920.dng",
+      "sha256": "14648c0f80133683c08b7c9d275267ebc7f06c53d68a47489587f20867c1eaff",
+      "bytes": 84588610,
+      "backends": {
+        "apple": {
+          "above_one": 1905588,
+          "decode_ms": [
+            1665.45025,
+            1355.739,
+            1350.335458,
+            1330.8713329999998,
+            1348.044375,
+            1339.9040420000001
+          ],
+          "decoder": "apple",
+          "height": 6336,
+          "input": "7858115920.dng",
+          "max": [
+            3.748711585998535,
+            3.9631049633026123,
+            4.310178756713867
+          ],
+          "mean": [
+            0.08320164360069632,
+            0.050142664463312704,
+            0.08867492587899505
+          ],
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Apple",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 9520,
+          "zeros": 4815655,
+          "exit_code": 0,
+          "peak_rss_mib": 2267.359375,
+          "first_ms": 1665.45025,
+          "warm_median_ms": 1348.044375,
+          "warm_min_ms": 1330.8713329999998,
+          "warm_max_ms": 1355.739
+        },
+        "rawler": {
+          "above_one": 718993,
+          "decode_ms": [
+            1104.816958,
+            1018.1084170000001,
+            1014.4055839999999,
+            1017.5375829999999,
+            1022.0331250000002,
+            1025.580167
+          ],
+          "decoder": "rawler",
+          "height": 6336,
+          "input": "7858115920.dng",
+          "max": [
+            1.6180745363235474,
+            1.569653868675232,
+            2.0696539878845215
+          ],
+          "mean": [
+            0.07234824077734897,
+            0.04911531403382309,
+            0.08238081097917287
+          ],
+          "min": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "nonfinite": 0,
+          "oriented": true,
+          "requested": "Rawler",
+          "success": true,
+          "white_balance": {
+            "mode": "as_shot",
+            "temperature": 5500.0,
+            "tint": 1.0
+          },
+          "width": 9520,
+          "zeros": 5624618,
+          "exit_code": 0,
+          "peak_rss_mib": 2196.78125,
+          "first_ms": 1104.816958,
+          "warm_median_ms": 1018.1084170000001,
+          "warm_min_ms": 1014.4055839999999,
+          "warm_max_ms": 1025.580167
+        }
+      }
+    }
+  ],
+  "method": "Sequential fresh-process calls; first iteration reported separately; median of remaining calls. OS caches are not purged. No writing/film rendering in decode_ms. RSS includes probe statistics/conversion buffers; excludes GPU allocations not resident in process.",
+  "cpu": "Apple M1 Pro",
+  "development": {
+    "apple": "float32 extended-linear sRGB; native resolution; draft off; tone boosts, baseline exposure, noise reduction, sharpening, gamut mapping and lens correction off; highlight colour recovery on",
+    "rawler": "stock 0.8.0 default development without sRGB gamma; shared WB options",
+    "film_processing_included": false
+  },
+  "baseline_commit": "a885d99e34b0b77d27e2622ad0c75af99f054c51"
+}

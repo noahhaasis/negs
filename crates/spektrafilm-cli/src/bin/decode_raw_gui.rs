@@ -38,7 +38,10 @@ fn main() -> Result<()> {
     let input = Path::new(&input);
     let output = Path::new(&output);
 
-    eprintln!("[decode_raw_gui] decoding {} via rawler …", input.display());
+    eprintln!(
+        "[decode_raw_gui] decoding {} via the platform RAW decoder …",
+        input.display()
+    );
     let img = if orient {
         spektrafilm_io::load_raw(input)?
     } else {
