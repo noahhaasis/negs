@@ -90,17 +90,17 @@ final class EngineTests: XCTestCase {
         XCTAssertNil(try locate(["SPEKTRAFILM_F32_CLI": directory.appendingPathComponent("missing").path]).fastExporter)
     }
 
-    func testExportEngineDefaultsToReferenceAndDetectsTheBackend() {
+    func testExportEngineDefaultsToFastAndDetectsTheBackend() {
         XCTAssertEqual(ExportEngine.reference.backend, "cpu")
         XCTAssertEqual(ExportEngine.fast.backend, "wgpu")
         let key = "exportEngine", saved = UserDefaults.standard.string(forKey: key)
         defer { UserDefaults.standard.set(saved, forKey: key) }
         UserDefaults.standard.removeObject(forKey: key)
-        XCTAssertEqual(ExportEngine.selected, .reference)
-        ExportEngine.selected = .fast
         XCTAssertEqual(ExportEngine.selected, .fast)
-        UserDefaults.standard.set("bogus", forKey: key)
+        ExportEngine.selected = .reference
         XCTAssertEqual(ExportEngine.selected, .reference)
+        UserDefaults.standard.set("bogus", forKey: key)
+        XCTAssertEqual(ExportEngine.selected, .fast)
         XCTAssertTrue(ExportEngine.ranOnGPU(log: "Image loaded\nBackend: wgpu (GPU)\nPipeline: 1 ms"))
         XCTAssertFalse(ExportEngine.ranOnGPU(log: "WARN wgpu backend requested but unavailable; falling back\nBackend: CPU (rayon)"))
         XCTAssertTrue(ExportEngine.ranOnGPU(backend: "wgpu (GPU)"))

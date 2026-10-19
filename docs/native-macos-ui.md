@@ -103,12 +103,12 @@ Swift rounding to the Rust tests' values.
 
 The preview buffer is capped at 8192 pixels on its longest side; saving retains
 the full processed preview resolution. Linear output is encoded only for display
-and tagged sRGB. Export runs an independent process: by default the f64
-reference (`spektrafilm-f64`, `SPEKTRAFILM_BACKEND=cpu`), or, when the export
-panel's Engine pop-up says Fast (GPU), the f32 `spektrafilm` with
-`SPEKTRAFILM_BACKEND=wgpu` (located via `SPEKTRAFILM_F32_CLI`, the app bundle,
-then `target/release`; a missing f32 tool only disables Fast export). The choice
-is stored in UserDefaults (`exportEngine`). A fast export whose log shows a CPU
+and tagged sRGB. Export runs an independent process: by default the f32
+`spektrafilm` with `SPEKTRAFILM_BACKEND=wgpu` (Fast (GPU)), or, when the export
+panel's Engine pop-up says Reference (CPU, 64-bit), the f64 reference
+(`spektrafilm-f64`, `SPEKTRAFILM_BACKEND=cpu`). The f32 tool is located via `SPEKTRAFILM_F32_CLI`, the app bundle,
+then `target/release`; a missing f32 tool only disables Fast export. The choice
+is stored in UserDefaults (`exportEngine`); without one, Fast is offered. A fast export whose log shows a CPU
 fallback is reported in the status bar, and a failed fast export suggests the
 reference engine. A fast export skips the process when the current preview was
 rendered at export size (preview not limited, or the photograph within 12 MP):

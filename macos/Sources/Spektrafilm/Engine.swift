@@ -90,9 +90,9 @@ enum ExportEngine: String, CaseIterable {
     /// Whether the helper's reported backend name is the wgpu GPU backend.
     static func ranOnGPU(backend: String) -> Bool { backend.hasPrefix("wgpu") }
 
-    /// The last choice, offered first next time. Reference until changed.
+    /// The last choice, offered first next time. Fast until changed.
     static var selected: ExportEngine {
-        get { UserDefaults.standard.string(forKey: "exportEngine").flatMap(ExportEngine.init) ?? .reference }
+        get { UserDefaults.standard.string(forKey: "exportEngine").flatMap(ExportEngine.init) ?? .fast }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "exportEngine") }
     }
 }

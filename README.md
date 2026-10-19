@@ -13,7 +13,7 @@ The same spectral integration the original Python project does (RGB → film dye
 - **Spectral pipeline.** Hanatos2025 RGB→raw spectral upsampling, full 81-wavelength film/print/scanner spectral integration, density-curve interpolation, halation, DIR couplers, grain (bit-exact numpy `MT19937` port), glare, output CCTF encoding.
 - **Live interactive preview** on the GPU (wgpu / Metal on macOS) — slider drags update at 60 fps on a 6 MP working image.
 - **Reference-quality export** on the CPU at f64 — deterministic print-chain comparisons against Python main pass within `1e-6`; see [scope and measured results](docs/upstream-sync.md).
-- **Decoupled preview + export.** GUI uses f32 GPU for iteration, then shells out to a CLI for the final write: the f64 CPU binary (Reference, the default) or the f32 GPU binary (Fast), which [measures within ΔE00 0.25 of the reference](docs/gpu-vs-cpu-quality.md). The export runs in a worker thread with a cancel button and proper child-process lifecycle.
+- **Decoupled preview + export.** GUI uses f32 GPU for iteration, then shells out to a CLI for the final write: the f32 GPU binary (Fast, the default in the macOS app), which [measures within ΔE00 0.02 of the reference](docs/gpu-vs-cpu-quality.md), or the f64 CPU binary (Reference). The export runs in a worker thread with a cancel button and proper child-process lifecycle.
 - **Profiles bundled.** 30+ film and paper profiles in `data/profiles/` — Kodak Gold/Portra/Ektar, Fuji Velvia/Provia, Kodak Endura papers, Fuji Crystal Archive papers.
 - **B&W stocks.** Updated upstream Double-X 5222, Tri-X Reversal 7266, and Kodak 2302 print-film calibrations, including development-time families. See [usage, provenance, and parity scope](docs/handoff-bw-stocks.md).
 
@@ -61,10 +61,10 @@ color-managed image display. Pinch to zoom, scroll or drag to pan, and double-cl
 to fit. Use **⌘O** to open, **⌘S** to save the preview, **⇧⌘E** to export,
 **⌘R** to rotate, **⌘0 / ⌘1** for fit / actual size, and **⌥⌘I** to toggle adjustments.
 Export remains cancellable and uses the original image at the selected working
-resolution. The export panel's **Engine** pop-up chooses **Reference (CPU,
-64-bit)**, the default, or **Fast (GPU)**, which renders like the preview and is
-several times quicker (Q3 60 MP: about 6 s instead of 33 s). Fast matches the
-reference within ΔE00 0.25 at default settings, at most one 8-bit step; grain is
+resolution. The export panel's **Engine** pop-up chooses **Fast (GPU)**, the
+default, which renders like the preview and is several times quicker (Q3 60 MP:
+about 6 s instead of 33 s), or **Reference (CPU, 64-bit)**. Fast matches the
+reference within ΔE00 0.02 at default settings, at most one 8-bit step; grain is
 statistically the same but drawn from different random numbers. The choice is
 remembered. When the preview is already at export size (not limited to 12 MP),
 a Fast export saves it directly instead of developing the photograph again,

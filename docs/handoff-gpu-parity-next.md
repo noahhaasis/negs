@@ -335,7 +335,8 @@ Answers (user, 2026-10-19):
 
 1. egui is unmaintained; leave its export as it is. The focus is the macOS
    app, which will later be ported to other platforms.
-2. Not yet: Reference stays the default.
+2. Not at first; later the same day the user made Fast the default (export
+   panel text simplified for end users at the same time).
 3. No automatic fallback, since Fast is not the default; the error message
    suggesting Reference is enough.
 4. Keep the wording for now; the user will fine-tune the UI after approving

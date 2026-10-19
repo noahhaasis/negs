@@ -496,9 +496,9 @@ import UniformTypeIdentifiers
         if let border = state.border.exported(for: photoSize) { extras += " Adds the \(border.title.lowercased()) border." }
         let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: export ? ExportEngine.selected : nil) { engine in
             switch engine {
-            case .reference?: "Render with the reference engine (CPU, 64-bit) at the current working resolution.\(extras)"
-            case .fast?: "Render on the GPU like the preview, at the current working resolution. Matches the reference within ΔE 0.25; grain is equally fine but not identical.\(extras)"
-            case nil: "Save the current preview at its rendered resolution.\(extras)"
+            case .reference?: "The most precise result. Can take about half a minute for large photos.\(extras)"
+            case .fast?: "Looks the same as Reference, in a fraction of the time.\(extras)"
+            case nil: "Saves the preview as shown.\(extras)"
             }
         }
         panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).\(picker.format.type.preferredFilenameExtension ?? "png")"
@@ -647,7 +647,7 @@ enum OutputFormat: String, CaseIterable {
             enginePopup.addItems(withTitles: ExportEngine.allCases.map(\.title))
             enginePopup.selectItem(at: ExportEngine.allCases.firstIndex(of: engine) ?? 0)
             enginePopup.target = self; enginePopup.action = #selector(engineChanged)
-            enginePopup.toolTip = "Reference renders with the 64-bit CPU engine. Fast renders on the GPU like the preview: several times quicker, and measured to match the reference within ΔE 0.25."
+            enginePopup.toolTip = "Reference develops the photo again with extra precision. Fast uses the preview's result and looks the same."
             rows.append(NSStackView(views: [NSTextField(labelWithString: "Engine:"), enginePopup]))
         }
         let stack = NSStackView(views: rows)
