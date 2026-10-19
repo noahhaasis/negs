@@ -1,0 +1,9 @@
+{
+ "film_render": {
+  "halation": {
+   "boost_ev": 1.0,
+   "boost_range": 0.3,
+   "protect_ev": 3.0
+  }
+ }
+}

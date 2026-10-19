@@ -1,0 +1,9 @@
+{
+ "enlarger": {
+  "diffusion_filter": {
+   "active": true,
+   "filter_family": "pro_mist",
+   "strength": 0.7
+  }
+ }
+}

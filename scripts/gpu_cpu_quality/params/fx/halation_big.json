@@ -1,0 +1,22 @@
+{
+ "film_render": {
+  "halation": {
+   "halation_amount": 2.0,
+   "halation_spatial_scale": 3.0,
+   "scatter_amount": 1.5,
+   "scatter_spatial_scale": 2.5,
+   "halation_n_bounces": 5,
+   "halation_bounce_decay": 0.7,
+   "halation_first_sigma_um": [
+    50.0,
+    65.0,
+    90.0
+   ],
+   "halation_strength": [
+    0.05,
+    0.03,
+    0.01
+   ]
+  }
+ }
+}

@@ -291,8 +291,8 @@ kernels it replaced, even with the extra exponential-tail passes.
 - **CUDA backend** (experimental, opt-in) is unchanged: channel-averaged
   sizes, single-Gaussian tails, normal-approximation grain.
 - **Other blurs** (unsharp mask, lens blurs, glare, grain blur, diffusion
-  filter) still use the old 3σ FIR. They are within ΔE00 0.13 of the CPU but
-  could move to `RefBlur`.
+  filter) still used the old 3σ FIR. *Fixed later on 19 October*, see
+  [Later on 19 October](#later-on-19-october-every-blur-and-the-diffusion-filter).
 - **About 67 MP limit on the GPU path (lifted on 19 October, see the
   handoff's results).** Every other per-pixel pass dispatched `ceil(n / 1024)`
   workgroups in x only, so above 65535 × 1024 pixels the dispatch was invalid
@@ -302,6 +302,111 @@ kernels it replaced, even with the extra exponential-tail passes.
 - **Any heavy per-pixel shader at 1024 threads** risks the same silent
   drop as grain. Today's set was verified by the matrix, but a new heavy pass
   should get a moment test like grain's.
+
+## Later on 19 October: every blur and the diffusion filter
+
+A second session (see the Results in
+[handoff-gpu-parity-next.md](handoff-gpu-parity-next.md)) lifted the 67 MP
+limit, made the recursive blur well conditioned in f32 (`IirCascade`), moved
+every remaining GPU blur onto `RefBlur`, and replaced the downsampled
+diffusion filter with an FFT convolution of the CPU's exact PSF. It also
+measured the effects that are off by default for the first time.
+
+### What changed
+
+- **Unsharp mask, camera and scanner lens blur, glare blur, grain blur** and
+  the non-resident `gaussian_blur` now use `RefBlur` (FIR with
+  `int(3σ + 0.5)` below σ = 3, the recursive filter above, like
+  `gaussian_blur_channel`). The old FIR used `ceil(3σ)` and never switched
+  to the recursive filter, so σ ≥ 3 (large lens blur, unsharp radius 3)
+  differed by up to ΔE00 24, and the default unsharp mask (σ 0.7: radius 3
+  instead of 2) was the residual of the colour-only mode. RefBlur can now
+  blur in place and on selected channels.
+- **Diffusion filter (camera and enlarger):** the CPU convolves each channel
+  with the exact exponential PSF by FFT, reflect-padded by the PSF radius.
+  The GPU blurred a copy downsampled up to 10× with three Gaussians per
+  exponential, which smeared the core and got the borders and very wide
+  blooms wrong (ΔE00 7–16). It now does what the CPU does: a mixed-radix
+  (2, 3, 4, 5) Stockham FFT in f32 (`fft_stage.wgsl`) on a grid of at least
+  (h + 2r) × (w + 2r), the PSF evaluated on the GPU from the CPU's
+  exponentials (`diffusion_psf_spec`) and normalized by its DC term,
+  reflect padding, crop and mix (`fft_conv.wgsl`). A unit test compares it
+  with `convolve2d_reflect` in f64: max error 4e-7.
+
+### Default settings, 42 cases per mode
+
+Worst over six photos per film. f64 CPU reference vs GPU.
+
+| Film | det: worst p99 | det: worst pixel | colour: worst p99 | colour: worst pixel | Max 8-bit step |
+|---|---:|---:|---:|---:|---:|
+| Pro 400H → Crystal Archive | 0.0039 | 0.005 | 0.0039 | 0.005 | 1 |
+| Velvia 100 (scan) | 0.0038 | 0.005 | 0.0038 | 0.005 | 1 |
+| Double-X → 2302 | 0.0040 | 0.005 | 0.0040 | 0.005 | 1 |
+| Gold 200 → Portra Endura | 0.0038 | 0.005 | 0.0038 | 0.005 | 1 |
+| Portra 400 → Portra Endura | 0.0038 | 0.005 | 0.0038 | 0.005 | 1 |
+| Tri-X reversal (scan) | 0.0038 | 0.004 | 0.0038 | 0.004 | 1 |
+| Vision3 500T → 2383 | 0.0027 | 0.004 | 0.0030 | 0.004 | 1 |
+
+Before: det worst pixel 0.19 and p99 0.040, colour worst pixel 0.13. Both
+modes are now at the same level, 0.005: what remains is f32 rounding of the
+colour pipeline. The 100 MP synthetic frame (the Q3 upscaled to
+12288 × 8192) in det mode: worst pixel 0.008, p99 0.0036.
+
+### Effects that are off by default
+
+DSC_5009 and DSC_4990, Portra 400 → Portra Endura, det base (grain and glare
+off), worst of the two photos. Parameters are in
+`scripts/gpu_cpu_quality/params/fx/` (run `effects.sh`).
+
+| Effect | Before (worst pixel / worst p99 / pixels > ΔE 1 / 8-bit step) | After (worst pixel / p99 / 8-bit step) |
+|---|---|---|
+| Diffusion, Black Pro-Mist 0.5 | 7.16 / 1.61 / 2.7% / 24 | 0.005 / 0.0036 / 1 |
+| Diffusion, Glimmerglass 1.0, warm halo | 12.59 / 2.62 / 8.7% / 40 | 0.004 / 0.0036 / 1 |
+| Diffusion, Cinebloom 1.5, scale 2, bloom size 2 | 16.08 / 6.59 / 61.8% / 48 | 0.004 / 0.0036 / 1 |
+| Enlarger diffusion, Pro-Mist 0.7 | 10.84 / 2.69 / 9.1% / 30 | 0.004 / 0.0036 / 1 |
+| Camera lens blur 10 µm (σ 1.7 px) | 0.26 / 0.035 / 0 / 1 | 0.005 / 0.0036 / 1 |
+| Camera lens blur 40 µm (σ 6.9 px) | 15.93 / 1.10 / 1.3% / 54 | 0.004 / 0.0037 / 1 |
+| Scanner lens blur 1.5 px | 0.005 / 0.004 / 0 / 1 | 0.004 / 0.0036 / 1 |
+| Scanner lens blur 4 px | 15.74 / 1.08 / 1.2% / 45 | 0.004 / 0.0036 / 1 |
+| Unsharp 2.5 px, amount 1.2 | 0.005 / 0.004 / 0 / 1 | 0.005 / 0.0036 / 1 |
+| Unsharp 3 px, amount 1 | 24.00 / 1.74 / 2.4% / 83 | 0.005 / 0.0036 / 1 |
+| Highlight boost 1 EV | 0.02 / 0.004 / 0 / 1 | 0.005 / 0.0036 / 1 |
+| Preflash 0.2, M +10, Y −5 | 0.003 / 0.002 / 0 / 1 | 0.002 / 0.0015 / 1 |
+| Print-curve morph (γ 1.2, exhaustion 0.3, …) | 0.03 / 0.004 / 0 / 1 | 0.004 / 0.0035 / 1 |
+| Halation ×2, scale 3, 5 bounces, unequal σ | 0.04 / 0.004 / 0 / 1 | 0.005 / 0.0036 / 1 |
+| DIR amount 1.5, 60 / 400 µm, tail weight 0.4 | 0.08 / 0.008 / 0 / 1 | 0.005 / 0.0036 / 1 |
+
+"Before" is this branch after the dispatch and cascade fixes. On the
+original branch highlight boost also crashed the GPU above 21.8 MP.
+`enlarger.lens_blur` exists in the parameters but neither engine applies it.
+
+### Grain (10 cases, re-run)
+
+The grain blur moved to `RefBlur` (same kernel for the default σ 0.65, so
+the same output), and the unsharp mask changed (radius 2 instead of 3 at
+σ 0.7). Grain still matches within the run-to-run spread of the reference:
+
+| Case | Grain σ dev: 2nd CPU run | GPU | Tone shift ΔL*: 2nd CPU | GPU | Spectrum dev: 2nd CPU | GPU | Low-pass ΔE: 2nd CPU | GPU |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Z6 Ektar 100 | 0.38% | 0.45% | 0.020 | 0.013 | 2.0% | 2.4% | 2.061 | 2.062 |
+| Z6 Portra 800 push 2 | 0.32% | 0.38% | 0.020 | 0.008 | 3.8% | 2.9% | 2.149 | 2.150 |
+| Z6 Portra 400 | 0.35% | 0.27% | 0.004 | 0.005 | 1.2% | 1.6% | 1.982 | 1.985 |
+| Z6 Double-X | 0.18% | 0.18% | 0.009 | 0.010 | 2.4% | 1.9% | 0.398 | 0.398 |
+| Z6 Velvia 100 | 0.24% | 0.39% | 0.004 | 0.012 | 3.1% | 2.9% | 0.930 | 0.929 |
+| Z6 Gold 200 | 0.30% | 0.20% | 0.009 | 0.006 | 2.6% | 1.4% | 1.223 | 1.222 |
+| Z6 Vision3 500T | 0.21% | 0.31% | 0.020 | 0.007 | 2.0% | 2.2% | 0.843 | 0.843 |
+| Q3 Velvia 100 | 0.18% | 0.21% | 0.006 | 0.010 | 0.9% | 1.9% | 0.997 | 0.997 |
+| Q3 Portra 400, coarse | 0.69% | 0.46% | 0.019 | 0.023 | 1.6% | 1.0% | 3.846 | 3.856 |
+| Q3 Portra 800 push 2 | 0.28% | 0.20% | 0.008 | 0.011 | 2.3% | 1.1% | 1.540 | 1.542 |
+
+### Cost
+
+The FFT diffusion filter needs two complex grids and one real spectrum of
+at least (h + 2r) × (w + 2r): on the 100 MP frame with Black Pro-Mist the
+GPU render's peak memory footprint grew from 9.2 GB to 13.7 GB, and it took
+8–13 s instead of about 4 s. At 24 MP with diffusion the GPU still renders
+in about 2.5–3 s, and at preview size (6 MP) it is as fast as the old
+downsampled version.
 
 ## What this does not prove
 
@@ -325,6 +430,9 @@ P=scripts/gpu_cpu_quality/params
 # Pixel comparison (append the printed lines to a results file):
 scripts/gpu_cpu_quality/pair.sh m_det_DSC_5009_kodak_portra_400 $PWD/$P/det.json \
   ~/Downloads/Z\ 6/DSC_5009.NEF kodak_portra_400 kodak_portra_endura | tee -a results.txt
+# Effects that are off by default (params/fx/*.json over det.json):
+scripts/gpu_cpu_quality/effects.sh            # or: effects.sh diff_bpm lens_cam_large
+# GPU_BIN=/abs/path/to/spektrafilm pair.sh … compares another build against kept ref dumps.
 # Grain statistics (suffix _coarse uses the 1.0 µm² particle params):
 scripts/gpu_cpu_quality/grain_case.sh target/memory-study/leica-q3.dng fujifilm_velvia_100 scan
 # Tables:

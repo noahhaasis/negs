@@ -1,0 +1,10 @@
+{
+ "camera": {
+  "diffusion_filter": {
+   "active": true,
+   "filter_family": "glimmerglass",
+   "strength": 1.0,
+   "halo_warmth": 0.5
+  }
+ }
+}

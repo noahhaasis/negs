@@ -1,0 +1,8 @@
+{
+ "scanner": {
+  "unsharp_mask": [
+   3.0,
+   1.0
+  ]
+ }
+}

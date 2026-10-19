@@ -7,6 +7,8 @@
 # ENGINES defaults to "ref gpu"; f32cpu is also available. Results go to
 # $OUT/runs/NAME/<engine>.json and a one-line summary is printed.
 # Build first: spektrafilm (f32) and spektrafilm-f64 in target/release.
+# GPU_BIN overrides the GPU engine's binary (an absolute path), e.g. to
+# compare a build in another target directory against kept ref dumps.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
@@ -18,12 +20,12 @@ R=$OUT/runs/$name; mkdir -p "$R"
 if [ "$paper" = scan ]; then stock=(--scan-film); else stock=(--paper "$paper"); fi
 for e in $engines; do
   case $e in
-    ref) B=spektrafilm-f64; BE=cpu ;;
-    gpu) B=spektrafilm; BE=wgpu ;;
-    f32cpu) B=spektrafilm; BE=cpu ;;
+    ref) B=target/release/spektrafilm-f64; BE=cpu ;;
+    gpu) B=${GPU_BIN:-target/release/spektrafilm}; BE=wgpu ;;
+    f32cpu) B=target/release/spektrafilm; BE=cpu ;;
   esac
   [ -f "$R/$e.f64" ] && continue
-  (cd "$ROOT" && env SPEKTRAFILM_BACKEND=$BE "target/release/$B" process "$img" -o "$R/$e.tiff" \
+  (cd "$ROOT" && env SPEKTRAFILM_BACKEND=$BE "$B" process "$img" -o "$R/$e.tiff" \
     --film "$film" "${stock[@]}" --params "$params" --raw-out "$R/$e.f64" --timings > "$R/$e.log" 2>&1)
   rm -f "$R/$e.tiff"
 done

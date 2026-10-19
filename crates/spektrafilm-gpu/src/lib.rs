@@ -270,12 +270,27 @@ pub enum FrontPass<'a> {
 /// adds `coeffs[i]` (per-channel) into the accumulator.
 #[derive(Debug, Clone)]
 pub struct DiffusionGpuPlan {
+    /// Downsample factor and working size for backends that blur a reduced
+    /// copy (CUDA). The wgpu backend convolves with `psf` by FFT instead.
     pub d: u32,
     pub small_w: u32,
     pub small_h: u32,
     pub p_s: f32,
+    /// σ at the downsampled working resolution (σ_full / d).
     pub sigmas: Vec<f32>,
     pub coeffs: Vec<[f32; 3]>,
+    /// The exact PSF, for backends that convolve by FFT (wgpu).
+    pub psf: DiffusionPsf,
+}
+
+/// The diffusion filter's exact PSF: kernel radius in pixels and, per
+/// channel, the radial exponentials `(λ_px, amplitude)` whose sum over the
+/// `(2·radius+1)²` square, normalized to unit sum, is the kernel the CPU
+/// reference convolves with.
+#[derive(Debug, Clone)]
+pub struct DiffusionPsf {
+    pub radius: u32,
+    pub components: [Vec<(f64, f64)>; 3],
 }
 
 #[derive(Debug, Clone, Copy)]

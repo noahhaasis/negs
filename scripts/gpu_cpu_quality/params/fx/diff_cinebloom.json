@@ -1,0 +1,11 @@
+{
+ "camera": {
+  "diffusion_filter": {
+   "active": true,
+   "filter_family": "cinebloom",
+   "strength": 1.5,
+   "spatial_scale": 2.0,
+   "bloom_size": 2.0
+  }
+ }
+}

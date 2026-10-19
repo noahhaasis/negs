@@ -1,0 +1,10 @@
+{
+ "film_render": {
+  "dir_couplers": {
+   "amount": 1.5,
+   "diffusion_size_um": 60.0,
+   "diffusion_tail_um": 400.0,
+   "diffusion_tail_weight": 0.4
+  }
+ }
+}

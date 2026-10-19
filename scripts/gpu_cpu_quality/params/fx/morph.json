@@ -1,0 +1,12 @@
+{
+ "print_render": {
+  "density_curves_morph": {
+   "active": true,
+   "gamma_factor": 1.2,
+   "gamma_factor_fast": 0.9,
+   "gamma_factor_red": 0.9,
+   "gamma_factor_blue": 1.1,
+   "developer_exhaustion": 0.3
+  }
+ }
+}

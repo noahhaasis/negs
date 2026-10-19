@@ -588,11 +588,7 @@ pub fn apply_diffusion_filter_um(
     let w = image.width as usize;
     let h = image.height as usize;
 
-    // Kernel radius: 8·λ_max captures 99.95% of a 2D exponential's energy.
-    let bloom_max_px = bloom_max_lambda_um(&cfg) * df.spatial_scale / pixel_size_um;
-    let mut radius = (8.0 * bloom_max_px).max(5.0).ceil() as usize;
-    let cap = (h.min(w) / 2).saturating_sub(1).max(1);
-    radius = radius.min(cap);
+    let radius = psf_radius(&cfg, df, pixel_size_um, w, h);
     let k = 2 * radius + 1;
 
     let psf = diffusion_filter_psf(k, &cfg, df.spatial_scale, pixel_size_um, df.halo_warmth);
@@ -608,6 +604,65 @@ pub fn apply_diffusion_filter_um(
         out.write_channel(c, &mixed);
     }
     out
+}
+
+/// Kernel radius of the diffusion PSF: 8·λ_max captures 99.95% of a 2D
+/// exponential's energy; capped at `min(h, w)/2 − 1` for the reflect padding.
+fn psf_radius(cfg: &FamilyShape, df: &DiffusionFilter, pixel_size_um: f64, w: usize, h: usize) -> usize {
+    let bloom_max_px = bloom_max_lambda_um(cfg) * df.spatial_scale / pixel_size_um;
+    let radius = (8.0 * bloom_max_px).max(5.0).ceil() as usize;
+    let cap = (h.min(w) / 2).saturating_sub(1).max(1);
+    radius.min(cap)
+}
+
+/// The exact PSF `apply_diffusion_filter_um` convolves with, as data for a
+/// GPU FFT convolution: deflected fraction `p_s`, kernel radius, and per
+/// channel the radial exponentials `(λ_px, amplitude)` whose sum
+/// `Σ a·exp(−r/λ)` over the `(2·radius+1)²` square, normalized to unit sum,
+/// is the PSF.
+pub struct DiffusionPsfSpec {
+    pub p_s: f64,
+    pub radius: usize,
+    pub components: [Vec<(f64, f64)>; 3],
+}
+
+/// See [`DiffusionPsfSpec`]. `None` when the filter is a no-op, exactly as in
+/// `apply_diffusion_filter_um`.
+pub fn diffusion_psf_spec(df: &DiffusionFilter, pixel_size_um: f64, width: u32, height: u32) -> Option<DiffusionPsfSpec> {
+    if df.strength <= 0.0 || df.spatial_scale <= 0.0 {
+        return None;
+    }
+    let base = family_shape(df.family)?;
+    let p_s = strength_to_scatter(df.strength, base.total_gain);
+    if p_s <= 0.0 {
+        return None;
+    }
+    let cfg = resolve_family_cfg(base, df);
+    let radius = psf_radius(&cfg, df, pixel_size_um, width as usize, height as usize);
+    // Same terms as `radial_components` / `exp_sum`.
+    let spatial_scale = df.spatial_scale.max(1e-6);
+    let (core_l, core_w) = expand_group(&cfg.core, false);
+    let (halo_l, halo_w) = expand_group(&cfg.halo, false);
+    let (bloom_l, bloom_w) = expand_group(&cfg.bloom, true);
+    let halo_per_ch = halo_channel_weights(&halo_w, cfg.halo_warmth_base + df.halo_warmth);
+    let term = |l_um: f64, weight: f64| {
+        let l = (l_um * spatial_scale / pixel_size_um).max(1e-6);
+        (l, weight / (2.0 * std::f64::consts::PI * l * l))
+    };
+    let components = std::array::from_fn(|c| {
+        let mut v = Vec::new();
+        for (k, &l) in core_l.iter().enumerate() {
+            v.push(term(l, cfg.w_c * core_w[k]));
+        }
+        for (k, &l) in halo_l.iter().enumerate() {
+            v.push(term(l, cfg.w_h * halo_per_ch[c][k]));
+        }
+        for (k, &l) in bloom_l.iter().enumerate() {
+            v.push(term(l, cfg.w_b * bloom_w[k]));
+        }
+        v
+    });
+    Some(DiffusionPsfSpec { p_s, radius, components })
 }
 
 /// Highlight-boost tone curve. Port of Python `boost_highlights`
@@ -807,6 +862,7 @@ pub fn diffusion_gpu_plan(
     let (sigmas_full, coeffs) = diffusion_components(&cfg, df, pixel_size_um);
     let sigma_max = sigmas_full.iter().cloned().fold(0.0f64, f64::max);
     let d = ((sigma_max / DIFFUSION_SIGMA_CAP).ceil() as usize).max(1);
+    let spec = diffusion_psf_spec(df, pixel_size_um, width, height)?;
 
     Some(spektrafilm_gpu::DiffusionGpuPlan {
         d: d as u32,
@@ -818,6 +874,7 @@ pub fn diffusion_gpu_plan(
             .iter()
             .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32])
             .collect(),
+        psf: spektrafilm_gpu::DiffusionPsf { radius: spec.radius as u32, components: spec.components },
     })
 }
 
@@ -897,4 +954,46 @@ pub fn apply_diffusion_filter_blur(
             *o = from_f64((1.0 - p_s) * (orig as f64) + p_s * s);
         });
     out
+}
+
+#[cfg(test)]
+mod psf_spec_tests {
+    use super::*;
+
+    /// The spec's exponentials rebuild the PSF the CPU convolves with.
+    #[test]
+    fn psf_spec_matches_the_cpu_psf() {
+        for (family, scale, warmth, w, h) in [("black_pro_mist", 1.0, 0.0, 900, 600), ("cinebloom", 2.0, 0.4, 400, 300), ("glimmerglass", 1.0, -0.5, 1200, 800)] {
+            let df = DiffusionFilter {
+                family,
+                strength: 0.8,
+                spatial_scale: scale,
+                halo_warmth: warmth,
+                core_intensity: 1.0,
+                core_size: 1.0,
+                halo_intensity: 1.2,
+                halo_size: 1.0,
+                bloom_intensity: 1.0,
+                bloom_size: 1.5,
+            };
+            let pix = 5.8;
+            let spec = diffusion_psf_spec(&df, pix, w, h).unwrap();
+            let cfg = resolve_family_cfg(family_shape(family).unwrap(), &df);
+            assert_eq!(spec.radius, psf_radius(&cfg, &df, pix, w as usize, h as usize));
+            let k = 2 * spec.radius + 1;
+            let psf = diffusion_filter_psf(k, &cfg, df.spatial_scale, pix, df.halo_warmth);
+            for c in 0..3 {
+                let raw: Vec<f64> = (0..k * k)
+                    .map(|p| {
+                        let (dx, dy) = ((p % k) as f64 - spec.radius as f64, (p / k) as f64 - spec.radius as f64);
+                        let r = (dx * dx + dy * dy).sqrt();
+                        spec.components[c].iter().map(|&(l, a)| a * (-r / l).exp()).sum::<f64>()
+                    })
+                    .collect();
+                let sum: f64 = raw.iter().sum();
+                let err = raw.iter().zip(&psf[c]).map(|(a, b)| (a / sum - b).abs()).fold(0.0, f64::max);
+                assert!(err < 1e-12 * psf[c].iter().cloned().fold(0.0, f64::max).max(1.0), "{family} channel {c}: {err}");
+            }
+        }
+    }
 }
