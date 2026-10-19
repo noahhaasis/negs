@@ -117,7 +117,7 @@ f64 export:
 - The GUI uses it for CPU f64 Export.
 
 Black and white stocks:
-- Film: Kodak Tri-X 400 / 400TX, D-76, 8 min, 35 mm (camera negative).
+- Film: Kodak Tri-X 400 / 400TX, D-76, 8 min, 35 mm (camera negative, experimental).
 - Tri-X 400 pairs automatically with the experimental neutral Ilford
   Multigrade RC Deluxe grade-2 paper. This is a fixed-grade rendering for
   neutral B&W negatives; paper tint and stock-specific grain are not measured.
