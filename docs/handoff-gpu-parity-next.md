@@ -223,3 +223,128 @@ Every speed change must keep the pass criteria; report both numbers.
 Write a short results section at the end of this file: what was done, the
 numbers, what's left, and anything you could not verify. Commit it. The user
 reads these handoffs to decide what to merge.
+
+## Results (19 October 2026, second session)
+
+Six commits on `gpu-reference-parity` after `af08025`, each with its
+measurements in the message body. Measured on this M1 Pro (32 GiB, Metal).
+Numbers are f64 CPU reference vs GPU unless stated; the full tables are in
+[gpu-vs-cpu-quality.md](gpu-vs-cpu-quality.md#later-on-19-october-every-blur-and-the-diffusion-filter).
+
+| Commit | What |
+|---|---|
+| `45deabc` | Task 1: lift the 67 MP dispatch limit |
+| `56178b4` | Recursive blur in cascade form (found by Task 1's 100 MP test) |
+| `bc4f614` | Task 2: export engine option (macOS app and egui) |
+| `bc23c8d` | Task 3: remaining blurs on RefBlur, FFT diffusion filter, effects harness |
+| `f90c926` | Task 4: faster RefBlur, per-stage GPU profiler |
+| this one | Results |
+
+### Task 1 — 67 MP limit (done)
+
+- Every flat pass goes through `linear_dispatch_grid` / `dispatch_linear`
+  (2D grid); the 1024-wide shaders compute
+  `idx = gid.y * groups.x * 1024 + gid.x`; `max_reduce` wraps its blocks.
+  Highlight boost (one thread per value) already crashed above **21.8 MP**:
+  a 24 MP Z6 file with `boost_ev = 1` panicked on the old binary.
+- Limits on this Mac: `max_buffer_size` 20.1 GB, binding 4.29 GB; a 100 MP
+  image buffer is 1.21 GB.
+- Synthetic 100.7 MP TIFF (Q3 upscaled to 12288 × 8192): colour mode worst
+  pixel 0.021; det mode worst 0.214 but **p99 0.089, above the 0.05
+  criterion**. Cause: the f32 direct-form recursive filter at σ ≈ 190 px.
+  Fixed in `56178b4` by running the same filter as a first- plus
+  second-order section in difference form (`IirCascade`): 100 MP det worst
+  0.008, p99 0.0036; Q3 det worst 0.19 → 0.012. Below 67 MP the dispatch
+  change alone was bit-identical to the old binary.
+- 100 MP GPU render: 3.5–7 s, peak footprint 9.2 GB. The f64 reference at
+  100 MP took 54–63 s and ran without trouble on 32 GiB.
+- Tests: grid maths up to 302 M values; wrapped dispatch and max-reduce on
+  the GPU with a forced 2D grid (fails with the old indexing); device limits.
+
+### Task 2 — export engine option (done)
+
+- macOS: Engine pop-up in the export panel, "Reference (CPU, 64-bit)"
+  (default) or "Fast (GPU)", stored in UserDefaults `exportEngine`.
+  `EnginePaths` finds `spektrafilm` via `SPEKTRAFILM_F32_CLI`, the bundle,
+  `target/release`; a missing f32 tool only disables Fast. CPU fallback is
+  detected from the log (`Backend: wgpu` missing) and shown in the status
+  bar; a failed fast export suggests the reference engine. Staging, cancel
+  and crash cleanup use the chosen binary.
+- **The default is still Reference.** You can flip it in the export panel;
+  it is remembered.
+- End to end through `ExportJob` with the real binaries (XCTest
+  `testRealExportsFromJobList`, 16-bit TIFF): grain off, DSC_5009, worst
+  pixel 0.020, p99 0.0058 (16-bit quantization included), 12.5 s vs 1.6 s;
+  grain on, DSC_4990: the GPU's grain statistics match CPU A as closely as
+  CPU B does.
+- egui: an engine box next to the format picker (session setting, like
+  the format; egui has no persistence). Reference keeps forcing the LUTs on;
+  Fast keeps the preview settings (the GPU computes spectra exactly).
+- README and `docs/native-macos-ui.md` updated. Swift and egui unit tests
+  added and passing.
+
+### Task 3 — remaining blurs and untested effects (done)
+
+- New harness: `effects.sh` with 15 parameter sets in `params/fx/`
+  (diffusion ×3 families, enlarger diffusion, lens blurs small/large,
+  scanner lens blur small/large, unsharp at σ 2.5 and 3, highlight boost,
+  preflash, print-curve morph, big halation, wide DIR). `pair.sh` takes
+  `GPU_BIN`.
+- Before: diffusion filters worst pixel 7–16 (up to 62% of pixels > ΔE 1);
+  lens blurs and unsharp at σ ≥ 3 worst 16–24; the rest ≤ 0.08.
+- Unsharp, lens blurs, glare blur, grain blur and the non-resident blur now
+  use RefBlur. The diffusion filter (camera and enlarger) is now an FFT
+  convolution with the CPU's exact PSF and reflect padding, in f32.
+- After: every effect worst pixel ≤ 0.005, p99 ≤ 0.0037. Default det and
+  colour matrices (42 cases each): worst pixel 0.0048, p99 0.0040 (before
+  0.19 and 0.13). Grain, 10 cases: within the CPU A-vs-B spread
+  (σ dev ≤ 0.46%, tone shift ≤ 0.023 L*, spectrum ≤ 2.9%).
+- Cost: with diffusion on, 100 MP peak footprint 13.7 GB (+4.5 GB) and
+  8–13 s; 24 MP about 2.5–3 s.
+
+### Task 4 — speed (done, more is possible)
+
+- Per-stage profiler: `SPEKTRAFILM_GPU_PROFILE=1`.
+- FIR: one dispatch for all channels (bit-identical). IIR columns: one
+  invocation per channel (bit-identical). IIR rows: segmented recursion
+  (differs by ≤ 5.7e-6; det matrix unchanged at worst 0.0048, p99 0.0040).
+- 24 MP 1100 → 755 ms, 60 MP 3800 → 2020 ms (AC power, LPM off,
+  alternating runs).
+- Left: the row pass is still the largest blur cost (~29 ms × 8 per frame
+  at 24 MP), then grain (~110 ms) and the two spectral passes (~40 ms each).
+  Packing two channels per FFT would roughly halve the diffusion filter's
+  cost. Fusing the small per-pixel passes would save ~20–30 ms.
+
+### Open questions
+
+1. **egui reference export uses the LUTs; the GPU doesn't.** GPU vs f64 with
+   LUTs on: worst pixel 0.13, **p99 0.117** (DSC_4990, Velvia scan; 0.016 on
+   DSC_5009 Portra), so the egui Fast export differs from the egui Reference
+   export by more than the 0.05 p99 criterion. That is the LUT
+   approximation, not the GPU (the GPU matches the exact spectra). Should
+   egui's reference export drop the LUTs, as the macOS app does?
+2. Make Fast the default? The numbers now support it for deterministic
+   effects (≤ 0.005); grain is statistically equal but not pixel-identical.
+3. The FFT diffusion filter needs ~4.5 GB extra at 100 MP. Smaller Macs may
+   fail there; the error is surfaced (export failed, with the reference
+   suggested), but there is no automatic fallback.
+4. The macOS panel text says the GPU "matches the reference within
+   ΔE 0.25"; measured is now 0.005. Kept conservative; tighten if wanted.
+
+### Not verified / not covered
+
+- No real 100 MP raw (GFX100, X2D): only the upscaled Q3 TIFF.
+- The macOS app UI itself was not clicked through: the export panel's
+  Engine pop-up compiles and its logic is unit-tested, and `ExportJob` ran
+  real exports, but nobody looked at the panel. The Swift integration tests
+  that need `target/release/spektrafilm-native` were skipped (not built in
+  this worktree); packaging scripts were not run.
+- The egui option was unit-tested but not run interactively; Windows and
+  Linux untested.
+- Settings not in the matrices: output gamut compression modes, mallett and
+  arctic upsampling, CAT16, scanner white/black correction, B&W print paths
+  beyond Double-X → 2302.
+- `apply_diffusion_filter_blur` (the GPU backend's non-resident path, used
+  only when the resident chain can't run) still downsamples.
+- CUDA backend untouched (compiles with `--features cuda-backend`).
+- One machine and one GPU (M1 Pro, Metal).
