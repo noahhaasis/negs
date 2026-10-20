@@ -656,7 +656,9 @@ import UniformTypeIdentifiers
         if let folder = Self.lastSaveFolder { panel.directoryURL = folder }
         var extras = ""
         if state.crop.cropped { extras += " Crops the photograph." }
-        if let border = state.border.exported(for: photoSize) { extras += " Adds the \(border.title.lowercased()) border." }
+        if let border = state.border.exported(for: photoSize) {
+            extras += " Adds the \(border.title.lowercased()) border\(state.border.instagram ? ", extended to 3:4 for Instagram" : "")."
+        }
         let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: export ? ExportEngine.selected : nil) { engine in
             switch engine {
             case .reference?: "The most precise result. Can take about half a minute for large photos.\(extras)"
@@ -706,7 +708,10 @@ import UniformTypeIdentifiers
             let r = state.crop.rect
             command["crop"] = .object(["x": .number(r.minX), "y": .number(r.minY), "width": .number(r.width), "height": .number(r.height), "angle": .number(state.crop.angle)])
         }
-        if let border = state.border.exported(for: photoSize) { command["border"] = .string(border.rawValue) }
+        if let border = state.border.exported(for: photoSize) {
+            command["border"] = .string(border.rawValue)
+            command["instagram"] = .bool(state.border.instagram)
+        }
         return command
     }
 

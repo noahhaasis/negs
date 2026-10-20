@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use spektrafilm_core::{params::RuntimeParams, pipeline::Pipeline, preview::*, profile};
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_io::{
-    border::{BorderStyle, add_border},
+    border::{BorderStyle, add_border, extend_for_instagram},
     crop::Crop,
 };
 use spektrafilm_math::image::ImageBuf;
@@ -45,6 +45,9 @@ enum Command {
         output: PathBuf,
         #[serde(default)]
         border: Option<BorderStyle>,
+        /// Extend the border to Instagram's 3:4.
+        #[serde(default)]
+        instagram: bool,
         #[serde(default)]
         crop: Option<Crop>,
         /// Clockwise quarter turns. The preview is never rotated, so turning
@@ -100,6 +103,7 @@ impl Session {
                 render_id,
                 output,
                 border,
+                instagram,
                 crop,
                 rotate_cw,
             } => {
@@ -124,11 +128,13 @@ impl Session {
                     (rotate_cw.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(rotate_cw));
                 let image = rotated.as_ref().unwrap_or(image);
                 match border {
-                    Some(style) => spektrafilm_io::save_image(
-                        &add_border(image, style, film, *encoded, data)?,
-                        &output,
-                        metadata.as_ref(),
-                    )?,
+                    Some(style) => {
+                        let mut bordered = add_border(image, style, film, *encoded, data)?;
+                        if instagram {
+                            bordered = extend_for_instagram(&bordered, style);
+                        }
+                        spektrafilm_io::save_image(&bordered, &output, metadata.as_ref())?
+                    }
                     None => spektrafilm_io::save_image(image, &output, metadata.as_ref())?,
                 }
                 Ok(json!({"saved": output}))
@@ -363,6 +369,7 @@ mod tests {
                 render_id: 1,
                 output: "unused.png".into(),
                 border: None,
+                instagram: false,
                 crop: None,
                 rotate_cw: 0,
             },

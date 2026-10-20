@@ -11,6 +11,7 @@ struct PreviewCanvas: NSViewRepresentable {
     let rotation: Int
     let crop: CropSettings
     let border: BorderStyle?
+    var instagram = false
     let filmTexture: CGImage?
     let filmStrip: FilmStrip?
     let zoomCommand: UUID
@@ -33,13 +34,16 @@ struct PreviewCanvas: NSViewRepresentable {
         let photo = scroll.documentView as! PhotographView
         let cropped = crop.size(of: size)
         let displaySize = rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
-        let documentSize = border?.canvas(for: displaySize, strip: filmStrip) ?? displaySize
+        let documentSize = border.map { border in
+            let canvas = border.canvas(for: displaySize, strip: filmStrip)
+            return instagram ? border.instagramCanvas(for: canvas) : canvas
+        } ?? displaySize
         let oldSize = photo.frame.size, oldPhotoSize = photo.displaySize
         let commanded = scroll.lastCommand != zoomCommand
         // A different crop (such as an undone one) is a new picture: fit it.
         let recropped = photo.crop != crop && oldSize.width != 0
         if recropped { scroll.fitting = true }
-        photo.show(image, size: size, rotation: rotation, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
+        photo.show(image, size: size, rotation: rotation, crop: crop, border: border, instagram: instagram, filmTexture: filmTexture, filmStrip: filmStrip)
         if oldSize != documentSize {
             if commanded || scroll.fitting || oldSize.width == 0 {
                 photo.setFrameSize(documentSize)
@@ -125,6 +129,7 @@ final class PhotographView: NSView {
     private var rotation = 0
     private(set) var crop = CropSettings()
     private var border: BorderStyle?
+    private var instagram = false
     private var filmTexture: CGImage?
     private var filmStrip: FilmStrip?
     /// The photograph's size on the canvas, after cropping and rotation.
@@ -152,11 +157,11 @@ final class PhotographView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(_ image: AnyObject, size: CGSize, rotation: Int, crop: CropSettings = CropSettings(), border: BorderStyle? = nil, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
+    func show(_ image: AnyObject, size: CGSize, rotation: Int, crop: CropSettings = CropSettings(), border: BorderStyle? = nil, instagram: Bool = false, filmTexture: CGImage? = nil, filmStrip: FilmStrip? = nil) {
         guard image !== self.image || size != self.size || rotation != self.rotation || crop != self.crop
-            || border != self.border || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
+            || border != self.border || instagram != self.instagram || filmTexture !== self.filmTexture || filmStrip != self.filmStrip else { return }
         self.image = image; self.size = size; self.rotation = rotation; self.crop = crop
-        self.border = border; self.filmTexture = filmTexture; self.filmStrip = filmStrip
+        self.border = border; self.instagram = instagram; self.filmTexture = filmTexture; self.filmStrip = filmStrip
         photo.contents = image
         needsLayout = true
     }
@@ -173,7 +178,7 @@ final class PhotographView: NSView {
         photo.bounds = CGRect(origin: .zero, size: size)
         photo.position = CGPoint(x: size.width / 2 - pixels.minX, y: pixels.height - (size.height / 2 - pixels.minY))
         photo.setAffineTransform(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180))
-        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
+        borderLayers.layout(border, instagram: instagram, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
         CATransaction.commit()
     }
 

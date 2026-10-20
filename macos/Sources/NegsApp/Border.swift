@@ -46,6 +46,14 @@ enum BorderStyle: String, Codable, Sendable, CaseIterable, Identifiable {
         }
         return CGSize(width: size.width + 2 * inset, height: size.height + 2 * inset)
     }
+    /// The 3:4 portrait canvas Instagram shows whole, around the bordered
+    /// `canvas`: the film borders get a white margin first, then white
+    /// extends the short way as little as it can.
+    func instagramCanvas(for canvas: CGSize) -> CGSize {
+        let margin = self == .film || self == .film35 ? (max(canvas.width, canvas.height) * 0.03).rounded(.down) : 0
+        let (w, h) = (canvas.width + 2 * margin, canvas.height + 2 * margin)
+        return w * 4 > h * 3 ? CGSize(width: w, height: (w * 4 / 3).rounded(.up)) : CGSize(width: (h * 3 / 4).rounded(.up), height: h)
+    }
     static func keyline(for size: CGSize) -> CGFloat { max(1, (max(size.width, size.height) * 0.004).rounded()) }
     /// The film frame's canvas inset and nine-patch corner size.
     static func film(for size: CGSize) -> (inset: CGFloat, pad: CGFloat) {
@@ -65,10 +73,24 @@ struct BorderSettings: Codable, Equatable, Sendable {
     var enabled = false
     var style = BorderStyle.white
     var export = true
+    /// Extends the border with white to Instagram's 3:4 portrait.
+    var instagram = false
 
     /// The border around a photograph of `size`, if the style fits it.
     func shown(for size: CGSize) -> BorderStyle? { enabled && style.fits(size) ? style : nil }
     func exported(for size: CGSize) -> BorderStyle? { export ? shown(for: size) : nil }
+}
+
+extension BorderSettings {
+    /// Sessions saved before a setting existed restore it at its default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = BorderSettings()
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? defaults.enabled
+        style = try c.decodeIfPresent(BorderStyle.self, forKey: .style) ?? defaults.style
+        export = try c.decodeIfPresent(Bool.self, forKey: .export) ?? defaults.export
+        instagram = try c.decodeIfPresent(Bool.self, forKey: .instagram) ?? defaults.instagram
+    }
 }
 
 /// The 35mm frame a photograph fills, chosen by its aspect ratio, like
@@ -147,40 +169,44 @@ struct FilmStrip: Equatable {
 /// The film texture is a nine-patch (`contentsCenter`), so resizing the
 /// canvas or zooming never redraws anything.
 final class BorderLayers {
-    private let keyline = CALayer()
+    /// The keyline, or the black under a film border on a white canvas.
+    private let black = CALayer()
     private let film = CALayer()
     private let strip = CALayer()
 
     init(in host: CALayer, around photo: CALayer) {
         let none = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull(), "backgroundColor": NSNull(), "hidden": NSNull()]
-        keyline.backgroundColor = .black
-        keyline.actions = none
+        black.backgroundColor = .black
+        black.actions = none
         for layer in [film, strip] {
             layer.actions = none
             layer.minificationFilter = .trilinear
             layer.magnificationFilter = .linear
             host.addSublayer(layer)
         }
-        host.insertSublayer(keyline, below: photo)
+        host.insertSublayer(black, below: photo)
         host.actions = none
     }
 
     /// Lays the border out around a photograph of `size` (as displayed,
-    /// after rotation), centred in `host`.
-    func layout(_ style: BorderStyle?, photo size: CGSize, host: CALayer, texture: CGImage?, filmStrip: FilmStrip?) {
+    /// after rotation), centred in `host`. On an `instagram` canvas the
+    /// film borders sit on white, like the exporter's.
+    func layout(_ style: BorderStyle?, instagram: Bool = false, photo size: CGSize, host: CALayer, texture: CGImage?, filmStrip: FilmStrip?) {
         let center = CGPoint(x: host.bounds.midX, y: host.bounds.midY)
+        let filmStrip = style == .film35 ? filmStrip.flatMap { $0.format == FilmFormat(size) ? $0 : nil } : nil
         host.backgroundColor = switch style {
         case .white, .keyline: .white
-        case .film, .film35: .black
+        case .film, .film35: instagram ? .white : .black
         case nil: nil
         }
-        keyline.isHidden = style != .keyline
-        if style == .keyline {
+        black.isHidden = style == nil || style == .white
+        if let style, style != .white {
             let line = BorderStyle.keyline(for: size)
-            keyline.bounds = CGRect(x: 0, y: 0, width: size.width + 2 * line, height: size.height + 2 * line)
-            keyline.position = center
+            black.bounds.size = style == .keyline ? CGSize(width: size.width + 2 * line, height: size.height + 2 * line)
+                                                  : style.canvas(for: size, strip: filmStrip)
+            black.position = center
         }
-        layoutStrip(style == .film35 ? filmStrip.flatMap { $0.format == FilmFormat(size) ? $0 : nil } : nil, photo: size, center: center)
+        layoutStrip(filmStrip, photo: size, center: center)
         film.isHidden = style != .film || texture == nil
         guard style == .film, let texture else { film.contents = nil; return }
         // Lay the texture out landscape and turn it for portrait photographs,

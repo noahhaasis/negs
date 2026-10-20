@@ -312,6 +312,8 @@ struct AdjustmentInspector: View {
                         Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)); crop it to 3:2 or 4:3 to use it.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    Toggle("Extend to 3:4 for Instagram", isOn: model.border(\.instagram))
+                        .help("Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post.")
                     Toggle("Include in export", isOn: model.border(\.export))
                         .help("Adds the border to exported photographs and saved previews.")
                 }

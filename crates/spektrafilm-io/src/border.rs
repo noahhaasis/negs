@@ -64,6 +64,29 @@ pub fn film_geometry(width: u32, height: u32) -> (u32, u32) {
     )
 }
 
+/// The 3:4 portrait canvas Instagram shows whole, for a `width` × `height`
+/// photograph with a `style` border: the film borders get a white margin
+/// first, then white extends the short way as little as it can.
+pub fn instagram_canvas(width: u32, height: u32, style: BorderStyle) -> (u32, u32) {
+    let margin = match style {
+        BorderStyle::White | BorderStyle::Keyline => 0,
+        BorderStyle::Film | BorderStyle::Film35 => white_margin(width, height),
+    };
+    let (w, h) = (width + 2 * margin, height + 2 * margin);
+    if w * 4 > h * 3 {
+        (w, (w * 4).div_ceil(3))
+    } else {
+        ((h * 3).div_ceil(4), h)
+    }
+}
+
+/// `bordered`, a photograph with a `style` border, in the middle of its
+/// white Instagram canvas.
+pub fn extend_for_instagram(bordered: &ImageBuf, style: BorderStyle) -> ImageBuf {
+    let (w, h) = instagram_canvas(bordered.width, bordered.height, style);
+    centered(bordered, w, h, 1.0)
+}
+
 /// The 35mm frame a photograph fills, chosen by its aspect ratio.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilmFormat {
@@ -125,7 +148,7 @@ pub fn add_border(
             })?;
             let strip = Strip::load(data_dir, film, format)?;
             let (cw, ch) = strip.canvas(w, h);
-            let mut out = centered(image, cw, ch);
+            let mut out = centered(image, cw, ch, 0.0);
             overlay_strip(&mut out, &strip.renderer(cw, ch, strip.turned(w, h)), encoded);
             out
         }
@@ -154,12 +177,12 @@ fn overlay_strip(out: &mut ImageBuf, renderer: &Renderer, encoded: bool) {
         });
 }
 
-/// `image` in the middle of a black `width` × `height` canvas.
-fn centered(image: &ImageBuf, width: u32, height: u32) -> ImageBuf {
+/// `image` in the middle of a `width` × `height` canvas of `fill`.
+fn centered(image: &ImageBuf, width: u32, height: u32, fill: f32) -> ImageBuf {
     let (w, h) = (image.width as usize, image.height as usize);
     let (cw, ch) = (width as usize, height as usize);
     let (x0, y0) = ((cw - w) / 2, (ch - h) / 2);
-    let mut data = vec![from_f32(0.0); cw * ch * 3];
+    let mut data = vec![from_f32(fill); cw * ch * 3];
     data.par_chunks_exact_mut(cw * 3)
         .skip(y0)
         .take(h)
@@ -306,6 +329,32 @@ mod tests {
         assert_eq!(out.get(30, 100), [from_f32(0.0); 3]);
         assert_eq!(out.get(33, 33), [from_f32(0.0); 3]);
         assert_eq!(out.get(34, 100), [from_f32(0.5); 3]);
+    }
+
+    #[test]
+    fn instagram_extends_the_short_way_to_3_by_4() {
+        use BorderStyle::*;
+        // Landscape grows down, a tall portrait grows sideways, and a
+        // canvas that's already 3:4 stays as it is.
+        assert_eq!(instagram_canvas(1068, 568, Keyline), (1068, 1424));
+        assert_eq!(instagram_canvas(1000, 2000, White), (1500, 2000));
+        assert_eq!(instagram_canvas(300, 400, White), (300, 400));
+        assert_eq!(instagram_canvas(301, 400, White), (301, 402));
+        // The film borders get a 3% white margin first.
+        assert_eq!(instagram_canvas(1000, 400, Film), (1060, 1414));
+        assert_eq!(instagram_canvas(300, 400, Film35), (324, 432));
+
+        let bordered = add_border(&photo(200, 100), White, "", true, &data_dir()).unwrap();
+        let out = extend_for_instagram(&bordered, White);
+        assert_eq!((out.width, out.height), (212, 283));
+        assert_eq!(out.get(106, 141), [from_f32(0.5); 3]);
+        assert_eq!(out.get(106, 10), [from_f32(1.0); 3]);
+
+        let bordered = add_border(&photo(600, 400), Film, "", true, &data_dir()).unwrap();
+        let out = extend_for_instagram(&bordered, Film);
+        assert_eq!((out.width, out.height), instagram_canvas(602, 402, Film));
+        assert_eq!(out.get(0, out.height / 2), [from_f32(1.0); 3]);
+        assert!(out.get(18, out.height / 2)[0] < from_f32(0.01));
     }
 
     #[test]

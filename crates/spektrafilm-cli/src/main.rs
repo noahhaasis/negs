@@ -64,6 +64,9 @@ enum Commands {
         /// Add a border around the result (after rotation and crop).
         #[arg(long, value_parser = ["white", "film", "keyline", "35mm"])]
         border: Option<String>,
+        /// Extend the border with white to Instagram's 3:4 portrait.
+        #[arg(long, requires = "border")]
+        instagram: bool,
         /// Run the pipeline N times in the same process. Each iteration is
         /// timed individually so you can see cold-start vs warm-cache speed.
         /// Default: 1 (no repetition).
@@ -124,6 +127,7 @@ fn main() -> Result<()> {
             raw_out,
             crop,
             border,
+            instagram,
             iters,
             data_dir,
         } => {
@@ -142,6 +146,7 @@ fn main() -> Result<()> {
                 raw_out.as_deref(),
                 crop,
                 border,
+                instagram,
                 iters,
                 &data_dir,
             )?;
@@ -178,6 +183,7 @@ fn cmd_process(
     raw_out: Option<&Path>,
     crop: Option<spektrafilm_io::crop::Crop>,
     border: Option<spektrafilm_io::border::BorderStyle>,
+    instagram: bool,
     iters: usize,
     data_dir: &Path,
 ) -> Result<()> {
@@ -286,7 +292,13 @@ fn cmd_process(
     let result = result.rotated_cw(rotate_cw);
     let result = match border {
         Some(style) => {
-            spektrafilm_io::border::add_border(&result, style, film_name, encoded, data_dir)?
+            let bordered =
+                spektrafilm_io::border::add_border(&result, style, film_name, encoded, data_dir)?;
+            if instagram {
+                spektrafilm_io::border::extend_for_instagram(&bordered, style)
+            } else {
+                bordered
+            }
         }
         None => result,
     };

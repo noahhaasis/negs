@@ -343,7 +343,10 @@ final class EngineClient: @unchecked Sendable {
             let r = crop.rect
             child.arguments! += ["--crop", [r.minX, r.minY, r.width, r.height, crop.angle].map { "\(Double($0))" }.joined(separator: ",")]
         }
-        if let border { child.arguments! += ["--border", border.rawValue] }
+        if let border {
+            child.arguments! += ["--border", border.rawValue]
+            if state.border.instagram { child.arguments!.append("--instagram") }
+        }
         var environment = ProcessInfo.processInfo.environment
         environment["SPEKTRAFILM_BACKEND"] = engine.backend; child.environment = environment
         child.standardOutput = log; child.standardError = log

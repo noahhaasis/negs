@@ -14,6 +14,22 @@ final class BorderTests: XCTestCase {
         XCTAssertEqual(BorderStyle.film(for: CGSize(width: 6000, height: 4000)).pad, 100)
     }
 
+    /// The same sizes as `instagram_extends_the_short_way_to_3_by_4` in `spektrafilm-io::border`.
+    func testInstagramCanvasMatchesExporter() {
+        XCTAssertEqual(BorderStyle.keyline.instagramCanvas(for: CGSize(width: 1068, height: 568)), CGSize(width: 1068, height: 1424))
+        XCTAssertEqual(BorderStyle.white.instagramCanvas(for: CGSize(width: 1000, height: 2000)), CGSize(width: 1500, height: 2000))
+        XCTAssertEqual(BorderStyle.white.instagramCanvas(for: CGSize(width: 300, height: 400)), CGSize(width: 300, height: 400))
+        XCTAssertEqual(BorderStyle.white.instagramCanvas(for: CGSize(width: 301, height: 400)), CGSize(width: 301, height: 402))
+        XCTAssertEqual(BorderStyle.film.instagramCanvas(for: CGSize(width: 1000, height: 400)), CGSize(width: 1060, height: 1414))
+        XCTAssertEqual(BorderStyle.film35.instagramCanvas(for: CGSize(width: 300, height: 400)), CGSize(width: 324, height: 432))
+    }
+
+    func testBorderSettingsSavedBeforeInstagramRestore() throws {
+        let json = Data(#"{"enabled":true,"style":"film","export":false}"#.utf8)
+        let border = try JSONDecoder().decode(BorderSettings.self, from: json)
+        XCTAssertEqual(border, BorderSettings(enabled: true, style: .film, export: false, instagram: false))
+    }
+
     func testBorderEditsDoNotChangeTheRenderedState() {
         var state = EditState()
         let rendered = state.rendered
