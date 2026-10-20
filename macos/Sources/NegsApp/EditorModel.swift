@@ -33,6 +33,8 @@ import UniformTypeIdentifiers
     private(set) var image: IOSurface?
     /// The unprocessed photograph, shown while the first render develops.
     private(set) var placeholder: CGImage?
+    /// The tones of `image` within the crop; nil until it develops.
+    private(set) var histogram: Histogram?
     private(set) var imageSize = CGSize.zero
     private(set) var placeholderSize = CGSize.zero
     private(set) var imageRotation = 0
@@ -73,6 +75,7 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var explicitOpenRequested = false
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
     @ObservationIgnored private var stripRequest: (film: String, format: FilmFormat)?
+    @ObservationIgnored private var histogramRequest = 0
 
     /// The stocks and defaults are known, from the helper or the last launch's
     /// catalog. Edits are possible; rendering waits for `ready`.
@@ -199,7 +202,7 @@ import UniformTypeIdentifiers
         if paper != state.paper { paper = state.paper }
         if limitsPreview != state.limitPreview { limitsPreview = state.limitPreview }
         if border != state.border { border = state.border }
-        if crop != state.crop { crop = state.crop }
+        if crop != state.crop { crop = state.crop; updateHistogram() }
         let rotation = Int(state.params["io.rotate_cw"].double)
         if imageRotation != rotation {
             imageRotation = rotation
@@ -388,6 +391,7 @@ import UniformTypeIdentifiers
             return
         }
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        updateHistogram()
         interactionStart = nil; cropSession = nil
         sourceGeneration += 1
         let generation = sourceGeneration
@@ -487,6 +491,7 @@ import UniformTypeIdentifiers
             guard shouldShow(currentRevision, generation) else { return }
             imageSize = CGSize(width: result["output_width"].double, height: result["output_height"].double)
             image = developed; placeholder = nil
+            updateHistogram()
             cropSession?.update(photo: shownImageSize, rotation: imageRotation)
             updateFilmStrip()
             isRaw = result["raw"].bool
@@ -508,6 +513,22 @@ import UniformTypeIdentifiers
     /// latest edit, so a discrete change never flashes an older state.
     private func shouldShow(_ renderedRevision: Int, _ generation: Int) -> Bool {
         !closing && generation == sourceGeneration && (revision == renderedRevision || interacting)
+    }
+
+    /// Counts the preview's tones off the main thread. A newer preview or
+    /// crop supersedes a count still running.
+    private func updateHistogram() {
+        histogramRequest += 1
+        guard let image else { histogram = nil; return }
+        let request = histogramRequest, crop = crop
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let counted = Histogram.of(image, crop: crop)
+            await self?.showHistogram(counted, request: request)
+        }
+    }
+    private func showHistogram(_ counted: Histogram, request: Int) {
+        guard request == histogramRequest, counted != histogram else { return }
+        histogram = counted
     }
 
     /// Only mention an update once it has visibly taken a while.
