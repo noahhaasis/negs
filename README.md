@@ -2,7 +2,7 @@
 
 **Your photos, developed on film.**
 
-Negs is a free Mac app that runs your pictures through a physical simulation of film: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
+Negs is a **free** Mac app that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
 
 Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in a native macOS app.
 
@@ -47,7 +47,9 @@ A LUT looks at each pixel on its own and swaps its colour. Real film doesn't wor
 
 Finish with a clean white border, a thin keyline, a black film edge, or the full 35mm frame, sprocket holes and all, printed with the stock's own edge markings.
 
-![A photo in a full 35mm frame with sprocket holes and edge markings](docs/readme/border-35mm.webp)
+| White border | Keyline | Film edge | 35mm frame |
+|---|---|---|---|
+| ![A bench on a terrace above a lake and mountains, with a white border](docs/readme/border-white.webp) | ![Horse-drawn carriages in front of a palace, with a keyline border](docs/readme/border-keyline.webp) | ![A bar at night with glowing shelves, with a black film border](docs/readme/border-film.webp) | ![The Colosseum in a 35mm Kodak Gold 200 frame with sprocket holes and edge print](docs/readme/border-35mm.webp) |
 
 ## Your film shelf
 
