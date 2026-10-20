@@ -93,9 +93,19 @@ mod metal_threadgroups {
         device.supports_family(metal::MTLGPUFamily::Apple1)
     }
 
-    /// The limit for `shader_source`'s `main`, translated to MSL with the
-    /// options wgpu's Metal backend uses (default overrides, bounds checks).
-    pub(super) fn max_threads(device: &metal::Device, shader_source: &str) -> Result<u32, String> {
+    /// The limit of the pipeline wgpu 24's Metal backend builds for
+    /// `shader_source`'s `main` with one bind group of `entries` and
+    /// `WORKGROUP_SIZE` set to `workgroup_size`. Mirrors wgpu-hal's
+    /// `load_shader`, `create_pipeline_layout` and `create_compute_pipeline`:
+    /// the same MSL (version, bounds checks, binding slots, sizes buffer) and
+    /// the same pipeline descriptor (immutable read-only buffers), since a
+    /// different compilation may allow more threads than the real pipeline.
+    pub(super) fn max_threads(
+        device: &metal::Device,
+        shader_source: &str,
+        entries: &[wgpu::BindGroupLayoutEntry],
+        workgroup_size: Option<u32>,
+    ) -> Result<u32, String> {
         let module = naga::front::wgsl::parse_str(shader_source).map_err(|e| e.to_string())?;
         let info = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
@@ -103,30 +113,50 @@ mod metal_threadgroups {
         )
         .validate(&module)
         .map_err(|e| e.to_string())?;
-        let (module, info) = naga::back::pipeline_constants::process_overrides(
-            &module,
-            &info,
-            &Default::default(),
-        )
-        .map_err(|e| e.to_string())?;
+        let constants: std::collections::HashMap<String, f64> = workgroup_size
+            .map(|size| ("WORKGROUP_SIZE".to_string(), size as f64))
+            .into_iter()
+            .collect();
+        let (module, info) =
+            naga::back::pipeline_constants::process_overrides(&module, &info, &constants)
+                .map_err(|e| e.to_string())?;
+
+        // Buffer slots in layout order; storage buffers get a sizes buffer.
         let mut resources = naga::back::msl::EntryPointResources::default();
-        for (_, var) in module.global_variables.iter() {
-            let Some(binding) = &var.binding else { continue };
-            // Our layouts bind buffers 0..n of group 0, which wgpu maps to
-            // Metal buffer slots 0..n.
-            let mutable = matches!(var.space, naga::AddressSpace::Storage { access }
-                if access.contains(naga::StorageAccess::STORE));
-            let target = naga::back::msl::BindTarget {
-                buffer: Some(binding.binding as u8),
-                mutable,
-                ..Default::default()
+        let mut slot = 0u8;
+        let mut needs_sizes = false;
+        for entry in entries {
+            let wgpu::BindingType::Buffer { ty, .. } = entry.ty else {
+                return Err("only buffer bindings are mirrored".into());
             };
-            resources.resources.insert(binding.clone(), target);
+            let mutable = matches!(ty, wgpu::BufferBindingType::Storage { read_only: false });
+            needs_sizes |= matches!(ty, wgpu::BufferBindingType::Storage { .. });
+            let target = naga::back::msl::BindTarget { buffer: Some(slot), mutable, ..Default::default() };
+            resources.resources.insert(naga::ResourceBinding { group: 0, binding: entry.binding }, target);
+            slot += 1;
         }
-        resources.sizes_buffer = Some(resources.resources.len() as u8);
+        resources.sizes_buffer = needs_sizes.then_some(slot);
+
+        // Buffers the entry point uses but never stores to are immutable.
+        let ep_info = info.get_entry_point(0);
+        let mut immutable_slots = Vec::new();
+        for (handle, var) in module.global_variables.iter() {
+            let stores = match var.space {
+                naga::AddressSpace::Uniform => false,
+                naga::AddressSpace::Storage { access } => access.contains(naga::StorageAccess::STORE),
+                _ => continue,
+            };
+            let Some(binding) = &var.binding else { continue };
+            if !ep_info[handle].is_empty() && !stores {
+                let target = resources.resources.get(binding).ok_or("binding missing from layout")?;
+                immutable_slots.extend(target.buffer);
+            }
+        }
+
         let checks = naga::proc::BoundsCheckPolicy::Restrict;
         let options = naga::back::msl::Options {
-            lang_version: (2, 4),
+            // wgpu-hal uses MSL 3.1 from macOS 14, the oldest we deploy to.
+            lang_version: (3, 1),
             per_entry_point_map: [("main".to_string(), resources)].into(),
             bounds_check_policies: naga::proc::BoundsCheckPolicies {
                 index: checks,
@@ -136,9 +166,13 @@ mod metal_threadgroups {
             },
             zero_initialize_workgroup_memory: true,
             force_loop_bounding: true,
+            fake_missing_bindings: false,
             ..Default::default()
         };
-        let pipeline_options = naga::back::msl::PipelineOptions::default();
+        let pipeline_options = naga::back::msl::PipelineOptions {
+            vertex_pulling_transform: true,
+            ..Default::default()
+        };
         let (msl, translation) =
             naga::back::msl::write_string(&module, &info, &options, &pipeline_options)
                 .map_err(|e| e.to_string())?;
@@ -148,10 +182,18 @@ mod metal_threadgroups {
             .and_then(|name| name.as_ref().ok())
             .ok_or("no entry point")?;
         let compile = metal::CompileOptions::new();
-        compile.set_language_version(metal::MTLLanguageVersion::V2_4);
+        compile.set_language_version(metal::MTLLanguageVersion::V3_1);
+        compile.set_preserve_invariance(true);
         let library = device.new_library_with_source(&msl, &compile)?;
         let function = library.get_function(entry, None)?;
-        let pipeline = device.new_compute_pipeline_state_with_function(&function)?;
+        let descriptor = metal::ComputePipelineDescriptor::new();
+        descriptor.set_compute_function(Some(&function));
+        let buffers = descriptor.buffers().ok_or("no buffer descriptors")?;
+        for slot in immutable_slots {
+            let buffer = buffers.object_at(slot as u64).ok_or("no buffer descriptor")?;
+            buffer.set_mutability(metal::MTLMutability::Immutable);
+        }
+        let pipeline = device.new_compute_pipeline_state(&descriptor)?;
         Ok(pipeline.max_total_threads_per_threadgroup() as u32)
     }
 }
@@ -354,33 +396,47 @@ impl WgpuBackend {
     // RUST_LOG=spektrafilm_gpu=debug and record which shaders are lowered,
     // check none of the fixed-size shaders warn, and compare a render with
     // Apple silicon's.
-    fn workgroup_size(&self, shader_source: &str) -> u32 {
+    fn workgroup_size(&self, shader_source: &str, entries: &[wgpu::BindGroupLayoutEntry]) -> u32 {
+        let floor_pow2 = |n: u32| 1u32 << (31 - n.max(1).leading_zeros());
         let declared = declared_workgroup_size(shader_source);
-        let mut limit = self.max_workgroup_size;
+        let mut size = declared.map_or(0, |d| floor_pow2(d.min(self.max_workgroup_size)));
         #[cfg(target_os = "macos")]
         if let Some(device) = &self.threadgroup_probe {
-            let pipeline_limit = metal_threadgroups::max_threads(device, shader_source)
-                .unwrap_or_else(|error| {
-                    // Unexpected; a 64-thread group runs on every Mac GPU.
-                    tracing::warn!(%error, "could not query the Metal threadgroup limit");
-                    64
-                });
-            let threads = declared.or_else(|| fixed_workgroup_threads(shader_source));
-            tracing::debug!(?threads, pipeline_limit, "Metal threadgroup limit");
-            match threads {
-                Some(threads) if declared.is_none() && threads > pipeline_limit => tracing::warn!(
-                    threads,
-                    pipeline_limit,
-                    "fixed workgroup exceeds the GPU's limit; its dispatches may be dropped"
-                ),
-                _ => {}
+            let query = |size: Option<u32>| {
+                metal_threadgroups::max_threads(device, shader_source, entries, size)
+                    .unwrap_or_else(|error| {
+                        // Unexpected; a 64-thread group runs on every Mac GPU.
+                        tracing::warn!(%error, "could not query the Metal threadgroup limit");
+                        64
+                    })
+            };
+            if declared.is_none() {
+                let threads = fixed_workgroup_threads(shader_source).unwrap_or(1);
+                let limit = query(None);
+                tracing::debug!(threads, limit, "Metal threadgroup limit");
+                if threads > limit {
+                    tracing::warn!(
+                        threads,
+                        limit,
+                        "fixed workgroup exceeds the GPU's limit; its dispatches may be dropped"
+                    );
+                }
+                return 0;
             }
-            limit = limit.min(pipeline_limit);
+            // The limit is of the pipeline specialized to `size`, so step
+            // down until the specialization that will be built fits.
+            loop {
+                let limit = query(Some(size));
+                tracing::debug!(size, limit, "Metal threadgroup limit");
+                if size <= limit || size == 1 {
+                    break;
+                }
+                size = floor_pow2(limit.min(size / 2));
+            }
         }
-        match declared {
-            Some(size) => 1 << (31 - size.min(limit).max(1).leading_zeros()),
-            None => 0,
-        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = entries;
+        size
     }
 
     /// Compile `shader_source`'s `main` with one bind group of `entries`,
@@ -407,7 +463,7 @@ impl WgpuBackend {
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
-        let workgroup_size = self.workgroup_size(shader_source);
+        let workgroup_size = self.workgroup_size(shader_source, entries);
         let constants: std::collections::HashMap<String, f64> = if workgroup_size > 0 {
             [("WORKGROUP_SIZE".to_string(), workgroup_size as f64)].into()
         } else {
@@ -4533,14 +4589,49 @@ mod grain_tests {
         for path in paths {
             let source = std::fs::read_to_string(&path).unwrap();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            let limit = metal_threadgroups::max_threads(&device, &source).unwrap_or_else(|e| panic!("{name}: {e}"));
-            let threads = declared_workgroup_size(&source).or_else(|| fixed_workgroup_threads(&source)).unwrap();
+            let entries = layout_from_wgsl(&source);
+            let declared = declared_workgroup_size(&source);
+            let limit = metal_threadgroups::max_threads(&device, &source, &entries, declared)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let threads = declared.or_else(|| fixed_workgroup_threads(&source)).unwrap();
             eprintln!("{name:32} {threads:5} threads, pipeline limit {limit}");
             assert!(threads <= limit, "{name}: {threads} threads > limit {limit}");
             if name == "grain.wgsl" {
-                assert!(limit < 1024, "grain is known not to run 1024-thread groups");
+                let at_1024 = metal_threadgroups::max_threads(&device, &source, &entries, Some(1024)).unwrap();
+                assert!(at_1024 < 1024, "grain is known not to run 1024-thread groups");
             }
         }
+    }
+
+    /// One bind group of buffers as the shader declares them.
+    #[cfg(target_os = "macos")]
+    fn layout_from_wgsl(source: &str) -> Vec<wgpu::BindGroupLayoutEntry> {
+        use wgpu::naga;
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        let mut bindings: Vec<_> = module
+            .global_variables
+            .iter()
+            .filter_map(|(_, var)| {
+                let ty = match var.space {
+                    naga::AddressSpace::Uniform => wgpu::BufferBindingType::Uniform,
+                    naga::AddressSpace::Storage { access } => wgpu::BufferBindingType::Storage {
+                        read_only: !access.contains(naga::StorageAccess::STORE),
+                    },
+                    _ => return None,
+                };
+                Some((var.binding.as_ref()?.binding, ty))
+            })
+            .collect();
+        bindings.sort_by_key(|&(binding, _)| binding);
+        bindings
+            .into_iter()
+            .map(|(binding, ty)| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None },
+                count: None,
+            })
+            .collect()
     }
 
     /// Render a cheap flat shader over a grid that is forced to wrap into y

@@ -164,10 +164,13 @@ still Apple's, so Intel and AMD graphics themselves are untested.
 The GPU risk is Metal's per-pipeline thread limit (`maxTotalThreadsPerThreadgroup`),
 which depends on the GPU and the shader. Metal drops a larger dispatch without
 an error, which already happened to the grain shader at 1024 threads on Apple
-GPUs (limit 896). The flat per-pixel shaders therefore declare an
+GPUs (limit 832). The flat per-pixel shaders therefore declare an
 `override WORKGROUP_SIZE`, and on GPUs that are not Apple-designed the backend
-compiles each one, queries its limit and lowers the size to fit. Renders are
-byte-identical at every size from 1024 down to 64.
+compiles each one exactly as wgpu-hal does (MSL 3.1, bounds checks, binding
+slots, immutable read-only buffers, the chosen size), queries its limit and
+lowers the size to fit. With Metal API validation on (`MTL_DEBUG_LAYER=1`),
+the real pipeline's limit for grain at 1024 matches the query exactly.
+Renders are byte-identical at every size from 1024 down to 64.
 
 Diagnostics, all off by default:
 
