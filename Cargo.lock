@@ -3711,7 +3711,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3730,7 +3730,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "blas-src",
  "cblas",
@@ -3750,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-gpu"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "accelerate-src",
  "blas-src",
@@ -3769,7 +3769,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-gui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "core-graphics 0.24.0",
@@ -3792,7 +3792,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -3807,7 +3807,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "byteorder",
  "half",
@@ -3822,7 +3822,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-model"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rand",
  "rand_distr",
@@ -3836,7 +3836,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-native"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "image",
