@@ -6,7 +6,9 @@ Negs is a free Mac app that runs your pictures through a physical simulation of 
 
 Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in a native macOS app.
 
-**[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon
+**[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon · [getnegs.com](https://getnegs.com)
+
+The first time you open Negs, macOS asks you to allow it in System Settings: see the [install steps](#install).
 
 | RAW · Apple default | Negs · Kodak Ektar 100 |
 |---|---|
@@ -14,7 +16,7 @@ Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https:
 
 ## A darkroom in a window
 
-![The Negs main window](docs/readme/app-window.webp)
+![The Negs window: a photo of the Colosseum in a 35mm Kodak Ektar 100 frame, with film, camera and print controls on the right](docs/readme/app-window.webp)
 
 Pick a film, pick a paper, drag a slider, and watch the picture change as you move.
 
