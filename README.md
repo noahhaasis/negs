@@ -1,5 +1,7 @@
 # Negs
 
+[![Downloads](https://img.shields.io/github/downloads/noahhaasis/negs/total)](https://github.com/noahhaasis/negs/releases)
+
 **Your photos, developed on film.**
 
 Negs is a **free** Mac app that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
