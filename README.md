@@ -78,6 +78,7 @@ Negs updates itself: use **Negs → Check for Updates…**, or turn automatic ch
 | Rotate | ⌘R |
 | Fit / actual size | ⌘0 / ⌘1 |
 | Show or hide adjustments | ⌥⌘I |
+| Show the original while held | \ |
 
 Pinch to zoom, scroll or drag to pan, double-click to fit.
 

@@ -131,6 +131,20 @@ x,y,w,h,angle` on the exporter) cut the same pixels with
 border. `CropTests` pins the
 Swift rounding to the Rust tests' values.
 
+Show Original (the split-square button at the right of the status bar, or
+holding `\`) swaps the photograph layer's contents for the undeveloped
+photograph while held; the crop, rotation, and border stay, so nothing moves.
+RAW files show Apple's default RAW look (`CIRAWFilter` with lens correction
+off, matching the engine's framing); other files show the file itself through
+ImageIO, with its color profile. The app decodes it at the developed preview's
+size the first time the pointer reaches the button, not through the helper,
+and keeps it until another photograph opens. While hidden the IOSurface is
+purgeable, so macOS can reclaim it and the next press decodes again. A 24 MP
+RAW takes about 0.5 s for the first decode in a launch and 0.2 s after that;
+a "Loading Original" badge shows while the button is held before it arrives.
+Core Image's full-size intermediates (about 1 GB for a 24 MP RAW) become
+purgeable a few seconds after each decode.
+
 The preview buffer is capped at 8192 pixels on its longest side; saving retains
 the full processed preview resolution. Linear output is encoded only for display
 and tagged sRGB. Export runs an independent process: by default the f32

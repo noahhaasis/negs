@@ -139,7 +139,7 @@ struct CanvasArea: View {
             if let session = model.cropSession, let image = model.image {
                 CropEditor(session: session, image: image)
             } else if let image = model.image {
-                canvas(image, size: model.imageSize, rotation: model.imageRotation)
+                canvas(model.original ?? image, size: model.imageSize, rotation: model.imageRotation)
             } else if let placeholder = model.placeholder {
                 canvas(placeholder, size: model.placeholderSize, rotation: model.imageRotation)
             } else if model.source == nil {
@@ -159,6 +159,8 @@ struct ActivityBadge: View {
     let model: EditorModel
 
     private var title: String? {
+        if model.original != nil { return "Original" }
+        if model.holdingOriginal { return "Loading Original" }
         guard model.source != nil, !model.renderFailed else { return nil }
         if model.image == nil { return "Developing" }
         return model.showsActivity ? "Updating" : nil
@@ -167,8 +169,9 @@ struct ActivityBadge: View {
     var body: some View {
         ZStack {
             if let title {
-                Label(title, systemImage: "camera.aperture")
-                    .symbolEffect(.pulse, options: .repeating)
+                let shown = model.original != nil
+                Label(title, systemImage: model.holdingOriginal ? "square.split.diagonal.fill" : "camera.aperture")
+                    .symbolEffect(.pulse, options: .repeating, isActive: !shown)
                     .font(.callout.weight(.medium))
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .background(.regularMaterial, in: Capsule())
@@ -222,10 +225,40 @@ struct StatusBar: View {
                 }
                 Button("Cancel", action: model.cancelExport).controlSize(.small)
             }
+            if model.source != nil { OriginalButton(model: model) }
         }
         .font(.caption).foregroundStyle(.secondary)
         .padding(.horizontal, 14).frame(height: 28)
         .background(.bar)
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// Press and hold to compare with the photograph before developing, like
+/// Lightroom's Show Original. The decode starts when the pointer arrives.
+struct OriginalButton: View {
+    let model: EditorModel
+    @State private var pressed = false
+
+    var body: some View {
+        let enabled = model.canShowOriginal
+        Image(systemName: "square.split.diagonal.fill")
+            .font(.system(size: 13))
+            .foregroundStyle(model.original != nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            .frame(width: 24, height: 20)
+            .contentShape(Rectangle())
+            .opacity(enabled ? 1 : 0.4)
+            .onHover { if $0 { model.prepareOriginal() } }
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { _ in if !pressed { pressed = true; model.holdOriginal(true) } }
+                .onEnded { _ in pressed = false; model.holdOriginal(false) })
+            .allowsHitTesting(enabled)
+            .help("Hold to show the original (\\)")
+            .accessibilityElement()
+            .accessibilityLabel("Show Original")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(model.original != nil ? "On" : "Off")
+            // VoiceOver can't hold, so activating it toggles.
+            .accessibilityAction { model.holdOriginal(!model.holdingOriginal) }
     }
 }

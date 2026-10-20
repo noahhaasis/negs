@@ -33,6 +33,9 @@ import UniformTypeIdentifiers
     private(set) var image: IOSurface?
     /// The unprocessed photograph, shown while the first render develops.
     private(set) var placeholder: CGImage?
+    /// The undeveloped photograph, shown in place of `image` while the
+    /// Original button is held.
+    private(set) var original: IOSurface?
     private(set) var imageSize = CGSize.zero
     private(set) var placeholderSize = CGSize.zero
     private(set) var imageRotation = 0
@@ -73,6 +76,12 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var explicitOpenRequested = false
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
     @ObservationIgnored private var stripRequest: (film: String, format: FilmFormat)?
+    /// The source's original, decoded on first use and kept until another
+    /// photograph opens. Volatile while hidden.
+    @ObservationIgnored private var originalCache: IOSurface?
+    @ObservationIgnored private var originalLoad: Task<Void, Never>?
+    /// The Original button is held; `original` is nil until its decode finishes.
+    private(set) var holdingOriginal = false
 
     /// The stocks and defaults are known, from the helper or the last launch's
     /// catalog. Edits are possible; rendering waits for `ready`.
@@ -85,6 +94,7 @@ import UniformTypeIdentifiers
     var paperName: String { papers.first { $0.id == paper }?.name ?? paper }
     var canSave: Bool { previewCurrent && image != nil && !rendering && !saving && !cropping }
     var cropping: Bool { cropSession != nil }
+    var canShowOriginal: Bool { image != nil && !cropping }
     /// The shown photograph's size after cropping, before rotation; zero
     /// before one opens. Borders fit this size.
     var photoSize: CGSize { crop.size(of: image != nil ? imageSize : placeholderSize) }
@@ -338,6 +348,7 @@ import UniformTypeIdentifiers
     /// Shows the whole developed photograph, without the border, to crop it.
     func beginCrop() {
         guard !cropping, image != nil, imageSize != .zero else { return }
+        holdOriginal(false)
         cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation)
     }
     /// Done applies the crop, and any rotation while cropping, as one undo
@@ -389,6 +400,7 @@ import UniformTypeIdentifiers
         }
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         interactionStart = nil; cropSession = nil
+        original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         sourceGeneration += 1
         let generation = sourceGeneration
         if let session {
@@ -442,6 +454,62 @@ import UniformTypeIdentifiers
             size = turned ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
         }
         return (image, size)
+    }
+
+    // MARK: Original
+
+    /// Decodes the original ahead of a press, such as when the pointer
+    /// reaches the button.
+    func prepareOriginal() {
+        if canShowOriginal, originalCache == nil { loadOriginal() }
+    }
+
+    /// Shows the original in place of the developed photograph while held.
+    /// The canvas keeps its crop, rotation, and border.
+    func holdOriginal(_ held: Bool) {
+        guard held, canShowOriginal else {
+            holdingOriginal = false
+            if let shown = original {
+                original = nil
+                // Core Animation may still be compositing it for a frame.
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(1))
+                    guard let self, !self.holdingOriginal, self.originalCache === shown else { return }
+                    shown.makeVolatile()
+                }
+            }
+            return
+        }
+        guard !holdingOriginal else { return }
+        holdingOriginal = true
+        if let cached = originalCache {
+            if cached.makeNonVolatile() { original = cached; return }
+            originalCache = nil
+        }
+        loadOriginal()
+    }
+
+    /// Decodes at the developed preview's resolution, so it is as sharp at
+    /// actual size.
+    private func loadOriginal() {
+        guard originalLoad == nil, let source, let image else { return }
+        let raw = isRaw, maxPixels = max(image.width, image.height), generation = sourceGeneration
+        originalLoad = Task { [weak self] in
+            let surface = await Task.detached(priority: .userInitiated) {
+                OriginalImage.load(source, raw: raw, maxPixels: maxPixels)
+            }.value
+            guard let self, generation == self.sourceGeneration, !Task.isCancelled else { return }
+            self.originalLoad = nil
+            guard let surface else {
+                if self.holdingOriginal {
+                    self.holdingOriginal = false
+                    self.status = "The original of \(source.lastPathComponent) couldn’t be shown"
+                }
+                return
+            }
+            self.originalCache = surface
+            if self.holdingOriginal { self.original = surface } else { surface.makeVolatile() }
+        }
     }
 
     // MARK: Rendering

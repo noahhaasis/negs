@@ -15,6 +15,11 @@ import SwiftUI
     private lazy var doneButton = NSButton(title: "Done", target: self, action: #selector(applyCrop))
     private var collapsing: NSKeyValueObservation?
     private var appearing: NSObjectProtocol?
+    private var resigning: NSObjectProtocol?
+    private var keyMonitor: Any?
+    /// The key held to show the original, so its release is found even if
+    /// a modifier (⌥⇧ on some layouts) was let go first.
+    private var originalKey: UInt16?
 
     init(model: EditorModel) {
         self.model = model
@@ -67,6 +72,15 @@ import SwiftUI
         appearing = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.windowChangedOcclusion() }
         }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            MainActor.assumeIsolated { self?.holdOriginal(event) ?? false } ? nil : event
+        }
+        resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.originalKey != nil else { return }
+                self.originalKey = nil; self.model.holdOriginal(false)
+            }
+        }
         observe()
     }
 
@@ -79,6 +93,21 @@ import SwiftUI
         NotificationCenter.default.removeObserver(appearing)
         self.appearing = nil
         panel.rootView = InspectorPanel(model: model)
+    }
+
+    /// Holding \ shows the original, as in Lightroom, unless text is being
+    /// typed. True if the event was handled.
+    private func holdOriginal(_ event: NSEvent) -> Bool {
+        if event.type == .keyUp {
+            guard event.keyCode == originalKey else { return false }
+            originalKey = nil; model.holdOriginal(false)
+            return true
+        }
+        guard event.window === window, event.characters == "\\",
+              event.modifierFlags.isDisjoint(with: [.command, .control]),
+              !(window?.firstResponder is NSText) else { return false }
+        if !event.isARepeat { originalKey = event.keyCode; model.holdOriginal(true) }
+        return true
     }
 
     private func observe() {
