@@ -338,7 +338,7 @@ struct AdjustmentInspector: View {
             control(.slider("Whites", "post.whites", -100...100, 1))
             control(.slider("Blacks", "post.blacks", -100...100, 1))
         } header: { Text("Tone") } footer: {
-            Text("Adjusts the finished scan. To recover a clipped highlight, use exposure in the Lab.")
+            Text("Adjusts the finished scan/print. To recover a clipped highlight, use exposure in the Lab.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         Section("Color") {
