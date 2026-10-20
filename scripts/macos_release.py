@@ -45,9 +45,10 @@ def metadata(root=ROOT, env=os.environ):
             raise ValueError("SPARKLE_PUBLIC_KEY must be a base64 Ed25519 public key")
     if tag and not feed:
         raise ValueError("Tagged releases must have an update feed and public key")
-    architecture = env.get("RELEASE_ARCH", "arm64")
-    if architecture != "arm64":
-        raise ValueError("The initial macOS release supports arm64 only")
+    # One universal (arm64 + x86_64) app keeps a single download and update feed.
+    architecture = env.get("RELEASE_ARCH", "universal")
+    if architecture != "universal":
+        raise ValueError("The macOS release is a universal (arm64 + x86_64) app")
     return dict(version=version, build=build, tag=f"v{version}", repository=repository,
                 feed=feed, public_key=key, architecture=architecture,
                 name=f"Negs-{version}-macos-{architecture}")

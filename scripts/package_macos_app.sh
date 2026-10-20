@@ -17,19 +17,25 @@ cd "$repo_root"
 # come from CI; local packages intentionally have no live update configuration.
 "$PYTHON" scripts/macos_release.py >/dev/null
 release_name="$("$PYTHON" scripts/macos_release.py --field name)"
-if [[ "$(uname -m)" != arm64 ]]; then
-    echo "The initial macOS package requires an Apple Silicon build host." >&2
-    exit 1
-fi
 
 # Keep the binary deployment target consistent with Info.plist.
 export MACOSX_DEPLOYMENT_TARGET=14.0
 
-cargo build --locked --release -p spektrafilm-native --target-dir "$BUILD_TARGET_DIR"
-swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions
-swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions --show-bin-path)"
-cargo build --locked --release -p spektrafilm-cli --bin spektrafilm --target-dir "$BUILD_TARGET_DIR"
-cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 --target-dir "$BUILD_TARGET_DIR"
+# Universal app: build every executable for Apple silicon and Intel.
+rust_targets=(--target aarch64-apple-darwin --target x86_64-apple-darwin)
+swift_archs=(--arch arm64 --arch x86_64)
+cargo build --locked --release -p spektrafilm-native "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions "${swift_archs[@]}"
+swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions "${swift_archs[@]}" --show-bin-path)"
+cargo build --locked --release -p spektrafilm-cli --bin spektrafilm "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+universal_dir="$BUILD_TARGET_DIR/universal-apple-darwin/release"
+mkdir -p "$universal_dir"
+for binary in spektrafilm-native spektrafilm spektrafilm-f64; do
+    lipo -create -output "$universal_dir/$binary" \
+        "$BUILD_TARGET_DIR/aarch64-apple-darwin/release/$binary" \
+        "$BUILD_TARGET_DIR/x86_64-apple-darwin/release/$binary"
+done
 
 rm -rf "$DIST_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUNDLE/Contents/Frameworks" "$RELEASE_DIR"
@@ -37,9 +43,9 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" "$APP_BUN
 ditto "$swift_bin_dir/Sparkle.framework" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
 
 cp "$swift_bin_dir/NegsApp" "$APP_BUNDLE/Contents/MacOS/NegsApp"
-cp "$BUILD_TARGET_DIR/release/spektrafilm-native" "$APP_BUNDLE/Contents/MacOS/spektrafilm-native"
-cp "$BUILD_TARGET_DIR/release/spektrafilm" "$APP_BUNDLE/Contents/MacOS/spektrafilm"
-cp "$BUILD_TARGET_DIR/release/spektrafilm-f64" "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
+cp "$universal_dir/spektrafilm-native" "$APP_BUNDLE/Contents/MacOS/spektrafilm-native"
+cp "$universal_dir/spektrafilm" "$APP_BUNDLE/Contents/MacOS/spektrafilm"
+cp "$universal_dir/spektrafilm-f64" "$APP_BUNDLE/Contents/MacOS/spektrafilm-f64"
 cp -R data "$APP_BUNDLE/Contents/Resources/data"
 cp LICENSE "$APP_BUNDLE/Contents/Resources/LICENSE.txt"
 chmod +x "$APP_BUNDLE/Contents/MacOS/NegsApp" \
@@ -74,7 +80,8 @@ Negs for macOS
 Open the disk image, drag Negs.app to Applications, and double-click it.
 For ZIP downloads, unzip the app and move it to Applications.
 No Rust, Homebrew, or separate data download is needed.
-The native SwiftUI interface requires macOS 14 or newer; see BUILD-INFO.txt for its CPU architecture.
+The native SwiftUI interface requires macOS 14 or newer and runs natively on
+Apple silicon and Intel Macs.
 
 Native interface:
 - Standard macOS menus, toolbar, adjustment inspector, and open/save dialogs.
@@ -119,7 +126,8 @@ README
 
 {
     date -u '+Built: %Y-%m-%dT%H:%M:%SZ'
-    uname -m
+    echo "Build host: $(uname -m)"
+    lipo -archs "$APP_BUNDLE/Contents/MacOS/NegsApp"
     rustc -vV
     git rev-parse HEAD
     git status --short
@@ -134,7 +142,9 @@ COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='__pycache__' --exclude='
 
 # Ad-hoc sign our own executables and the outer app. Do not recursively
 # overwrite Sparkle's supplied signatures. No Apple account is required.
-for binary in NegsApp spektrafilm-native spektrafilm spektrafilm-f64; do
+# Sign the helpers before NegsApp: signing the main executable checks its
+# neighbours, and the linker only ad-hoc signs arm64 slices, not x86_64.
+for binary in spektrafilm-native spektrafilm spektrafilm-f64 NegsApp; do
     codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/$binary"
 done
 codesign --force --sign - "$APP_BUNDLE"

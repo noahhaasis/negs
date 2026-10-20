@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   macos:
-    name: macOS Apple Silicon
+    name: macOS universal
     runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -37,6 +37,8 @@ jobs:
         id: metadata
         run: python scripts/macos_release.py --github-output "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@1.93.1
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
       - name: Record toolchains
         run: |
           rustc -vV
@@ -53,6 +55,11 @@ jobs:
         env:
           BUILD_TARGET_DIR: target
         run: bash scripts/package_macos_app.sh
+      - name: Smoke-test the Intel slice under Rosetta
+        run: |
+          app=dist/negs-macos/Negs.app/Contents
+          arch -x86_64 "$app/MacOS/spektrafilm" list-profiles --data-dir "$app/Resources/data" > /dev/null
+          arch -x86_64 "$app/MacOS/spektrafilm-f64" list-profiles --data-dir "$app/Resources/data" > /dev/null
       - name: Sign and verify update feed
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:

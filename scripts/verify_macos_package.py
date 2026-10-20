@@ -55,18 +55,20 @@ def main():
         binary = app / "Contents/MacOS" / name
         arch = checked("/usr/bin/lipo", "-archs", str(binary)).strip()
         links = checked("/usr/bin/otool", "-L", str(binary))
-        dependencies = [line.strip().split(" (", 1)[0] for line in links.splitlines()[1:]]
+        # Universal binaries list each slice under its own "(architecture …)" header.
+        dependencies = list(dict.fromkeys(line.strip().split(" (", 1)[0]
+                                          for line in links.splitlines() if line.startswith("\t")))
         bundled_sparkle = "@rpath/Sparkle.framework/Versions/B/Sparkle"
         require(all(p.startswith(("/System/Library/", "/usr/lib/")) or
                     (name == plist["CFBundleExecutable"] and p == bundled_sparkle) for p in dependencies),
                 f"{name} has a non-system dynamic dependency: {dependencies}")
         build = checked("/usr/bin/xcrun", "vtool", "-show-build", str(binary))
-        minimum = re.search(r"\bminos\s+([\d.]+)", build).group(1)
+        minimum = max(re.findall(r"\bminos\s+([\d.]+)", build), key=lambda v: tuple(map(int, v.split("."))))
         require(tuple(map(int, minimum.split("."))) <= tuple(map(int, plist["LSMinimumSystemVersion"].split("."))),
                 f"{name} requires a newer OS than Info.plist advertises")
         report["binaries"][name] = {"sha256": sha(binary), "architecture": arch,
                                      "minimum_macos": minimum, "dependencies": dependencies}
-        require(arch == "arm64", f"Unexpected release architecture: {name}: {arch}")
+        require(set(arch.split()) == {"arm64", "x86_64"}, f"Not a universal binary: {name}: {arch}")
     framework = app / "Contents/Frameworks/Sparkle.framework"
     require(framework.is_dir(), "Sparkle framework missing")
     checked("/usr/bin/codesign", "--verify", "--deep", "--strict", str(framework))
