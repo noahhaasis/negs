@@ -1,218 +1,130 @@
-# negs
+# Negs
 
-![banner](docs/card.jpg)
+**Your photos, developed on film.**
 
-A Rust port of [andreavolpato/spektrafilm](https://github.com/andreavolpato/spektrafilm) — a spectral simulator for analogue colour film and the print-and-scan chain.
+Negs is a free Mac app that runs your pictures through a physical simulation of film: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
 
-The same spectral integration the original Python project does (RGB → film dye density → enlarger illuminant → print paper → scanner RGB), reimplemented in Rust with a GPU preview and a CPU export targeting numerical parity with a pinned Python reference at f64 precision.
+Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both, with a GPU preview that matches the reference render, Apple's RAW decoder, faster exports and lab-style borders, and wraps it all in a native macOS app.
 
----
+**[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon
 
-## What it does
+| Camera JPEG | Negs · Kodak Ektar 100 |
+|---|---|
+| ![Rome at dusk, straight from the camera](docs/readme/compare-before.webp) | ![The same photo developed on Ektar 100 in Negs](docs/readme/compare-after.webp) |
 
-- **Spectral pipeline.** Hanatos2025 RGB→raw spectral upsampling, full 81-wavelength film/print/scanner spectral integration, density-curve interpolation, halation, DIR couplers, grain (bit-exact numpy `MT19937` port), glare, output CCTF encoding.
-- **Live interactive preview** on the GPU (wgpu / Metal on macOS) — slider drags update at 60 fps on a 6 MP working image.
-- **Reference-quality export** on the CPU at f64 — deterministic print-chain comparisons against Python main pass within `1e-6`; see [scope and measured results](docs/upstream-sync.md).
-- **Decoupled preview + export.** GUI uses f32 GPU for iteration, then shells out to a CLI for the final write: the f32 GPU binary (Fast, the default in the macOS app), which [measures within ΔE00 0.02 of the reference](docs/gpu-vs-cpu-quality.md), or the f64 CPU binary (Reference). The export runs in a worker thread with a cancel button and proper child-process lifecycle.
-- **Profiles bundled.** 30+ film and paper profiles in `data/profiles/` — Kodak Gold/Portra/Ektar, Fuji Velvia/Provia, Kodak Endura papers, Fuji Crystal Archive papers.
-- **B&W stocks.** Updated upstream Double-X 5222, Tri-X Reversal 7266, and Kodak 2302 print-film calibrations, including development-time families. See [usage, provenance, and parity scope](docs/handoff-bw-stocks.md).
+## A darkroom in a window
 
-## Build
+![The Negs main window](docs/readme/app-window.webp)
 
-Requires Rust stable (≥ 1.89) and the standard system toolchain. macOS packaging
-also requires Python 3.11+; set `PYTHON=/path/to/python3` if needed.
+Pick a film, pick a paper, drag a slider, and watch the picture change as you move.
 
-```bash
-git clone <this-repo> && cd negs
+- Opens RAW files from most cameras, including Nikon HE★ and 60 MP medium format, plus JPEG, TIFF and PNG
+- Crop, straighten, and add borders with each stock's real edge print
+- Undo, keyboard shortcuts, pinch to zoom: it behaves like a Mac app
+- Exports PNG, TIFF or JPEG and keeps your camera's EXIF
+- 60 fps live preview while you drag a slider, and what you see in the preview is what you export
 
-# Native macOS app (macOS 14+, Xcode / Swift 5.9+)
-bash scripts/package_macos_app.sh
-open dist/negs-macos/Negs.app
-# Installer and app-only update ZIP: dist/releases/
+## Chemistry, not a filter
 
-# Cross-platform GUI (wgpu preview, eframe; Windows/Linux or legacy macOS)
-cargo build --release -p spektrafilm-gui
+Negs doesn't guess what film looks like. It follows the light through the whole chain (film, enlarger, paper, scanner) using the published data for each stock.
 
-# f32 CLI — fast batch processor, defaults to GPU backend
-cargo build --release -p spektrafilm-cli
+- **Colour from the spectrum.** Your photo is turned back into light, exposed onto the film's three dye layers, printed onto paper and scanned. Colours shift the way they did on the real stock, because the same thing happens to them.
+- **Halation.** Bright lights bleed a warm red glow, the way light bounces back through real film. Street lamps, sun on chrome, candle flames.
+- **Grain that lives in the image.** Grain is simulated in each dye layer from how dense the film is at that spot. It sits inside the picture instead of being laid on top.
+- **The developer's bite.** Development chemistry sharpens edges and deepens colour where tones meet, giving the crispness film has and digital lacks.
+- **Paper matters.** The print paper changes the look as much as the film does, just like in a real lab.
+- **Print it, or scan it.** Print the negative onto paper for the classic lab look, or skip the paper and scan the film directly.
 
-# f32 CLI with experimental native CUDA backend option
-cargo build --release -p spektrafilm-cli --features spektrafilm-gpu/cuda-backend
+### Why not a LUT?
 
-# f64 CLI — reference precision (CPU only; WGSL has no f64)
-cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64
+A LUT looks at each pixel on its own and swaps its colour. Real film doesn't work like that: light spreads through the emulsion, highlights glow, grain follows exposure and neighbouring tones pull on each other. Negs simulates all of it, so the look holds up where LUTs fall apart: skin, neon, deep shadows, bright skies.
 
-# Parity helper: decodes a RAW exactly like the GUI and writes a float TIFF
-# (EXIF orientation applied; pass --no-orient to skip it)
-cargo build --release -p spektrafilm-cli --bin decode_raw_gui
-```
+## Borders
 
-Build the GUI and f64 companion separately when updating: building only `spektrafilm-gui` does not rebuild the export executable. The GUI auto-detects the f64 binary via `$SPEKTRAFILM_F64_CLI`, then next to its own executable, then `spektrafilm-f64` on `PATH`, then `target/release/spektrafilm-f64`.
+Finish with a clean white border, a thin keyline, a black film edge, or the full 35mm frame, sprocket holes and all, printed with the stock's own edge markings.
 
-Windows builds use the WGSL/wgpu backend by default. The CPU fallback path avoids requiring a system OpenBLAS install on Windows, while macOS and Unix-like targets still use native BLAS providers.
+![A photo in a full 35mm frame with sprocket holes and edge markings](docs/readme/border-35mm.webp)
 
-WGSL is the default GPU backend and can be selected explicitly with `SPEKTRAFILM_BACKEND=wgpu`. An experimental native CUDA backend can be built with `--features spektrafilm-gpu/cuda-backend` and selected with `SPEKTRAFILM_BACKEND=cuda`. It uses CUDA 12 driver/NVRTC bindings through dynamic loading, so the NVIDIA driver and NVRTC runtime DLLs must be available. Set `SPEKTRAFILM_CUDA_DEVICE=1` (or another zero-based index) to pick a non-default CUDA device. Both GPU paths have a resident preview implementation: front pass, highlight boost, camera diffusion, camera lens blur, halation, DIR couplers, grain, density curves, enlarger diffusion, print/scan spectral reductions, glare, output gamut compression, scanner lens blur, unsharp, and one readback.
+## Your film shelf
 
-## Usage
+| | |
+|---|---|
+| **Colour negative** | Portra 160, Portra 400, Portra 800 (+1, +2), Ektar 100, Gold 200, Ultramax 400, Fujicolor C200, Pro 400H, Superia X-TRA 400 |
+| **Slide** | Ektachrome 100, Kodachrome 64, Velvia 100, Provia 100F |
+| **Motion picture** | Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Verita 200D |
+| **Black & white** | Tri-X 400 *(experimental)*, Double-X 5222 *(experimental)* |
+| **Papers & print film** | Portra Endura, Endura Premier, Supra Endura, Ultra Endura, Ektacolor Edge, Crystal Archive II, Ilford Multigrade RC, Vision 2383, Vision 2393 |
 
-### GUI
+Kodak, Fujifilm and Ilford stock names are trademarks of their owners. Negs is not affiliated with them.
 
-The macOS package uses a native **SwiftUI and AppKit interface** with a standard
-toolbar, adjustment inspector, menus, undo/redo, native file dialogs, and
-color-managed image display. Pinch to zoom, scroll or drag to pan, and double-click
-to fit. Use **⌘O** to open, **⌘S** to save the preview, **⇧⌘E** to export,
-**⌘R** to rotate, **⌘0 / ⌘1** for fit / actual size, and **⌥⌘I** to toggle adjustments.
-Export remains cancellable and uses the original image at the selected working
-resolution. The export panel's **Engine** pop-up chooses **Fast (GPU)**, the
-default, which renders like the preview and is several times quicker (Q3 60 MP:
-about 6 s instead of 33 s), or **Reference (CPU, 64-bit)**. Fast matches the
-reference within ΔE00 0.02 at default settings, at most one 8-bit step; grain is
-statistically the same but drawn from different random numbers. The choice is
-remembered. When the preview is already at export size (not limited to 12 MP),
-a Fast export saves it directly instead of developing the photograph again,
-which is the same file byte for byte. If no GPU is available, Fast falls back to the 32-bit CPU engine and
-the status bar says so. All existing adjustment groups are available in the
-inspector.
+## Install
 
-See the [native UI plan, architecture, and development guide](docs/native-macos-ui.md).
-Release builds support **Negs → Check for Updates…** and automatic checks
-configured in Settings. Normal quit and update restart save the current photograph,
-adjustments, crop, rotation, and borders for the next launch. Undo history and work
-lost to a crash are not restored. Local builds without a feed/key disable updates.
-The app is ad-hoc signed, without paid Apple signing or notarization; downloaded
-builds may need **System Settings → Privacy & Security → Open Anyway** on first
-launch. See [macOS installation, versioning, and releases](docs/macos-distribution.md).
-The cross-platform egui UI is **unmaintained**: it still builds and is the only
-UI on Windows and Linux for now, but it gets no new work or fixes. Development
-focuses on the macOS app, which will later be ported to other platforms. It
-runs with:
+1. **Download** the `.dmg` from the [latest release](https://github.com/noahhaasis/negs/releases).
+2. **Drag to Applications.** Open the `.dmg` and drag **Negs** into the **Applications** folder.
+3. **Open it once.** Double-click Negs. macOS says it can't verify the app and won't open it. Click **Done** (not *Move to Trash*).
+4. **Allow it in Settings.** Go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to the message about Negs. Enter your password, then click **Open**.
 
-```bash
-./target/release/spektrafilm-gui [optional/path/to/image.orf]
-```
+Why the extra step? Negs isn't notarized by Apple, which needs a paid developer account, so macOS asks you to allow it yourself the first time.
 
-- **Open…** — load a TIFF, PNG, or camera RAW (DNG/CR2/CR3/NEF/ARW/ORF/RW2/etc.). macOS uses Apple's RAW decoder, including supported Nikon HE/HE★ files; unsupported formats fall back to [`rawler`](https://github.com/dnglab/dnglab). Other platforms use rawler. See [decoder architecture and quality](docs/apple-raw-decoder.md).
-- **RAW white balance** — As shot (default), Daylight, Tungsten, or Custom temperature/tint. Edits re-develop the RAW for preview and final export. Disabled for non-RAW inputs; independent of Scanner → White correction. See [controls and decoder differences](docs/raw-white-balance.md).
-- **Sliders** — exposure, film format, halation, DIR couplers, grain, glare, scanner, enlarger, output. All live-updating against the GPU preview.
-- **Profiles** — film stock and print paper combo boxes; picking a film auto-selects its paired paper (`target_print` in the profile).
-- **Zoom** — scroll wheel or trackpad pinch over the preview (cursor-anchored), click-drag to pan, double-click to reset.
-- **Export…** — re-runs the pipeline at full resolution and writes a PNG/TIFF/JPEG. The engine box next to the format picks **Reference (CPU, 64-bit)** (default; `spektrafilm-f64` with the enlarger and scanner LUTs on) or **Fast (GPU)** (`spektrafilm` on wgpu, like the preview; located via `$SPEKTRAFILM_F32_CLI`, next to the GUI, on `PATH`, or `target/release`; not bundled in the embedded Windows build). Status bar shows elapsed time and reports a Fast export that fell back to the CPU; **Cancel** kills the child cleanly. Closing the GUI mid-export also kills the child (no orphans).
-- **Serial grain for export (less RAM)** — optional checkbox under Output, off by default. Processes grain channels one at a time during CPU export: less peak memory, identical output, but slower. Previews keep parallel grain. CLI users can set `settings.serial_grain: true` in their params JSON.
-- **Save…** — write the f32 GPU preview directly (instant, less precise).
-- **Limit preview to 12 MP** — optional checkbox under Output, off by default. Caps the image before preview processing to reduce memory and rendering time while preserving aspect ratio. Smaller images are not enlarged. Export still uses the Working resolution setting (full resolution at 1.0); Save writes the reduced preview. Disable the cap to inspect fine grain and detail at full working resolution. The full decoded source remains in memory, and RAW loading and full-resolution export peaks are unaffected.
+Negs updates itself: use **Negs → Check for Updates…**, or turn automatic checks on or off in Settings.
 
-### CLI
+### Handy shortcuts
 
-```bash
-# f32 GPU (fast)
-./target/release/spektrafilm process input.ORF -o out.png \
-    --film kodak_gold_200 --paper kodak_portra_endura --data-dir data
+| | |
+|---|---|
+| Open a photo | ⌘O |
+| Export | ⇧⌘E |
+| Save the preview | ⌘S |
+| Rotate | ⌘R |
+| Fit / actual size | ⌘0 / ⌘1 |
+| Show or hide adjustments | ⌥⌘I |
 
-# f32 native CUDA, when built with spektrafilm-gpu/cuda-backend
-SPEKTRAFILM_BACKEND=cuda \
-    ./target/release/spektrafilm process input.ORF -o out.png \
-    --film kodak_gold_200 --paper kodak_portra_endura --data-dir data
+Pinch to zoom, scroll or drag to pan, double-click to fit.
 
-# f64 CPU (reference)
-SPEKTRAFILM_BACKEND=cpu \
-    ./target/release/spektrafilm-f64 process input.ORF -o out.png \
-    --film kodak_gold_200 --paper kodak_portra_endura --data-dir data
+## Questions
 
-# Override any params via JSON (matches RuntimeParams struct)
-... --params my_params.json
+**Is Negs free?**
+Yes. It's free to download and open source under the GPL-3.0 (see [License](#license)).
 
-# Opt into pinned experimental 28bf883 gamut settings
-... --params data/presets/experimental-gamut.json
+**macOS says Negs can't be opened. Is it safe?**
+macOS shows that warning for every app that isn't notarized by Apple. Negs isn't, because notarizing needs a paid developer account. All of the source code is in this repository for anyone to check. Follow the [install steps](#install): you only need to allow it once.
 
-# RAW input WB (also available via io.raw_white_balance in --params)
-./target/release/spektrafilm process input.ORF -o out.png \
-    --film kodak_gold_200 --raw-wb custom --raw-temperature 3200 --raw-tint 0.85
+**Which files can I open?**
+RAW files from most cameras (through Apple's own RAW support), plus JPEG, TIFF and PNG.
 
-# List available film + paper profiles
-./target/release/spektrafilm list-profiles --data-dir data
-```
+**Does it run on Intel Macs?**
+No. Negs needs a Mac with Apple silicon (M1 or later).
 
-## Parity
+**Is this a preset pack?**
+No. Presets and LUTs remap colours. Negs simulates the film, the paper and the light, which is why halation, grain and edge effects come out right.
 
-The optional [experimental gamut preset](docs/handoff-experimental-gamut.md)
-adds the smooth input boundary and D65 compression center. All 24 tested
-B&W cases pass against pinned Python `28bf883`, including saturated inputs,
-with maximum final RGB error `5.313e-10`. The existing runtime defaults are
-preserved; colour-profile normalization remains a separate port.
+**Windows or Linux?**
+Not yet, but they will follow.
 
-The [repeatable parity runner](scripts/parity/README.md) checks intermediate f64 arrays and final RGB against an explicitly selected Python checkout. The [October 2026 audit](docs/upstream-sync.md) passes all 12 tested cases against upstream main `3bb2c2d`, with maximum final linear RGB error `3.631e-9`. The sibling Python checkout is on experimental `28bf883`, which changes the model and fails all six tested Portra/Endura cases. Version `0.3.4` alone does not identify a stable reference.
-
-Historical measurements from the initial port against Python v0.3.2 (bare chain, no stochastic FX) follow. They are numerical comparisons, not byte identity, and were not reproduced on the original image in the current audit:
-
-| Stage | Max diff | Mean diff | Identical pixels |
-|---|---|---|---|
-| `log_raw` (post-Hanatos + log10) | **8.9 × 10⁻¹⁵** | 3.4 × 10⁻¹⁶ | — |
-| Film density CMY | **1.1 × 10⁻¹⁵** | 1.7 × 10⁻¹⁶ | — |
-| Print density CMY | **3.1 × 10⁻¹⁵** | 3.0 × 10⁻¹⁶ | — |
-| Final PNG (8-bit) | **1 / 255** | 0.00004 / 255 | **99.9962 %** |
-
-With grain on, the binomial sampler's rejection step is sensitive to upstream ULP shifts and the rendered grain texture diverges per pixel — this is by design (matches numpy's behaviour) and produces the same average tone with a different grain pattern.
-
-The LUT path (`use_enlarger_lut` + `use_scanner_lut`, the typical export config) uses a bit-exact port of Python's PCHIP 3D interpolation (`crates/spektrafilm-math/src/pchip3d.rs` ↔ `spektrafilm/utils/fast_interp_lut.py`). Parity numbers above hold for both the LUT and non-LUT paths.
-
-## Performance
-
-The [Leica Q3 memory investigation](docs/memory-study-q3.md) measures the current
-memory reductions and optional serial grain. The [memory optimization handoff](docs/handoff-memory.md)
-records the agreed next steps: GPU scratch reuse, then CPU buffer ownership/reuse,
-while retaining full-resolution previews.
-
-f64 CPU export on a 16 MP Olympus ORF (kodak_gold_200 → kodak_portra_endura, full FX):
-
-| | Wall time | Notes |
-|---|---|---|
-| Python reference (numpy + numba) | 22 s | LUT enabled, default config |
-| **spektrafilm-rs (f64 CPU)** | **14 s** | **35 % faster than Python** |
-
-What gets it there:
-
-- **PCHIP LUTs** for the spectral integrations (enlarger + scanner) — same approximation Python uses, same accuracy budget.
-- **`vForce vvpow`** for `10^x` on the spectral chain — Accelerate's SIMD pow, bit-identical to libm `pow(10, x)`.
-- **Accelerate BLAS dgemm** for the spectral reductions — a single `cblas_dgemm` per contraction, parallelised internally by Accelerate. (It is not safe to call concurrently from multiple threads, so the matmul is never split across rayon.)
-- **Parallelised hot per-pixel loops** in the printing and scanning post-stages.
-
-GPU preview path uses wgpu compute shaders (`crates/spektrafilm-shaders/wgsl/`). All shaders are f32 (WGSL has no f64); the GPU path drives the live preview while the export reaches for f64 CPU. End-to-end preview render: ~250 ms at 6 MP, ~700 ms at 16 MP on Apple Silicon.
-
-## Layout
-
-For an interactive, source-linked walkthrough of RAW decoding, stock simulation, printing, scanning, and export, open [the Anatomy explainer](docs/anatomy/index.html) in a browser. Its charts use samples from the bundled profile JSON; regenerate it with `node docs/anatomy/build.mjs` after profile changes.
-
-```
-crates/
-  spektrafilm-math/    f64 reference math (spectral, interp, PCHIP, RNG, vForce bindings)
-  spektrafilm-model/   stochastic + physical models (grain, halation, DIR couplers, glare)
-  spektrafilm-core/    pipeline orchestration, profiles, stage definitions
-  spektrafilm-gpu/     ComputeBackend trait + CPU (rayon + BLAS) and wgpu backends
-  spektrafilm-shaders/ WGSL / Metal / CUDA compute shaders
-  spektrafilm-io/      image + camera RAW loading (rawler) and PNG/JPEG/TIFF saving
-                       with the source's camera EXIF, shared by the CLI and GUI
-  spektrafilm-cli/     `spektrafilm` (process, list-profiles, gen-lut) + `decode_raw_gui`
-  spektrafilm-gui/     egui/eframe preview, unmaintained (wgpu renderer, Metal-backed on macOS)
-  spektrafilm-native/  persistent image-engine helper for the native macOS app
-macos/                SwiftUI interface, AppKit image canvas, and Swift tests
-data/
-  profiles/            film + paper JSON profiles (spectral sensitivities, density curves, etc.)
-  luts/                Hanatos2025 spectral basis + standard observer CMFs (.npy)
-  filters/             neutral-print enlarger filter database
-scripts/parity/        Python ↔ Rust comparison harness (spektra_compare.py, etc.)
-docs/upstream-sync.md  verified Python references, parity results, porting backlog
-```
+**Found a bug or have an idea?**
+[Open an issue](https://github.com/noahhaasis/negs/issues).
 
 ## Credits
 
-Original Python implementation by Andrea Volpato — [andreavolpato/spektrafilm](https://github.com/andreavolpato/spektrafilm). All spectral data, film/paper profiles, and pipeline architecture come from there. This port owes its existence to Andrea and its work.
+The film model at the heart of Negs comes from two open-source projects. Negs builds a fast, native Mac app on top of them.
 
-The spectral-upsampling LUT (`hanatos2025_*`) is named after [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt), who provided the upstream Python project with the LUT files and sample code that drive the RGB → spectrum step.
+- **[spektrafilm](https://github.com/andreavolpato/spektrafilm)** by Andrea Volpato: the spectral simulation of film and print. The physics and the stock data come from here.
+- **[spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs)** by turbasvin: the Rust port of spektrafilm that Negs started from.
 
-PCHIP 3D LUT, MT19937 binomial sampler, and CIE 1931 observer constants are ported from numpy / scipy / scikit-image / colour-science.
-
-Claude code for being this awesome.
+The spectral-upsampling tables are by [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt). Parts of the maths are ported from numpy, scipy, scikit-image and colour-science. RAW files Apple can't read are decoded with [rawler](https://github.com/dnglab/dnglab), and updates are delivered with [Sparkle](https://sparkle-project.org).
 
 ## License
 
-GPL-3.0, matching the upstream Python project. See [LICENSE](LICENSE) for the full text.
+Negs is free software under the **GNU General Public License, version 3** ([full text](LICENSE)), the same license as spektrafilm and spektrafilm-rs, which it builds on.
+
+That means you can use Negs for anything, including commercial work. The photos you make with it are yours, and the license puts no conditions on them. You may also share and modify the app. If you distribute it, modified or not, you must pass on the same freedoms: release it under the GPL-3.0 and make the source code available.
+
+- Copyright © Andrea Volpato (spektrafilm)
+- Copyright © turbasvin (spektrafilm-rs)
+- Copyright © 2026 Noah Haasis (Negs: the Mac app and the changes to the engine)
+
+Third-party components keep their own licenses. Sparkle, the update framework bundled in the Mac app, is under the MIT license.
+
+## For developers
+
+Building from source, the command-line tools, accuracy against the original Python project, and how the code is laid out: see [docs/development.md](docs/development.md).
