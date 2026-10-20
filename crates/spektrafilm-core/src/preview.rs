@@ -97,6 +97,18 @@ pub fn rescale_preview_input_fast(image: &ImageBuf, (new_w, new_h): (u32, u32)) 
 /// `encoded` says whether `image` is already sRGB-encoded; if not, each
 /// interpolated value is encoded here. `image` itself is never modified.
 pub fn display_rgba(image: &ImageBuf, max_dim: usize, encoded: bool) -> (usize, usize, Vec<u8>) {
+    display_rgba_with_post(image, max_dim, encoded, None)
+}
+
+/// [`display_rgba`] with post adjustments applied to each displayed pixel, so
+/// a post-only edit redraws the preview without developing the film again.
+/// They act per pixel, so at 1:1 this matches adjusting the image itself.
+pub fn display_rgba_with_post(
+    image: &ImageBuf,
+    max_dim: usize,
+    encoded: bool,
+    post: Option<&crate::post::PostProcess>,
+) -> (usize, usize, Vec<u8>) {
     let src_w = image.width as usize;
     let src_h = image.height as usize;
     let max_src_dim = src_w.max(src_h).max(1);
@@ -131,14 +143,20 @@ pub fn display_rgba(image: &ImageBuf, max_dim: usize, encoded: bool) -> (usize, 
                 let p11 = (y1 * src_w + x1) * 3;
                 let dst = x * 4;
 
-                for c in 0..3 {
+                let mut rgb = [0f32; 3];
+                for (c, out) in rgb.iter_mut().enumerate() {
                     let v00 = to_f32(image.data[p00 + c]);
                     let v10 = to_f32(image.data[p10 + c]);
                     let v01 = to_f32(image.data[p01 + c]);
                     let v11 = to_f32(image.data[p11 + c]);
                     let top = v00 + (v10 - v00) * tx;
                     let bot = v01 + (v11 - v01) * tx;
-                    let mut v = top + (bot - top) * ty;
+                    *out = top + (bot - top) * ty;
+                }
+                if let Some(post) = post {
+                    rgb = post.apply_rgb(rgb);
+                }
+                for (c, mut v) in rgb.into_iter().enumerate() {
                     if !encoded {
                         v = if v <= 0.0031308 {
                             v * 12.92
