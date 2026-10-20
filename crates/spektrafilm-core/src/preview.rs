@@ -100,9 +100,10 @@ pub fn display_rgba(image: &ImageBuf, max_dim: usize, encoded: bool) -> (usize, 
     display_rgba_with_post(image, max_dim, encoded, None)
 }
 
-/// [`display_rgba`] with post adjustments applied to each displayed pixel, so
-/// a post-only edit redraws the preview without developing the film again.
-/// They act per pixel, so at 1:1 this matches adjusting the image itself.
+/// [`display_rgba`] with post adjustments, so a post-only edit redraws the
+/// preview without developing the film again. They are applied to the source
+/// pixels before downscaling, as an export applies them before any resize, so
+/// the preview matches the adjusted image at every size.
 pub fn display_rgba_with_post(
     image: &ImageBuf,
     max_dim: usize,
@@ -116,58 +117,179 @@ pub fn display_rgba_with_post(
     let w = ((src_w * scale_num + max_src_dim / 2) / max_src_dim).max(1);
     let h = ((src_h * scale_num + max_src_dim / 2) / max_src_dim).max(1);
     let mut rgba = vec![0u8; w * h * 4];
-    rgba.par_chunks_exact_mut(w * 4)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let gy = if h == src_h {
-                y as f32
-            } else {
-                (y as f32 + 0.5) * (src_h as f32 / h as f32) - 0.5
-            };
-            let y0 = gy.floor().clamp(0.0, (src_h - 1) as f32) as usize;
-            let y1 = (y0 + 1).min(src_h - 1);
-            let ty = (gy - y0 as f32).clamp(0.0, 1.0);
-
-            for x in 0..w {
-                let gx = if w == src_w {
-                    x as f32
+    let pixel = |y: usize, x: usize| {
+        let p = (y * src_w + x) * 3;
+        let rgb = [0, 1, 2].map(|c| to_f32(image.data[p + c]));
+        post.map_or(rgb, |post| post.apply_rgb(rgb))
+    };
+    let write = |out: &mut [u8], rgb: [f32; 3]| {
+        for (c, mut v) in rgb.into_iter().enumerate() {
+            if !encoded {
+                v = if v <= 0.0031308 {
+                    v * 12.92
                 } else {
-                    (x as f32 + 0.5) * (src_w as f32 / w as f32) - 0.5
+                    1.055 * v.powf(1.0 / 2.4) - 0.055
                 };
-                let x0 = gx.floor().clamp(0.0, (src_w - 1) as f32) as usize;
-                let x1 = (x0 + 1).min(src_w - 1);
-                let tx = (gx - x0 as f32).clamp(0.0, 1.0);
-                let p00 = (y0 * src_w + x0) * 3;
-                let p10 = (y0 * src_w + x1) * 3;
-                let p01 = (y1 * src_w + x0) * 3;
-                let p11 = (y1 * src_w + x1) * 3;
-                let dst = x * 4;
+            }
+            out[c] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        }
+        out[3] = 255;
+    };
+    if w == src_w && h == src_h {
+        rgba.par_chunks_exact_mut(w * 4)
+            .enumerate()
+            .for_each(|(y, row)| {
+                for (x, out) in row.chunks_exact_mut(4).enumerate() {
+                    write(out, pixel(y, x));
+                }
+            });
+        return (w, h, rgba);
+    }
 
-                let mut rgb = [0f32; 3];
-                for (c, out) in rgb.iter_mut().enumerate() {
-                    let v00 = to_f32(image.data[p00 + c]);
-                    let v10 = to_f32(image.data[p10 + c]);
-                    let v01 = to_f32(image.data[p01 + c]);
-                    let v11 = to_f32(image.data[p11 + c]);
-                    let top = v00 + (v10 - v00) * tx;
-                    let bot = v01 + (v11 - v01) * tx;
-                    *out = top + (bot - top) * ty;
+    // Bilinear. Each band of display rows reads the source rows it needs
+    // once, and only the columns it samples, so post adjustments run about
+    // once per source pixel rather than once per tap.
+    const BAND: usize = 32;
+    let columns: Vec<(usize, f32)> = (0..w)
+        .map(|x| {
+            let gx = if w == src_w {
+                x as f32
+            } else {
+                (x as f32 + 0.5) * (src_w as f32 / w as f32) - 0.5
+            };
+            let x0 = gx.floor().clamp(0.0, (src_w - 1) as f32) as usize;
+            (x0, (gx - x0 as f32).clamp(0.0, 1.0))
+        })
+        .collect();
+    let mut sampled = vec![false; src_w];
+    for &(x0, _) in &columns {
+        sampled[x0] = true;
+        sampled[(x0 + 1).min(src_w - 1)] = true;
+    }
+    rgba.par_chunks_mut(w * 4 * BAND)
+        .enumerate()
+        .for_each(|(band, rows)| {
+            // The two source rows under the current display row, by index.
+            let mut cached = [
+                (usize::MAX, vec![[0f32; 3]; src_w]),
+                (usize::MAX, vec![[0f32; 3]; src_w]),
+            ];
+            for (i, row) in rows.chunks_exact_mut(w * 4).enumerate() {
+                let y = band * BAND + i;
+                let gy = if h == src_h {
+                    y as f32
+                } else {
+                    (y as f32 + 0.5) * (src_h as f32 / h as f32) - 0.5
+                };
+                let y0 = gy.floor().clamp(0.0, (src_h - 1) as f32) as usize;
+                let y1 = (y0 + 1).min(src_h - 1);
+                let ty = (gy - y0 as f32).clamp(0.0, 1.0);
+                if cached[1].0 == y0 {
+                    cached.swap(0, 1);
                 }
-                if let Some(post) = post {
-                    rgb = post.apply_rgb(rgb);
-                }
-                for (c, mut v) in rgb.into_iter().enumerate() {
-                    if !encoded {
-                        v = if v <= 0.0031308 {
-                            v * 12.92
-                        } else {
-                            1.055 * v.powf(1.0 / 2.4) - 0.055
-                        };
+                for (slot, source_y) in [(0, y0), (1, y1)] {
+                    let (index, values) = &mut cached[slot];
+                    if *index != source_y {
+                        for (x, value) in values.iter_mut().enumerate() {
+                            if sampled[x] {
+                                *value = pixel(source_y, x);
+                            }
+                        }
+                        *index = source_y;
                     }
-                    row[dst + c] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
                 }
-                row[dst + 3] = 255;
+                let (top_row, bottom_row) = (&cached[0].1, &cached[1].1);
+                for (out, &(x0, tx)) in row.chunks_exact_mut(4).zip(&columns) {
+                    let x1 = (x0 + 1).min(src_w - 1);
+                    let rgb = [0, 1, 2].map(|c| {
+                        let top = top_row[x0][c] + (top_row[x1][c] - top_row[x0][c]) * tx;
+                        let bot = bottom_row[x0][c] + (bottom_row[x1][c] - bottom_row[x0][c]) * tx;
+                        top + (bot - top) * ty
+                    });
+                    write(out, rgb);
+                }
             }
         });
     (w, h, rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::post::{PostParams, PostProcess};
+
+    /// Per-pixel bilinear sampling, as the display proxy did before it read
+    /// source rows in bands. The banded version must give the same bytes.
+    fn reference_rgba(image: &ImageBuf, w: usize, h: usize) -> Vec<u8> {
+        let (src_w, src_h) = (image.width as usize, image.height as usize);
+        let at = |x: usize, y: usize, c: usize| to_f32(image.data[(y * src_w + x) * 3 + c]);
+        let mut out = Vec::new();
+        for y in 0..h {
+            let gy = (y as f32 + 0.5) * (src_h as f32 / h as f32) - 0.5;
+            let y0 = gy.floor().clamp(0.0, (src_h - 1) as f32) as usize;
+            let (y1, ty) = ((y0 + 1).min(src_h - 1), (gy - y0 as f32).clamp(0.0, 1.0));
+            for x in 0..w {
+                let gx = (x as f32 + 0.5) * (src_w as f32 / w as f32) - 0.5;
+                let x0 = gx.floor().clamp(0.0, (src_w - 1) as f32) as usize;
+                let (x1, tx) = ((x0 + 1).min(src_w - 1), (gx - x0 as f32).clamp(0.0, 1.0));
+                for c in 0..3 {
+                    let top = at(x0, y0, c) + (at(x1, y0, c) - at(x0, y0, c)) * tx;
+                    let bot = at(x0, y1, c) + (at(x1, y1, c) - at(x0, y1, c)) * tx;
+                    out.push(((top + (bot - top) * ty).clamp(0.0, 1.0) * 255.0).round() as u8);
+                }
+                out.push(255);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn downscaled_display_matches_per_pixel_bilinear() {
+        // Taller than one band, with an odd scale so source rows are skipped and shared.
+        let (src_w, src_h) = (53, 97);
+        let data = (0..src_w * src_h * 3)
+            .map(|i| from_f32(((i * 7919) % 1000) as f32 / 999.0))
+            .collect();
+        let image = ImageBuf::from_data(src_w as u32, src_h as u32, data);
+        for max_dim in [96, 61, 40, 7] {
+            let (w, h, rgba) = display_rgba(&image, max_dim, true);
+            assert_eq!(rgba, reference_rgba(&image, w, h), "max_dim {max_dim}");
+        }
+    }
+
+    /// Fine detail above the display cap: adjusting then downscaling, as an
+    /// export would, must equal the preview's own path.
+    #[test]
+    fn post_preview_matches_the_adjusted_image_when_downscaled() {
+        let stripes = (0..20 * 2)
+            .flat_map(|i| [(i % 2) as f32; 3])
+            .map(from_f32)
+            .collect();
+        let stripes = ImageBuf::from_data(20, 2, stripes);
+        let noise = (0..53 * 97 * 3)
+            .map(|i| from_f32(((i * 7919) % 1000) as f32 / 999.0))
+            .collect();
+        let noise = ImageBuf::from_data(53, 97, noise);
+        let post = PostProcess::new(
+            &PostParams {
+                brightness: 100.0,
+                contrast: 40.0,
+                saturation: 50.0,
+                ..Default::default()
+            },
+            true,
+            "sRGB",
+        );
+        for (image, sizes) in [(&stripes, &[7, 20][..]), (&noise, &[97, 61, 40, 7][..])] {
+            for &max_dim in sizes {
+                assert_eq!(
+                    display_rgba_with_post(image, max_dim, true, Some(&post)),
+                    display_rgba(&post.applied(image), max_dim, true),
+                    "{}x{} at max_dim {max_dim}",
+                    image.width,
+                    image.height
+                );
+            }
+        }
+    }
 }

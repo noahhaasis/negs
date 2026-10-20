@@ -24,6 +24,8 @@ use std::{
 
 /// EditorModel.readPreview rejects larger preview buffers.
 const DISPLAY_MAX_DIM: usize = 8192;
+/// The only output colour space the helper renders.
+const OUTPUT_SPACE: &str = "sRGB";
 
 #[derive(Deserialize)]
 struct Request {
@@ -150,8 +152,8 @@ impl Session {
                 // Crop in the unrotated orientation, then rotate, then add the border.
                 let cropped = crop.map(|crop| crop.apply(image));
                 let image = cropped.as_ref().unwrap_or(image);
-                let adjusted =
-                    (!post.is_identity()).then(|| PostProcess::new(post, *encoded).applied(image));
+                let adjusted = (!post.is_identity())
+                    .then(|| PostProcess::new(post, *encoded, OUTPUT_SPACE).applied(image));
                 let image = adjusted.as_ref().unwrap_or(image);
                 let rotated =
                     (rotate_cw.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(rotate_cw));
@@ -184,7 +186,7 @@ impl Session {
                     "Invalid working resolution"
                 );
                 ensure!(
-                    params.io.output_color_space == "sRGB",
+                    params.io.output_color_space == OUTPUT_SPACE,
                     "Native preview requires sRGB output"
                 );
                 params.io.raw_white_balance.validate()?;
@@ -304,7 +306,7 @@ fn write_display(
     post: &PostParams,
     path: &Path,
 ) -> Result<(usize, usize)> {
-    let post = (!post.is_identity()).then(|| PostProcess::new(post, encoded));
+    let post = (!post.is_identity()).then(|| PostProcess::new(post, encoded, OUTPUT_SPACE));
     let (width, height, bytes) =
         display_rgba_with_post(image, DISPLAY_MAX_DIM, encoded, post.as_ref());
     std::fs::write(path, bytes).context("Writing preview buffer")?;

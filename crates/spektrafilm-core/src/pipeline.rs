@@ -465,8 +465,12 @@ impl Pipeline {
     fn apply_post(&self, mut image: ImageBuf) -> ImageBuf {
         let post = &self.params.post;
         if !post.is_identity() {
-            crate::post::PostProcess::new(post, self.params.io.output_cctf_encoding)
-                .apply(&mut image);
+            crate::post::PostProcess::new(
+                post,
+                self.params.io.output_cctf_encoding,
+                &self.params.io.output_color_space,
+            )
+            .apply(&mut image);
         }
         image
     }

@@ -5,10 +5,16 @@
 //!
 //! Tones are shaped on luminance in sRGB-encoded (perceptual) space, and each
 //! pixel keeps its colour ratios, so contrast doesn't shift the film's hues.
+//!
+//! The arithmetic is f32 even in the f64 build: the tables already limit
+//! accuracy to about 2e-7, far below a 16-bit output step, and the f64
+//! build's purpose, parity with the Python reference, doesn't cover Post.
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use spektrafilm_math::colorspace::SRGB_TO_XYZ;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f32, to_f32};
+use spektrafilm_math::spectral::colorspace_to_xyz;
 
 /// Each control runs from -100 to 100; 0 leaves the photograph unchanged.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -41,7 +47,17 @@ const PIVOT: f64 = 0.461_356;
 /// How far Whites and Blacks at ±100 move their end point.
 const LEVELS_RANGE: f64 = 0.15;
 const LUT_SIZE: usize = 4096;
-const LUMA: [f32; 3] = [0.2126, 0.7152, 0.0722];
+
+/// Luminance weights of an output colour space: the Y row of its RGB → XYZ
+/// matrix. Unknown names fall back to sRGB, as the scan's output does.
+fn luminance_weights(color_space: &str) -> [f32; 3] {
+    match color_space {
+        "ProPhoto RGB" | "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" | "ACES2065-1" => {
+            colorspace_to_xyz(color_space)[1]
+        }
+        _ => SRGB_TO_XYZ[1],
+    }
+}
 
 fn srgb_encode(x: f64) -> f64 {
     if x <= 0.003_130_8 {
@@ -94,6 +110,8 @@ fn lookup(table: &[f32], x: f32) -> f32 {
 /// applying them costs a few lookups per pixel.
 pub struct PostProcess {
     saturation: f32,
+    /// The output space's luminance weights.
+    luma: [f32; 3],
     /// Whether pixels arrive, and leave, sRGB-encoded rather than linear.
     encoded: bool,
     /// Encoded → linear.
@@ -105,7 +123,9 @@ pub struct PostProcess {
 }
 
 impl PostProcess {
-    pub fn new(params: &PostParams, encoded: bool) -> Self {
+    /// `encoded` and `color_space` describe the scan's output, as
+    /// `io.output_cctf_encoding` and `io.output_color_space`.
+    pub fn new(params: &PostParams, encoded: bool, color_space: &str) -> Self {
         let samples = |f: &dyn Fn(f64) -> f64| -> Vec<f32> {
             (0..LUT_SIZE)
                 .map(|i| f(i as f64 / (LUT_SIZE - 1) as f64) as f32)
@@ -113,6 +133,7 @@ impl PostProcess {
         };
         Self {
             saturation: params.saturation / 100.0,
+            luma: luminance_weights(color_space),
             encoded,
             decode: samples(&srgb_decode),
             encode: samples(&|s| srgb_encode(s * s)),
@@ -128,7 +149,7 @@ impl PostProcess {
         } else {
             rgb.map(|v| v.clamp(0.0, 1.0))
         };
-        let y = LUMA[0] * c[0] + LUMA[1] * c[1] + LUMA[2] * c[2];
+        let y = self.luma[0] * c[0] + self.luma[1] * c[1] + self.luma[2] * c[2];
         let y2 = lookup(&self.tone, y.max(0.0).sqrt());
         if y <= 1e-9 {
             c = [y2; 3];
@@ -189,7 +210,7 @@ mod tests {
 
     #[test]
     fn neutral_settings_keep_the_photograph() {
-        let post = PostProcess::new(&PostParams::default(), true);
+        let post = PostProcess::new(&PostParams::default(), true, "sRGB");
         for rgb in [
             [0.0, 0.0, 0.0],
             [1.0, 1.0, 1.0],
@@ -235,12 +256,12 @@ mod tests {
 
     #[test]
     fn saturation_keeps_luminance_and_greys() {
-        let luma = |c: [f32; 3]| LUMA[0] * c[0] + LUMA[1] * c[1] + LUMA[2] * c[2];
-        let mono = PostProcess::new(&params(|p| p.saturation = -100.0), false);
+        let luma = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let mono = PostProcess::new(&params(|p| p.saturation = -100.0), false, "sRGB");
         let out = mono.apply_rgb([0.6, 0.2, 0.1]);
         assert!((out[0] - out[1]).abs() < 1e-6 && (out[1] - out[2]).abs() < 1e-6);
         assert!((luma(out) - luma([0.6, 0.2, 0.1])).abs() < 1e-3);
-        let vivid = PostProcess::new(&params(|p| p.saturation = 100.0), false);
+        let vivid = PostProcess::new(&params(|p| p.saturation = 100.0), false, "sRGB");
         assert_eq!(
             vivid.apply_rgb([0.4, 0.4, 0.4]).map(|v| (v * 1e4).round()),
             [4000.0; 3]
@@ -259,8 +280,26 @@ mod tests {
                 p.whites = 100.0;
             }),
             true,
+            "sRGB",
         );
         let out = post.apply_rgb([1.0, 0.9, 0.2]);
         assert!(out.iter().all(|v| (0.0..=1.0).contains(v)), "{out:?}");
+    }
+
+    #[test]
+    fn luminance_follows_the_output_space() {
+        let prophoto = colorspace_to_xyz("ProPhoto RGB")[1];
+        let mono = PostProcess::new(&params(|p| p.saturation = -100.0), false, "ProPhoto RGB");
+        for (rgb, y) in [
+            ([1.0, 0.0, 0.0], prophoto[0]),
+            ([0.0, 0.0, 1.0], prophoto[2]),
+        ] {
+            let out = mono.apply_rgb(rgb);
+            assert!(
+                out.iter().all(|v| (v - y).abs() < 1e-4),
+                "{rgb:?} -> {out:?}, want {y}"
+            );
+        }
+        assert_eq!(luminance_weights("unknown"), luminance_weights("sRGB"));
     }
 }
