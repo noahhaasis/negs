@@ -246,28 +246,39 @@ private extension View {
 
 struct AdjustmentInspector: View {
     let model: EditorModel
-    @AppStorage("expandedAdjustments") private var expanded = "Grain,Halation,Enlarger"
+    @AppStorage("expandedAdjustments") private var expanded = "Enlarger"
     @AppStorage("inspectorTab") private var tab = InspectorTab.lab
 
     var body: some View {
-        Form {
-            Section {
+        // The histogram and tab switch stay put above the tab's scrolling sections.
+        VStack(spacing: 0) {
+            VStack(spacing: 10) {
                 HistogramView(histogram: model.histogram).frame(height: 88)
                 Picker("Tab", selection: $tab) {
                     ForEach(InspectorTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden()
+                .frame(maxWidth: .infinity)
             }
-            switch tab {
-            case .lab: lab
-            case .post: post
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            Divider()
+            Form {
+                switch tab {
+                case .lab: lab
+                case .post: post
+                }
             }
-            Section {
-                Button("Reset All Adjustments", action: model.reset).frame(maxWidth: .infinity)
-                    .help("Restore defaults on both tabs while keeping the film, paper, rotation, and border. You can undo this.")
+            .formStyle(.grouped)
+            // Pinned below the sections, like the Reset Adjustments button in Photos.
+            Button(action: model.reset) {
+                Text("Reset Adjustments").frame(maxWidth: .infinity)
             }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.extraLarge)
+            .help("Restore defaults on both tabs while keeping the film, paper, rotation, and border. You can undo this.")
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
-        .formStyle(.grouped)
         .disabled(!model.hasCatalog)
     }
 

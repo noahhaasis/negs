@@ -4,7 +4,7 @@
 
 Negs is a free Mac app that runs your pictures through a physical simulation of film: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
 
-Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both, with a GPU preview that matches the reference render, Apple's RAW decoder, faster exports and lab-style borders, and wraps it all in a native macOS app.
+Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in a native macOS app.
 
 **[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon
 
@@ -22,7 +22,7 @@ Pick a film, pick a paper, drag a slider, and watch the picture change as you mo
 - Crop, straighten, and add borders with each stock's real edge print
 - Undo, keyboard shortcuts, pinch to zoom: it behaves like a Mac app
 - Exports PNG, TIFF or JPEG and keeps your camera's EXIF
-- 60 fps live preview while you drag a slider, and what you see in the preview is what you export
+- Live preview while you drag a slider, and what you see in the preview is what you export
 
 ## Chemistry, not a filter
 

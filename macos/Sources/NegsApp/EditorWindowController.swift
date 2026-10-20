@@ -203,6 +203,8 @@ import SwiftUI
         case .doneCrop:
             item = NSToolbarItem(itemIdentifier: id)
             item.view = doneButton; item.label = "Done"; item.toolTip = "Apply the crop (Return)"
+            // The confirming action is filled with the accent color.
+            if #available(macOS 26, *) { item.style = .prominent } else { doneButton.bezelColor = .controlAccentColor }
         default:
             return nil
         }
