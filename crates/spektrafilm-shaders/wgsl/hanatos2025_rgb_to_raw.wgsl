@@ -114,13 +114,17 @@ fn sample_lut_bicubic(lut_x: f32, lut_y: f32) -> vec3<f32> {
     return sum;
 }
 
-@compute @workgroup_size(1024)
+// Threads per workgroup; the host may lower it to what the GPU's
+// compiled pipeline supports (see `WgpuBackend::workgroup_size`).
+override WORKGROUP_SIZE: u32 = 1024u;
+
+@compute @workgroup_size(WORKGROUP_SIZE)
 fn main(
     @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(num_workgroups) groups: vec3<u32>,
 ) {
     // 2D grid above 65535 workgroups (see `linear_dispatch_grid`).
-    let pixel_idx = gid.y * groups.x * 1024u + gid.x;
+    let pixel_idx = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     let total_pixels = params.width * params.height;
     if pixel_idx >= total_pixels {
         return;

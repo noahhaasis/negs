@@ -49,12 +49,16 @@ fn reflect(s: i32, n: i32) -> u32 {
     return u32(s);
 }
 
-@compute @workgroup_size(256)
+// Threads per workgroup; the host may lower it to what the GPU's
+// compiled pipeline supports (see `WgpuBackend::workgroup_size`).
+override WORKGROUP_SIZE: u32 = 256u;
+
+@compute @workgroup_size(WORKGROUP_SIZE)
 fn main(
     @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(num_workgroups) groups: vec3<u32>,
 ) {
-    let idx = gid.y * groups.x * 256u + gid.x;
+    let idx = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     let n1 = params.n1;
     let n2 = params.n2;
     let r = params.r;
