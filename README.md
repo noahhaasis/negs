@@ -26,6 +26,8 @@ Pick a film, pick a paper, drag a slider, and watch the picture change as you mo
 - Exports PNG, TIFF or JPEG and keeps your camera's EXIF
 - Live preview while you drag a slider, and what you see in the preview is what you export
 
+https://github.com/user-attachments/assets/3fab6c0d-4e37-4e9e-a9f7-53b9f6c67812
+
 ## Chemistry, not a filter
 
 Negs doesn't guess what film looks like. It follows the light through the whole chain (film, enlarger, paper, scanner) using the published data for each stock.
