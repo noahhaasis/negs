@@ -124,7 +124,6 @@ struct SliderRow: View {
     let step: Double
 
     @State private var typing = false
-    @FocusState private var fieldFocused: Bool
     private var decimals: Int { max(0, Int(-log10(step).rounded(.down))) }
     private var format: FloatingPointFormatStyle<Double> { .number.precision(.fractionLength(0...decimals)) }
 
@@ -143,14 +142,8 @@ struct SliderRow: View {
                 }
                 // A field only while typing, so the window never focuses one by default.
                 if typing {
-                    TextField(title, value: value, format: format)
-                        .textFieldStyle(.roundedBorder).labelsHidden().controlSize(.small)
-                        .multilineTextAlignment(.trailing).monospacedDigit().frame(width: 64)
-                        .focused($fieldFocused)
-                        .onAppear { fieldFocused = true }
-                        .onSubmit { typing = false }
-                        .onExitCommand { typing = false }
-                        .onChange(of: fieldFocused) { _, focused in if !focused { typing = false } }
+                    ValueField(title: title, value: value, decimals: decimals) { typing = false }
+                        .frame(width: 64)
                 } else {
                     Text(value.wrappedValue, format: format)
                         .monospacedDigit().foregroundStyle(.secondary)
@@ -168,6 +161,73 @@ struct SliderRow: View {
         .padding(.vertical, 1)
         .resettable(model, path)
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// The number field shown while typing a slider's value. AppKit, because
+/// SwiftUI's focus never reaches a field in the inspector column; the field
+/// takes focus as it appears, which selects the value so typing replaces it.
+private struct ValueField: NSViewRepresentable {
+    let title: String
+    @Binding var value: Double
+    let decimals: Int
+    let onEnd: () -> Void
+
+    private var formatter: NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = false
+        formatter.maximumFractionDigits = decimals
+        formatter.isLenient = true
+        return formatter
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = FocusingTextField()
+        field.controlSize = .small
+        field.bezelStyle = .roundedBezel
+        field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize(for: .small), weight: .regular)
+        field.alignment = .right
+        field.setAccessibilityLabel(title)
+        field.delegate = context.coordinator
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.parent = self
+        if field.currentEditor() == nil { field.stringValue = formatter.string(from: value as NSNumber) ?? "" }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: ValueField
+        private var cancelled = false
+        init(_ parent: ValueField) { self.parent = parent }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+            cancelled = true
+            control.window?.makeFirstResponder(nil)
+            return true
+        }
+
+        /// Return, Tab, clicking elsewhere and Escape all end here; only Escape discards the typing.
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            if !cancelled, let number = parent.formatter.number(from: field.stringValue) { parent.value = number.doubleValue }
+            parent.onEnd()
+        }
+    }
+}
+
+private final class FocusingTextField: NSTextField {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            window.makeFirstResponder(self)
+        }
     }
 }
 
