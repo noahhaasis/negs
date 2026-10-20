@@ -186,6 +186,9 @@ struct AdjustmentInspector: View {
     var body: some View {
         let scanning = model.value("io.scan_film").bool
         Form {
+            Section {
+                HistogramView(histogram: model.histogram).frame(height: 88)
+            }
             Section("Film & Paper") {
                 Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
                     ForEach(model.filmGroups) { group in
