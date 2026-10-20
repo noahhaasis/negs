@@ -251,15 +251,18 @@ fn sample_binomial(n: f32, p: f32, rng: ptr<function, Rng>) -> f32 {
 
 // 256, not 1024 like the other per-pixel passes: the rejection samplers
 // need enough registers that Metal will not run 1024-thread groups of this
-// pipeline, and an oversized dispatch is dropped without an error.
-@compute @workgroup_size(256)
+// pipeline, and an oversized dispatch is dropped without an error. The host
+// may lower it further on other GPUs (see `WgpuBackend::workgroup_size`).
+override WORKGROUP_SIZE: u32 = 256u;
+
+@compute @workgroup_size(WORKGROUP_SIZE)
 fn main(
     @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(num_workgroups) groups: vec3<u32>,
 ) {
     // The host spreads the dispatch over y once x would exceed the
     // 65535-workgroup limit (256-thread groups reach it at ~16.7 MP).
-    let idx = gid.y * groups.x * 256u + gid.x;
+    let idx = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     if idx >= params.n_pixels { return; }
     let base = idx * 3u;
 

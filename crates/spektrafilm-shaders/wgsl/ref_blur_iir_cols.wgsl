@@ -41,12 +41,16 @@ fn sample_index(line: u32, i: u32, c: u32) -> u32 {
     return (line * params.width + i) * 3u + c;
 }
 
-@compute @workgroup_size(64)
+// Threads per workgroup; the host may lower it to what the GPU's
+// compiled pipeline supports (see `WgpuBackend::workgroup_size`).
+override WORKGROUP_SIZE: u32 = 64u;
+
+@compute @workgroup_size(WORKGROUP_SIZE)
 fn main(
     @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(num_workgroups) groups: vec3<u32>,
 ) {
-    let t = gid.y * groups.x * 64u + gid.x;
+    let t = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     var n = params.width;
     var lines = params.height;
     if params.vertical != 0u {

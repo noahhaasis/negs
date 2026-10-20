@@ -34,12 +34,16 @@ fn rot(z: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(-z.y, z.x);
 }
 
-@compute @workgroup_size(256)
+// Threads per workgroup; the host may lower it to what the GPU's
+// compiled pipeline supports (see `WgpuBackend::workgroup_size`).
+override WORKGROUP_SIZE: u32 = 256u;
+
+@compute @workgroup_size(WORKGROUP_SIZE)
 fn main(
     @builtin(global_invocation_id) gid: vec3<u32>,
     @builtin(num_workgroups) groups: vec3<u32>,
 ) {
-    let t = gid.y * groups.x * 256u + gid.x;
+    let t = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     let radix = params.radix;
     let per_line = params.n / radix;
     if t >= per_line * params.lines {

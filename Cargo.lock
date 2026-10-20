@@ -3757,6 +3757,7 @@ dependencies = [
  "bytemuck",
  "cblas",
  "cudarc",
+ "metal",
  "openblas-src",
  "pollster",
  "rayon",

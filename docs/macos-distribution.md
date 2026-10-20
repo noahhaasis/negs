@@ -1,7 +1,7 @@
 # macOS installation, updates, and releases
 
 Negs is currently **0.4.0, build 4**, before the public 1.0 release. The
-initial installer supports Apple Silicon and macOS 14+. The source repository
+installer is a universal app for Apple silicon and Intel Macs on macOS 14+. The source repository
 and downloads will be public from the first release. No remote repository has
 been configured or release published by this implementation.
 
@@ -149,6 +149,36 @@ a temporary-key signed feed, independent archive verification, and rejection of
 a wrong public key and a tampered archive. Hosted GitHub Actions/Pages publication
 and an actual user-facing upgrade remain to be exercised once the repository and
 production key are configured.
+
+## Intel Macs
+
+The package is universal: `NegsApp` and the three Rust executables each carry
+an arm64 and an x86_64 slice (`lipo -archs`), so one download and one update
+feed cover both. Apple silicon Macs run the arm64 slices unchanged.
+
+What has been checked on Apple silicon, running the x86_64 slices under
+Rosetta: the Rust test suites, byte-identical GPU renders and CPU renders within
+2.4e-7, and the app opening and developing a photo. Under Rosetta the GPU is
+still Apple's, so Intel and AMD graphics themselves are untested.
+
+The GPU risk is Metal's per-pipeline thread limit (`maxTotalThreadsPerThreadgroup`),
+which depends on the GPU and the shader. Metal drops a larger dispatch without
+an error, which already happened to the grain shader at 1024 threads on Apple
+GPUs (limit 896). The flat per-pixel shaders therefore declare an
+`override WORKGROUP_SIZE`, and on GPUs that are not Apple-designed the backend
+compiles each one, queries its limit and lowers the size to fit. Renders are
+byte-identical at every size from 1024 down to 64.
+
+Diagnostics, all off by default:
+
+- `SPEKTRAFILM_WGPU_PROBE_WORKGROUPS=1` queries the limits on Apple GPUs too.
+- `SPEKTRAFILM_WGPU_WORKGROUP_SIZE=N` caps the per-pixel workgroup size at N.
+- `RUST_LOG=spektrafilm_gpu=debug` logs each queried limit; a fixed-size
+  shader over its limit logs a warning.
+
+`TODO(intel)` comments mark what still needs real Intel hardware: the GPU
+choice on dual-GPU MacBook Pros, the mapped-buffer path on Intel iGPUs, the
+lowered workgroup sizes, an AVX2 build of the CPU path, and RAW decoding.
 
 ## Startup measurements
 

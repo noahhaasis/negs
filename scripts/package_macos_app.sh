@@ -22,6 +22,10 @@ release_name="$("$PYTHON" scripts/macos_release.py --field name)"
 export MACOSX_DEPLOYMENT_TARGET=14.0
 
 # Universal app: build every executable for Apple silicon and Intel.
+# TODO(intel): the x86_64 slices use Rust's default baseline (SSE4.1). Every
+# Intel Mac that runs macOS 14 has AVX2/FMA, so measure the CPU path and f64
+# export with RUSTFLAGS="-C target-cpu=x86-64-v3" on Intel hardware (Rosetta
+# here can't run AVX2) and switch if it is faster and renders the same.
 rust_targets=(--target aarch64-apple-darwin --target x86_64-apple-darwin)
 swift_archs=(--arch arm64 --arch x86_64)
 cargo build --locked --release -p spektrafilm-native "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"

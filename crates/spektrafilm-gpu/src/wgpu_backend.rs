@@ -17,10 +17,15 @@ fn scalars_to_f32(v: &[spektrafilm_math::precision::Scalar]) -> std::borrow::Cow
     std::borrow::Cow::Borrowed(v)
 }
 
-/// `@workgroup_size` of the flat per-pixel shaders (one thread per pixel or
-/// value, `idx = gid.y * groups.x * 1024 + gid.x`).
-#[cfg(feature = "wgpu-backend")]
+/// Default `WORKGROUP_SIZE` of the flat per-pixel shaders (one thread per
+/// pixel or value, `idx = gid.y * groups.x * WORKGROUP_SIZE + gid.x`). Each
+/// pipeline's actual size is [`WgpuBackend::workgroup_size`].
+#[cfg(all(feature = "wgpu-backend", test))]
 const LINEAR_WORKGROUP_SIZE: u32 = 1024;
+
+/// Default `WORKGROUP_SIZE` of grain.wgsl.
+#[cfg(all(feature = "wgpu-backend", test))]
+const GRAIN_WORKGROUP_SIZE: u32 = 256;
 
 /// WebGPU's default (and Metal's actual) limit on workgroups per dispatch
 /// dimension.
@@ -46,12 +51,109 @@ fn linear_dispatch_grid_capped(n_threads: u32, workgroup_size: u32, max_per_dim:
     (groups.div_ceil(y), y)
 }
 
-/// Dispatch a flat per-pixel shader (`@workgroup_size(1024)`) over
-/// `n_threads` threads.
+/// Dispatch a flat per-pixel shader over `n_threads` threads in groups of
+/// the pipeline's `workgroup_size`.
 #[cfg(feature = "wgpu-backend")]
-fn dispatch_linear(pass: &mut wgpu::ComputePass<'_>, n_threads: u32) {
-    let (x, y) = linear_dispatch_grid(n_threads, LINEAR_WORKGROUP_SIZE);
+fn dispatch_linear(pass: &mut wgpu::ComputePass<'_>, n_threads: u32, workgroup_size: u32) {
+    let (x, y) = linear_dispatch_grid(n_threads, workgroup_size);
     pass.dispatch_workgroups(x, y, 1);
+}
+
+/// The default of a shader's `override WORKGROUP_SIZE: u32 = N;`, or `None`
+/// for shaders with a fixed `@workgroup_size`.
+#[cfg(feature = "wgpu-backend")]
+fn declared_workgroup_size(shader_source: &str) -> Option<u32> {
+    let rest = shader_source.split_once("override WORKGROUP_SIZE: u32 = ")?.1;
+    rest.split_once("u;")?.0.parse().ok()
+}
+
+/// Threads per workgroup of a fixed `@workgroup_size(x[, y[, z]])`.
+#[cfg(all(feature = "wgpu-backend", target_os = "macos"))]
+fn fixed_workgroup_threads(shader_source: &str) -> Option<u32> {
+    let dims = shader_source.split_once("@workgroup_size(")?.1.split_once(')')?.0;
+    dims.split(',').map(|d| d.trim().parse::<u32>().ok()).product()
+}
+
+/// `maxTotalThreadsPerThreadgroup` of compiled Metal pipelines. It depends
+/// on the GPU and on each shader's register use, and Metal drops a larger
+/// dispatch without an error (grain.wgsl hit this on Apple GPUs at 1024).
+#[cfg(all(feature = "wgpu-backend", target_os = "macos"))]
+mod metal_threadgroups {
+    use wgpu::naga;
+
+    pub(super) fn raw_device(device: &wgpu::Device) -> Option<metal::Device> {
+        // SAFETY: only clones the retained MTLDevice handle out of wgpu.
+        unsafe {
+            device.as_hal::<wgpu::hal::api::Metal, _, _>(|d| d.map(|d| d.raw_device().lock().clone()))
+        }
+    }
+
+    /// Apple-designed GPUs; Intel and AMD GPUs in Macs are only `Mac2`.
+    pub(super) fn is_apple_gpu(device: &metal::Device) -> bool {
+        device.supports_family(metal::MTLGPUFamily::Apple1)
+    }
+
+    /// The limit for `shader_source`'s `main`, translated to MSL with the
+    /// options wgpu's Metal backend uses (default overrides, bounds checks).
+    pub(super) fn max_threads(device: &metal::Device, shader_source: &str) -> Result<u32, String> {
+        let module = naga::front::wgsl::parse_str(shader_source).map_err(|e| e.to_string())?;
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .map_err(|e| e.to_string())?;
+        let (module, info) = naga::back::pipeline_constants::process_overrides(
+            &module,
+            &info,
+            &Default::default(),
+        )
+        .map_err(|e| e.to_string())?;
+        let mut resources = naga::back::msl::EntryPointResources::default();
+        for (_, var) in module.global_variables.iter() {
+            let Some(binding) = &var.binding else { continue };
+            // Our layouts bind buffers 0..n of group 0, which wgpu maps to
+            // Metal buffer slots 0..n.
+            let mutable = matches!(var.space, naga::AddressSpace::Storage { access }
+                if access.contains(naga::StorageAccess::STORE));
+            let target = naga::back::msl::BindTarget {
+                buffer: Some(binding.binding as u8),
+                mutable,
+                ..Default::default()
+            };
+            resources.resources.insert(binding.clone(), target);
+        }
+        resources.sizes_buffer = Some(resources.resources.len() as u8);
+        let checks = naga::proc::BoundsCheckPolicy::Restrict;
+        let options = naga::back::msl::Options {
+            lang_version: (2, 4),
+            per_entry_point_map: [("main".to_string(), resources)].into(),
+            bounds_check_policies: naga::proc::BoundsCheckPolicies {
+                index: checks,
+                buffer: checks,
+                image_load: checks,
+                binding_array: naga::proc::BoundsCheckPolicy::Unchecked,
+            },
+            zero_initialize_workgroup_memory: true,
+            force_loop_bounding: true,
+            ..Default::default()
+        };
+        let pipeline_options = naga::back::msl::PipelineOptions::default();
+        let (msl, translation) =
+            naga::back::msl::write_string(&module, &info, &options, &pipeline_options)
+                .map_err(|e| e.to_string())?;
+        let entry = translation
+            .entry_point_names
+            .first()
+            .and_then(|name| name.as_ref().ok())
+            .ok_or("no entry point")?;
+        let compile = metal::CompileOptions::new();
+        compile.set_language_version(metal::MTLLanguageVersion::V2_4);
+        let library = device.new_library_with_source(&msl, &compile)?;
+        let function = library.get_function(entry, None)?;
+        let pipeline = device.new_compute_pipeline_state_with_function(&function)?;
+        Ok(pipeline.max_total_threads_per_threadgroup() as u32)
+    }
 }
 
 #[cfg(all(feature = "wgpu-backend", feature = "precision-f64"))]
@@ -121,12 +223,24 @@ pub struct WgpuBackend {
     /// Cache compiled compute pipelines keyed by shader source pointer.
     /// `&'static str` is fine because all our shader sources come from `include_str!`.
     pipeline_cache: std::sync::Mutex<std::collections::HashMap<usize, CachedPipeline>>,
+    /// Upper bound for `WORKGROUP_SIZE` overrides: the adapter's limit, or
+    /// lower with `SPEKTRAFILM_WGPU_WORKGROUP_SIZE` (a diagnostic to exercise
+    /// the smaller sizes other GPUs get).
+    max_workgroup_size: u32,
+    /// The Metal device whose per-pipeline thread limits are queried: GPUs
+    /// that are not Apple-designed, or any with
+    /// `SPEKTRAFILM_WGPU_PROBE_WORKGROUPS` set.
+    #[cfg(target_os = "macos")]
+    threadgroup_probe: Option<metal::Device>,
 }
 
 #[cfg(feature = "wgpu-backend")]
 struct CachedPipeline {
     bind_group_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::ComputePipeline,
+    /// `WORKGROUP_SIZE` the pipeline was built with; 0 for shaders with a
+    /// fixed `@workgroup_size`.
+    workgroup_size: u32,
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -137,6 +251,10 @@ impl WgpuBackend {
             ..Default::default()
         });
 
+        // TODO(intel): on MacBook Pros with an Intel iGPU and an AMD dGPU this
+        // picks the AMD GPU, which switches the discrete GPU on. Measure both
+        // for speed and battery, and check large RAWs (e.g. 60 MP) fit the
+        // 4 GB of VRAM on smaller Radeon Pro parts.
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
@@ -172,6 +290,9 @@ impl WgpuBackend {
         // per-frame cost. No-op (falls back to the blit path) if unsupported.
         // Diagnostic override to exercise the dedicated upload/readback path
         // on integrated GPUs that normally map the primary image buffers.
+        // TODO(intel): Intel iGPUs also report IntegratedGpu, so they take the
+        // mapped path. Check it renders the same as SPEKTRAFILM_WGPU_FORCE_STAGING
+        // there and is actually faster.
         let force_staging = std::env::var_os("SPEKTRAFILM_WGPU_FORCE_STAGING").is_some();
         let opt_feats =
             if adapter_info.device_type == wgpu::DeviceType::IntegratedGpu && !force_staging {
@@ -190,9 +311,26 @@ impl WgpuBackend {
         ))
         .ok()?;
 
+        let limits = device.limits();
+        let mut max_workgroup_size = limits
+            .max_compute_invocations_per_workgroup
+            .min(limits.max_compute_workgroup_size_x);
+        if let Some(cap) = std::env::var("SPEKTRAFILM_WGPU_WORKGROUP_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            max_workgroup_size = max_workgroup_size.min(cap.max(1));
+        }
+        #[cfg(target_os = "macos")]
+        let threadgroup_probe = metal_threadgroups::raw_device(&device).filter(|raw| {
+            !metal_threadgroups::is_apple_gpu(raw)
+                || std::env::var_os("SPEKTRAFILM_WGPU_PROBE_WORKGROUPS").is_some()
+        });
+
         tracing::info!(
             adapter = adapter_info.name,
             backend = ?adapter_info.backend,
+            max_workgroup_size,
             "wgpu backend initialized"
         );
 
@@ -200,7 +338,99 @@ impl WgpuBackend {
             device,
             queue,
             pipeline_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+            max_workgroup_size,
+            #[cfg(target_os = "macos")]
+            threadgroup_probe,
         })
+    }
+
+    /// `WORKGROUP_SIZE` for `shader_source`: its default, lowered to the
+    /// largest power of two this GPU runs for the compiled pipeline. 0 for
+    /// shaders with a fixed `@workgroup_size`, which are only checked.
+    ///
+    /// Apple GPUs run every default (grain.wgsl already asks for 256), so
+    /// only other GPUs are queried, once per pipeline.
+    // TODO(intel): on Intel (Iris/UHD) and AMD Radeon Macs, run with
+    // RUST_LOG=spektrafilm_gpu=debug and record which shaders are lowered,
+    // check none of the fixed-size shaders warn, and compare a render with
+    // Apple silicon's.
+    fn workgroup_size(&self, shader_source: &str) -> u32 {
+        let declared = declared_workgroup_size(shader_source);
+        let mut limit = self.max_workgroup_size;
+        #[cfg(target_os = "macos")]
+        if let Some(device) = &self.threadgroup_probe {
+            let pipeline_limit = metal_threadgroups::max_threads(device, shader_source)
+                .unwrap_or_else(|error| {
+                    // Unexpected; a 64-thread group runs on every Mac GPU.
+                    tracing::warn!(%error, "could not query the Metal threadgroup limit");
+                    64
+                });
+            let threads = declared.or_else(|| fixed_workgroup_threads(shader_source));
+            tracing::debug!(?threads, pipeline_limit, "Metal threadgroup limit");
+            match threads {
+                Some(threads) if declared.is_none() && threads > pipeline_limit => tracing::warn!(
+                    threads,
+                    pipeline_limit,
+                    "fixed workgroup exceeds the GPU's limit; its dispatches may be dropped"
+                ),
+                _ => {}
+            }
+            limit = limit.min(pipeline_limit);
+        }
+        match declared {
+            Some(size) => 1 << (31 - size.min(limit).max(1).leading_zeros()),
+            None => 0,
+        }
+    }
+
+    /// Compile `shader_source`'s `main` with one bind group of `entries`,
+    /// setting its `WORKGROUP_SIZE` override if it has one.
+    fn build_pipeline(
+        &self,
+        shader_source: &'static str,
+        entries: &[wgpu::BindGroupLayoutEntry],
+    ) -> CachedPipeline {
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("compute_shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_source)),
+        });
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("compute_layout"),
+                    entries,
+                });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("compute_pipeline_layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let workgroup_size = self.workgroup_size(shader_source);
+        let constants: std::collections::HashMap<String, f64> = if workgroup_size > 0 {
+            [("WORKGROUP_SIZE".to_string(), workgroup_size as f64)].into()
+        } else {
+            Default::default()
+        };
+        let pipeline = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("compute_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: Some("main"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
+                cache: None,
+            });
+        CachedPipeline {
+            bind_group_layout,
+            pipeline,
+            workgroup_size,
+        }
     }
 
     /// Get or compile + cache a pipeline keyed by shader source pointer.
@@ -216,43 +446,8 @@ impl WgpuBackend {
         let key = shader_source.as_ptr() as usize;
         let mut cache = self.pipeline_cache.lock().unwrap();
         if !cache.contains_key(&key) {
-            let shader = self
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("compute_shader"),
-                    source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_source)),
-                });
-            let entries = layout_entries_fn();
-            let bind_group_layout =
-                self.device
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("compute_layout"),
-                        entries: &entries,
-                    });
-            let pipeline_layout =
-                self.device
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("compute_pipeline_layout"),
-                        bind_group_layouts: &[&bind_group_layout],
-                        push_constant_ranges: &[],
-                    });
-            let pipeline = self
-                .device
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("compute_pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                });
-            cache.insert(
-                key,
-                CachedPipeline {
-                    bind_group_layout,
-                    pipeline,
-                },
-            );
+            let pipeline = self.build_pipeline(shader_source, &layout_entries_fn());
+            cache.insert(key, pipeline);
         }
         cache
     }
@@ -339,7 +534,7 @@ impl WgpuBackend {
             });
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            dispatch_linear(&mut pass, n_pixels);
+            dispatch_linear(&mut pass, n_pixels, cached.workgroup_size);
         }
         encoder.copy_buffer_to_buffer(&gpu_buffers[output_idx], 0, &readback, 0, output_size);
         self.queue.submit(Some(encoder.finish()));
@@ -1226,22 +1421,22 @@ impl WgpuBackend {
         // ── Single command buffer chaining everything ────────────────────
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let dispatch = |encoder: &mut wgpu::CommandEncoder,
-                        pipe: &wgpu::ComputePipeline,
+                        pipe: &CachedPipelineRef,
                         bg: &wgpu::BindGroup,
                         n: u32| {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(pipe);
+            pass.set_pipeline(&pipe.pipeline);
             pass.set_bind_group(0, bg, &[]);
-            dispatch_linear(&mut pass, n);
+            dispatch_linear(&mut pass, n, pipe.workgroup_size);
         };
 
         let mut profiler = GpuStageProfiler::new(&self.device, &self.queue);
         profiler.mark("upload", &mut encoder);
         // 1. Front pass (hanatos or mallett): buf_a (rgb in) → buf_b (raw)
-        dispatch(&mut encoder, &front_pipe.pipeline, &bg_front, n_pixels);
+        dispatch(&mut encoder, &front_pipe, &bg_front, n_pixels);
         profiler.mark("front", &mut encoder);
         // 1a. Highlight boost on raw, before optical scatter.
         if let Some(hs) = highlight_state.as_ref() {
@@ -1268,11 +1463,11 @@ impl WgpuBackend {
         }
         // 2. log10 in-place on buf_b: raw → log_raw (3 channels per thread).
         let (log10_pipe, log10_bg, _keepalive) = &bg_log10;
-        dispatch(&mut encoder, &log10_pipe.pipeline, log10_bg, n_pixels);
+        dispatch(&mut encoder, &log10_pipe, log10_bg, n_pixels);
         // 3. Density curve (film, normalized): buf_b (log_raw) → buf_a (density_cmy)
         dispatch(
             &mut encoder,
-            &density_pipe.pipeline,
+            &density_pipe,
             &bg_density_film,
             n_pixels,
         );
@@ -1293,7 +1488,7 @@ impl WgpuBackend {
         //     scan pass consumes the film density already in buf_a.
         if !p.scan_film {
             // 4. Print spectral: buf_a → buf_b (log_raw_print)
-            dispatch(&mut encoder, &print_pipe.pipeline, &bg_print, n_pixels);
+            dispatch(&mut encoder, &print_pipe, &bg_print, n_pixels);
             profiler.mark("print_spectral", &mut encoder);
             if let (Some(l2l), Some(ds), Some(l2g)) = (
                 enlarger_log_to_linear_state.as_ref(),
@@ -1308,14 +1503,14 @@ impl WgpuBackend {
             // 5. Density curve (print, raw curves): buf_b → buf_a (density_print)
             dispatch(
                 &mut encoder,
-                &density_pipe.pipeline,
+                &density_pipe,
                 &bg_density_print,
                 n_pixels,
             );
             profiler.mark("print_density", &mut encoder);
         }
         // 6. Scan spectral: buf_a → buf_b (final rgb, clamped, NOT sRGB-encoded)
-        dispatch(&mut encoder, &scan_pipe.pipeline, &bg_scan, n_pixels);
+        dispatch(&mut encoder, &scan_pipe, &bg_scan, n_pixels);
         profiler.mark("scan_spectral", &mut encoder);
         // 6b. Glare (in place on buf_b).
         if let Some(gs) = glare_state.as_ref() {
@@ -1410,42 +1605,8 @@ impl WgpuBackend {
         let mut cache = self.pipeline_cache.lock().unwrap();
         let key = shader_source.as_ptr() as usize;
         if !cache.contains_key(&key) {
-            let shader = self
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("compute_shader"),
-                    source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_source)),
-                });
-            let bind_group_layout =
-                self.device
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("compute_layout"),
-                        entries: &entries_for_compile,
-                    });
-            let pipeline_layout =
-                self.device
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("compute_pipeline_layout"),
-                        bind_group_layouts: &[&bind_group_layout],
-                        push_constant_ranges: &[],
-                    });
-            let pipeline = self
-                .device
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("compute_pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                });
-            cache.insert(
-                key,
-                CachedPipeline {
-                    bind_group_layout,
-                    pipeline,
-                },
-            );
+            let pipeline = self.build_pipeline(shader_source, &entries_for_compile);
+            cache.insert(key, pipeline);
         }
         // Drop the guard but the underlying Arc keeps the entries alive.
         // Return cloned handles.
@@ -1453,6 +1614,7 @@ impl WgpuBackend {
         CachedPipelineRef {
             pipeline: cached.pipeline.clone(),
             layout: cached.bind_group_layout.clone(),
+            workgroup_size: cached.workgroup_size,
         }
     }
 }
@@ -1506,6 +1668,8 @@ impl<'a> GpuStageProfiler<'a> {
 struct CachedPipelineRef {
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
+    /// See [`CachedPipeline::workgroup_size`].
+    workgroup_size: u32,
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -2214,7 +2378,7 @@ fn build_ref_blur_channels(
                 _kernel_buf: Some(state_buf.clone()),
                 pipeline: iir_rows_pipe.clone(),
                 bg,
-                workgroups: linear_dispatch_grid(threads, 64),
+                workgroups: linear_dispatch_grid(threads, iir_rows_pipe.workgroup_size),
             });
         }
         // Columns: mid filtered in place, written to out.
@@ -2239,7 +2403,7 @@ fn build_ref_blur_channels(
             _kernel_buf: Some(placeholder.clone()),
             pipeline: iir_cols_pipe.clone(),
             bg,
-            workgroups: linear_dispatch_grid(3 * width, 64),
+            workgroups: linear_dispatch_grid(3 * width, iir_cols_pipe.workgroup_size),
         });
     }
     RefBlur { passes }
@@ -2699,7 +2863,7 @@ impl HalationState {
             });
             pass.set_pipeline(&job.pipeline.pipeline);
             pass.set_bind_group(0, &job.bg, &[]);
-            dispatch_linear(&mut pass, n_pixels);
+            dispatch_linear(&mut pass, n_pixels, job.pipeline.workgroup_size);
         };
 
         // Scatter
@@ -2831,7 +2995,7 @@ impl Fft2d {
                         wgpu::BindGroupEntry { binding: 3, resource: tw.as_entire_binding() },
                     ],
                 });
-                stages.push((bg, linear_dispatch_grid((n / radix) * lines, 256), in_a));
+                stages.push((bg, linear_dispatch_grid((n / radix) * lines, pipeline.workgroup_size), in_a));
                 owned.push(params_buf);
                 in_a = !in_a;
                 ns *= radix;
@@ -3000,7 +3164,7 @@ fn build_diffusion_state(
         });
         owned.push(params_buf);
         let threads = if mode == 4 { width * height } else { (n_grid) as u32 };
-        (bg, linear_dispatch_grid(threads, 256))
+        (bg, linear_dispatch_grid(threads, pipeline.workgroup_size))
     };
     let grid = |in_a: bool| if in_a { &grid_a } else { &grid_b };
     let mut channels = Vec::new();
@@ -3265,7 +3429,7 @@ impl HighlightBoostState {
         });
         pass.set_pipeline(&self.boost.pipeline.pipeline);
         pass.set_bind_group(0, &self.boost.bg, &[]);
-        dispatch_linear(&mut pass, self.n_values);
+        dispatch_linear(&mut pass, self.n_values, self.boost.pipeline.workgroup_size);
     }
 }
 
@@ -3283,7 +3447,7 @@ impl InplaceUnaryState {
         });
         pass.set_pipeline(&self.job.pipeline.pipeline);
         pass.set_bind_group(0, &self.job.bg, &[]);
-        dispatch_linear(&mut pass, n_pixels);
+        dispatch_linear(&mut pass, n_pixels, self.job.pipeline.workgroup_size);
     }
 }
 
@@ -3745,7 +3909,7 @@ impl DirState {
             });
             pass.set_pipeline(&job.pipeline.pipeline);
             pass.set_bind_group(0, &job.bg, &[]);
-            dispatch_linear(&mut pass, n_pixels);
+            dispatch_linear(&mut pass, n_pixels, job.pipeline.workgroup_size);
         };
 
         dispatch_linear(encoder, &self.matmul); // buf_a → S0
@@ -3872,7 +4036,7 @@ impl UnsharpState {
             });
             pass.set_pipeline(&self.combine.pipeline.pipeline);
             pass.set_bind_group(0, &self.combine.bg, &[]);
-            dispatch_linear(&mut pass, n_pixels);
+            dispatch_linear(&mut pass, n_pixels, self.combine.pipeline.workgroup_size);
         }
         // Copy sharpened result back into buf_b so the downstream
         // readback sees it without needing to know we used a temp.
@@ -4051,7 +4215,7 @@ impl GlareState {
             });
             pass.set_pipeline(&self.gen_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.gen_dispatch.bg, &[]);
-            dispatch_linear(&mut pass, n_pixels);
+            dispatch_linear(&mut pass, n_pixels, self.gen_dispatch.pipeline.workgroup_size);
         }
         // 2. Optional blur.
         if let Some(b) = &self.blur {
@@ -4065,7 +4229,7 @@ impl GlareState {
             });
             pass.set_pipeline(&self.apply_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.apply_dispatch.bg, &[]);
-            dispatch_linear(&mut pass, n_pixels);
+            dispatch_linear(&mut pass, n_pixels, self.apply_dispatch.pipeline.workgroup_size);
         }
     }
 }
@@ -4180,7 +4344,7 @@ impl GamutState {
         });
         pass.set_pipeline(&self.dispatch.pipeline.pipeline);
         pass.set_bind_group(0, &self.dispatch.bg, &[]);
-        dispatch_linear(&mut pass, n_pixels);
+        dispatch_linear(&mut pass, n_pixels, self.dispatch.pipeline.workgroup_size);
     }
 }
 
@@ -4192,10 +4356,6 @@ impl GamutState {
 /// follows up with a separable Gaussian blur that uses `buf_b` as mid
 /// (free at this point — DIR's `density_curve_0` already overwrote
 /// buf_b's role).
-/// Must match `@workgroup_size` in grain.wgsl.
-#[cfg(feature = "wgpu-backend")]
-const GRAIN_WORKGROUP_SIZE: u32 = 256;
-
 
 #[cfg(feature = "wgpu-backend")]
 struct GrainState {
@@ -4305,7 +4465,7 @@ impl GrainState {
             });
             pass.set_pipeline(&self.grain_dispatch.pipeline.pipeline);
             pass.set_bind_group(0, &self.grain_dispatch.bg, &[]);
-            let (x, y) = linear_dispatch_grid(n_pixels, GRAIN_WORKGROUP_SIZE);
+            let (x, y) = linear_dispatch_grid(n_pixels, self.grain_dispatch.pipeline.workgroup_size);
             pass.dispatch_workgroups(x, y, 1);
         }
         // Optional post-blur.
@@ -4352,6 +4512,37 @@ mod grain_tests {
         }
     }
 
+    /// The Metal threadgroup query must agree with what Apple GPUs are known
+    /// to run: every shader's default size, except grain at 1024 threads,
+    /// whose dispatches Metal dropped (hence its default of 256).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn metal_threadgroup_limits_match_apple_gpus() {
+        let Some(backend) = WgpuBackend::new() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        let Some(device) = metal_threadgroups::raw_device(&backend.device) else { return };
+        if !metal_threadgroups::is_apple_gpu(&device) {
+            eprintln!("not an Apple GPU; skipping");
+            return;
+        }
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../spektrafilm-shaders/wgsl");
+        let mut paths: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        paths.sort();
+        for path in paths {
+            let source = std::fs::read_to_string(&path).unwrap();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let limit = metal_threadgroups::max_threads(&device, &source).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let threads = declared_workgroup_size(&source).or_else(|| fixed_workgroup_threads(&source)).unwrap();
+            eprintln!("{name:32} {threads:5} threads, pipeline limit {limit}");
+            assert!(threads <= limit, "{name}: {threads} threads > limit {limit}");
+            if name == "grain.wgsl" {
+                assert!(limit < 1024, "grain is known not to run 1024-thread groups");
+            }
+        }
+    }
+
     /// Render a cheap flat shader over a grid that is forced to wrap into y
     /// (as every pass does above 67 MP) and check each pixel is written
     /// exactly once: `dst += 1 · src` with src = 1 leaves 0 where a thread
@@ -4362,9 +4553,6 @@ mod grain_tests {
             eprintln!("no GPU adapter; skipping");
             return;
         };
-        let n_pixels = 10 * LINEAR_WORKGROUP_SIZE + 5; // 11 groups
-        let (x, y) = linear_dispatch_grid_capped(n_pixels, LINEAR_WORKGROUP_SIZE, 4);
-        assert_eq!((x, y), (4, 3), "test must exercise an overshooting 2D grid");
         let pipe = backend.cached_pipeline(
             include_str!("../../spektrafilm-shaders/wgsl/add_scaled.wgsl"),
             &[
@@ -4373,6 +4561,9 @@ mod grain_tests {
                 wgpu::BufferBindingType::Storage { read_only: false },
             ],
         );
+        let n_pixels = 10 * pipe.workgroup_size + 5; // 11 groups
+        let (x, y) = linear_dispatch_grid_capped(n_pixels, pipe.workgroup_size, 4);
+        assert_eq!((x, y), (4, 3), "test must exercise an overshooting 2D grid");
         let n_values = n_pixels as usize * 3;
         // One spare pixel past the end must stay untouched too.
         let ones = vec![1.0f32; n_values + 3];

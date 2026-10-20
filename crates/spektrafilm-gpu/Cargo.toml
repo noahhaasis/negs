@@ -26,6 +26,8 @@ pollster = "0.4"
 cblas = "0.4"
 blas-src = { version = "0.10", features = ["accelerate"] }
 accelerate-src = "0.3"
+# Per-pipeline threadgroup limits on Intel/AMD GPUs (same version as wgpu-hal).
+metal = "0.31"
 
 [target.'cfg(all(not(target_os = "macos"), not(target_os = "windows")))'.dependencies]
 cblas = "0.4"

@@ -9,6 +9,8 @@ import IOSurface
 /// the file itself. Lines up with the developed image, which the canvas
 /// stretches it over.
 enum OriginalImage {
+    // TODO(intel): RAW decoding time and memory were measured on Apple
+    // silicon (~0.5 s cold, ~1 GB transient). Re-measure on Intel/AMD GPUs.
     private static let context = CIContext(options: [.cacheIntermediates: false])
     private static let colorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
 
