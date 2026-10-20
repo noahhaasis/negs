@@ -3,7 +3,13 @@
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use spektrafilm_core::{params::RuntimeParams, pipeline::Pipeline, preview::*, profile};
+use spektrafilm_core::{
+    params::RuntimeParams,
+    pipeline::Pipeline,
+    post::{PostParams, PostProcess},
+    preview::*,
+    profile,
+};
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_io::{
     border::{BorderStyle, add_border, extend_for_instagram},
@@ -18,6 +24,8 @@ use std::{
 
 /// EditorModel.readPreview rejects larger preview buffers.
 const DISPLAY_MAX_DIM: usize = 8192;
+/// The only output colour space the helper renders.
+const OUTPUT_SPACE: &str = "sRGB";
 
 #[derive(Deserialize)]
 struct Request {
@@ -66,8 +74,21 @@ struct Session {
     /// don't change the size skip a full-resolution resample.
     scaled: Option<((u32, u32), ImageBuf)>,
     pipeline: Option<(String, Pipeline)>,
-    /// The last render: request ID, source, film, sRGB-encoded, image.
-    output: Option<(u64, PathBuf, String, bool, ImageBuf)>,
+    output: Option<Rendered>,
+}
+
+/// The last render. `image` is the scan before the post adjustments, so a
+/// post-only edit reuses it; `key` is everything else the render depended on.
+struct Rendered {
+    id: u64,
+    key: Value,
+    /// The response to the render, reused when only the post adjustments change.
+    response: Value,
+    source: PathBuf,
+    film: String,
+    encoded: bool,
+    post: PostParams,
+    image: ImageBuf,
 }
 
 fn catalog(data: &Path) -> Result<Value> {
@@ -107,8 +128,15 @@ impl Session {
                 crop,
                 rotate_cw,
             } => {
-                let (id, source, film, encoded, image) =
-                    self.output.as_ref().context("No preview to save")?;
+                let Rendered {
+                    id,
+                    source,
+                    film,
+                    encoded,
+                    post,
+                    image,
+                    ..
+                } = self.output.as_ref().context("No preview to save")?;
                 ensure!(
                     *id == render_id,
                     "The preview changed; wait for the current render and try again"
@@ -124,6 +152,9 @@ impl Session {
                 // Crop in the unrotated orientation, then rotate, then add the border.
                 let cropped = crop.map(|crop| crop.apply(image));
                 let image = cropped.as_ref().unwrap_or(image);
+                let adjusted = (!post.is_identity())
+                    .then(|| PostProcess::new(post, *encoded, OUTPUT_SPACE).applied(image));
+                let image = adjusted.as_ref().unwrap_or(image);
                 let rotated =
                     (rotate_cw.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(rotate_cw));
                 let image = rotated.as_ref().unwrap_or(image);
@@ -155,7 +186,7 @@ impl Session {
                     "Invalid working resolution"
                 );
                 ensure!(
-                    params.io.output_color_space == "sRGB",
+                    params.io.output_color_space == OUTPUT_SPACE,
                     "Native preview requires sRGB output"
                 );
                 params.io.raw_white_balance.validate()?;
@@ -165,6 +196,24 @@ impl Session {
                     params.io.input_cctf_decoding = false;
                 }
                 params.settings.serial_grain = false;
+                // Applied to the display and on save, so the pipeline runs without them.
+                let post = std::mem::take(&mut params.post);
+                let render_key = json!({
+                    "input": input, "source_generation": source_generation, "film": film,
+                    "paper": paper, "params": params, "limit_preview": limit_preview,
+                });
+                let reused = self.output.take().filter(|last| last.key == render_key);
+                if let Some(last) = reused {
+                    write_display(&last.image, last.encoded, &post, &preview_path)?;
+                    let mut response = last.response.clone();
+                    response["elapsed_ms"] = json!(started.elapsed().as_secs_f64() * 1000.0);
+                    self.output = Some(Rendered {
+                        id: request.id,
+                        post,
+                        ..last
+                    });
+                    return Ok(response);
+                }
                 let wb = params.io.raw_white_balance;
                 let reload = self.source_generation != source_generation
                     || self.source.as_ref().is_none_or(|(path, old_wb, _)| {
@@ -220,11 +269,8 @@ impl Session {
                         .process_resident_borrowed(working, backend.as_ref())
                         .unwrap_or_else(|| pipeline.process(working.clone(), backend.as_ref()))
                 };
-                // Transport raw RGBA, avoiding PNG compression on every slider edit.
-                // Save retains the original float output, independent of this display proxy.
-                let (width, height, bytes) =
-                    display_rgba(&output, DISPLAY_MAX_DIM, params.io.output_cctf_encoding);
-                std::fs::write(&preview_path, bytes).context("Writing preview buffer")?;
+                let encoded = params.io.output_cctf_encoding;
+                let (width, height) = write_display(&output, encoded, &post, &preview_path)?;
                 // At this size the output is byte-identical to a Fast (GPU)
                 // export, so the app can save it instead of rendering again.
                 let export_resolution = dimensions
@@ -236,17 +282,35 @@ impl Session {
                     "raw": spektrafilm_io::is_raw(&input), "backend": backend.name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 });
-                self.output = Some((
-                    request.id,
-                    input,
+                self.output = Some(Rendered {
+                    id: request.id,
+                    key: render_key,
+                    response: response.clone(),
+                    source: input,
                     film,
-                    params.io.output_cctf_encoding,
-                    output,
-                ));
+                    encoded,
+                    post,
+                    image: output,
+                });
                 Ok(response)
             }
         }
     }
+}
+
+/// Writes the preview for the app as raw RGBA, avoiding PNG compression on
+/// every slider edit. Save keeps the float output, independent of this proxy.
+fn write_display(
+    image: &ImageBuf,
+    encoded: bool,
+    post: &PostParams,
+    path: &Path,
+) -> Result<(usize, usize)> {
+    let post = (!post.is_identity()).then(|| PostProcess::new(post, encoded, OUTPUT_SPACE));
+    let (width, height, bytes) =
+        display_rgba_with_post(image, DISPLAY_MAX_DIM, encoded, post.as_ref());
+    std::fs::write(path, bytes).context("Writing preview buffer")?;
+    Ok((width, height))
 }
 
 /// The source at `dimensions`. A resampled copy is kept until the source or
@@ -354,13 +418,16 @@ mod tests {
     #[test]
     fn stale_preview_cannot_be_saved() {
         let mut session = Session {
-            output: Some((
-                2,
-                "source.png".into(),
-                "kodak_gold_200".into(),
-                true,
-                ImageBuf::from_data(1, 1, vec![0.0; 3]),
-            )),
+            output: Some(Rendered {
+                id: 2,
+                key: Value::Null,
+                response: Value::Null,
+                source: "source.png".into(),
+                film: "kodak_gold_200".into(),
+                encoded: true,
+                post: PostParams::default(),
+                image: ImageBuf::from_data(1, 1, vec![0.0; 3]),
+            }),
             ..Default::default()
         };
         let request = Request {

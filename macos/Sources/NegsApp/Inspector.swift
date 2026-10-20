@@ -16,6 +16,11 @@ enum InspectorSection: String, CaseIterable {
     case camera = "Camera", film = "Film", print = "Print", scan = "Scan & Color"
 }
 
+/// The inspector's two tabs: developing the film, then finishing the scan.
+enum InspectorTab: String, CaseIterable {
+    case lab = "Lab", post = "Post"
+}
+
 struct AdjustmentGroup: Identifiable {
     let title: String
     let symbol: String
@@ -242,90 +247,119 @@ private extension View {
 struct AdjustmentInspector: View {
     let model: EditorModel
     @AppStorage("expandedAdjustments") private var expanded = "Grain,Halation,Enlarger"
+    @AppStorage("inspectorTab") private var tab = InspectorTab.lab
 
     var body: some View {
-        let scanning = model.value("io.scan_film").bool
         Form {
             Section {
                 HistogramView(histogram: model.histogram).frame(height: 88)
+                Picker("Tab", selection: $tab) {
+                    ForEach(InspectorTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
             }
-            Section("Film & Paper") {
-                Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
-                    ForEach(model.filmGroups) { group in
-                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
-                    }
-                }
-                developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
-                Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
-                    .help("Skip printing and scan the developed film, as for slides.")
-                if !scanning {
-                    Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
-                        ForEach(model.paperGroups) { group in
-                            Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
-                        }
-                    }
-                    developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")
-                }
-            }
-            Section("Camera") {
-                Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
-                if model.value("camera.auto_exposure").bool {
-                    control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
-                }
-                control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
-                control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))
-                control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1))
-                if model.isRaw {
-                    disclosure("RAW White Balance", symbol: "thermometer.sun") {
-                        control(.choice("White balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
-                        if model.value("io.raw_white_balance.mode").string == "custom" {
-                            control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
-                            control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
-                        }
-                    }
-                }
-                groups(.camera)
-            }
-            Section("Film") { groups(.film) }
-            Section {
-                groups(.print).disabled(scanning)
-            } header: { Text("Print") } footer: {
-                if scanning { Text("Printing is skipped while scanning film directly.").font(.caption).foregroundStyle(.secondary) }
-            }
-            Section("Scan & Color") {
-                groups(.scan)
-                disclosure("Output", symbol: "square.and.arrow.down.on.square") {
-                    control(.slider("Working resolution", "io.upscale_factor", 0.1...1, 0.05))
-                    Toggle("Limit preview to 12 MP", isOn: Binding(get: { model.limitsPreview }, set: model.limitPreview))
-                        .help("Develops the preview faster on large photographs. Export keeps the working resolution.")
-                    Toggle("Encode output as sRGB", isOn: model.toggle("io.output_cctf_encoding"))
-                    Toggle("Use less memory for export", isOn: model.toggle("settings.serial_grain"))
-                        .help("Processes grain channels one at a time. Same result, less memory, longer export.")
-                }
-            }
-            Section("Border") {
-                Toggle("Add border", isOn: model.border(\.enabled))
-                Group {
-                    let photo = model.photoSize == .zero ? nil : model.photoSize
-                    BorderStylePicker(selection: model.border(\.style), photo: photo)
-                    if let photo, !BorderStyle.film35.fits(photo) {
-                        Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)); crop it to 3:2 or 4:3 to use it.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Toggle("Extend to 3:4 for Instagram", isOn: model.border(\.instagram))
-                        .help("Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post.")
-                    Toggle("Include in export", isOn: model.border(\.export))
-                        .help("Adds the border to exported photographs and saved previews.")
-                }
-                .disabled(!model.border.enabled)
+            switch tab {
+            case .lab: lab
+            case .post: post
             }
             Section {
                 Button("Reset All Adjustments", action: model.reset).frame(maxWidth: .infinity)
-                    .help("Restore defaults while keeping the film, paper, and rotation. You can undo this.")
+                    .help("Restore defaults on both tabs while keeping the film, paper, rotation, and border. You can undo this.")
             }
         }
         .formStyle(.grouped)
         .disabled(!model.hasCatalog)
+    }
+
+    @ViewBuilder private var lab: some View {
+        let scanning = model.value("io.scan_film").bool
+        Section("Film & Paper") {
+            Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
+                ForEach(model.filmGroups) { group in
+                    Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                }
+            }
+            developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
+            Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
+                .help("Skip printing and scan the developed film, as for slides.")
+            if !scanning {
+                Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
+                    ForEach(model.paperGroups) { group in
+                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                    }
+                }
+                developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")
+            }
+        }
+        Section("Camera") {
+            Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
+            if model.value("camera.auto_exposure").bool {
+                control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
+            }
+            control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
+            control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))
+            control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1))
+            if model.isRaw {
+                disclosure("RAW White Balance", symbol: "thermometer.sun") {
+                    control(.choice("White balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
+                    if model.value("io.raw_white_balance.mode").string == "custom" {
+                        control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
+                        control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
+                    }
+                }
+            }
+            groups(.camera)
+        }
+        Section("Film") { groups(.film) }
+        Section {
+            groups(.print).disabled(scanning)
+        } header: { Text("Print") } footer: {
+            if scanning { Text("Printing is skipped while scanning film directly.").font(.caption).foregroundStyle(.secondary) }
+        }
+        Section("Scan & Color") {
+            groups(.scan)
+            disclosure("Output", symbol: "square.and.arrow.down.on.square") {
+                control(.slider("Working resolution", "io.upscale_factor", 0.1...1, 0.05))
+                Toggle("Limit preview to 12 MP", isOn: Binding(get: { model.limitsPreview }, set: model.limitPreview))
+                    .help("Develops the preview faster on large photographs. Export keeps the working resolution.")
+                Toggle("Encode output as sRGB", isOn: model.toggle("io.output_cctf_encoding"))
+                Toggle("Use less memory for export", isOn: model.toggle("settings.serial_grain"))
+                    .help("Processes grain channels one at a time. Same result, less memory, longer export.")
+            }
+        }
+    }
+
+    /// Finishing edits on the scan, after the film. They shape the tones the
+    /// film produced; detail the paper clipped comes back only in the Lab.
+    @ViewBuilder private var post: some View {
+        Section {
+            control(.slider("Brightness", "post.brightness", -100...100, 1))
+            control(.slider("Contrast", "post.contrast", -100...100, 1))
+            control(.slider("Whites", "post.whites", -100...100, 1))
+            control(.slider("Blacks", "post.blacks", -100...100, 1))
+        } header: { Text("Tone") } footer: {
+            Text("Adjusts the finished scan/print. To recover a clipped highlight, use exposure in the Lab.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Color") {
+            control(.slider("Saturation", "post.saturation", -100...100, 1))
+        }
+        Section("Border") {
+            Toggle("Add border", isOn: model.border(\.enabled))
+            Group {
+                let photo = model.photoSize == .zero ? nil : model.photoSize
+                BorderStylePicker(selection: model.border(\.style), photo: photo)
+                if let photo, !BorderStyle.film35.fits(photo) {
+                    Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)); crop it to 3:2 or 4:3 to use it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Toggle("Extend to 3:4 for Instagram", isOn: model.border(\.instagram))
+                    .help("Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post.")
+                Toggle("Include in export", isOn: model.border(\.export))
+                    .help("Adds the border to exported photographs and saved previews.")
+            }
+            .disabled(!model.border.enabled)
+        }
     }
 
     private func control(_ adjustment: Adjustment) -> some View { AdjustmentControl(model: model, adjustment: adjustment) }

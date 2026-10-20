@@ -458,6 +458,25 @@ impl Pipeline {
     }
 
     pub fn process(&self, image: ImageBuf, backend: &dyn ComputeBackend) -> ImageBuf {
+        self.apply_post(self.process_scan(image, backend))
+    }
+
+    /// The post adjustments, last, on the scanned photograph.
+    fn apply_post(&self, mut image: ImageBuf) -> ImageBuf {
+        let post = &self.params.post;
+        if !post.is_identity() {
+            crate::post::PostProcess::new(
+                post,
+                self.params.io.output_cctf_encoding,
+                &self.params.io.output_color_space,
+            )
+            .apply(&mut image);
+        }
+        image
+    }
+
+    /// Everything up to and including the scan, without the post adjustments.
+    fn process_scan(&self, image: ImageBuf, backend: &dyn ComputeBackend) -> ImageBuf {
         let stage_timings = stage_timings_enabled();
         // Working-resolution rescale (io.upscale_factor) — mirrors Python's
         // ResizingService.crop_and_rescale. Done first so the whole pipeline
@@ -585,11 +604,12 @@ impl Pipeline {
             self.print_exposure_factor,
         );
         let out = self.try_gpu_resident(image, backend, &color_ref)?;
-        if backend.resident_chain_applies_post_scan() {
-            Some(out)
+        let out = if backend.resident_chain_applies_post_scan() {
+            out
         } else {
-            Some(self.apply_post_scan(out))
-        }
+            self.apply_post_scan(out)
+        };
+        Some(self.apply_post(out))
     }
 
     /// Resize the working image by `io.upscale_factor` (bicubic), mirroring

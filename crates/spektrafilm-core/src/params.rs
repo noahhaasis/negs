@@ -740,6 +740,9 @@ pub struct RuntimeParams {
     pub io: IoParams,
     #[serde(default)]
     pub settings: SettingsParams,
+    /// Finishing edits on the scan; see [`crate::post`].
+    #[serde(default)]
+    pub post: crate::post::PostParams,
 }
 
 impl Default for RuntimeParams {
@@ -752,6 +755,7 @@ impl Default for RuntimeParams {
             print_render: PrintRenderingParams::default(),
             io: IoParams::default(),
             settings: SettingsParams::default(),
+            post: crate::post::PostParams::default(),
         }
     }
 }
