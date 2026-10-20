@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ICON_SOURCE="${ICON_SOURCE:-assets/spektrafilm-icon.jpg}"
+ICON_SOURCE="${ICON_SOURCE:-assets/negs-icon.png}"
 ICON_ICNS="${ICON_ICNS:-}"
 BUILD_TARGET_DIR="${BUILD_TARGET_DIR:-target/macos-app}"
 DIST_DIR="${DIST_DIR:-dist/negs-macos}"
