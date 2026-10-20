@@ -8,7 +8,7 @@ Negs is a **free** Mac app that runs your pictures through a **physical simulati
 
 Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in a native macOS app.
 
-**[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon · [getnegs.com](https://getnegs.com)
+**[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon and Intel · [getnegs.com](https://getnegs.com)
 
 The first time you open Negs, macOS asks you to allow it in System Settings: see the [install steps](#install).
 
@@ -102,7 +102,7 @@ macOS shows that warning for every app that isn't notarized by Apple. Negs isn't
 RAW files from most cameras (through Apple's own RAW support), plus JPEG, TIFF and PNG.
 
 **Does it run on Intel Macs?**
-No. Negs needs a Mac with Apple silicon (M1 or later).
+Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it runs natively on both Intel and Apple silicon. It is developed and tested mainly on Apple silicon, so if something looks wrong on an Intel Mac, please [open an issue](https://github.com/noahhaasis/negs/issues).
 
 **Is this a preset pack?**
 No. Presets and LUTs remap colours. Negs simulates the film, the paper and the light, which is why halation, grain and edge effects come out right.
