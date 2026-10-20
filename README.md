@@ -8,9 +8,9 @@ Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https:
 
 **[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon
 
-| Camera JPEG | Negs · Kodak Ektar 100 |
+| RAW · Apple default | Negs · Kodak Ektar 100 |
 |---|---|
-| ![Rome at dusk, straight from the camera](docs/readme/compare-before.webp) | ![The same photo developed on Ektar 100 in Negs](docs/readme/compare-after.webp) |
+| ![Rome at dusk, the RAW as macOS renders it by default](docs/readme/compare-before.webp) | ![The same photo developed on Ektar 100 in Negs](docs/readme/compare-after.webp) |
 
 ## A darkroom in a window
 
