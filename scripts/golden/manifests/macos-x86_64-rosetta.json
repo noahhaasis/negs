@@ -1,0 +1,6653 @@
+{
+ "meta": {
+  "label": "macos-x86_64-rosetta",
+  "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+  "python": "3.14.3",
+  "cpu": "Apple M1 Pro",
+  "cpu_count": 10,
+  "threads": "all",
+  "git_rev": "a5c360f30eb63e65e3d773ed18e70a53b8ad3020",
+  "git_dirty_hash": "cf4951ab02a9ab2d7f988adafa7b72404518b0db0f697f849ba2cc827c743697",
+  "cargo_lock": "f7e0e221db459c721495b3aa809e61385b42c43121490b908d61c175e3c07231",
+  "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: aarch64-apple-darwin\nrelease: 1.93.1\nLLVM version: 21.1.8",
+  "binaries": {
+   "f64": {
+    "sha256": "e0b8d7880fd1ef3e0e2bc5c840edeb605d1057e339da4facbbfe980188326a9e",
+    "arch": "x86_64"
+   },
+   "f32cpu": {
+    "sha256": "d37f915e44596a15daaa49196a07fee796e93b5065f3ec9e96572d8e911fc40b",
+    "arch": "x86_64"
+   },
+   "gpu": {
+    "sha256": "d37f915e44596a15daaa49196a07fee796e93b5065f3ec9e96572d8e911fc40b",
+    "arch": "x86_64"
+   }
+  },
+  "data_dir": "cfac1b286e3f34b500dc22ea4fe4520ff1dc2a1e92a30eea2ec93f800407908d",
+  "presets_dir": "4f56a89d88180cc199e72d466e3a8e28c440dc1f820d0c0222bd7d9d02b45b27"
+ },
+ "inputs": {
+  "photo_7858115920": "7a2fdb5a5ea112f2e379957e581b9c0f7d91b97b4fae25c8f14944e628094873",
+  "photo_DSC_4985": "3d8583be77dc25d89246ef294c514d0171380874a95b5cc5abc7dd64f4be8b7c",
+  "photo_DSC_4990": "2c557fd848bd43a10fd3cef811485c922be56c742b7b2dc8c6378222958972c7",
+  "photo_DSC_4997": "e9c57ff94f9f459bc7ddccf0692d20f45dd00086c1c31386190317b8468f563c",
+  "photo_DSC_5003": "36463c26944a81b62181cb39f6935bfdc08807d4226e27fbce02f55e33214365",
+  "photo_DSC_5009": "dab56be9624532b44eaf3505bcdd5df66a0e5150d4c0b1d21135982c2e61dbc0",
+  "synth_edges": "44413d95af4ae18cb4147ad0d9124a237bd2f5dc89f6a0dcfd6e89fa7986e70f",
+  "synth_gamut": "86dabdb3058aab0751852db1d12c0cb01c86a40e0fe22cc803d17c1ce6006e05",
+  "synth_noise": "28698e3f8e8c4b3b606547bcd3f596f4346ef54385f81c1ca9510bbe4504aae4",
+  "synth_ramp": "69fefa3b0123178d3550e14ec5bcfb399487808df4934a0b4ee12a09c45ebe57"
+ },
+ "presets": {
+  "boost": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "halation": {
+     "boost_ev": 1.0,
+     "boost_range": 0.3,
+     "protect_ev": 3.0
+    }
+   }
+  },
+  "colour": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false
+    },
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "default": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   }
+  },
+  "det": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "diff_bpm": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "diffusion_filter": {
+     "active": true,
+     "filter_family": "black_pro_mist",
+     "strength": 0.5
+    }
+   }
+  },
+  "diff_cinebloom": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "diffusion_filter": {
+     "active": true,
+     "filter_family": "cinebloom",
+     "strength": 1.5,
+     "spatial_scale": 2.0,
+     "bloom_size": 2.0
+    }
+   }
+  },
+  "diff_enlarger": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "enlarger": {
+    "diffusion_filter": {
+     "active": true,
+     "filter_family": "pro_mist",
+     "strength": 0.7
+    }
+   }
+  },
+  "diff_glimmer": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "diffusion_filter": {
+     "active": true,
+     "filter_family": "glimmerglass",
+     "strength": 1.0,
+     "halo_warmth": 0.5
+    }
+   }
+  },
+  "dir_wide": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "dir_couplers": {
+     "amount": 1.5,
+     "diffusion_size_um": 60.0,
+     "diffusion_tail_um": 400.0,
+     "diffusion_tail_weight": 0.4
+    }
+   }
+  },
+  "grain_off": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false
+    },
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "grain_off_coarse": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false,
+     "agx_particle_area_um2": 1.0
+    },
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "grain_on": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "grain_on_coarse": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    },
+    "grain": {
+     "agx_particle_area_um2": 1.0
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "halation_big": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "halation": {
+     "halation_amount": 2.0,
+     "halation_spatial_scale": 3.0,
+     "scatter_amount": 1.5,
+     "scatter_spatial_scale": 2.5,
+     "halation_n_bounces": 5,
+     "halation_bounce_decay": 0.7,
+     "halation_first_sigma_um": [
+      50.0,
+      65.0,
+      90.0
+     ],
+     "halation_strength": [
+      0.05,
+      0.03,
+      0.01
+     ]
+    }
+   }
+  },
+  "lens_cam_large": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "lens_blur_um": 40.0
+   }
+  },
+  "lens_cam_small": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "lens_blur_um": 10.0
+   }
+  },
+  "lens_scan_large": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "scanner": {
+    "lens_blur": 4.0
+   }
+  },
+  "lens_scan_small": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "scanner": {
+    "lens_blur": 1.5
+   }
+  },
+  "morph": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "print_render": {
+    "density_curves_morph": {
+     "active": true,
+     "gamma_factor": 1.2,
+     "gamma_factor_fast": 0.9,
+     "gamma_factor_red": 0.9,
+     "gamma_factor_blue": 1.1,
+     "developer_exhaustion": 0.3
+    }
+   }
+  },
+  "preflash": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "enlarger": {
+    "preflash_exposure": 0.2,
+    "preflash_m_filter_shift": 10.0,
+    "preflash_y_filter_shift": -5.0
+   }
+  },
+  "unsharp_iir": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "scanner": {
+    "unsharp_mask": [
+     3.0,
+     1.0
+    ]
+   }
+  },
+  "unsharp_strong": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "scanner": {
+    "unsharp_mask": [
+     2.5,
+     1.2
+    ]
+   }
+  }
+ },
+ "cases": {
+  "photo_7858115920__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_7858115920",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "7b6f6f495241e154d9ffee25dfbd3ae0a40d2457767023f5841004f51957c899",
+     "tiff": "f8aaa59dc5bc37fa90750dc6efed0bc33dbbf77bc6951cd2e45eb66cff114d9d",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "14843a58dbfbadeedb38d4bf748f9bd6cd15b26f2215437f61a4c2558e8b7368",
+     "tiff": "37a23bc0f3a835ca568bf53030d99b7ac377186a05bce0bd5ba1d1cba26e1187",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "e8e0795cb2174f6913ebf7dc5eb7b52ace8dfbc04ed2eb2baa47a5d37f95965a",
+     "tiff": "4786f0e4098fb4c34629029f88a9f395061ea7fdacd23423d8f105f492c553f4",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_7858115920",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "1cf27ac41775b8fee1a8c2f83226b9534fee054cc129e4d356c08a94ff8c337f",
+     "tiff": "6ad814e0e1305a198a27ac53a5a05bd04be7f117ed7fb9804d5972d387bf8b1e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "c13bf9b8fba18e4d99d172d491c57428b4387794537b5248a98708d026e89934",
+     "tiff": "113b8dce637ed3a1a4079295925156e00069cbd42a239e1b29882081c7635023",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__fujifilm_velvia_100__scan__default": {
+   "input": "photo_7858115920",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "7e5c580ebe1c7a883f66fb349fac3e012693cddab62b95d4b769b66d81e5d170",
+     "tiff": "e305dd9b28796ea5823789169d1ba955fe79a886a2794a0e76e99a2e1916ade4",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "7a3a59a2123b3aae15158eeb64e59e21e3f2aecaea72a84c921d3a5fd8378694",
+     "tiff": "633775295adc8546c178223e68b3dd99eb185bf1cd1a0fc05cd336ca10140293",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "8b362e5d99a50c4dc470c558c36b5ac62a1eafa0e85fbe4cf0a7ccc4b4943448",
+     "tiff": "daeb5082359aaceb6d14cb2c249aaa3e502e912ee667efa3325a721cad57ef1c",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__fujifilm_velvia_100__scan__det": {
+   "input": "photo_7858115920",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "7a24330467d0898bf3e457d25945ddb7011930e92b1db2cf72da6477dc196653",
+     "tiff": "88ba0a8f9e53605e9a5d801ef27f70fe0aa4ebaa68165af8ee2343b3cd45f165",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "faf3c679668f7dd55df3ed7efc15a6e9ad271381af7d217ebdc214e05037b999",
+     "tiff": "31a9a223f52bfa7ed265a1af5ac26bb18e50c65c4a3a813d58d4286f4849eb68",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_doublex__kodak_2302__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "1a47c5764d724f414461b07d54d4aa6646b4c9f24e5f8450b0fd975f4e6bc737",
+     "tiff": "f953096fe3009f57f65056baf0bd1af6c8b9756e72985b221908110b8f12bcc5",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "dd184989882a0eef96743f3d7bad391f7ac75a68b5af62b43fc1890cf3abce73",
+     "tiff": "b4af38bee5ab93f949b300774618e5ae999a528481a7099d60a7018022bc2985",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "1b848dd2047bfd9d74c5642df1cc2dfb32cb44cc07bf1983f406627af4dffb3f",
+     "tiff": "4ec2b65ae2017955e5393433e0bc27c2e3469e21ef49b2e9ac09159e60702dd4",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_doublex__kodak_2302__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "947f5130b036cfc5b854519fe3b3bc36ff50f412b9ef4568aebe1410ab2b2a6f",
+     "tiff": "758637fa79e7bac7b7502a4004f4a2cc45adff340b6854ce8ee43c1af95c7f8e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "7b08316c74ad83144c03a2633c2e53ca8501c7321ee6a0c1937776296c1b25ed",
+     "tiff": "76ac6bdfd74e17816368e3cd5949dfc03b95fb16c76ec254a93baf7a9ed4820f",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "449e3bf74ca86d307a8fcf8b326db89d782b72e3a6c357ac5a815b3e887f09a9",
+     "tiff": "35f3c7193592994615a02401730d858da0fcca8dd114e3753ef81cc76cd286ed",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "343f0b63b14b857231ffab3c24160e35010fc5ddf14c703e562b16a7832343d8",
+     "tiff": "8b8187f8aaecf4bb188af1f5e553a4c418ff9f6e518d71a00309fbd6c394f40a",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "affe787b1b20127d92b3ce107141368614ad1d909ea760fa096c9558c9cf5f61",
+     "tiff": "50a449b0641bfecdd64932ea3753e3dc25cbc0e0524a85878ca35fe8e1eb67c8",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e1da7a493e29783b8b79aaf26323d340c74b06ec25b249b25fca6ba95f5c7235",
+     "tiff": "a736f18b5c26e1eecb3f57310d99ce25a8da1631d6676b815954a7766eba3aee",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "6e04dc7f05c7d8d75fb4c7cf61253ffb1254dfac69f2724ed41db99ea31fb1a9",
+     "tiff": "51763b8c7c9fe739ecc0be7cdc534b36d3f01d4c2d103d0d3d527e29978fb075",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__boost": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "boost",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "8eb21b21c399a95405a7dd1a1029de6bd5ec9616d10f773608dd437e48281ce0",
+     "tiff": "b675b1077f2c2b6f2944f5141ae3bbfb8521ca3f51779c2fae37c679ce5ba91c",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "27723941f383fe26d747e0e64b9301b906f655d6912fc567f3eb70fb0f365786",
+     "tiff": "a812fad921420774ecbe26af33146dc20b3b374f1518f58ec2712756c3d9a79d",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "d51b3421035208fe70b68d3cc287cd2f562508eeeb1a7bc5f39de7818f573ec9",
+     "tiff": "50baf1b06a25b296a932091c3b64f77e910c5dddfe44ef376842fd18a24cfce1",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__colour": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "colour",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "36ecf12ae5e6e4862a88b118e2a55c7007f4ecd37cfc7353e004edfb1fbc2e54",
+     "tiff": "02cfb78843a2092a4fd60da49fe6182ec6b5de222e365dc6620dcaff3ff7ea09",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "2c30a4789e5b2c104e4385efbd9e9f2cdb30ed2ce784114126c8584635b5dbe9",
+     "tiff": "7fecefc60e794f82ceb99360710d6f9e8c3b1bc15f2ee7dfec81dedc72dc2df9",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "32663374c6d47b94f9f71d6ff2aae5303b91c4dd7c45ba05e6241ee326c6e25b",
+     "tiff": "1e138270545b6e8c29db4e8fb2f3a3d00ecad68e7eed6e02ba6e6fcdaeb9d1b1",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "0366301b184b9f92ad3cc163912d7269d1c8f9656d4bf384524dc286622d80a5",
+     "tiff": "bdfa0b1bac435d43ff6ff3bf59d477ed51e58edc5784921a5ad1a1230ddcbf79",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "e54c446dc0401ecee229ae406285c88d15e962694bc2e6e4126c2de19f191175",
+     "tiff": "f953243c1528ba98f64079d0cd884273329c45fcbdae4aa2340ec58c0260de5f",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "f6265a60ae279bcce825a28c351d86d00b8761f636ba333b13731d9374762d01",
+     "tiff": "bb991cf0a96ff5614e45ebeeb179d7f61a99c26215f824303202ad9fb9526209",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__border_35mm": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": "border_35mm",
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a4d6fa1bf8909f4d46b1f5c36a7f71805bd0040114edeebdff860b4900bac3a1",
+     "tiff": "7780800f3e81060e8dde72ecfe67ebab6d47b301eb4917e00e19c392fcb54be6",
+     "size": [
+      1005,
+      926
+     ]
+    },
+    "f32cpu": {
+     "f64": "6defca045dcf9e9b54a38e6ab1d80226ba5bcd4b746e28b1ac9877b31974f8a7",
+     "tiff": "8709aab7964198e2408b311a60d0c3d9bd6b96c7c747a5579073e2449097a154",
+     "size": [
+      1005,
+      926
+     ]
+    },
+    "gpu": {
+     "f64": "415a43917f6e1b5efb73b6c58713d5ded05324a33b348a574ae30a9a7affb0d5",
+     "tiff": "680cd054edc746c4a8892acc8f61c4e84d8cd284a0016eded56cdf4808039587",
+     "size": [
+      1005,
+      926
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__border_keyline": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": "border_keyline",
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "22a4e17ab4811ff79ee8375e6afada2f00c111e85c74d5682edeaba1adb48ae3",
+     "tiff": "117f872336faff235287327a6e289573115c2e0096b2ababdf74955793ae945c",
+     "size": [
+      1016,
+      1355
+     ]
+    },
+    "f32cpu": {
+     "f64": "f30db4a5ab6500edb3bb473fcff2b7802f4b067ed424ae607cc5cfd0579e5711",
+     "tiff": "30e2b8630592baa9685167cbbb461464c4e088843c92eea94b048574c75b3726",
+     "size": [
+      1016,
+      1355
+     ]
+    },
+    "gpu": {
+     "f64": "d2306ce2e733b14f36d72205bf3e4ce8727ef4b174720ba8aa94f5af72646bfe",
+     "tiff": "e9ef468927ba8cde0cf22ed2b24cfe04c3596987bdf9033e5b841e7cbe2eba80",
+     "size": [
+      1016,
+      1355
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__crop_rotate": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": "crop_rotate",
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "c43dbc271d8d144c051121e9f27b8c1880ec8f829fa7b6eed30579f4e7ed1917",
+     "tiff": "4623df2e1ce1639a9587417b095b961e05a2a08fce4ec5541d2680b9da8db05e",
+     "size": [
+      762,
+      538
+     ]
+    },
+    "f32cpu": {
+     "f64": "1fb1f20903ec5da6009911bd074250b24ae37de63346be9109ad91ecce33dc84",
+     "tiff": "82e202e33b42d5dead19f2fd5f33c2fba8953effd7a0788c535f3a6a96e0df60",
+     "size": [
+      762,
+      538
+     ]
+    },
+    "gpu": {
+     "f64": "9c4f7820e18af0cedcee73600b4745614b699be5bea728d8167191fc3da3d20d",
+     "tiff": "69d3c9554f8d6c2113679c722dc57520ffcdfb77a2a634117becd90a380e8b73",
+     "size": [
+      762,
+      538
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__resize": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": "resize",
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "6b8ced2344f01f673bc6dfd9f00ba980ade4308de461ea4b80c0a1fca199a0c0",
+     "tiff": "27908f70a9dc51b651dbe6d8105e0a5d62ccf3a584be2d9e3ef7caa2f6871b66",
+     "size": [
+      600,
+      399
+     ]
+    },
+    "f32cpu": {
+     "f64": "dd6d0fdb5b0e8e50610ce6afcbbff5d46110b6c83ab88b12ef4a8de572962259",
+     "tiff": "cb2ea533f8986ee6e45202925f152e4f1573b481701cfda70746b7c0b6509667",
+     "size": [
+      600,
+      399
+     ]
+    },
+    "gpu": {
+     "f64": "d18e74567f5232c526c626ee40d7af387ec81dc327bfaf12f38db00224d57cd7",
+     "tiff": "8d63fc3e7b4bfff28f9460b5a1a5010a1f34d2cbee08a6999e326319d321ae5b",
+     "size": [
+      600,
+      399
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "5fba152c0e81ce209b9d434d66239b8c1812676fbca83e45d7ccf23852096c88",
+     "tiff": "82b6f42cceac87a23079e2ae875c9a3d2cbd3b686e22c198cfe0e7fdc442e33d",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "6fab03fd0617e5bee45ad858b21a0923409f56b0da318b3783bb70c275b48307",
+     "tiff": "6d1a80f64db76980701029e9fca27093c304f1ff06da2de36e18953b485b39e0",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "211fd7334aafa94dd30bd226d7ccc384888c773aab5ddde77c09e892368612f5",
+     "tiff": "8bb2811a15b09d41c1f99d7409f6f1c073ecda5d1f4d7991fc7c74e5100bec73",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_bpm": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_bpm",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "22d063e9377207e0967b03db3dfc1895a0f154b4051701b2b13d892f1f807e42",
+     "tiff": "28a0b0828d65571f7015829b9f5b91e92b3b901b1690af1c60ba793ba115c212",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "65f93b019fa15b99dd6c0c055e53e86d843b512be45969c7b7ef23949225020a",
+     "tiff": "30bbd7ee0bd5471bb3727f340b74d3a922ae9b1183b5ff920a453c96a61ee72b",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "820b3a30845a1e583bebbb2af16c5ff442f16df3bac57fcabb5135df29c197fc",
+     "tiff": "d884201191725542342c9595c93c334100b7d749dec7868f68663e42ea9bd3bf",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_cinebloom": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_cinebloom",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "243775f64703f13ab338723d48cb725c2a9005dd5fd43889708f975472ec7e64",
+     "tiff": "8e5045bb4f46a216a849bf003ad27dd98c22bdcfb81575e8450f25d7ea6d59f5",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "ae699f3e0f956f0b6a5e54b6522154ef6c3a6f023f49fef9433a199fe00fe2fa",
+     "tiff": "e314330ae594148d456df04575452a8ec09c2a2904298d42f4c56a4fa2e8c4ee",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "fa45b07789f38dbbf0a1ff497905cfe2abec09e577f2c92b3900634ceddb4895",
+     "tiff": "054a390773f686d6b0c0ef5e9f0c1ee528e73ed3ab5ad4a56ffee7af3f80ae5c",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_enlarger": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_enlarger",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "3cb63ca6150577e3bc5355946aec362708e02d4e416ce73cfbc6938344c81e8b",
+     "tiff": "a33aa767868917a716c0061654b9340fe03ca40c66b439e283e417d3d4a51644",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "31af96fd98abb8ea3907dde53d5c57cc5243d18ca01cb73f49f1f567d9c8aad0",
+     "tiff": "0b535bcfdd4f6bacd83e63e3c69105b3e596ae0f3cd9325ca93ac97ae0aba60a",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "c73c37ec33c5623c4485b7ff17d55f808738cce473621789f7153e34b4a6dfa2",
+     "tiff": "832f10fda3dade0502c2ceb0540186495b665da6c37f5bcd586065257ee5bf9c",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_glimmer": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_glimmer",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "b77e55c939f7f0586c6a158a6e8b0a626dc7f57392ca18695d71bcf43dce7232",
+     "tiff": "2111fc61317a6b8e472a301a6cec8c1d3a5840447f7c5070978e503938f38d69",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "d42bb129fcaa2b221a64226eca9a871cba424c7ee509f25eddf1ea5b3a0736bb",
+     "tiff": "8887b72d5c088e379d81f7bce1add0322066c22d9f09d7193e713244cb7fcd0a",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "f64141d9192e7691943bd8e85a23d2e0db649a346137bdc3a896d4187b6dcc4e",
+     "tiff": "db864c5d5adba5ae7ecc89446cb5b14debbced46d0eff61c8cc3096ecc9002e5",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__dir_wide": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "dir_wide",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "ca0ba68c62cab23a27fc3ccb5bd7705f0c4c52118b4c58f640ef142f276188d0",
+     "tiff": "884d5d49b2d4e0be954a420f5935bfb6ad8ddd0279e6fe5e24c177c5fffa45c3",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "0130413d053b3f6f33f9cb6fe767a92a391f5ef82ae564012c7ba957c4a4c66e",
+     "tiff": "2e9e7620fb30298ac8b34b411c8a5114883672b19c065e1eac5db5720fd74fab",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "14f5bf282eabdb837c4ceed8b9a330c54b77e29127b7c1a09634481dc3290f1c",
+     "tiff": "f20abfd489f9e803d438bab9dc1ce0f56e035550a981dc27bcb3476d4e61363d",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_off": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_off",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "36ecf12ae5e6e4862a88b118e2a55c7007f4ecd37cfc7353e004edfb1fbc2e54",
+     "tiff": "02cfb78843a2092a4fd60da49fe6182ec6b5de222e365dc6620dcaff3ff7ea09",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "2c30a4789e5b2c104e4385efbd9e9f2cdb30ed2ce784114126c8584635b5dbe9",
+     "tiff": "7fecefc60e794f82ceb99360710d6f9e8c3b1bc15f2ee7dfec81dedc72dc2df9",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "32663374c6d47b94f9f71d6ff2aae5303b91c4dd7c45ba05e6241ee326c6e25b",
+     "tiff": "1e138270545b6e8c29db4e8fb2f3a3d00ecad68e7eed6e02ba6e6fcdaeb9d1b1",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_off_coarse": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_off_coarse",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "36ecf12ae5e6e4862a88b118e2a55c7007f4ecd37cfc7353e004edfb1fbc2e54",
+     "tiff": "02cfb78843a2092a4fd60da49fe6182ec6b5de222e365dc6620dcaff3ff7ea09",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "2c30a4789e5b2c104e4385efbd9e9f2cdb30ed2ce784114126c8584635b5dbe9",
+     "tiff": "7fecefc60e794f82ceb99360710d6f9e8c3b1bc15f2ee7dfec81dedc72dc2df9",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "32663374c6d47b94f9f71d6ff2aae5303b91c4dd7c45ba05e6241ee326c6e25b",
+     "tiff": "1e138270545b6e8c29db4e8fb2f3a3d00ecad68e7eed6e02ba6e6fcdaeb9d1b1",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_on": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_on",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "fbd4cf60c7ab2d60384814198b2a7d25d14ea7bdc18607b2faabd979f07eec69",
+     "tiff": "764e07e206157205904a0f74a7200be41686804c298b397d8a9121eec3b55a88",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "7e4309bb7b376e9da71ece36d1c50a9f74749e792513bd7e94b720daced8b772",
+     "tiff": "e43454a3063726c3e4871c7302fd59eace0f2aa89160e08e0de65603c8b2538d",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "1e7796c9f3addf47ee772904704a2949b50fd697472df3312c9d77b8f5fb1475",
+     "tiff": "13372df2750c00de63620430d0e2f64368366d54900a881ddd716ee548f2220a",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_on_coarse": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_on_coarse",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d57c80b1ec4951aefc27625de51d7ac06e74f2b981e49a2593671b891aaffaca",
+     "tiff": "f9aca5c570283af11c1443f4c32578bef021a26d1eddda6e0fb640ad7ba0dc76",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "a444dc790a3fb3d31a5bfe9aa6d549c9fa04b66aa251432e754418bdf9624bdd",
+     "tiff": "a55cd010342bad5dbcc915ac83e3e851f011d494736bbe6ca32ffb89997937eb",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "c06607bfb11626ef01834f8365f59cdf216ec45741036a689accbf0966779ef2",
+     "tiff": "fc12fd693440d990de7180ee8d3c05173864f0a1f91a0f5942e1e637f12bc37d",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__halation_big": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "halation_big",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "3131a5a8d4501fd41dfdf72a2069a575e2b7eef70dbc53f9dfdbf9248905fc80",
+     "tiff": "c1ed464299487d32a25e8de8f66b328704214e26355733080129d0ed88f6029f",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "cdb87897958c37093e1e5d7f3b5efe749df5efbea76994019360b65c5a3b675e",
+     "tiff": "3117d30d051ac4d854eeeb4c04578bb11e3981b3f4ca6d60bf965554bfc4acf6",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "e6f5bb2b72998f9ba8b62d88b31bc42efe59ce76ee6265c6d33882055494ef30",
+     "tiff": "e78466c34e0938039d4b4d97d401366bf5c5187836b737a2e809f6c2e413d258",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_cam_large": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_cam_large",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "6420505546381f09a13593b3565440712a546c9711bca60f1141bd3501005b7b",
+     "tiff": "4d1ad945dfa442a988652ea02684b3ec87167a92e1a3f2f39e3132c0439bc48a",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "9088ddf6424197bd112dafc2fae683ae1611e6ef24173a5938fd385859de1276",
+     "tiff": "0216c7f6e9eff36b90b520d79c4f71dfc3034d1f093cb3c7530960ff4363013e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "824a8e5c6591339e2edb14d82561523dcdfcdf716804fed376d672ad8cf9465a",
+     "tiff": "1ff22dfad29669c48ec911cfffb64c2d73a04c83f93e905c3868fcd8efb7c73e",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_cam_small": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_cam_small",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f9e1f0e86c050574d94bf5546ac62eebfc1c944715f8514c06cfdaa01ce27a32",
+     "tiff": "e7a896b2d065f7fc1ebfc36c866040f87254c4efa01cf8d4340288b8bffc6cd7",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "8e91950bacec5fec40de3581ada2c07874ae01c1529c703e77ec9e7d5c8b4dc3",
+     "tiff": "7d529a6b777e6c5dcb2bcf3133e0f3e08368387bc3b3429ac7fa7b395b7ba3bc",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "5128232aa02f4997ce4c48adac4dc6bfcdd12abf6c7fc9ebcb8132be88556fe8",
+     "tiff": "e89ee97f1bd66a7b0b7c0ce1711477298132626cae130753c6f9be36bd9678e5",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_scan_large": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_scan_large",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "9e3d56d342967d4eedb0b3f663a919f4a4f8960b19f9de53fd23a020248bd8b9",
+     "tiff": "d34ec10c3fbc2ef7683dcd7923fb33896f72a43926627c2a54505a92a18bb1e0",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "0323522f306300638aab3f3c54216b088e0b0f1bc06c035a9c2d7eb3d4660168",
+     "tiff": "0941218ffc42c774f51e0dabe558acaa8987d54c425de57d85876d315aa8d209",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "24ab9c56055170aca044b203e352eb61a82ec463e60729b212a3c4f66cd04765",
+     "tiff": "3d0e475b24fd9d9915bfc3800d528482e1ae571610091a2d4ab291a53d7ea6b1",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_scan_small": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_scan_small",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e469a28ba77f86b438fdf2d232bae2bff478e917d985bb3abd5167c033384bb9",
+     "tiff": "c39f50afb7f6ca69a97be0de83c5cb75440b93d999b22579e05d6574e853d272",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "a10f1116189d9cd6e59705096969781416396b739d0c9ff9748886a724af529e",
+     "tiff": "643e9500da9bb87cce4ff3d7a960594eb2ee5fb4cdd734e1f49bd6ee80e8bab8",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "99caa9e49450b822f4d8647af2886ad36f58f3ad678ab006f4f557bc2752414b",
+     "tiff": "fc12166fab3e2e2616cfff9014bda78edb0bc86a969fc5c2881ba26986462ea2",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__morph": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "morph",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e15863c105f0f9b27894f8b425b4793835277415c353c89f5bbad97094e16b04",
+     "tiff": "ae9d7bd8065c404d87379a4483a637d67d6a35d739e6b057aa1fae9da4d5154f",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "454cd80b50e0b25c2bc89c5f8b7b392381fa1f4ee530d71b0db3858c839d6250",
+     "tiff": "bd8fa91a98827746c05fade4226509824b06827fe7e7c15fe718e98ef51648aa",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "dc5129bd42bb9dbca5d2535dd46eed2274287128abb704a95907bb9f432ff553",
+     "tiff": "f31cd8d782ed62f81327b0244536a04036cd090f9ee1b1fbd7646279b6ef784c",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__preflash": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "preflash",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a541cbc753c79f3dceefc695cd90c8dc00c9a4ac2e211927a1048abe19793a86",
+     "tiff": "400eedb289035542c3a0a634a34028d1483d94db8880df66c19cbc6e2b40ac7c",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "e63ee57c550fa3839fa41ee96de6be25a8326b6858bc82d25f75a3f336742791",
+     "tiff": "de9eee3385026a56a393ee3a457c4634abf14e43ac5ac30b2f804bccf37cc48a",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "ef1485806070728db354ad946f60acfe72118ae4c4aa39a5ac0170d13ed2e7cc",
+     "tiff": "ae14b4beb06a581581135c305a65c96d1db75d1a77b08f851370ed4282e7cbf4",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__unsharp_iir": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "unsharp_iir",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "22ff117520f5eb8b31f88af4c76779d480b25f228d1072f15d221ae3bc1d95ed",
+     "tiff": "8fea9886a5ff554bb9eca4dac88184e36e8a544cce61fdc8f2849801c5358dfb",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "77c6d6f52d3b90778412c1f80888a91af1c91bffbb14503cbcde010219135a7f",
+     "tiff": "8e95da2e800a9b6ffbd6f7c20bb404cbbcfc24277fc7a6d2acc39515f067ae34",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "e07b99e1783d128cd30a23765ea6617a6e0724a1f533cb5b4a7a37180061efd2",
+     "tiff": "7b3ede265dc9ae8d95abb1979900b1e0206baf4f8e16cc90a310cfe989dcbe4c",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__unsharp_strong": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "unsharp_strong",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "6b0f43622c31e0f1f3410d28354eb6f6999b55d08e3e835fc9caad4273363042",
+     "tiff": "7bf08e8cbc387d600fdb5732286fb2b27938df58fb341f85587c86fd83b72229",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "f6717e96a049feb63f48b4130971670555f45394b4aa7d986d37e6268d9bcc08",
+     "tiff": "132dcaae267761462e2a7b1f257dd97715314a8aff43b2aaa1cd937f33684945",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "e5b6395f68cfcd332c0ca23f991d53eae39e1146ad468b177076e4f90056839f",
+     "tiff": "052a4ccb5c481967125745006492235116fb1a97e6e1ca758d6d6a05c3d077e5",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_trix__scan__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "b4ec0182969f5edaf115fbaf6631081a9ceddac9e2b9901500a82fd75f4cf8fa",
+     "tiff": "8c89ac76137def5be9d2b3ef175c5e20d068b32a9928ca7030f0bf525d887c56",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "ca35310131f757b32033ae03fc872e1677c4e7423b244a0481488b02bdccc2c9",
+     "tiff": "e839d9dafb0fe79af95b640183a31d29beed0735c799f4c7ced9eed65805f08f",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "35d438dfc23c77b3e7c7b287c9c97ad99efbc798086811e3b71dcbbd7b2607d8",
+     "tiff": "d1d2f3cfd3b2fb4510c9f553468db65a5a4723e9e83f6b9ce2e1edfdd4779eb5",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_trix__scan__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "3dabf0740ef472cda45a5e9a1e8ffc5e268fd2a63336871ee7b8ebf55041e21e",
+     "tiff": "dd3278401775059a5c457eeca8e9198be8b8986df7a5c64b161e4322a9778d42",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "ff2766f085f1ada8905f9d8986b01f3473858675724e61353c9c2e644874f0f4",
+     "tiff": "fb5e00e523b9a076c98c4312363f68b6590c2428edaa10203e451398d79b1e50",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "180ee474cbd6ede04880f3602174c4978bb191695e11ba8c6e76884f0effdf1e",
+     "tiff": "59f35c32035d539a8406f3022f67073bb56b63ee65f39751931139416fdc9deb",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "0585dd08fbd28aff5fa70d86cf03da2158484c905f90e8c3ec0aeaa7e65706ec",
+     "tiff": "ad0918faec99fdf3111b3373d6f1f9bfb5a63aa8fd60f9813179ce3bda1e1753",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "2c2c9f240f1f43d01d5fee76875d2d962deb6f15030464d9c7fe0d38524d3dc0",
+     "tiff": "e7a30b7f4fa35ea41994ee05779ca8aff58faf8be2f68e66ae14eded0aa8df70",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "63978a22e0c43b45cae14d331e310a2d6e460a7ea9bd2b4bcd0c84ed8cd5753f",
+     "tiff": "62bc3eca1a9127089ede41e64cd4c43f398b176f2ca0b62d5d78cd4f5e18ac5f",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "55827a10699fd4d466af0789d2045edc844778e9bb027b74279be9cc0ebab9ba",
+     "tiff": "0e7b62ca26912eea26845167bfbac9738736015010d6231d840de62c035d1f2d",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_4985",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a4ba2261abafb77eac0bccc1f8d9b6c4a76e15b8c10f46c6ec17d4403fbf2f6c",
+     "tiff": "2002f897b23b1f06392b6b829ffc98e40e30107e3fcbad61462095122577a37a",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "facf7a4f45b86456f3b2997a07038947c405d7c6f0a81fd7bb871beefa591573",
+     "tiff": "18f216e6675f9e6a34fbac9f30c30141b24d1ebe3dd3ad6b33f84fdc7416759e",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "3f7f88480aba1267011b02aa9333a090ccc7d39ff083df427f8fb93520034923",
+     "tiff": "29bcfa684bd604d3d364c584aad7039a3d3fbb43b0c276fe69ff7b274b9fe693",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_4985",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "52c5a2f42dedca1b3423ff99c87b6db8fec8a235d69db3d2ab471fca23353230",
+     "tiff": "943e5ff2a66786ac59b97de02dd98d6820b0f247cea66910f0b908c0afa43d02",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "c8069906f4d5685d3779b36bf3c86e523ee07894672af00900c55f2e6caa7f1b",
+     "tiff": "4f5ff8b8bef3f014f36d98c5a4feebd1323f2ca0d97bf2da8826fcb65f51c53a",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_4985",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "8b7350c928fcabc9294b3dd9de83858ccb46eec2beac1d2f53a1f0a082a6c1da",
+     "tiff": "c22bc5ceb174c54f8c036887564ae3db5b60188c2be95616621e53efd52f30d4",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "3681f0f73ffadaf145788773c80db5467ef3011db692e719d7d311a1d23123fd",
+     "tiff": "406ad2e6a1b5dfa00c393e26b962f63f8f3c1ea79458977ff6da04e55937f946",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "ae95cc0beb3d45fcc27adc76f5509a47ae0d3c15342fb0232ce3b8bc8913ccef",
+     "tiff": "2d93628326cf3e241c67f9fad77b7981d23f6f05d1ce2ba9816f8a088563d1da",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_4985",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e5ef28c1d8dcb1ead0698d6018fcf4730b165829d62efdbd51d5757546e28e26",
+     "tiff": "c879999bff317fd7c66c4d52cf6099cf1b35a40cf3fc6303875aafab4e025c9a",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "3a756684203de60153c26d1703e07363122a6905ee029f73d14bc10e5f6c1371",
+     "tiff": "9b6959a3581e426afb9775fe70cc1b3958bf3efbdc08159cada1b884170d0f1c",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f5d76e8a0b27856d34c28e12cfe47bde0348c0b442084f2e61308016820cf7f9",
+     "tiff": "d34b12952d890f7bcafbffe3c58bcfece69fd2226baf3a59bf347c08506c254f",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "68835dd39327c64827621833f9199e7911b98f7b3da99defc8d7769766e79a0d",
+     "tiff": "537bf04a1c9490d82489a3282d5172cbe7d8deeee40ee0e3974b7afc8150a7b1",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "9a000bb708c057fc087ca94ba4d9a73acd1bad37f227894ae19dfff05cad3b79",
+     "tiff": "980b713d1066f0e8bed452cbeed029f9a5225d42b579f472bb9cb763aadc89cb",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "1b866e83bba4c656a2f078f4250261878f131d3a0e7c6ab6d3bce9dc87cea90d",
+     "tiff": "af09362f8788c31cd55270beeae2f50e4f6ab83acce12fc66c9f79b8980ca3bb",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "99906a91e150e763972203cab21d0123a1b8ea6aeacc72eb4c5b8a6d3fc9969a",
+     "tiff": "dad6b8ac0f649807c8b6bae920d362d1e7be2b89f44d9b690e9b48ba93a0efd1",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "6d233b46a14e403e0c6c1a4dbe6f63b0a06e1c08ebb44a5f713ac43d7460d96a",
+     "tiff": "10a2d2c5efcf7620e798f6fc8fc8fe60f3a37cad16c867ac3f062484e3275bd0",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "67d75bace6ebeddec517c2edadd1ba2b8da356aa39692330d069565028cdd229",
+     "tiff": "949646fed35aee9e2557aad44584c9f0a0b76b390f212a403ce29130d8f7e793",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "7d4ea2f78cf8c31f3eee482ea39a75241dd8c11c37aa40bf9dc70b7d71c4bd80",
+     "tiff": "625f7d22a3e24434bce5ef632fd03f47fd9de3da896994693f70e3f54ae54601",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "0aa592f65b0a458a0762b714771cb01ffee271f9f596fc2443dd8083865763fc",
+     "tiff": "1b18b981b64df5b9c9d7c7b979f8f0b529b88cdf1a30295350f69f9a862aa1fc",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "ff8a668ead4aaef5483583b235c986e49ddf1c426b74d1a3c0969224f3651917",
+     "tiff": "38fdaeefd8ca7333b14b16da7c3e9003125bd53cb8ba3f77ce2bb50954c2735e",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "610a266dea1d13fb52af6946f6a154c0d77163d1cd111fe1ca76de9eff4c6366",
+     "tiff": "388ad14c905b1174311da9504ec05b9a68563476e7694bfd18321bb3556bf142",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "820e833089895d6337bfd00113cb9271896cc322a7b0a0d4ca264970ca7dd1cb",
+     "tiff": "6b20c658c1416fd89bbaed5585eb8619b7fbf08060ca39be4027af8f3857d5cf",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "8a6a8e71a3678eb2b392c3e02a3850954c627b97ebb4fc20134b626d2d6187f2",
+     "tiff": "c22e4b611a327cf4223bf6c035bfb5769d2dc26e2dddc4fb1d16a2bf8702efc9",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "fd370cdb8539e94abf58c0511c42d3ac82f54f4c2b61df72a3b9c19d8fae20bd",
+     "tiff": "97353ee7451c85b08507c0378dfe63f520346abbc0833ef545dbd21dea83e2c2",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "07483f6e73c0e737a8a7d0d4eb5daa1ab80e67e4911cdecdc758afc6e5801382",
+     "tiff": "63b872282aa3eecfbb54e82ff40d06d4ab4ed0750b40fd65b66860d5d0b0fafb",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_trix__scan__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "9717101658cb005d683603b6cca3007f033745188a57f4b6649cbac3dc8d36dd",
+     "tiff": "98a10744106aa6732102736c48091d7a5abc9d73230b31e8468e103b7109367f",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "196075d00f7aa4ed900dc4baba9032aeaa696a26d8b2aca77429bf87f7d59954",
+     "tiff": "b3825a6de25c369143a55f9ee81d58844b760825c50b8173d903960fb72e2d1b",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "129a92c4d547fee14bc617c07b503e4fe1276bde2fbe03cbbdffd9d1bda08b84",
+     "tiff": "ef1910adc3229a8fff553560f94d06579b6d139083e181467141dc605d4b99b5",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_trix__scan__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "ec5c163efa1df650a189119d50919efe3949cd4c72c58102bc4e964c420c726c",
+     "tiff": "d99fa17691b427d4ebd8bb173518e20b580368cebb3874c71cb4a34a10cb66ad",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "e388323ef204edb2b8462e5421d71c09aad6bd0f2dc5d97cb76795dd55246ca9",
+     "tiff": "0a74075839b9a04687c4f0a9c6fad31b4d0e8fe46f806fc0e19630384f9ad626",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "7dc6e36ae41564ee80b8c1e86e88b87f838d28259b5280ae127a048739d2031f",
+     "tiff": "11af4024c73ffbca8e202d2c9e9cc0d828c881b3b04a7fb3aa529372eab68ca8",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "5051046d40f81254fdb27b8bfbb408e6f74be23466f402da9ace90067cfd246a",
+     "tiff": "42e206af4bf0653da5b30906fecf7522457ac2e4bcc3f69884d1824d082f9f6b",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "0930eb9dc1f43f6e0bd802b4e8e8eba43bbbe1d6c3fcb55159a10063bc7a4d07",
+     "tiff": "41e2ee01e6d0e5e1f79bcd3fdb2cda9094a56c88f03b568c4de05931d0932513",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e76c8797b069330eb65b9cab80c1eaee7e30cf8bb018a9c2b32b0b02f7e6da4d",
+     "tiff": "73cdf90594a42450a13ab0f25bed64e45586c3b55abe124ede86aed6672aba33",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "bbb897f8028bd789bd87360a3133547680aa07a06ea2e2f72c56f1634e993887",
+     "tiff": "c091af2a33316a2223c19b84bc138c8d0b8113b09eab1830f88799a5bef8c5be",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_4990",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "88a20e5eb7bc382861a53b9637e09b810abd29e8bd70d46b256dfdaad5168c44",
+     "tiff": "f2849b4484c83501fd6a63ba745a92a1b37446984b7d7d9cd6d2de0c090cb805",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "30e9a030de3f008462119591289de35a903d72b1ae2d19e4d55d0a6a09f52c3f",
+     "tiff": "b14946a69c75cb2a1d9febc05033a39ab202311579426714241a7c2ed774ee5b",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "6345fed2f31780728a92e259d16cc28ce68618b041942b221c357535ea55ba84",
+     "tiff": "4c085ad671bf1bd204754a8cafdb0bf03847c477be86818255fe571a4564c6ee",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_4990",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "ce114550f0c02c7b15cfe5930d59bd5f14c9ee49bf5d6c42b7c6960c8444f722",
+     "tiff": "00e9d751cd23806ea5a25a930606e31a8e271b133f15a55c1e3a954aebdcf749",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "fed6877a788400ae6f39fa4746eff36400f665b3bab5350d40b7a306c50f3dbf",
+     "tiff": "00139569501d86f59cd82b4905662abaa5941f958589b33ad5c8063910ad3574",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_4990",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "cd102a58875e9b773e467d3b4d359e3a01cb9d9ac54ff1c449a7ebc88c4008b2",
+     "tiff": "4d3b6ba2457f02f84d533c2c3d6bf9f8585f71bd5eea8ced526e45c683db6581",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "afe373995484e66aa96db3cc51c141d3c9dae42a489833b72c54dd8ce24122ea",
+     "tiff": "749ae4f3f9ff3f6fca0e3eadd954eceaace9875f0584db804a704af938907964",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "0b8a7d3687f5cda65a73a82ec8859c3fbe2acfb6ce6992a58ee539f277e95081",
+     "tiff": "e05b98f9417d668278fec32a4c1c1e6b46dd5f845166517e1abc0350a9efcdd0",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_4990",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "0edd3aa56ab2bf186505aba0092e3e2920377737ed2004602b42a4594c5400f8",
+     "tiff": "552a8d686b3665b4115428bbe94265cf8da3d2f55a5ee3dda4122aa08b9c52fd",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "fdd5467ec67558367dc58eaaf93f3babcaf39a5e8ead391f03e1567e072a668b",
+     "tiff": "243e32a56e0ae3b7a185dc98fdbd6d101efab390c390cdc09cdf8b62e4fb031e",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "529ffcfd7a18e50fc00f51c2ee828c3c671b304c96aee132f44d5fb79aa7ff23",
+     "tiff": "01765f40286222200d1db6dd45226624212903efe567c2be7876be151f67d667",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "fdcabf0b23935a0909df749b940439815c6cdcbc205aa35ab33f094a94c3c087",
+     "tiff": "6c6a4c3f13dbc27a619b6cecb646c95db393268dd16a8ef685cee7061b2591cc",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "6652cc8dc66eb5c679e553d27b95a8220f819cc896fc290f935de6ff48784188",
+     "tiff": "85ca036bae37514e8e0cdfc25393d1f5da8d21c10471e52e18285a608699881d",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "31db2917ac21421c0b3ad753a93ce55b9af7b4097f32d7eb41aec7db7d56dd8f",
+     "tiff": "6b4b71f19b0e81ca7486d2c33bb9fb834808d1516e59890d3bc7656049d994b5",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "b0b255d3555093e07b49321056516b9be2d464b7f11c59fce2e37efd128f576d",
+     "tiff": "2f4ad3eb06a31e983b24b48d204613eb8f8bb16ab1647a117697dd884648e434",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "3f168888d475ad0ca9774fb20fb574e992389e7a6d3abf7a2e131b697395f680",
+     "tiff": "30a7284ad1fe088d6493cde8d5c0845f96b73006c054cf762eeb75304a51aeb6",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "9b53c01f1bd8d663dc9f78850c358c544ea41f8b7258fdf65a6f848931e1f5ce",
+     "tiff": "0e8898a9ab34e8f2ffca214a3e9983775f066fde12e06c5090d342d5de2e9a07",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "284c7be99a10c0ab35150ea12d6a412aa0ec96717e0443f201b9ad054f1554f5",
+     "tiff": "252832f6e7825d34599cc02cf40f4b3a45a06fc51c32bcdc2bd4969f3941bf0c",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "c292279d4845b1df039206a338d1a956956d06a13cd90bdad360b4a2f469ac14",
+     "tiff": "f6397b9c9de3cce3a7afa544e80b005897274488a8e0246ce23d49f11dddd0a8",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "9c589a02233105a2a2b13155dadf5d22867de4b120279bfcd5a9f3e8c8e155bb",
+     "tiff": "49c3bd74ed4c03103746d4674ae6f65c4000bc83bf0ba8bcbe8b94c820a880f8",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "58891ceaa19980e4c4a7d345eaa4820790f0dcc14292720c80d84ec18680b351",
+     "tiff": "f7118f387e421eb895b9a10f8c4dd00349da964bc0df183e45ee28e0f2f29cf1",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "f47aed6a43fdda812db02aa6a5f97a15babaa6119f3b7dc8b47617483a5023c8",
+     "tiff": "b99c6c14e4bdb4aa44a1671b8a88b2ef97c05683ca449fbc3e0d6f1417b37464",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "17eb35000faa90cb1dad26e56399875f0eb1fe7e1508db1353c9a86e7b683f73",
+     "tiff": "ec549236043ae0117dc6de4be89ae181172e9a2d17ab53a8b6a193fc36f2d1cf",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "41ffdcdd581971d47b07a5e9f0c05f2392e8b536278e72937467e03284629062",
+     "tiff": "ea3d38353464fe4a35f201804bb6f126d6e4e6bb818eb110f010598be14910e1",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "3b6dfd14843b7a6357adebb6563e87383b391f9e997d608261a8e260dc70b6fd",
+     "tiff": "0efa6dc0323f50ba4a6569a8844c9f86ec0bff9da063c33c62ac2058da9db54b",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_trix__scan__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "680caafef2cdac8f2185cf7613e48d57ddc16faf00d35ce7523e5445f53ce9f3",
+     "tiff": "9090f3b6b69fba2f4d7bd54b6782ca5eeee6509266cb90c3d9abf480f778f895",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "4facf8d35625bb7543b7b0d8b524ec6ba5f6c91bf1525594e763f03bf393e364",
+     "tiff": "6d0964c34a8dd824165de0c96250fc1a43191b50bca493c158d006516dc2fc18",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "8eded9a7e43cd801a566962997aaffa94db2af44361bf0d83b1075b91ac83a41",
+     "tiff": "a24505da005be9c1655dbe3dba63cce06e4216aa96d6b180934cbfb50c37d0ee",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_trix__scan__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "21fd84c6838db82cd11a23ab67666b23410b234c33004100893284c5234131ae",
+     "tiff": "205722402f4018edbe171bc120be2f948a1095e84a21537c7c974740ca9b35b4",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "10b6c03d63d8b9922e4e00d7f44b8c38e07805e419ac8dab4e989bf17841d298",
+     "tiff": "2bc8747080cd39e60f8f9dbf71a39a56d00efb5dafc66ee1d84bf73c3f27e625",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "345a85b129571a78a70d722a426e77d1816d612a33b4b061605aa8b5e9990625",
+     "tiff": "59f00580a3109d0d8baccbb0d5c427bfc4dbc6abb4e90a6c5edf5db9ccaf4aa6",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "e14c45ad069100883ff627aea45e1565fd22ef8dd108e2bcbcc9258b5522282b",
+     "tiff": "1447096a621ba7925c972e8a25b291b24096d98a1cba0039da34944622e141df",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "e6fb4ecac4210c0b80c7eaa274069ac9ca001c87a80b3c9076a11188fe63e7a9",
+     "tiff": "7244d5376c0a96031e05658f47e4fa85cbb9f459ac5a38bd7028d8d2710b4303",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "fd8d19d3011cfacec3574220b18fca697edf5f57ff3a159ddd31622a3b12a998",
+     "tiff": "449a7f1a03c84bf2d920b881e0f024de880d4b7aced90c3c478f9068c85588fa",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "c7655de470c37205aee37d8544958ebea8be547a04dc96229b02a7a5a329ab4b",
+     "tiff": "7eb450331557bebe824b7866fa033751053a8285fe914e317c661d51fb3de932",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_4997",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "c834eecd8e963e7ad9305dbded04c6f5fdc79e7d00ca9c5dd02eaa481f0388d7",
+     "tiff": "4466743aa28a4c14b5d9fdcf44488d629532254e9de766ace390fdb1f10699fa",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "d9ade36c8b79d906e8ded98a80a8f5c8613e1c73d9a34865b58d69e9880ad1bb",
+     "tiff": "ac1bb00fe0c8ea3bd21bdcbdb902090f4e3952274e4fbd13b7211800d3027b82",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "faaadc9d52c4868cad31324e6df40dec0f51a821e19d5819ea2c7640e06f6786",
+     "tiff": "27c41a495f5cf6fed6cfbe1f14df47ff9f33cf4298720f7fd0741d8aa54c5ea3",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_4997",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "7ecd576ee1caa64329920a93574c8297f838aac0c65d7456c98330fa457f60c9",
+     "tiff": "c948c9fc67ef143f009b0954ccb8ab6502140fe54729484888944df8b87fed17",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "66dfdce1d7c450908982f451aa36624eb98bd00dcf9421e05dbc8c6396ebc029",
+     "tiff": "726a819c5b74c01f5384f06fb65e7d1110b60212dfee81c900c717e9e30bce56",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_4997",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "31c075cc401247f5652a687c065ae406953d228226b162d4adb87d13cc01bd4c",
+     "tiff": "8d93af33db42d61e47814dd0faa0748d95113e5ef7831946adf08e405e5ed8fa",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "606ab2c26233747bac0798965b9c813713067e90b080ccf13fe2efc8537043e0",
+     "tiff": "fd33fbf66e1d09d1f420a9bb892f8e983523db0f64c2f538e9d14839f97210df",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "2f0da576519c7e4e6050df1ad58dc7082c7144eb2f8e6564d25cc38c3ebbf5f6",
+     "tiff": "b190d9f9fb1c57e247c73fcf84ed4a0ef2a52e3d5eb1bcaa14d84d1ed3a16401",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_4997",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "d1ed0b4b7976b6135df0db511da0213f6f64572b65ccb48dab16fb24d3a946fa",
+     "tiff": "1417dcc8c36dad0c8388d9089ccc53f3b55d0b634489820b15c558b3d4b2b212",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "ff1893a46a69823264d7e40874a3edf4281c3ee6e2335771b14afb7c48c5483b",
+     "tiff": "815e279843f9548d64e7fa1c21ae4ee77ea6fded78d27ad4c33946a8d3f20642",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "11166a13b340ca62f5eda269889fa623df2e088b59f49c556270c0b9102877e2",
+     "tiff": "f3d86c55b1d10ee4b2299a8589146baf5d694bfd5a3ac217535a361d54e88b4b",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "3529b6da6db29b8ebf550688214320713d5a9122b944250772688d4e41c48622",
+     "tiff": "d43ea1af35169723fdc45d74beb87c56c92e8ee7c4803f34277783d19604bd8f",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "e04445d90a9026fb9bf40b76cadfe50adacd5687771af2b67d6985548d4aded8",
+     "tiff": "770348030464b07f0cb4644c5f99b1bfed973da37cda05e803de199b229b9e74",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f8e0e724ee1271e26f8484ce5a7966c094ed1e573619286553c590f70c147fa6",
+     "tiff": "a7634f6db50ed677e0bab20e084bc21e303a17a64feb4a15526e31275823fa7b",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "cbf7003580a1f2fc32e5655e1181a4cb7f1ee0b3161e2e02c616adb27038d56b",
+     "tiff": "41d0bf1d50150ea2648dad84ba0b9296175bd90a2fda784ba77677e520554f0b",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "6a03e4142a9d534c1980d46e3d8b3c2bb74fe8fb017b9e9295734d0b6329ef29",
+     "tiff": "d18ac113530f98d9832789ff53aae9669bfe1de20a6d6414c66f55fbed72d8cb",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "23648b410374b8c059ad57ee8875fc952a3dffd37c536e25314e99a3dd0ecd1e",
+     "tiff": "fa63c2d8fe7711040857e1be2a3ae85f30537f80267511680b036389e60af2c5",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "fc47865e7a86f8dae7c6aa23bea48f1fd1f77519f94966995f21b73e53dfd766",
+     "tiff": "d64d1ecbd53d3debde723534c0f0f3008acae005bdcf6ed080151fc893d58861",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "842224909f0dc0d48fd24e9a9fe7b36a6456019c4c0b4a0e1d7df501db671f01",
+     "tiff": "9a99cb8b97a5fdaae137899a1b63ee8ffe4e541a817a82071bdf14f3b913ab94",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "21d24d986b753857a371e682f5d8021222d5df80a3794ea27dd76cd640a7a960",
+     "tiff": "a11141fdcad84ad5c48dfffd70561c5041fdedb1f157c9bc764d8dec52b2b7d1",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "cab3d93243bde6c7590c9f114c906e52e1233ff5e49d61bee1be18655a1cf2c2",
+     "tiff": "d1eba542474d1776d51d5fc4d1bd710afefbec6f0ef821b732152574483c3446",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "3445c7fcd7027e5a510d1a30b4169becd823388d2b2fef1dc991a34423a0ec49",
+     "tiff": "859874ed88499df5ee955f32770aeef53c49e1e590dfb07951a3ab8fd59570da",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "27d44f61905c6e453c527fd46a624e50d68959e871a0229326ff97ccdd04ca91",
+     "tiff": "f073ee915a5054ff53e65928df0d38de326167d9ee36fa6b3f752c309674512b",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "842584fdf93f6c91b4546a7650465a4a6f4aeb9268f377a21fd818317d07b693",
+     "tiff": "9c6a8544443b02320a8f95b4649767f0c5198dafa0f06b01c5ed1bcc8ee29478",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "d1c4c73a1c87b0cdda0acf8c3cef77fe8acae6660b6ef438975838fe61eab564",
+     "tiff": "c9a8b5beed3b7104b11d64b38d776c72e290d7a87649120afedb9c6e3780dbbf",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_trix__scan__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "54cc497a7e8b687bd9f972255700aec52e6abe574216276d01de3abaf0303a90",
+     "tiff": "13c79632127c04c13771c7ed20a4a21e5fdea5848c52583c9e20769154eb8654",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "9424263a4232a9c48eade394e87172fc274935b5699e8508beffd3785a638332",
+     "tiff": "332fa504345526e9999db87c544e974c7e8b5b97dd85e1ca3bb0a3860604d89c",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "7e6b11899424a1254cacbd78b8c442be65e3eabb9efc93a12ca3a5b4f54afea6",
+     "tiff": "ea74b3abcaebcd412874b689ba9eefb64f631e7db0712501fa7d0a3b2c6aa7e9",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_trix__scan__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "997900271b5f5ea932e2341d93684c1b9a0d83c4053c5bc8abf585072a8b48f1",
+     "tiff": "27df41390f40d8819da5515fefb7a2771d2d0edc2a0ddd2912a6c4c17ea691ab",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "7ac81732d8f007cb6cf05ed624e8dc6298b84fdb0728024b043ac03cd782eac9",
+     "tiff": "11ecaf69fdc29b4f1916623939dc492774fa3cca66b0bddb06e64321c494a8dc",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "b9e2750498c999ebf9e2ebc1ea0036bdd83e472c7e39962bc955f65c40ad6f3d",
+     "tiff": "34592b5454c94c96ab0b5091c12f047ebadfb127fe689d775ec7a486327bf436",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "c889f41a8c08ba39d1f120d76be1618be7a57b99f9cbb7b24f2dbeeb8f2445b2",
+     "tiff": "90c29222938c683555e0163eb9924802e7a3acc5dbd71302aaded5c913b6ca54",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "12c93ef561d6da55a7184530736f02f872c0368f99cf4f40989480fbdb076968",
+     "tiff": "6761f442b4bdbe3f8f4c264bc1f7adec3096e2ecfabbcfca2320358a670780e2",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "62384775f1271968d3d6804858cf0aec2e075d4210cbfcd88884467e4d74cf4b",
+     "tiff": "2f309550d17dd44d16d5d4424da10d291213cbef101c239f856940bad5a57751",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "1dbdb642e56b97334c539a72b75cf5d1ae3ed7c89c254aee6737d8e7cbcae696",
+     "tiff": "d36b20d58f616830265e57bc904a073b89e5e320e7a2fa09a4720583e553f1b8",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_5003",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "b617e7f69b6d842dcce2df2120e0f1b7fad1ccd05580fc156f9e8cb530a8623a",
+     "tiff": "ecb354002457fe7fa9b86131bde1511928969cd926dcecda89d39867fdcd0d42",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "109725ee234e795035221a9b2fae9a9d9e32229150b22c5e917fd679cbc39310",
+     "tiff": "01192fd10b51f83f62b8ada474c11349d363384b3ef4d165a3638daa17144ffc",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "2377f0c79b8d36b19223255d32fbcbaef811e8d8c6d4a01861d422552a8d49d2",
+     "tiff": "ec736722fd33266d871428322feaa3bbef34cca2e035ad0eae49f73c20e7a0b2",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_5003",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "a05ed49bc10107e106a0a540e9563a08ed6e2adb3fec677a6d21735c25c70a4d",
+     "tiff": "725b224452ac73b6e7c75109776363134d4a0ce73dbf726bbc59ea41f173e84d",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "8aeda2f9d18b2e2963c55a98c178194bd542562d64609d71eb5ffaabe07098a9",
+     "tiff": "30cec635275bb37142b5e74765b6f6ee6b133500c8b29ae8fe19752d0bcea4a7",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_5003",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d6c8c0dd6bbff6d25f7c2d41ef928b941f17939dbe9ec4c5ef96cdcc08f7c210",
+     "tiff": "15d634f31946ecd74e6044331ed87e2bf57a67c3117bfbf1bee836fc39a509b3",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "9824c442dd8e1fa5f83a4693de3c77873ae121f6054ba6633faa768ce371f7d8",
+     "tiff": "43d242ff9ec325717c7919ed57f7f5da4eec8c314c27e73354589833e275aba6",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "2240f45bed7cc194bcef65987a7fa00f1dc950d9f3ca59b2739a82bc728b21f0",
+     "tiff": "2debcd43088f485f1d472ee1140ec9d88dfe3ceef8b2cbe67df95935bf7bda5f",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_5003",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "4b8f790127dd6c1117268b28d0b21ee2a7e2c5bd1d9346c2c715805277c86a73",
+     "tiff": "85be8630f7ae700a31d6a9f81d1ef4c0b825725a13c32b841dfc94c932c6b89a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "ab40182cc0c1c026c26c8e51a68dbf9b54e4476911fdb306baa23b8ff3a9fe68",
+     "tiff": "6f227795a4ec17ec3bd7c9a3ed9e4d3c3643c3e2e36015af2687c4d44556f234",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e10ad957fab7f612d41f40c37ef2e8d6b5ee0af8915acdc7fcae61710e229ec9",
+     "tiff": "cc98b267ecd59f691f70d3356dcf6278983d652e82deb007f52137a4944a64dd",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "f5465aaafc85beca47a78e829350f2b377fb47886998a28a2fb3128453fbad1d",
+     "tiff": "a8cc52621aee4fcc60fdb15ca3a9d4e44c385eb7d0a0a1ebbfd4c6c298a8d490",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "3455cab7f35afc9915adc759470170eec91ba8037e6feaff4150acdbea172dd6",
+     "tiff": "0e8aee97e0b0b8a4ceeead39d0bde5a3ee7b8e50fd8b2305a8151d2933de1158",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "fd60539f08ce419fd3952259c782b6c6f0dd36e396a84cf91ee0a57e64e7e9e4",
+     "tiff": "831987a7ebe6f622aeafd6e58072a749573044da4f1de6dc1ab2d94fc37051fe",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "259da114c0434168b7eb78a03d44172bd9d1380b26cf1b2108035ec087d8ec22",
+     "tiff": "dcc9983fa1a6bab3a98ba3278bf2a72dfec73103de9d1d6785e1c190b23d6f8c",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "2dcd66537f3455632c2bb46f7d1080dfd05e3932513e626c7cd1efe42d395600",
+     "tiff": "30e5c222bafe56ac35438f6f1738334edfcf4cdc5cb76e41a702faf6462349a0",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "2c4002f366ca31323ee9a6f322174f4c39ed8c071f42ecd2b6f8b4ac078f37e1",
+     "tiff": "1c9babf3d683bdd1dd6fe34e42711ae1fdba102e1630a1094fd402a6799aa60c",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "7676eadce2462f843925f1a0731772f89da66625ea4aa9b507b904db792d95d9",
+     "tiff": "6ea004c826d8a4ece4d167f0354c955d7f437f83e4cdaa05ade2d0c9203bca04",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "470d36d97b7703da6958aa2fafa55a43dfb251fbac9ecf7a740d701deea2b9b8",
+     "tiff": "7e9858d7291c46febe0018ada63f0004e14ac50a23c10b663bafc231e9d21272",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "3cd2634f4ede151b9ae9598422575b725afbe3b7a70f955a79c90422697d4751",
+     "tiff": "e68bd5c4475c5e98c176f2c4231f4cc8a40dade6c72d4e553349649545046931",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5544e83c9835c73ed38c31220b777afaacd26e6529693380f96eeb3c4e3624de",
+     "tiff": "ebac45c85842af12ba9a23541b9990f1303261cb4b34aca83a046567a5916e1b",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "938fb46767958caebb354a03cc83f34090bc31dcd2a8f5cc4b28355635da5641",
+     "tiff": "cb08962f66ad170aaea58158153ca0e86cb894679cb4f3495bc1799749a12c01",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "dbf53086cf59ea2959f2080badfae7637c91d554a4434ced36c58454275b9e55",
+     "tiff": "820f42e3f4ab14e61d551e36f98f989081ca302d53502e744717d394e76962f6",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "85a251073342daa531bc10296b983ddd58b0a03d8eeed2f427d26eb0abb67832",
+     "tiff": "0d609777c2d7ae6b8f92602482feeefe00604e6586fb5768856ed1eefe21e76e",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "3c7ea2d70cbe6c383f831af63a331dde23db272ae44e1f3f5d30766a0109a3c4",
+     "tiff": "9b48afdf575b6b7e1238581ca886ec2609a1e261aa84df0f44e80b50668df671",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_trix__scan__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "63130ae3e983f06fc473dcbf53ac10e5edf079cc7b9fb8d7b10fe0d294846e0e",
+     "tiff": "f1e23c512dc07b68595c28d653c6cb64f414e741da8eaa525f167e24e263153b",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "e0b283bd7c4603e7a5a5b29028a2fb1a3980fc274aea1142bd8e75b4c40a1a0c",
+     "tiff": "e833f3a5ca8fa7fa78c20fcc82393cdb6c87ddbecbd1ff61e99e95a752c26096",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "d1cd543f525103550476ca8ffffa0852ec3d3cc9929b0993c2f8522b9a9425ea",
+     "tiff": "93b871929edf0430f4e2c49e3e40e9db75ce3527b49eb8391fe5ff1b19126578",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_trix__scan__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "fafa084a80cd1ba23fed45cc933a75e7d146d3241d5ecbc6407ebb7edd97b65e",
+     "tiff": "4dc7b35af6bd89dec374483c74312dd463cc683f4dd34e43dd3b21876bea51bf",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "5654f51352018d54a5decb337bf62d27fd937b9dd52a91b4ede9aefee19461bd",
+     "tiff": "25e5a9adbc9cff5ac63071c9086f7a7b4dead87c537b9ebbaa688642382d1f8a",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "20c015f44a3c9545246fafce5403da9db347f738a6f00a703691da1d98c07afd",
+     "tiff": "e4e1db64786c58498aaadd7429e701c3c47dd7b7e9612b070539c9f6473ffe6d",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "5e09ab7e34bcc69ff4b787d6b62406766e3aaa7602a86a9fa754ffa18450dd9b",
+     "tiff": "7c344193b046794bcab0c3e33b1fab59b2e82be304a66b803ec1a1626388ce1d",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "8327cc344964d70c840cbc68ed47f46d8a890f2720105f54128381434281a774",
+     "tiff": "7ca5333bc21bfdc3f17d61eacd386284e5cd4f5cd505514e47415f2cfeee92e2",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "8e8ef2455c34845a3ff8ad3f3b204bedb0e0740cebf6e9a5c425d2f701bd4d95",
+     "tiff": "0659a8b5b3a6adc11fd8ed2b3f48dc0c264aca6f9718454fa80a3c9eae43fa5f",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "56087671c73778cb81f6c6670cdb018d76c83d123a59f691dfec6ba7ddd27ca7",
+     "tiff": "4543f4ce7ff32e4da65360734c0879f8b4a46bd28a5e8de5d03ce79b4a99c504",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_5009",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e095398ce14cbf40d94d5a491b455b9c6f0607d75c7b1655574f95a8de3139e4",
+     "tiff": "d65725d9a256a95e067eb1b886bee172c4a61289c147c3a72147e2fe8b677416",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "693d1c8aa94c30ffd73c5bfdb515cd12546a8ca54d58a90a47e7715f0d35016f",
+     "tiff": "458793daab1e5c4690d5d91cd14b58fe92ee457e170dc4ee8113780af6cff3c4",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "7bc776c56484f375877857e6ad01d3a4c99b706585912bd8b074d052ec39c1d7",
+     "tiff": "05824fb196a324f580c8d48275977713ceeddbd416fc74ba5732ab5f045b3a61",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_5009",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f037ae7455a79f8f2531767e8220498cdc06fe507b4dc6c7279c102b16a9e64d",
+     "tiff": "1a799cac4f043eaa2a17baff5c2f1ab1a8ef9388a5a51a48a51c48cc7f12982f",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "9131484295d5945d4c9abc59ac4cc0804220474808b01fa4687c7fe9cbc4800f",
+     "tiff": "d679a6210b9cb51108f9d03a3d66bc91cfaf9872daf780dcd145c7d931352edd",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_5009",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "b02199bea2fcfa32a8017164ce7b6b4fd17dd5e0183374279788561f0673ca96",
+     "tiff": "06837643e7490fedf40f02523c827261d41450e94e92342c107bc7a9cec9b55f",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "f3e0d306d8c09eccbcf25fcfa7f7b730106d570fcfde06dd17f17988cb3405e3",
+     "tiff": "95a889b8ed8e31467dc6f3cafec9de19cf4ac1dce46f977301d713fb6f72e4bb",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "0d3fd5d5797701f0d98b440ae39a3a7619cda3c658ae486234b841f4a1616a2c",
+     "tiff": "c3c0e717b05170ca0e6c75e15c8507655ed857871793b658324f2df19daab5d6",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_5009",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "8e127cd586379c5599c7a5d01d0f6d5602ed6810a1bdaf4a0df9c6ecd5ee177e",
+     "tiff": "ecf83d0ee11ced42e1666d1a1ddb0218338aa68525ce66b32bc794b094977b73",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "e9ed096fb520564f35aeaf39d2542629c1c7fe398920329f87037514067c0603",
+     "tiff": "01b67ad40c47a3831d72b0df1c3cce0fab06fc66ed6e01c28ad37c54ea5107ec",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "2e341f347ea9c13d412cdc4bb3f9405261cbe0b54e48c5aa0e9bec006ca0f4d1",
+     "tiff": "cac916946e3d9597149edf3c87c337894a69428e61f1091c04f88225aa920ddb",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "33fe1543be4a92b7239b6a1fd84d9604a53452146ebd9683776f359c1ef21678",
+     "tiff": "f62c343f241393122277b316400ba5144fdf46bf2ffe8c21d3ad53a47a2c807d",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "707aa4d3257f68215be63c4a9cf852bdb42a3a7498a5bb7933e124c75ee01160",
+     "tiff": "e1c6bd4b95a758389b572fe70acf799437cbf25f8109a18184e7f3fd8607ec51",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "014a88d6b65f707222c5dfe1afeb710b3af0bda2d8c2c0f2f4a1f710fd909c6f",
+     "tiff": "6730e6cb0b404135fd02237f42b39855956c78acd80351d171ce577ea77cee98",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "2c6866baf80a9ba8c2e8e2708b1ffb57765e36229629b16ef06603b7197a7b25",
+     "tiff": "e559e2e227a4078813075734f517ffd70523014ff81489252216809368f9c71c",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5e6181dcc218eb25efa4725462bd7148429c648f73f0431a48e6ccde9a98fed3",
+     "tiff": "483a64d6b83c908e6fe15af4cf8555307bdbccb59f604d8441788b57b7121616",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "84b2ccb869b1954fd103008b9624b797683b409fb76c91fbd9d8bcb421309ac6",
+     "tiff": "29e062b29b4a0a8a38405709254b2e9133cc56f01f68f64bff808e6a336f0f31",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "257c7a4af0aa0b3d793b9e25d072d2c54fccb5d0061f15882acb1b3fc3b3b831",
+     "tiff": "d89dd9163bd789e80e40f9d1d8859888ac5a74513270e8366b6b43c5d4b35d6d",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "232b6b76f461d6859a70766ee46017f0410f88b238a00235cae9f3f676a99fe4",
+     "tiff": "7e739416192218a91d1756f9f4f9d2a2e22c7b79be67f35294211c192cef42c1",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "82cfa7684dfd56cedf70d62610148194344cdc30afcd14c68a2dec8149d25c26",
+     "tiff": "8b4e260a3998ab68399bf952e16450412d63bd363b777a216a9a57055ff8a80e",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "47a793bf0d70255e84e0a3c94ae0344696d13bf97a1541d60b8378335f383b38",
+     "tiff": "e4cbb660b2e20f1eb4bf6169f9d6233183e27acd90eef96081f9bc9148fe5ce4",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "6d4db54a15bf834e1dc494ffc95551d1eac5b0fb55781480e2f7450474b4c69e",
+     "tiff": "cd446a1fe47596be30ad70a0580306413d0dca6c677a7c7225c6b5ef29daf397",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "37214dd67d0fc1737546ca4bdc02346d71c737f550a3dbf2b45e4cf6330da023",
+     "tiff": "31f754f592b1ba768f8361a3484fa420ec913a3fcdde4da8a4cadb2b4dff49fe",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "5e595f8d9b99079319d486bbc717d59f51f7df7802ae6123e773b56880c9d626",
+     "tiff": "8f1ae26f0ee264451abdcfc4591e085da2075731c5454e37ef7cd20933eb4b26",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "9d7456cb3476867ff8df1864d73222d070c13347ddfa4811d2fff22e352caf9b",
+     "tiff": "1c603b7e4cb7ad5b1f865848d916d38a629990116b75a65b2647a66f700cf5f9",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_trix__scan__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a7595c3648b7259f5fb54d2e0413c46b3e34403c0a36cc9e9bc75ba16d54a829",
+     "tiff": "2b61ba45c8ba16df1a52d7c0b780475b229717c68290ef23a32a324dfff36796",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "2e1f5b2cd6ab2c1efbb5cd388ee6ca2aa500f6ff5a9c249dcd1dc6cd8838d6fd",
+     "tiff": "11600c24b6008db0f7385a6ae256a05467d23e1395d2152507d808c3adca9082",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "3fa6bd1df14c31ceb7079a56ab0ea70f31e16fd9dc46bafda032efb4f3a711ff",
+     "tiff": "fdcc28d95ec89649d931f91d035f105959bda2c894186dbac43e8d360600a0cb",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_trix__scan__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "7e89d1b676668ff82439e0227fb453e8a65b00cd39530d352e3d8e970fd80146",
+     "tiff": "bf1e94d24578b9675d8ae7795ee7e83704481e6642abaeddda72188b8f145c4a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "4a78409d56eafbbb207fbdf6dc00524d3057da1f741a9804be11eb629adad962",
+     "tiff": "fc7950fb593c33979d0019d1f10ef33ece373a6d2e0093119bc6d39a4712d6cd",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "ca784ad3fc5a1c50f9285256bdb7a311e6f570528caab80dcb9e6d55cbf61fa8",
+     "tiff": "93444ccfe7364e08e0b5b3ee15af64631531f9583f26e1327687fe67e2fc8483",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "8cbb7ba3c977a9d31f0af7ff51ed8c86301e53073a055b211379b7120a4b07ca",
+     "tiff": "7055da0aa7fa20d897f3fa15540848dbbafe939a30b70f240c73a0de0b0f3acc",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "270a06a314062a245a8b342eebcc5aaebd468f9cb5226ae5a8bd023dcae7f144",
+     "tiff": "aa138a18887820cc83508c5dc484e6f9991cc24360e29e97cffd6dc4817867da",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "2e59e74a9e10a469bf36d8cb44bac508550d7cd437b7f75a6aef7892b97d1097",
+     "tiff": "571816e5dc6c2da65108893fa41df6f71e6669077371bc127eb69a9fcbb0efab",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "63e0fa0d25cbe23c1de04bcb0d84f54765710061986fa68ba0bbab929b56cd5d",
+     "tiff": "5292e6b39d83a820aa3f98477bc855d8b87acad226805a280268b1fe21e95bfd",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "synth_edges",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d92e76556322fdab76d717eae2521351276606126a601c7fdf1a6e8e3949a3df",
+     "tiff": "87617e0a6f0e0fb30e135255e1b9751f8e61ddec1cda0cfba5c349b737b67425",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "2ee43f3d6ac27f5b2e521448ed8d46718a1898076f930caf7ea35deaf9e7b852",
+     "tiff": "e8b44987a745b1cd0f36493fcc859a1957841d316cc617a6311fb26615a0de98",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "be75a0474d36fbca5b2ece75c0a141c612d789ac7658452ecb4774a03ff43182",
+     "tiff": "2b1d264c1773708cbd7b7502001c899abf4223d10733a37419830689b57ee2a8",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "synth_edges",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "ba73ba112483edf86cf09648bc169e6bbfa12f6a7d4e662c9e1daef37ee5cd4f",
+     "tiff": "db82d43de019f9e2332c1155b7fc9d654f42924ff794ba710db6790aa8caaaa4",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "0530b4d3faf2154b00eccdd1adbf1615a06491a20ee1041744e28198a5d31d99",
+     "tiff": "fc2b388eadd8fff803c0620df710deb7080ed253e2473fb4df26faeea0374559",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__fujifilm_velvia_100__scan__default": {
+   "input": "synth_edges",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "9c27f820c0a3021840f96a8f732674efa53ef0d0ea49cd80f4374bec24ea6444",
+     "tiff": "bbb942e09601bbb7e00e758080774916856002df1ed3131418944293ceb239db",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "7b4e2f46b45ac9d1a992c2bf37f89d17c01feb7a6e101e020982136dc334d63a",
+     "tiff": "f0d717202372d93b45afc391ec7ad10cb29c46e31037241b24d458b7a7c72ea6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "2de7a94446a88fae039ba65caab1e62af2a5cbb7ab70050820bc66b63456dbaf",
+     "tiff": "7e3fec576b75ac35c2832baab7117e2a8f1440b1cd9090e7ebb9c0b9b9d235c9",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__fujifilm_velvia_100__scan__det": {
+   "input": "synth_edges",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "907a0868291bd45b49834d7d469d634ef440cb9af800f751377731806adea6c8",
+     "tiff": "95dd2589a6ba4958f47f213e969b91e44fe5d668746ea5f240ebb1b763e4e1ae",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "4b18e19ee464c9a16af8adb25f40d51f5d2fe256c50cd19058dfc0650e723733",
+     "tiff": "f0f2aa9b3496b40b2d8d86bf6cad775345f62f4e9615440d14492a6900352403",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_doublex__kodak_2302__default": {
+   "input": "synth_edges",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "7e7670dad4f2744fba0ee9e8e0f142e732524da6935beea27044331a94488f70",
+     "tiff": "496df408ef89e86bc586cf701b1a5369cf7c63f5184bab174c0e19624b148f6c",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "5838625185840d4db41bb2a2a596d3eb989e9451cd1b762884b9b3798dc7f1df",
+     "tiff": "0b23df1848f6244d18515cde42fac576057fca2eea7c956fb31cded4672d148b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "298c6555cdb990f1dc1106ee27f00ac6884771af5dedc251572ec2ed828faa78",
+     "tiff": "1cc199efa921fbec6c33fd08aa7cc4aaf61a25ce65f94ce3c1daaaefb9b62ebf",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_doublex__kodak_2302__det": {
+   "input": "synth_edges",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "364062c33429aca31e814b8118772546d251784b31c9ed583108c3bcca5ee55b",
+     "tiff": "3ab55b935dd6e7f55d8d68512a9d3b970a4c303aef98b2cf87b0a901f6650fc9",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "11f0cc680306b90d589f11968b83b82064f3607d0deff65a66ed76ff0145c78e",
+     "tiff": "08ab0fce1dd5e80dd43bbce4c3959ffabf09dc675c5fd71b0d9bdd592551b713",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "synth_edges",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "849ca8c0c724bf5c7fc0259e43131800c599e6f861e5f6f8e093cbb788ec61b4",
+     "tiff": "f2e9363c0b2ac8bd0a67fca5ad3ef9e85b95d16420f754b1e76dc7f064e74f3e",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "fb0e7a06bd1a77ffbd774392e1d54ea99f64ea295f05e06d114995d3c529d556",
+     "tiff": "7c505dbb7f7e955d5b75ecc7b5ffa7ef6bf10bcaab7b0173b05e9096cdd14f5e",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "ec2daa7ce538ea0d92bf1c74d27812e387b786d14ca552ed2d3ee7b3af8fa063",
+     "tiff": "5130b33fc281eb4b7e2d272916bfcd6cc310d397fe0b7b9395c6ff8402080e99",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "synth_edges",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e48c49b01e063cff10cdf35ffdb51df1df616f4048a3fb3cc136be397c03b847",
+     "tiff": "a1576ca5ac486f4b1260b2ab67f12b3d95dc469bf1a094ff2b369efaed85b372",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "2e39a18f66631997c1135ad84a463580878f393081426812e58b98f1b1493f53",
+     "tiff": "9c4301209785ae7d6eba5d7381dc1e7e279e84346b10206c6457cd34cd6e9089",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "synth_edges",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "cdd7e62ed880f36224cd1e1ad805a934fa9b3adad9c9f547d21e9725f6a57491",
+     "tiff": "363358c62224f9ecf98fd09a1a19895968f089dcc8e7a64bf2423ac2b4a1faac",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "42953ce485f246e23b896420014883ab20231b099ccbc50234efedb2097e0c3a",
+     "tiff": "0ab49df0065fbf3a665d29b40c409887a49aa908e5094f27a7326dc394762533",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c1882cf23a8e1b00bc30a37e171e46f69fed2659d3c74ee39e03c83546ce9f63",
+     "tiff": "6cc524ca7f027c7b93171f5d66ed21a7f0786fc7605bb04eef7356ae010b44c4",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "synth_edges",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "79263db3172a3cb4b37c3cca0c77e609ee708b734a7b9e6762cfecf240360249",
+     "tiff": "c0fa9c9d109f2d58080db49d1d5f4c48f8c00e93c764c8f5ac618ba82e34cc9e",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "5ee03ca1b0062e0b7d6b1e02d4abbccdea3eb076bfec36d87cf45ef59f63ccc8",
+     "tiff": "61a6df3f9f6c207f478b5013b9a83a9cc7205cc47b8d04144e921a70543f6c0d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_trix__scan__default": {
+   "input": "synth_edges",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "604544080f96df9459c2278c364808413bd74a6e540ab34bc490f545ecf9ec5b",
+     "tiff": "5efeb38caf969001757024d41b8fc593c9bef6df371bfc0e87d7ec47f8d8aebf",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "732afe8a331a09d4a45138c33b6a3c2e9ccf8f4a48c55b50e977f748e8c8c517",
+     "tiff": "682dd0a668a3f9287d4e5e6eea04b9718f258e126972032d1e09fc381179b1f9",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "69b643e54a220336f29494bb57b033eb9b2187a736a8e96e1e2b369eeb63243b",
+     "tiff": "8edefe6395a56be94e466a19bb00319ba0026b05da302b6bdd48065364dd52a6",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_trix__scan__det": {
+   "input": "synth_edges",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "b5dfb24d86251bb3581d95b1ddf71739ce596ced493ccf2d2e3d1fa76929f9b9",
+     "tiff": "863bea5a4c916f169dad51b4d35e0fc789ed0960931ebe1ca1de5a5b8e333bc0",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "907fd4ff689bd1add61fa190bba391e0f0cc9c05d39005b2ce740a6160e6d3bc",
+     "tiff": "af3d8e4c0fa36633ff94ee542e69f5a86059e8f4b301ff44f11e0d7c0b078606",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_vision3_500t__kodak_2383__default": {
+   "input": "synth_edges",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e921883f56f1a4b9e048822a296dac51627dbe908b7fb43466bfecfe04ea97b1",
+     "tiff": "83ae00f47fe1d3c531a9b0f891b077f83bfd631094980ca7bb140727b12130c0",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "4a5a612a5ed400654bedb33dfd3125fabc0ef99c06b80a4cab00ec0e21e564b0",
+     "tiff": "b120ea7d3195e54b726655712c87061ff2304c6a46b83c55e0fa869a61e3fa70",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "cdf223523f0ea1c02527070f316ba5d7014d004224f4b9919e5407ed27913313",
+     "tiff": "f75be4b03a8bda4daeb6ee0da09dd6c836f59937162f4397a24b8a280f0c0980",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_vision3_500t__kodak_2383__det": {
+   "input": "synth_edges",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e5eebd9790dc70211e018ac771a1e0ed7ac923949695745dfe680ad69a57057a",
+     "tiff": "56ca775c282a13f522439e404cd560e69174c03c486c9e46d30383f703dd4b92",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "d5cb8b90c2d5fbb7d4509159be47baac36d1aac13f92951935d7265f1908631a",
+     "tiff": "feaa4abc60ca3b7f3c53ab333637d95829290cdfa6ec64defff55f7ea2f4fa94",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "synth_gamut",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "87d2da7f2707ba9ea213c8b0fa8e89d5f4090e9fdee10b8cc09f777b3125b7eb",
+     "tiff": "377a4c7712044b19126a72be004e09cfd830c129f23d43aaf36f826f32a19e64",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "8738ae77c969e8de5235ef4258b607c6a273fa9d87255ac226cb01fddcee6815",
+     "tiff": "29ed51ba46b305af2c67abd32d96ff5d281e1ac49df013866f4b2291c10393dd",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "138f6ca0f29d94a273fb875019425f430abd646fcaf8d542e24502f33fe71a43",
+     "tiff": "63aed5621036f5aaca6fe9f1959aba81876b9fa2d87765d518473cb23fd928c1",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "synth_gamut",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "3cd034e2821f6bc4be95eda35751a90fabe3a72c4f20e2fe3abe83c386897808",
+     "tiff": "2a2c744131cce6d6e6b8c9f6611062297bf49a329da653a2074cd416c9ccdb93",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "710d49c1faf20ccc01e826a1e5917a868eff3dd4186478fa46f53cf891c22bb6",
+     "tiff": "1ed85b02f0f4315dc561804368946452862ae70d71bee916ca4b68373f480915",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__fujifilm_velvia_100__scan__default": {
+   "input": "synth_gamut",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "ff6bd8d139091492507c8c1b6339cd3a73f88cd54ae08952bc4b506175ab60a2",
+     "tiff": "e55edd967d14c408090cf400d9abd3f86b13a442382e4416deb23f4cdad56900",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "2079f9eae017c0d48be97bb7b4cb639e2318ca7864741168585f70d26cfd6cfc",
+     "tiff": "355818d3e02006c1dfd8d0d494f3810fa77b56a00a8e4a666952c2a6b8a9afce",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "accabf265b15df82b77a03782c9ac749427cd2baded69ba73820786cee7e64e6",
+     "tiff": "fec3ea0cbe56159bbed28383b2498d7cc6304df780e27064a327ddb6cd3e941b",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__fujifilm_velvia_100__scan__det": {
+   "input": "synth_gamut",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e70b00bacbd787276fa6cdef38a2b370727f962be4b0505ab0068be371423280",
+     "tiff": "9cea9c22c1cb766a4fe12560edc51ba504fc731fa3b11fa62f99913821d853c8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "19c337b30f045012815dcee53e298d02fa59588baf08d5cec0bbc74d672c2441",
+     "tiff": "d19cb3ec98722f5d8b87d38f23fc6b2839d20bec1d071b1a136ed0499f47763a",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_doublex__kodak_2302__default": {
+   "input": "synth_gamut",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f942ee7a8b1b9ef88e70ddf36266173670ffe36c569391f7fe3569598be63cec",
+     "tiff": "13f6c028258bfb97f2cfe2da0b04a34091ce4c39d6be4cf2aa0ab414fe2ab3da",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "3da7e6722f6fbefed43ea9749fa0209290c306ac8666d353b955e5ce209f7799",
+     "tiff": "715eb198ae5a56fc08780fc0a0de33af393f45d9713179a8501059c765a4d899",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "2a5310bd7308afee6764a58efa2652dc648fccf3919e8da6d00955ad8a35840d",
+     "tiff": "89a960c7d03ca75a134e4f37c7790d044d73b5cdf45145e5330b865a24a68594",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_doublex__kodak_2302__det": {
+   "input": "synth_gamut",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "c4370f37119cdbfd463c2f5d28a7140c01a09d339b6a4d1b41e02cc5c03e8965",
+     "tiff": "bcd949e60e8154950d72d4b4639b10bb6627677f93f037ebda9b59e7bf3388da",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "76043b1db5a534c325852459c6179de7efa2f6700fd559fc9abb471126ad7f1c",
+     "tiff": "6fc6f0884520f0b4035bbd232ab7d7384a166d244d97a084c91b0b288bd132cb",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "synth_gamut",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "22a2ce7dec3e7f523a8464b091450410ad182fcf8a8b61d37cf176c672d20f59",
+     "tiff": "4d3183434f40518a9ae5564396bbd43105b5677d770a217ce27602d12e19c831",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "400c2786c9a690cc62b7389d39bd8f7ea9e5fa204c3dcea7e922bdc91aff07fe",
+     "tiff": "4f5aa2976649d83e29a1aeadf28a553464895c8fa44e8a4614d89358ff32666b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "a5c3a185ba702270a6395364c75c0b86e3450604e6597533c6d1fed3ad7c9ffd",
+     "tiff": "71fb35f7b3782ac3270378c27f594a3e19806670828c716ad13328a47c9ea8d1",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "synth_gamut",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "cd53f69a3533e951a9d9896bee36a86ca9d556edcbf7efd992009a5a4b0fe900",
+     "tiff": "322c18c6ff52a1e04a125c2dcaf3cd9d45e00ee4bfb6ac5e912bea26b45be3da",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "0c1b427fdba0ec137b4715dc35ec69ec87d6612a9ab6c54909839ee5311b2912",
+     "tiff": "7e1a9378715429d57b84481ab1f691fa8a52d9cdb3f3b62d992f013eefb6aa2b",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "synth_gamut",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f4f343d806f33318e2da03ee58df371be6428b5c903701d5f29234fa33aa2dbe",
+     "tiff": "6974ef644b0bb6d351c370523e51803201a756bdd46c577f5612f8267aeb5590",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "5ec764611eb68b1a4426623d5954948e81601cbbc0b046c70ac05ed9bc44e59f",
+     "tiff": "9e82856dabd9750ad91e6110954973dc49154a7d6574d92cc14d1335d35a875b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "be76b0b01755538ad96d7952e6dbfb5d734825c064f3b1da8d95c890d43d84b8",
+     "tiff": "d7442e884a85b53bd0785225b3c636824fe80152ef696c8770da676ed70ef237",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "synth_gamut",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "2908dfa0f992883e14c21271ee17b577bb072f7295e493f177a50966df3b1252",
+     "tiff": "3ffa7fd42361649f92a17a1888bb9db7a49ec7277accb7238d81e0a9dde390b2",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "8e90e02bd71be973d0c92b68da6dbe981b67eb6b6b69d4bae39fc225273b57d1",
+     "tiff": "804934cbe6cbc73f6a96972f057ac2013ef54bc67ca93b54a95d7004d90f20c1",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_trix__scan__default": {
+   "input": "synth_gamut",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f7eb6fc745d807421465196898937a49628d8ee27ba8d14505ce012876abbcf4",
+     "tiff": "aa4eab558fb80e0da106954943f9d385af163c647a7679c05562d063ccadcb05",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "594434f7f6af793ba9c194bceb8ec99c1bc506b867d05eaa5caff5e2126b4f83",
+     "tiff": "b76352bb8c80eae3eeb7e654d6ef0ba571349e453180b9c51ab03d6171db87d1",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "80b95b9eac40da85af130f7b7f52c45b976ecb857f837b5c62464f60f2e17941",
+     "tiff": "ea9bcca0926094d25ccd8be8353e06b5b662312fc545cdd43f3a0f071fc575f5",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_trix__scan__det": {
+   "input": "synth_gamut",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e882f66888ccea04ab68cc9860196ed72ac6470a813da5ce106ddf3de49527d5",
+     "tiff": "7f6fb52fe6b097c3bf25cd3eb64687ab249c3e624c572a9f06f945144862690f",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "6f1595676452565c536bae36361cf63d55745d1d6c8932e734d35e005e70cb2c",
+     "tiff": "3b49b539ce7d72cc733b80581c0524f5f9a0ed4cb40797600015e84950673775",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_vision3_500t__kodak_2383__default": {
+   "input": "synth_gamut",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f74bd4a847548d4c5db076311fd401708f891c21a382f17654b4b4551a52d275",
+     "tiff": "d852e224a6a80bd840146effcb996222de52e9517d62529b6e45ee87d3b4e916",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "755dacfd039ae2c9ac3c276292a094add1ee703bbb96492f973d506b86cf821f",
+     "tiff": "0f0ceb08b9e05e03ce80a042f4096b3616046ea60a71d344dd60822bccad9801",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "686669da5379aa4bfde865d618b65578c65efec430988bb09bd70857b3cb56a5",
+     "tiff": "98aa6a97b14857181ec662861012289e127d148323467aee0875c74878f3c0e4",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_vision3_500t__kodak_2383__det": {
+   "input": "synth_gamut",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "048c3ba05424910b76239c0da3c68095431f3770f48fcc4b72acecb771a5a55c",
+     "tiff": "827047090f291ebd5cb83db073c20a1d7bb9f9f4c88e70bbe83a9ab8c3af8140",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "e3f27f21d15eee5088682d95f8ba25e2a5b2efaf97f035da9fd4d510ce9fc65b",
+     "tiff": "3c2a53a50fb7fb27eee1d045bb7c1c13459ce68a0d040e7de8ce1b39f42c46b4",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "synth_noise",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "0b8988b44aacfadf7fd2ccda19452c12f19221172f34a33ac9fc68181e199d14",
+     "tiff": "132afc9ee4faf981737bc03efcfe7dfa04259d770ff514a7d5a2683178b92442",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "08e49c2f2903fb04b532d2f5a48522df61017173bf39c6b9ca99289aa8f03c04",
+     "tiff": "ab690fa8e69b3b8de6f43bbe144b05dd5dd9074fa42d6a76c678cf060fee318c",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "4c715f30da2b74e49861e1c6b1cb5be80b4ab9585847267d36c0116ea829fe26",
+     "tiff": "ff26b16cb3e1138fd45cd3c75fec307f32f583342b7fbae857233faeaf553bff",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "synth_noise",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "eb6fc5e79760bd3803b587cba709fa7ab350eb6316a403a873b1fe20e735ca3a",
+     "tiff": "48f88da407eaa0c056e92b8c7be0900630b63c8b2796a5873a3f6f74a9399344",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "00ffcbc9d6e0853749c2d5cdcc90714e73ba9d8f72997cfc632967130177dbb5",
+     "tiff": "26530a756c1b2b466e8cb7c01673e39c2d19360aa79ccfa024e8d9cbffc8d38c",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__fujifilm_velvia_100__scan__default": {
+   "input": "synth_noise",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f5ccfed16e905f2f13a04f0b0ad40252f59238f17dc120c8ef23048515120fe9",
+     "tiff": "1c00723cf77bc166e88de734501dee9aed0929aca7fbaa2dcb1c82e401e05804",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "9ef3a89a0f97d41f692646ef57f7f7b20759061922efb7d3d81ffc485c4e07f1",
+     "tiff": "b147758d79bd1a36479611b78d25f4455141ac700b100dd47ea9d80a8ce3de86",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "696ec753411b045aa70ca20bfc4184103ae1b5b5e44774f5112ab75277b6dff1",
+     "tiff": "8ae3d303b29d8cf4c2f3b5a5a04f3c451ba0f5da07c62ec4f01ed37566441d9c",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__fujifilm_velvia_100__scan__det": {
+   "input": "synth_noise",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "a90ec7e79f29795a5d859b230995da0c9ed7cb2d89cb17a3f67c4e9c03104c46",
+     "tiff": "e15c4c9ec387935f2f986a1ed034e19d896247f939d33135e4be20a4ca492d73",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "63cc9864f63fec4eac54492fc1376128151dcce58375409ece9cfbf3e8145a8f",
+     "tiff": "b9a56f89061634ee6382f35074f4d5fe85759627bfca02989dd1c84a0757ebe4",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_doublex__kodak_2302__default": {
+   "input": "synth_noise",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "2ddde9c35867e993889c97da908918e2dc786169f20312076c3451946b742934",
+     "tiff": "db95431ffe8337a531e96e725a4e7a77d85edb5b5878891b174035a74690de0a",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "17aabe28d4a1c84bc54d4adc261e4b9c5ebef554224e08ae204a5274f9060088",
+     "tiff": "3b7b1642293f336cd2f88972847692e639df670953a0a275e980e4631f63a792",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "466c52c1d5fc65b4fb841050e23deb0804db105ef47fef0fbea301f48dc1dba9",
+     "tiff": "dc199b05845ae330008da38f023305afd2fb8dea7ec0a7f7c196a7cc93a04b68",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_doublex__kodak_2302__det": {
+   "input": "synth_noise",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "0ca2c637ac9519e5bb7ae991e331b558b5ef88538f993e812c263db6861723ef",
+     "tiff": "91b26dd8e9c9b4f55715a93687ea7c17708db0d6e1ee9d8114dc5d8fca3f2249",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "00b1c1c47b451e5e291574d191c48f7474ad3e1defe4c2600ba3e10f5ecc1467",
+     "tiff": "58d74bd41998eba2089d33afd3b94efd3134b913b9fc36678fa08dcff334c3e7",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "synth_noise",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "ac07a9325c319a726560377ebaa2f1845a99c8f09f62efc572acc4e5650e30e6",
+     "tiff": "bdab89dcd81ca26fd530f9ba3c196e0eefd921a105c43da4fada5f7c6fdb41e0",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "b86269448f6d676719c8fa53e4edca7a7244bf40f6036bdfc936bcca2b0bf549",
+     "tiff": "16c8c2fff1ad2c7764540ce5ab0caa5fc99b6a9aee29d35e793382fb84c07d0d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "f48104d8bc9d48331e5f6bfedf42021eba9a4b350577c4d9b32d0b1c23f3d198",
+     "tiff": "078e94159545c55682361d7ed1db7b04a11af39264bf1b891ea21f24a534bc10",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "synth_noise",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "274329075d751c499fb9a47ef1e276613ec3c6811c8fe1bae902919324f42b29",
+     "tiff": "f57daa58426e14d4a0ba19260e844895378b79126b370b2763d17de45df99574",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "0a32bd76570a419cbca0bd99d1b72711dd2af6d28043f51e55910e1f6b2b612b",
+     "tiff": "9cd1e3951a34617293f084a72a4682c5daebe555bd1b6b429094b5894c4f1ba9",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__boost": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "boost",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a987f563d9acac687da84a8e39d7b24ff3f3ef604d9cc11ddfe0626ee4d0cc24",
+     "tiff": "bf8947d69cb088b0d8c10ca38b58f8854d93026df6ec5842d99ebfbf2c508bda",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "466a22528079716f4e1589477ca099ff3429fc2ad7b9d974cd5cc95b5830a5d5",
+     "tiff": "efd322a87a025d039a6171b2c94a9414257509cfb64ab5efdca2519e4269cc9e",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "5ff05ce18b7a6653909df20eba6e9ecc2bdb415f707fef46cad49d96dc26a3a3",
+     "tiff": "2617920b1811c17f9353e191b0b8b79292cba575e58f2e80fb3e8b25f0b4230e",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__colour": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "colour",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "baf8e80cbdca415ff9881bf5cecf6c7bface72465fcfa22a84a5463a1793ea55",
+     "tiff": "559d660d9a6901bd6cd0f24b9e8bffa87fa8313655e63ba023c805cc5a2e445d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "8423c6a521f7dfe9138751fd4709af964d22c62d83c3dfdd6d00bf180578f6f9",
+     "tiff": "d898b050bdec13c5ac06e297cf75ef1a9253953e10fdd04d2ac2f3dd1622f361",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "e64535d6a300b543a84c48be8e9c8750c134026441899d9c47fc01ba065f77e9",
+     "tiff": "3a0e876e8f32643f32eb2118c23782d5731cd51e7c11e1ca8be420dc89c92bc0",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "3ef6d586d4593bd426e0f720d8834fb0ffc6af191e8bc4d1468fae4241a45364",
+     "tiff": "f619d00a07c9124ad334ba9e3e4abe89b685b4b7b1115d3bb6ce1c86fdaee02f",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "ef1fb819cb2cfe36d6676232935ac709dd9d53ad3c13f04f794b17f65da70cd3",
+     "tiff": "90587ab569b1da05fed95bf2b195c66ea788b38c61cff655774eedf2e16a50fd",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "ae73c13d4b6e4a4198deb5698ea65d14251ca59d6d65fe50810ae5404a363cb5",
+     "tiff": "7b54478a09f77288c500f57ad03138fff389dffee9575442d833d8864154fb82",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e4ac638a4215c6fa7530898464155e953ad09e7df5a278aabad1283c211fe0fc",
+     "tiff": "eb167ff7ec5830aa8142b7e454b0136962a1d5cc9d9b5822b3825dd48b3722b0",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "e096c952a07c8826637576b3b727cfa3d594b3ae084beb8096b0105ab7fded15",
+     "tiff": "310bddc2065ca8c9e7a8fc1fe98fae705de1a4b6bba106c6769033e2780221e1",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c46815a48dc596de5233165214b76b9889bcda786c2895fc2f3090a8771a2776",
+     "tiff": "4a96c8e3478f3daad4ea753eaa4ca8ee20e1e27c69d93e4f0ccb604c295c8a63",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_bpm": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_bpm",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "b128ea510984cde57b4233fc0f56c55937f360fe387d6b4c08e0ebb91aaabb55",
+     "tiff": "c6b604eb88c468e51473b642e3c6141cd4ca61aae2a0e679f64bf7a5c91897d0",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "d2d73287e9ffbd03897c04f0ebed061e63ba7fac5998b13fe96f6796ac7066b6",
+     "tiff": "e7370740d18760650bf16a70a3b77cbf38d805a32e56c8a64fcb618b4f448824",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "6f4039421877247c698839ca3b0cee28d550a4b9aec2dfed373c53a8f8659dc4",
+     "tiff": "9d855c88d1021799f71be0ec64457d6a9400e86bf016d5d820f0e6f059456f82",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_cinebloom": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_cinebloom",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "7f72c2580096f134dfa9dc5c6d3e0b0e973dded78724f6159a8ff946f7076fe7",
+     "tiff": "0a840df695761f31f6d124b941768578a599651c13b8c6f29ba7741d29dddab3",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "6f53a89aa12db166cd61c7c6249c855fb4288e3f17f48246af56e192bb7cb85d",
+     "tiff": "24dc4e03a0c9a5feeed73ee849069949a3ee7a6cded5939e66868806011f2043",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "6e0f683ade68ad42c0d45df8b932138bddea27e62234739ecfbeef0a0dacdf58",
+     "tiff": "b97fb523e425c2108d917cd814dbaff642119bfa978157372becb2b47b74b50f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_enlarger": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_enlarger",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "05ead734542260d3ecd97d782efb75623d3f3f15ef0bf7ffb1bb9bd7bacec132",
+     "tiff": "03504c0c879e1dc04b559b495b7eca3a5de8e641781cf7c034aa641ab7cfbd73",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "c97adc6c7bcb4546d0b80480bd66862528c01ab8c04a8b2007d5f4b33645defe",
+     "tiff": "5ac5ed9a2e5f5adb967b603c19a60c83a45a65c5d98e7c697d4481e90df51b05",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "9023862d31dc49552262bc489bdcfc2fa20f8fcb89f0043e924ec55744c4936a",
+     "tiff": "b913c258d653ec60a90ab85bea338c500ce2a525abffd5b1d863de1aaea4ca3b",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_glimmer": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_glimmer",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "9a8c28d4ebb9b9a0f2a33fd5c5e0802522ce9059da932bac95b031082ee45c05",
+     "tiff": "e453630d61e6c34da18a655ff33a93c3012e9c7671619c6538529d5c4790f363",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "5208fc399be43da54aa347e764a2ef953efdcefe54404feb23ee61eb057fcf5b",
+     "tiff": "02a2f734e5490ac422c2cb8d11d6bf6957f0c41337f69ed8c468b7710ea94180",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "72b168486d001f14a8901abc92f3ac635c002616e19b4580b02cae3c51c8c56d",
+     "tiff": "be003d65751272a939dddd8b918ec9b3da4a17b4ce5e92e44ef474c34ac4538f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__dir_wide": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "dir_wide",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "422bffd9d3f170df2b43e7a234a69fd5d1eb7b35296397ca518ff3ce93a12529",
+     "tiff": "6e950292b06c0d456bdc2bff0409dce5625dc1538cc3820a8afbbf2645a4a82e",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "a45695a83b845c5be482dbc80b57a6bd23213e5dd4c22558c148b0c5bdfb644e",
+     "tiff": "c34a4b89c98e1d70a19c3b766c843868686b1ab0a66344f6ca17a0f454e1e269",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "7319f4cb48e70a3ea0ca2936e5540256e8db4ce2521b2c54263c10dde94d4a5a",
+     "tiff": "c4a2df4160c2a0695e001e28bbf82866910f29c106b615b160eff4ff29746d14",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_off": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_off",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "baf8e80cbdca415ff9881bf5cecf6c7bface72465fcfa22a84a5463a1793ea55",
+     "tiff": "559d660d9a6901bd6cd0f24b9e8bffa87fa8313655e63ba023c805cc5a2e445d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "8423c6a521f7dfe9138751fd4709af964d22c62d83c3dfdd6d00bf180578f6f9",
+     "tiff": "d898b050bdec13c5ac06e297cf75ef1a9253953e10fdd04d2ac2f3dd1622f361",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "e64535d6a300b543a84c48be8e9c8750c134026441899d9c47fc01ba065f77e9",
+     "tiff": "3a0e876e8f32643f32eb2118c23782d5731cd51e7c11e1ca8be420dc89c92bc0",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_off_coarse": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_off_coarse",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "baf8e80cbdca415ff9881bf5cecf6c7bface72465fcfa22a84a5463a1793ea55",
+     "tiff": "559d660d9a6901bd6cd0f24b9e8bffa87fa8313655e63ba023c805cc5a2e445d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "8423c6a521f7dfe9138751fd4709af964d22c62d83c3dfdd6d00bf180578f6f9",
+     "tiff": "d898b050bdec13c5ac06e297cf75ef1a9253953e10fdd04d2ac2f3dd1622f361",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "e64535d6a300b543a84c48be8e9c8750c134026441899d9c47fc01ba065f77e9",
+     "tiff": "3a0e876e8f32643f32eb2118c23782d5731cd51e7c11e1ca8be420dc89c92bc0",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_on": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_on",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "419cae55abbc2624dc223096c82d62d7c36ccf3fc7c9752116aef82279368579",
+     "tiff": "c9a317e43d4ec172c944f342ec687d6dbe13ec00b70c3d66d9866de9b12b99a8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "f92928eb08b32ed671ca6e11e9a0bd56d6a7ff408eaf2f2faa13e165df22193b",
+     "tiff": "a7a853a0f45da7117c54bdf542c7d8057557e68bfab550c427932c91e0e91838",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "9226b9237d00c01e41389c9b2701f954823b38fd41d80c23d422407b7a8bc1d2",
+     "tiff": "3fa071aa127e7f99b8b45c96fc5d12f5817d7cc1472ea0eec993ec8a9580ead7",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_on_coarse": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_on_coarse",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "dab2a1c7306bb225661e87925084e5540e36582fa13ebbce7686df414c12df6e",
+     "tiff": "7fba4c46bd9ce179f8128b25b59c1235e58fe78f0063e7c679033bcf9abc4c9c",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "2f50fbe69c8c2b2328faef4853dd8f9bbfe9af2d23f6073e5f55473c6030b569",
+     "tiff": "09e9be0f01f6c979809a9ee48c28e5fc04bf5f48721b77d4c3be3c29b76b4390",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "fc47299b242e7439c99ea1a0808a15bfea38d19cdbc6670e70a31c57cae3678d",
+     "tiff": "151059887a8bb068c7b9d04a4d4fcb8731b521a40d1d81ba372406359590da6b",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__halation_big": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "halation_big",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d6791c75a7f35e33b1714ceb289e3c9a9d42f71efa399004352e4264c2d7d5e4",
+     "tiff": "6e7394702570d44d729f24b021336afb3511a9f1fb80dfc644c1ac477437a5f2",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "9bd1fc8bf6397f9c830c00034067892ba66ff06dae59ee1d5c333483f6b2c1f2",
+     "tiff": "426241aa4896fc288f5bd9e5a5640b6d9a99ca8359b2fb56b4f502cd071dfef7",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "b4acdb8c920edaace4ff1ca5c787db31ad0de1ced975704c120052d50dd31621",
+     "tiff": "106195b344087ecef6c32f71e5dbdb5379f31557f6a2b2d471548b8ec25b513d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_cam_large": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_cam_large",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5608d5ebdf1c6d513e5f0c78d4ec497dad3fb4ece91697ded5876c92c1fab18e",
+     "tiff": "ec03454cc540c4f9f852d89d3bb0405893d1862271247f0cab7ec35973882b44",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "ac702522eb08e7c3d9ab3e3f26b6be817d329eda0ec71e54df0525d159a2283c",
+     "tiff": "4154334ca8de4e36cbe0605f5e661d1481eefb53ba0186c3ee7e1de1557b9187",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "7c6b69c016a27c6373ab4b99bd60495207b8c55b13937d59b66bba63b23961eb",
+     "tiff": "d167d031f5e5b320c6e33ba4a8252fb15b74cb3015d992d0f5cc4c1724f662e6",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_cam_small": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_cam_small",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "c4a58744ddf7ff3cd73f38d641b2102edd46437d5a818ea30fe89476ca18185b",
+     "tiff": "d60096b11954e36751d25c3426975c3f6d7de5805e47a0d96c53e73a5ddafb7a",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "4f27b7e80afe4a77583fa0ecb725f9ecc223883a9b90b8d3ca5abf0d1496d963",
+     "tiff": "a644a57fb1baf13baf4fa6e7f34b9f7eb3d140b9b8fa0c63523207f42ffa3068",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "2e0d7db1c07f5df344d87e96e3a0cf802224ca74d0c7e28c4fcc91ca0c61729a",
+     "tiff": "f2735c7ad886c8a8647dccae87d15ded67bcc2ea6027daa6e932968bdca900ff",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_scan_large": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_scan_large",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "600253b295b93f94355d17c52ab675ac331526bb0b1c2aacbcdf5d4d3ac68309",
+     "tiff": "2c764df29d8b36fc39adb5770d03b7fdeeca2aabf47a2568449fefd71a117d0a",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "3e654d41649b3810305f9ccce4b314be1a4a579a4a27c9af8eb162caab77ce42",
+     "tiff": "7e00319dcd8464bdff1f258abf136d11be9705530659fb11e6004d261e2c24a1",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "d082cc65cbd61c384db4ee6bdbd7bacdeff5f58d6e6f00c29b06b0d84f7ea2bf",
+     "tiff": "92430e453997c95b2725d511a8db07aa29bd39fa9d4b5667d97326ef1051517b",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_scan_small": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_scan_small",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "34b3c82274f4495847c8e0cf9e474c3f100e98e1effa02f50c5caa30c59159d7",
+     "tiff": "67fa5644fe8df647f31267f601be8b72d89c3edb1b7c54d3af06651ca9cf27b3",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "d899b3b5f30e31b8f2bee603d74ebe0ea8051e0e8e2a17b01c2432bed27b3f86",
+     "tiff": "c4ad9ebce7c43041c07e29a5df87b91fa719e2609657f5bc3371b9040ac0cc10",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "25338b052649e1e4ead24fe8b039c8b214b09f4a7934ab371f9bd3e81e996654",
+     "tiff": "d78971bed95fbd67a399558fc86d5a5b409f2440be7471d2375bbabdc73dee36",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__morph": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "morph",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "9ea06a5c88727116286d80b8014007ed5f26df9c1ad232ec4dee83e44cfafa71",
+     "tiff": "53a0d4bea19fd673018632150f4464dd1bcb15ac39bf73405dfa4017a0aaaa9a",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "63c6742333d45d652fc131daeca9c6f68e48aa1192ae3bd8171085347228fce5",
+     "tiff": "ac00deeeb9662d058cbc2461f7407bc83231b22a531a90ae714a377f59142180",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "52c05e53ac8f57bc297a77cf9e1a17fbdcad7357b0774668d693ebda92eab8dd",
+     "tiff": "bfbcbd55b7ebecec6becc0141ff3b394f708b6d190d246601b1d4f7ad0added9",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__preflash": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "preflash",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4fdeabecb5f4578822335e7ab293461fdd961ca7a0e1f9a462d4be263d7164d3",
+     "tiff": "d63a472ff1bbeff0e2f06293c205ef34a83947457708377c2b902d655ce88bc2",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "cdaecab829feb16ff79f705a330d7a909473c0a61b47f25e879fd31900e403da",
+     "tiff": "abb99cc0aabb4c91fba57d09c1084fc2eb80e44f1b68b5fadedf7d8cb7994b68",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "a9d774a1204d00155a8fa077b4cb7b0b75eb008945f4e8367ec4b5fe2688a0a5",
+     "tiff": "9ea9de04bf3bf67c8ef47f591c5d4376f372d52c6fb9d358c99b674c0a8a3260",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__unsharp_iir": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "unsharp_iir",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "1c23f9e304706cefb4f88d8b9533619217ec6df88d1e417a2e8106c21fe91a4f",
+     "tiff": "ccc2ee9ba9069d25fbf995b0b9bfc84f1c2b03332b22f2746f953db80d7c252c",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "2a7da424b6d30e8867f559426224b891d288a1da7bc2eee1b9788e780edd90ce",
+     "tiff": "f138d85090fff26223e9d458677a33e387c38bafa9d26161d6db5bcafaddae70",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "05b4b1362e06be9283b1e2ce2dbe4358f0ad92631b083f07d0fe1af4d3e9daa8",
+     "tiff": "b1bb515d5a03f6836845d265017396e4ad13838d4e6ab7a70f9fa7d91f706177",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__unsharp_strong": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "unsharp_strong",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "72820d4d047287c372740e0ecbefd29f5b16f30c11a7039feb1096b593550ea7",
+     "tiff": "62c3ea32d66a2ef1042eeb91648364cbc9f9d23364ea502ba5c89a6eb761fd97",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "64584c8c8b59dd1687e9cc56110b428089b3d669f99f64ac2d34b43911cba79b",
+     "tiff": "0f5ad5eb91c48182a7b3ddd67bbaf86fe901267057e583fb16bd808052237114",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "7ba4db29d3d59a01871ab9b98653356025702387f6c0bca7df9a4526d051f11a",
+     "tiff": "8ee36d9d5d29697f4c608ba538f96c58962b1112fb30c14f9ea7599ef9b5b3af",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_trix__scan__default": {
+   "input": "synth_noise",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e651c367b87b48e27e86936d8ccd248432394fb1c3a0b321cac31708a471e2a3",
+     "tiff": "9faefd6bd7c9a1fd2d5faaa411fa631cfdef4f34b30336816181c5d6257e53b6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "51ec8cb9b9088b2b861a0209d1600d96b11da6939b6c56e58a270be98c8a20df",
+     "tiff": "2fc09f176eb206bbcf3525384a7f3d27df024788a31e6f302814daefd5d1d5c2",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "ac28b1dce73b23d87bd086936124d77e1498930e9ecfb2082f59c69ee6ecad31",
+     "tiff": "ea3e1e76a75077ab5506164af50f4f8d11490e0674397f3608b3571f340eb6e0",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_trix__scan__det": {
+   "input": "synth_noise",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "593e35a7da7e7de2c900fe47a2901bd5a4246de0830e0623c6ce342ac2b1304a",
+     "tiff": "3f651c4c97784a090313f35852b436d3df2d20f513dffac94696908e89f8a704",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "f655c20b201cf54e2942d77b8ffecdbfafe2bf3ed383b237677bfb04962a12e7",
+     "tiff": "7ee7cbfecaf095f2be143ca2184e8342934ca6c5c9f93ed7d46e77fdefbba849",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_vision3_500t__kodak_2383__default": {
+   "input": "synth_noise",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "73038e8151705b112ef980fb440679eaa79708e58a259e3f345228f2592a1a76",
+     "tiff": "099096ef9d5e6f5c5d217557115cde6a72eeff1ed62ee471bd54a6fe45b86189",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "4b3c25249c38115f26a7916d53a98eae3e7aeebd5600e6ccd167dcafee11e471",
+     "tiff": "1998cbda20d1c6415e057faa6595e4d8e1222dacc5392dcaadaeb47a5c617c74",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "fbcf05bc62dda683eeba22b31cb3074c7d333dab3013ab4e818cb43966081937",
+     "tiff": "017126bba74254f23891412b8e7ec8215625a0b0d0c9b04b992680c2e78b4f69",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_vision3_500t__kodak_2383__det": {
+   "input": "synth_noise",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "53b2f883456c26d237d1ab9ff142fed7002009bbb5db4c5eeafb193135ffeb32",
+     "tiff": "34935fa91c67d6bab4c9e11502c3bf73844fd4ef20178c6bffc0ac6ae6ee18fa",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "a08961655774d165420f393c66ac1355f56b9f12e0c9630cffaeb9f66ce9d91e",
+     "tiff": "eb11f166e5714bc6c77d3841eecaa7efc284926be7dd482391b1b26104183433",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "synth_ramp",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "adff01e50beeace5c699d3ae2b221ef467549d486e353771c64e9d58672bd44d",
+     "tiff": "adfa6a32159ed7a81247723eb993544ba6daebc33b733d3db7e231710b627520",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "77101a5c32491c8ae145e4ef4c2fd78d7c12d058a5c55223c4d29d0a93ba4910",
+     "tiff": "27f734411417ac74a279d129cbe24ff0cc6b0a2809198dfdd4d9bdf08205d73d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c9d026560bc0d4581b3256b0560de738634550799ab76e0f4e88ff3844f5ff7f",
+     "tiff": "c296eec44b2cb7c46cb96097f3f7ada85a1943d0916bf42a9a1eea1059613040",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "synth_ramp",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "58ccf7904bbe4546e147c7c25faf3055189f819c922b962759c9b86034919d83",
+     "tiff": "cf85618f4a6e48caec3bfde8be6b0f7451eabb70794ac8f2f14d6a0ad401560b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "57954684bc184300a8b13e8890bff354cdef6c8c613b5ddddd71fce8e5ba81a2",
+     "tiff": "15b6a1cbbdf6296f8acc80120db343ba2b43b4cb722f50c5aea9cf71a489de2a",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__fujifilm_velvia_100__scan__default": {
+   "input": "synth_ramp",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "c3ea879a20cd9729e7006788191e75fe9e4e5a1b8a24c9fd01e1998871570e92",
+     "tiff": "990be149299a153e63e14df3b4c23111d26c8988492481847c4f48c43cbfe58d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "88dc0f380643cfa90fc0dfdd39e6aefe20fcadab5e5791591a12e4d81ea85367",
+     "tiff": "4ae462aaaa7384b273906c1e93b0345ca56697021a38a318ec2e8a7bb3e3ba74",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "27ceeca9b153040d186011d10ba437fec41002bbda93c1ca972f4c33c7ddcf9d",
+     "tiff": "c5580a3c95f2c7211e63fed6c0053014bb883ad1c0bcbe03ecea9f91d59a81e2",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__fujifilm_velvia_100__scan__det": {
+   "input": "synth_ramp",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "179541ab409fe7c0fe53053e6dd8de5fd50cdce8800b893b6cbacd0af74852f1",
+     "tiff": "82af37c914a11717c74d6f95de6aaaf6adc4a83042b5300600d42c789e6877ff",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "eda1c5d3fc911abdc419de9a91dfad24cafb4f175ef3ea443389ba1fcbe438a7",
+     "tiff": "130f07d2922338ce4304882287eb209811dc1ce49a7cfcbf083a346089a56409",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_doublex__kodak_2302__default": {
+   "input": "synth_ramp",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "51bf7a8abe80f906650078493c7df68ed83fdc69e8e3d26e259ffe91469d4b27",
+     "tiff": "71a114d4f4228f6860f524065051df0769f65b34a95b230a4fc801718fa9055d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "dc356c7ccecf65c72c9a0bbe4ab1a54ed4a3876847177899a3f20456e860a2ca",
+     "tiff": "7ca2b96cbc47b0330fb84b4162418a50bd9bd78808e607b6ceb69e488e671b64",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "8f4395440f6301c1360484444a75c62250e6ed68873f9c7cfee303e194ee09c4",
+     "tiff": "1418bab8b6d72e1c296f2a6faad14d4deaeff5fb74ef6b31692b77edcb40cfe2",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_doublex__kodak_2302__det": {
+   "input": "synth_ramp",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "d255abb036c670af3332729605b12971b4634493a7f08f09408220fee3c39dee",
+     "tiff": "314e3c79c07c3c56b2c89f734c049b88c9bdb9382aba3ad6777c91a7311748c6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "38eb5af4f891cc1f994edb9286e5b7bbd6f17e231fe8754789f7281750de26cd",
+     "tiff": "5cccc2f1dd56fd795da1ef498f3812660bf9facc366e5494accd82e3ffd8e25c",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "synth_ramp",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "1aa77423c1ef97c2dbb76df4f17fff7537edb5ef7a1b79fcd38b5a5107697152",
+     "tiff": "934227831162c9e83c0d8bcefda75568df7fe56098138f9773dcc1bf5bf370ee",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "5e3574977da097b82a4928c0f91113541ebc74b9f9713fa1d2d2b8a5c1b3d278",
+     "tiff": "130e32b90900328ce4fa2b5979707725c93462676f856011e4c1a19ec1526b13",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c68b9d01f6461fe888a67a9999b09170e1ee52ff2243a8f8d48cd68b60a9c7d5",
+     "tiff": "1d81303198c21db9641ad3da45433ac71df763bacaf20c66071841430f6d1e96",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "synth_ramp",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "71f6e8fc2fdec0d357d95e0b64b25d3ee84280a19b9dee7cd0d503b526ab4ef6",
+     "tiff": "fa9a44fd573762e3d076637e8140ef883844d63bf25ee58e1479a9960390ec50",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "552e4b757dcbede5ef400e941f2b8869f6ede115f110fa1fb479e5e3644ce7d9",
+     "tiff": "552a703bf49bae3888db32e66f6dc7b2f249bd3544bcd69b762420b1c211cd37",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "synth_ramp",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5a4fb9ee6791d9e0fccd895a486038a3f6e4e2578a5ceebe50d6f0f4e56695dc",
+     "tiff": "3f87a91fb2d3b9b25d5f0bb9dfa6e8e9873540769b0ff630cced8b90844a576b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "389b601ecd43688c6181347253b6fcec312c015ccb89fdb6476ef52294e6317d",
+     "tiff": "74ee72ee449e61a94dc09f98b58c54b45ac043819f2bf123fee0cfd0d682df3f",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "496d99af8c4ed2aa0190cee9c29bb14c9d0cd7c6d467b5f4853d174208fb0866",
+     "tiff": "7dd0f8a99b84cb0e3775c225ebcf491688f9e188362d2ff5ac130f1984e7a035",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "synth_ramp",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "a41f85b86e038f4cc0b097cb08db3d7fc17a546cc224563bdf7e5ea0d29faace",
+     "tiff": "a94f216fb653dd11c50d43532576da7e56a753f18fecb103d62f4371cd78f662",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "891d3e133d10c54ffac662c5e3d0e39cfe937736e999bf429a21239e0db03c7d",
+     "tiff": "c403e8014a1d0da7c5bddfa1d960022f24c7bc999eb2c36247e85d25264c9c3d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_trix__scan__default": {
+   "input": "synth_ramp",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d322394cb95ce24873c41441ef8cbc064a822120777bb1f270c3a64f53fa669b",
+     "tiff": "36c80d50969dc84dd76a0492af85ca921e75c2198e72eb91a0b1dc4a4d51caca",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "fb5f39ca223b9adcf83365312546d7a00d5d5f2d7e658309a0599f38a4727bc9",
+     "tiff": "c5c0b2aa5219c65f5cd46895c8c19934a2101a106e21e5949e3cd3d5e9c88d26",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "0e9af0acde36fc4afd063fbe6db3388ba785e96c60a1e1eb36ef3525f0c6ff6a",
+     "tiff": "a5ce651e346b091cf3586e945ae8854edf6ec249fca0d5ab11e367f49960ac4b",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_trix__scan__det": {
+   "input": "synth_ramp",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f7c4820fe02a0fb9c6465bd3c7dbc79d3a66d11f293cc9b5625ae77578c7bcdc",
+     "tiff": "cfd8f1bde51aa3268aed5735ffde9dc5dd2cc183e904fcc94ab357175094bac0",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "1379d97c497f850db9655df24d0270d7682061bbb53e2c49b3b5aa186e4e2401",
+     "tiff": "7971fea1a5f1c7b42d473391f71e38bce7edcfdc39156a8fb97c5102b024f97e",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_vision3_500t__kodak_2383__default": {
+   "input": "synth_ramp",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d190b383bfcc203d640daef0436735a7661b827b22d7dc400d4e248172eaf3c9",
+     "tiff": "96e284a77bba5c775e8af76349a57970dcacff0ea04968b701ca3c10553b0478",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "fc4fcbca57dc88a293796baf89c4360508df09aea32c946fc75723fd21fc22a3",
+     "tiff": "e0398e6999c36bfc40f8765d6646a6f3bfad34d3c8d88f6d101deb3634195175",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "6b309edef69f203ea2aa6fb716e4860394a14f9731f9ad569ec7fadebc6a411a",
+     "tiff": "f27fd724238a05b21ff48157ed041d33e0376c83bb617a9643f907b9d64a5b81",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_vision3_500t__kodak_2383__det": {
+   "input": "synth_ramp",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "18bd70685a5ebebb9e5eaaead6e310fb70119cf36b49c510c938a5b02b5e86a6",
+     "tiff": "1893f42168dce6f3f35b58d897e990bf7902a292dd08a679ade2ba170f205afe",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "dfa94ca2c0ca1cd06a3ffdce4a042186057faa4b3ea17ceb9eda4a8874b56ab1",
+     "tiff": "499ffb6cf677b630f8b6060dcddfbe5a08bd98d76fb07032fcb0799543b916f3",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  }
+ }
+}

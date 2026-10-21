@@ -16,19 +16,21 @@ use spektrafilm_math::spectral::TcLut;
 /// pixel data to that path as a raw little-endian f64 blob. Used to
 /// bisect the Python ↔ Rust drift one stage at a time without
 /// modifying call sites. Silent no-op when the env var is unset.
-fn dump_if_env(var: &str, image: &ImageBuf) {
+pub(crate) fn dump_if_env(var: &str, image: &ImageBuf) {
+    dump_values_if_env(var, || image.data.iter().map(|&v| v as f64).collect());
+}
+
+/// Like [`dump_if_env`] for any values; `values` only runs when `$var` is set.
+pub(crate) fn dump_values_if_env(var: &str, values: impl FnOnce() -> Vec<f64>) {
     let Ok(path) = std::env::var(var) else {
         return;
     };
-    let bytes: Vec<u8> = image
-        .data
-        .iter()
-        .flat_map(|&v| (v as f64).to_le_bytes())
-        .collect();
+    let values = values();
+    let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
     match std::fs::write(&path, &bytes) {
         Ok(()) => tracing::info!(
             path = %path,
-            count = image.data.len(),
+            count = values.len(),
             "dumped f64 buffer for {}",
             var
         ),
@@ -249,6 +251,9 @@ impl Pipeline {
                 out
             })
             .collect();
+        dump_values_if_env("SPEKTRAFILM_DUMP_FILM_SENSITIVITY", || {
+            sensitivity.iter().flatten().copied().collect()
+        });
 
         let ref_illuminant = select_illuminant(&film.info.reference_illuminant);
         let ref_illuminant_f64 = select_illuminant_f64(&film.info.reference_illuminant);
@@ -322,6 +327,9 @@ impl Pipeline {
                     return Err(format!("unsupported rgb_to_raw_method: {other:?}"));
                 }
             };
+        if let Some(lut) = &tc_lut {
+            dump_values_if_env("SPEKTRAFILM_DUMP_TC_LUT", || lut.data.clone());
+        }
 
         // Python parity: sensitivities are pre-balanced in the profile so midgray ≈ 1.0.
         // The TC LUT is used unnormalized — Python's `rgb_to_raw_hanatos2025` does NOT scale it.

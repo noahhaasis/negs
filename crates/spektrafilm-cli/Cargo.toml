@@ -17,6 +17,18 @@ required-features = ["precision-f64"]
 name = "decode_raw_gui"
 path = "src/bin/decode_raw_gui.rs"
 
+[[bin]]
+name = "golden_inputs"
+path = "src/bin/golden_inputs.rs"
+
+[[bin]]
+name = "golden_compare"
+path = "src/bin/golden_compare.rs"
+
+[[bin]]
+name = "golden_probes"
+path = "src/bin/golden_probes.rs"
+
 [features]
 precision-f64 = [
     "spektrafilm-math/precision-f64",
@@ -39,3 +51,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 rayon.workspace = true
 tiff = "0.10"
+# golden_probes drives the numpy-compatible samplers with their own MT19937.
+rand_mt = "5"

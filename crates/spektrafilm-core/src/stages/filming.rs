@@ -325,6 +325,7 @@ pub fn expose(
             rgb
         }
     };
+    crate::pipeline::dump_if_env("SPEKTRAFILM_DUMP_FILM_RAW", &raw);
 
     // Order mirrors Python filming: boost → diffusion → lens_blur → halation.
 
@@ -401,6 +402,7 @@ pub fn expose(
     // `np.log10(np.fmax(raw, 0.0) + 1e-10)` exactly — adding 1e-10
     // after the floor-at-zero shifts every value by a constant in
     // log-space and is *not* the same as `log10(max(raw, 1e-10))`.
+    crate::pipeline::dump_if_env("SPEKTRAFILM_DUMP_FILM_PRE_LOG", &raw);
     let zero = from_f64(0.0);
     let eps = from_f64(1e-10);
     raw.data.par_iter_mut().for_each(|v| {
@@ -468,6 +470,7 @@ pub fn develop(
     }
 
     // Log exposure has been consumed/released before allocating grain scratch.
+    crate::pipeline::dump_if_env("SPEKTRAFILM_DUMP_FILM_PRE_GRAIN", &density_cmy);
     // Grain
     let grain = &params.film_render.grain;
     if grain.active {
