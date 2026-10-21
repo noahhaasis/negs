@@ -673,8 +673,9 @@ import UniformTypeIdentifiers
         if let border = state.border.exported(for: photoSize) {
             extras += " Adds the \(border.title.lowercased()) border\(state.border.instagram ? ", extended to 3:4 for Instagram" : "")."
         }
-        let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: export ? ExportEngine.selected : nil) { engine in
-            switch engine {
+        let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: export ? ExportEngine.selected : nil, size: ExportSize.last) { engine, size in
+            let extras = extras + (size.summary.map { " \($0)." } ?? "")
+            return switch engine {
             case .reference?: "The most precise result. Can take about half a minute for large photos.\(extras)"
             case .fast?: "Looks the same as Reference, in a fraction of the time.\(extras)"
             case nil: "Saves the preview as shown.\(extras)"
@@ -687,10 +688,12 @@ import UniformTypeIdentifiers
                 self.error = "Choose a different filename to preserve the original photograph."; return
             }
             OutputFormat.last = picker.format
+            ExportSize.last = picker.size
             Self.lastSaveFolder = url.deletingLastPathComponent()
             let engine = picker.engine ?? .reference
+            let size = picker.size
             if export { ExportEngine.selected = engine }
-            Task { if export { await self.export(to: url, engine: engine) } else { await self.savePreview(to: url) } }
+            Task { if export { await self.export(to: url, engine: engine, size: size) } else { await self.savePreview(to: url, size: size) } }
         }
     }
 
@@ -714,8 +717,8 @@ import UniformTypeIdentifiers
         return x.isEqual(y)
     }
 
-    /// Saves the current preview with the crop, rotation, and border.
-    private func saveCommand(to url: URL) -> [String: JSONValue] {
+    /// Saves the current preview with the crop, rotation, border, and size.
+    private func saveCommand(to url: URL, size: ExportSize) -> [String: JSONValue] {
         var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path),
                                             "rotate_cw": .number(Double(imageRotation))]
         if state.crop.cropped {
@@ -726,15 +729,16 @@ import UniformTypeIdentifiers
             command["border"] = .string(border.rawValue)
             command["instagram"] = .bool(state.border.instagram)
         }
+        if let fit = size.json { command["fit"] = fit }
         return command
     }
 
-    private func savePreview(to url: URL) async {
+    private func savePreview(to url: URL, size: ExportSize = .full) async {
         guard canSave, let engine else { return }
         saving = true
         defer { saving = false }
         do {
-            _ = try await engine.request(saveCommand(to: url))
+            _ = try await engine.request(saveCommand(to: url, size: size))
             status = "Saved \(url.lastPathComponent)"
         } catch { report(error) }
     }
@@ -743,13 +747,13 @@ import UniformTypeIdentifiers
     /// so save it instead of developing the photograph again. Like ExportJob,
     /// write a sibling temporary file and rename it, so a failure leaves an
     /// existing file untouched. False if the preview could not be saved.
-    private func exportPreview(to url: URL) async -> Bool {
+    private func exportPreview(to url: URL, size: ExportSize) async -> Bool {
         guard canSave, renderAtExportSize, let engine else { return false }
         saving = true
         defer { saving = false }
         let staging = url.deletingLastPathComponent().appendingPathComponent(".negs-\(UUID().uuidString).\(url.pathExtension)")
         defer { try? FileManager.default.removeItem(at: staging) }
-        guard (try? await engine.request(saveCommand(to: staging))) != nil else { return false }
+        guard (try? await engine.request(saveCommand(to: staging, size: size))) != nil else { return false }
         guard rename(staging.path, url.path) == 0 else {
             report(EngineError(message: "Could not move the completed export to \(url.path): \(String(cString: strerror(errno)))"))
             return true
@@ -760,15 +764,15 @@ import UniformTypeIdentifiers
         return true
     }
 
-    func export(to url: URL, engine exportEngine: ExportEngine) async {
+    func export(to url: URL, engine exportEngine: ExportEngine, size: ExportSize = .full) async {
         // An edit made meanwhile makes the save fail; develop the photograph then.
-        if exportEngine == .fast, await exportPreview(to: url) { return }
+        if exportEngine == .fast, await exportPreview(to: url, size: size) { return }
         guard !exporting, let source, let engine else { return }
         let job = ExportJob(); exportJob = job; exporting = true; exportStarted = Date()
         defer { exporting = false; exportJob = nil }
         do {
             let outcome = try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: state,
-                                            crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: photoSize), engine: exportEngine)
+                                            crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: photoSize), size: size, engine: exportEngine)
             status = outcome.fellBackToCPU
                 ? "Exported \(url.lastPathComponent) on the CPU (32-bit): no GPU was available for Fast export"
                 : "Exported \(url.lastPathComponent)"
@@ -815,19 +819,83 @@ enum OutputFormat: String, CaseIterable {
     }
 }
 
-/// The save panel's Format pop-up, and for exports the Engine pop-up.
-/// Changing the format restricts the panel to that type, which also rewrites
-/// the extension in the name field. Changing the engine updates the message.
-@MainActor private final class FormatPicker: NSObject {
+/// The size a save or export is fitted to, like `Fit` in
+/// `spektrafilm-io::resize`: full size, or a number of pixels on the long or
+/// short edge of the finished file, border included. Never enlarged.
+struct ExportSize: Equatable {
+    enum Edge: String, CaseIterable {
+        case full, long, short
+        var title: String {
+            switch self {
+            case .full: "Full Size"
+            case .long: "Long Edge"
+            case .short: "Short Edge"
+            }
+        }
+    }
+    var edge: Edge
+    var pixels: Int
+
+    static let full = ExportSize(edge: .full, pixels: 2048)
+    static let pixelRange = 16...65_535
+
+    /// The `fit` of a save command; nil at full size.
+    var json: JSONValue? {
+        switch edge {
+        case .full: nil
+        case .long: .object(["long_edge": .number(Double(pixels))])
+        case .short: .object(["short_edge": .number(Double(pixels))])
+        }
+    }
+    /// The exporter's arguments.
+    var arguments: [String] {
+        switch edge {
+        case .full: []
+        case .long: ["--long-edge", "\(pixels)"]
+        case .short: ["--short-edge", "\(pixels)"]
+        }
+    }
+    /// For the save panel's message; nil at full size.
+    var summary: String? {
+        edge == .full ? nil : "Fits \(pixels) px on the \(edge == .long ? "long" : "short") edge"
+    }
+
+    /// The size of the last save or export, offered first next time.
+    static var last: ExportSize {
+        get {
+            let defaults = UserDefaults.standard
+            let edge = defaults.string(forKey: "exportEdge").flatMap(Edge.init) ?? .full
+            let pixels = defaults.integer(forKey: "exportEdgePixels")
+            return ExportSize(edge: edge, pixels: pixelRange.contains(pixels) ? pixels : full.pixels)
+        }
+        set {
+            UserDefaults.standard.set(newValue.edge.rawValue, forKey: "exportEdge")
+            UserDefaults.standard.set(newValue.pixels, forKey: "exportEdgePixels")
+        }
+    }
+}
+
+/// The save panel's Format and Size controls, and for exports the Engine
+/// pop-up. Changing the format restricts the panel to that type, which also
+/// rewrites the extension in the name field. Changing the engine or the size
+/// updates the message.
+@MainActor private final class FormatPicker: NSObject, NSTextFieldDelegate {
     private let popup = NSPopUpButton()
     private let enginePopup: NSPopUpButton?
-    private let message: (ExportEngine?) -> String
+    private let edgePopup = NSPopUpButton()
+    private let pixelsField = NSTextField()
+    private let message: (ExportEngine?, ExportSize) -> String
     private weak var panel: NSSavePanel?
     var format: OutputFormat { OutputFormat.allCases[max(popup.indexOfSelectedItem, 0)] }
     /// nil for Save Preview.
     var engine: ExportEngine? { enginePopup.map { ExportEngine.allCases[max($0.indexOfSelectedItem, 0)] } }
+    var size: ExportSize {
+        let pixels = Int(pixelsField.stringValue.filter(\.isNumber)) ?? ExportSize.full.pixels
+        return ExportSize(edge: ExportSize.Edge.allCases[max(edgePopup.indexOfSelectedItem, 0)],
+                          pixels: min(max(pixels, ExportSize.pixelRange.lowerBound), ExportSize.pixelRange.upperBound))
+    }
 
-    init(panel: NSSavePanel, selected: OutputFormat, engine: ExportEngine?, message: @escaping (ExportEngine?) -> String) {
+    init(panel: NSSavePanel, selected: OutputFormat, engine: ExportEngine?, size: ExportSize, message: @escaping (ExportEngine?, ExportSize) -> String) {
         self.panel = panel
         self.message = message
         enginePopup = engine.map { _ in NSPopUpButton() }
@@ -843,15 +911,36 @@ enum OutputFormat: String, CaseIterable {
             enginePopup.toolTip = "Reference develops the photo again with extra precision. Fast uses the preview's result and looks the same."
             rows.append(NSStackView(views: [NSTextField(labelWithString: "Engine:"), enginePopup]))
         }
+        edgePopup.addItems(withTitles: ExportSize.Edge.allCases.map(\.title))
+        edgePopup.selectItem(at: ExportSize.Edge.allCases.firstIndex(of: size.edge) ?? 0)
+        edgePopup.target = self; edgePopup.action = #selector(sizeChanged)
+        edgePopup.toolTip = "Fits the finished file, border included, to this many pixels. Never enlarges."
+        let formatter = NumberFormatter()
+        formatter.allowsFloats = false
+        formatter.minimum = ExportSize.pixelRange.lowerBound as NSNumber
+        formatter.maximum = ExportSize.pixelRange.upperBound as NSNumber
+        pixelsField.formatter = formatter
+        pixelsField.integerValue = size.pixels
+        pixelsField.alignment = .right
+        pixelsField.delegate = self
+        pixelsField.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        pixelsField.isEnabled = size.edge != .full
+        rows.append(NSStackView(views: [NSTextField(labelWithString: "Size:"), edgePopup, pixelsField, NSTextField(labelWithString: "px")]))
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
         stack.setFrameSize(stack.fittingSize)
         panel.accessoryView = stack
         panel.allowedContentTypes = [selected.type]
-        panel.message = message(self.engine)
+        panel.message = message(self.engine, self.size)
     }
 
     @objc private func changed() { panel?.allowedContentTypes = [format.type] }
-    @objc private func engineChanged() { panel?.message = message(engine) }
+    @objc private func engineChanged() { panel?.message = message(engine, size) }
+    @objc private func sizeChanged() {
+        pixelsField.isEnabled = size.edge != .full
+        if pixelsField.isEnabled { panel?.makeFirstResponder(pixelsField) }
+        panel?.message = message(engine, size)
+    }
+    func controlTextDidChange(_ notification: Notification) { panel?.message = message(engine, size) }
 }

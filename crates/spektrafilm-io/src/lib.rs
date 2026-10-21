@@ -17,6 +17,7 @@ pub mod crop;
 pub mod film35;
 pub mod metadata;
 pub mod raw;
+pub mod resize;
 pub mod save;
 mod white_balance;
 

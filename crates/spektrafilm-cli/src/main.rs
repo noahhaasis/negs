@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use spektrafilm_core::params::RuntimeParams;
 use spektrafilm_core::pipeline::Pipeline;
 use spektrafilm_core::profile;
+use spektrafilm_io::resize::Fit;
 use spektrafilm_math::image::ImageBuf;
 
 #[derive(Parser)]
@@ -67,6 +68,14 @@ enum Commands {
         /// Extend the border with white to Instagram's 3:4 portrait.
         #[arg(long, requires = "border")]
         instagram: bool,
+        /// Resample the result (after the border) to this many pixels on
+        /// its long edge. Never enlarges.
+        #[arg(long, conflicts_with = "short_edge")]
+        long_edge: Option<u32>,
+        /// Resample the result (after the border) to this many pixels on
+        /// its short edge. Never enlarges.
+        #[arg(long)]
+        short_edge: Option<u32>,
         /// Run the pipeline N times in the same process. Each iteration is
         /// timed individually so you can see cold-start vs warm-cache speed.
         /// Default: 1 (no repetition).
@@ -128,10 +137,15 @@ fn main() -> Result<()> {
             crop,
             border,
             instagram,
+            long_edge,
+            short_edge,
             iters,
             data_dir,
         } => {
             let border = border.as_deref().map(str::parse).transpose()?;
+            let fit = long_edge
+                .map(Fit::LongEdge)
+                .or(short_edge.map(Fit::ShortEdge));
             cmd_process(
                 &input,
                 &output,
@@ -147,6 +161,7 @@ fn main() -> Result<()> {
                 crop,
                 border,
                 instagram,
+                fit,
                 iters,
                 &data_dir,
             )?;
@@ -184,6 +199,7 @@ fn cmd_process(
     crop: Option<spektrafilm_io::crop::Crop>,
     border: Option<spektrafilm_io::border::BorderStyle>,
     instagram: bool,
+    fit: Option<Fit>,
     iters: usize,
     data_dir: &Path,
 ) -> Result<()> {
@@ -300,6 +316,10 @@ fn cmd_process(
                 bordered
             }
         }
+        None => result,
+    };
+    let result = match fit.and_then(|fit| spektrafilm_io::resize::fit(&result, fit, encoded)) {
+        Some(resized) => resized,
         None => result,
     };
 

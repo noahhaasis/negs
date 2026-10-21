@@ -14,6 +14,7 @@ use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_io::{
     border::{BorderStyle, add_border, extend_for_instagram},
     crop::Crop,
+    resize::{self, Fit},
 };
 use spektrafilm_math::image::ImageBuf;
 use std::{
@@ -66,6 +67,9 @@ enum Command {
         /// the photograph doesn't need a new render.
         #[serde(default)]
         rotate_cw: i32,
+        /// Resample the saved file to this edge, after the border.
+        #[serde(default)]
+        fit: Option<Fit>,
     },
 }
 
@@ -134,6 +138,7 @@ impl Session {
                 instagram,
                 crop,
                 rotate_cw,
+                fit,
             } => {
                 let Rendered {
                     id,
@@ -165,16 +170,21 @@ impl Session {
                 let rotated =
                     (rotate_cw.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(rotate_cw));
                 let image = rotated.as_ref().unwrap_or(image);
-                match border {
+                let bordered = match border {
                     Some(style) => {
-                        let mut bordered = add_border(image, style, film, *encoded, data)?;
-                        if instagram {
-                            bordered = extend_for_instagram(&bordered, style);
-                        }
-                        spektrafilm_io::save_image(&bordered, &output, metadata.as_ref())?
+                        let bordered = add_border(image, style, film, *encoded, data)?;
+                        Some(if instagram {
+                            extend_for_instagram(&bordered, style)
+                        } else {
+                            bordered
+                        })
                     }
-                    None => spektrafilm_io::save_image(image, &output, metadata.as_ref())?,
-                }
+                    None => None,
+                };
+                let image = bordered.as_ref().unwrap_or(image);
+                let resized = fit.and_then(|fit| resize::fit(image, fit, *encoded));
+                let image = resized.as_ref().unwrap_or(image);
+                spektrafilm_io::save_image(image, &output, metadata.as_ref())?;
                 Ok(json!({"saved": output}))
             }
             Command::Render {
