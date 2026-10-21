@@ -28,7 +28,7 @@ Pick a film, pick a paper, drag a slider, and watch the picture change as you mo
 - Exports PNG, TIFF or JPEG and keeps your camera's EXIF
 - Live preview while you drag a slider, and what you see in the preview is what you export
 
-https://github.com/user-attachments/assets/3fab6c0d-4e37-4e9e-a9f7-53b9f6c67812
+https://github.com/user-attachments/assets/b1b50860-9160-4a6c-b939-42ceaa9e82cd
 
 ## Chemistry, not a filter
 
