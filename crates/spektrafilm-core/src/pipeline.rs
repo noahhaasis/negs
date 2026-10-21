@@ -111,6 +111,9 @@ pub struct Pipeline {
     print_exposure_factor: f64,
     /// Filtered enlarger illuminant for printing stage (f64 for Python parity).
     print_illuminant: Vec<f64>,
+    /// Print paper sensitivity, `10^log_sensitivity` with NaN → 0; empty for
+    /// the simplified pipeline. Kept for [`Self::compute_print_exposure_factor`].
+    print_sensitivity: Vec<[f64; 3]>,
     /// Constant preflash raw 3-vector added to the print exposure before the
     /// inner log10. `[0; 3]` unless the enlarger preflash is active.
     preflash_raw: [f64; 3],
@@ -138,7 +141,8 @@ impl Pipeline {
 
     /// Return a copy of this calibrated pipeline with updated runtime params.
     /// Callers must only use this when the calibration-affecting inputs match
-    /// the pipeline that was originally built.
+    /// the pipeline that was originally built. The print exposure factor
+    /// follows `params` (exposure compensation, film gamma), so those don't.
     pub fn with_params(mut self, params: RuntimeParams) -> Self {
         let mut params = params;
         apply_film_specific_params(&self.film, &mut params);
@@ -147,6 +151,7 @@ impl Pipeline {
             &params.io.output_color_space,
         );
         self.params = params;
+        self.print_exposure_factor = self.compute_print_exposure_factor();
         self
     }
 }
@@ -179,6 +184,7 @@ impl Pipeline {
             front_illuminant,
             print_exposure_factor: 1.0,
             print_illuminant,
+            print_sensitivity: Vec::new(),
             preflash_raw: [0.0; 3],
             output_gamut,
         }
@@ -330,31 +336,6 @@ impl Pipeline {
             y_neutral_f64 + params.enlarger.y_filter_shift as f64,
         );
 
-        // Midgray sensor raw for the print-exposure normalization — always in
-        // sRGB (Python `_rgb_to_film_raw` default), through whichever upsampler
-        // is active. `scale` folds the EV compensation for the `_comp` branch.
-        let midgray_raw = |scale: f64| -> [f64; 3] {
-            if let Some(lut) = &tc_lut {
-                enlarger::midgray_raw_hanatos(
-                    lut,
-                    select_illuminant(&front_illuminant),
-                    params.settings.use_cat16,
-                    scale,
-                )
-            } else {
-                let core = mallett_core
-                    .as_ref()
-                    .expect("one upsampler is always built");
-                let m = crate::mallett::film_matrix(core, "sRGB");
-                let g = 0.184 * scale;
-                crate::mallett::apply(&m, [g, g, g])
-            }
-        };
-
-        // Compute midgray spectral density (gray card through full filming path)
-        let density_spectral_midgray =
-            enlarger::midgray_density_spectral_from_raw(midgray_raw(1.0), &film, &params);
-
         // Print sensitivity: Python `sensitivity = np.nan_to_num(10 ** log_sensitivity)` — f64 with NaN→0.
         let print_log_sens = print.log_sensitivity_f64();
         let print_sensitivity: Vec<[f64; 3]> = print_log_sens
@@ -381,24 +362,89 @@ impl Pipeline {
             &print_sensitivity,
         );
 
-        // Print exposure normalization — mirror Python's
-        // `_compute_exposure_factor_midgray` in
-        // `spektrafilm/runtime/stages/printing.py`. There are two
-        // candidate factors:
-        //   * `factor_midgray`     = 1 / geomean(raw_midgray)
-        //   * `factor_midgray_comp`= 1 / geomean(raw_midgray_with_neg_EV)
-        // and four flag combinations of
-        // `enlarger.normalize_print_exposure` × `enlarger.print_exposure_compensation`.
-        //
-        // With both flags ON (defaults) and no EV compensation,
-        // Python returns `factor_midgray_comp == 1.0`. Rust used to
-        // unconditionally apply `factor_midgray` here, which biased
-        // the print exposure by ~3% on every render and was the root
-        // cause of the residual Python-parity drift in the print stage.
+        let output_gamut = crate::gamut_compression::OutputGamutCompress::build(
+            &params.io.output_gamut_compress,
+            &params.io.output_color_space,
+        );
+        let mut pipeline = Self {
+            film,
+            print,
+            params,
+            tc_lut,
+            mallett_core,
+            front_illuminant,
+            print_exposure_factor: 1.0,
+            print_illuminant,
+            print_sensitivity,
+            preflash_raw,
+            output_gamut,
+        };
+        pipeline.print_exposure_factor = pipeline.compute_print_exposure_factor();
+
+        tracing::info!(
+            method = pipeline.params.settings.rgb_to_raw_method,
+            lut_size = pipeline.tc_lut.as_ref().map_or(0, |l| l.size),
+            film = pipeline.film.info.stock.as_deref().unwrap_or("unknown"),
+            print_exposure_factor = pipeline.print_exposure_factor,
+            "pipeline calibrated"
+        );
+        Ok(pipeline)
+    }
+
+    /// Print exposure normalization — mirror Python's
+    /// `_compute_exposure_factor_midgray` in
+    /// `spektrafilm/runtime/stages/printing.py`. There are two
+    /// candidate factors:
+    ///   * `factor_midgray`     = 1 / geomean(raw_midgray)
+    ///   * `factor_midgray_comp`= 1 / geomean(raw_midgray_with_neg_EV)
+    /// and four flag combinations of
+    /// `enlarger.normalize_print_exposure` × `enlarger.print_exposure_compensation`.
+    ///
+    /// With both flags ON (defaults) and no EV compensation,
+    /// Python returns `factor_midgray_comp == 1.0`. Rust used to
+    /// unconditionally apply `factor_midgray` here, which biased
+    /// the print exposure by ~3% on every render and was the root
+    /// cause of the residual Python-parity drift in the print stage.
+    ///
+    /// A gray patch through the film and the enlarger, so it takes
+    /// microseconds: [`Self::with_params`] reruns it, and an exposure
+    /// change doesn't need a newly calibrated pipeline.
+    fn compute_print_exposure_factor(&self) -> f64 {
+        let params = &self.params;
+        // The simplified pipeline (`Pipeline::new`) has no upsampler and
+        // doesn't normalize the print exposure.
+        if self.tc_lut.is_none() && self.mallett_core.is_none() {
+            return 1.0;
+        }
+        // Midgray sensor raw for the print-exposure normalization — always in
+        // sRGB (Python `_rgb_to_film_raw` default), through whichever upsampler
+        // is active. `scale` folds the EV compensation for the `_comp` branch.
+        let midgray_raw = |scale: f64| -> [f64; 3] {
+            if let Some(lut) = &self.tc_lut {
+                enlarger::midgray_raw_hanatos(
+                    lut,
+                    select_illuminant(&self.front_illuminant),
+                    params.settings.use_cat16,
+                    scale,
+                )
+            } else {
+                let core = self
+                    .mallett_core
+                    .as_ref()
+                    .expect("one upsampler is always built");
+                let m = crate::mallett::film_matrix(core, "sRGB");
+                let g = 0.184 * scale;
+                crate::mallett::apply(&m, [g, g, g])
+            }
+        };
+
+        // Compute midgray spectral density (gray card through full filming path)
+        let density_spectral_midgray =
+            enlarger::midgray_density_spectral_from_raw(midgray_raw(1.0), &self.film, params);
         let factor_midgray = enlarger::compute_exposure_factor(
             &density_spectral_midgray,
-            &print_illuminant,
-            &print_sensitivity,
+            &self.print_illuminant,
+            &self.print_sensitivity,
         );
         // Python builds `density_spectral_midgray_comp` whenever
         // `print_exposure_compensation` is on — even when EV == 0, in
@@ -414,14 +460,14 @@ impl Pipeline {
             // Python: `rgb_midgray_comp = rgb_midgray * 2 ** exposure_compensation_ev`.
             let scale = 2.0f64.powf(params.camera.exposure_compensation_ev as f64);
             let density_spectral_midgray_comp =
-                enlarger::midgray_density_spectral_from_raw(midgray_raw(scale), &film, &params);
+                enlarger::midgray_density_spectral_from_raw(midgray_raw(scale), &self.film, params);
             enlarger::compute_exposure_factor(
                 &density_spectral_midgray_comp,
-                &print_illuminant,
-                &print_sensitivity,
+                &self.print_illuminant,
+                &self.print_sensitivity,
             )
         };
-        let print_exposure_factor = match (
+        match (
             params.enlarger.normalize_print_exposure,
             params.enlarger.print_exposure_compensation,
         ) {
@@ -429,32 +475,7 @@ impl Pipeline {
             (true, false) => factor_midgray,
             (false, true) => factor_midgray_comp / factor_midgray,
             (false, false) => 1.0,
-        };
-
-        tracing::info!(
-            method = params.settings.rgb_to_raw_method,
-            lut_size = tc_lut.as_ref().map_or(0, |l| l.size),
-            film = film.info.stock.as_deref().unwrap_or("unknown"),
-            print_exposure_factor = print_exposure_factor,
-            "pipeline calibrated"
-        );
-
-        let output_gamut = crate::gamut_compression::OutputGamutCompress::build(
-            &params.io.output_gamut_compress,
-            &params.io.output_color_space,
-        );
-        Ok(Self {
-            film,
-            print,
-            params,
-            tc_lut,
-            mallett_core,
-            front_illuminant,
-            print_exposure_factor,
-            print_illuminant,
-            preflash_raw,
-            output_gamut,
-        })
+        }
     }
 
     pub fn process(&self, image: ImageBuf, backend: &dyn ComputeBackend) -> ImageBuf {

@@ -236,6 +236,19 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BENCHMARK_PHOTO=/path/to/photo.jpg target/swif
 On an M-series Mac with a 10 MP JPEG, busy time per pass is about 3–5 ms
 median and 20 ms p95 (before: 32 ms median, with the main thread saturated).
 
+It also reports the live frame rate and how long the export-size frame takes
+after letting go. `SPEKTRAFILM_BENCHMARK_PARAM=camera.exposure_compensation_ev`
+drags Exposure instead of print exposure (its 0.1 EV steps repeat values, so
+fewer frames are requested), and `SPEKTRAFILM_BENCHMARK_SHOTS=/tmp/negs-drag`
+saves window screenshots during the drag and after letting go.
+
+While a slider moves, the helper renders at the canvas's resolution
+(`interactive_scale`: screen pixels per photo pixel at the current zoom), with
+every effect on, from an area-averaged copy of the source. The status line says
+"Preview". Letting go renders at export size, byte-identical to a render that
+never dragged. On an M1 Pro, 24 MP NEF and 60 MP Leica Q3 drag frames at a
+≈1960 px canvas take ≈90 ms (11 fps), against 0.85 s and 2.4 s at export size.
+
 An optional native-window smoke test captures light/dark views:
 
 ```sh

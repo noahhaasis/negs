@@ -71,6 +71,10 @@ import UniformTypeIdentifiers
     /// a Fast export, byte for byte.
     @ObservationIgnored private var renderAtExportSize = false
     @ObservationIgnored private var renderOnGPU = false
+    /// The shown frame was rendered at canvas size while a slider moved;
+    /// letting go renders the photograph at export size.
+    @ObservationIgnored private var showingInteractiveFrame = false
+    @ObservationIgnored let canvasScale = CanvasScale()
     @ObservationIgnored private var pendingRender: Task<Void, Never>?
     @ObservationIgnored private var activityTimer: Task<Void, Never>?
     @ObservationIgnored private var interactionStart: EditState?
@@ -262,6 +266,7 @@ import UniformTypeIdentifiers
         guard let start = interactionStart else { return }
         interactionStart = nil
         if start != state { registerUndo(restoring: start, action: "Change Adjustment") }
+        if showingInteractiveFrame, ready, source != nil, !closing { scheduleRender() }
         if !previewCurrent { scheduleActivity() }
     }
 
@@ -538,38 +543,47 @@ import UniformTypeIdentifiers
     private func render() async {
         guard !rendering, !closing, let source, let engine else { return }
         let currentRevision = revision, snapshot = state, generation = sourceGeneration
+        // While a slider moves, render only as many pixels as the canvas
+        // shows; the frame on release is the export-size one.
+        let interactiveScale = interacting ? canvasScale.screenPixelsPerPhotoPixel.flatMap { $0 < 1 ? $0 : nil } : nil
         rendering = true
         let buffer = engine.directory.appendingPathComponent("preview.rgba")
         defer {
             rendering = false
-            if revision != currentRevision, !closing { scheduleRender() }
+            if revision != currentRevision || (interactiveScale != nil && !interacting), !closing { scheduleRender() }
         }
         do {
-            let (id, result) = try await engine.request([
+            var command: [String: JSONValue] = [
                 "command": .string("render"), "input": .string(source.path),
                 "source_generation": .number(Double(generation)),
                 "film": .string(snapshot.film), "paper": .string(snapshot.paper), "params": snapshot.params,
                 "limit_preview": .bool(snapshot.limitPreview), "preview_path": .string(buffer.path)
-            ])
+            ]
+            if let interactiveScale { command["interactive_scale"] = .number(Double(interactiveScale)) }
+            let (id, result) = try await engine.request(command)
             guard shouldShow(currentRevision, generation) else { return }
             let width = Int(result["width"].double), height = Int(result["height"].double)
             let developed = try await Task.detached(priority: .userInitiated) {
                 try Self.readPreview(buffer, width: width, height: height)
             }.value
             guard shouldShow(currentRevision, generation) else { return }
-            imageSize = CGSize(width: result["output_width"].double, height: result["output_height"].double)
+            imageSize = CGSize(width: result["photo_width"].double, height: result["photo_height"].double)
+            showingInteractiveFrame = interactiveScale != nil
             image = developed; placeholder = nil
             updateHistogram()
             cropSession?.update(photo: shownImageSize, rotation: imageRotation)
             updateFilmStrip()
             isRaw = result["raw"].bool
-            if revision == currentRevision {
+            if revision == currentRevision, interactiveScale == nil {
                 renderID = id; previewCurrent = true; hideActivity()
                 renderAtExportSize = result["export_resolution"].bool
                 renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
             }
             let seconds = result["elapsed_ms"].double / 1000
-            status = "\(Int(imageSize.width)) × \(Int(imageSize.height)) · developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
+            let time = "developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
+            status = interactiveScale != nil
+                ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
+                : "\(Int(imageSize.width)) × \(Int(imageSize.height)) · \(time)"
         } catch {
             if currentRevision == revision, generation == sourceGeneration, !closing {
                 renderFailed = true; hideActivity(); report(error)

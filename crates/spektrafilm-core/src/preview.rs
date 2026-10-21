@@ -42,11 +42,6 @@ pub fn preview_pipeline_cache_key(
             "normalize_print_exposure": params.enlarger.normalize_print_exposure,
             "print_exposure_compensation": params.enlarger.print_exposure_compensation,
         },
-        "exposure_compensation_ev": if params.enlarger.print_exposure_compensation {
-            params.camera.exposure_compensation_ev
-        } else {
-            0.0
-        },
     })
     .to_string()
 }
@@ -88,6 +83,56 @@ pub fn rescale_preview_input_fast(image: &ImageBuf, (new_w, new_h): (u32, u32)) 
         .expect("ImageBuf dims match its data length");
     let dst = image::imageops::resize(&src, new_w, new_h, image::imageops::FilterType::CatmullRom);
     let data: Vec<Scalar> = dst.into_raw().into_par_iter().map(from_f32).collect();
+    ImageBuf::from_data(new_w, new_h, data)
+}
+
+/// The source reduced for an interactive preview: each output pixel is the
+/// mean of the source area it covers. Parallel over output rows, so a 60 MP
+/// source takes tens of milliseconds, where the bicubic resample above takes
+/// about a second. Only for frames shown while a slider moves.
+pub fn downsample_area(image: &ImageBuf, (new_w, new_h): (u32, u32)) -> ImageBuf {
+    assert!(new_w >= 1 && new_h >= 1 && new_w <= image.width && new_h <= image.height);
+    let (sw, sh) = (image.width as usize, image.height as usize);
+    let (dw, dh) = (new_w as usize, new_h as usize);
+    // Per output column or row: the first source index it covers and the
+    // covered fraction of each source pixel from there, summing to one.
+    let spans = |src: usize, dst: usize| -> Vec<(usize, Vec<f32>)> {
+        let scale = src as f64 / dst as f64;
+        (0..dst)
+            .map(|i| {
+                let (a, b) = (i as f64 * scale, ((i + 1) as f64 * scale).min(src as f64));
+                let first = a.floor() as usize;
+                let weights = (first..(b.ceil() as usize).min(src))
+                    .map(|j| ((b.min(j as f64 + 1.0) - a.max(j as f64)) / scale) as f32)
+                    .collect();
+                (first, weights)
+            })
+            .collect()
+    };
+    let (columns, rows) = (spans(sw, dw), spans(sh, dh));
+    let mut data = vec![from_f32(0.0); dw * dh * 3];
+    data.par_chunks_mut(dw * 3)
+        .zip(rows.par_iter())
+        .for_each(|(line, (y0, row_weights))| {
+            let mut sum = vec![0f32; sw * 3];
+            for (k, &w) in row_weights.iter().enumerate() {
+                let row = &image.data[(y0 + k) * sw * 3..(y0 + k + 1) * sw * 3];
+                for (s, &v) in sum.iter_mut().zip(row) {
+                    *s += w * to_f32(v);
+                }
+            }
+            for (x, (x0, column_weights)) in columns.iter().enumerate() {
+                let mut px = [0f32; 3];
+                for (k, &w) in column_weights.iter().enumerate() {
+                    for c in 0..3 {
+                        px[c] += w * sum[(x0 + k) * 3 + c];
+                    }
+                }
+                for c in 0..3 {
+                    line[x * 3 + c] = from_f32(px[c]);
+                }
+            }
+        });
     ImageBuf::from_data(new_w, new_h, data)
 }
 
@@ -217,6 +262,25 @@ pub fn display_rgba_with_post(
 mod tests {
     use super::*;
     use crate::post::{PostParams, PostProcess};
+
+    #[test]
+    fn area_downsample_averages_the_covered_pixels() {
+        // 3 → 2 columns: each output covers 1.5 source pixels.
+        let image = ImageBuf::from_data(
+            3,
+            2,
+            [0.0, 3.0, 6.0, 0.0, 3.0, 6.0]
+                .iter()
+                .flat_map(|&v| [from_f32(v); 3])
+                .collect(),
+        );
+        let out = downsample_area(&image, (2, 1));
+        let values: Vec<f32> = out.data.iter().step_by(3).map(|&v| to_f32(v)).collect();
+        assert_eq!(values, [1.0, 5.0]);
+        let flat = ImageBuf::from_data(7, 5, vec![from_f32(0.25); 7 * 5 * 3]);
+        let out = downsample_area(&flat, (3, 2));
+        assert!(out.data.iter().all(|&v| (to_f32(v) - 0.25).abs() < 1e-6));
+    }
 
     /// Per-pixel bilinear sampling, as the display proxy did before it read
     /// source rows in bands. The banded version must give the same bytes.
