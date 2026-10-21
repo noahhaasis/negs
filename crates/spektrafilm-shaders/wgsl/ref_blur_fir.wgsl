@@ -9,13 +9,19 @@
 // in the same order as its own kernel would. The vertical pass can scale its
 // result and add it to the output, so blurs feeding a weighted sum need no
 // extra buffer. Channels with mask 0 are not written.
+//
+// A workgroup first copies the pixels its taps read into `tile`, one vec4
+// per pixel: a row segment of 256 pixels plus the borders for the
+// horizontal pass, a block of 16 columns × 32 rows plus the borders for the
+// vertical one (two rows per invocation). Read from the buffer for every
+// tap instead, a pass cost about 1 ms per tap at 24 MP.
 
 struct Params {
     width: u32,
     height: u32,
     vertical: u32,
     accumulate: u32, // 1: output += scale * blur, 0: output = scale * blur
-    radius: u32,     // largest radius of the active channels
+    radius: u32,     // largest radius of the active channels, ≤ MAX_RADIUS
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
@@ -28,29 +34,22 @@ struct Params {
 @group(0) @binding(2) var<storage, read> kernel_buf: array<f32>;  // [3][2*radius+1]
 @group(0) @binding(3) var<storage, read_write> output: array<f32>; // [H*W*3]
 
-@compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let x = gid.x;
-    let y = gid.y;
-    if x >= params.width || y >= params.height {
-        return;
-    }
-    let r = i32(params.radius);
-    let taps = u32(2 * r + 1);
-    var sum = vec3<f32>(0.0);
-    for (var k = 0; k <= 2 * r; k++) {
-        var sx = i32(x);
-        var sy = i32(y);
-        if params.vertical != 0u {
-            sy = clamp(sy + k - r, 0, i32(params.height) - 1);
-        } else {
-            sx = clamp(sx + k - r, 0, i32(params.width) - 1);
-        }
-        let b = (u32(sy) * params.width + u32(sx)) * 3u;
-        let v = vec3<f32>(input[b], input[b + 1u], input[b + 2u]);
-        let w = vec3<f32>(kernel_buf[u32(k)], kernel_buf[taps + u32(k)], kernel_buf[2u * taps + u32(k)]);
-        sum += w * v;
-    }
+const MAX_RADIUS: u32 = 9u; // int(3σ + 0.5) for σ < 3
+const ROW_PIXELS: u32 = 256u;
+const BLOCK_W: u32 = 16u;
+const BLOCK_H: u32 = 32u;
+
+// Horizontal: ROW_PIXELS + 2·MAX_RADIUS pixels. Vertical: BLOCK_H +
+// 2·MAX_RADIUS rows of BLOCK_W pixels.
+var<workgroup> tile: array<vec4<f32>, 800>;
+var<workgroup> weights: array<vec3<f32>, 19>; // 2·MAX_RADIUS + 1 taps
+
+fn load_pixel(x: u32, y: u32) -> vec4<f32> {
+    let b = (y * params.width + x) * 3u;
+    return vec4<f32>(input[b], input[b + 1u], input[b + 2u], 0.0);
+}
+
+fn store(x: u32, y: u32, sum: vec3<f32>) {
     let idx = (y * params.width + x) * 3u;
     for (var c = 0u; c < 3u; c++) {
         if params.mask[c] != 0u {
@@ -58,6 +57,71 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 output[idx + c] += params.scale[c] * sum[c];
             } else {
                 output[idx + c] = params.scale[c] * sum[c];
+            }
+        }
+    }
+}
+
+@compute @workgroup_size(256)
+fn main(
+    @builtin(workgroup_id) wid: vec3<u32>,
+    @builtin(num_workgroups) groups: vec3<u32>,
+    @builtin(local_invocation_index) lid: u32,
+) {
+    let r = params.radius;
+    let taps = 2u * r + 1u;
+    if lid < taps {
+        weights[lid] = vec3<f32>(kernel_buf[lid], kernel_buf[taps + lid], kernel_buf[2u * taps + lid]);
+    }
+    let w = params.width;
+    let h = params.height;
+    if params.vertical == 0u {
+        // Pixels x0 − r … x0 + 255 + r of row y, clamped to the image.
+        // Segments are numbered row by row and wrap into y (see
+        // `linear_dispatch_grid`), so images taller than 65535 rows fit.
+        let segments = (w + ROW_PIXELS - 1u) / ROW_PIXELS;
+        let segment = wid.y * groups.x + wid.x;
+        if segment >= segments * h {
+            return;
+        }
+        let x0 = (segment % segments) * ROW_PIXELS;
+        let y = segment / segments;
+        for (var p = lid; p < ROW_PIXELS + 2u * r; p += 256u) {
+            let sx = clamp(i32(x0 + p) - i32(r), 0, i32(w) - 1);
+            tile[p] = load_pixel(u32(sx), y);
+        }
+        workgroupBarrier();
+        let x = x0 + lid;
+        if x < w {
+            var sum = vec3<f32>(0.0);
+            for (var k = 0u; k < taps; k++) {
+                sum += weights[k] * tile[lid + k].xyz;
+            }
+            store(x, y, sum);
+        }
+    } else {
+        // Rows y0 − r … y0 + 31 + r, clamped, of columns x0 … x0 + 15.
+        let x0 = wid.x * BLOCK_W;
+        let y0 = wid.y * BLOCK_H;
+        for (var e = lid; e < (BLOCK_H + 2u * r) * BLOCK_W; e += 256u) {
+            let x = x0 + e % BLOCK_W;
+            if x < w {
+                let sy = clamp(i32(y0 + e / BLOCK_W) - i32(r), 0, i32(h) - 1);
+                tile[e] = load_pixel(x, u32(sy));
+            }
+        }
+        workgroupBarrier();
+        let x = x0 + lid % BLOCK_W;
+        if x < w {
+            for (var half = 0u; half < 2u; half++) {
+                let ty = lid / BLOCK_W + half * (BLOCK_H / 2u);
+                if y0 + ty < h {
+                    var sum = vec3<f32>(0.0);
+                    for (var k = 0u; k < taps; k++) {
+                        sum += weights[k] * tile[(ty + k) * BLOCK_W + lid % BLOCK_W].xyz;
+                    }
+                    store(x, y0 + ty, sum);
+                }
             }
         }
     }
