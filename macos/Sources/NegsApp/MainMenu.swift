@@ -57,6 +57,7 @@ import SwiftUI
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
 
         let view = submenu("View")
+        command(view, "Hide Film Strip", #selector(toggleFilmstrip), "f", [.command, .option])
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
@@ -108,6 +109,7 @@ import SwiftUI
     @objc private func openRecent(_ item: NSMenuItem) { if let url = item.representedObject as? URL { model.open(url) } }
     @objc private func savePreview() { model.savePanel(export: false) }
     @objc private func exportPhotograph() { model.savePanel(export: true) }
+    @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
     @objc private func toggleAdjustments() { model.inspectorVisible.toggle() }
     @objc private func fitPhotograph() { model.zoom(fit: true) }
     @objc private func actualSize() { model.zoom(fit: false) }
@@ -122,6 +124,9 @@ import SwiftUI
         case #selector(showRecent): return !model.recentFiles.isEmpty
         case #selector(savePreview): return model.canSave
         case #selector(exportPhotograph): return photo && model.ready && !model.exporting && !model.cropping
+        case #selector(toggleFilmstrip):
+            item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
+            return true
         case #selector(toggleAdjustments): item.state = model.inspectorVisible ? .on : .off; return true
         case #selector(fitPhotograph), #selector(actualSize): return photo && !model.cropping
         case #selector(rotate): return photo
