@@ -3717,6 +3717,7 @@ dependencies = [
  "clap",
  "exr",
  "image",
+ "rand_mt",
  "rayon",
  "serde_json",
  "spektrafilm-core",
