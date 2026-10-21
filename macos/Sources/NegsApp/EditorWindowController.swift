@@ -122,6 +122,12 @@ import SwiftUI
         window.title = model.source?.lastPathComponent ?? "Negs"
         window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
         showCropActions(model.cropping)
+        if let item = items[.filmstrip] {
+            item.toolTip = model.filmstripVisible ? "Hide film strip (⌥⌘F)" : "Show film strip (⌥⌘F)"
+            let icon = symbol("rectangle.bottomthird.inset.filled", "Film Strip")
+            item.image = model.filmstripVisible
+                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+        }
         setEnabled(.zoom, photo && !model.cropping)
         if let edit = items[.edit] as? NSToolbarItemGroup {
             edit.isEnabled = photo
@@ -167,7 +173,7 @@ import SwiftUI
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.open, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .export, .adjustments]
+        [.open, .filmstrip, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .export, .adjustments]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -180,6 +186,8 @@ import SwiftUI
         case .open:
             item = button(id, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph))
             item.isNavigational = true
+        case .filmstrip:
+            item = button(id, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip))
         case .zoom:
             let group = NSToolbarItemGroup(itemIdentifier: id)
             group.subitems = [button(.init("fit"), "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
@@ -245,10 +253,12 @@ import SwiftUI
     @objc private func cancelCrop() { model.endCrop(apply: false) }
     @objc private func applyCrop() { model.endCrop(apply: true) }
     @objc private func export() { model.savePanel(export: true) }
+    @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
     @objc private func toggleAdjustments() { model.inspectorVisible.toggle() }
 }
 
 private extension NSToolbarItem.Identifier {
+    static let filmstrip = Self("filmstrip")
     static let open = Self("open"), zoom = Self("zoom"), edit = Self("edit")
     static let export = Self("export"), adjustments = Self("adjustments"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
 }

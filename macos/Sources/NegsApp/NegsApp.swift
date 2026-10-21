@@ -106,6 +106,10 @@ struct EditorCanvas: View {
                 .overlay {
                     if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
                 }
+            if model.filmstripVisible, let source = model.source {
+                Divider()
+                PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
+            }
             if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
                 Divider()
                 StatusBar(model: model)
