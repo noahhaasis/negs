@@ -57,7 +57,8 @@ fn linear_dispatch_grid_capped(n_threads: u32, workgroup_size: u32, max_per_dim:
 #[cfg(feature = "wgpu-backend")]
 fn relaxed_loop_bounding(shader_source: &str) -> bool {
     [
-        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir.wgsl"),
+        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir_rows.wgsl"),
+        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir_cols.wgsl"),
         include_str!("../../spektrafilm-shaders/wgsl/ref_blur_iir_rows.wgsl"),
         include_str!("../../spektrafilm-shaders/wgsl/ref_blur_iir_cols.wgsl"),
     ]
@@ -2231,15 +2232,16 @@ fn build_ref_blur_channels(
     label: &str,
 ) -> RefBlur {
     use wgpu::util::DeviceExt;
-    let fir_pipe = backend.cached_pipeline(
-        include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir.wgsl"),
-        &[
-            wgpu::BufferBindingType::Uniform,
-            wgpu::BufferBindingType::Storage { read_only: true },
-            wgpu::BufferBindingType::Storage { read_only: true },
-            wgpu::BufferBindingType::Storage { read_only: false },
-        ],
-    );
+    let fir_layout = [
+        wgpu::BufferBindingType::Uniform,
+        wgpu::BufferBindingType::Storage { read_only: true },
+        wgpu::BufferBindingType::Storage { read_only: true },
+        wgpu::BufferBindingType::Storage { read_only: false },
+    ];
+    // Separate shaders per direction, so the row pass reserves only the
+    // workgroup memory it needs.
+    let fir_rows_pipe = backend.cached_pipeline(include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir_rows.wgsl"), &fir_layout);
+    let fir_cols_pipe = backend.cached_pipeline(include_str!("../../spektrafilm-shaders/wgsl/ref_blur_fir_cols.wgsl"), &fir_layout);
     let iir_layout = [
         wgpu::BufferBindingType::Uniform,
         wgpu::BufferBindingType::Storage { read_only: true },
@@ -2255,10 +2257,8 @@ fn build_ref_blur_channels(
     struct FirParams {
         width: u32,
         height: u32,
-        vertical: u32,
         accumulate: u32,
         radius: u32,
-        _pad: [u32; 3],
         mask: [u32; 4],
         scale: [f32; 4],
     }
@@ -2294,10 +2294,8 @@ fn build_ref_blur_channels(
     let mut fir = FirParams {
         width,
         height,
-        vertical: 0,
         accumulate: 0,
         radius: 0,
-        _pad: [0; 3],
         mask: [0; 4],
         scale: [1.0; 4],
     };
@@ -2350,7 +2348,6 @@ fn build_ref_blur_channels(
         for vertical in [0u32, 1] {
             let (input, output) = if vertical == 0 { (src, mid) } else { (mid, out) };
             let params = FirParams {
-                vertical,
                 accumulate: if vertical == 0 { 0 } else { accumulate as u32 },
                 scale: if vertical == 0 { [1.0; 4] } else { fir.scale },
                 ..fir
@@ -2360,9 +2357,10 @@ fn build_ref_blur_channels(
                 contents: bytemuck::bytes_of(&params),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
+            let pipeline = if vertical == 0 { &fir_rows_pipe } else { &fir_cols_pipe };
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&format!("{label}_fir_bg_{vertical}")),
-                layout: &fir_pipe.layout,
+                layout: &pipeline.layout,
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 1, resource: input.as_entire_binding() },
@@ -2370,8 +2368,8 @@ fn build_ref_blur_channels(
                     wgpu::BindGroupEntry { binding: 3, resource: output.as_entire_binding() },
                 ],
             });
-            // ref_blur_fir.wgsl: 256-pixel row segments (numbered row by
-            // row, wrapped into y), or 16 × 32 blocks.
+            // 256-pixel row segments (numbered row by row, wrapped into
+            // y), or 16 × 32 blocks.
             let workgroups = if vertical == 0 {
                 linear_dispatch_grid(width.div_ceil(256) * height, 1)
             } else {
@@ -2380,7 +2378,7 @@ fn build_ref_blur_channels(
             passes.push(RefBlurPass {
                 _params_buf: params_buf,
                 _kernel_buf: Some(kernel_buf.clone()),
-                pipeline: fir_pipe.clone(),
+                pipeline: pipeline.clone(),
                 bg,
                 workgroups,
             });
