@@ -47,7 +47,7 @@ A LUT looks at each pixel on its own and swaps its colour. Real film doesn't wor
 
 ## Borders
 
-Finish with a clean white border, a thin keyline, a black film edge, or the full 35mm frame, sprocket holes and all, printed with the stock's own edge markings.
+Finish with a solid border or a thin keyline in any width and colour, a black film edge, or the full 35mm frame, sprocket holes and all, printed with the stock's own edge markings.
 
 | White border | Keyline | Film edge | 35mm frame |
 |---|---|---|---|

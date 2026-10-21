@@ -319,7 +319,7 @@ final class EngineClient: @unchecked Sendable {
     /// Develops `source` at full resolution with `state`, cropping and
     /// straightening to `crop`, adding `border`, and fitting to `size`, with `engine`.
     @discardableResult
-    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderStyle?, size: ExportSize = .full, engine: ExportEngine = .reference) async throws -> ExportOutcome {
+    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderSettings?, size: ExportSize = .full, engine: ExportEngine = .reference) async throws -> ExportOutcome {
         let fm = FileManager.default
         let executable = try engine.executable(in: paths)
         let work = scratch.directory.appendingPathComponent("export-\(UUID().uuidString)")
@@ -343,10 +343,7 @@ final class EngineClient: @unchecked Sendable {
             let r = crop.rect
             child.arguments! += ["--crop", [r.minX, r.minY, r.width, r.height, crop.angle].map { "\(Double($0))" }.joined(separator: ",")]
         }
-        if let border {
-            child.arguments! += ["--border", border.rawValue]
-            if state.border.instagram { child.arguments!.append("--instagram") }
-        }
+        if let border { child.arguments! += border.arguments }
         child.arguments! += size.arguments
         var environment = ProcessInfo.processInfo.environment
         environment["SPEKTRAFILM_BACKEND"] = engine.backend; child.environment = environment

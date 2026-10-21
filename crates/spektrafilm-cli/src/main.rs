@@ -63,9 +63,23 @@ enum Commands {
         #[arg(long)]
         crop: Option<spektrafilm_io::crop::Crop>,
         /// Add a border around the result (after rotation and crop).
-        #[arg(long, value_parser = ["white", "film", "keyline", "35mm"])]
+        #[arg(long, value_parser = ["solid", "white", "film", "keyline", "35mm"])]
         border: Option<String>,
-        /// Extend the border with white to Instagram's 3:4 portrait.
+        /// The solid or keyline mat, or the black around the film frame, as a
+        /// fraction of the long edge. Default: 0.03 for a mat, 0 for film.
+        #[arg(long, requires = "border")]
+        border_width: Option<f64>,
+        /// The mat's colour, #rrggbb. Default: white.
+        #[arg(long, requires = "border")]
+        border_color: Option<spektrafilm_io::border::Rgb>,
+        /// The keyline's line, as a fraction of the long edge. Default: 0.004.
+        #[arg(long, requires = "border")]
+        keyline_width: Option<f64>,
+        /// The keyline's colour, #rrggbb. Default: black.
+        #[arg(long, requires = "border")]
+        keyline_color: Option<spektrafilm_io::border::Rgb>,
+        /// Extend the border to Instagram's 3:4 portrait, with the mat's
+        /// colour around a solid or keyline border and white around film.
         #[arg(long, requires = "border")]
         instagram: bool,
         /// Resample the result (after the border) to this many pixels on
@@ -136,6 +150,10 @@ fn main() -> Result<()> {
             raw_out,
             crop,
             border,
+            border_width,
+            border_color,
+            keyline_width,
+            keyline_color,
             instagram,
             long_edge,
             short_edge,
@@ -146,6 +164,13 @@ fn main() -> Result<()> {
             let fit = long_edge
                 .map(Fit::LongEdge)
                 .or(short_edge.map(Fit::ShortEdge));
+            let defaults = spektrafilm_io::border::BorderOptions::default();
+            let border_options = spektrafilm_io::border::BorderOptions {
+                width: border_width,
+                line: keyline_width.unwrap_or(defaults.line),
+                color: border_color.unwrap_or(defaults.color),
+                line_color: keyline_color.unwrap_or(defaults.line_color),
+            };
             cmd_process(
                 &input,
                 &output,
@@ -160,6 +185,7 @@ fn main() -> Result<()> {
                 raw_out.as_deref(),
                 crop,
                 border,
+                &border_options,
                 instagram,
                 fit,
                 iters,
@@ -198,6 +224,7 @@ fn cmd_process(
     raw_out: Option<&Path>,
     crop: Option<spektrafilm_io::crop::Crop>,
     border: Option<spektrafilm_io::border::BorderStyle>,
+    border_options: &spektrafilm_io::border::BorderOptions,
     instagram: bool,
     fit: Option<Fit>,
     iters: usize,
@@ -308,10 +335,21 @@ fn cmd_process(
     let result = result.rotated_cw(rotate_cw);
     let result = match border {
         Some(style) => {
-            let bordered =
-                spektrafilm_io::border::add_border(&result, style, film_name, encoded, data_dir)?;
+            let bordered = spektrafilm_io::border::add_border(
+                &result,
+                style,
+                border_options,
+                film_name,
+                encoded,
+                data_dir,
+            )?;
             if instagram {
-                spektrafilm_io::border::extend_for_instagram(&bordered, style)
+                spektrafilm_io::border::extend_for_instagram(
+                    &bordered,
+                    style,
+                    border_options,
+                    encoded,
+                )
             } else {
                 bordered
             }

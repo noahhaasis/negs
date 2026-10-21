@@ -6,13 +6,15 @@ import SwiftUI
 /// changing one never re-renders. Sizes match `spektrafilm-io::border`, which
 /// adds the same border on export; keep the two in sync.
 enum BorderStyle: String, Codable, Sendable, CaseIterable, Identifiable {
-    case white, film, keyline
+    /// Saved as "white", its name before it took a colour.
+    case solid = "white"
+    case film, keyline
     case film35 = "35mm"
 
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .white: "White"
+        case .solid: "Solid"
         case .film: "Film"
         case .keyline: "Keyline"
         case .film35: "35mm"
@@ -20,9 +22,9 @@ enum BorderStyle: String, Codable, Sendable, CaseIterable, Identifiable {
     }
     var help: String {
         switch self {
-        case .white: "A white mat around the photograph."
+        case .solid: "A plain mat around the photograph."
         case .film: "A scanned 120 film frame with an irregular black edge."
-        case .keyline: "A white mat with a thin black line around the photograph."
+        case .keyline: "A mat with a thin line around the photograph."
         case .film35: "A 35mm negative strip with the film’s edge print. Needs a 3:2 or 3:4 photograph."
         }
     }
@@ -31,30 +33,6 @@ enum BorderStyle: String, Codable, Sendable, CaseIterable, Identifiable {
     /// holds 3:2 and 3:4 photographs.
     func fits(_ size: CGSize) -> Bool { self != .film35 || FilmFormat(size) != nil }
 
-    /// The canvas around a photograph of `size` pixels. The 35mm canvas
-    /// comes from its `strip`, and is the photograph alone until that loads.
-    func canvas(for size: CGSize, strip: FilmStrip? = nil) -> CGSize {
-        let long = max(size.width, size.height)
-        let inset: CGFloat
-        switch self {
-        case .white: inset = (long * 0.03).rounded(.down)
-        case .keyline: inset = (long * 0.03).rounded(.down) + Self.keyline(for: size)
-        case .film: inset = Self.film(for: size).inset
-        case .film35:
-            guard let strip, strip.format == FilmFormat(size) else { return size }
-            return strip.canvas(for: size)
-        }
-        return CGSize(width: size.width + 2 * inset, height: size.height + 2 * inset)
-    }
-    /// The 3:4 portrait canvas Instagram shows whole, around the bordered
-    /// `canvas`: the film borders get a white margin first, then white
-    /// extends the short way as little as it can.
-    func instagramCanvas(for canvas: CGSize) -> CGSize {
-        let margin = self == .film || self == .film35 ? (max(canvas.width, canvas.height) * 0.03).rounded(.down) : 0
-        let (w, h) = (canvas.width + 2 * margin, canvas.height + 2 * margin)
-        return w * 4 > h * 3 ? CGSize(width: w, height: (w * 4 / 3).rounded(.up)) : CGSize(width: (h * 3 / 4).rounded(.up), height: h)
-    }
-    static func keyline(for size: CGSize) -> CGFloat { max(1, (max(size.width, size.height) * 0.004).rounded()) }
     /// The film frame's canvas inset and nine-patch corner size.
     static func film(for size: CGSize) -> (inset: CGFloat, pad: CGFloat) {
         let short = min(size.width, size.height)
@@ -69,16 +47,116 @@ enum BorderStyle: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+/// An 8-bit sRGB colour, saved and sent to the exporter as "#rrggbb", so
+/// the preview shows exactly what the exporter fills.
+struct BorderColor: Codable, Hashable, Sendable {
+    var red: UInt8, green: UInt8, blue: UInt8
+
+    static let white = BorderColor(red: 255, green: 255, blue: 255)
+    static let black = BorderColor(red: 0, green: 0, blue: 0)
+
+    init(red: UInt8, green: UInt8, blue: UInt8) { (self.red, self.green, self.blue) = (red, green, blue) }
+    /// The nearest sRGB colour to `color`, from any colour space.
+    init(_ color: CGColor) {
+        let srgb = color.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil)
+        let c = srgb?.components ?? [0, 0, 0]
+        let channel = { (i: Int) in UInt8((min(max(c.count > 2 ? c[i] : c[0], 0), 1) * 255).rounded()) }
+        self.init(red: channel(0), green: channel(1), blue: channel(2))
+    }
+    init?(hex: String) {
+        let digits = hex.hasPrefix("#") ? hex.dropFirst() : Substring(hex)
+        guard digits.count == 6, let value = UInt32(digits, radix: 16) else { return nil }
+        self.init(red: UInt8(value >> 16 & 0xff), green: UInt8(value >> 8 & 0xff), blue: UInt8(value & 0xff))
+    }
+
+    var hex: String { String(format: "#%02x%02x%02x", red, green, blue) }
+    var cgColor: CGColor { CGColor(srgbRed: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255, alpha: 1) }
+
+    init(from decoder: Decoder) throws {
+        let hex = try decoder.singleValueContainer().decode(String.self)
+        guard let color = BorderColor(hex: hex) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not a #rrggbb colour: \(hex)"))
+        }
+        self = color
+    }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(hex)
+    }
+}
+
 struct BorderSettings: Codable, Equatable, Sendable {
     var enabled = false
-    var style = BorderStyle.white
+    var style = BorderStyle.solid
     var export = true
-    /// Extends the border with white to Instagram's 3:4 portrait.
+    /// Extends the border to Instagram's 3:4 portrait: with the mat's
+    /// colour around a mat, with white around film.
     var instagram = false
+    /// The solid and keyline mat on every side, a fraction of the
+    /// photograph's long edge. Both styles share it, and the colour.
+    var width = Self.defaultWidth
+    /// Black around the film frame, a fraction of the long edge.
+    var filmWidth = 0.0
+    /// The keyline's line, a fraction of the long edge.
+    var line = Self.defaultLine
+    var color = BorderColor.white
+    var lineColor = BorderColor.black
+
+    static let defaultWidth = 0.03
+    static let defaultLine = 0.004
 
     /// The border around a photograph of `size`, if the style fits it.
-    func shown(for size: CGSize) -> BorderStyle? { enabled && style.fits(size) ? style : nil }
-    func exported(for size: CGSize) -> BorderStyle? { export ? shown(for: size) : nil }
+    func shown(for size: CGSize) -> BorderSettings? { enabled && style.fits(size) ? self : nil }
+    func exported(for size: CGSize) -> BorderSettings? { export ? shown(for: size) : nil }
+
+    /// The style's width setting: the mat, or the black around film.
+    var styleWidth: Double? {
+        switch style {
+        case .solid, .keyline: width
+        case .film: filmWidth
+        case .film35: nil
+        }
+    }
+
+    /// The canvas around a photograph of `size` pixels. The 35mm canvas
+    /// comes from its `strip`, and is the photograph alone until that loads.
+    func canvas(for size: CGSize, strip: FilmStrip? = nil) -> CGSize {
+        let long = max(size.width, size.height)
+        let inset: CGFloat
+        switch style {
+        case .solid: inset = (long * width).rounded(.down)
+        case .keyline: inset = (long * width).rounded(.down) + keyline(for: size)
+        case .film: inset = BorderStyle.film(for: size).inset + (long * filmWidth).rounded(.down)
+        case .film35:
+            guard let strip, strip.format == FilmFormat(size) else { return size }
+            return strip.canvas(for: size)
+        }
+        return CGSize(width: size.width + 2 * inset, height: size.height + 2 * inset)
+    }
+    /// The 3:4 portrait canvas Instagram shows whole, around the bordered
+    /// `canvas`: the film borders get a white margin first, then the
+    /// background extends the short way as little as it can.
+    func instagramCanvas(for canvas: CGSize) -> CGSize {
+        let margin = style == .film || style == .film35 ? (max(canvas.width, canvas.height) * 0.03).rounded(.down) : 0
+        let (w, h) = (canvas.width + 2 * margin, canvas.height + 2 * margin)
+        return w * 4 > h * 3 ? CGSize(width: w, height: (w * 4 / 3).rounded(.up)) : CGSize(width: (h * 3 / 4).rounded(.up), height: h)
+    }
+    func keyline(for size: CGSize) -> CGFloat { max(1, (max(size.width, size.height) * line).rounded()) }
+
+    /// The exporter's options for this border, as `BorderOptions` in
+    /// `spektrafilm-io::border` reads them.
+    var options: [String: JSONValue] {
+        var options: [String: JSONValue] = ["line": .number(line), "color": .string(color.hex), "line_color": .string(lineColor.hex)]
+        if let styleWidth { options["width"] = .number(styleWidth) }
+        return options
+    }
+    /// The same options as `spektrafilm process` arguments.
+    var arguments: [String] {
+        var arguments = ["--border", style.rawValue, "--keyline-width", "\(line)", "--border-color", color.hex, "--keyline-color", lineColor.hex]
+        if let styleWidth { arguments += ["--border-width", "\(styleWidth)"] }
+        if instagram { arguments.append("--instagram") }
+        return arguments
+    }
 }
 
 extension BorderSettings {
@@ -90,6 +168,11 @@ extension BorderSettings {
         style = try c.decodeIfPresent(BorderStyle.self, forKey: .style) ?? defaults.style
         export = try c.decodeIfPresent(Bool.self, forKey: .export) ?? defaults.export
         instagram = try c.decodeIfPresent(Bool.self, forKey: .instagram) ?? defaults.instagram
+        width = try c.decodeIfPresent(Double.self, forKey: .width) ?? defaults.width
+        filmWidth = try c.decodeIfPresent(Double.self, forKey: .filmWidth) ?? defaults.filmWidth
+        line = try c.decodeIfPresent(Double.self, forKey: .line) ?? defaults.line
+        color = try c.decodeIfPresent(BorderColor.self, forKey: .color) ?? defaults.color
+        lineColor = try c.decodeIfPresent(BorderColor.self, forKey: .lineColor) ?? defaults.lineColor
     }
 }
 
@@ -170,41 +253,43 @@ struct FilmStrip: Equatable {
 /// canvas or zooming never redraws anything.
 final class BorderLayers {
     /// The keyline, or the black under a film border on a white canvas.
-    private let black = CALayer()
+    private let line = CALayer()
     private let film = CALayer()
     private let strip = CALayer()
 
     init(in host: CALayer, around photo: CALayer) {
         let none = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull(), "backgroundColor": NSNull(), "hidden": NSNull()]
-        black.backgroundColor = .black
-        black.actions = none
+        line.actions = none
         for layer in [film, strip] {
             layer.actions = none
             layer.minificationFilter = .trilinear
             layer.magnificationFilter = .linear
             host.addSublayer(layer)
         }
-        host.insertSublayer(black, below: photo)
+        host.insertSublayer(line, below: photo)
         host.actions = none
     }
 
     /// Lays the border out around a photograph of `size` (as displayed,
-    /// after rotation), centred in `host`. On an `instagram` canvas the
-    /// film borders sit on white, like the exporter's.
-    func layout(_ style: BorderStyle?, instagram: Bool = false, photo size: CGSize, host: CALayer, texture: CGImage?, filmStrip: FilmStrip?) {
+    /// after rotation), centred in `host`. The mat fills the whole canvas,
+    /// Instagram's extension too; there the film borders sit on white,
+    /// like the exporter's.
+    func layout(_ border: BorderSettings?, photo size: CGSize, host: CALayer, texture: CGImage?, filmStrip: FilmStrip?) {
         let center = CGPoint(x: host.bounds.midX, y: host.bounds.midY)
+        let style = border?.style
         let filmStrip = style == .film35 ? filmStrip.flatMap { $0.format == FilmFormat(size) ? $0 : nil } : nil
         host.backgroundColor = switch style {
-        case .white, .keyline: .white
-        case .film, .film35: instagram ? .white : .black
+        case .solid?, .keyline?: border?.color.cgColor
+        case .film?, .film35?: border?.instagram == true ? .white : .black
         case nil: nil
         }
-        black.isHidden = style == nil || style == .white
-        if let style, style != .white {
-            let line = BorderStyle.keyline(for: size)
-            black.bounds.size = style == .keyline ? CGSize(width: size.width + 2 * line, height: size.height + 2 * line)
-                                                  : style.canvas(for: size, strip: filmStrip)
-            black.position = center
+        line.isHidden = style == nil || style == .solid
+        if let border, border.style != .solid {
+            let width = border.keyline(for: size)
+            line.backgroundColor = border.style == .keyline ? border.lineColor.cgColor : .black
+            line.bounds.size = border.style == .keyline ? CGSize(width: size.width + 2 * width, height: size.height + 2 * width)
+                                                        : border.canvas(for: size, strip: filmStrip)
+            line.position = center
         }
         layoutStrip(filmStrip, photo: size, center: center)
         film.isHidden = style != .film || texture == nil
@@ -246,13 +331,15 @@ final class BorderLayers {
 struct BorderStylePicker: View {
     @Binding var selection: BorderStyle
     var photo: CGSize?
+    /// The mat and line colours the samples show.
+    var colors = (mat: BorderColor.white, line: BorderColor.black)
 
     var body: some View {
         HStack(spacing: 8) {
             ForEach(BorderStyle.allCases) { style in
                 Button { selection = style } label: {
                     VStack(spacing: 5) {
-                        BorderSwatch(style: style)
+                        BorderSwatch(style: style, colors: colors)
                             .frame(width: 50, height: 36)
                             .padding(3)
                             .overlay {
@@ -277,18 +364,19 @@ struct BorderStylePicker: View {
 
 private struct BorderSwatch: View {
     let style: BorderStyle
+    let colors: (mat: BorderColor, line: BorderColor)
     @Environment(\.isEnabled) private var enabled
     private let photo = LinearGradient(colors: [Color(red: 0.55, green: 0.68, blue: 0.78), Color(red: 0.86, green: 0.74, blue: 0.56)], startPoint: .top, endPoint: .bottom)
 
     var body: some View {
         ZStack {
             switch style {
-            case .white:
-                Color.white
+            case .solid:
+                Color(cgColor: colors.mat.cgColor)
                 Rectangle().fill(photo).padding(5)
             case .keyline:
-                Color.white
-                Rectangle().fill(photo).padding(1).background(Color.black).padding(4)
+                Color(cgColor: colors.mat.cgColor)
+                Rectangle().fill(photo).padding(1).background(Color(cgColor: colors.line.cgColor)).padding(4)
             case .film:
                 Color.black
                 RoundedRectangle(cornerRadius: 2).fill(photo).padding(2)

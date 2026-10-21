@@ -12,7 +12,7 @@ use spektrafilm_core::{
 };
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_io::{
-    border::{BorderStyle, add_border, extend_for_instagram},
+    border::{BorderOptions, BorderStyle, add_border, extend_for_instagram},
     crop::Crop,
     resize::{self, Fit},
 };
@@ -58,6 +58,8 @@ enum Command {
         output: PathBuf,
         #[serde(default)]
         border: Option<BorderStyle>,
+        #[serde(default)]
+        border_options: BorderOptions,
         /// Extend the border to Instagram's 3:4.
         #[serde(default)]
         instagram: bool,
@@ -135,6 +137,7 @@ impl Session {
                 render_id,
                 output,
                 border,
+                border_options,
                 instagram,
                 crop,
                 rotate_cw,
@@ -172,9 +175,10 @@ impl Session {
                 let image = rotated.as_ref().unwrap_or(image);
                 let bordered = match border {
                     Some(style) => {
-                        let bordered = add_border(image, style, film, *encoded, data)?;
+                        let bordered =
+                            add_border(image, style, &border_options, film, *encoded, data)?;
                         Some(if instagram {
-                            extend_for_instagram(&bordered, style)
+                            extend_for_instagram(&bordered, style, &border_options, *encoded)
                         } else {
                             bordered
                         })
@@ -467,6 +471,37 @@ mod tests {
         assert!(scaled.is_none());
     }
     #[test]
+    fn save_reads_the_apps_border_options() {
+        use spektrafilm_io::border::Rgb;
+        // As `saveCommand` in the app's EditorModel writes it.
+        let request: Request = serde_json::from_str(
+            r##"{"id": 1, "command": "save", "render_id": 1, "output": "out.png", "rotate_cw": 0,
+                "border": "white", "instagram": true,
+                "border_options": {"width": 0.05, "line": 0.004, "color": "#1f2a44", "line_color": "#000000"}}"##,
+        )
+        .unwrap();
+        let Command::Save {
+            border,
+            border_options,
+            instagram,
+            ..
+        } = request.command
+        else {
+            panic!("not a save")
+        };
+        assert_eq!(border, Some(BorderStyle::Solid));
+        assert!(instagram);
+        assert_eq!(
+            border_options,
+            BorderOptions {
+                width: Some(0.05),
+                color: Rgb([0x1f, 0x2a, 0x44]),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
     fn stale_preview_cannot_be_saved() {
         let mut session = Session {
             output: Some(Rendered {
@@ -487,9 +522,11 @@ mod tests {
                 render_id: 1,
                 output: "unused.png".into(),
                 border: None,
+                border_options: BorderOptions::default(),
                 instagram: false,
                 crop: None,
                 rotate_cw: 0,
+                fit: None,
             },
         };
         assert!(

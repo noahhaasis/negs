@@ -128,21 +128,42 @@ struct SliderRow: View {
     let range: ClosedRange<Double>
     let step: Double
 
+    var body: some View {
+        LabeledSlider(title: title, value: model.number(path, range: range, step: step), range: range, step: step,
+                      defaultValue: model.defaultValue(path).double, modified: model.isModified(path),
+                      reset: { model.resetValue(path) },
+                      editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+    }
+}
+
+/// A slider under its title and value. Clicking the value types one; off
+/// its default, a button resets it.
+struct LabeledSlider: View {
+    let title: String
+    let value: Binding<Double>
+    let range: ClosedRange<Double>
+    let step: Double
+    /// Shown after the value, such as "%".
+    var unit = ""
+    let defaultValue: Double
+    let modified: Bool
+    let reset: () -> Void
+    let editing: (Bool) -> Void
+
     @State private var typing = false
     private var decimals: Int { max(0, Int(-log10(step).rounded(.down))) }
     private var format: FloatingPointFormatStyle<Double> { .number.precision(.fractionLength(0...decimals)) }
 
     var body: some View {
-        let value = model.number(path, range: range, step: step)
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Text(title).lineLimit(1)
-                    .onTapGesture(count: 2) { model.resetValue(path) }
+                    .onTapGesture(count: 2) { reset() }
                 Spacer(minLength: 8)
-                if model.isModified(path) {
-                    Button { model.resetValue(path) } label: { Image(systemName: "arrow.counterclockwise") }
+                if modified {
+                    Button { reset() } label: { Image(systemName: "arrow.counterclockwise") }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).imageScale(.small)
-                        .help("Reset to \(model.defaultValue(path).double.formatted(.number.precision(.fractionLength(0...decimals))))")
+                        .help("Reset to \(defaultValue.formatted(format))\(unit)")
                         .accessibilityLabel("Reset \(title)")
                 }
                 // A field only while typing, so the window never focuses one by default.
@@ -150,7 +171,7 @@ struct SliderRow: View {
                     ValueField(title: title, value: value, decimals: decimals) { typing = false }
                         .frame(width: 64)
                 } else {
-                    Text(value.wrappedValue, format: format)
+                    Text("\(value.wrappedValue.formatted(format))\(unit)")
                         .monospacedDigit().foregroundStyle(.secondary)
                         .frame(minWidth: 40, alignment: .trailing)
                         .contentShape(Rectangle())
@@ -158,13 +179,11 @@ struct SliderRow: View {
                         .help("Click to type a value")
                 }
             }
-            Slider(value: value, in: range) { Text(title) } onEditingChanged: { editing in
-                editing ? model.beginInteraction() : model.endInteraction()
-            }
+            Slider(value: value, in: range) { Text(title) } onEditingChanged: { editing($0) }
             .labelsHidden().controlSize(.small)
         }
         .padding(.vertical, 1)
-        .resettable(model, path)
+        .resettable(modified: modified, reset: reset)
         .accessibilityElement(children: .contain)
     }
 }
@@ -238,8 +257,11 @@ private final class FocusingTextField: NSTextField {
 
 private extension View {
     func resettable(_ model: EditorModel, _ path: String) -> some View {
+        resettable(modified: model.isModified(path)) { model.resetValue(path) }
+    }
+    func resettable(modified: Bool, reset: @escaping () -> Void) -> some View {
         contextMenu {
-            Button("Reset to Default") { model.resetValue(path) }.disabled(!model.isModified(path))
+            Button("Reset to Default", action: reset).disabled(!modified)
         }
     }
 }
@@ -359,11 +381,12 @@ struct AdjustmentInspector: View {
             Toggle("Add border", isOn: model.border(\.enabled))
             Group {
                 let photo = model.photoSize == .zero ? nil : model.photoSize
-                BorderStylePicker(selection: model.border(\.style), photo: photo)
+                BorderStylePicker(selection: model.border(\.style), photo: photo, colors: (model.border.color, model.border.lineColor))
                 if let photo, !BorderStyle.film35.fits(photo) {
                     Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)); crop it to 3:2 or 4:3 to use it.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                borderControls
                 Toggle("Extend to 3:4 for Instagram", isOn: model.border(\.instagram))
                     .help("Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post.")
                 Toggle("Include in export", isOn: model.border(\.export))
@@ -371,6 +394,33 @@ struct AdjustmentInspector: View {
             }
             .disabled(!model.border.enabled)
         }
+    }
+
+    /// The chosen style's width and colours. Solid and Keyline share the
+    /// mat; the film frame's width adds black around it.
+    @ViewBuilder private var borderControls: some View {
+        switch model.border.style {
+        case .solid, .keyline:
+            let keyline = model.border.style == .keyline
+            borderSlider("Width", \.width, 0...15, step: 0.1)
+            if keyline { borderSlider("Line width", \.line, 0.05...2, step: 0.05) }
+            ColorPicker("Color", selection: model.borderColor(\.color), supportsOpacity: false)
+            if keyline { ColorPicker("Line color", selection: model.borderColor(\.lineColor), supportsOpacity: false) }
+        case .film:
+            borderSlider("Width", \.filmWidth, 0...15, step: 0.1)
+                .help("Adds black around the film frame.")
+        case .film35:
+            EmptyView()
+        }
+    }
+
+    /// A border width in percent of the photograph's long edge.
+    private func borderSlider(_ title: String, _ setting: WritableKeyPath<BorderSettings, Double>, _ range: ClosedRange<Double>, step: Double) -> some View {
+        let initial = BorderSettings()[keyPath: setting]
+        return LabeledSlider(title: title, value: model.borderPercent(setting, range: range, step: step), range: range, step: step, unit: "%",
+                             defaultValue: initial * 100, modified: abs(model.border[keyPath: setting] - initial) > 1e-9,
+                             reset: { model.border(setting).wrappedValue = initial },
+                             editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Border") })
     }
 
     private func control(_ adjustment: Adjustment) -> some View { AdjustmentControl(model: model, adjustment: adjustment) }
