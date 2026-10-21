@@ -104,14 +104,18 @@ to the window on screen (median of 10):
   the stocks at once and isn't rebuilt when the helper answers. Edits are
   possible as soon as the catalog is known; rendering waits for the helper.
 
-Borders (white, film frame, white with keyline) are presentation only. They
+Borders (solid, film frame, keyline, 35mm) are presentation only. They
 are not render parameters, so a border change never re-renders: the canvas
 draws them with Core Animation (the film texture `data/borders/film.png` is a
-`contentsCenter` nine-patch). Export and Save Preview add them only when
-"Include in export" is on, via `--border` on the f64 exporter and `border` on
-the helper's `save`, using `spektrafilm-io::border` after rotation. Both sides
-share the same proportional geometry; `BorderTests` pins the Swift sizes to
-the Rust tests' values.
+`contentsCenter` nine-patch). Solid and keyline share a mat width and colour;
+keyline adds a line width and colour; film's width adds black around the
+frame. Widths are fractions of the long edge (the inspector shows percent),
+colours 8-bit sRGB `#rrggbb`. Export and Save Preview add them only when
+"Include in export" is on, via `--border`, `--border-width`, `--border-color`,
+`--keyline-width` and `--keyline-color` on the f64 exporter and `border` plus
+`border_options` on the helper's `save`, using `spektrafilm-io::border` after
+rotation. Both sides share the same proportional geometry; `BorderTests` pins
+the Swift sizes to the Rust tests' values.
 
 Crop (toolbar crop button, ⌘K) is presentation only as well. Crop mode shows
 the whole developed photograph without its border, with a dimmed outside,

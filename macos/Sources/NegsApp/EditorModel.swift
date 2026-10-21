@@ -78,6 +78,9 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var pendingRender: Task<Void, Never>?
     @ObservationIgnored private var activityTimer: Task<Void, Never>?
     @ObservationIgnored private var interactionStart: EditState?
+    /// The last border colour change, which the next one to the same colour
+    /// joins if nothing else changed in between.
+    @ObservationIgnored private var lastColorEdit: (setting: WritableKeyPath<BorderSettings, BorderColor>, state: EditState, at: Date)?
     @ObservationIgnored private var closing = false
     @ObservationIgnored private var explicitOpenRequested = false
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
@@ -262,10 +265,10 @@ import UniformTypeIdentifiers
         if interactionStart == nil { interactionStart = state }
         hideActivity()
     }
-    func endInteraction() {
+    func endInteraction(action: String = "Change Adjustment") {
         guard let start = interactionStart else { return }
         interactionStart = nil
-        if start != state { registerUndo(restoring: start, action: "Change Adjustment") }
+        if start != state { registerUndo(restoring: start, action: action) }
         if showingInteractiveFrame, ready, source != nil, !closing { scheduleRender() }
         if !previewCurrent { scheduleActivity() }
     }
@@ -292,6 +295,29 @@ import UniformTypeIdentifiers
     func border<Value>(_ setting: WritableKeyPath<BorderSettings, Value>) -> Binding<Value> {
         Binding(get: { self.border[keyPath: setting] }, set: {
             var next = self.state; next.border[keyPath: setting] = $0; self.apply(next, action: "Change Border")
+        })
+    }
+    /// A border width as a percentage of the long edge, stepped like the
+    /// adjustment sliders. Back at the default it stores the default exactly,
+    /// so exports match ones made before widths could change.
+    func borderPercent(_ setting: WritableKeyPath<BorderSettings, Double>, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
+        Binding(get: { self.border[keyPath: setting] * 100 }, set: {
+            let fraction = Self.snap($0, to: range, step: step) / 100, initial = BorderSettings()[keyPath: setting]
+            self.border(setting).wrappedValue = abs(fraction - initial) < 1e-9 ? initial : fraction
+        })
+    }
+    /// The colour panel sends a stream of colours while one is dragged, so
+    /// one undo step covers each run of changes to the same colour.
+    func borderColor(_ setting: WritableKeyPath<BorderSettings, BorderColor>) -> Binding<CGColor> {
+        Binding(get: { self.border[keyPath: setting].cgColor }, set: {
+            var next = self.state; next.border[keyPath: setting] = BorderColor($0)
+            guard next != self.state else { return }
+            if let last = self.lastColorEdit, last.setting == setting, last.state == self.state, Date().timeIntervalSince(last.at) < 1 {
+                self.replaceState(next)
+            } else {
+                self.apply(next, action: "Change Border Color")
+            }
+            self.lastColorEdit = (setting, next, Date())
         })
     }
     /// Keeps the border and crop, like the film, paper, and rotation.
@@ -671,7 +697,7 @@ import UniformTypeIdentifiers
         var extras = ""
         if state.crop.cropped { extras += " Crops the photograph." }
         if let border = state.border.exported(for: photoSize) {
-            extras += " Adds the \(border.title.lowercased()) border\(state.border.instagram ? ", extended to 3:4 for Instagram" : "")."
+            extras += " Adds the \(border.style.title.lowercased()) border\(border.instagram ? ", extended to 3:4 for Instagram" : "")."
         }
         let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: export ? ExportEngine.selected : nil, size: ExportSize.last) { engine, size in
             let extras = extras + (size.summary.map { " \($0)." } ?? "")
@@ -726,8 +752,9 @@ import UniformTypeIdentifiers
             command["crop"] = .object(["x": .number(r.minX), "y": .number(r.minY), "width": .number(r.width), "height": .number(r.height), "angle": .number(state.crop.angle)])
         }
         if let border = state.border.exported(for: photoSize) {
-            command["border"] = .string(border.rawValue)
-            command["instagram"] = .bool(state.border.instagram)
+            command["border"] = .string(border.style.rawValue)
+            command["border_options"] = .object(border.options)
+            command["instagram"] = .bool(border.instagram)
         }
         if let fit = size.json { command["fit"] = fit }
         return command
