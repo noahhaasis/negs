@@ -214,6 +214,47 @@ mod integration_tests {
     }
 
     #[test]
+    fn with_params_recalibrates_print_exposure_like_a_new_pipeline() {
+        let dir = data_dir();
+        let film = profile::load_profile_by_name(&dir, "kodak_gold_200").unwrap();
+        let print = profile::load_profile_by_name(&dir, "kodak_portra_endura").unwrap();
+        let backend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let img = ImageBuf::from_data(
+            8,
+            8,
+            (0..8 * 8 * 3)
+                .map(|i| from_f64((i % 17) as f64 / 16.0))
+                .collect(),
+        );
+        let cached = Pipeline::new_with_spectral(
+            film.clone(),
+            print.clone(),
+            RuntimeParams::default(),
+            &dir,
+        )
+        .unwrap();
+        for (ev, compensation, gamma) in [(1.3, true, 1.0), (-0.7, true, 1.2), (1.3, false, 1.0)] {
+            let mut params = RuntimeParams::default();
+            params.camera.exposure_compensation_ev = ev;
+            params.enlarger.print_exposure_compensation = compensation;
+            params.film_render.density_curve_gamma = gamma;
+            let fresh =
+                Pipeline::new_with_spectral(film.clone(), print.clone(), params.clone(), &dir)
+                    .unwrap();
+            let reused = cached.clone().with_params(params);
+            assert_eq!(
+                reused.print_exposure_factor().to_bits(),
+                fresh.print_exposure_factor().to_bits(),
+                "EV {ev}, compensation {compensation}, gamma {gamma}"
+            );
+            assert_eq!(
+                reused.process(img.clone(), &backend).data,
+                fresh.process(img.clone(), &backend).data
+            );
+        }
+    }
+
+    #[test]
     fn positive_slide_film_scan_stays_photographic() {
         let dir = data_dir();
         let film = profile::load_profile_by_name(&dir, "kodak_ektachrome_100").unwrap();

@@ -16,6 +16,7 @@ struct PreviewCanvas: NSViewRepresentable {
     let filmStrip: FilmStrip?
     let zoomCommand: UUID
     let fit: Bool
+    var scale: CanvasScale?
 
     func makeNSView(context: Context) -> ImageScrollView {
         let scroll = ImageScrollView()
@@ -31,6 +32,7 @@ struct PreviewCanvas: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: ImageScrollView, context: Context) {
+        scale?.view = scroll
         let photo = scroll.documentView as! PhotographView
         let cropped = crop.size(of: size)
         let displaySize = rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
@@ -58,6 +60,16 @@ struct PreviewCanvas: NSViewRepresentable {
             scroll.lastCommand = zoomCommand; scroll.fitting = fit
             scroll.applyZoom()
         } else if oldSize != documentSize || recropped, scroll.fitting { scroll.applyZoom() }
+    }
+}
+
+/// How many screen pixels a pixel of the photograph covers at the canvas's
+/// zoom. A render this much smaller than the photograph looks the same on screen.
+@MainActor final class CanvasScale {
+    fileprivate weak var view: ImageScrollView?
+    var screenPixelsPerPhotoPixel: CGFloat? {
+        guard let view, let window = view.window, view.magnification > 0 else { return nil }
+        return view.magnification * window.backingScaleFactor
     }
 }
 

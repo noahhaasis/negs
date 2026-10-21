@@ -47,6 +47,10 @@ enum Command {
         params: Box<RuntimeParams>,
         limit_preview: bool,
         preview_path: PathBuf,
+        /// While a slider moves: render at this fraction of the photograph's
+        /// size (the canvas resolution), a preview that is never saved.
+        #[serde(default)]
+        interactive_scale: Option<f32>,
     },
     Save {
         render_id: u64,
@@ -73,6 +77,9 @@ struct Session {
     /// The source resized to the working/preview dimensions, so edits that
     /// don't change the size skip a full-resolution resample.
     scaled: Option<((u32, u32), ImageBuf)>,
+    /// The same for interactive renders, kept beside `scaled` so a drag
+    /// after a full-size render doesn't resample the source again.
+    interactive: Option<((u32, u32), ImageBuf)>,
     pipeline: Option<(String, Pipeline)>,
     output: Option<Rendered>,
 }
@@ -178,12 +185,17 @@ impl Session {
                 mut params,
                 limit_preview,
                 preview_path,
+                interactive_scale,
             } => {
                 let started = Instant::now();
                 ensure!(
                     params.io.upscale_factor.is_finite()
                         && (0.1..=1.0).contains(&params.io.upscale_factor),
                     "Invalid working resolution"
+                );
+                ensure!(
+                    interactive_scale.is_none_or(|s| s.is_finite() && s > 0.0),
+                    "Invalid interactive scale"
                 );
                 ensure!(
                     params.io.output_color_space == OUTPUT_SPACE,
@@ -201,6 +213,7 @@ impl Session {
                 let render_key = json!({
                     "input": input, "source_generation": source_generation, "film": film,
                     "paper": paper, "params": params, "limit_preview": limit_preview,
+                    "interactive_scale": interactive_scale,
                 });
                 let reused = self.output.take().filter(|last| last.key == render_key);
                 if let Some(last) = reused {
@@ -227,6 +240,7 @@ impl Session {
                     )?;
                     self.source = Some((input.clone(), wb, image));
                     self.scaled = None;
+                    self.interactive = None;
                     self.source_generation = source_generation;
                 }
                 let key = preview_pipeline_cache_key(&film, &paper, &params);
@@ -248,8 +262,17 @@ impl Session {
                 let source = &self.source.as_ref().unwrap().2;
                 let (source_width, source_height) = (source.width, source.height);
                 let upscale_factor = params.io.upscale_factor;
-                let dimensions =
+                // The photograph's size; an interactive render is a smaller
+                // frame of the same photograph.
+                let photo_dimensions =
                     preview_dimensions(source_width, source_height, upscale_factor, limit_preview);
+                let dimensions = match interactive_scale.filter(|&s| s < 1.0) {
+                    Some(s) => (
+                        ((photo_dimensions.0 as f32 * s).round() as u32).max(1),
+                        ((photo_dimensions.1 as f32 * s).round() as u32).max(1),
+                    ),
+                    None => photo_dimensions,
+                };
                 params.io.upscale_factor = 1.0;
                 let pipeline = self
                     .pipeline
@@ -258,7 +281,16 @@ impl Session {
                     .1
                     .clone()
                     .with_params((*params).clone());
-                let working = working_source(source, &mut self.scaled, dimensions);
+                let working = if dimensions == photo_dimensions {
+                    working_source(
+                        source,
+                        &mut self.scaled,
+                        dimensions,
+                        rescale_preview_input_fast,
+                    )
+                } else {
+                    working_source(source, &mut self.interactive, dimensions, downsample_area)
+                };
                 let backend = self
                     .backend
                     .get_or_insert_with(spektrafilm_gpu::select_backend);
@@ -277,6 +309,7 @@ impl Session {
                     == preview_dimensions(source_width, source_height, upscale_factor, false);
                 let response = json!({
                     "width": width, "height": height, "output_width": output.width, "output_height": output.height,
+                    "photo_width": photo_dimensions.0, "photo_height": photo_dimensions.1,
                     "source_width": source_width, "source_height": source_height,
                     "export_resolution": export_resolution,
                     "raw": spektrafilm_io::is_raw(&input), "backend": backend.name(),
@@ -319,6 +352,7 @@ fn working_source<'a>(
     source: &'a ImageBuf,
     scaled: &'a mut Option<((u32, u32), ImageBuf)>,
     dimensions: (u32, u32),
+    resample: fn(&ImageBuf, (u32, u32)) -> ImageBuf,
 ) -> &'a ImageBuf {
     if dimensions == (source.width, source.height) {
         *scaled = None;
@@ -326,7 +360,7 @@ fn working_source<'a>(
     }
     if scaled.as_ref().is_none_or(|(size, _)| *size != dimensions) {
         *scaled = None; // release the previous size before allocating
-        *scaled = Some((dimensions, rescale_preview_input_fast(source, dimensions)));
+        *scaled = Some((dimensions, resample(source, dimensions)));
     }
     &scaled.as_ref().unwrap().1
 }
@@ -405,13 +439,20 @@ mod tests {
     fn working_source_is_resampled_once_per_size() {
         let source = ImageBuf::from_data(4, 2, vec![0.5; 24]);
         let mut scaled = None;
-        let first = working_source(&source, &mut scaled, (2, 1)).data.as_ptr();
+        let first = working_source(&source, &mut scaled, (2, 1), rescale_preview_input_fast)
+            .data
+            .as_ptr();
         assert_eq!(
-            working_source(&source, &mut scaled, (2, 1)).data.as_ptr(),
+            working_source(&source, &mut scaled, (2, 1), rescale_preview_input_fast)
+                .data
+                .as_ptr(),
             first
         );
-        assert_eq!(working_source(&source, &mut scaled, (1, 1)).width, 1);
-        let full = working_source(&source, &mut scaled, (4, 2));
+        assert_eq!(
+            working_source(&source, &mut scaled, (1, 1), rescale_preview_input_fast).width,
+            1
+        );
+        let full = working_source(&source, &mut scaled, (4, 2), rescale_preview_input_fast);
         assert_eq!(full.data.as_ptr(), source.data.as_ptr());
         assert!(scaled.is_none());
     }
