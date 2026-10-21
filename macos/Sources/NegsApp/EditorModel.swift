@@ -54,6 +54,9 @@ import UniformTypeIdentifiers
     private(set) var exportStarted = Date()
     var error: String?
     var status = "Starting…"
+    var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
+    }
     var inspectorVisible = true
     var zoomCommand = UUID()
     var fitImage = true

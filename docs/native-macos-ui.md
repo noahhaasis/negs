@@ -260,3 +260,18 @@ Set `SPEKTRAFILM_CAPTURE_WINDOW=1` as well for a window-only screen capture when
 screen-recording permission is available. Validate trackpad feel, VoiceOver,
 wide-gamut display matching, and large camera RAWs interactively on target Macs;
 automated fixture tests do not establish those qualities or a 60 fps guarantee.
+
+The film strip below the canvas lists JPEG, PNG, TIFF and supported RAW files
+from the current photograph's folder in Finder-style filename order. Click a
+thumbnail to open it with the current adjustments (crop and rotation reset,
+as with Open). The toolbar's bottom-panel button and View > Show/Hide Film
+Strip (⌥⌘F) toggle it; visibility is remembered between launches. During crop
+editing the strip is disabled until Done or Cancel.
+
+Folder enumeration runs off the main thread when the strip appears or the
+folder changes. A lazy horizontal row requests 192-pixel thumbnails only as
+cells appear, through a serial background decoder and a 16 MiB cache. RAW
+files use embedded previews only, with a generic photo icon when unavailable.
+Offscreen cells release their images; hiding the strip cancels queued work.
+The strip does not use the rendering engine, watch folders, or retain full-size
+images. Hide and show it to refresh a folder after external file changes.
