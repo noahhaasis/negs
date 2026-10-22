@@ -303,8 +303,13 @@ struct CachedPipeline {
 #[cfg(feature = "wgpu-backend")]
 impl WgpuBackend {
     pub fn new() -> Option<Self> {
+        // Metal on macOS, Vulkan everywhere else. DX12 is left out on purpose:
+        // every Windows GPU that can run this well has Vulkan (NVIDIA and AMD
+        // since 2012, Intel since Skylake), and a second Windows backend would
+        // need its own shader compiler and golden calibration. Without Vulkan
+        // the CPU engine renders instead.
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: wgpu::Backends::VULKAN | wgpu::Backends::METAL,
             ..Default::default()
         });
 

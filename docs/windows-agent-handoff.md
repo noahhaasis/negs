@@ -75,11 +75,8 @@ python -I scripts/golden/run.py compare-probe target/golden/probe/macos-arm64 ta
 What to expect and watch:
 
 - **GPU renders must use the resident GPU path.** `run` fails a GPU render that
-  fell back to the CPU or skipped the resident chain. If wgpu picks DX12 with
-  FXC, shader compiles may be slow; note it. Choosing DX12 vs Vulkan needs an
-  explicit engine setting first (`WgpuBackend::new` hardcodes
-  `Backends::PRIMARY`; `run.py` strips `WGPU_*`). Test both backends once that
-  exists, and record which one ran.
+  fell back to the CPU or skipped the resident chain. Windows uses Vulkan only
+  (no DX12, decided 2026-10-22); the log records the adapter and backend.
 - **`gpu` and `gpu_grain` gates** were calibrated on the GTX 1660 SUPER
   (2026-10-22, `scripts/golden/README.md`). On another GPU, report the measured
   ΔE statistics; propose a change with evidence, don't just widen them.

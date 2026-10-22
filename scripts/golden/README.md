@@ -193,8 +193,8 @@ release. See `docs/windows-agent-handoff.md`.
 
 ## Watch next
 
-- `WGPU_*` variables are stripped: choosing DX12 vs Vulkan needs an explicit
-  engine setting first (the backend hardcodes `Backends::PRIMARY`).
+- The engine uses Vulkan or Metal only; Windows has no DX12 path (decided
+  2026-10-22).
 - The GPU gates come from two vendors (Apple, NVIDIA); AMD, Intel and
   software Vulkan may need more room.
 

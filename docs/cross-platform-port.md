@@ -14,7 +14,7 @@ dark mode on Windows is not. Same input must give the same output.
 |---|---|---|
 | UI | Swift app (`macos/`), uses Core Image in `Original.swift` | egui GUI builds but is unmaintained |
 | Engine process | `spektrafilm-native`, JSON lines over stdin/stdout, previews written to a path | Same binary; portable as is |
-| GPU | wgpu, `Backends::PRIMARY`, all 28 shaders WGSL | Vulkan on Linux, DX12 or Vulkan on Windows; falls back to CPU if no adapter |
+| GPU | wgpu, Vulkan or Metal only, all 28 shaders WGSL | Vulkan on Linux and Windows (no DX12, decided 2026-10-22); falls back to CPU if no adapter |
 | RAW decode | Apple decoder (`raw/apple_raw.m`), rawler fallback | rawler only |
 | BLAS (dgemm) | Accelerate | OpenBLAS on Linux, naive triple loop on Windows (`cpu_backend.rs:72`) |
 | `exp10_inplace` | vForce `vvpow` (`spektrafilm-math/src/vforce.rs`) | scalar `powf` loop |
@@ -40,11 +40,16 @@ The `.metal` shaders in `spektrafilm-shaders/metal/` are not used.
 3. **Watchdogs and lost devices.** Windows resets the GPU when one piece of work
    runs about 2 s; Linux drivers have similar timeouts. Large blur/FFT passes on a
    weak iGPU at high megapixels could hit it. No device-lost recovery exists yet.
-4. **DX12 shader compiles.** wgpu 24 uses FXC on DX12 unless DXC is configured
-   and shipped. Prefer Vulkan on Windows, or bundle DXC.
+4. **No DX12.** Decided 2026-10-22: Windows uses Vulkan only. Every GPU worth
+   running on has it (NVIDIA and AMD since 2012, Intel since Skylake, 2015; every
+   Windows 11 PC); the gap is Haswell/Broadwell iGPU laptops, which get the CPU
+   engine. That avoids FXC (slow) or shipping DXC, and wgpu's pipeline cache is
+   Vulkan-only.
 5. **Adapter choice and testing.** `HighPerformance` behaves differently on
-   hybrid laptops. CI has no GPUs; WARP (Windows) and lavapipe (Linux) are CPU
-   implementations that are enough to test correctness.
+   hybrid laptops. CI has no GPUs; lavapipe is a CPU Vulkan that is enough to
+   test correctness. On a machine whose only Vulkan device is lavapipe/llvmpipe,
+   wgpu would pick it over the CPU engine; decide whether to reject
+   `DeviceType::Cpu` adapters (Linux).
 6. **Performance numbers don't carry over.** ~33 ms/MP and the blur tuning were
    measured on Apple GPUs. Discrete GPUs use the staging upload path
    (`MAPPABLE_PRIMARY_BUFFERS` is only requested on integrated GPUs).
@@ -59,7 +64,7 @@ The `.metal` shaders in `spektrafilm-shaders/metal/` are not used.
   `vulkan-asahi` from `lspci`; NVIDIA gets it via `nvidia-utils` in
   `install/hardware/nvidia.sh`. `omarchy-hw-vulkan` checks for an ICD. (Read on
   the `quattro` default branch of basecamp/omarchy.)
-- Windows: NVIDIA, AMD and Intel drivers include Vulkan; DX12 is always there.
+- Windows: NVIDIA, AMD and Intel drivers include Vulkan (Intel from Skylake).
 
 ## Linux / Omarchy UI
 
