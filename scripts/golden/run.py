@@ -101,8 +101,9 @@ def sha256(path):
 def tree_hash(root):
     """SHA-256 over the sorted relative paths and contents of every file."""
     h = hashlib.sha256()
-    for p in sorted(q for q in Path(root).rglob("*") if q.is_file()):
-        h.update(p.relative_to(root).as_posix().encode() + b"\0" + sha256(p).encode() + b"\n")
+    # Sort the strings: Windows paths compare case-insensitively.
+    for rel in sorted(p.relative_to(root).as_posix() for p in Path(root).rglob("*") if p.is_file()):
+        h.update(rel.encode() + b"\0" + sha256(Path(root) / rel).encode() + b"\n")
     return h.hexdigest()
 
 
@@ -265,7 +266,7 @@ def render(args, work, case, engine):
     check = subprocess.run([str(tool(args.bin_dir, "golden_compare")), "--gates", str(GATES),
                             "--profile", "self", "--scalar", scalar, str(dump), str(dump), str(w),
                             str(h), "--tiff-a", str(tiff), "--tiff-b", str(tiff)],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8")
     tiff.unlink()
     if check.returncode != 0:
         return name, engine, {"error": f"TIFF self-check failed: {check.stdout or check.stderr}",
@@ -342,7 +343,7 @@ def cmd_run(args):
 def golden_compare(bin_dir, profile, scalar, a, b, w, h):
     proc = subprocess.run([str(tool(bin_dir, "golden_compare")), "--gates", str(GATES),
                            "--profile", profile, "--scalar", scalar, str(a), str(b), str(w), str(h)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     if proc.returncode == 2 or not proc.stdout.strip():
         return {"pass": False, "failures": [proc.stderr.strip()], "stats": {}}
     return json.loads(proc.stdout)
@@ -400,6 +401,8 @@ def cmd_compare(args):
         _, _, scalar, profile = ENGINES[engine]
         case = a["cases"][name]
         border = engine == "f64" and (case.get("layout") or "").startswith("border")
+        if engine == "gpu" and case.get("grain"):
+            profile = "gpu_grain"
         fname = f"{name}.{engine}.f64"
         pa, pb = Path(args.dumps_a) / fname, Path(args.dumps_b) / fname
         stale = [str(p) for p, r in ((pa, ra), (pb, rb))
@@ -502,7 +505,7 @@ def cmd_probe(args):
     out = Path(args.out_dir)
     (out / "stages").mkdir(parents=True, exist_ok=True)
     proc = subprocess.run([str(tool(args.bin_dir, "golden_probes")), str(out / "probes")],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         sys.exit(f"golden_probes failed: {proc.stderr}")
     files = {}
