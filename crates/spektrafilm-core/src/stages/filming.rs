@@ -23,6 +23,20 @@ fn print_stage_timing(enabled: bool, stage: &str, start: Instant) {
     }
 }
 
+/// `2^x` and `log2(x)` in f32, computed in f64 and rounded once. The f32
+/// libm functions differ by an ulp between platforms (MSVC vs Apple), and an
+/// exposure scale one ulp off shifts every pixel of the image. The f64 results
+/// are far more accurate than an f32 ulp, so they round to the same f32
+/// everywhere (and to what Apple's f32 functions return: macOS output is
+/// unchanged).
+fn exp2_f32(x: f32) -> f32 {
+    (x as f64).exp2() as f32
+}
+
+fn log2_f32(x: f32) -> f32 {
+    (x as f64).log2() as f32
+}
+
 /// Compute pixel size in micrometers from film format and image dimensions.
 pub fn pixel_size_um(film_format_mm: f32, width: u32, height: u32) -> f32 {
     film_format_mm * 1000.0 / width.max(height) as f32
@@ -96,7 +110,7 @@ pub fn measure_autoexposure_ev(image: &ImageBuf, rgb_to_xyz: &[[f32; 3]; 3], met
     if exposure <= 0.0 || exposure.is_infinite() {
         return 0.0;
     }
-    let ev = -exposure.log2();
+    let ev = -log2_f32(exposure);
     tracing::info!(
         sw = sw,
         sh = sh,
@@ -297,12 +311,12 @@ pub fn expose(
         if params.camera.auto_exposure {
             let ae_ev =
                 measure_autoexposure_ev(&rgb, &rgb_to_xyz, &params.camera.auto_exposure_method);
-            let scale = from_f32(2.0f32.powf(ae_ev));
+            let scale = from_f32(exp2_f32(ae_ev));
             rgb.data.par_iter_mut().for_each(|v| *v *= scale);
         }
 
         // Exposure compensation
-        let exp_comp = from_f32(2.0f32.powf(params.camera.exposure_compensation_ev));
+        let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev));
         rgb.data.par_iter_mut().for_each(|v| *v *= exp_comp);
 
         // RGB → film raw exposure
