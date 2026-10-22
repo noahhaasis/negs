@@ -1,119 +1,168 @@
-# Windows port: handoff to the agent on the Windows machine
+# Windows port: handoff for the next agent
 
-You are continuing the Negs Windows port on the target machine. Noah's
-priorities, in order: **correctness**, **performance**, **launch speed** (a hard
-requirement for the UI). Dark mode does not matter on Windows. The **GPU path is
-what ~99 % of users run**, so verify it first and most carefully.
+You are continuing the Negs Windows port. Correctness is done: the engine
+matches the Mac within calibrated gates on a real Windows GPU. What is left is
+**performance**, **startup**, and the **Win32 app**.
 
-Read first: `docs/cross-platform-port.md` (plan and decisions),
-`scripts/golden/README.md` (the correctness harness, its gates and the macOS
-results), `docs/cross-platform-port-review-codex.md` (an independent review).
+Noah's priorities, in order: **correctness**, **performance**, **launch speed**
+(a hard requirement for the UI). The **GPU path is what ~99 % of users run**.
+Dark mode does not matter on Windows. Windows comes before Linux/Omarchy.
 
-## Decisions already made — do not reopen
+Read first: `docs/cross-platform-port.md` (plan, risks, decisions) and
+`scripts/golden/README.md` (the correctness harness, its gates, and the Mac and
+Windows results).
 
-- **Correctness across platforms = tight numeric delta**, not byte-identical
-  output. No portable-math rewrite (it would cost ~22 %–3.6× on f64 exports).
-  Within one machine and build, output must be bit-identical.
-- Gates live in `scripts/golden/gates.json`. **Never loosen a gate to make a run
-  pass.** If something fails, find the first divergent stage (`probe`,
-  `compare-probe`), explain it, and bring the evidence to Noah. Relaxed
-  statuses (PASS-BORDER, PASS-GRAIN) must stay visible in reports.
-- Windows UI: Win32 with the standard common controls (light mode), wgpu
-  straight into the HWND for the image, custom drawing only where needed.
-  Noah is running a Win32 vs WinUI 3 startup spike; follow its result.
-- Windows before Linux.
+## Decisions already made: do not reopen
 
-## What you receive
+- **Cross-platform correctness = tight numeric delta**, gated per engine in
+  `scripts/golden/gates.json`; exact hashes within one machine and build. No
+  portable-math rewrite.
+- **Auto-exposure is computed in f64 and rounded once** (f596979). Noah accepted
+  that about 0.6 % of auto-exposed CPU exports on macOS move by one ulp of
+  exposure.
+- **GPU grain differs slightly between GPU vendors** (the samplers use the GPU's
+  `log`/`exp`). Accepted, gated statistically by `gpu_grain`.
+- **Vulkan only on Windows and Linux, Metal on macOS; no DX12** (312d24f).
+  wgpu's `dx12` cargo feature is off (214ed09). Without Vulkan the CPU engine
+  renders.
+- **Windows UI: Win32 with the standard common controls**, light mode, wgpu
+  rendering straight into the HWND for the image. Noah ran or is running a
+  Win32 vs WinUI 3 startup spike: ask for its result before building the app.
+- The egui GUI (`crates/spektrafilm-gui`) and `scripts/package_windows_app.ps1`
+  (CUDA build) are legacy. Do not build the Windows app on them.
 
-1. **Code:** branch `worktree-cross-platform-port` (in `negs-cross-platform.bundle`
-   if it is not on GitHub: `git fetch path\to\negs-cross-platform.bundle
-   worktree-cross-platform-port:cross-platform-port`).
-2. **Handoff archive** (transferred directly, not via GitHub — too large, and the
-   repo is public). Unpack into the repo root so the paths line up:
-   - `target/golden/inputs/` — the 10 fixed float-TIFF inputs (64 MB)
-   - `target/golden/dumps/macos-arm64/` — the Mac reference dumps (5.9 GB)
-   - `target/golden/probe/macos-arm64/` — the Mac probe outputs (0.96 GB)
-   - `SHA256SUMS` — verify before use
-   The Mac manifests are in git: `scripts/golden/manifests/macos-arm64.json`
-   (reference) and `macos-x86_64-rosetta.json`.
+**Deferred** (don't act without Noah): f32 CPU grain diverges across platforms
+(one shared MT19937 stream; 82 FAIL-GRAIN in `compare`, expected).
 
-## Setup
+## Rules
 
-- Rust **1.93.1**, MSVC toolchain (`rustup toolchain install 1.93.1`,
-  `rustup default 1.93.1`), Visual Studio Build Tools with the C++ workload.
-- Python 3.9+ (standard library only for the harness).
-- From the Mac: `cargo check --target x86_64-pc-windows-msvc` passes for the
-  CLI, the f64 CLI and `spektrafilm-native`, with two harmless warnings
-  (`unused mut` in `wgpu_backend.rs:417`, dead `finish_rgb`). Linking and
-  running have never been tried on Windows.
-- Windows has no BLAS: `cpu_backend.rs` and `spectral_service.rs` use plain
-  triple loops there. Expect the f64 engine to be slower than on macOS;
-  measure, don't guess.
+- **Never loosen a gate to make a run pass.** Find the first divergent stage
+  (`probe`, `compare-probe`) and bring evidence.
+- **Any change to macOS output needs Noah's approval.** Speed must not come from
+  approximations: Noah declined that before. Exports stay accurate.
+- The repo is **public**: no dumps, RAWs, machine access details or credentials
+  in git or releases.
+- Commit on branch `worktree-cross-platform-port` only. Don't push or merge
+  without Noah's go-ahead. Commits that land on main are dated one minute after
+  main's tip (author and committer).
 
-Record before anything else: CPU model and features (AVX2? FMA?), GPU, driver
-version, which adapter and backend wgpu picks (the `run` manifest records
-adapter and backend for every GPU render), Windows build.
+## State of the branch
 
-## Step 1 — build
+| Commit | What |
+|---|---|
+| 018c226 | Cross-platform golden test and the port plan |
+| f596979 | Auto-exposure identical across platforms; `.gitattributes` LF; harness hardening |
+| e1ca2a2 | Gates calibrated on Windows; Windows manifest and results |
+| 316824c | Decisions recorded |
+| 312d24f | Vulkan or Metal only |
+| 214ed09 | wgpu `dx12` feature dropped (Windows `spektrafilm.exe` 16.6 → 16.0 MB) |
 
-```powershell
-cargo build --release --locked -p spektrafilm-cli --bin spektrafilm --bin golden_compare --bin golden_probes --bin golden_inputs
-cargo build --release --locked -p spektrafilm-cli --features precision-f64 --bin spektrafilm-f64
-python -I -m unittest discover -s scripts/golden -p "test_*.py"
-```
+Verified at 214ed09: all 184 GPU cases byte-identical to the committed
+manifests on both machines.
 
-## Step 2 — correctness
+## The machines
 
-```powershell
-python -I scripts/golden/run.py run --label windows-<gpu> --out scripts/golden/manifests/windows-<gpu>.json --dump-dir target/golden/dumps/windows-<gpu>
-python -I scripts/golden/run.py quality scripts/golden/manifests/windows-<gpu>.json --dumps target/golden/dumps/windows-<gpu>
-python -I scripts/golden/run.py compare scripts/golden/manifests/macos-arm64.json scripts/golden/manifests/windows-<gpu>.json --dumps-a target/golden/dumps/macos-arm64 --dumps-b target/golden/dumps/windows-<gpu> --report target/golden/compare-windows.json
-python -I scripts/golden/run.py probe --label windows-<gpu> --out-dir target/golden/probe/windows-<gpu>
-python -I scripts/golden/run.py compare-probe target/golden/probe/macos-arm64 target/golden/probe/windows-<gpu>
-```
+**Mac (where this was driven from):** M1 Pro, worktree
+`.claude/worktrees/cross-platform-port`. The Mac reference dumps are in
+`target/golden/dumps/macos-arm64/`, the inputs in `target/golden/inputs/`, and
+the source RAWs in `~/Downloads/"Z 6"/` (Nikon Z 6 NEFs, 24.3 MP) and
+`~/Downloads/7858115920.dng`.
 
-What to expect and watch:
+**Windows test box:** Windows 10 22H2 (19045), Ryzen 5 3600 (6 cores / 12
+threads), GTX 1660 SUPER (6 GB, driver 610.47, Vulkan), MSVC, Rust 1.93.1,
+Python 3.9 (standard library only). Sleep on AC is off. The repo is at
+`C:\Users\Noah\Projects\negs` and has no git remote: code arrives as a git
+bundle. It already holds the Mac reference dumps, its own dumps
+(`target/golden/dumps/windows-gtx1660s-vulkan`) and the golden inputs.
 
-- **GPU renders must use the resident GPU path.** `run` fails a GPU render that
-  fell back to the CPU or skipped the resident chain. Windows uses Vulkan only
-  (no DX12, decided 2026-10-22); the log records the adapter and backend.
-- **`gpu` and `gpu_grain` gates** were calibrated on the GTX 1660 SUPER
-  (2026-10-22, `scripts/golden/README.md`). On another GPU, report the measured
-  ΔE statistics; propose a change with evidence, don't just widen them.
-- **`quality` (GPU vs f64 on Windows)** must pass the same gate as on the Mac
-  (worst ΔE00 there: 0.0054).
-- **f64 `dir_wide`** used half the f64 gate between arm64 and x86_64; Windows
-  adds rustfft's AVX path, MSVC's math library and the naive dgemm.
-- **Auto-exposure** used f32 `log2`/`powf`, and MSVC's differ from Apple's:
-  fixed in f596979 (f64, rounded once). Any other f32 libm call on a whole-image
-  path fails the f64 gate the same way.
-- **f32 CPU with grain** diverges (FAIL-GRAIN): one shared MT19937 stream, so
-  the first flipped draw shifts all later ones. Known; open decision.
-- Run every comparison twice on Windows too (`compare --exact` between two
-  Windows runs) to confirm same-machine determinism, including the GPU.
+**Access:** SSH with a key from the Mac. The host, user and key are in Claude's
+project memory (`linux-omarchy-port-plan`), not here. Never ask for or accept a
+password in chat. Helpers, git-ignored, in this worktree:
 
-## Step 3 — performance
+- `target/windows-remote/win-ssh.sh '<cmd.exe command>'` runs a command there.
+- `target/windows-remote/win-sync.sh [--no-build]` fast-forwards the Windows
+  checkout to this branch with a bundle, then rebuilds the golden binaries.
+- `target/windows-remote/win-get.sh <repo-relative path> <local dir>` copies
+  files back to the Mac.
 
-Profile a full-resolution Reference (f64) export and a GPU export (the Mac:
-22.0 s f64 for 24.3 MP with grain, M1 Pro; GPU ~33 ms/MP). Check VRAM use at
-full resolution and the largest image the GPU accepts; the 100 MP test only
-checks reported limits. Watch for TDR (device lost) on long dispatches.
+Gotchas:
 
-## Step 4 — app
+- **cmd.exe, not a shell.** Use `&` to always continue and `&&` to continue on
+  success. Cargo isn't on the SSH PATH: prefix
+  `set "PATH=%PATH%;C:\Users\Noah\.cargo\bin" &&`.
+- **`findstr` is fragile.** It reads arguments like `/184` as options, and
+  `/b` misses cargo's indented `Finished` line. Redirect output to a file
+  instead, or filter it on the Mac.
+- **Tar archives from the Mac** need `COPYFILE_DISABLE=1`, or they unpack `._*`
+  files.
+- **Line endings.** Python on Windows writes CRLF, and `.gitattributes`
+  normalises it.
+- **Run length.** A full `run` takes ~40 min there, f64 mostly; the GPU cases
+  alone take a few minutes. Run long jobs in the background.
+- **Worktree bash guard.** In a worktree session, put loops, variables and
+  multi-step logic in script files.
 
-The Windows app must port **both** halves of the macOS export architecture:
-the `spektrafilm-native` JSON-lines helper (preview, `Save` of the cached
-render) **and** the separate Reference export that launches `spektrafilm-f64`
-(`macos/Sources/NegsApp/Engine.swift`). Startup: measure first painted frame,
-first interaction and first usable image separately, including helper start,
-catalog load and shader compilation; the wgpu pipeline cache is not
-implemented yet (`cache: None`).
+## Next steps
+
+### 1. Performance (start here)
+
+Measure on both machines with the same full-resolution input. Decode one Z 6
+NEF to a full-size float TIFF with
+`golden_inputs --long-edge 100000 <out_dir> <file.NEF>` on the Mac, check it
+is byte-identical on Windows, and copy it over.
+
+- **GPU export:** wall time per stage with `SPEKTRAFILM_GPU_PROFILE=1` (it
+  inflates small renders, so use full resolution). The Mac does ~33 ms/MP;
+  halation blurs dominate.
+- **f64 Reference export:** the Mac takes 22.0 s for 24.3 MP with grain. On
+  Windows there is no BLAS: `cpu_backend.rs` and `spectral_service.rs` use plain
+  triple loops. Measure, then profile (e.g. `cargo flamegraph` or Windows
+  Performance Recorder) before changing anything. Keep results bit-identical
+  on each machine, and within the f64 gate across machines.
+- **VRAM and limits:** peak VRAM at 24 MP and at the largest size the GPU
+  accepts (`nvidia-smi --query-gpu=memory.used`). The 100 MP test only checks
+  the reported limits. On 6 GB, find where it fails and whether it fails
+  cleanly (CPU fallback, not a crash).
+- **Watchdog (TDR):** Windows resets the GPU when one submission runs ~2 s. Look
+  for device-lost errors on long blur/FFT passes at high megapixels. No
+  device-lost recovery exists yet.
+
+Write the numbers into `docs/cross-platform-port.md`, Mac and Windows side by
+side.
+
+### 2. Startup: Vulkan pipeline cache
+
+wgpu supports a pipeline cache on Vulkan only. The engine passes `cache: None`
+(`crates/spektrafilm-gpu/src/wgpu_backend.rs`, in the compute pipeline
+descriptor). Measure cold and warm time from start to first GPU render on
+Windows, add a disk-backed `wgpu::PipelineCache`, and measure again. This must
+not change output: re-run the GPU golden cases with
+`run.py compare --exact --engines gpu`.
+
+### 3. Win32 app
+
+Port **both** halves of the macOS export architecture:
+
+- the `spektrafilm-native` JSON-lines helper, which serves the preview and
+  `Save` of the cached render;
+- the separate Reference export, which launches `spektrafilm-f64`
+  (`macos/Sources/NegsApp/Engine.swift`).
+
+Measure startup in three parts: first painted frame, first interaction, and
+first usable image. Include helper start, catalog load and shader compilation.
+Get the spike's result and Noah's go-ahead on the UI plan first.
+
+### Later and open
+
+- The GPU gates come from Apple and NVIDIA only. AMD, Intel and software Vulkan
+  may need more room: measure, then propose.
+- Linux: if the only Vulkan device is llvmpipe/lavapipe, wgpu picks it over the
+  CPU engine. Decide whether to reject `DeviceType::Cpu` adapters.
+- After any engine change, re-run the golden matrix on both machines (see
+  `scripts/golden/README.md` → Run).
 
 ## Reporting back
 
-Commit manifests and reports (not dumps) to the branch, update
-`scripts/golden/README.md` with a Windows results section in the same format as
-the macOS one, and summarise for Noah: what passed, every non-PASS status with
-its explanation, measured numbers, and open decisions. Don't push or merge
-without Noah's go-ahead; main's commits use his dating rule (one minute after
-main's tip).
+Commit manifests, reports and docs (not dumps) to the branch. Summarise for
+Noah: measured numbers, what changed, every non-PASS status with its
+explanation, and open decisions with a recommendation.
