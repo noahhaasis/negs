@@ -27,8 +27,8 @@ fn print_stage_timing(enabled: bool, stage: &str, start: Instant) {
 /// libm functions differ by an ulp between platforms (MSVC vs Apple), and an
 /// exposure scale one ulp off shifts every pixel of the image. The f64 results
 /// are far more accurate than an f32 ulp, so they round to the same f32
-/// everywhere (and to what Apple's f32 functions return: macOS output is
-/// unchanged).
+/// everywhere. Apple's `powf(2, x)` is not always correctly rounded either: on
+/// macOS the scale moves by one ulp for about 0.6% of exposures.
 fn exp2_f32(x: f32) -> f32 {
     (x as f64).exp2() as f32
 }

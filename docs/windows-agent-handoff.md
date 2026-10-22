@@ -80,17 +80,18 @@ What to expect and watch:
   explicit engine setting first (`WgpuBackend::new` hardcodes
   `Backends::PRIMARY`; `run.py` strips `WGPU_*`). Test both backends once that
   exists, and record which one ran.
-- **`gpu` gate is provisional** (Mac GPU vs Mac GPU is exact; no second GPU has
-  been measured). Report the measured ΔE statistics; propose a calibrated gate
-  with evidence, don't just widen it.
+- **`gpu` and `gpu_grain` gates** were calibrated on the GTX 1660 SUPER
+  (2026-10-22, `scripts/golden/README.md`). On another GPU, report the measured
+  ΔE statistics; propose a change with evidence, don't just widen them.
 - **`quality` (GPU vs f64 on Windows)** must pass the same gate as on the Mac
   (worst ΔE00 there: 0.0054).
 - **f64 `dir_wide`** used half the f64 gate between arm64 and x86_64; Windows
   adds rustfft's AVX path, MSVC's math library and the naive dgemm.
-- **Auto-exposure** computes `2f32.powf(ev)` (`stages/filming.rs`); a one-ulp
-  difference in MSVC's `powf` would scale the whole image by ~6e-8 and fail the
-  f64 gate. If so, prove it with `FILM_RAW` in `compare-probe`, then report —
-  fixing it changes macOS output and needs Noah's approval.
+- **Auto-exposure** used f32 `log2`/`powf`, and MSVC's differ from Apple's:
+  fixed in f596979 (f64, rounded once). Any other f32 libm call on a whole-image
+  path fails the f64 gate the same way.
+- **f32 CPU with grain** diverges (FAIL-GRAIN): one shared MT19937 stream, so
+  the first flipped draw shifts all later ones. Known; open decision.
 - Run every comparison twice on Windows too (`compare --exact` between two
   Windows runs) to confirm same-machine determinism, including the GPU.
 

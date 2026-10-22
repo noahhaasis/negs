@@ -164,6 +164,12 @@ class GoldenCompareTest(unittest.TestCase):
         v = [0.5] * 6
         self.assertFalse(self.check(v, [0.5, 0.5, 0.5, 0.6, 0.5, 0.5], profile="gpu")["pass"])
 
+    def test_gpu_grain_gate(self):
+        # Every gate has its statistic, and a visibly different image fails.
+        v = [0.5] * 6
+        self.assertTrue(self.check(v, v, profile="gpu_grain")["pass"])
+        self.assertFalse(self.check(v, [0.5, 0.5, 0.5, 0.6, 0.5, 0.5], profile="gpu_grain")["pass"])
+
 
 class ArchTest(unittest.TestCase):
     def test_this_python(self):

@@ -7,9 +7,9 @@
   "code16_max": 1
  },
  "f32cpu": {
-  "description": "f32 CPU engine, machine A vs machine B.",
-  "value_abs": 2e-6,
-  "value_rel": 2e-6,
+  "description": "f32 CPU engine, machine A vs machine B. The f32 libm differs between platforms (probes: log10f, expf, powf). Apple M1 Pro vs Ryzen 5 3600 with MSVC, worst on this matrix (2026-10-22): 4.7e-6 absolute, 2.2x the first gate of 2e-6; gates about 2x that.",
+  "value_abs": 1e-5,
+  "value_rel": 1e-5,
   "rms_norm": 2e-7,
   "code16_max": 1
  },
@@ -28,11 +28,18 @@
   "code8_max": 1
  },
  "gpu": {
-  "description": "GPU engine, machine A vs machine B. PROVISIONAL until calibrated on a second GPU.",
-  "de00_p999": 0.05,
-  "de00_max": 1.0,
-  "frac_de00_gt_0_5": 1e-4,
-  "code8_max": 2
+  "description": "GPU engine without grain, machine A vs machine B. Apple M1 Pro (Metal) vs GTX 1660 SUPER (Vulkan), worst on this matrix (2026-10-22): de00_max 0.0020, p999 0.0008, 1 step in 8 bit; gates about 10x that.",
+  "de00_p999": 0.01,
+  "de00_max": 0.02,
+  "code8_max": 1
+ },
+ "gpu_grain": {
+  "description": "GPU engine with grain, machine A vs machine B. The samplers use the GPU's log/exp, whose precision differs by vendor, so some draws differ and the grain blur spreads each one: single clumps can differ by de00 20, so there is no per-pixel limit. Apple M1 Pro vs GTX 1660 SUPER, worst on this matrix (2026-10-22): de00_mean 0.030, p99 0.60, frac_de00_gt_1 0.0049, frac_de00_gt_2 0.0014, rms_norm 9.2e-4; gates about 2x that.",
+  "de00_mean": 0.06,
+  "de00_p99": 1.0,
+  "frac_de00_gt_1": 0.01,
+  "frac_de00_gt_2": 0.003,
+  "rms_norm": 2e-3
  },
  "gpu_vs_ref": {
   "description": "GPU vs f64 reference on one machine, grain off. Apple M1 Pro worst on this matrix (2026-10-22): de00_max 0.0054, p99 0.0040, 1 step in 8 bit; gates about 10x that. Commit 36ad0ce measured up to 0.19 on full-resolution photos, so full-resolution runs may need their own profile.",
