@@ -1572,18 +1572,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpu-allocator"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c151a2a5ef800297b4e79efa4f4bec035c5f51d5ae587287c9b952bdf734cacd"
-dependencies = [
- "log",
- "presser",
- "thiserror 1.0.69",
- "windows",
-]
-
-[[package]]
 name = "gpu-descriptor"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3062,12 +3050,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "presser"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
-
-[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3199,12 +3181,6 @@ checksum = "a9375873db1061df25ed185eb584cd8839196db7a43803daa0612c5ae53be5b5"
 dependencies = [
  "rand_core",
 ]
-
-[[package]]
-name = "range-alloc"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
 
 [[package]]
 name = "raw-window-handle"
@@ -4724,7 +4700,6 @@ dependencies = [
  "android_system_properties",
  "arrayvec",
  "ash",
- "bit-set",
  "bitflags 2.11.1",
  "block",
  "bytemuck",
@@ -4733,7 +4708,6 @@ dependencies = [
  "glow",
  "glutin_wgl_sys",
  "gpu-alloc",
- "gpu-allocator",
  "gpu-descriptor",
  "js-sys",
  "khronos-egl",
@@ -4748,7 +4722,6 @@ dependencies = [
  "ordered-float",
  "parking_lot",
  "profiling",
- "range-alloc",
  "raw-window-handle",
  "renderdoc-sys",
  "rustc-hash 1.1.0",
@@ -4758,7 +4731,6 @@ dependencies = [
  "web-sys",
  "wgpu-types",
  "windows",
- "windows-core",
 ]
 
 [[package]]
