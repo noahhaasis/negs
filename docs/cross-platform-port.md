@@ -229,6 +229,10 @@ Windows (2026-10-22, GTX 1660 SUPER on Vulkan): f64 and the GPU without grain
 pass against the Mac after fixing auto-exposure's f32 libm calls and CRLF data;
 the GPU with grain passes a statistical gate (`gpu_grain`); f32 CPU with grain
 diverges (shared random stream). Two Windows runs are bit-identical.
+
+Decided 2026-10-22 (Noah): keep the auto-exposure fix, although about 0.6 % of
+auto-exposed CPU exports on macOS move by one ulp of exposure; accept GPU grain
+differences across vendors, gated statistically by `gpu_grain`.
 The original plan follows.
 
 1. A `golden` script: fixed matrix of real photos (float EXR/TIFF and RAW via
@@ -253,14 +257,8 @@ GPU.
 
 ## Open decisions
 
-- Accept a one-time last-bit change in macOS exports for cross-platform
-  determinism? Already in f596979 for auto-exposure: one ulp of exposure on
-  about 0.6 % of auto-exposed CPU exports.
-- GPU grain across vendors: accept the `gpu_grain` statistical gate, or make
-  the samplers' accept/reject tests less sensitive to `log`/`exp` precision
-  (changes the grain of some macOS exports)?
 - f32 CPU grain across platforms: accept a different grain pattern, or give
-  rows/tiles their own random streams (changes macOS f32 CPU grain)?
+  rows/tiles their own random streams (changes macOS f32 CPU grain)? Deferred.
 - Windows UI: WinUI 3 or Win32 + custom drawing (after the startup spike).
 - Keep or drop the CUDA backend (recommendation: drop, wgpu only).
 - Which GPU is in the target machine (NVIDIA proprietary vs Mesa).

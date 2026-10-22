@@ -161,7 +161,8 @@ What the first run found, and what fixed it:
   Apple's differ by an ulp, which moved every pixel of three photos by ~1e-7
   (all f64 failures). Both are now computed in f64 and rounded once. Apple's
   `powf(2, x)` is not always correctly rounded either, so on macOS the scale
-  moves by one ulp for about 0.6 % of exposures (none in this matrix).
+  moves by one ulp for about 0.6 % of exposures (none in this matrix);
+  accepted 2026-10-22.
 - Git for Windows checks text files out with CRLF, which changed the film
   data and so its hash. `.gitattributes` keeps LF everywhere.
 - `tree_hash` sorted `Path`s, which compare case-insensitively on Windows; it
@@ -170,8 +171,8 @@ What the first run found, and what fixed it:
 **GPU grain.** Each pixel has its own PCG stream, so nothing cascades, but the
 Poisson and binomial samplers use the GPU's `log`/`exp`, whose precision
 differs by vendor. Some draws come out differently and the grain blur spreads
-each one: 0.1–1.3 % of pixels move by more than ΔE00 0.5. `gpu_grain` bounds
-that statistically. It rejects all 108 grain cases when the GPU render is
+each one: 0.1–1.3 % of pixels move by more than ΔE00 0.5. Accepted
+(2026-10-22): `gpu_grain` bounds it statistically. It rejects all 108 grain cases when the GPU render is
 compared with the f64 render of the same case (a different grain pattern:
 ΔE00 mean ≥ 0.139, against ≤ 0.030 for the cross-vendor drift).
 
