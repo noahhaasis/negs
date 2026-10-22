@@ -1,0 +1,4 @@
+# LF in every checkout. Git for Windows converts text files to CRLF by
+# default, which changes the bytes of the film data and presets (and so the
+# golden test's data hashes) without changing the repository.
+* text=auto eol=lf

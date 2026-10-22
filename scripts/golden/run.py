@@ -137,7 +137,9 @@ def cpu_model():
     if sys.platform == "darwin":
         return command_output(["sysctl", "-n", "machdep.cpu.brand_string"])
     if os.name == "nt":
-        return os.environ.get("PROCESSOR_IDENTIFIER")
+        name = command_output(["powershell", "-NoProfile", "-Command",
+                               "(Get-CimInstance Win32_Processor).Name"])
+        return (name or os.environ.get("PROCESSOR_IDENTIFIER", "")).strip()
     try:
         for line in Path("/proc/cpuinfo").read_text().splitlines():
             if line.startswith("model name"):
@@ -347,9 +349,8 @@ def golden_compare(bin_dir, profile, scalar, a, b, w, h):
 
 
 def summarise(stats):
-    keys = ["differ", "max_abs", "value_gate_worst", "rms_norm", "de00_max", "de00_p999",
-            "code16_max", "code8_max"]
-    return {k: stats[k] for k in keys if k in stats}
+    """Every scalar statistic, so a report can calibrate any gate."""
+    return {k: v for k, v in stats.items() if isinstance(v, (int, float))}
 
 
 def cmd_compare(args):
@@ -401,6 +402,11 @@ def cmd_compare(args):
         border = engine == "f64" and (case.get("layout") or "").startswith("border")
         fname = f"{name}.{engine}.f64"
         pa, pb = Path(args.dumps_a) / fname, Path(args.dumps_b) / fname
+        stale = [str(p) for p, r in ((pa, ra), (pb, rb))
+                 if not p.is_file() or sha256(p) != r["f64"]]
+        if stale:
+            return name, engine, "FAIL", {"failures": [f"dump missing or not the one in the "
+                                                       f"manifest: {', '.join(stale)}"]}
         res = golden_compare(args.bin_dir, "f64_border" if border else profile, scalar, pa, pb,
                              *ra["size"])
         status = ("PASS-BORDER" if border else "PASS") if res["pass"] else "FAIL"

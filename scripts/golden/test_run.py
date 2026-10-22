@@ -95,6 +95,18 @@ class CompareTest(unittest.TestCase):
         b["cases"]["case1"]["engines"]["f64"]["f64"] = "e" * 64
         self.assertNotEqual(compare(MANIFEST, b, exact=False), 0)
 
+    def test_dump_not_matching_manifest_fails(self):
+        # Equal dumps on disk must not pass when they are not the dumps the
+        # manifests describe (stale directory, damaged copy).
+        b = copy.deepcopy(MANIFEST)
+        b["cases"]["case1"]["engines"]["f64"]["f64"] = "e" * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            for side in ("a", "b"):
+                (Path(tmp) / side).mkdir()
+                (Path(tmp) / side / "case1.f64.f64").write_bytes(bytes(4 * 2 * 3 * 8))
+            self.assertEqual(compare(MANIFEST, b, exact=False, dumps_a=str(Path(tmp) / "a"),
+                                     dumps_b=str(Path(tmp) / "b")), 1)
+
 
 class MatrixTest(unittest.TestCase):
     def test_names_unique_and_engines_known(self):
