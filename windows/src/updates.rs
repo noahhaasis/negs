@@ -28,10 +28,13 @@ pub fn valid_configuration(feed: Option<&str>, key: Option<&str>) -> bool {
 
 fn base64_len(text: &str) -> Option<usize> {
     let text = text.trim();
-    if text.len() % 4 != 0 || !text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=') {
+    if text.is_empty() || text.len() % 4 != 0 {
         return None;
     }
     let padding = text.bytes().rev().take_while(|&b| b == b'=').count();
+    if padding > 2 || !text[..text.len() - padding].bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/') {
+        return None;
+    }
     Some(text.len() / 4 * 3 - padding)
 }
 
@@ -105,27 +108,35 @@ fn wait_for_first_render(app: &mut App) {
     start(app.model.prefs.check_for_updates);
 }
 
-fn start(automatic: bool) {
-    if STARTED.with(|s| s.replace(true)) {
-        return;
+fn start(automatic: bool) -> bool {
+    if STARTED.with(|s| s.get()) {
+        return true;
     }
-    let (Some(feed), Some(key)) = (FEED, KEY) else { return };
+    let (Some(feed), Some(key)) = (FEED, KEY) else { return false };
+    if !valid_configuration(Some(feed), Some(key)) {
+        return false;
+    }
     let feed = std::ffi::CString::new(feed).unwrap();
     let key = std::ffi::CString::new(key).unwrap();
     call!("win_sparkle_set_appcast_url", fn(*const i8), feed.as_ptr());
-    call!("win_sparkle_set_eddsa_public_key", fn(*const i8) -> i32, key.as_ptr());
+    // WinSparkle returns 0 for invalid keys. Never start unsigned updates
+    // if the DLL is too old or rejects the configured key.
+    if call!("win_sparkle_set_eddsa_public_key", fn(*const i8) -> i32, key.as_ptr()) != Some(1) {
+        return false;
+    }
     call!("win_sparkle_set_can_shutdown_callback", fn(extern "C" fn() -> i32), can_shutdown);
     call!("win_sparkle_set_shutdown_request_callback", fn(extern "C" fn()), shutdown_request);
     call!("win_sparkle_set_automatic_check_for_updates", fn(i32), automatic as i32);
-    call!("win_sparkle_init", fn(),);
+    let started = call!("win_sparkle_init", fn(),).is_some();
+    STARTED.with(|s| s.set(started));
+    started
 }
 
 pub fn check(with_ui: bool) {
     if !configured() {
         return;
     }
-    start(true);
-    if with_ui {
+    if start(true) && with_ui {
         call!("win_sparkle_check_update_with_ui", fn(),);
     }
 }
@@ -175,5 +186,7 @@ mod tests {
         assert!(!valid_configuration(Some("https://negs.app/appcast.xml"), None));
         assert!(!valid_configuration(None, Some(key)));
         assert!(!valid_configuration(Some("https://negs.app/a"), Some("short")));
+        assert_eq!(base64_len("===="), None);
+        assert_eq!(base64_len("a=bc"), None);
     }
 }

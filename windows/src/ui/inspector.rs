@@ -942,7 +942,8 @@ fn row_of(id: u16) -> Option<(usize, u16)> {
 
 /// Parses a typed number, with either decimal separator.
 pub fn parse_number(text: &str) -> Option<f64> {
-    let cleaned: String = text.trim().replace(',', ".").chars().filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-').collect();
+    // Reject malformed input rather than silently turning "1x2" into 12.
+    let cleaned = text.trim().trim_end_matches('%').trim().replace(',', ".");
     cleaned.parse().ok().filter(|v: &f64| v.is_finite())
 }
 
@@ -1860,6 +1861,9 @@ mod tests {
         assert_eq!(parse_number(" -0.25 "), Some(-0.25));
         assert_eq!(parse_number("3 %"), Some(3.0));
         assert_eq!(parse_number("abc"), None);
+        assert_eq!(parse_number("1x2"), None);
+        assert_eq!(parse_number("NaN"), None);
+        assert_eq!(parse_number("inf"), None);
     }
 
     #[test]

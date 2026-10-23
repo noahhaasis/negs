@@ -1047,6 +1047,7 @@ pub fn run() {
     }
     unsafe {
         let _ = OleInitialize(None);
+        let _ = SetCurrentProcessExplicitAppUserModelID(w!("dev.negs.app"));
         let icc = INITCOMMONCONTROLSEX {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
             dwICC: ICC_BAR_CLASSES | ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES | ICC_LINK_CLASS | ICC_TAB_CLASSES,
@@ -1187,6 +1188,7 @@ fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
 /// and the accelerators, which never fire while a text field has focus.
 fn pre_translate(msg: &MSG) -> bool {
     let main = main_hwnd();
+    let mut accelerators = None;
     let handled = with_app(|app| {
         if app.original_key(msg) {
             return true;
@@ -1209,8 +1211,8 @@ fn pre_translate(msg: &MSG) -> bool {
                 Some("ComboBox") => !modifier_down() && (b'A' as usize..=b'Z' as usize).contains(&msg.wParam.0),
                 _ => false,
             };
-            if !skip && unsafe { TranslateAcceleratorW(main, app.accelerators, msg) } != 0 {
-                return true;
+            if !skip {
+                accelerators = Some(app.accelerators);
             }
         }
         false
@@ -1218,6 +1220,13 @@ fn pre_translate(msg: &MSG) -> bool {
     .unwrap_or(false);
     if handled {
         return true;
+    }
+    // TranslateAccelerator synchronously sends WM_COMMAND. Release the App
+    // borrow first or main_proc's with_app will reject the command as reentrant.
+    if let Some(table) = accelerators {
+        if unsafe { TranslateAcceleratorW(main, table, msg) } != 0 {
+            return true;
+        }
     }
     unsafe { IsDialogMessageW(main, msg).as_bool() }
 }
