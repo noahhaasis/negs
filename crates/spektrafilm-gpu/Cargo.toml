@@ -6,7 +6,7 @@ license.workspace = true
 
 [features]
 default = ["wgpu-backend"]
-wgpu-backend = ["dep:wgpu"]
+wgpu-backend = ["dep:wgpu", "dep:crc32fast", "dep:tempfile"]
 cuda-backend = ["dep:cudarc"]
 precision-f64 = ["spektrafilm-math/precision-f64"]
 
@@ -19,6 +19,8 @@ wgpu = { workspace = true, optional = true, features = ["wgsl", "metal"] }
 cudarc = { version = "0.19.7", optional = true, default-features = false, features = ["std", "driver", "nvrtc", "dynamic-loading", "cuda-12000"] }
 bytemuck = { version = "1.25", features = ["derive"] }
 pollster = "0.4"
+crc32fast = { version = "1", optional = true }
+tempfile = { version = "3", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Native BLAS for CPU spectral integration — matches numpy's

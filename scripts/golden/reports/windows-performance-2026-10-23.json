@@ -1,0 +1,1296 @@
+{
+  "measurement_date_local": "2026-10-22/23",
+  "note": "Private images, dumps, ETL and logs remain under target/windows-perf. GPU cache validation manifests accompany this report separately. Cold means process or application cache cold; OS and driver caches were not cleared.",
+  "baseline_macos": {
+    "label": "macos-m1-pro",
+    "commit": "8a9402d963960ef03c16e6cdb24b0c292589a3d7",
+    "input_sha256": "d3aa7348d100d9d0545c9b35a46469e7d167357a3f975e67ade25cd60e98516d",
+    "film": "kodak_portra_400",
+    "paper": "kodak_portra_endura",
+    "params": {
+      "io": {
+        "input_color_space": "sRGB",
+        "input_cctf_decoding": false
+      }
+    },
+    "iterations_per_process": 1,
+    "raw_dump_included_in_wall_time": true,
+    "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+    "runs": [
+      {
+        "name": "gpu-1",
+        "engine": "gpu",
+        "profiled": false,
+        "exit_code": 0,
+        "wall_ms": 1793.3443749789149,
+        "pipeline_ms": [
+          724
+        ],
+        "load_ms": [
+          104
+        ],
+        "save_ms": [
+          229
+        ],
+        "cli_total_ms": [
+          1749
+        ],
+        "gpu_stages_ms": [],
+        "gpu_resident": true,
+        "memory_baseline_mib": null,
+        "memory_peak_mib": null,
+        "memory_samples": 0,
+        "pass": true,
+        "tiff_sha256": "9056234e7eb385da53a1983bd02ef1e22a4421f31cd8c47bcac7b6e29fa6af41",
+        "raw_sha256": "9b013d31c805c53d158f1548681814b5e7c9183622b1b5644a9b94ad7386812e"
+      },
+      {
+        "name": "gpu-2",
+        "engine": "gpu",
+        "profiled": false,
+        "exit_code": 0,
+        "wall_ms": 1844.418291002512,
+        "pipeline_ms": [
+          757
+        ],
+        "load_ms": [
+          86
+        ],
+        "save_ms": [
+          74
+        ],
+        "cli_total_ms": [
+          1797
+        ],
+        "gpu_stages_ms": [],
+        "gpu_resident": true,
+        "memory_baseline_mib": null,
+        "memory_peak_mib": null,
+        "memory_samples": 0,
+        "pass": true,
+        "tiff_sha256": "9056234e7eb385da53a1983bd02ef1e22a4421f31cd8c47bcac7b6e29fa6af41",
+        "raw_sha256": "9b013d31c805c53d158f1548681814b5e7c9183622b1b5644a9b94ad7386812e"
+      },
+      {
+        "name": "gpu-profile",
+        "engine": "gpu",
+        "profiled": true,
+        "exit_code": 0,
+        "wall_ms": 1990.7417080248706,
+        "pipeline_ms": [
+          708
+        ],
+        "load_ms": [
+          99
+        ],
+        "save_ms": [
+          220
+        ],
+        "cli_total_ms": [
+          1910
+        ],
+        "gpu_stages_ms": [
+          [
+            "upload",
+            1.5
+          ],
+          [
+            "front",
+            52.8
+          ],
+          [
+            "halation",
+            168.9
+          ],
+          [
+            "log10_density",
+            8.9
+          ],
+          [
+            "dir_couplers",
+            118.1
+          ],
+          [
+            "grain",
+            101.8
+          ],
+          [
+            "print_spectral",
+            39.2
+          ],
+          [
+            "print_density",
+            5.1
+          ],
+          [
+            "scan_spectral",
+            40.0
+          ],
+          [
+            "glare",
+            20.3
+          ],
+          [
+            "gamut",
+            8.9
+          ],
+          [
+            "unsharp",
+            16.6
+          ],
+          [
+            "post_scan",
+            3.8
+          ]
+        ],
+        "gpu_resident": true,
+        "memory_baseline_mib": null,
+        "memory_peak_mib": null,
+        "memory_samples": 0,
+        "pass": true,
+        "tiff_sha256": "9056234e7eb385da53a1983bd02ef1e22a4421f31cd8c47bcac7b6e29fa6af41",
+        "raw_sha256": "9b013d31c805c53d158f1548681814b5e7c9183622b1b5644a9b94ad7386812e"
+      },
+      {
+        "name": "f64-1",
+        "engine": "f64",
+        "profiled": false,
+        "exit_code": 0,
+        "wall_ms": 18317.20975000644,
+        "pipeline_ms": [
+          16395
+        ],
+        "load_ms": [
+          99
+        ],
+        "save_ms": [
+          206
+        ],
+        "cli_total_ms": [
+          17611
+        ],
+        "gpu_stages_ms": [],
+        "gpu_resident": false,
+        "memory_baseline_mib": null,
+        "memory_peak_mib": null,
+        "memory_samples": 0,
+        "pass": true,
+        "tiff_sha256": "07cb66e4385b0713f902eb01e1a8041c17e521fa5e48901898b4b281df36c201",
+        "raw_sha256": "38f4f291b55768eaed40adf833f006909f14c887261fe5d516e3b9318cb5b0bb"
+      },
+      {
+        "name": "f64-2",
+        "engine": "f64",
+        "profiled": false,
+        "exit_code": 0,
+        "wall_ms": 17373.00908297766,
+        "pipeline_ms": [
+          15961
+        ],
+        "load_ms": [
+          110
+        ],
+        "save_ms": [
+          240
+        ],
+        "cli_total_ms": [
+          17304
+        ],
+        "gpu_stages_ms": [],
+        "gpu_resident": false,
+        "memory_baseline_mib": null,
+        "memory_peak_mib": null,
+        "memory_samples": 0,
+        "pass": true,
+        "tiff_sha256": "07cb66e4385b0713f902eb01e1a8041c17e521fa5e48901898b4b281df36c201",
+        "raw_sha256": "38f4f291b55768eaed40adf833f006909f14c887261fe5d516e3b9318cb5b0bb"
+      }
+    ],
+    "repeat_identical": true
+  },
+  "windows": {
+    "capacity-144mp": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "047720fa0c47bbc11ac616d0512728660e2ba57e732938314aca0dc5d5f1adcc",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 9250.7621,
+          "pipeline_ms": [
+            5756
+          ],
+          "load_ms": [
+            2023
+          ],
+          "save_ms": [
+            1020
+          ],
+          "cli_total_ms": [
+            8992
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 351.0,
+          "memory_peak_mib": 5924.0,
+          "memory_samples": 86,
+          "pass": false,
+          "tiff_sha256": "95628b2090a5c99533dedeeec5ae1e966318c9beedb2d46f3420f22e3d577b90",
+          "original_reported_pass": true,
+          "watchdog_events": [
+            {
+              "id": 4101,
+              "utc": "2026-10-22T22:00:57Z"
+            }
+          ],
+          "validation_note": "Retrospective System event-log check found a display reset during this successful-exit render."
+        }
+      ],
+      "repeat_identical": null
+    },
+    "capacity-178950000": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "b63444a675016fd2ba78fd5d2b17b6bc3108b6a40eafa9a0470d4d18b0eec7ae",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 10395.2316,
+          "pipeline_ms": [
+            6410
+          ],
+          "load_ms": [
+            2162
+          ],
+          "save_ms": [
+            1277
+          ],
+          "cli_total_ms": [
+            10036
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 5892.0,
+          "memory_samples": 96,
+          "pass": false,
+          "tiff_sha256": "10b18295c39679f5903e19694e1e181fc99b2de637517b95c344b569254de816",
+          "original_reported_pass": true,
+          "watchdog_events": [
+            {
+              "id": 4101,
+              "utc": "2026-10-22T22:02:50Z"
+            }
+          ],
+          "validation_note": "Retrospective System event-log check found a display reset during this successful-exit render."
+        }
+      ],
+      "repeat_identical": null
+    },
+    "capacity-180mp": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "f26f3426781c8b3576d8cc8d597e16ed37b79df5eb8619c35ee8479c5386dc43",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 101,
+          "wall_ms": 5039.4128,
+          "pipeline_ms": [],
+          "load_ms": [
+            3376
+          ],
+          "save_ms": [],
+          "cli_total_ms": [],
+          "gpu_stages_ms": [],
+          "gpu_resident": false,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 2416.0,
+          "memory_samples": 48,
+          "pass": false
+        }
+      ]
+    },
+    "capacity-54mp": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "9b9ad31541201a284711d2233b34a675aaa75384b7d34b995c52106c732db49c",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 4428.5218,
+          "pipeline_ms": [
+            2046
+          ],
+          "load_ms": [
+            840
+          ],
+          "save_ms": [
+            1174
+          ],
+          "cli_total_ms": [
+            4264
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 351.0,
+          "memory_peak_mib": 2916.0,
+          "memory_samples": 41,
+          "pass": true,
+          "tiff_sha256": "9ff7ca817d342d2f22c808fc38f76bdbe637bda39ff1f8468f1c4ef428e72fca"
+        }
+      ],
+      "repeat_identical": true
+    },
+    "capacity-96mp": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "3da1e30f1e5499628441fd5735467bd4418a8914aaa91347f09a510f400d2233",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 7078.819599999999,
+          "pipeline_ms": [
+            3144
+          ],
+          "load_ms": [
+            1449
+          ],
+          "save_ms": [
+            2083
+          ],
+          "cli_total_ms": [
+            6874
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 351.0,
+          "memory_peak_mib": 4919.0,
+          "memory_samples": 64,
+          "pass": true,
+          "tiff_sha256": "caa06e1b815984694c4d0eaa4a26414afbb38184f76b2f9f6fe7b0cc466ee6b3"
+        }
+      ],
+      "repeat_identical": true
+    },
+    "startup-before": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "2c557fd848bd43a10fd3cef811485c922be56c742b7b2dc8c6378222958972c7",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 3,
+      "raw_dump_included_in_wall_time": false,
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 498.0352000000001,
+          "pipeline_ms": [
+            115,
+            24,
+            23
+          ],
+          "load_ms": [
+            9
+          ],
+          "save_ms": [
+            21
+          ],
+          "cli_total_ms": [
+            386
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 356.0,
+          "memory_samples": 7,
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        },
+        {
+          "name": "gpu-2",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 481.5318,
+          "pipeline_ms": [
+            111,
+            23,
+            23
+          ],
+          "load_ms": [
+            9
+          ],
+          "save_ms": [
+            15
+          ],
+          "cli_total_ms": [
+            363
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 372.0,
+          "memory_samples": 6,
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        },
+        {
+          "name": "gpu-3",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 480.3486999999997,
+          "pipeline_ms": [
+            109,
+            26,
+            24
+          ],
+          "load_ms": [
+            9
+          ],
+          "save_ms": [
+            15
+          ],
+          "cli_total_ms": [
+            367
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 356.0,
+          "memory_samples": 6,
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        }
+      ],
+      "repeat_identical": true
+    },
+    "startup-cache": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "2c557fd848bd43a10fd3cef811485c922be56c742b7b2dc8c6378222958972c7",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "pipeline_cache": "explicit directory",
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 811.1261,
+          "pipeline_ms": [
+            142
+          ],
+          "load_ms": [
+            8
+          ],
+          "save_ms": [
+            16
+          ],
+          "cli_total_ms": [
+            359
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 356.0,
+          "memory_samples": 9,
+          "start_utc": "2026-10-22T22:09:02.526591+00:00",
+          "end_utc": "2026-10-22T22:09:03.337642+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        },
+        {
+          "name": "gpu-2",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 434.64579999999995,
+          "pipeline_ms": [
+            112
+          ],
+          "load_ms": [
+            20
+          ],
+          "save_ms": [
+            16
+          ],
+          "cli_total_ms": [
+            319
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 372.0,
+          "memory_samples": 6,
+          "start_utc": "2026-10-22T22:09:03.997232+00:00",
+          "end_utc": "2026-10-22T22:09:04.431566+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        },
+        {
+          "name": "gpu-3",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 417.8054000000002,
+          "pipeline_ms": [
+            112
+          ],
+          "load_ms": [
+            9
+          ],
+          "save_ms": [
+            15
+          ],
+          "cli_total_ms": [
+            308
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 372.0,
+          "memory_samples": 6,
+          "start_utc": "2026-10-22T22:09:05.071838+00:00",
+          "end_utc": "2026-10-22T22:09:05.489599+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        },
+        {
+          "name": "gpu-4",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 426.0886000000004,
+          "pipeline_ms": [
+            112
+          ],
+          "load_ms": [
+            9
+          ],
+          "save_ms": [
+            15
+          ],
+          "cli_total_ms": [
+            309
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 372.0,
+          "memory_samples": 6,
+          "start_utc": "2026-10-22T22:09:06.133070+00:00",
+          "end_utc": "2026-10-22T22:09:06.559119+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        }
+      ],
+      "repeat_identical": true
+    },
+    "startup-disabled": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "2c557fd848bd43a10fd3cef811485c922be56c742b7b2dc8c6378222958972c7",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "pipeline_cache": "disabled",
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 431.5559,
+          "pipeline_ms": [
+            106
+          ],
+          "load_ms": [
+            8
+          ],
+          "save_ms": [
+            15
+          ],
+          "cli_total_ms": [
+            310
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 372.0,
+          "memory_samples": 6,
+          "start_utc": "2026-10-22T22:09:12.201419+00:00",
+          "end_utc": "2026-10-22T22:09:12.632696+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        },
+        {
+          "name": "gpu-2",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 417.15079999999995,
+          "pipeline_ms": [
+            105
+          ],
+          "load_ms": [
+            8
+          ],
+          "save_ms": [
+            15
+          ],
+          "cli_total_ms": [
+            299
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 388.0,
+          "memory_samples": 6,
+          "start_utc": "2026-10-22T22:09:13.278051+00:00",
+          "end_utc": "2026-10-22T22:09:13.694449+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        },
+        {
+          "name": "gpu-3",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 421.5848000000002,
+          "pipeline_ms": [
+            113
+          ],
+          "load_ms": [
+            8
+          ],
+          "save_ms": [
+            15
+          ],
+          "cli_total_ms": [
+            305
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 372.0,
+          "memory_samples": 6,
+          "start_utc": "2026-10-22T22:09:14.338847+00:00",
+          "end_utc": "2026-10-22T22:09:14.760058+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        },
+        {
+          "name": "gpu-4",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 415.9501000000003,
+          "pipeline_ms": [
+            112
+          ],
+          "load_ms": [
+            8
+          ],
+          "save_ms": [
+            15
+          ],
+          "cli_total_ms": [
+            307
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 372.0,
+          "memory_samples": 6,
+          "start_utc": "2026-10-22T22:09:15.402591+00:00",
+          "end_utc": "2026-10-22T22:09:15.817696+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        }
+      ],
+      "repeat_identical": true
+    },
+    "windows-full": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "input_sha256": "d3aa7348d100d9d0545c9b35a46469e7d167357a3f975e67ade25cd60e98516d",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": true,
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 3035.7633,
+          "pipeline_ms": [
+            891
+          ],
+          "load_ms": [
+            380
+          ],
+          "save_ms": [
+            520
+          ],
+          "cli_total_ms": [
+            2888
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 351.0,
+          "memory_peak_mib": 1510.0,
+          "memory_samples": 29,
+          "pass": true,
+          "tiff_sha256": "bd80cee24e9dc7f9c9d2523a0a8e700eaa2af5947fd053513a796815d4f19d7e",
+          "raw_sha256": "1df7aa38f696131b4553e28dc15b934849502d649feb300ff3da74a0da695c42"
+        },
+        {
+          "name": "gpu-2",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 2813.5022000000004,
+          "pipeline_ms": [
+            935
+          ],
+          "load_ms": [
+            288
+          ],
+          "save_ms": [
+            520
+          ],
+          "cli_total_ms": [
+            2679
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 351.0,
+          "memory_peak_mib": 1510.0,
+          "memory_samples": 27,
+          "pass": true,
+          "tiff_sha256": "bd80cee24e9dc7f9c9d2523a0a8e700eaa2af5947fd053513a796815d4f19d7e",
+          "raw_sha256": "1df7aa38f696131b4553e28dc15b934849502d649feb300ff3da74a0da695c42"
+        },
+        {
+          "name": "gpu-profile",
+          "engine": "gpu",
+          "profiled": true,
+          "exit_code": 0,
+          "wall_ms": 2806.9039999999995,
+          "pipeline_ms": [
+            889
+          ],
+          "load_ms": [
+            294
+          ],
+          "save_ms": [
+            520
+          ],
+          "cli_total_ms": [
+            2659
+          ],
+          "gpu_stages_ms": [
+            [
+              "upload",
+              52.4
+            ],
+            [
+              "front",
+              11.5
+            ],
+            [
+              "halation",
+              155.1
+            ],
+            [
+              "log10_density",
+              5.0
+            ],
+            [
+              "dir_couplers",
+              121.1
+            ],
+            [
+              "grain",
+              30.4
+            ],
+            [
+              "print_spectral",
+              24.2
+            ],
+            [
+              "print_density",
+              2.5
+            ],
+            [
+              "scan_spectral",
+              24.2
+            ],
+            [
+              "glare",
+              11.1
+            ],
+            [
+              "gamut",
+              4.8
+            ],
+            [
+              "unsharp",
+              10.2
+            ],
+            [
+              "post_scan",
+              2.4
+            ]
+          ],
+          "gpu_resident": true,
+          "memory_baseline_mib": 351.0,
+          "memory_peak_mib": 1510.0,
+          "memory_samples": 27,
+          "pass": true,
+          "tiff_sha256": "bd80cee24e9dc7f9c9d2523a0a8e700eaa2af5947fd053513a796815d4f19d7e",
+          "raw_sha256": "1df7aa38f696131b4553e28dc15b934849502d649feb300ff3da74a0da695c42"
+        },
+        {
+          "name": "f64-1",
+          "engine": "f64",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 37218.3333,
+          "pipeline_ms": [
+            35111
+          ],
+          "load_ms": [
+            329
+          ],
+          "save_ms": [
+            548
+          ],
+          "cli_total_ms": [
+            36730
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": false,
+          "memory_baseline_mib": 351.0,
+          "memory_peak_mib": 351.0,
+          "memory_samples": 322,
+          "pass": true,
+          "tiff_sha256": "07cb66e4385b0713f902eb01e1a8041c17e521fa5e48901898b4b281df36c201",
+          "raw_sha256": "f32ceb03e81da0662c7637bd41fbba8f8566b0dc8ce58ca3b37fac972734043c"
+        },
+        {
+          "name": "f64-2",
+          "engine": "f64",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 37225.73539999999,
+          "pipeline_ms": [
+            35479
+          ],
+          "load_ms": [
+            325
+          ],
+          "save_ms": [
+            549
+          ],
+          "cli_total_ms": [
+            37106
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": false,
+          "memory_baseline_mib": 351.0,
+          "memory_peak_mib": 351.0,
+          "memory_samples": 325,
+          "pass": true,
+          "tiff_sha256": "07cb66e4385b0713f902eb01e1a8041c17e521fa5e48901898b4b281df36c201",
+          "raw_sha256": "f32ceb03e81da0662c7637bd41fbba8f8566b0dc8ce58ca3b37fac972734043c"
+        }
+      ],
+      "repeat_identical": true
+    },
+    "cache-corruption": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "tracked_changes": true,
+      "gpu_source_sha256": "859a081a2a524536203e9b2482a3b4317905f6fe4afe40a45f73e532b491f7c9",
+      "input_sha256": "2c557fd848bd43a10fd3cef811485c922be56c742b7b2dc8c6378222958972c7",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "pipeline_cache": "explicit directory",
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 699.1553,
+          "pipeline_ms": [
+            176
+          ],
+          "load_ms": [
+            8
+          ],
+          "save_ms": [
+            35
+          ],
+          "cli_total_ms": [
+            431
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 388.0,
+          "memory_samples": 8,
+          "start_utc": "2026-10-22T22:14:39.661088+00:00",
+          "end_utc": "2026-10-22T22:14:40.359977+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        }
+      ],
+      "repeat_identical": true
+    },
+    "cache-unwritable": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "tracked_changes": true,
+      "gpu_source_sha256": "859a081a2a524536203e9b2482a3b4317905f6fe4afe40a45f73e532b491f7c9",
+      "input_sha256": "2c557fd848bd43a10fd3cef811485c922be56c742b7b2dc8c6378222958972c7",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "pipeline_cache": "explicit directory",
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 616.5121,
+          "pipeline_ms": [
+            168
+          ],
+          "load_ms": [
+            30
+          ],
+          "save_ms": [
+            16
+          ],
+          "cli_total_ms": [
+            503
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 372.0,
+          "memory_samples": 7,
+          "start_utc": "2026-10-22T22:14:41.228202+00:00",
+          "end_utc": "2026-10-22T22:14:41.844400+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "131067c1302af042f49e9ac2e73e9fdd579ce623ce505941525c2d25acd59c32"
+        }
+      ],
+      "repeat_identical": true
+    },
+    "capacity-178950000-profile": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "tracked_changes": true,
+      "gpu_source_sha256": "859a081a2a524536203e9b2482a3b4317905f6fe4afe40a45f73e532b491f7c9",
+      "input_sha256": "b63444a675016fd2ba78fd5d2b17b6bc3108b6a40eafa9a0470d4d18b0eec7ae",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": false,
+      "pipeline_cache": "default",
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-profile",
+          "engine": "gpu",
+          "profiled": true,
+          "exit_code": 1,
+          "wall_ms": 125408.1931,
+          "pipeline_ms": [],
+          "load_ms": [
+            3326
+          ],
+          "save_ms": [],
+          "cli_total_ms": [],
+          "gpu_stages_ms": [],
+          "gpu_resident": false,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 5892.0,
+          "memory_samples": 1120,
+          "start_utc": "2026-10-22T22:16:01.785601+00:00",
+          "end_utc": "2026-10-22T22:18:07.193855+00:00",
+          "watchdog_events": [
+            {
+              "id": 4101,
+              "utc": "2026-10-22T22:16:12.2726150Z"
+            }
+          ],
+          "pass": false
+        }
+      ],
+      "termination_note": "Manually terminated after 125 seconds: display reset, then no progress. This diagnostic overlapped CPU golden cases; it is not a performance sample."
+    },
+    "full-after-cache": {
+      "label": "windows-gtx1660s",
+      "commit": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+      "tracked_changes": true,
+      "gpu_source_sha256": "859a081a2a524536203e9b2482a3b4317905f6fe4afe40a45f73e532b491f7c9",
+      "input_sha256": "d3aa7348d100d9d0545c9b35a46469e7d167357a3f975e67ade25cd60e98516d",
+      "film": "kodak_portra_400",
+      "paper": "kodak_portra_endura",
+      "params": {
+        "io": {
+          "input_color_space": "sRGB",
+          "input_cctf_decoding": false
+        }
+      },
+      "iterations_per_process": 1,
+      "raw_dump_included_in_wall_time": true,
+      "pipeline_cache": "default",
+      "memory_note": "GPU 0 whole-device usage sampled at 100 ms; includes desktop, not process VRAM",
+      "runs": [
+        {
+          "name": "gpu-1",
+          "engine": "gpu",
+          "profiled": false,
+          "exit_code": 0,
+          "wall_ms": 2645.8408999999997,
+          "pipeline_ms": [
+            768
+          ],
+          "load_ms": [
+            290
+          ],
+          "save_ms": [
+            520
+          ],
+          "cli_total_ms": [
+            2502
+          ],
+          "gpu_stages_ms": [],
+          "gpu_resident": true,
+          "memory_baseline_mib": 343.0,
+          "memory_peak_mib": 1502.0,
+          "memory_samples": 25,
+          "start_utc": "2026-10-22T22:18:24.906574+00:00",
+          "end_utc": "2026-10-22T22:18:27.551998+00:00",
+          "watchdog_events": [],
+          "pass": true,
+          "tiff_sha256": "bd80cee24e9dc7f9c9d2523a0a8e700eaa2af5947fd053513a796815d4f19d7e",
+          "raw_sha256": "1df7aa38f696131b4553e28dc15b934849502d649feb300ff3da74a0da695c42"
+        }
+      ],
+      "repeat_identical": true
+    }
+  },
+  "full_resolution_f64_comparison": {
+    "failures": [],
+    "gates": {
+      "code16_max": 1,
+      "description": "f64 reference, machine A vs machine B. Every value within 1e-12 + 1e-11\u00b7max(|a|,|b|).",
+      "rms_norm": 1e-12,
+      "value_abs": 1e-12,
+      "value_rel": 1e-11
+    },
+    "pass": true,
+    "profile": "f64",
+    "stats": {
+      "code16_differ": 0,
+      "code16_max": 0,
+      "code8_differ": 0,
+      "code8_max": 0,
+      "de00_max": 4.738408470145572e-11,
+      "de00_max_at": {
+        "x": 5770,
+        "y": 2574
+      },
+      "de00_mean": 2.99531976063375e-12,
+      "de00_p99": 1.3664179811441897e-11,
+      "de00_p999": 2.112961037860669e-11,
+      "differ": 72744922,
+      "frac_de00_gt_0_5": 0.0,
+      "frac_de00_gt_1": 0.0,
+      "frac_de00_gt_2": 0.0,
+      "max_abs": 2.871036741680655e-13,
+      "max_abs_at": {
+        "c": 2,
+        "x": 5675,
+        "y": 959
+      },
+      "nonfinite": [
+        0,
+        0
+      ],
+      "rms_norm": 1.3353298738430985e-14,
+      "value_gate_violations": 0,
+      "value_gate_worst": 0.09241433098670775,
+      "value_gate_worst_at": {
+        "c": 2,
+        "x": 1629,
+        "y": 127
+      },
+      "values": 73011456
+    }
+  },
+  "cache_recovery_note": "Both cases ran during CPU correctness testing: their timings are not startup benchmark samples. Both exported the same TIFF as cache-disabled and populated-cache runs; the truncated cache was replaced with a valid 256069-byte cache.",
+  "validation": {
+    "macos_exact": {
+      "gpu": 184,
+      "f64": 184,
+      "f32cpu": 116
+    },
+    "windows_exact": {
+      "gpu": 184,
+      "f64": 184,
+      "f32cpu": 116
+    },
+    "cache_unit_tests_each_platform": 3,
+    "harness_unit_tests": 22,
+    "windows_full_resolution_after_cache_identical": true
+  }
+}

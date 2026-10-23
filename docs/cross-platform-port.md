@@ -1,12 +1,142 @@
 # Cross-platform port: Linux, Omarchy, Windows
 
 Notes from the portability review on 2026-10-22, based on `main` at a5c360f
-(Release 0.7.0). Nothing here was built on Linux or Windows yet; only the macOS
-targets are installed on the Mac.
+(Release 0.7.0), followed by measurements on macOS and Windows. The Windows
+engine now builds and passes the calibrated f64/GPU gates on a GTX 1660 SUPER.
+The historical alternatives below are superseded by the decisions in
+`windows-agent-handoff.md`.
 
 Plan (updated 2026-10-22): Windows first, then Linux and Omarchy (Arch +
 Hyprland). Each platform gets a native UI. Launch speed is a hard requirement;
 dark mode on Windows is not. Same input must give the same output.
+
+## Full-resolution measurements (2026-10-22/23)
+
+Input: one Nikon Z 6 photo, 6048 × 4024 (24.337 MP), decoded with rawler into
+linear float TIFF. Independent Mac and Windows decodes have the same SHA-256:
+`d3aa7348d100d9d0545c9b35a46469e7d167357a3f975e67ade25cd60e98516d`.
+Portra 400 → Endura, default effects including grain; linear sRGB input,
+no input transfer-function decoding. Two fresh processes per engine.
+
+| Measurement | M1 Pro / Metal | Ryzen 5 3600 / GTX 1660 SUPER / Vulkan |
+|---|---:|---:|
+| GPU pipeline | 724–757 ms | 891–935 ms |
+| GPU pipeline per MP | 29.7–31.1 ms | 36.6–38.4 ms |
+| f64 CPU pipeline | 15,961–16,395 ms | 35,111–35,479 ms |
+| GPU process wall, including TIFF and diagnostic raw dump | 1.79–1.84 s | 2.81–3.04 s |
+| f64 process wall, including TIFF and diagnostic raw dump | 17.37–18.32 s | 37.22–37.23 s |
+| GPU whole-device peak / idle baseline | not measured | 1510 / 351 MiB |
+
+Pipeline timings exclude image load, device creation and output encoding.
+Wall timings include the 584 MB diagnostic dump and are **not** ordinary
+export latency. The original 22 s Mac measurement used a different input
+path; it is not the denominator for this comparison. The NVIDIA memory
+numbers are whole-device samples every 100 ms, including the desktop, not
+per-process allocation counts. They can miss short peaks.
+
+Both repeats and the separately profiled GPU run are byte-identical within
+each machine. The full-resolution f64 TIFF is also identical between machines.
+The raw f64 comparison passes the existing gate: max absolute delta
+2.87e-13, normalised RMS 1.34e-14, worst value 0.0925× the gate, no changed
+16-bit codes. No tolerance or numerical implementation changed.
+
+Separate GPU stage profile (`SPEKTRAFILM_GPU_PROFILE=1`, ms):
+
+| Stage | M1 Pro | GTX 1660 SUPER |
+|---|---:|---:|
+| Upload | 1.5 | 52.4 |
+| Front | 52.8 | 11.5 |
+| Halation | 168.9 | 155.1 |
+| DIR couplers | 118.1 | 121.1 |
+| Grain | 101.8 | 30.4 |
+| Print spectral | 39.2 | 24.2 |
+| Scan spectral | 40.0 | 24.2 |
+
+This mode submits and waits between stages, so it changes scheduling and
+cannot establish watchdog safety for a normal export. It includes stage
+setup/compilation overhead, not just GPU execution. Windows f64 stage timings
+under a WPR CPU recording were: expose 5.218 s, develop 9.277 s (DIR 3.690 s,
+grain 5.361 s), printing 8.800 s, scanning 11.799 s. The private ETL is retained
+under `target/windows-perf/`; no CPU math optimization has been made. Inspect
+sampled stacks before attributing the print/scan cost specifically to BLAS.
+
+### Capacity and Windows watchdog
+
+Deterministic synthetic float TIFFs from `scripts/golden/capacity_input.py`,
+same stock/effects, normal unprofiled submissions. These timings describe
+stress inputs and are not directly comparable with the photo above.
+
+| Size | Pipeline | Peak device memory | Result |
+|---|---:|---:|---|
+| 54 MP (9000 × 6000) | 2.046 s | 2916 MiB | completed; no matching display-reset event |
+| 96 MP (12000 × 8000) | 3.144 s | 4919 MiB | completed; no matching display-reset event |
+| 144 MP (14400 × 10000) | 5.756 s | 5924 MiB | exit 0 **but display driver reset** |
+| 178.95 MP (15000 × 11930) | 6.410 s | 5892 MiB | exit 0 **but display driver reset** |
+| 180 MP (15000 × 12000) | — | 2416 MiB before failure | validation panic, exit 101; no CPU fallback |
+
+Windows System event 4101 (`nvlddmkm stopped responding`) occurred at
+22:00:57 and 22:02:50 UTC on October 22, during the 144 MP and 178.95 MP
+renders respectively. Their success exit codes do **not** establish correct
+output or device stability. The benchmark now rejects runs with a matching
+display-reset event. Largest tested size without a reset: **96 MP**; this is
+not a guarantee for other effects, drivers or images.
+
+The adapter accepts at most 2,147,483,647 bytes in one storage binding:
+178,956,970 RGB f32 pixels theoretically. At 180 MP the 2,160,000,000-byte
+image binding is rejected by `Device::create_bind_group` (`bg_hanatos`). The
+test at 178.95 MP approaches that binding limit and the dedicated VRAM ceiling;
+it is not a supported operating size. Host-memory spill is plausible from
+the memory plateau; per-process shared-memory accounting was not measured.
+
+**Unresolved release blockers:** preflight capacity before allocating GPU
+buffers, route oversized work to CPU, and handle watchdog/device loss without
+claiming a successful export. Investigate shorter submissions with unchanged
+shader math and exact-output checks. Do not raise Windows TDR timeouts or
+loosen the image gates to hide these failures.
+
+A subsequent 178.95 MP run with per-stage profiling also triggered event 4101
+(22:16:12 UTC), then stalled with zero GPU utilization, about 5892 MiB device
+memory and 7.6 GB process working set. It was explicitly terminated after
+125 s. This diagnostic overlapped the small CPU correctness cases, so its
+timing is not a capacity benchmark; it nevertheless shows that per-stage
+waits alone did not prevent a reset/stall. Use a bounded `--timeout` for
+further experiments.
+
+### Vulkan pipeline cache
+
+The backend now requests `PIPELINE_CACHE` only when supported on Vulkan and
+passes a disk-backed cache to compute pipeline creation. It uses wgpu's
+adapter key and driver/ABI validation, plus a bounded, checksummed envelope
+and atomic file replacement. Missing, stale, corrupt or unwritable cache
+files do not prevent ordinary compilation. A completed resident render saves
+new pipelines; Drop also saves standalone pipeline use. Metal does not use it.
+
+Default storage: `%LOCALAPPDATA%/Negs/Cache/gpu` on Windows;
+`$XDG_CACHE_HOME/negs/gpu` or `~/.cache/negs/gpu` on Linux.
+`SPEKTRAFILM_PIPELINE_CACHE_DIR` selects an isolated test directory;
+`SPEKTRAFILM_DISABLE_PIPELINE_CACHE=1` disables the feature.
+
+On the 1008 × 670 golden photo, a new application cache took 142 ms for the
+first pipeline; three subsequent processes took 112 ms each. With application
+caching disabled the same build took 105–113 ms. Approximate start-to-image
+inside the CLI (one iteration, `Total − Saved`, excludes process teardown):
+343 ms with an empty cache, 293–303 ms with a populated cache, 284–295 ms with
+the cache disabled. The resulting cache was 256,069 bytes. All these TIFFs
+were identical. **No demonstrated warm-start speedup on this NVIDIA driver.**
+Its own shader cache and OS file caches were already warm; these are fresh
+process / empty-application-cache measurements, not reboot-cold measurements.
+Before this change, in-process repeat pipelines took 23–26 ms.
+
+Validation: **484/484 outputs byte-identical on each machine** against its
+previous manifest (184 GPU, 184 f64, 116 f32 CPU). The existing cross-platform
+f32 CPU grain differences remain deferred; this change introduces none.
+Cache unit tests pass on Mac and Windows; corrupt and unwritable cache paths
+also produce the same golden TIFF on Windows. The 22 harness tests pass.
+Updated full manifests are `macos-arm64-pipeline-cache.json` and
+`windows-gtx1660s-vulkan-pipeline-cache.json` in `scripts/golden/manifests/`.
+
+The Win32 first-paint, first-interaction and first-usable-image measurements
+remain pending the UI spike result and approval of the UI plan.
 
 ## Where the code stands
 
@@ -264,6 +394,7 @@ GPU.
 
 - f32 CPU grain across platforms: accept a different grain pattern, or give
   rows/tiles their own random streams (changes macOS f32 CPU grain)? Deferred.
-- Windows UI: WinUI 3 or Win32 + custom drawing (after the startup spike).
+- Windows UI: Win32 with standard common controls is selected; the startup
+  spike result and go-ahead are still required before implementing the app.
 - Keep or drop the CUDA backend (recommendation: drop, wgpu only).
-- Which GPU is in the target machine (NVIDIA proprietary vs Mesa).
+- Capacity fallback and watchdog recovery on Windows (measured failures above).

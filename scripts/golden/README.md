@@ -197,6 +197,52 @@ release. See `docs/windows-agent-handoff.md`.
   2026-10-22).
 - The GPU gates come from two vendors (Apple, NVIDIA); AMD, Intel and
   software Vulkan may need more room.
+- Windows full-resolution capacity is now measured: 96 MP completed without
+  a display reset; 144 and 178.95 MP returned success while Windows logged a
+  driver reset; 180 MP panicked at the storage-binding limit. See
+  `docs/cross-platform-port.md`. These are unresolved capacity/recovery issues,
+  not reasons to loosen a correctness gate.
+
+## Full-resolution performance and startup
+
+`benchmark.py` uses the same linear-input parameters and engine selection as
+the golden matrix. It checks the GPU backend and resident path, hashes repeated
+outputs, and records per-process/pipeline timings. On NVIDIA it samples
+whole-device memory at 100 ms; on Windows it also checks System event 4101 and
+fails a run with a display reset, even if the CLI returned success.
+
+```bash
+target/release/golden_inputs --long-edge 100000 target/windows-perf/inputs INPUT.NEF
+python3 -I scripts/golden/benchmark.py target/windows-perf/inputs/photo_INPUT.tif \
+  --out target/windows-perf/full --label MACHINE --raw --profile
+
+# Empty vs populated application cache: reuse a new, private cache directory.
+# These are fresh processes; the OS and GPU driver's own caches may be warm.
+python3 -I scripts/golden/benchmark.py target/golden/inputs/photo_DSC_4990.tif \
+  --out target/windows-perf/startup-cache --label MACHINE --engines gpu \
+  --repeats 4 --pipeline-cache-dir target/windows-perf/new-cache
+python3 -I scripts/golden/benchmark.py target/golden/inputs/photo_DSC_4990.tif \
+  --out target/windows-perf/startup-disabled --label MACHINE --engines gpu \
+  --repeats 4 --disable-pipeline-cache
+
+# Synthetic capacity stress, generated with bounded host RAM.
+python3 -I scripts/golden/capacity_input.py target/windows-perf/capacity.tif 12000 8000
+python3 -I scripts/golden/benchmark.py target/windows-perf/capacity.tif \
+  --out target/windows-perf/capacity --label MACHINE --engines gpu --repeats 1
+```
+
+Use `--preset` to exercise the golden effects and `--profile-only` to diagnose
+GPU stages without first repeating an unsafe normal submission. Profiling
+waits between stages and **cannot** establish normal-submit watchdog safety.
+Pass `--timeout 120` for capacity experiments so a stalled render is killed.
+`--raw` adds a diagnostic dump to wall time; omit it for export/startup latency.
+Keep logs, images, dumps and WPR traces in `target/`. Only reviewed reports,
+hash manifests and documentation belong in this public repository.
+
+The 2026-10-23 performance report is in
+`scripts/golden/reports/windows-performance-2026-10-23.json`. Early capacity
+runs predated the event-log check; their two apparent successes have been
+explicitly marked failed after matching Windows' display-reset events.
 
 ## Not covered yet
 
