@@ -175,6 +175,10 @@ further cache/compilation changes.
 
 ### 3. Win32 app
 
+The app follows Windows conventions rather than copying the Mac layout.
+`docs/windows-ui-features.md` lists every macOS feature and its behaviour,
+what to do instead on Windows, and the decisions still open.
+
 Port **both** halves of the macOS export architecture:
 
 - the `spektrafilm-native` JSON-lines helper, which serves the preview and
