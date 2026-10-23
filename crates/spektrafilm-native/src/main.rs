@@ -39,6 +39,14 @@ struct Request {
 #[serde(tag = "command", rename_all = "snake_case")]
 enum Command {
     Catalog,
+    /// Unprocessed, identically framed source for the Windows original view.
+    /// This does not replace the retained film render used by Save.
+    Original {
+        input: PathBuf,
+        params: Box<RuntimeParams>,
+        limit_preview: bool,
+        preview_path: PathBuf,
+    },
     Render {
         input: PathBuf,
         #[serde(default)]
@@ -133,6 +141,21 @@ impl Session {
     fn handle(&mut self, request: Request, data: &Path) -> Result<Value> {
         match request.command {
             Command::Catalog => catalog(data),
+            Command::Original { input, params, limit_preview, preview_path } => {
+                ensure!(input != preview_path, "Choose a different preview path to preserve the source");
+                ensure!(params.io.upscale_factor.is_finite()
+                    && (0.1..=1.0).contains(&params.io.upscale_factor), "Invalid working resolution");
+                params.io.raw_white_balance.validate()?;
+                let source = spektrafilm_io::load_image_with_wb(
+                    &input, spektrafilm_io::Formats::Any, params.io.raw_white_balance,
+                )?;
+                let dimensions = preview_dimensions(source.width, source.height,
+                    params.io.upscale_factor, limit_preview);
+                let working = rescale_preview_input_fast(&source, dimensions);
+                let encoded = !spektrafilm_io::input_is_linear_srgb(&input);
+                let (width, height) = write_display(&working, encoded, &PostParams::default(), &preview_path)?;
+                Ok(json!({"width": width, "height": height}))
+            }
             Command::Save {
                 render_id,
                 output,
@@ -449,6 +472,39 @@ mod tests {
             vec![0, 46, 255, 255]
         );
         assert_eq!(image.data[1], 0.18);
+    }
+    #[test]
+    fn original_keeps_the_render_available_for_save() {
+        let dir = std::env::temp_dir().join(format!("negs-original-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.png");
+        let preview = dir.join("original.rgba");
+        let source = ImageBuf::from_data(2, 1, vec![0.0, 0.5, 1.0, 1.0, 0.5, 0.0]);
+        spektrafilm_io::save_image(&source, &input, None).unwrap();
+        let mut session = Session {
+            output: Some(Rendered { id: 7, key: Value::Null, response: Value::Null,
+                source: input.clone(), film: "kodak_gold_200".into(), encoded: true,
+                post: PostParams::default(), image: source.clone() }),
+            ..Default::default()
+        };
+        let params = Box::new(RuntimeParams::default());
+        let response = session.handle(Request { id: 8, command: Command::Original {
+            input: input.clone(), params, limit_preview: false, preview_path: preview.clone(),
+        } }, Path::new(".")).unwrap();
+        assert_eq!(response["width"], 2);
+        assert_eq!(response["height"], 1);
+        assert_eq!(std::fs::read(preview).unwrap().len(), 8);
+        let retained = session.output.as_ref().unwrap();
+        assert_eq!(retained.id, 7);
+        assert_eq!(retained.image.data, source.data);
+        let saved = dir.join("saved.png");
+        session.handle(Request { id: 9, command: Command::Save {
+            render_id: 7, output: saved.clone(), border: None,
+            border_options: BorderOptions::default(), instagram: false,
+            crop: None, rotate_cw: 0, fit: None,
+        } }, Path::new(".")).unwrap();
+        assert_eq!(std::fs::read(input).unwrap(), std::fs::read(saved).unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn working_source_is_resampled_once_per_size() {
