@@ -128,6 +128,45 @@ test checking whole-pipeline fallback and single rescaling pass on Mac and
 Windows. CPU fallback retains the existing f32 CPU grain behavior; its
 cross-platform grain decision remains deferred.
 
+### Reporting the backend that actually rendered (f27722c)
+
+`Pipeline::process_with_backend` returns the image and the name of the
+backend that rendered it; `process` is a wrapper. The CLI prints `Backend:`
+**after** the render from that name, and the helper's `render` reply carries
+it. Before this, a capacity-fallback export still printed `Backend: wgpu`
+(the startup selection), which the Mac app and the egui GUI read as proof of
+GPU execution. The native bridge test (`scripts/check_native_macos.py`, now
+cross-platform: one reader thread instead of `select()`) takes
+`--expected-backend cpu|wgpu`.
+
+Validation at f27722c, against the capacity-guard checkpoint on the same
+machine:
+
+| Check | M1 Pro | GTX 1660 SUPER |
+|---|---|---|
+| Golden matrix, `compare --exact` | 484/484 identical (184 GPU, 184 f64, 116 f32 CPU) | 484/484 identical (184 GPU, 184 f64, 116 f32 CPU) |
+| Golden run time (default jobs) | 2 min 29 s | 10 min 41 s |
+| Native bridge, default (wgpu) | pass, `wgpu (GPU)` | pass, `wgpu (GPU)` |
+| Native bridge, `SPEKTRAFILM_BACKEND=cpu` | pass, `CPU (rayon)` | pass, `CPU (rayon)` |
+| Native bridge, wgpu + `SPEKTRAFILM_WGPU_MEMORY_LIMIT_MB=0` | n/a (no admission on Metal) | pass, `CPU (rayon)` |
+| Forced image (0 MiB) / FFT (160 MiB) fallback vs explicit CPU | n/a | raw and TIFF identical, same hashes as the checkpoint; CLI prints `Backend: CPU (rayon)` |
+| Capacity unit tests, fallback integration test | 3 + 1 pass | 3 + 1 pass |
+| Golden harness tests | 22 pass | 22 pass |
+
+Windows against the original Mac reference (`macos-arm64.json`, tolerance
+mode; report `windows-backend-report.json`): f64 182 PASS + 2 PASS-BORDER,
+GPU 184 PASS, f32 CPU 23 PASS + 11 PASS-GRAIN + **82 FAIL-GRAIN**. The
+FAIL-GRAIN cases are the deferred shared-MT19937-stream divergence: the
+same count as at e1ca2a2, not a new difference. Windows exports that fall
+back to the CPU inherit it. Manifests: `macos-arm64-backend-report.json`,
+`windows-gtx1660s-backend-report.json`; exact reports
+`*-backend-report-exact.json`.
+
+The bridge test also checks that a saved preview at export size equals the
+Fast export byte for byte; under the 0 MiB limit both fell back to the CPU
+and still matched. The 180 MP fallback export (272 s, CPU) was not repeated
+just for its log label.
+
 ### Vulkan pipeline cache
 
 The backend now requests `PIPELINE_CACHE` only when supported on Vulkan and
@@ -422,5 +461,8 @@ GPU.
   rows/tiles their own random streams (changes macOS f32 CPU grain)? Deferred.
 - Windows UI: Win32 with standard common controls is selected; the startup
   spike result and go-ahead are still required before implementing the app.
+  The UI's own open decisions are in `docs/windows-ui-features.md` §20.
 - Keep or drop the CUDA backend (recommendation: drop, wgpu only).
-- Capacity fallback and watchdog recovery on Windows (measured failures above).
+- Watchdog and device-loss recovery on Windows. Memory admission with CPU
+  fallback is done (above); it does not make long-running work that fits in
+  memory safe from a driver reset, and nothing detects a lost device yet.
