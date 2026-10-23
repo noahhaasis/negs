@@ -14,6 +14,9 @@ if ($EdPublicKey -and [Convert]::FromBase64String($EdPublicKey).Length -ne 32) {
 $env:NEGS_APPCAST_URL = $AppcastUrl
 $env:NEGS_ED_PUBLIC_KEY = $EdPublicKey
 function Build([string[]]$Arguments) {
+    # Windows PowerShell 5 wraps redirected native stderr as ErrorRecord,
+    # including harmless compiler warnings. The process exit code is decisive.
+    $ErrorActionPreference = 'Continue'
     & cargo @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Cargo build failed.' }
 }
@@ -37,7 +40,8 @@ if ($WinSparkleDll) {
     if (-not (Test-Path -LiteralPath $license)) { throw 'Place the WinSparkle COPYING license beside the DLL.' }
     Copy-Item -LiteralPath $license -Destination (Join-Path $stage 'WinSparkle-COPYING')
 }
-& git -c "safe.directory=$root" archive --format=zip "--output=$(Join-Path $stage 'source.zip')" HEAD
+$gitRoot = $root.Replace('\', '/')
+& git -c "safe.directory=$gitRoot" archive --format=zip "--output=$(Join-Path $stage 'source.zip')" HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Source archive failed.' }
 $output = Join-Path $root 'target/windows-dist'
 New-Item -ItemType Directory -Force -Path $output | Out-Null
