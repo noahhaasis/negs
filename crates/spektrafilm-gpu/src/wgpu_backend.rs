@@ -1,4 +1,4 @@
-/// wgpu compute backend — dispatches WGSL shaders on GPU via Metal/Vulkan/DX12.
+/// wgpu compute backend — dispatches WGSL shaders on GPU via Metal/Vulkan.
 
 #[cfg(feature = "wgpu-backend")]
 use std::borrow::Cow;
@@ -280,6 +280,8 @@ pub struct WgpuBackend {
     /// Cache compiled compute pipelines keyed by shader source pointer.
     /// `&'static str` is fine because all our shader sources come from `include_str!`.
     pipeline_cache: std::sync::Mutex<std::collections::HashMap<usize, CachedPipeline>>,
+    /// Vulkan driver binaries reused between processes (Metal has its own cache).
+    disk_pipeline_cache: Option<crate::pipeline_cache::DiskPipelineCache>,
     /// Upper bound for `WORKGROUP_SIZE` overrides: the adapter's limit, or
     /// lower with `SPEKTRAFILM_WGPU_WORKGROUP_SIZE` (a diagnostic to exercise
     /// the smaller sizes other GPUs get).
@@ -356,12 +358,17 @@ impl WgpuBackend {
         // mapped path. Check it renders the same as SPEKTRAFILM_WGPU_FORCE_STAGING
         // there and is actually faster.
         let force_staging = std::env::var_os("SPEKTRAFILM_WGPU_FORCE_STAGING").is_some();
-        let opt_feats =
+        let mut opt_feats =
             if adapter_info.device_type == wgpu::DeviceType::IntegratedGpu && !force_staging {
                 wgpu::Features::MAPPABLE_PRIMARY_BUFFERS & adapter.features()
             } else {
                 wgpu::Features::empty()
             };
+        let cache_path = crate::pipeline_cache::DiskPipelineCache::path(&adapter_info)
+            .filter(|_| adapter.features().contains(wgpu::Features::PIPELINE_CACHE));
+        if cache_path.is_some() {
+            opt_feats |= wgpu::Features::PIPELINE_CACHE;
+        }
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("spektrafilm"),
@@ -372,6 +379,9 @@ impl WgpuBackend {
             None,
         ))
         .ok()?;
+
+        let disk_pipeline_cache = cache_path
+            .map(|path| crate::pipeline_cache::DiskPipelineCache::new(&device, path));
 
         let limits = device.limits();
         let mut max_workgroup_size = limits
@@ -400,6 +410,7 @@ impl WgpuBackend {
             device,
             queue,
             pipeline_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+            disk_pipeline_cache,
             max_workgroup_size,
             #[cfg(target_os = "macos")]
             threadgroup_probe,
@@ -513,8 +524,11 @@ impl WgpuBackend {
                     // slower. Every shader writes what it reads there first.
                     zero_initialize_workgroup_memory: false,
                 },
-                cache: None,
+                cache: self.disk_pipeline_cache.as_ref().map(|c| &c.cache),
             });
+        if let Some(cache) = &self.disk_pipeline_cache {
+            cache.mark_dirty();
+        }
         CachedPipeline {
             bind_group_layout,
             pipeline,
@@ -1656,6 +1670,12 @@ impl WgpuBackend {
         map_target.unmap();
 
         profiler.report();
+        // Persist only when new pipelines were compiled. The helper can be
+        // terminated by its UI, so also save after a successful resident render
+        // rather than relying solely on Drop at a graceful process exit.
+        if let Some(cache) = &self.disk_pipeline_cache {
+            cache.flush();
+        }
         let out = ImageBuf::from_data(image.width, image.height, f32_to_scalars(out_f32));
         tracing::debug!(
             cpu_setup_ms = format!("{cpu_setup_ms:.1}"),

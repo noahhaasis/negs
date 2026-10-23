@@ -3,6 +3,8 @@ pub mod cpu_backend;
 pub mod cuda_backend;
 #[cfg(feature = "wgpu-backend")]
 pub mod wgpu_backend;
+#[cfg(feature = "wgpu-backend")]
+mod pipeline_cache;
 
 use spektrafilm_math::image::ImageBuf;
 

@@ -1,0 +1,1939 @@
+{
+ "a": {
+  "label": "windows-gtx1660s-vulkan",
+  "platform": "Windows-10-10.0.19041-SP0",
+  "python": "3.9.2",
+  "cpu": "AMD Ryzen 5 3600 6-Core Processor",
+  "cpu_count": 12,
+  "threads": "all",
+  "git_rev": "f596979674f984252847c62974e83be44c156427",
+  "git_dirty_hash": null,
+  "cargo_lock": "f7e0e221db459c721495b3aa809e61385b42c43121490b908d61c175e3c07231",
+  "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: x86_64-pc-windows-msvc\nrelease: 1.93.1\nLLVM version: 21.1.8",
+  "binaries": {
+   "f64": {
+    "sha256": "fc77bb8a03d9ba397a3fe8df3ba245cbc19d78b595fde1fb01bf2b3674881855",
+    "arch": "x86_64"
+   },
+   "f32cpu": {
+    "sha256": "dbdbe0ebe6d975bcb0453bad37c37e24e564ffff32d0317d3843bccbffc93344",
+    "arch": "x86_64"
+   },
+   "gpu": {
+    "sha256": "dbdbe0ebe6d975bcb0453bad37c37e24e564ffff32d0317d3843bccbffc93344",
+    "arch": "x86_64"
+   }
+  },
+  "data_dir": "cfac1b286e3f34b500dc22ea4fe4520ff1dc2a1e92a30eea2ec93f800407908d",
+  "presets_dir": "4f56a89d88180cc199e72d466e3a8e28c440dc1f820d0c0222bd7d9d02b45b27"
+ },
+ "b": {
+  "label": "windows-gtx1660s-vulkan-pipeline-cache",
+  "platform": "Windows-10-10.0.19041-SP0",
+  "python": "3.9.2",
+  "cpu": "AMD Ryzen 5 3600 6-Core Processor",
+  "cpu_count": 12,
+  "threads": "all",
+  "git_rev": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+  "git_dirty_hash": "12d6002538b173bd913fa59b8ee5bccd1bfcf70b97aa4d876514043491276c55",
+  "cargo_lock": "2c3e05cad6560cfdb26e019b8362fa2022ece1af2fdc41b521d4d8de5678d766",
+  "rustc": null,
+  "binaries": {
+   "gpu": {
+    "sha256": "bb1ade273264c31b356c0f7bed88be7564fd4594595f009e75d9ea842ccb6914",
+    "arch": "x86_64"
+   },
+   "f64": {
+    "sha256": "4a88c8b83a3eafa284fb7d7e53b2693951b78f193a0daab45686c7e34e523b0d",
+    "arch": "x86_64"
+   },
+   "f32cpu": {
+    "sha256": "bb1ade273264c31b356c0f7bed88be7564fd4594595f009e75d9ea842ccb6914",
+    "arch": "x86_64"
+   }
+  },
+  "data_dir": "cfac1b286e3f34b500dc22ea4fe4520ff1dc2a1e92a30eea2ec93f800407908d",
+  "presets_dir": "4f56a89d88180cc199e72d466e3a8e28c440dc1f820d0c0222bd7d9d02b45b27",
+  "subset_provenance": {
+   "gpu": {
+    "label": "windows-pipeline-cache",
+    "platform": "Windows-10-10.0.19041-SP0",
+    "python": "3.9.2",
+    "cpu": "AMD Ryzen 5 3600 6-Core Processor",
+    "cpu_count": 12,
+    "threads": "all",
+    "git_rev": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+    "git_dirty_hash": "12d6002538b173bd913fa59b8ee5bccd1bfcf70b97aa4d876514043491276c55",
+    "cargo_lock": "2c3e05cad6560cfdb26e019b8362fa2022ece1af2fdc41b521d4d8de5678d766",
+    "rustc": null,
+    "binaries": {
+     "gpu": {
+      "sha256": "bb1ade273264c31b356c0f7bed88be7564fd4594595f009e75d9ea842ccb6914",
+      "arch": "x86_64"
+     }
+    },
+    "data_dir": "cfac1b286e3f34b500dc22ea4fe4520ff1dc2a1e92a30eea2ec93f800407908d",
+    "presets_dir": "4f56a89d88180cc199e72d466e3a8e28c440dc1f820d0c0222bd7d9d02b45b27"
+   },
+   "cpu": {
+    "label": "windows-cache-cpu",
+    "platform": "Windows-10-10.0.19041-SP0",
+    "python": "3.9.2",
+    "cpu": "AMD Ryzen 5 3600 6-Core Processor",
+    "cpu_count": 12,
+    "threads": "all",
+    "git_rev": "214ed09e8be5ec2d394b9db95aa3bd811657f2ab",
+    "git_dirty_hash": "12d6002538b173bd913fa59b8ee5bccd1bfcf70b97aa4d876514043491276c55",
+    "cargo_lock": "2c3e05cad6560cfdb26e019b8362fa2022ece1af2fdc41b521d4d8de5678d766",
+    "rustc": null,
+    "binaries": {
+     "f64": {
+      "sha256": "4a88c8b83a3eafa284fb7d7e53b2693951b78f193a0daab45686c7e34e523b0d",
+      "arch": "x86_64"
+     },
+     "f32cpu": {
+      "sha256": "bb1ade273264c31b356c0f7bed88be7564fd4594595f009e75d9ea842ccb6914",
+      "arch": "x86_64"
+     }
+    },
+    "data_dir": "cfac1b286e3f34b500dc22ea4fe4520ff1dc2a1e92a30eea2ec93f800407908d",
+    "presets_dir": "4f56a89d88180cc199e72d466e3a8e28c440dc1f820d0c0222bd7d9d02b45b27"
+   }
+  },
+  "validation_note": "Combined GPU and CPU subsets of the same cache implementation; binary hashes and per-subset source metadata retained."
+ },
+ "cases": {
+  "photo_7858115920__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__boost": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__colour": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__border_35mm": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__border_keyline": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__crop_rotate": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__resize": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__det": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_bpm": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_cinebloom": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_enlarger": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_glimmer": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__dir_wide": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_off": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_off_coarse": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_on": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_on_coarse": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__halation_big": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_cam_large": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_cam_small": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_scan_large": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_scan_small": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__morph": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__preflash": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__unsharp_iir": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__unsharp_strong": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_7858115920__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_portra_400__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4985__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_portra_400__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4990__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_portra_400__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_4997__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_portra_400__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5003__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_portra_400__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "photo_DSC_5009__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_portra_400__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_edges__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_portra_400__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_gamut__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__boost": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__colour": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__det": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_bpm": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_cinebloom": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_enlarger": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_glimmer": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__dir_wide": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_off": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_off_coarse": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_on": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_on_coarse": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__halation_big": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_cam_large": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_cam_small": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_scan_large": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_scan_small": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__morph": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__preflash": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__unsharp_iir": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__unsharp_strong": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_noise__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__fujifilm_velvia_100__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__fujifilm_velvia_100__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_doublex__kodak_2302__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_doublex__kodak_2302__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_gold_200__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_gold_200__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_portra_400__kodak_portra_endura__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_portra_400__kodak_portra_endura__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_trix__scan__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_trix__scan__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_vision3_500t__kodak_2383__default": {
+   "f32cpu": {
+    "status": "IDENTICAL"
+   },
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  },
+  "synth_ramp__kodak_vision3_500t__kodak_2383__det": {
+   "f64": {
+    "status": "IDENTICAL"
+   },
+   "gpu": {
+    "status": "IDENTICAL"
+   }
+  }
+ },
+ "counts": {
+  "f32cpu": {
+   "IDENTICAL": 116
+  },
+  "f64": {
+   "IDENTICAL": 184
+  },
+  "gpu": {
+   "IDENTICAL": 184
+  }
+ },
+ "problems": []
+}

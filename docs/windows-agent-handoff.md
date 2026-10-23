@@ -1,8 +1,10 @@
 # Windows port: handoff for the next agent
 
-You are continuing the Negs Windows port. Correctness is done: the engine
-matches the Mac within calibrated gates on a real Windows GPU. What is left is
-**performance**, **startup**, and the **Win32 app**.
+You are continuing the Negs Windows port. The golden matrix matches the Mac
+within calibrated gates on a real Windows GPU. Full-resolution testing has
+now exposed **capacity/watchdog failures** beyond that matrix. Performance
+baselines and a Vulkan pipeline cache are implemented; the **Win32 app** has
+not been started.
 
 Noah's priorities, in order: **correctness**, **performance**, **launch speed**
 (a hard requirement for the UI). The **GPU path is what ~99 % of users run**.
@@ -46,7 +48,7 @@ Windows results).
   without Noah's go-ahead. Commits that land on main are dated one minute after
   main's tip (author and committer).
 
-## State of the branch
+## Baseline before the October 23 continuation
 
 | Commit | What |
 |---|---|
@@ -59,6 +61,47 @@ Windows results).
 
 Verified at 214ed09: all 184 GPU cases byte-identical to the committed
 manifests on both machines.
+
+## October 23 continuation
+
+- Full-resolution Z 6 input decoded independently on both platforms with
+  identical bytes. Portra 400 → Endura, grain on: GPU pipeline 0.724–0.757 s
+  on M1 Pro, 0.891–0.935 s on GTX 1660 SUPER; f64 15.961–16.395 s vs
+  35.111–35.479 s. The full-size f64 TIFF is identical across platforms;
+  raw buffers pass the unchanged f64 gate.
+- New standard-library scripts: `scripts/golden/benchmark.py` and
+  `capacity_input.py`. The benchmark checks backend/resident execution,
+  repeated output hashes, sampled NVIDIA memory and Windows display resets.
+- 96 MP completed without a matching Windows display-reset event. 144 MP
+  and 178.95 MP returned exit 0 **while the NVIDIA driver reset** (System
+  event 4101). 180 MP panicked at the 2 GiB storage-binding limit, with no
+  CPU fallback. Do not describe these as successful capacity tests.
+- Vulkan pipeline cache: `crates/spektrafilm-gpu/src/pipeline_cache.rs`.
+  Per-user storage, adapter/driver validation, CRC envelope, atomic writes,
+  persistence after resident renders and on Drop. Metal does not use it.
+  Corrupt and unwritable cache recovery passed on Windows, with identical
+  output. Unit tests pass on both platforms.
+- No demonstrated NVIDIA warm-start benefit: first pipeline ~112 ms with
+  populated application cache vs 105–113 ms disabled. Driver/OS caches were
+  already warm; reboot-cold launch remains unmeasured.
+- No gate, shader math, f32 CPU grain implementation or macOS numerical
+  implementation changed. No push or merge. The Win32 startup-test result
+  and UI go-ahead are still outstanding.
+- All 484 outputs (184 GPU, 184 f64, 116 f32 CPU) are byte-identical to the
+  previous same-machine manifests on **both** machines. Full combined
+  manifests are `macos-arm64-pipeline-cache.json` and
+  `windows-gtx1660s-vulkan-pipeline-cache.json` under
+  `scripts/golden/manifests/`. The 22 harness tests also pass.
+- A 178.95 MP `--profile-only` diagnostic also reset the driver, then stalled
+  until explicitly terminated after 125 s. Per-stage waits alone are not
+  sufficient at that size. Use a bounded `--timeout` for further diagnostics.
+
+Detailed measurements and limitations: `docs/cross-platform-port.md`.
+Public report: `scripts/golden/reports/windows-performance-2026-10-23.json`.
+Private TIFFs, raw dumps, logs and WPR trace: `target/windows-perf/` on each
+machine. The Windows CPU trace is `target/windows-perf/f64-cpu.etl`.
+Cache-change golden subsets/dumps use `macos-pipeline-cache`,
+`macos-cache-cpu`, `windows-pipeline-cache`, and `windows-cache-cpu`.
 
 ## The machines
 
@@ -104,40 +147,31 @@ Gotchas:
 
 ## Next steps
 
-### 1. Performance (start here)
+### 1. Capacity and watchdog recovery (start here)
 
-Measure on both machines with the same full-resolution input. Decode one Z 6
-NEF to a full-size float TIFF with
-`golden_inputs --long-edge 100000 <out_dir> <file.NEF>` on the Mac, check it
-is byte-identical on Windows, and copy it over.
+Use the recorded failures above to add preflight capacity checks and CPU
+fallback before oversize allocations/bindings, and to investigate shorter
+Windows submissions and device-loss recovery. An exit-0 TIFF during a driver
+reset is not proof of correct output. Keep shader math unchanged and prove
+exact output on both machines. Do not increase Windows TDR timeouts.
 
-- **GPU export:** wall time per stage with `SPEKTRAFILM_GPU_PROFILE=1` (it
-  inflates small renders, so use full resolution). The Mac does ~33 ms/MP;
-  halation blurs dominate.
-- **f64 Reference export:** the Mac takes 22.0 s for 24.3 MP with grain. On
-  Windows there is no BLAS: `cpu_backend.rs` and `spectral_service.rs` use plain
-  triple loops. Measure, then profile (e.g. `cargo flamegraph` or Windows
-  Performance Recorder) before changing anything. Keep results bit-identical
-  on each machine, and within the f64 gate across machines.
-- **VRAM and limits:** peak VRAM at 24 MP and at the largest size the GPU
-  accepts (`nvidia-smi --query-gpu=memory.used`). The 100 MP test only checks
-  the reported limits. On 6 GB, find where it fails and whether it fails
-  cleanly (CPU fallback, not a crash).
-- **Watchdog (TDR):** Windows resets the GPU when one submission runs ~2 s. Look
-  for device-lost errors on long blur/FFT passes at high megapixels. No
-  device-lost recovery exists yet.
+Use `--profile-only` for diagnostics without first repeating the known-unsafe
+normal submission. The per-stage waits change scheduling, so a profile run
+without a reset does not establish that the normal render is safe. Test wide
+blurs/FFT effects as well as defaults before claiming a supported MP ceiling.
 
-Write the numbers into `docs/cross-platform-port.md`, Mac and Windows side by
-side.
+For f64 speed work, inspect the captured WPR stacks before changing the
+Windows triple loops. Stage timings put most time in printing/scanning, but
+do not isolate BLAS from pow/exp and other work. Preserve same-machine bytes
+and the existing cross-platform f64 gate.
 
 ### 2. Startup: Vulkan pipeline cache
 
-wgpu supports a pipeline cache on Vulkan only. The engine passes `cache: None`
-(`crates/spektrafilm-gpu/src/wgpu_backend.rs`, in the compute pipeline
-descriptor). Measure cold and warm time from start to first GPU render on
-Windows, add a disk-backed `wgpu::PipelineCache`, and measure again. This must
-not change output: re-run the GPU golden cases with
-`run.py compare --exact --engines gpu`.
+Implemented and measured as above. Cache isolation and disable switches are
+documented in `scripts/golden/README.md`. Do not claim a speedup on the tested
+NVIDIA driver; keep process-cold, application-cache-cold and reboot-cold
+measurements distinct. Re-run `run.py compare --exact --engines gpu` after any
+further cache/compilation changes.
 
 ### 3. Win32 app
 
