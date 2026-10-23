@@ -308,12 +308,13 @@ impl Session {
                 let backend = self
                     .backend
                     .get_or_insert_with(spektrafilm_gpu::select_backend);
-                let output = if pipeline.params.io.scan_film && pipeline.film.is_positive() {
-                    pipeline.process(working.clone(), backend.as_ref())
+                let (output, used_backend) = if pipeline.params.io.scan_film && pipeline.film.is_positive() {
+                    pipeline.process_with_backend(working.clone(), backend.as_ref())
                 } else {
                     pipeline
                         .process_resident_borrowed(working, backend.as_ref())
-                        .unwrap_or_else(|| pipeline.process(working.clone(), backend.as_ref()))
+                        .map(|output| (output, backend.name()))
+                        .unwrap_or_else(|| pipeline.process_with_backend(working.clone(), backend.as_ref()))
                 };
                 let encoded = params.io.output_cctf_encoding;
                 let (width, height) = write_display(&output, encoded, &post, &preview_path)?;
@@ -326,7 +327,7 @@ impl Session {
                     "photo_width": photo_dimensions.0, "photo_height": photo_dimensions.1,
                     "source_width": source_width, "source_height": source_height,
                     "export_resolution": export_resolution,
-                    "raw": spektrafilm_io::is_raw(&input), "backend": backend.name(),
+                    "raw": spektrafilm_io::is_raw(&input), "backend": used_backend,
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 });
                 self.output = Some(Rendered {

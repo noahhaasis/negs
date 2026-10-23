@@ -1,0 +1,55 @@
+{
+  "label": "windows-capacity-guard",
+  "large_render": {
+    "name": "fallback",
+    "engine": "gpu",
+    "profiled": false,
+    "exit_code": 0,
+    "wall_ms": 285929.8296,
+    "pipeline_ms": [
+      272088
+    ],
+    "load_ms": [
+      3043
+    ],
+    "save_ms": [
+      7204
+    ],
+    "cli_total_ms": [
+      282738
+    ],
+    "gpu_stages_ms": [],
+    "gpu_resident": false,
+    "memory_baseline_mib": 605.0,
+    "memory_peak_mib": 635.0,
+    "memory_samples": 2332,
+    "start_utc": "2026-10-23T07:52:10.055460+00:00",
+    "end_utc": "2026-10-23T07:56:55.985591+00:00",
+    "watchdog_events": [],
+    "tiff_sha256": "6eb2fd41d9a5c29fbe7ca3853dd9c0332b09cd84f3a77e2ee3868cfae4f8f040",
+    "gpu_requirement_pass": false,
+    "expected_cpu_fallback": true,
+    "pass": true
+  },
+  "forced_fallback_comparisons": [
+    {
+      "case": "image",
+      "memory_limit_mb": 0,
+      "cpu_identical": true,
+      "hashes": {
+        "tiff": "11b168d04af0bf1bd281595d7cfe19069be9c645a04d202495a34b7fec1d41c9",
+        "raw": "8b702774db36f1fedf8e3539646b5ee3c69b303f610391c87cc210681853f30b"
+      }
+    },
+    {
+      "case": "fft",
+      "memory_limit_mb": 160,
+      "cpu_identical": true,
+      "hashes": {
+        "tiff": "cd76ea730a39cf9c2aff628d62ceaf8e137fb0a7fe6d8fc9cbc22290b1420fa6",
+        "raw": "8640ec15c205fe46c5f993624cbfaea61a8db0001b858adba19716ae893067b5"
+      }
+    }
+  ],
+  "note": "180 MP normal GPU selection now routes to CPU before the oversized binding; the forced fallback cases match explicit f32 CPU raw/TIFF bytes. Memory is sampled whole-device usage, not per-process GPU memory."
+}

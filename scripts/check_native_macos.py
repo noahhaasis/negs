@@ -3,16 +3,18 @@
 
 Build with cargo build --release -p spektrafilm-native first.
 Uses only the Python standard library. Set SPEKTRAFILM_BACKEND=cpu to force CPU.
+Also runs on Windows; pass the .exe paths with the three executable options.
 """
 import argparse
 import copy
 import json
 import os
-import select
+import queue
 from pathlib import Path
 import struct
 import subprocess
 import tempfile
+import threading
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,13 +33,26 @@ def main():
     parser.add_argument("--data-dir", type=Path, default=ROOT / "data")
     parser.add_argument("--exporter", type=Path, default=ROOT / "target/release/spektrafilm-f64")
     parser.add_argument("--fast-exporter", type=Path, default=ROOT / "target/release/spektrafilm")
+    parser.add_argument("--expected-backend", choices=["cpu", "wgpu"])
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="spektrafilm-native-test-") as work:
         work = Path(work)
         source, buffer, saved = work / "source.png", work / "preview.rgba", work / "saved.png"
         png(source, 32, 24)
         with (work / "engine.log").open("w+") as log:
-            child = subprocess.Popen([args.helper.resolve(), "--data-dir", args.data_dir.resolve()], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True)
+            child = subprocess.Popen([args.helper.resolve(), "--data-dir", args.data_dir.resolve()], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, encoding="utf-8")
+            replies = queue.Queue()
+
+            # select() cannot wait on anonymous Windows pipes. Keep a single
+            # reader for the protocol stream and time out the waiting request.
+            def read_replies():
+                try:
+                    for line in child.stdout:
+                        replies.put(line)
+                finally:
+                    replies.put("")
+
+            threading.Thread(target=read_replies, daemon=True).start()
             sequence = 0
 
             def request(command, expect_error=False, **kwargs):
@@ -45,14 +60,19 @@ def main():
                 sequence += 1
                 child.stdin.write(json.dumps(dict(id=sequence, command=command, **kwargs)) + "\n")
                 child.stdin.flush()
-                assert select.select([child.stdout], [], [], 60)[0], "Engine response timed out"
-                line = child.stdout.readline()
+                try:
+                    line = replies.get(timeout=60)
+                except queue.Empty:
+                    raise AssertionError("Engine response timed out") from None
                 if not line:
                     log.seek(0)
                     raise AssertionError(f"Engine stopped: {log.read()}")
                 reply = json.loads(line)
                 assert reply["id"] == sequence, reply
                 assert ("error" in reply) == expect_error, reply
+                if command == "render" and not expect_error and args.expected_backend:
+                    expected = "CPU" if args.expected_backend == "cpu" else "wgpu"
+                    assert reply["result"]["backend"].startswith(expected), reply
                 return sequence, reply.get("result", reply.get("error"))
 
             try:

@@ -295,7 +295,6 @@ fn cmd_process(
 
     // Select backend
     let backend = spektrafilm_gpu::select_backend();
-    eprintln!("Backend: {}", backend.name());
 
     // Run pipeline (with full Hanatos2025 spectral upsampling)
     let t = Instant::now();
@@ -304,16 +303,16 @@ fn cmd_process(
     let pipeline = Pipeline::new_with_spectral(film, print, params, data_dir)
         .map_err(anyhow::Error::msg)
         .context("building spectral pipeline")?;
-    let result = if iters > 1 {
+    let (result, used_backend) = if iters > 1 {
         // Warm-cache bench: process the image `iters` times in the same backend
         // instance. The first iteration pays shader-compile cost; subsequent ones
         // hit the cache and reflect "GUI live preview" performance.
-        let mut last = pipeline.process(image.clone(), backend.as_ref());
+        let mut last = pipeline.process_with_backend(image.clone(), backend.as_ref());
         let iter1_ms = t.elapsed().as_millis();
         eprintln!("Pipeline (iter 1): {} ms (cold)", iter1_ms);
         for i in 2..=iters {
             let ti = Instant::now();
-            last = pipeline.process(image.clone(), backend.as_ref());
+            last = pipeline.process_with_backend(image.clone(), backend.as_ref());
             eprintln!(
                 "Pipeline (iter {}): {} ms (warm)",
                 i,
@@ -322,10 +321,11 @@ fn cmd_process(
         }
         last
     } else {
-        let r = pipeline.process(image, backend.as_ref());
+        let r = pipeline.process_with_backend(image, backend.as_ref());
         eprintln!("Pipeline: {} ms", t.elapsed().as_millis());
         r
     };
+    eprintln!("Backend: {used_backend}");
 
     // User crop and rotation from the GUI (post-pipeline, matches the preview).
     let result = match crop {

@@ -14,6 +14,143 @@ Read first: `docs/cross-platform-port.md` (plan, risks, decisions) and
 `scripts/golden/README.md` (the correctness harness, its gates, and the Mac and
 Windows results).
 
+## Resume here: handoff requested October 23
+
+Noah requested a handoff to another agent and asked that the existing
+background run finish. **Do not restart the project or discard the dirty
+worktree.** There are two distinct validation checkpoints below; the last
+backend-reporting edits have not had full integration validation yet.
+
+### Committed checkpoints
+
+- `e3d0bb8`: measured full-resolution performance/capacity and added the
+  persistent Vulkan pipeline cache. All 484 renders were exact against the
+  previous same-machine manifests on **each** machine. Cache corruption and
+  unwritable-directory recovery, three cache unit tests on both platforms,
+  and 22 golden-harness tests passed. Nothing pushed or merged.
+- `c7e762a`: the macOS-to-Windows feature inventory, added concurrently by
+  another participant. Preserve `docs/windows-ui-features.md` and its link
+  below; it is the reference for the eventual Windows UI.
+
+### Uncommitted capacity guard: implemented and exercised
+
+Files: `crates/spektrafilm-gpu/src/capacity.rs`, `src/lib.rs`,
+`src/wgpu_backend.rs`, `crates/spektrafilm-core/src/pipeline.rs`,
+`crates/spektrafilm-core/tests/gpu_capacity_fallback.rs`, and
+`crates/spektrafilm-gpu/examples/windows_capacity.rs`.
+
+- Admission checks apply to **Windows only**. Metal's existing path is kept.
+  Check RGB binding/allocation limits, then a conservative working-set
+  estimate: four RGB f32 images + 128 MiB reserve, plus the padded complex
+  grids and kernel spectra for both diffusion filters. Query the largest
+  Vulkan device-local heap on discrete GPUs and admit at most 80% of it.
+  This is static headroom, **not** a live free-memory query or TDR recovery.
+- `ComputeBackend::image_capacity` and `film_chain_capacity` default to
+  acceptance. Windows wgpu overrides them. A rejected render goes through
+  `CpuBackend` for the whole pipeline; returning `None` alone would instead
+  dispatch individual GPU stages and fail again. Rescale occurs once.
+- `SPEKTRAFILM_WGPU_MEMORY_LIMIT_MB` is a diagnostic that can only lower the
+  admission budget. Forced image rejection (0 MiB) and forced FFT rejection
+  (160 MiB, small `diff_bpm` fixture) were compared on Windows: raw buffers
+  and TIFFs are identical to explicit f32 CPU rendering.
+- Actual hardware admission probe (`cargo run --release --locked -p
+  spektrafilm-gpu --example windows_capacity`): 24.3 and 96 MP accepted;
+  144 and 178.95 MP rejected against a **4772 MiB** admission budget;
+  180 MP rejected against the 2,147,483,647-byte binding limit. The probe
+  allocates no large image and does not establish runtime watchdog safety.
+- The original **180 MP** input now completes via CPU fallback: pipeline
+  **272.088 s**, wall **285.930 s**, whole-device GPU memory peak **635 MiB**
+  (605 MiB baseline), exit 0, **no event 4101**. TIFF SHA-256:
+  `6eb2fd41d9a5c29fbe7ca3853dd9c0332b09cd84f3a77e2ee3868cfae4f8f040`.
+  This is a successful slow CPU export, not a GPU performance result.
+- Three capacity unit tests and the pipeline fallback/rescale integration
+  test passed on Mac and Windows. A complete Mac golden run passed 484/484
+  exact. The Windows full run was allowed to finish for this handoff; see
+  the completion record below.
+
+These full matrices validate the guard **before** the reporting edits below.
+Public WIP artifacts are `scripts/golden/manifests/*capacity-guard.json` and
+`scripts/golden/reports/*capacity*`. Private dumps are under
+`target/golden/dumps/macos-capacity-guard` and `windows-capacity-guard` on the
+respective machines. Source manifests/reports and diagnostic logs are also
+under `target/windows-perf/`.
+
+### Last edits: actual-backend reporting (finish and validate next)
+
+Review the current diff; these edits are newer than the capacity matrices:
+
+- `Pipeline::process_with_backend` returns `(ImageBuf, &str)` with the backend
+  that actually rendered it. `process` remains a compatibility wrapper.
+  `process_scan` uses a static stateless CPU backend for a stable returned
+  name when capacity rejection causes fallback.
+- `crates/spektrafilm-cli/src/main.rs`: print `Backend: ...` **after** the
+  render, using that returned name. Previously a capacity-fallback CPU
+  export still printed `Backend: wgpu` because it reported startup selection.
+  Existing GUI code interprets that marker as proof of GPU execution.
+- `crates/spektrafilm-native/src/main.rs`: the JSON render response similarly
+  reports the actual backend. A successful borrowed GPU render keeps the
+  selected backend name; the full fallback path uses `process_with_backend`.
+- `scripts/check_native_macos.py`: replaced `select()` on stdout pipes with
+  one reader thread and a queue, because Windows cannot select anonymous
+  pipes. Added `--expected-backend cpu|wgpu` assertions for render replies.
+  The script still has its historical filename but is intended to run on
+  both platforms. **It has not yet been run after these edits.**
+- The updated core integration test (now also asserting the returned CPU
+  name) passes on Mac. Mac f32 CLI and native helper builds completed.
+  **Mac f64 has not been rebuilt after the reporting edits. Windows has
+  neither these reporting sources nor their rebuilt binaries yet.**
+
+Next actions, without reopening previous decisions:
+
+1. Review the reporting diff, build f32 CLI/native helper and separately f64
+   on both machines. Do not enable `precision-f64` on a combined helper/f32
+   build: Cargo feature unification would change their precision.
+2. Run the native bridge test on Mac and Windows, both ordinarily and on
+   Windows with `SPEKTRAFILM_BACKEND=wgpu` plus
+   `SPEKTRAFILM_WGPU_MEMORY_LIMIT_MB=0`, expecting `cpu`. It exercises helper
+   render/save and separate Reference export, including saved-preview versus
+   Fast-export bytes. Pass explicit `.exe` paths on Windows.
+3. Recheck CLI fallback reporting and same-machine bytes; rerun the golden
+   matrix for the final source and compare `--exact` before committing the
+   guard/reporting changes. Keep the old validation checkpoint distinct.
+4. Update the public manifests/reports and port plan, then commit on this
+   branch only. Do not push or merge.
+5. Device-loss recovery and long-running effects that fit in memory remain
+   unresolved. Do not describe memory admission as complete watchdog safety.
+   The startup spike result and UI-plan go-ahead remain outstanding too.
+
+### Remote/source details for resuming
+
+The Windows checkout is still based on `214ed09`, with the cache and first
+capacity-guard changes transferred directly into its working tree. It is
+**dirty intentionally**. Do not blindly reset or assume `win-sync.sh` can
+fast-forward over it. Review/preserve the remote changes before reconciling
+them with the local committed branch.
+
+Private diagnostic helpers in `target/windows-perf/` on both machines:
+`check_fallback.py` (forced image/FFT versus CPU),
+`check_large_fallback.py` (180 MP run), and `transfer.tar` (last transfer,
+not an authoritative complete source snapshot). The two check scripts still
+expect the **old** early `Backend: wgpu` marker; update those assertions to
+the final actual-backend behavior before reusing them. Do not rerun the
+4.5-minute 180 MP export solely to test a log label.
+
+After a Codex daemon restart, local execution-session IDs may disappear while
+the remote Python/cargo process continues. Check the Windows process list and
+manifest/report existence before relaunching anything. Redirect future long
+jobs' stdout/stderr to a remote log so completion can be recovered without
+the original SSH tool session. Keep all machine access details in the ignored
+helpers, not this public document.
+
+### Background-run completion record
+
+The native-helper Mac build completed successfully. The Windows capacity
+matrix finished at 10:08 on October 23: **484/484 identical** (184 GPU,
+184 f64, 116 f32 CPU, no problems) against `windows-gtx1660s-vulkan`. Its
+manifest and report are `scripts/golden/manifests/windows-gtx1660s-capacity-guard.json`
+and `scripts/golden/reports/windows-capacity-guard-exact.json`. Like the Mac
+run, it predates the actual-backend reporting edits above.
+
 ## Decisions already made: do not reopen
 
 - **Cross-platform correctness = tight numeric delta**, gated per engine in

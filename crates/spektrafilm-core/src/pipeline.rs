@@ -487,7 +487,18 @@ impl Pipeline {
     }
 
     pub fn process(&self, image: ImageBuf, backend: &dyn ComputeBackend) -> ImageBuf {
-        self.apply_post(self.process_scan(image, backend))
+        self.process_with_backend(image, backend).0
+    }
+
+    /// Return the backend that actually rendered the image, including a
+    /// capacity-triggered CPU fallback, for CLI and native-helper reporting.
+    pub fn process_with_backend<'a>(
+        &self,
+        image: ImageBuf,
+        backend: &'a dyn ComputeBackend,
+    ) -> (ImageBuf, &'a str) {
+        let (image, used_backend) = self.process_scan(image, backend);
+        (self.apply_post(image), used_backend)
     }
 
     /// The post adjustments, last, on the scanned photograph.
@@ -505,7 +516,7 @@ impl Pipeline {
     }
 
     /// Everything up to and including the scan, without the post adjustments.
-    fn process_scan(&self, image: ImageBuf, backend: &dyn ComputeBackend) -> ImageBuf {
+    fn process_scan<'a>(&self, image: ImageBuf, backend: &'a dyn ComputeBackend) -> (ImageBuf, &'a str) {
         let stage_timings = stage_timings_enabled();
         // Working-resolution rescale (io.upscale_factor) — mirrors Python's
         // ResizingService.crop_and_rescale. Done first so the whole pipeline
@@ -515,6 +526,12 @@ impl Pipeline {
         let t = Instant::now();
         let image = self.rescale_working(image);
         print_stage_timing(stage_timings, "rescale", t);
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let mut backend = backend;
+        if let Err(reason) = backend.image_capacity(image.width, image.height) {
+            tracing::warn!(%reason, "GPU capacity exceeded; rendering on CPU");
+            backend = &CPU;
+        }
         tracing::info!(backend = backend.name(), "pipeline: start");
 
         // Scanner B&W/slide exposure correction (no-op unless scanner
@@ -537,12 +554,21 @@ impl Pipeline {
         // highlight boost, and enlarger diffusion. Backends that do not
         // implement the resident chain return `None` and fall through.
         if self.tc_lut.is_some() || self.mallett_core.is_some() {
-            if let Some(out) = self.try_gpu_resident(&image, backend, &color_ref) {
-                tracing::info!("pipeline: gpu-resident fast path complete");
-                if backend.resident_chain_applies_post_scan() {
-                    return out;
+            match self.try_gpu_resident(&image, backend, &color_ref) {
+                Ok(Some(out)) => {
+                    tracing::info!("pipeline: gpu-resident fast path complete");
+                    if backend.resident_chain_applies_post_scan() {
+                        return (out, backend.name());
+                    }
+                    return (self.apply_post_scan(out), backend.name());
                 }
-                return self.apply_post_scan(out);
+                Err(reason) => {
+                    // Returning None alone would dispatch the individual GPU
+                    // stages next and hit the same allocation/binding failure.
+                    tracing::warn!(%reason, "GPU effects exceed capacity; rendering on CPU");
+                    backend = &CPU;
+                }
+                Ok(None) => {}
             }
         }
 
@@ -565,7 +591,7 @@ impl Pipeline {
         tracing::info!("pipeline: filming complete");
         dump_if_env("SPEKTRAFILM_DUMP_FILM_DENSITY", &filmed);
 
-        if self.params.io.scan_film {
+        let result = if self.params.io.scan_film {
             let t = Instant::now();
             let result = stages::scanning::process(
                 filmed,
@@ -606,7 +632,8 @@ impl Pipeline {
             print_stage_timing(stage_timings, "scanning", t);
             tracing::info!("pipeline: scanning complete");
             result
-        }
+        };
+        (result, backend.name())
     }
 
     /// Run only the GPU-resident path from a borrowed image. This is used by
@@ -621,6 +648,7 @@ impl Pipeline {
         if self.tc_lut.is_none() && self.mallett_core.is_none() {
             return None;
         }
+        backend.image_capacity(image.width, image.height).ok()?;
         tracing::info!(
             backend = backend.name(),
             "pipeline: borrowed resident start"
@@ -632,7 +660,7 @@ impl Pipeline {
             &self.print_illuminant,
             self.print_exposure_factor,
         );
-        let out = self.try_gpu_resident(image, backend, &color_ref)?;
+        let out = self.try_gpu_resident(image, backend, &color_ref).ok()??;
         let out = if backend.resident_chain_applies_post_scan() {
             out
         } else {
@@ -679,7 +707,7 @@ impl Pipeline {
         image: &ImageBuf,
         backend: &dyn ComputeBackend,
         color_ref: &crate::color_reference::ColorReference,
-    ) -> Option<ImageBuf> {
+    ) -> Result<Option<ImageBuf>, String> {
         // Bake the exposure scale (auto-exposure × manual EV compensation)
         // into the front-pass matrix. Both upsamplers (hanatos and mallett)
         // are homogeneous in the input RGB, so scaling the matrix is
@@ -734,7 +762,7 @@ impl Pipeline {
                 rgb_to_adapted_xyz: rgb_to_adapted,
             }
         } else {
-            let core = self.mallett_core.as_ref()?;
+            let Some(core) = self.mallett_core.as_ref() else { return Ok(None) };
             let mut matrix = crate::mallett::film_matrix(core, &self.params.io.input_color_space);
             fold_exposure(&mut matrix);
             spektrafilm_gpu::FrontPass::Mallett2019 { matrix }
@@ -1195,7 +1223,8 @@ impl Pipeline {
             print_exposure_scale,
             output_cctf_encoding: self.params.io.output_cctf_encoding,
         };
-        backend.try_run_film_chain(&params)
+        backend.film_chain_capacity(&params)?;
+        Ok(backend.try_run_film_chain(&params))
     }
 
     /// After the GPU fast path returns linear RGB, apply sRGB encoding + clip
