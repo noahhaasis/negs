@@ -5,6 +5,8 @@ pub mod cuda_backend;
 pub mod wgpu_backend;
 #[cfg(feature = "wgpu-backend")]
 mod pipeline_cache;
+#[cfg(all(feature = "wgpu-backend", any(target_os = "windows", test)))]
+mod capacity;
 
 use spektrafilm_math::image::ImageBuf;
 
@@ -14,6 +16,17 @@ use spektrafilm_math::image::ImageBuf;
 /// Default implementations fall back to CPU. GPU backends override the
 /// spectral methods for massive speedups.
 pub trait ComputeBackend: Send + Sync {
+    /// Reject work before allocating GPU images. The pipeline routes the
+    /// entire render through CpuBackend on rejection, including stage paths.
+    fn image_capacity(&self, _width: u32, _height: u32) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Additional resident-chain allocations (for example padded FFT grids).
+    fn film_chain_capacity(&self, params: &FilmChainParams<'_>) -> Result<(), String> {
+        self.image_capacity(params.image.width, params.image.height)
+    }
+
     fn colorspace_convert(&self, img: &ImageBuf, matrix: &[[f32; 3]; 3]) -> ImageBuf;
     fn cctf_encode_srgb(&self, img: &ImageBuf) -> ImageBuf;
     fn cctf_decode_srgb(&self, img: &ImageBuf) -> ImageBuf;

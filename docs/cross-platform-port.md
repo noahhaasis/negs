@@ -88,11 +88,11 @@ test at 178.95 MP approaches that binding limit and the dedicated VRAM ceiling;
 it is not a supported operating size. Host-memory spill is plausible from
 the memory plateau; per-process shared-memory accounting was not measured.
 
-**Unresolved release blockers:** preflight capacity before allocating GPU
-buffers, route oversized work to CPU, and handle watchdog/device loss without
-claiming a successful export. Investigate shorter submissions with unchanged
-shader math and exact-output checks. Do not raise Windows TDR timeouts or
-loosen the image gates to hide these failures.
+These measurements prompted the admission guard below. **Still unresolved:**
+handle watchdog/device loss without claiming a successful export, including
+long-running effects that fit in memory. Investigate shorter submissions with
+unchanged shader math and exact-output checks. Do not raise Windows TDR
+timeouts or loosen the image gates to hide these failures.
 
 A subsequent 178.95 MP run with per-stage profiling also triggered event 4101
 (22:16:12 UTC), then stalled with zero GPU utilization, about 5892 MiB device
@@ -101,6 +101,32 @@ memory and 7.6 GB process working set. It was explicitly terminated after
 timing is not a capacity benchmark; it nevertheless shows that per-stage
 waits alone did not prevent a reset/stall. Use a bounded `--timeout` for
 further experiments.
+
+### Capacity admission guard (October 23)
+
+Windows Vulkan now checks the image buffer against both the adapter's binding
+and allocation limits before entering the render. On discrete GPUs it also
+queries the largest Vulkan device-local heap and reserves 20% for the desktop,
+other applications and driver overhead. The estimate includes four RGB f32
+buffers, 128 MiB for LUTs/small allocations, and all camera/enlarger diffusion
+FFT buffers (both padded complex grids and the kernel spectrum). FFT bindings
+are checked separately. These are conservative estimates, not a live memory
+budget or a guarantee against a watchdog reset.
+
+Rejected work uses the CPU backend for the **whole** pipeline. Merely declining
+the resident fast path would otherwise fall through to individual GPU stages
+and repeat the allocation failure. Working-resolution scaling still occurs
+exactly once. The helper's borrowed resident path declines rejected work so
+its existing fallback can route through the same CPU path. Metal retains its
+existing rendering behavior.
+
+`SPEKTRAFILM_WGPU_MEMORY_LIMIT_MB` can only lower the Windows admission budget
+for diagnostics. On the Windows test box, forcing image rejection with 0 MiB
+and FFT rejection with 160 MiB both produced raw buffers and TIFFs identical
+to explicit f32 CPU rendering. Three pure capacity tests and an integration
+test checking whole-pipeline fallback and single rescaling pass on Mac and
+Windows. CPU fallback retains the existing f32 CPU grain behavior; its
+cross-platform grain decision remains deferred.
 
 ### Vulkan pipeline cache
 

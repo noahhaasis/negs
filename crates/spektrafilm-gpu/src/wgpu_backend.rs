@@ -282,6 +282,8 @@ pub struct WgpuBackend {
     pipeline_cache: std::sync::Mutex<std::collections::HashMap<usize, CachedPipeline>>,
     /// Vulkan driver binaries reused between processes (Metal has its own cache).
     disk_pipeline_cache: Option<crate::pipeline_cache::DiskPipelineCache>,
+    #[cfg(target_os = "windows")]
+    capacity: crate::capacity::CapacityLimits,
     /// Upper bound for `WORKGROUP_SIZE` overrides: the adapter's limit, or
     /// lower with `SPEKTRAFILM_WGPU_WORKGROUP_SIZE` (a diagnostic to exercise
     /// the smaller sizes other GPUs get).
@@ -331,6 +333,8 @@ impl WgpuBackend {
         // adapter's hardware ceiling so we can render arbitrary
         // megapixel counts (within RAM).
         let adapter_info = adapter.get_info();
+        #[cfg(target_os = "windows")]
+        let capacity = crate::capacity::windows_limits(&adapter);
         let adapter_limits = adapter.limits();
         let mut limits = wgpu::Limits::default();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
@@ -411,6 +415,8 @@ impl WgpuBackend {
             queue,
             pipeline_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             disk_pipeline_cache,
+            #[cfg(target_os = "windows")]
+            capacity,
             max_workgroup_size,
             #[cfg(target_os = "macos")]
             threadgroup_probe,
@@ -2148,7 +2154,38 @@ impl ComputeBackend for WgpuBackend {
     }
 
     fn try_run_film_chain(&self, params: &crate::FilmChainParams<'_>) -> Option<ImageBuf> {
+        self.film_chain_capacity(params).ok()?;
         Some(self.run_film_chain(params))
+    }
+
+    #[cfg(target_os = "windows")]
+    fn image_capacity(&self, width: u32, height: u32) -> Result<(), String> {
+        self.capacity.image(width, height).map(|_| ())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn film_chain_capacity(&self, params: &crate::FilmChainParams<'_>) -> Result<(), String> {
+        let mut bytes = self.capacity.image(params.image.width, params.image.height)?;
+        // Camera and enlarger FFT states are prepared together and remain
+        // alive through readback, even though their passes run sequentially.
+        for plan in params.diffusion.iter().chain(
+            params.enlarger_diffusion.iter().filter(|_| !params.scan_film),
+        ) {
+            let radius2 = plan.psf.radius.checked_mul(2).ok_or("FFT radius overflow")?;
+            let padded = |dimension: u32| -> Result<u32, String> {
+                let target = dimension.checked_add(radius2).ok_or("FFT dimension overflow")?;
+                // Check before searching for a smooth length; this also keeps
+                // fft_size's u32 increments far away from overflow.
+                self.capacity.buffer(u64::from(target) * 8, "FFT dimension")?;
+                Ok(fft_size(target))
+            };
+            let grid = u64::from(padded(params.image.width)?)
+                * u64::from(padded(params.image.height)?);
+            self.capacity.buffer(grid.checked_mul(8).ok_or("FFT buffer overflow")?, "FFT grid")?;
+            bytes = grid.checked_mul(20).and_then(|n| bytes.checked_add(n))
+                .ok_or("FFT working-set overflow")?;
+        }
+        self.capacity.working_set(bytes)
     }
 
     fn resident_chain_applies_post_scan(&self) -> bool {
