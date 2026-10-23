@@ -13,7 +13,7 @@ it is a Mac, this list says so and leaves it out. Items marked **Ask Noah**
 need a decision before building them.
 
 Read alongside: `docs/native-macos-ui.md` (design and startup notes),
-`docs/windows-agent-handoff.md` (rules, machines, step 3), and the Swift
+`docs/windows-agent-handoff.md` (rules, machines, engine state), and the Swift
 sources named in each section.
 
 Contents: 1 Window · 2 Menus and shortcuts · 3 Toolbar · 4 Opening ·
@@ -720,7 +720,11 @@ Behaviour:
   STYLE --keyline-width W --border-color #rrggbb --keyline-color #rrggbb
   [--border-width W] [--instagram]] [--long-edge N | --short-edge N]`, env
   `SPEKTRAFILM_BACKEND=cpu|wgpu`. "Backend: wgpu" in its log means it ran on
-  the GPU.
+  the GPU. The line is printed after the render and names the backend that
+  actually rendered: on Windows a render that fails the GPU capacity check
+  reports `Backend: CPU (rayon)` although wgpu was requested. The helper's
+  `render` reply `backend` follows the same rule. Treat either as "fell back
+  to the CPU" and say so, as the Mac app does.
 - Scratch: a per-launch folder under the temp dir with a lock file. Startup
   sweeps folders whose lock is free (left by a crash), killing their
   recorded exporter (after checking the executable path) and deleting
@@ -762,7 +766,7 @@ Techniques from the Mac that carry over:
 - Defer the updater (and anything else non-essential) until after the first
   render.
 - Measure first painted frame, first interaction and first usable image
-  (handoff step 3). The Mac has a benchmark hook (`InteractionBenchmark.swift`,
+  (see the handoff). The Mac has a benchmark hook (`InteractionBenchmark.swift`,
   `SPEKTRAFILM_BENCHMARK_*` env vars, never reopens a session); give the
   Windows app an equivalent.
 

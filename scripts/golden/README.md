@@ -80,7 +80,7 @@ python3 -I scripts/golden/run.py compare-probe target/golden/probe/macos-arm64 \
 python3 -I -m unittest discover -s scripts/golden -p 'test_*.py'
 ```
 
-`run` takes about 15 minutes on an M1 Pro and keeps about 6 GB of dumps.
+`run` takes about 2.5 minutes on an M1 Pro and 11 on the Windows box (October 23, default `--jobs`) and keeps about 6 GB of dumps.
 Every render runs with a clean environment (no inherited `SPEKTRAFILM_*`,
 `WGPU_*`, `RAYON_NUM_THREADS`, `RUST_LOG`), a timeout, and a log on failure.
 GPU renders must report the wgpu backend and the GPU-resident path, or they
@@ -199,9 +199,12 @@ release. See `docs/windows-agent-handoff.md`.
   software Vulkan may need more room.
 - Windows full-resolution capacity is now measured: 96 MP completed without
   a display reset; 144 and 178.95 MP returned success while Windows logged a
-  driver reset; 180 MP panicked at the storage-binding limit. See
-  `docs/cross-platform-port.md`. These are unresolved capacity/recovery issues,
-  not reasons to loosen a correctness gate.
+  driver reset; 180 MP panicked at the storage-binding limit. Since
+  f27722c an admission check renders work that doesn't fit on the CPU, and
+  the CLI's `Backend:` line (printed after the render) names the backend that
+  actually rendered. Watchdog and device-loss recovery for work that fits is
+  still open. See `docs/cross-platform-port.md`. None of this is a reason to
+  loosen a correctness gate.
 
 ## Full-resolution performance and startup
 
