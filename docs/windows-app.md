@@ -36,8 +36,10 @@ WinSparkle key rejection. The app now sets the installer’s AppUserModelID.
 The WinSparkle return-value contract is documented in its
 [official header](https://github.com/vslavik/winsparkle/blob/master/include/winsparkle.h).
 
-The Windows exact matrix passes: 116 f32 CPU, 184 f64 and 184 GPU renders
-are IDENTICAL to `windows-gtx1660s-backend-report.json`.
+Both exact matrices pass: each has 116 f32 CPU, 184 f64 and 184 GPU renders
+IDENTICAL to its previous same-machine backend-report manifest. The Mac
+engine tools build and all six helper tests pass in the isolated verification
+worktree. Reports are `scripts/golden/reports/{windows,macos}-ui-exact.json`.
 `python -I windows/check_original.py INPUT.NEF` additionally checks matching
 preview dimensions and byte-identical Save before/after Original; it passes
 on the test D750 NEF (602 × 402 at 10% resolution).
@@ -52,9 +54,19 @@ per-user installer. Its Open With registration does not select a default app.
 Pass `-WinSparkleDll`, `-AppcastUrl` and `-EdPublicKey` for a configured release;
 place WinSparkle's COPYING license beside the supplied DLL.
 
+The portable packaging smoke test passes, including ZIP CRCs and presence of
+the app, three helpers, data, license and source archive. The output is
+`target/windows-dist/Negs-portable.zip` (approximately 104 MB).
+The PowerShell script handles compiler warnings on stderr and normalises the
+per-command Git ownership exception. No Inno Setup compiler is installed on
+the test box, so the installer definition has not yet been compiled/tested.
+
 Still required before completion: interactive feature/accessibility checks,
-installer packaging and validation, repeated application startup measurements,
-and the Windows/macOS exact golden matrices and Mac build/test checks.
+installer compilation and install/uninstall validation, repeated application
+startup measurements, and presentation fallback without Vulkan.
+Computer Use denied launching Negs because the app was not approved, twice;
+the user agreed to enable access, but a successful launch through that tool
+has not yet been observed. Do not infer interactive PASS from unit tests.
 Earlier single-launch timings in the conversation are diagnostic, not final
 startup results. Release update feeds and signing keys must come from release
 configuration; local builds do not invent them.
