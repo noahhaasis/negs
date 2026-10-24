@@ -23,6 +23,8 @@ use crate::gpu::{self, Gpu, GpuImage, Item, PhotoUniform, QuadInstance};
 use crate::icc;
 use crate::picture::Picture;
 
+mod software;
+
 const BACKGROUND: [u8; 3] = [0x9a, 0x9a, 0x9a];
 const MIN_ZOOM: f64 = 0.005;
 const MAX_ZOOM: f64 = 16.0;
@@ -88,6 +90,8 @@ struct View {
     surface: Option<Surface>,
     globals: Option<Globals>,
     monitor: isize,
+    software_cm: Option<icc::Transform>,
+    software_cache: software::Cache,
     /// Screen pixels per document pixel, and the document point at the
     /// middle of the view.
     zoom: f64,
@@ -117,6 +121,20 @@ fn with_view<R>(f: impl FnOnce(&mut View) -> R) -> Option<R> {
     VIEW.with(|cell| cell.try_borrow_mut().ok().and_then(|mut v| v.as_mut().map(f)))
 }
 
+/// A raw-handle surface must be destroyed while its HWND is still valid.
+/// Do this explicitly, rather than at thread-local teardown after DestroyWindow.
+pub fn shutdown() {
+    VIEW.with(|cell| {
+        let view = cell.borrow_mut().take();
+        if let Some(view) = &view {
+            if let Some(gpu) = &view.gpu {
+                let _ = gpu.device.poll(wgpu::Maintain::Wait);
+            }
+        }
+        drop(view);
+    });
+}
+
 pub fn register() {
     unsafe {
         let class = WNDCLASSEXW {
@@ -144,6 +162,8 @@ pub fn init(hwnd: HWND, dpi: u32) {
             surface: None,
             globals: None,
             monitor: 0,
+            software_cm: None,
+            software_cache: software::Cache::default(),
             zoom: 1.0,
             center: (0.0, 0.0),
             fitting: true,
@@ -186,8 +206,12 @@ pub fn start_gpu(hwnd: HWND) {
                     });
                 }
                 Err(error) => {
-                    app.model.error = Some(format!("The photograph can’t be shown: no graphics adapter could present it ({error:#})."));
-                    app.model.dirty |= crate::model::dirty::ERROR;
+                    app.report.line(&format!("software_canvas {error:#}"));
+                    with_view(|view| {
+                        view.update_color_management();
+                        invalidate(view.hwnd);
+                    });
+                    app.model.dirty |= crate::model::dirty::CANVAS;
                 }
             });
         })
@@ -424,7 +448,16 @@ impl View {
     }
 
     fn update_color_management(&mut self) {
-        let Some(gpu) = self.gpu.clone() else { return };
+        if self.gpu.is_none() {
+            let monitor = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST).0 as isize };
+            if monitor != self.monitor {
+                self.monitor = monitor;
+                self.software_cm = icc::for_window(self.hwnd);
+                invalidate(self.hwnd);
+            }
+            return;
+        }
+        let gpu = self.gpu.clone().unwrap();
         let monitor = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST).0 as isize };
         if monitor == self.monitor && self.globals.is_some() {
             return;
@@ -444,6 +477,14 @@ impl View {
         let bind_group = gpu.globals_bind_group(&buffer, &lut);
         self.globals = Some(Globals { buffer, bind_group, cm });
         invalidate(self.hwnd);
+    }
+
+    fn text_size(&mut self, text: &str, size: f64, weight: i32) -> Option<(f64, f64)> {
+        if self.gpu.is_some() {
+            return self.text(text, size, weight).map(|(_, w, h)| (w, h));
+        }
+        let mask = crate::text::render(text, (size * self.scale()).round() as i32, weight)?;
+        Some((mask.width as f64, mask.height as f64))
     }
 
     fn text(&mut self, text: &str, size_dip: f64, weight: i32) -> Option<(&GpuImage, f64, f64)> {
@@ -493,11 +534,12 @@ impl View {
         self.build(&mut items);
         self.prepare_texts(&items);
         let items = self.resolve(items);
+        let photo_drawn = items.iter().any(|item| matches!(item, Item::Photo(..)));
         let globals = self.globals.as_ref().unwrap();
         let clear = BACKGROUND.map(|c| c as f32 / 255.0);
         gpu::draw(&gpu, &target, &globals.bind_group, clear, &items);
         frame.present();
-        if self.scene.developed && !self.first_image_presented {
+        if photo_drawn && self.scene.developed && !self.first_image_presented {
             self.first_image_presented = true;
             std::thread::spawn(|| {
                 super::dwm_flush();
@@ -507,15 +549,39 @@ impl View {
         }
     }
 
-    /// Before the GPU is ready: the background.
-    fn paint_gdi(&self) {
+    /// Software presentation while Vulkan is unavailable or still starting.
+    fn paint_gdi(&mut self) {
+        self.update_color_management();
+        let mut draws = Vec::new();
+        self.build(&mut draws);
+        let pixels = software::render(self.width, self.height, self.dpi, &draws, self.software_cm.as_ref(), &mut self.software_cache);
         unsafe {
             let mut ps = PAINTSTRUCT::default();
             let dc = BeginPaint(self.hwnd, &mut ps);
-            let brush = CreateSolidBrush(COLORREF(BACKGROUND[0] as u32 | (BACKGROUND[1] as u32) << 8 | (BACKGROUND[2] as u32) << 16));
-            FillRect(dc, &ps.rcPaint, brush);
-            let _ = DeleteObject(brush);
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: self.width as i32,
+                    biHeight: -(self.height as i32),
+                    biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0,
+                    ..Default::default()
+                }, ..Default::default()
+            };
+            if self.width > 0 && self.height > 0 {
+                SetDIBitsToDevice(dc, 0, 0, self.width, self.height, 0, 0, 0, self.height,
+                    pixels.as_ptr().cast(), &info, DIB_RGB_COLORS);
+                let _ = GdiFlush();
+            }
             let _ = EndPaint(self.hwnd, &ps);
+        }
+        if self.width > 0 && self.height > 0 && self.scene.developed
+            && self.scene.picture.is_some() && !self.first_image_presented {
+            self.first_image_presented = true;
+            std::thread::spawn(|| {
+                super::dwm_flush();
+                let at = crate::platform::qpc();
+                post(move |app: &mut App| app.report.line(&format!("first_image_on_screen {at}")));
+            });
         }
     }
 }
@@ -588,7 +654,7 @@ impl View {
         }
         if let Some(badge) = scene.badge {
             let font = 13.0;
-            let (tw, th) = self.text(badge, font, 600).map(|(_, w, h)| (w, h)).unwrap_or((0.0, 0.0));
+            let (tw, th) = self.text_size(badge, font, 600).unwrap_or((0.0, 0.0));
             let (pw, ph) = (tw + 24.0 * s, th + 10.0 * s);
             let x = (self.width as f64 - pw) / 2.0;
             let y = 12.0 * s;
@@ -746,7 +812,7 @@ impl View {
         items.push(Draw::Fill(QuadInstance::rounded(rect(d.x, d.y, d.width, d.height), [0.0, 0.0, 0.0, 0.15], (12.0 * s) as f32, 1.0)));
         let label = if angle == 0.0 { "0°".to_string() } else { format!("{angle:.1}°") };
         let color = if angle == 0.0 { [0.45, 0.45, 0.45, 1.0] } else { [0.1, 0.1, 0.1, 1.0] };
-        if let Some((_, tw, _)) = self.text(&label, 13.0, 600) {
+        if let Some((tw, _)) = self.text_size(&label, 13.0, 600) {
             items.push(Draw::Text(label, 13.0, 600, color, (d.x + (d.width - tw) / 2.0, d.y + 6.0 * s), false));
         }
         let ruler = Rect::new(d.x + 14.0 * s, d.y + 28.0 * s, d.width - 28.0 * s, 22.0 * s);

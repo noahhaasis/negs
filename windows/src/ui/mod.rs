@@ -40,6 +40,22 @@ use crate::model::{Model, dirty};
 use crate::platform::{self, pcwstr, wide};
 use crate::session::{EditorSession, Preferences, SessionStore};
 
+/// Annotate icon buttons and numeric editors without changing their visual text.
+pub fn accessible_name(hwnd: HWND, name: &str) {
+    use windows::Win32::UI::Accessibility::{CAccPropServices, IAccPropServices, PROPID_ACC_NAME};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    thread_local! {
+        static PROPS: std::cell::OnceCell<Option<IAccPropServices>> = const { std::cell::OnceCell::new() };
+    }
+    PROPS.with(|cell| {
+        let service = cell.get_or_init(|| unsafe { CoCreateInstance(&CAccPropServices, None, CLSCTX_INPROC_SERVER).ok() });
+        if let Some(service) = service {
+            let name = wide(name);
+            unsafe { let _ = service.SetHwndPropStr(hwnd, OBJID_CLIENT.0 as u32, CHILDID_SELF, PROPID_ACC_NAME, pcwstr(&name)); }
+        }
+    });
+}
+
 pub const WM_APP_RUN: u32 = WM_APP + 1;
 const WM_APP_BUILD: u32 = WM_APP + 2;
 const TIMER_RUN: usize = 1;
@@ -1100,7 +1116,8 @@ pub fn run() {
         let progress = create(PROGRESS_CLASSW, "", WS_CHILD | WINDOW_STYLE(PBS_MARQUEE), WINDOW_EX_STYLE(0), status, 0, HFONT::default());
         SendMessageW(progress, PBM_SETMARQUEE, WPARAM(1), LPARAM(30));
         let cancel = create(w!("BUTTON"), "Cancel", WS_CHILD | WS_TABSTOP, WINDOW_EX_STYLE(0), status, id::CANCEL_EXPORT, fonts.ui);
-        let original_button = create(w!("BUTTON"), "\u{E8B9}", WS_CHILD | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), status, id::ORIGINAL, fonts.glyph_small);
+        let original_button = create(w!("BUTTON"), "\u{E8B9}", WS_CHILD | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), status, id::ORIGINAL, fonts.glyph_small);
+        accessible_name(original_button, "Show Original (toggle with Space; hold O or backslash)");
         empty::subclass_original_button(original_button);
         let canvas = create(w!("NegsCanvas"), "Photograph preview", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
         let empty = create(w!("NegsEmpty"), "", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), main, 0, HFONT::default());
@@ -1145,8 +1162,12 @@ pub fn run() {
 
         let show = with_app(|app| app.model.prefs.window.map_or(1, |w| w[0])).unwrap_or(1);
         let _ = ShowWindow(main, if show == 3 { SW_SHOWMAXIMIZED } else { SW_SHOWNORMAL });
-        let _ = UpdateWindow(main);
+        let _ = RedrawWindow(main, None, None, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         with_app(|app| app.report.stamp("window_shown"));
+        // Complete the first composition before creating the inspector. This
+        // timestamp bounds visible presentation, rather than a queued WM_PAINT.
+        let composited = DwmFlush().is_ok();
+        with_app(|app| app.report.stamp(if composited { "first_window_composited" } else { "first_window_flush_failed" }));
         // The adjustments, the GPU and the rest wait for the first frame.
         let _ = PostMessageW(main, WM_APP_BUILD, WPARAM(0), LPARAM(0));
         if let Some(path) = path {
@@ -1190,6 +1211,9 @@ fn pre_translate(msg: &MSG) -> bool {
     let main = main_hwnd();
     let mut accelerators = None;
     let handled = with_app(|app| {
+        if matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MOUSEWHEEL) {
+            app.report.stamp("first_input_received");
+        }
         if app.original_key(msg) {
             return true;
         }
@@ -1383,6 +1407,7 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             WM_CLOSE => {
                 if with_app(|app| app.close(false)).unwrap_or(false) {
+                    canvas::shutdown();
                     let _ = DestroyWindow(hwnd);
                 }
                 LRESULT(0)

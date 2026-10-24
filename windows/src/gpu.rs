@@ -296,10 +296,21 @@ pub fn shared() -> Option<&'static Arc<Gpu>> {
 
 /// Creates the Vulkan device and a surface for `hwnd`.
 pub fn init(hwnd: isize) -> Result<(Arc<Gpu>, wgpu::Surface<'static>)> {
+    if std::env::var_os("NEGS_SOFTWARE_CANVAS").is_some() {
+        return Err(anyhow!("Software canvas requested"));
+    }
     let mut last_error = anyhow!("No graphics adapter");
     for backends in [wgpu::Backends::VULKAN] {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends, ..Default::default() });
-        let handle = Win32WindowHandle::new(std::num::NonZeroIsize::new(hwnd).context("No canvas window")?);
+        let mut handle = Win32WindowHandle::new(std::num::NonZeroIsize::new(hwnd).context("No canvas window")?);
+        // Vulkan needs both the HWND and its owning module handle.
+        let instance_handle = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::GetWindowLongPtrW(
+                windows::Win32::Foundation::HWND(hwnd as *mut _),
+                windows::Win32::UI::WindowsAndMessaging::GWLP_HINSTANCE,
+            )
+        };
+        handle.hinstance = std::num::NonZeroIsize::new(instance_handle);
         let surface = unsafe {
             instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
                 raw_display_handle: RawDisplayHandle::Windows(WindowsDisplayHandle::new()),

@@ -1,0 +1,199 @@
+{
+  "date": "2026-10-23",
+  "base_commit": "8695a6c",
+  "scope": "Windows app only; shared engine and golden gates unchanged",
+  "windows_unit_tests": {
+    "status": "PASS",
+    "passed": 47
+  },
+  "windows_release_build": "PASS",
+  "mac_workspace": {
+    "build": "PASS",
+    "tests": "PASS",
+    "ignored": "one optional GPU blur benchmark",
+    "verified_commit": "88b537c8082e6a95dabc473eb7ce0bae65509373",
+    "engine_tree": "84241ad336bb742c8221e272f3919676e115454f",
+    "engine_tree_matches_windows": true
+  },
+  "installer": {
+    "install_exit": 0,
+    "open_with_count": 35,
+    "open_command": "PASS",
+    "defaults_unchanged": true,
+    "required_files": [
+      {
+        "name": "Negs.exe",
+        "present": true
+      },
+      {
+        "name": "spektrafilm.exe",
+        "present": true
+      },
+      {
+        "name": "spektrafilm-native.exe",
+        "present": true
+      },
+      {
+        "name": "spektrafilm-f64.exe",
+        "present": true
+      },
+      {
+        "name": "data",
+        "present": true
+      },
+      {
+        "name": "source.zip",
+        "present": true
+      },
+      {
+        "name": "LICENSE",
+        "present": true
+      }
+    ],
+    "uninstall_exit": 0,
+    "uninstall_files_removed": true,
+    "uninstall_registration_removed": true,
+    "compiler": "Inno Setup 6.7.3",
+    "payload": "previous portable staging; installer definition includes corrected OpenWith values"
+  },
+  "startup": {
+    "method": "External QPC before report creation and Process.Start; compositor completion after synchronous child paint; first image after presentation + DwmFlush; fresh process for every run. Golden photo_DSC_4990.tif, 1008 x 670 developed preview. OS/driver caches warm; first GPU profile/pipeline cache empty. No reboot-cold claim.",
+    "first_interaction_limit": "first_input_received is a real F7 event, but includes Computer Use orchestration delay (17-41 s). These observations establish working input, not startup interaction readiness latency.",
+    "presentation_limit": "Compositor-completion instrumentation; visual image appearance remains unverified because Computer Use capture fails.",
+    "corrected_runs": [
+      {
+        "run": 1,
+        "software": false,
+        "cache": "fresh app/profile and pipeline cache; OS/driver warm",
+        "exit_code": 0,
+        "launched_ms": 328.1177,
+        "first_window_composited_ms": 430.6785,
+        "inspector_shown_ms": 697.5337,
+        "gpu_ready_ms": 1111.9446,
+        "first_image_scene_ms": 1111.8364,
+        "first_image_on_screen_ms": 1114.2517,
+        "first_input_received_ms": 18590.1511
+      },
+      {
+        "run": 2,
+        "software": false,
+        "cache": "warm app/profile and pipeline cache; fresh process",
+        "exit_code": 0,
+        "launched_ms": 10.2245,
+        "first_window_composited_ms": 111.4698,
+        "inspector_shown_ms": 393.0609,
+        "gpu_ready_ms": 794.9559,
+        "first_image_scene_ms": 794.8368,
+        "first_image_on_screen_ms": 811.6892,
+        "first_input_received_ms": 16981.2272
+      },
+      {
+        "run": 3,
+        "software": false,
+        "cache": "warm app/profile and pipeline cache; fresh process",
+        "exit_code": 0,
+        "launched_ms": 9.8822,
+        "first_window_composited_ms": 113.0884,
+        "inspector_shown_ms": 359.1522,
+        "gpu_ready_ms": 685.7509,
+        "first_image_scene_ms": 685.1139,
+        "first_image_on_screen_ms": 696.3254,
+        "first_input_received_ms": 29220.1604
+      },
+      {
+        "run": 4,
+        "software": true,
+        "cache": "fresh app/profile and pipeline cache; OS/driver warm",
+        "exit_code": 0,
+        "launched_ms": 10.6793,
+        "first_window_composited_ms": 103.6186,
+        "inspector_shown_ms": 414.5519,
+        "first_image_scene_ms": 1289.6037,
+        "first_image_on_screen_ms": 1304.1225,
+        "first_input_received_ms": 40735.6423
+      }
+    ],
+    "pre_fix_diagnostics": [
+      {
+        "run": 1,
+        "software": false,
+        "cache": "fresh app/profile and pipeline cache; OS/driver warm",
+        "exit_code": -1073740791,
+        "launched_ms": 326.2982,
+        "first_window_composited_ms": 408.2593,
+        "inspector_shown_ms": 659.947,
+        "gpu_ready_ms": 1081.3627,
+        "first_image_scene_ms": 1081.2369,
+        "first_image_on_screen_ms": 1091.625,
+        "first_input_received_ms": 22307.6295
+      },
+      {
+        "run": 2,
+        "software": false,
+        "cache": "warm app/profile and pipeline cache; fresh process",
+        "exit_code": -1073740791,
+        "launched_ms": 10.3551,
+        "first_window_composited_ms": 108.7107,
+        "inspector_shown_ms": 373.4501,
+        "gpu_ready_ms": 792.8944,
+        "first_image_scene_ms": 792.7554,
+        "first_image_on_screen_ms": 808.5532,
+        "first_input_received_ms": 30080.3926
+      },
+      {
+        "run": 3,
+        "software": false,
+        "cache": "warm app/profile and pipeline cache; fresh process",
+        "exit_code": -1073740791,
+        "launched_ms": 10.3245,
+        "first_window_composited_ms": 109.7652,
+        "inspector_shown_ms": 381.8698,
+        "gpu_ready_ms": 780.1854,
+        "first_image_scene_ms": 780.078,
+        "first_image_on_screen_ms": 793.1368,
+        "first_input_received_ms": 29918.5938
+      },
+      {
+        "run": 4,
+        "software": true,
+        "cache": "fresh app/profile and pipeline cache; OS/driver warm",
+        "exit_code": 0,
+        "launched_ms": 11.5507,
+        "first_window_composited_ms": 104.6937,
+        "inspector_shown_ms": 453.7729,
+        "first_image_scene_ms": 1582.9288,
+        "first_image_on_screen_ms": 1588.4277,
+        "first_input_received_ms": 53719.0054
+      }
+    ],
+    "shutdown_fix": "Release Vulkan surface while HWND remains valid; three failing GPU closes became three clean closes."
+  },
+  "interactive_pass": [
+    "Approved tool launch",
+    "No Vulkan surface error after hinstance fix",
+    "Native Ctrl+O opens dialog (user selected file because modal targeting failed)",
+    "C enters crop",
+    "Rotate in crop changes size to 670 x 1008",
+    "Escape cancels crop including rotation",
+    "Reentering crop restores 1008 x 670",
+    "Enter commits/exits crop",
+    "F6 hides film strip",
+    "F7 hides inspector",
+    "Exposure numeric editor accepts 0.3 and updates slider",
+    "Malformed numeric commit preserves valid 0.3",
+    "Document Undo restores 0; Redo restores 0.3",
+    "Final named Original button and exposure editor visible in accessibility tree",
+    "Forced software canvas + CPU render reaches image presentation and responds to F7",
+    "All four corrected startup runs exit 0"
+  ],
+  "not_pass": {
+    "visual_and_pointer": "BLOCKED: WGC capture timed out; coordinate input geometry unavailable. No visual PASS for crop/framing/borders/textures/zoom, drag undo, pan, thumbnails or drag/drop.",
+    "modal_flows": "BLOCKED: filename edit was listed but set_value returned element unavailable; keyboard calls did not operate modal while parent was targeted. Export settings/cancellation and quit-during-export require completion.",
+    "accessibility": "PARTIAL: common controls inspected; named numeric/Original controls fixed. Custom film-strip items, crop dial screen-reader actions, full tab order and high contrast not established.",
+    "icc_dpi": "UNTESTED: multiple monitors, real wide-gamut ICC matching, monitor movement, DPI changes.",
+    "original": "PARTIAL: existing integration evidence retained; interactive held keys, German AltGr and invalidation after WB/resolution remain unverified.",
+    "startup": "PARTIAL: no reboot-cold run and no low-overhead first-interaction readiness measurement.",
+    "shell_integration": "PARTIAL: registry lifecycle passes; Explorer Open With and single-instance delivery not exercised interactively.",
+    "release_updates": "UNCONFIGURED: no supplied WinSparkle feed, DLL or signing key; none invented."
+  }
+}
