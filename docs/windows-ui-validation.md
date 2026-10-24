@@ -18,8 +18,14 @@ The per-user Inno installer compiles. Registry lifecycle validation found and
 fixed 35 missing OpenWithProgids values: Inno ValueType none creates no value.
 Install/uninstall now verifies all 35 empty REG_SZ values, the open command,
 required payload files, cleanup, and unchanged existing default associations.
-This first lifecycle check used the previous portable payload; final packaging
-must include the new executable and committed source.
+The final payload was rebuilt and checked on 2026-10-24 at implementation commit
+69e1363. Portable and embedded source ZIP CRCs pass; all four executables match
+the release build, and the source archive identifies its committed revision.
+The installer lifecycle was repeated with this payload, including a hash check
+of the installed app. The portable app loaded the 1008 x 670 photograph, reported
+development in 0.55 s, responded to F7, and exited with code 0. Capture still
+timed out after fresh-window recovery. Artifact hashes are kept beside the final
+deliverables; documentation-only repackaging does not change the tested app.
 
 Four corrected fresh-process startup runs all exit 0. From an external QPC
 origin: fresh app caches on Vulkan: first composition 431 ms, image 1114 ms;

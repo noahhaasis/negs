@@ -58,8 +58,10 @@ The portable packaging smoke test passes, including ZIP CRCs and presence of
 the app, three helpers, data, license and source archive. The output is
 `target/windows-dist/Negs-portable.zip` (approximately 104 MB).
 The PowerShell script handles compiler warnings on stderr and normalises the
-per-command Git ownership exception. No Inno Setup compiler is installed on
-the test box, so the installer definition has not yet been compiled/tested.
+per-command Git ownership exception. The final portable and Inno installer
+payloads passed archive, executable-hash and install/uninstall checks on
+2026-10-24. The portable app also loaded a photograph, responded to F7 and
+closed cleanly. See the validation report for coverage limits.
 
 Continuation results and the current release checklist are in
 [windows-ui-validation.md](windows-ui-validation.md). Software presentation
