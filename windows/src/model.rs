@@ -246,7 +246,10 @@ pub struct Model {
 }
 
 impl Model {
-    pub fn new(prefs: Preferences) -> Self {
+    pub fn new(mut prefs: Preferences) -> Self {
+        // Each launch starts with both editing panels available, even if they
+        // were hidden in the previous session. F6/F7 still toggle them in use.
+        prefs.filmstrip_visible = true;
         Self {
             state: EditState::default(),
             defaults: json!({}),
@@ -780,7 +783,6 @@ impl Model {
             let mut restored = session.state;
             restored.params = json::restoring(&self.defaults, &restored.params);
             self.state = restored;
-            self.inspector_visible = session.inspector_visible;
         } else {
             json::set(&mut self.state.params, "io.rotate_cw", json::num(0.0));
             self.state.crop = CropSettings::default();
