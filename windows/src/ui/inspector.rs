@@ -498,11 +498,13 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             }
             controls.push(slider);
             let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), WINDOW_EX_STYLE(WS_EX_CLIENTEDGE.0), parent, id(EDIT), fonts.ui);
+            super::accessible_name(edit, title);
             unsafe {
                 let _ = SetWindowSubclass(edit, Some(edit_subclass), 1, 0);
             }
             controls.push(edit);
             let reset = create(w!("BUTTON"), "\u{E777}", hidden | WINDOW_STYLE(BS_PUSHBUTTON as u32 | BS_FLAT as u32), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.glyph_small);
+            super::accessible_name(reset, &format!("Reset {title} to Default"));
             controls.push(reset);
         }
         Kind::Slider(_) => {}
@@ -1610,6 +1612,7 @@ fn build_crop(app: &mut App) {
     add(C_LABELS + 1, w!("STATIC"), "Ratio", WINDOW_STYLE(0), fonts.ui);
     for id in [C_WIDTH, C_HEIGHT] {
         let e = add(id, w!("EDIT"), "", WS_TABSTOP | WS_GROUP | WS_BORDER | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), fonts.ui);
+        super::accessible_name(e, if id == C_WIDTH { "Custom crop ratio width" } else { "Custom crop ratio height" });
         unsafe {
             let _ = SetWindowSubclass(e, Some(ratio_subclass), 1, 0);
         }

@@ -74,6 +74,13 @@ impl Picture {
         self.inner.texture.get()
     }
 
+    /// Borrows retained pixels for software presentation. GPU uploads still
+    /// release their full-size CPU buffer, so the normal path costs no more.
+    pub fn with_pixels<R>(&self, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+        let cpu = self.inner.cpu.lock().unwrap();
+        cpu.as_deref().map(f)
+    }
+
     pub fn histogram(&self, crop: &CropSettings) -> Histogram {
         let (rgba, w, h) = &self.inner.small;
         Histogram::of(rgba, *w as usize, *h as usize, crop, 1 << 20)

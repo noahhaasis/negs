@@ -61,17 +61,17 @@ The PowerShell script handles compiler warnings on stderr and normalises the
 per-command Git ownership exception. No Inno Setup compiler is installed on
 the test box, so the installer definition has not yet been compiled/tested.
 
-Still required before completion: interactive feature/accessibility checks,
-installer compilation and install/uninstall validation, repeated application
-startup measurements, and presentation fallback without Vulkan.
-Computer Use denied launching Negs because the app was not approved, twice;
-the user agreed to enable access, but a successful launch through that tool
-has not yet been observed. Do not infer interactive PASS from unit tests.
-Earlier single-launch timings in the conversation are diagnostic, not final
-startup results. Release update feeds and signing keys must come from release
-configuration; local builds do not invent them.
-The current canvas requires Vulkan; the GDI path only paints its background.
-Presentation on machines without Vulkan remains an implementation gap.
+Continuation results and the current release checklist are in
+[windows-ui-validation.md](windows-ui-validation.md). Software presentation
+is implemented, and the Vulkan startup/shutdown defects found interactively
+are fixed. 47 Windows tests pass; the Mac workspace build/tests pass. Inno
+Setup 6.7.3 compilation and all 35 association install/uninstall checks pass.
+Visual, pointer and modal testing remains incomplete due to Computer Use
+capture/targeting failures; the app is not yet a validated release.
 
-Test profiles can be isolated with `NEGS_PROFILE_DIR`. `NEGS_STARTUP_REPORT`
-records QPC timestamps. `NEGS_ALLOW_MULTIPLE` is intended only for testing.
+NEGS_SOFTWARE_CANVAS forces software image presentation for validation;
+SPEKTRAFILM_BACKEND=cpu also forces CPU development. Test profiles can be
+isolated with NEGS_PROFILE_DIR. NEGS_STARTUP_REPORT records QPC stamps,
+including actual input reception and compositor completion. Run
+windows/measure_startup.ps1 -Photo PATH for repeated process-start measurements
+with real keyboard input supplied separately. NEGS_ALLOW_MULTIPLE is for tests.

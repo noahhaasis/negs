@@ -1,3 +1,20 @@
+# Current continuation checkpoint (2026-10-23)
+
+Read windows-ui-validation.md and its machine-readable report first. They
+supersede the remaining-work list below. The HINSTANCE Vulkan startup bug,
+surface/HWND shutdown abort, software image presentation, numeric/Original
+accessibility names, and installer Open With registrations are now fixed.
+47 Windows tests pass; Mac workspace build/tests pass. Four instrumented
+startup/shutdown runs pass (three Vulkan, one forced software/CPU). The installer
+compiler is available and registry lifecycle validation passes for 35 extensions.
+
+Still incomplete: the visual/pointer/modal/monitor/accessibility/shell checks
+listed in windows-ui-validation.md. Computer Use app permission succeeds, but
+capture and modal element targeting fail. Do not call these checks PASS.
+First-interaction readiness and reboot-cold startup are still unmeasured.
+
+The following is preserved historical handoff context:
+
 # Windows UI continuation handoff (2026-10-23)
 
 Continue in the Windows checkout on `windows-ui`. Check `git status` first.
