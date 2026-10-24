@@ -59,7 +59,7 @@ Pass `-WinSparkleDll`, `-AppcastUrl` and `-EdPublicKey` for a configured release
 place WinSparkle's COPYING license beside the supplied DLL.
 
 The GitHub Release workflow builds Windows x64 packages alongside macOS.
-Manual runs provide a `negs-windows-experimental` artifact; tagged releases
+Main-branch pushes and manual runs provide a `negs-windows-experimental` artifact; tagged releases
 include those assets after both platform jobs pass. Python 3.11+ can run
 `windows/verify_package.py` after packaging to check archive integrity, bundled
 executables and committed source, then prepare versioned experimental assets
