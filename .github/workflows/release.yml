@@ -14,6 +14,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows:
+    name: Windows x64 (experimental)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@1.93.1
+      - name: Test Windows app
+        run: cargo test --locked --manifest-path windows/Cargo.toml
+      - name: Build installer and portable package
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (!(Test-Path -LiteralPath $iscc)) { throw 'Inno Setup 6 compiler is missing from the runner.' }
+          ./windows/package.ps1 -Iscc $iscc
+      - name: Verify and name experimental release assets
+        run: python windows/verify_package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: negs-windows-experimental
+          path: target/windows-release/
+          if-no-files-found: error
+
   macos:
     name: macOS universal
     runs-on: macos-15
@@ -78,7 +103,7 @@ jobs:
   publish:
     name: Publish complete release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: macos
+    needs: [macos, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,6 +112,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: negs-macos
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: negs-windows-experimental
           path: release-assets
       - name: Create draft, upload assets, then publish
         env:
