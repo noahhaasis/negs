@@ -17,6 +17,10 @@ WinSparkle and a per-user installer; winget is deferred.
 
 ## Implementation and validation in progress
 
+Both the adjustments panel and film strip start enabled on every launch,
+regardless of their saved visibility. F6/F7 can hide them during the session;
+the film strip appears once a photograph is open.
+
 The client includes the shell, inspector, Vulkan canvas, crop/border
 presentation, session storage, helper client, exports, film strip, ICC parser
 and dynamic WinSparkle integration. It is not yet a validated release.
