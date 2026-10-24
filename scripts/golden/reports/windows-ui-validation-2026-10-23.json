@@ -22,39 +22,40 @@
     "defaults_unchanged": true,
     "required_files": [
       {
-        "name": "Negs.exe",
-        "present": true
+        "present": true,
+        "name": "Negs.exe"
       },
       {
-        "name": "spektrafilm.exe",
-        "present": true
+        "present": true,
+        "name": "spektrafilm.exe"
       },
       {
-        "name": "spektrafilm-native.exe",
-        "present": true
+        "present": true,
+        "name": "spektrafilm-native.exe"
       },
       {
-        "name": "spektrafilm-f64.exe",
-        "present": true
+        "present": true,
+        "name": "spektrafilm-f64.exe"
       },
       {
-        "name": "data",
-        "present": true
+        "present": true,
+        "name": "data"
       },
       {
-        "name": "source.zip",
-        "present": true
+        "present": true,
+        "name": "source.zip"
       },
       {
-        "name": "LICENSE",
-        "present": true
+        "present": true,
+        "name": "LICENSE"
       }
     ],
+    "app_hash_matches_build": true,
     "uninstall_exit": 0,
     "uninstall_files_removed": true,
     "uninstall_registration_removed": true,
     "compiler": "Inno Setup 6.7.3",
-    "payload": "previous portable staging; installer definition includes corrected OpenWith values"
+    "payload": "final implementation build 69e1363; repeated on 2026-10-24"
   },
   "startup": {
     "method": "External QPC before report creation and Process.Start; compositor completion after synchronous child paint; first image after presentation + DwmFlush; fresh process for every run. Golden photo_DSC_4990.tif, 1008 x 670 developed preview. OS/driver caches warm; first GPU profile/pipeline cache empty. No reboot-cold claim.",
@@ -195,5 +196,28 @@
     "startup": "PARTIAL: no reboot-cold run and no low-overhead first-interaction readiness measurement.",
     "shell_integration": "PARTIAL: registry lifecycle passes; Explorer Open With and single-instance delivery not exercised interactively.",
     "release_updates": "UNCONFIGURED: no supplied WinSparkle feed, DLL or signing key; none invented."
+  },
+  "packaging": {
+    "commit": "69e1363f43724bddd7a45c9228f9625216377751",
+    "portable_crc": "PASS",
+    "source_crc": "PASS",
+    "source_commit": "PASS",
+    "required_entries": "PASS",
+    "executable_hashes_match_build": "PASS",
+    "entry_count": 131,
+    "app_sha256": "a59d0e733f9e59ec4c8b7af1cd440927fc768859bcd3f9059562d8cf75218092",
+    "date": "2026-10-24",
+    "portable_smoke": {
+      "loaded_photo": "photo_DSC_4990.tif",
+      "preview_dimensions": [
+        1008,
+        670
+      ],
+      "reported_develop_seconds": 0.55,
+      "F7_hides_inspector": true,
+      "exit_code": 0,
+      "capture": "BLOCKED: FrameArrived/window capture timed out after fresh-window retry"
+    },
+    "source_note": "Final deliverables may include subsequent documentation-only commits; their source commit and hashes are verified separately in the accompanying package-result.json."
   }
 }

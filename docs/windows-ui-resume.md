@@ -7,6 +7,10 @@ accessibility names, and installer Open With registrations are now fixed.
 47 Windows tests pass; Mac workspace build/tests pass. Four instrumented
 startup/shutdown runs pass (three Vulkan, one forced software/CPU). The installer
 compiler is available and registry lifecycle validation passes for 35 extensions.
+Final package checks on 2026-10-24 also pass: archive integrity, embedded committed
+source, executable hashes, installation/uninstallation with the new payload,
+and portable launch/photo loading/F7/clean exit. Details are in the validation
+report. Implementation commit 69e1363 is pushed to origin (the Mac).
 
 Still incomplete: the visual/pointer/modal/monitor/accessibility/shell checks
 listed in windows-ui-validation.md. Computer Use app permission succeeds, but
