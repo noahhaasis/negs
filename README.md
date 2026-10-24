@@ -4,11 +4,13 @@
 
 **Your photos, developed on film.**
 
-Negs is a **free** Mac app that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
+Negs is a **free** photo app for Mac, with an **experimental Windows version**, that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
 
 Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in a native macOS app.
 
 **[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon and Intel · [getnegs.com](https://getnegs.com)
+
+**[Windows (experimental)](#windows-experimental)** · Native Windows x64 app · Installer and portable builds
 
 The first time you open Negs, macOS asks you to allow it in System Settings: see the [install steps](#install).
 
@@ -67,6 +69,8 @@ Kodak, Fujifilm and Ilford stock names are trademarks of their owners. Negs is n
 
 ## Install
 
+### macOS
+
 1. **Download** the `.dmg` from the [latest release](https://github.com/noahhaasis/negs/releases).
 2. **Drag to Applications.** Open the `.dmg` and drag **Negs** into the **Applications** folder.
 3. **Open it once.** Double-click Negs. macOS says it can't verify the app and won't open it. Click **Done** (not *Move to Trash*).
@@ -76,17 +80,27 @@ Why the extra step? Negs isn't notarized by Apple, which needs a paid developer 
 
 Negs updates itself: use **Negs → Check for Updates…**, or turn automatic checks on or off in Settings.
 
+### Windows (experimental)
+
+The native Windows app uses the same film engine, with GPU previews, crop and straighten tools, borders, and Fast or Reference exports. It is experimental: visual, export-dialog, accessibility, and multi-monitor testing is still in progress. See the [validation status](docs/windows-ui-validation.md) for the remaining checks.
+
+- **Installer:** run `Negs-Setup.exe`. It installs for your Windows account and adds Negs to **Open with**, without changing your default photo app.
+- **Portable:** extract `Negs-portable.zip` and run `Negs.exe`. Keep the included helper executables and `data` folder beside it.
+- **Updates:** install a newer test build manually; automatic updates are not configured for the experimental Windows build.
+
+Windows packages can be built from source with [`windows/package.ps1`](windows/package.ps1); see the [Windows build instructions](docs/windows-app.md). The editing panel and film strip start enabled, and F7/F6 toggle them during use.
+
 ### Handy shortcuts
 
-| | |
-|---|---|
-| Open a photo | ⌘O |
-| Export | ⇧⌘E |
-| Save the preview | ⌘S |
-| Rotate | ⌘R |
-| Fit / actual size | ⌘0 / ⌘1 |
-| Show or hide adjustments | ⌥⌘I |
-| Show the original while held | \ |
+| | Mac | Windows |
+|---|---|---|
+| Open a photo | ⌘O | Ctrl+O |
+| Export | ⇧⌘E | Ctrl+Shift+E |
+| Save the preview | ⌘S | Ctrl+S |
+| Rotate | ⌘R | Ctrl+R |
+| Fit / actual size | ⌘0 / ⌘1 | Ctrl+0 / Ctrl+1 |
+| Show or hide adjustments | ⌥⌘I | F7 |
+| Show the original while held | \ | O or \ |
 
 Pinch to zoom, scroll or drag to pan, double-click to fit.
 
@@ -99,7 +113,7 @@ Yes. It's free to download and open source under the GPL-3.0 (see [License](#lic
 macOS shows that warning for every app that isn't notarized by Apple. Negs isn't, because notarizing needs a paid developer account. All of the source code is in this repository for anyone to check. Follow the [install steps](#install): you only need to allow it once.
 
 **Which files can I open?**
-RAW files from most cameras (through Apple's own RAW support), plus JPEG, TIFF and PNG.
+RAW files from most cameras, plus JPEG, TIFF and PNG. The Mac app uses Apple's RAW support with a rawler fallback; the experimental Windows app uses rawler for RAW files.
 
 **Does it run on Intel Macs?**
 Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it runs natively on both Intel and Apple silicon. It is developed and tested mainly on Apple silicon, so if something looks wrong on an Intel Mac, please [open an issue](https://github.com/noahhaasis/negs/issues).
@@ -108,7 +122,7 @@ Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it ru
 No. Presets and LUTs remap colours. Negs simulates the film, the paper and the light, which is why halation, grain and edge effects come out right.
 
 **Windows or Linux?**
-Not yet, but they will follow.
+An [experimental native Windows version](#windows-experimental) is available in this repository, with installer and portable packaging. Linux is not available yet.
 
 **Found a bug or have an idea?**
 [Open an issue](https://github.com/noahhaasis/negs/issues).
