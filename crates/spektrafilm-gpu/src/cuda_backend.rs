@@ -538,11 +538,25 @@ extern "C" __global__ void print_spectral_kernel(
     output[base + 2u] = log10f(fmaxf(raw_b, 0.0f) + 1e-10f);
 }
 
+// Border of the FIR blur. With `reflect` set, Python's `_reflect` (scipy
+// `mode='reflect'`: d c b a | a b c d, period 2n), which its FIR uses below
+// sigma 3; otherwise the edge sample is repeated, the closest a FIR gets to
+// the sample-replicating IIR Python uses from sigma 3 on.
+__device__ int blur_border_index(int i, int n, unsigned int reflect) {
+    if (i >= 0 && i < n) return i;
+    if (!reflect) return i < 0 ? 0 : n - 1;
+    int period = 2 * n;
+    int m = i % period;
+    if (m < 0) m += period;
+    return m < n ? m : period - 1 - m;
+}
+
 extern "C" __global__ void gaussian_blur_h_kernel(
     const float* __restrict__ input,
     unsigned int width,
     unsigned int height,
     unsigned int radius,
+    unsigned int reflect,
     const float* __restrict__ kernel,
     float* __restrict__ output
 ) {
@@ -553,9 +567,7 @@ extern "C" __global__ void gaussian_blur_h_kernel(
     int w_i = (int)width;
     unsigned int ksize = radius * 2u + 1u;
     for (unsigned int k = 0u; k < ksize; k++) {
-        int sx_i = (int)x + (int)k - (int)radius;
-        if (sx_i < 0) sx_i = 0;
-        if (sx_i >= w_i) sx_i = w_i - 1;
+        int sx_i = blur_border_index((int)x + (int)k - (int)radius, w_i, reflect);
         unsigned int base = (y * width + (unsigned int)sx_i) * 3u;
         float kw = kernel[k];
         sr += kw * input[base];
@@ -573,6 +585,7 @@ extern "C" __global__ void gaussian_blur_v_kernel(
     unsigned int width,
     unsigned int height,
     unsigned int radius,
+    unsigned int reflect,
     const float* __restrict__ kernel,
     float* __restrict__ output
 ) {
@@ -583,9 +596,7 @@ extern "C" __global__ void gaussian_blur_v_kernel(
     int h_i = (int)height;
     unsigned int ksize = radius * 2u + 1u;
     for (unsigned int k = 0u; k < ksize; k++) {
-        int sy_i = (int)y + (int)k - (int)radius;
-        if (sy_i < 0) sy_i = 0;
-        if (sy_i >= h_i) sy_i = h_i - 1;
+        int sy_i = blur_border_index((int)y + (int)k - (int)radius, h_i, reflect);
         unsigned int base = ((unsigned int)sy_i * width + x) * 3u;
         float kw = kernel[k];
         sr += kw * input[base];
@@ -1262,6 +1273,7 @@ impl CudaBackend {
         sigma: f32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (radius, kernel) = gaussian_kernel_f32(sigma);
+        let reflect = u32::from(sigma < 3.0);
         let kernel_dev = self.stream.clone_htod(&kernel)?;
         {
             let mut launch = self.stream.launch_builder(&self.blur_h_kernel);
@@ -1270,6 +1282,7 @@ impl CudaBackend {
                 .arg(&width)
                 .arg(&height)
                 .arg(&radius)
+                .arg(&reflect)
                 .arg(&kernel_dev)
                 .arg(&mut *mid);
             unsafe { launch.launch(launch_2d(width, height)) }?;
@@ -1281,6 +1294,7 @@ impl CudaBackend {
                 .arg(&width)
                 .arg(&height)
                 .arg(&radius)
+                .arg(&reflect)
                 .arg(&kernel_dev)
                 .arg(dst);
             unsafe { launch.launch(launch_2d(width, height)) }?;

@@ -3,9 +3,9 @@
 // the vertical, ref_blur_fir_rows.wgsl the horizontal one.
 //
 // CPU equivalent: `fir_blur_1d` in spektrafilm-math (σ < 3), which uses
-// `radius = int(3σ + 0.5)` and clamp-to-edge borders. The host builds the
-// normalized kernels in f64 and stores them as three rows of 2·radius + 1
-// taps, each centred and zero-padded to the largest radius. A channel with
+// `radius = int(3σ + 0.5)` and reflects at the borders like Python. The host
+// builds the normalized kernels in f64 and stores them as three rows of
+// 2·radius + 1 taps, each centred and zero-padded to the largest radius. A channel with
 // a smaller radius therefore first adds exact zeros, then the same products
 // in the same order as its own kernel would. The vertical pass can scale its
 // result and add it to the output, so blurs feeding a weighted sum need no
@@ -38,6 +38,22 @@ const BLOCK_H: u32 = 32u;
 var<workgroup> tile: array<vec4<f32>, 800>;
 var<workgroup> weights: array<vec3<f32>, 19>; // 2·MAX_RADIUS + 1 taps
 
+// Python `_reflect` (scipy.ndimage `mode='reflect'`): d c b a | a b c d |
+// d c b a, the edge sample repeated, with period 2n so that a kernel wider
+// than the image keeps folding across it. Same as `reflect_index` in
+// spektrafilm-math's gaussian.rs.
+fn reflect_index(i: i32, n: i32) -> u32 {
+    if i >= 0 && i < n {
+        return u32(i);
+    }
+    let period = 2 * n;
+    var m = i % period;
+    if m < 0 {
+        m += period;
+    }
+    return u32(select(m, period - 1 - m, m >= n));
+}
+
 fn load_pixel(x: u32, y: u32) -> vec4<f32> {
     let b = (y * params.width + x) * 3u;
     return vec4<f32>(input[b], input[b + 1u], input[b + 2u], 0.0);
@@ -68,14 +84,13 @@ fn main(
     }
     let w = params.width;
     let h = params.height;
-    // Rows y0 − r … y0 + 31 + r, clamped, of columns x0 … x0 + 15.
+    // Rows y0 − r … y0 + 31 + r, reflected, of columns x0 … x0 + 15.
     let x0 = wid.x * BLOCK_W;
     let y0 = wid.y * BLOCK_H;
     for (var e = lid; e < (BLOCK_H + 2u * r) * BLOCK_W; e += 256u) {
         let x = x0 + e % BLOCK_W;
         if x < w {
-            let sy = clamp(i32(y0 + e / BLOCK_W) - i32(r), 0, i32(h) - 1);
-            tile[e] = load_pixel(x, u32(sy));
+            tile[e] = load_pixel(x, reflect_index(i32(y0 + e / BLOCK_W) - i32(r), i32(h)));
         }
     }
     workgroupBarrier();

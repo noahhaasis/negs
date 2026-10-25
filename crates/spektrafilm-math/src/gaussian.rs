@@ -120,7 +120,8 @@ fn blur_1d_parallel(
     }
 }
 
-/// FIR Gaussian blur (truncated kernel). Good for small sigma.
+/// FIR Gaussian blur (truncated kernel). Good for small sigma. Borders
+/// reflect with the edge sample repeated, as in Python's `_fir_2d_fused`.
 fn fir_blur_1d(
     src: &[Scalar],
     dst: &mut [Scalar],
@@ -139,39 +140,57 @@ fn fir_blur_1d(
     // and changes the FIR kernel size — measurable parity drift.
     let radius = (from_f64(3.0) * sigma + from_f64(0.5)) as usize;
     let kernel = make_gaussian_kernel(sigma, radius);
+    let r = radius as isize;
 
     if horizontal {
         dst.par_chunks_exact_mut(w)
             .enumerate()
             .for_each(|(y, row_dst)| {
                 let row_src = &src[y * w..(y + 1) * w];
-                for x in 0..w {
+                for (x, out) in row_dst.iter_mut().enumerate() {
                     let mut sum = ZERO;
-                    for (ki, &kv) in kernel.iter().enumerate() {
-                        let sx = (x as isize + ki as isize - radius as isize)
-                            .max(0)
-                            .min(w as isize - 1) as usize;
-                        sum += row_src[sx] * kv;
+                    // Only the outer `radius` pixels on each side read past
+                    // the border.
+                    if x >= radius && x + radius < w {
+                        for (&s, &kv) in row_src[x - radius..=x + radius].iter().zip(&kernel) {
+                            sum += s * kv;
+                        }
+                    } else {
+                        for (ki, &kv) in kernel.iter().enumerate() {
+                            sum += row_src[reflect_index(x as isize + ki as isize - r, w)] * kv;
+                        }
                     }
-                    row_dst[x] = sum;
+                    *out = sum;
                 }
             });
     } else {
         dst.par_chunks_exact_mut(w)
             .enumerate()
             .for_each(|(y, row_dst)| {
-                for x in 0..w {
+                // Source row of each tap, reflected at the top and bottom.
+                let rows: Vec<usize> = (0..kernel.len())
+                    .map(|ki| reflect_index(y as isize + ki as isize - r, h) * w)
+                    .collect();
+                for (x, out) in row_dst.iter_mut().enumerate() {
                     let mut sum = ZERO;
-                    for (ki, &kv) in kernel.iter().enumerate() {
-                        let sy = (y as isize + ki as isize - radius as isize)
-                            .max(0)
-                            .min(h as isize - 1) as usize;
-                        sum += src[sy * w + x] * kv;
+                    for (&row, &kv) in rows.iter().zip(&kernel) {
+                        sum += src[row + x] * kv;
                     }
-                    row_dst[x] = sum;
+                    *out = sum;
                 }
             });
     }
+}
+
+/// Python `_reflect` in `fast_gaussian_filter.py`, i.e. scipy.ndimage
+/// `mode='reflect'` (numpy `symmetric`): `d c b a | a b c d | d c b a`, the
+/// edge sample repeated. The pattern has period `2n`, so a kernel wider than
+/// the image keeps folding back and forth across it.
+#[inline]
+fn reflect_index(i: isize, n: usize) -> usize {
+    let n = n as isize;
+    let i = i.rem_euclid(2 * n);
+    (if i < n { i } else { 2 * n - 1 - i }) as usize
 }
 
 /// Young-van Vliet recursive IIR Gaussian blur. Good for large sigma.
@@ -317,6 +336,18 @@ mod tests {
         let k = make_gaussian_kernel(from_f64(1.0), 3);
         let sum: Scalar = k.iter().sum();
         assert!((sum - from_f64(1.0)).abs() < from_f64(1e-6));
+    }
+
+    /// numpy `np.pad(np.arange(4), 9, mode='symmetric')`, which Python's
+    /// `_reflect` reproduces (scipy `mode='reflect'`).
+    #[test]
+    fn reflect_index_matches_numpy_symmetric() {
+        let expected = [
+            0, 0, 1, 2, 3, 3, 2, 1, 0, 0, 1, 2, 3, 3, 2, 1, 0, 0, 1, 2, 3, 3,
+        ];
+        let got: Vec<usize> = (-9..13).map(|i| reflect_index(i, 4)).collect();
+        assert_eq!(got, expected);
+        assert!((-5..6).all(|i| reflect_index(i, 1) == 0));
     }
 
     #[test]
