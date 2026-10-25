@@ -172,7 +172,7 @@ pub fn expose_calibrated(
             ]
         })
         .collect();
-    let base_density: Vec<f64> = film.data.base_density.clone();
+    let base_density = crate::bases::film_base_density(film, params);
     // Python: `sensitivity = np.nan_to_num(10 ** log_sensitivity)` — f64 with NaN→0.
     let print_sensitivity: Vec<[f64; 3]> = print
         .log_sensitivity_f64()
@@ -381,7 +381,7 @@ pub fn process(
             ]
         })
         .collect();
-    let base_density: Vec<f64> = film.data.base_density.clone();
+    let base_density = crate::bases::film_base_density(film, params);
     let print_sensitivity: Vec<[f64; 3]> = print
         .log_sensitivity_f64()
         .iter()

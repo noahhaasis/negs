@@ -452,6 +452,58 @@ impl Default for GlareParams {
     }
 }
 
+/// Film base tuning — upstream experimental's `FilmBaseParams`
+/// (`runtime/params_schema.py`, `model/develop.py`): a tilt and per-channel
+/// density scales of the film base + fog (the orange mask), around the
+/// status-M peaks. Applied wherever the film is lit: the print exposure, its
+/// mid-grey reference and the film scan. Neutral values (scale 1, tilt 0,
+/// C/M/Y 1) are the identity. See `crate::bases`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FilmBaseParams {
+    #[serde(default = "default_true")]
+    pub active: bool,
+    #[serde(default = "default_one_f64")]
+    pub scale: f64,
+    #[serde(default)]
+    pub tilt: f64,
+    #[serde(default = "default_one_f64")]
+    pub cyan: f64,
+    #[serde(default = "default_one_f64")]
+    pub magenta: f64,
+    #[serde(default = "default_one_f64")]
+    pub yellow: f64,
+}
+
+impl Default for FilmBaseParams {
+    fn default() -> Self {
+        Self { active: true, scale: 1.0, tilt: 0.0, cyan: 1.0, magenta: 1.0, yellow: 1.0 }
+    }
+}
+
+/// Print base tuning — upstream experimental's `PrintBaseParams`: an overall
+/// scale and per-channel scales of the paper base around the status-A peaks,
+/// applied when the print is scanned. Neutral values are the identity. See
+/// `crate::bases`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrintBaseParams {
+    #[serde(default = "default_true")]
+    pub active: bool,
+    #[serde(default = "default_one_f64")]
+    pub scale: f64,
+    #[serde(default = "default_one_f64")]
+    pub cyan: f64,
+    #[serde(default = "default_one_f64")]
+    pub magenta: f64,
+    #[serde(default = "default_one_f64")]
+    pub yellow: f64,
+}
+
+impl Default for PrintBaseParams {
+    fn default() -> Self {
+        Self { active: true, scale: 1.0, cyan: 1.0, magenta: 1.0, yellow: 1.0 }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilmRenderingParams {
     /// Development time (minutes) for B&W development-time families —
@@ -475,6 +527,8 @@ pub struct FilmRenderingParams {
     /// settings reproduce it. See `Pipeline::apply_film_curves_morph`.
     #[serde(default)]
     pub density_curves_morph: CurvesMorphParams,
+    #[serde(default)]
+    pub base: FilmBaseParams,
 }
 
 impl Default for FilmRenderingParams {
@@ -486,6 +540,7 @@ impl Default for FilmRenderingParams {
             dir_couplers: DirCouplersParams::default(),
             glare: GlareParams::default(),
             density_curves_morph: CurvesMorphParams::default(),
+            base: FilmBaseParams::default(),
         }
     }
 }
@@ -500,6 +555,8 @@ pub struct PrintRenderingParams {
     pub glare: GlareParams,
     #[serde(default)]
     pub density_curves_morph: CurvesMorphParams,
+    #[serde(default)]
+    pub base: PrintBaseParams,
 }
 
 impl Default for PrintRenderingParams {
@@ -508,6 +565,7 @@ impl Default for PrintRenderingParams {
             development_time: None,
             glare: GlareParams::default(),
             density_curves_morph: CurvesMorphParams::default(),
+            base: PrintBaseParams::default(),
         }
     }
 }

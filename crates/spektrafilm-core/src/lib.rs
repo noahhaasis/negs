@@ -1,3 +1,4 @@
+pub mod bases;
 pub mod color_filters;
 pub mod color_reference;
 pub mod couplers_presets;
@@ -13,6 +14,7 @@ pub mod neutral_filters;
 pub mod params;
 pub mod pipeline;
 pub mod post;
+pub mod print_balance;
 pub mod print_morph;
 pub mod profile;
 pub mod spectral_service;

@@ -190,7 +190,12 @@ pub fn scan(
             ]
         })
         .collect();
-    let base_density: Vec<f64> = profile.data.base_density.clone();
+    // `profile` is the film when scanning the film, else the print.
+    let base_density = if params.io.scan_film {
+        crate::bases::film_base_density(profile, params)
+    } else {
+        crate::bases::print_base_density(profile, params)
+    };
 
     // Use the full-precision f64 illuminant — the f32 → f64 promotion of
     // the f32 constants drops ~7 digits per sample and accumulates ~5e-6
