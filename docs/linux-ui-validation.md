@@ -192,9 +192,79 @@ tag. Evidence: `target/linux-validation/opacity-check/result.json`. Release
 build, Clippy and the state tests pass. The compositor exception was also
 applied to the open review window and persists across launches.
 
+### Configurable borders and installed-preview follow-up
+
+Validated source `7b3ae74` with Rust 1.93.1 and the same actual Wayland
+desktop. The release executable's SHA-256 was
+`aac392424db492245bb183eb99483a0c5ad2f19fc222b31aa74042118f3f0277`.
+Later UI work should record its own revision/results rather than treating
+this follow-up as validation of that work.
+
+Borders now expose mat, keyline and outer-film thickness; opaque native sRGB
+color pickers and hex entries; Solid/Film/Keyline/35mm; Instagram extension;
+and include-in-export state. Film and 35mm previews use the licensed project
+textures. The original Post controls and ranges have also been restored.
+No Spektrafilm render or export is connected in this tested revision.
+
+Release build, formatting, Clippy with `-D warnings`, and four state/border
+tests pass. The real AT-SPI regression suite passes all eight checks,
+including stable film-strip object identities and stale-load rejection.
+Four additional border checks pass: native numeric thickness controls with
+Undo/Redo; hex entry activation changes the actual compositor pixels to
+`#233445`; thickness/color are saved; and native fields restore correctly
+on the next launch. Evidence:
+`target/linux-validation/border-controls/result.json`,
+`configured-keyline.png` and the existing accessibility report.
+
+Inspected widget captures show the scanned film edge and stock-specific
+35mm rebate/perforations, plus light-theme keyline controls:
+`target/linux-validation/{border-film,border-35mm,border-keyline}/lazy-widget.png`.
+These are presentation checks, not proof of export geometry/pixel parity.
+
+The per-user preview installer was run repeatedly with isolated XDG
+config/data/bin roots. Its main-config include remains idempotent; border
+assets, license, source archive and desktop integration are present. The
+installed copy then launched in the real Wayland session and loaded 35mm
+assets from its own installed data directory. Evidence:
+`target/linux-validation/install-smoke/{result,installed-run}.json` and
+`installed-35mm.png`. Follow-up packaging also includes the UI audit and
+validation documentation alongside the installed README and source archive.
+The isolated smoke did not install the application into the user's actual
+application directories. Arch/other-distro dependencies and packaging remain
+separate work; this installer is explicitly for the UI preview.
+
+One additional interaction run with the expanded border inspector completed
+240 frame-clock updates in 3967.1 ms; callback p95 was 0.011 ms. The deferred
+inspector initially constructed 17 sliders (60 with all groups eager), versus
+the historical 14/57 above. First compositor presentation was 341.7 ms and
+camera-preview presentation 725.2 ms in this one run. It used existing
+OS/driver caches and is not a repeated median or a cold-start comparison.
+Evidence: `target/linux-validation/border-ui-performance/lazy-00.json`.
+`developed_image_ms` remains null.
+
+### RAWmakase opacity comparison
+
+A separate read-only investigation confirmed that current RAWmakase upstream
+also documents an Omarchy-specific window rule removing `default-opacity`
+and setting opacity to `1 1`. Its application creates an opaque Wayland
+surface and writes preview alpha 1, but those declarations do not bypass
+compositor opacity. The inspected packaging and runtime contain no automatic
+Hyprland-rule installation. See its pinned
+[README](https://github.com/pch/rawmakase/blob/433ce6000cb72b44ceaa51557c6fd4f7b68c7a78/README.md#L58-L62)
+and [preview shader](https://github.com/pch/rawmakase/blob/433ce6000cb72b44ceaa51557c6fd4f7b68c7a78/crates/rawmakase-engine/src/develop/gpu/present.wgsl#L291).
+The installed package is `rawmakase-bin 0.4.4-1`; that release predates the
+README recipe. No RAWmakase process was running, so this comparison is based
+on source and package inspection rather than a fresh visual test.
+
+Negs retains the same two-part approach: opaque canvas pixels plus an
+app-specific installed rule. Its rule uses absolute `1 override` values for
+focused/inactive/fullscreen states. Plain opacity values are multipliers,
+as documented in the
+[Hyprland window-rule reference](https://wiki.hypr.land/Configuring/Basics/Window-Rules/).
+
 ### Still pending
 
-Engine integration, numerical parity, real exports, all border/35mm and
+Engine integration, numerical parity, real exports, border/35mm export parity,
 straighten semantics, developed-preview caching, large watched folders, RAW
 development, color management on wide-gamut/mixed displays, different monitor
 scales, screen-reader usability, physical pointer/trackpad feel, and packaging
