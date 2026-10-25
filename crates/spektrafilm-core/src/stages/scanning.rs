@@ -169,6 +169,37 @@ fn scan_spectral_log_xyz(
     out
 }
 
+/// The scan's luminance normalization `Σ illuminant·ȳ` and the viewing
+/// illuminant's white (Y = 1), in f64 from the exact CMFs. Shared with the
+/// GPU-resident chain's set-up so both scans normalise alike.
+///
+/// The white is computed at runtime (matches Python's
+/// `XYZ_to_xy(integrate(illu, CMFs)/norm) → xy_to_xyZ`). The pre-computed
+/// `illuminant_xyz_f64` constant is 3 ULPs off the runtime value because
+/// Python's `contract(...)/norm` rounds Y slightly off 1.0, which xy_to_xyY
+/// then corrects — replaying that chain is bit-exact.
+pub(crate) fn scan_normalization_and_white(illuminant: &[f64], n_wl: usize) -> (f64, [f64; 3]) {
+    // Python parity (81-element sum), with the f64 CMF_Y for the same
+    // precision reason as the illuminant.
+    let normalization: f64 = (0..n_wl)
+        .map(|i| illuminant[i] * spectral::CMF_Y_F64[i])
+        .sum();
+    let mut illu_xyz_runtime = [0.0f64; 3];
+    for i in 0..n_wl {
+        illu_xyz_runtime[0] += illuminant[i] * spectral::CMF_X_F64[i];
+        illu_xyz_runtime[1] += illuminant[i] * spectral::CMF_Y_F64[i];
+        illu_xyz_runtime[2] += illuminant[i] * spectral::CMF_Z_F64[i];
+    }
+    for c in 0..3 {
+        illu_xyz_runtime[c] /= normalization;
+    }
+    // XYZ_to_xy then xy_to_xyz roundtrip (renormalizes Y to exactly 1).
+    let sum_xyz = illu_xyz_runtime[0] + illu_xyz_runtime[1] + illu_xyz_runtime[2];
+    let vx = illu_xyz_runtime[0] / sum_xyz;
+    let vy = illu_xyz_runtime[1] / sum_xyz;
+    (normalization, [vx / vy, 1.0f64, (1.0 - vx - vy) / vy])
+}
+
 pub fn scan(
     density_cmy: ImageBuf,
     profile: &Profile,
@@ -202,38 +233,13 @@ pub fn scan(
         .min(channel_density.len())
         .min(spectral::N_WAVELENGTHS);
 
-    // Compute normalization in f64 — Python parity (81-element sum).
-    // Use f64 CMF_Y for the same precision reason.
-    let normalization: f64 = (0..n_wl)
-        .map(|i| illuminant[i] * spectral::CMF_Y_F64[i])
-        .sum();
+    let (normalization, viewing_white) = scan_normalization_and_white(&illuminant, n_wl);
     // Build XYZ→RGB matrix with chromatic adaptation from viewing illuminant to output colorspace white.
     // Python's `colour.XYZ_to_RGB` applies CAT and the XYZ→RGB matrix as
     // TWO sequential matrix multiplies per pixel; pre-combining them
     // into one (M_rgb @ M_cat) loses ~1 ULP per output channel and
     // accumulates to ~5e-6 scan-stage drift. We keep them split for
     // CPU bit-parity; the GPU path can collapse them for performance.
-    //
-    // Compute viewing_white at runtime (matches Python's
-    // `XYZ_to_xy(integrate(illu, CMFs)/norm) → xy_to_xyZ`). The
-    // pre-computed `illuminant_xyz_f64` constant is 3 ULPs off the
-    // runtime value because Python's `contract(...)/norm` rounds Y
-    // slightly off 1.0, which xy_to_xyY then corrects — replaying that
-    // chain is bit-exact.
-    let mut illu_xyz_runtime = [0.0f64; 3];
-    for i in 0..n_wl {
-        illu_xyz_runtime[0] += illuminant[i] * spectral::CMF_X_F64[i];
-        illu_xyz_runtime[1] += illuminant[i] * spectral::CMF_Y_F64[i];
-        illu_xyz_runtime[2] += illuminant[i] * spectral::CMF_Z_F64[i];
-    }
-    for c in 0..3 {
-        illu_xyz_runtime[c] /= normalization;
-    }
-    // XYZ_to_xy then xy_to_xyz roundtrip (renormalizes Y to exactly 1).
-    let sum_xyz = illu_xyz_runtime[0] + illu_xyz_runtime[1] + illu_xyz_runtime[2];
-    let vx = illu_xyz_runtime[0] / sum_xyz;
-    let vy = illu_xyz_runtime[1] / sum_xyz;
-    let viewing_white = [vx / vy, 1.0f64, (1.0 - vx - vy) / vy];
     let output_white = spectral::colorspace_white_xyz_f64(&params.io.output_color_space);
     let adapt = colorspace::chromatic_adaptation_matrix_f64(viewing_white, output_white);
     let base_xyz_to_rgb = output_colorspace_from_xyz_f64(&params.io.output_color_space);

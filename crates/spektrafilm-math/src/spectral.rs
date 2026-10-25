@@ -289,6 +289,24 @@ pub const CMF_Z_F64: [f64; N_WAVELENGTHS] = [
     0.0,
 ];
 
+/// The exact CMFs (`CMF_*_F64`) rounded to f32, for the GPU scan. The f32
+/// `CMF_*` tables are an older 4–5 digit dataset (x̄(485 nm) is 0.05801 there
+/// and 0.05795001 in colour), up to 1.2 % off per sample: integrated X moved
+/// by 3e-6 to 2e-5, which the output gamut compressor amplified to ΔE00 0.045.
+pub const CMF_X_F32: [f32; N_WAVELENGTHS] = round_to_f32(&CMF_X_F64);
+pub const CMF_Y_F32: [f32; N_WAVELENGTHS] = round_to_f32(&CMF_Y_F64);
+pub const CMF_Z_F32: [f32; N_WAVELENGTHS] = round_to_f32(&CMF_Z_F64);
+
+const fn round_to_f32(values: &[f64; N_WAVELENGTHS]) -> [f32; N_WAVELENGTHS] {
+    let mut out = [0.0f32; N_WAVELENGTHS];
+    let mut i = 0;
+    while i < N_WAVELENGTHS {
+        out[i] = values[i] as f32;
+        i += 1;
+    }
+    out
+}
+
 pub const CMF_Z: [f32; N_WAVELENGTHS] = [
     0.006450, 0.010550, 0.020050, 0.036210, 0.067850, 0.110200, 0.207400, 0.371300, 0.645600,
     1.039050, 1.385600, 1.622960, 1.747060, 1.782600, 1.772110, 1.744100, 1.669200, 1.528100,
@@ -1257,6 +1275,19 @@ pub fn hanatos2025_rgb_to_raw_prepared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_cmfs_are_the_exact_cmfs_in_f32() {
+        for (f32s, f64s) in [
+            (&CMF_X_F32, &CMF_X_F64),
+            (&CMF_Y_F32, &CMF_Y_F64),
+            (&CMF_Z_F32, &CMF_Z_F64),
+        ] {
+            for (a, b) in f32s.iter().zip(f64s) {
+                assert_eq!(*a, *b as f32);
+            }
+        }
+    }
 
     #[test]
     fn test_tc_xy_roundtrip() {
