@@ -2,23 +2,43 @@ import AppKit
 import ImageIO
 import SwiftUI
 
-/// Folder browsing stays separate from the renderer and observes only the
-/// current file. No folder watcher or full-resolution preview cache is needed.
+/// Metadata lets live refreshes keep unchanged thumbnails, including when a
+/// session sidecar is written in the same folder. No image pixels are read here.
+struct PhotoFile: Hashable, Sendable {
+    let url: URL
+    let name: String
+    let modified: Date?
+    let size: Int?
+
+    init(url: URL, values: URLResourceValues? = nil) {
+        self.url = url
+        name = url.lastPathComponent
+        let values = values ?? (try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]))
+        modified = values?.contentModificationDate
+        size = values?.fileSize
+    }
+}
+
+/// Folder browsing stays separate from the renderer.
 enum PhotoFolder {
     static let extensions = Set(["jpg", "jpeg", "png", "tif", "tiff"] + EditorModel.rawExtensions)
 
     static func images(in directory: URL) throws -> [URL] {
+        try snapshot(in: directory).map(\.url)
+    }
+
+    static func snapshot(in directory: URL) throws -> [PhotoFile] {
         let files = try FileManager.default.contentsOfDirectory(at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
-        return try files.filter {
+            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles])
+        return try files.compactMap { url -> PhotoFile? in
             try Task.checkCancellation()
-            return extensions.contains($0.pathExtension.lowercased())
-                && (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            guard extensions.contains(url.pathExtension.lowercased()),
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]),
+                  values.isRegularFile == true else { return nil }
+            // Preserve the opened folder's spelling through symlinks.
+            return PhotoFile(url: directory.appendingPathComponent(url.lastPathComponent), values: values)
         }
-        // Directory enumeration resolves aliases such as /var → /private/var.
-        // Keep the opened folder’s spelling so selection and scroll IDs match.
-        .map { directory.appendingPathComponent($0.lastPathComponent) }
-        .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }
 
@@ -26,16 +46,26 @@ enum PhotoFolder {
 /// only embedded previews: browsing must never trigger a full RAW development.
 actor PhotoThumbnails {
     static let shared = PhotoThumbnails()
-    private let cache: NSCache<NSURL, CGImage> = {
-        let cache = NSCache<NSURL, CGImage>()
+    private final class Cached {
+        let file: PhotoFile
+        let image: CGImage
+        init(file: PhotoFile, image: CGImage) { self.file = file; self.image = image }
+    }
+    private let cache: NSCache<NSURL, Cached> = {
+        let cache = NSCache<NSURL, Cached>()
         cache.totalCostLimit = 16 * 1024 * 1024
         cache.countLimit = 160
         return cache
     }()
 
     func image(for url: URL) -> CGImage? {
+        image(for: PhotoFile(url: url))
+    }
+
+    func image(for file: PhotoFile) -> CGImage? {
+        let url = file.url
         guard !Task.isCancelled else { return nil }
-        if let image = cache.object(forKey: url as NSURL) { return image }
+        if let cached = cache.object(forKey: url as NSURL), cached.file == file { return cached.image }
         let image: CGImage? = autoreleasepool {
             guard let source = CGImageSourceCreateWithURL(url as CFURL,
                 [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
@@ -50,7 +80,7 @@ actor PhotoThumbnails {
             return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
         }
         guard !Task.isCancelled else { return nil }
-        if let image { cache.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height) }
+        if let image { cache.setObject(Cached(file: file, image: image), forKey: url as NSURL, cost: image.bytesPerRow * image.height) }
         return image
     }
 }
@@ -58,7 +88,7 @@ actor PhotoThumbnails {
 struct PhotoBrowser: View {
     let model: EditorModel
     let directory: URL
-    @State private var files: [URL] = []
+    @State private var files: [PhotoFile] = []
     @State private var loading = true
     @State private var failed = false
     @State private var scrollTarget: URL?
@@ -66,11 +96,11 @@ struct PhotoBrowser: View {
     var body: some View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 8) {
-                ForEach(files, id: \.self) { url in
-                    PhotoThumbnail(url: url, selected: url == model.source) {
-                        if url != model.source { model.open(url) }
+                ForEach(files, id: \.url) { file in
+                    PhotoThumbnail(file: file, selected: file.url == model.source) {
+                        if file.url != model.source { model.open(file.url) }
                     }
-                    .id(url)
+                    .id(file.url)
                 }
             }
             .scrollTargetLayout()
@@ -79,13 +109,12 @@ struct PhotoBrowser: View {
         }
         .scrollIndicators(.automatic)
         .scrollPosition(id: $scrollTarget, anchor: .center)
-        .onChange(of: files) { _, _ in scrollTarget = model.source }
         .onChange(of: model.source) { _, source in scrollTarget = source }
         .onMoveCommand { direction in
             guard !model.cropping, let source = model.source,
-                  let index = files.firstIndex(of: source) else { return }
+                  let index = files.firstIndex(where: { $0.url == source }) else { return }
             let next = direction == .left ? index - 1 : direction == .right ? index + 1 : index
-            if next != index, files.indices.contains(next) { model.open(files[next]) }
+            if next != index, files.indices.contains(next) { model.open(files[next].url) }
         }
         .frame(height: 112)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -98,23 +127,40 @@ struct PhotoBrowser: View {
         .accessibilityLabel("Film Strip")
         .task(id: directory) {
             loading = true; failed = false; files = []
-            let scan = Task.detached(priority: .utility) { try PhotoFolder.images(in: directory) }
-            do {
-                let result = try await withTaskCancellationHandler {
-                    try await scan.value
-                } onCancel: { scan.cancel() }
-                try Task.checkCancellation()
-                files = result; loading = false
-            } catch {
-                guard !Task.isCancelled else { return }
-                failed = true; loading = false
+            // Arm before the initial scan so arrivals during enumeration are
+            // not missed. Cancellation on hide/folder switch releases the watch.
+            let watcher = PhotoFolderWatcher(directory: directory)
+            defer { watcher?.stop() }
+            await refresh(initial: true)
+            if let watcher {
+                for await _ in watcher.changes {
+                    guard !Task.isCancelled else { return }
+                    await refresh(initial: false)
+                }
             }
+        }
+    }
+
+    private func refresh(initial: Bool) async {
+        let scan = Task.detached(priority: .utility) { try PhotoFolder.snapshot(in: directory) }
+        do {
+            let result = try await withTaskCancellationHandler {
+                try await scan.value
+            } onCancel: { scan.cancel() }
+            try Task.checkCancellation()
+            if files != result { files = result }
+            failed = false; loading = false
+            if initial { scrollTarget = model.source }
+        } catch {
+            guard !Task.isCancelled else { return }
+            failed = true; loading = false
         }
     }
 }
 
 private struct PhotoThumbnail: View {
-    let url: URL
+    let file: PhotoFile
+    private var url: URL { file.url }
     let selected: Bool
     let open: () -> Void
     @State private var image: CGImage?
@@ -133,7 +179,7 @@ private struct PhotoThumbnail: View {
                 }
                 .frame(width: 96, height: 68)
                 .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2) }
-                Text(url.lastPathComponent)
+                Text(file.name)
                     .font(.caption2)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -148,9 +194,9 @@ private struct PhotoThumbnail: View {
         .accessibilityAddTraits(selected ? [.isSelected] : [])
         .onAppear { visible = true }
         .onDisappear { visible = false; image = nil }
-        .task(id: visible) {
+        .task(id: visible ? file : nil) {
             guard visible else { return }
-            let request = Task.detached(priority: .utility) { await PhotoThumbnails.shared.image(for: url) }
+            let request = Task.detached(priority: .utility) { await PhotoThumbnails.shared.image(for: file) }
             let result = await withTaskCancellationHandler {
                 await request.value
             } onCancel: { request.cancel() }

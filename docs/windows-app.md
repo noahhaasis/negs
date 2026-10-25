@@ -21,6 +21,18 @@ Both the adjustments panel and film strip start enabled on every launch,
 regardless of their saved visibility. F6/F7 can hide them during the session;
 the film strip appears once a photograph is open.
 
+The visible film strip watches its current folder using
+`FindFirstChangeNotificationW`, including file names, attributes, sizes and
+last-write times. One background worker waits on OS notifications and a stop
+event; there is no idle polling. Bursts debounce for 200 ms (at most one second
+during a continuing import), scans run serially, and at most one snapshot waits
+for the UI thread. Refreshes preserve selection and scroll position, retain
+unchanged thumbnails, and reject stale thumbnail results after folder switches
+or file changes. Hiding the strip stops the watch; showing it rescans even the
+same folder. `cargo test --locked --manifest-path windows/Cargo.toml folder_watch`
+exercises arrivals, later writes, renames, removals, idle waiting and cancellation
+on Windows.
+
 The client includes the shell, inspector, Vulkan canvas, crop/border
 presentation, session storage, helper client, exports, film strip, ICC parser
 and dynamic WinSparkle integration. It is not yet a validated release.

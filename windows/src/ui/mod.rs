@@ -12,6 +12,7 @@ pub mod canvas;
 mod dialogs;
 mod drop;
 mod empty;
+mod folder_watch;
 pub mod inspector;
 mod strip;
 
