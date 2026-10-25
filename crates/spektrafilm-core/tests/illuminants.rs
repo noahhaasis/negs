@@ -1,4 +1,4 @@
-//! Light sources by name against frozen Python main 3bb2c2d values (ticket
+//! Light sources by name against frozen Python experimental 28bf883 values (ticket
 //! 16.2). Before this, Rust knew only D50/D55/D65/TH-KG3 and fell back to D55
 //! or D50 for anything else, so the tungsten Vision3 stocks (reference `T`)
 //! and the 2383/2393 cine prints (viewing light `K75P`) rendered with the
@@ -34,7 +34,7 @@ struct Case {
 }
 
 fn fixture() -> Fixture {
-    serde_json::from_str(include_str!("fixtures/illuminants_python_3bb2c2d.json")).unwrap()
+    serde_json::from_str(include_str!("fixtures/illuminants_python_28bf883.json")).unwrap()
 }
 
 fn data_dir() -> std::path::PathBuf {
