@@ -364,6 +364,7 @@ mod debug_tests {
             None,
             &ref_illuminant,
             1.0,
+            0.0,
         );
         eprintln!("log_raw: {:?}", log_raw.get(0, 0));
 

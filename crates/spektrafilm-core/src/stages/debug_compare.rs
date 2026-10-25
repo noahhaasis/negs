@@ -359,6 +359,7 @@ mod tests {
             pipeline.tc_lut(),
             &crate::illuminants::select_illuminant(&pipeline.film.info.reference_illuminant),
             1.0,
+            0.0,
         );
         check(
             "log_e_film",

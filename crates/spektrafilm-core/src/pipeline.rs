@@ -152,6 +152,11 @@ pub struct Pipeline {
     preflash_raw: [f64; 3],
     /// Output gamut compressor (built once; identity unless oklch is enabled).
     output_gamut: crate::gamut_compression::OutputGamutCompress,
+    /// The auto-exposure metering frame
+    /// ([`stages::filming::metering_preview`]) of the full source, when the
+    /// caller resized it before the pipeline. `None` meters the image given
+    /// to `process`, before its own working-size resize.
+    metering_preview: Option<ImageBuf>,
 }
 
 impl Pipeline {
@@ -189,6 +194,61 @@ impl Pipeline {
         self.print_exposure_factor = self.compute_print_exposure_factor();
         self
     }
+
+    /// Meter auto exposure on `preview`, the
+    /// [`stages::filming::metering_preview`] of the full source frame, rather
+    /// than on the image given to `process`. Callers that resize the source
+    /// before the pipeline (Image Size, a preview's reduced frame) pass the
+    /// source's preview so every size of the frame gets the same exposure,
+    /// as upstream meters the frame before its crop and resize.
+    pub fn with_metering_preview(mut self, preview: ImageBuf) -> Self {
+        self.metering_preview = Some(preview);
+        self
+    }
+
+    /// The auto-exposure EV for a frame whose metering preview is `preview`
+    /// (upstream `FilmingStage._auto_exposure`): the preview's film raw,
+    /// through the same upsampler as the exposure but always on the CPU, so
+    /// every backend meters alike. 0 with auto exposure off.
+    pub fn autoexposure_ev(&self, preview: &ImageBuf) -> f64 {
+        if !self.params.camera.auto_exposure {
+            return 0.0;
+        }
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let raw = stages::filming::rgb_to_film_raw(
+            preview,
+            &self.params,
+            &CPU,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+        );
+        let ev = stages::filming::measure_raw_autoexposure_ev(
+            raw.as_ref().unwrap_or(preview),
+            &self.params.camera.auto_exposure_method,
+            1.0,
+        );
+        tracing::info!(
+            width = preview.width,
+            height = preview.height,
+            method = self.params.camera.auto_exposure_method,
+            ev = ev,
+            "autoexposure"
+        );
+        ev
+    }
+
+    /// The EV `process` applies to `image`, the full frame it was given: the
+    /// metering preview's EV if the caller supplied one, else `image`'s.
+    pub fn frame_autoexposure_ev(&self, image: &ImageBuf) -> f64 {
+        if !self.params.camera.auto_exposure {
+            return 0.0;
+        }
+        match &self.metering_preview {
+            Some(preview) => self.autoexposure_ev(preview),
+            None => self.autoexposure_ev(&stages::filming::metering_preview(image)),
+        }
+    }
+
 
     /// Bake the film-curve morph into `film.data.density_curves` and
     /// `film.data.density_curves_layers`, as upstream experimental bakes
@@ -276,6 +336,7 @@ impl Pipeline {
             print_sensitivity: Vec::new(),
             preflash_raw: [0.0; 3],
             output_gamut,
+            metering_preview: None,
         };
         pipeline.apply_film_curves_morph();
         pipeline
@@ -487,6 +548,7 @@ impl Pipeline {
             print_sensitivity,
             preflash_raw,
             output_gamut,
+            metering_preview: None,
         };
         pipeline.apply_film_curves_morph();
         pipeline.print_exposure_factor = pipeline.compute_print_exposure_factor();
@@ -538,9 +600,29 @@ impl Pipeline {
             )
         };
 
+        // Auto exposure lands mid-grey at raw 1 on the real negative, so the
+        // reference takes the scale it would apply to the grey card (upstream
+        // `_midgray_autoexposure_scale`), which makes up a camera filter's
+        // light loss. The compensated reference takes the same scale.
+        let raw_midgray = midgray_raw(1.0);
+        let autoexposure_scale = if params.camera.auto_exposure {
+            let field = [stages::filming::raw_field_value(raw_midgray)];
+            stages::filming::measure_field_autoexposure_ev(
+                &field,
+                1,
+                1,
+                &params.camera.auto_exposure_method,
+                1.0,
+            )
+            .exp2()
+        } else {
+            1.0
+        };
+        let scaled = |raw: [f64; 3]| raw.map(|v| v * autoexposure_scale);
+
         // Compute midgray spectral density (gray card through full filming path)
         let density_spectral_midgray =
-            enlarger::midgray_density_spectral_from_raw(midgray_raw(1.0), &self.film, params);
+            enlarger::midgray_density_spectral_from_raw(scaled(raw_midgray), &self.film, params);
         let factor_midgray = enlarger::compute_exposure_factor(
             &density_spectral_midgray,
             &self.print_illuminant,
@@ -559,8 +641,11 @@ impl Pipeline {
         } else {
             // Python: `rgb_midgray_comp = rgb_midgray * 2 ** exposure_compensation_ev`.
             let scale = 2.0f64.powf(params.camera.exposure_compensation_ev as f64);
-            let density_spectral_midgray_comp =
-                enlarger::midgray_density_spectral_from_raw(midgray_raw(scale), &self.film, params);
+            let density_spectral_midgray_comp = enlarger::midgray_density_spectral_from_raw(
+                scaled(midgray_raw(scale)),
+                &self.film,
+                params,
+            );
             enlarger::compute_exposure_factor(
                 &density_spectral_midgray_comp,
                 &self.print_illuminant,
@@ -636,6 +721,10 @@ impl Pipeline {
         // diffusion-filter kernel size, which scales with the image) runs at
         // the chosen resolution. pixel_size_um is derived per-stage from the
         // image dims, so it follows automatically.
+        // Auto exposure meters the full frame before the resize.
+        let t = Instant::now();
+        let autoexposure_ev = self.frame_autoexposure_ev(&image);
+        print_stage_timing(stage_timings, "autoexposure", t);
         let t = Instant::now();
         let image = self.rescale_working(image)?;
         print_stage_timing(stage_timings, "rescale", t);
@@ -667,7 +756,7 @@ impl Pipeline {
         // highlight boost, and enlarger diffusion. Backends that do not
         // implement the resident chain return `None` and fall through.
         if self.tc_lut.is_some() {
-            match self.try_gpu_resident(&image, backend, &color_ref) {
+            match self.try_gpu_resident(&image, backend, &color_ref, autoexposure_ev) {
                 Ok(Some(out)) => {
                     tracing::info!("pipeline: gpu-resident fast path complete");
                     if backend.resident_chain_applies_post_scan() {
@@ -694,6 +783,7 @@ impl Pipeline {
             self.tc_lut.as_ref(),
             &select_illuminant(&self.front_illuminant),
             color_ref.filming_exposure_correction,
+            autoexposure_ev,
         );
         print_stage_timing(stage_timings, "filming_expose", t);
         dump_if_env("SPEKTRAFILM_DUMP_FILM_LOG_RAW", &log_raw);
@@ -775,7 +865,8 @@ impl Pipeline {
             &self.print_illuminant,
             self.print_exposure_factor,
         );
-        let out = self.try_gpu_resident(image, backend, &color_ref).ok()??;
+        let autoexposure_ev = self.frame_autoexposure_ev(image);
+        let out = self.try_gpu_resident(image, backend, &color_ref, autoexposure_ev).ok()??;
         let out = if backend.resident_chain_applies_post_scan() {
             out
         } else {
@@ -802,26 +893,17 @@ impl Pipeline {
         image: &ImageBuf,
         backend: &dyn ComputeBackend,
         color_ref: &crate::color_reference::ColorReference,
+        autoexposure_ev: f64,
     ) -> Result<Option<ImageBuf>, String> {
         // Bake the exposure scale (auto-exposure × manual EV compensation)
         // into the front-pass matrix. The upsampler is homogeneous in the
         // input RGB, so scaling the matrix is
         // equivalent to scaling the input — saves a separate "scale" compute
-        // pass at the head of the chain. Auto-exposure metering itself stays
-        // on CPU (~30 ms at 6 MP after the per-row rayon parallelization);
-        // the result is a single float that's cheap to roll into the matrix.
+        // pass at the head of the chain. The auto exposure is metered on the
+        // CPU, on the ≤256 px metering frame, by the caller.
         let mut exposure_scale_f64 = 1.0f64;
-        if self.params.camera.auto_exposure {
-            // Borrow back the f32 matrix shape that the CPU metering
-            // function expects.
-            let rgb_to_xyz_f32 =
-                stages::filming::input_colorspace_to_xyz(&self.params.io.input_color_space);
-            let ae_ev = stages::filming::measure_autoexposure_ev(
-                image,
-                &rgb_to_xyz_f32,
-                &self.params.camera.auto_exposure_method,
-            );
-            exposure_scale_f64 *= 2.0f64.powf(ae_ev as f64);
+        if autoexposure_ev != 0.0 {
+            exposure_scale_f64 *= autoexposure_ev.exp2();
         }
         if self.params.camera.exposure_compensation_ev != 0.0 {
             exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);

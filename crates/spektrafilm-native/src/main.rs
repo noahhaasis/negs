@@ -107,6 +107,10 @@ struct Session {
     /// The same for interactive renders, kept beside `scaled` so a drag
     /// after a full-size render doesn't resample the source again.
     interactive: Option<((u32, u32), ImageBuf)>,
+    /// The source's auto-exposure metering frame. Every render of the source,
+    /// at any preview or working size, meters it, as the exporter does, so
+    /// the preview's exposure is the export's.
+    metering: Option<ImageBuf>,
     pipeline: Option<(String, Pipeline)>,
     output: Option<Rendered>,
 }
@@ -282,6 +286,7 @@ impl Session {
                     self.source = None;
                     self.scaled = None;
                     self.interactive = None;
+                    self.metering = None;
                     let image = spektrafilm_io::load_image_with_wb(
                         &input,
                         spektrafilm_io::Formats::Any,
@@ -289,6 +294,10 @@ impl Session {
                     )?;
                     self.source = Some((input.clone(), wb, image));
                     self.source_generation = source_generation;
+                }
+                if params.camera.auto_exposure && self.metering.is_none() {
+                    let source = &self.source.as_ref().unwrap().2;
+                    self.metering = Some(spektrafilm_core::stages::filming::metering_preview(source));
                 }
                 let source = &self.source.as_ref().unwrap().2;
                 let (source_width, source_height) = (source.width, source.height);
@@ -343,13 +352,16 @@ impl Session {
                     .map_err(anyhow::Error::msg)?;
                     self.pipeline = Some((key, pipeline));
                 }
-                let pipeline = self
+                let mut pipeline = self
                     .pipeline
                     .as_ref()
                     .unwrap()
                     .1
                     .clone()
                     .with_params((*params).clone());
+                if let Some(metering) = &self.metering {
+                    pipeline = pipeline.with_metering_preview(metering.clone());
+                }
                 let working = if dimensions == photo_dimensions {
                     working_source(
                         source,

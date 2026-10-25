@@ -60,12 +60,14 @@ fn early_enlargement_develops_grain_and_halation_at_the_working_size() {
     // The pipeline's own resize, for the full frame...
     let early = pipeline(params.clone()).process(source.clone(), &CpuBackend);
     assert_eq!((early.width, early.height), (96, 64));
-    // ...is the CLI's and helper's preparation followed by a factor-1 render.
+    // ...is the CLI's and helper's preparation followed by a factor-1 render,
+    // metering the source as they do.
     let mut prepared_params = params.clone();
+    let metering = filming::metering_preview(&source);
     let (prepared, size) = image_size::prepare(source.clone(), &mut prepared_params, Some(&crop)).unwrap();
     assert_eq!(size.working, (96, 64));
     assert_eq!(prepared_params.io.photo_long_side_px, None);
-    let explicit = pipeline(prepared_params).process(prepared, &CpuBackend);
+    let explicit = pipeline(prepared_params).with_metering_preview(metering).process(prepared, &CpuBackend);
     assert_eq!(early.data, explicit.data);
 
     // Negative control: developing first and enlarging the print afterwards
@@ -120,56 +122,26 @@ fn physical_blur_keeps_its_size_on_the_film() {
     assert!((1.85..=2.15).contains(&ratio), "{original} px → {doubled} px ({ratio}×)");
 }
 
-/// Auto exposure meters the working image. Prints the drift between Original,
-/// 2× and 3× and between crop extents at a fixed target, for the photographs
-/// in `NEGS_IMAGE_SIZE_FIXTURES` (colon-separated paths).
+/// Auto exposure meters the full source frame, as upstream meters the frame
+/// before its crop and resize: every working size, preview cap and
+/// interactive frame that carries the source's metering preview gets the
+/// source's EV, while metering each resized frame itself would drift.
 #[test]
-#[ignore = "needs photographs; set NEGS_IMAGE_SIZE_FIXTURES"]
-fn auto_exposure_drift_across_working_sizes() {
-    let paths = std::env::var("NEGS_IMAGE_SIZE_FIXTURES").expect("NEGS_IMAGE_SIZE_FIXTURES");
-    let methods = ["center_weighted", "average", "median", "partial", "matrix", "multi_zone", "highlight_weighted"];
-    let mut worst = 0f32;
-    for path in paths.split(':').filter(|p| !p.is_empty()) {
-        let path = Path::new(path);
-        let source = spektrafilm_io::load_image(path, spektrafilm_io::Formats::Any).unwrap();
-        // About 12 MP, so that 2× and 3× stay within the working limit.
-        let scale = 4240.0 / f64::from(source.width.max(source.height));
-        let source = if scale < 1.0 {
-            let size = ((f64::from(source.width) * scale).round() as u32, (f64::from(source.height) * scale).round() as u32);
-            resize::catmull_rom(&source, size)
-        } else {
-            source
-        };
-        let space = if spektrafilm_io::input_is_linear_srgb(path) { "sRGB" } else { "ProPhoto RGB" };
-        let xyz = filming::input_colorspace_to_xyz(space);
-        let long = source.width.max(source.height);
-        let mut requests: Vec<(String, u32, Option<Crop>)> = vec![
-            ("2x".into(), long * 2, None),
-            ("3x".into(), long * 3, None),
-        ];
-        for extent in [0.9, 0.75, 0.5] {
-            let crop = Crop { x: (1.0 - extent) / 2.0, y: (1.0 - extent) / 2.0, width: extent, height: extent, angle: 0.0 };
-            requests.push((format!("crop {extent} at {long}"), long, Some(crop)));
-        }
-        for method in methods {
-            let base = filming::measure_autoexposure_ev(&source, &xyz, method);
-            for (label, target, crop) in &requests {
-                let mut params = RuntimeParams::default();
-                params.io.photo_long_side_px = Some(*target);
-                let Ok((working, size)) = image_size::prepare(source.clone(), &mut params, crop.as_ref()) else {
-                    println!("{} {label}: over the limit", path.display());
-                    continue;
-                };
-                let ev = filming::measure_autoexposure_ev(&working, &xyz, method);
-                worst = worst.max((ev - base).abs());
-                println!(
-                    "{} {method:>18} {label:>18} {:?}: {base:+.4} → {ev:+.4} EV (Δ {:+.4})",
-                    path.file_name().unwrap().to_string_lossy(),
-                    size.working,
-                    ev - base
-                );
-            }
-        }
+fn auto_exposure_is_the_sources_at_every_size() {
+    let source = scene(1200, 800);
+    let base = pipeline(linear_params());
+    let metering = filming::metering_preview(&source);
+    let ev = base.autoexposure_ev(&metering);
+    assert!(ev.is_finite() && ev != 0.0);
+    // `process` on the source itself meters it before its own resize.
+    assert_eq!(base.frame_autoexposure_ev(&source), ev);
+    let mut drift = 0f64;
+    for size in [(2400, 1600), (900, 600), (600, 400), (240, 160)] {
+        let working = resize::catmull_rom(&source, size);
+        let carried = base.clone().with_metering_preview(metering.clone());
+        assert_eq!(carried.frame_autoexposure_ev(&working), ev, "{size:?}");
+        drift = drift.max((base.frame_autoexposure_ev(&working) - ev).abs());
     }
-    println!("worst drift: {worst:.4} EV");
+    // Negative control: the resized frames meter differently on their own.
+    assert!(drift > 1e-4, "drift {drift}");
 }
