@@ -298,6 +298,13 @@ fn cmd_process(
         t.elapsed().as_millis()
     );
 
+    // Auto exposure meters the full source, before any resize, as the native
+    // preview does, so an export has the preview's exposure.
+    let metering = params
+        .camera
+        .auto_exposure
+        .then(|| spektrafilm_core::stages::filming::metering_preview(&image));
+
     // Image Size: resize the source before the film, so grain and halation
     // form at the working size. A Longest side target in the params describes
     // the cropped photograph, so it is resolved with --crop; the crop itself
@@ -323,9 +330,12 @@ fn cmd_process(
     let t = Instant::now();
     // A missing LUT or invalid configuration must fail the export. Falling
     // back used to silently discard the user's parameters and spectral model.
-    let pipeline = Pipeline::new_with_spectral(film, print, params, data_dir)
+    let mut pipeline = Pipeline::new_with_spectral(film, print, params, data_dir)
         .map_err(anyhow::Error::msg)
         .context("building spectral pipeline")?;
+    if let Some(metering) = metering {
+        pipeline = pipeline.with_metering_preview(metering);
+    }
     let (result, used_backend) = if iters > 1 {
         // Warm-cache bench: process the image `iters` times in the same backend
         // instance. The first iteration pays shader-compile cost; subsequent ones

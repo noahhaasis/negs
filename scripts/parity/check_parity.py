@@ -37,7 +37,7 @@ CASES = {
     "vision3-2383": ("kodak_vision3_500t", "kodak_2383", False),
 }
 FIXTURES = ["midgray", "gradient4", "ramp16", "scene"]
-EXTRA_FIXTURES = ["gamut-stress4", "adversarial32"]
+EXTRA_FIXTURES = ["gamut-stress4", "adversarial32", "frame300"]
 # Experimental's scanner unsharp mask default; Rust has the same default.
 SCANNER_USM = [0.7, 0.7]
 EXPERIMENTAL = "experimental"
@@ -271,6 +271,13 @@ def make_fixtures(names, np):
         pixels *= 10.0 ** rng.uniform(-8, 3, (1024, 1))
         pixels[:6] = [[0, 0, 0], [1e-12]*3, [1e-8]*3, [1e3]*3, [1, 0, 0], [0, 0, 1]]
         fixtures["adversarial32"] = pixels.astype(np.float32).reshape(32, 32, 3)
+    if "frame300" in names:
+        # Larger than the 256 px metering preview, so auto-exposure meters a
+        # downsample (skimage rescale with anti-aliasing).
+        y, x, c = np.indices((200, 300, 3))
+        frame = 0.02 + 0.6 * ((131 * y + 71 * x + 37 * c) % 97) / 97.0
+        frame[60:90, 150:200] *= 6.0
+        fixtures["frame300"] = frame.astype(np.float32)
     return fixtures
 
 
@@ -346,7 +353,7 @@ def parse_args(argv=None):
     parser.add_argument("--film", default="kodak_portra_400")
     parser.add_argument("--paper", default="kodak_portra_endura")
     parser.add_argument("--scan-film", action="store_true", help="skip printing and scan the film")
-    parser.add_argument("--fixture", action="append", choices=FIXTURES,
+    parser.add_argument("--fixture", action="append", choices=[*FIXTURES, *EXTRA_FIXTURES],
                         help="limit the input images (repeatable; default: all four)")
     parser.add_argument("--film-development-time", type=float)
     parser.add_argument("--print-development-time", type=float)
@@ -365,11 +372,13 @@ def parse_args(argv=None):
     parser.add_argument("--halation", action="store_true",
                         help="keep halation and scatter on (off by default)")
     parser.add_argument("--auto-exposure", action="store_true",
-                        help="keep auto-exposure on (off by default)")
+                        help="keep auto-exposure on (off by default) and add a 300x200 frame "
+                             "that exercises the metering downsample")
     parser.add_argument("--scanner-usm", action="store_true",
                         help="keep the scanner unsharp mask at its default 0.7/0.7 (off by default)")
     parser.add_argument("--lens-blur", type=float, nargs=3, metavar=("CAMERA_UM", "ENLARGER", "SCANNER"),
                         help="lens blur for camera (µm), enlarger and scanner (default 0)")
+    parser.add_argument("--color-filter", help="camera colour filter key, e.g. hoya_r1")
     parser.add_argument("--film-curves-morph", type=json.loads, metavar="JSON",
                         help="film Curves morph, e.g. '{\"gamma_factor\": 1.4}' (active is implied): "
                              "Rust film_render.density_curves_morph, experimental "
@@ -410,6 +419,8 @@ def parse_args(argv=None):
         args.fixtures.append("gamut-stress4")
     if args.adversarial_input:
         args.fixtures.append("adversarial32")
+    if (args.auto_exposure or args.experimental_defaults) and not args.fixture:
+        args.fixtures.append("frame300")
     if args.morph_source is not None and args.film_curves_morph is None:
         parser.error("--morph-source only applies with --film-curves-morph")
     return parser, args
@@ -471,6 +482,7 @@ def main(argv=None):
         "print_development_time": args.print_development_time,
         "clip_reference_output": args.clip_reference_output,
         "gamut_off": args.gamut_off,
+        "color_filter": args.color_filter,
         "film_curves_morph": film_morph,
         "print_curves_morph": print_morph,
         "morph_source": None if args.morph_source is None else {
@@ -498,6 +510,8 @@ def main(argv=None):
                         lut, defaults=args.experimental_defaults, dir_couplers=args.dir_couplers,
                         halation=args.halation, auto_exposure=args.auto_exposure,
                         scanner_usm=args.scanner_usm, lens_blur=args.lens_blur)
+                    if args.color_filter:
+                        overrides.setdefault("camera", {})["color_filter"] = args.color_filter
                     if args.gamut_off:
                         overrides["io"]["input_gamut_compress"] = {"algorithm": "off"}
                         overrides["io"]["output_gamut_compress"] = {"algorithm": "off"}

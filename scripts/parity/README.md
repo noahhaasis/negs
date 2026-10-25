@@ -216,6 +216,10 @@ imaginary, and above-white inputs as well as the ordinary three fixtures.
 See the [gamut handoff](../../docs/handoff-experimental-gamut.md) for the
 passing B&W routes and Python fixture regeneration.
 
+`--auto-exposure` keeps auto exposure on in both implementations and adds a
+300×200 frame, large enough for the metering downsample. `--color-filter
+hoya_r1` (or another key) sets the camera colour filter in both.
+
 `--adversarial-input` adds 1024 seeded HDR/imaginary/near-black pixels.
 `--rust-binary /path/to/spektrafilm-f64 --rust-data /path/to/data` checks an
 existing release and its own data instead of building a development binary.
