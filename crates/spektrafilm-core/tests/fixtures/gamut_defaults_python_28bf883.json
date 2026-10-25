@@ -1,0 +1,56 @@
+{
+ "reference": {
+  "commit": null,
+  "status": null,
+  "tree_sha256": "d03e1807ecfa9b23e7537c26ff25407aab14369cf7767b076206cccf4afe4a53"
+ },
+ "input": {
+  "active": true,
+  "algorithm": "xy",
+  "boundary": "inscribed_hull",
+  "hull_detail": 5.0,
+  "knee": [
+   0.815,
+   1.0,
+   1.2
+  ]
+ },
+ "input_center": "D65",
+ "output": {
+  "algorithm": "oklch",
+  "knee": [
+   0.95,
+   1.0,
+   1.6
+  ],
+  "lightness_compression": [
+   0.95,
+   1.0,
+   1.6
+  ]
+ },
+ "params_io_input": {
+  "active": true,
+  "algorithm": "xy",
+  "boundary": "inscribed_hull",
+  "hull_detail": 5.0,
+  "knee": [
+   0.815,
+   1.0,
+   1.2
+  ]
+ },
+ "params_io_output": {
+  "algorithm": "oklch",
+  "knee": [
+   0.95,
+   1.0,
+   1.6
+  ],
+  "lightness_compression": [
+   0.95,
+   1.0,
+   1.6
+  ]
+ }
+}

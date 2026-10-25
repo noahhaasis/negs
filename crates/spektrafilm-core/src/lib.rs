@@ -1,3 +1,4 @@
+pub mod color_filters;
 pub mod color_reference;
 pub mod couplers_presets;
 pub mod data;

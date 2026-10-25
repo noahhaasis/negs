@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::colorspace;
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::precision::{from_f32, from_f64, to_f32};
+use spektrafilm_math::precision::{from_f32, from_f64, to_f64};
 use spektrafilm_math::spectral::TcLut;
 use std::time::Instant;
 
@@ -23,18 +23,15 @@ fn print_stage_timing(enabled: bool, stage: &str, start: Instant) {
     }
 }
 
-/// `2^x` and `log2(x)` in f32, computed in f64 and rounded once. The f32
-/// libm functions differ by an ulp between platforms (MSVC vs Apple), and an
-/// exposure scale one ulp off shifts every pixel of the image. The f64 results
-/// are far more accurate than an f32 ulp, so they round to the same f32
-/// everywhere. Apple's `powf(2, x)` is not always correctly rounded either: on
-/// macOS the scale moves by one ulp for about 0.6% of exposures.
+/// `2^x` in f32, computed in f64 and rounded once. The f32 libm functions
+/// differ by an ulp between platforms (MSVC vs Apple), and an exposure scale
+/// one ulp off shifts every pixel of the image. The f64 result is far more
+/// accurate than an f32 ulp, so it rounds to the same f32 everywhere. Apple's
+/// `powf(2, x)` is not always correctly rounded either: on macOS the scale
+/// moves by one ulp for about 0.6% of exposures. The auto-exposure scale is
+/// rounded from f64 the same way.
 fn exp2_f32(x: f32) -> f32 {
     (x as f64).exp2() as f32
-}
-
-fn log2_f32(x: f32) -> f32 {
-    (x as f64).log2() as f32
 }
 
 /// Compute pixel size in micrometers from film format and image dimensions.
@@ -42,85 +39,140 @@ pub fn pixel_size_um(film_format_mm: f32, width: u32, height: u32) -> f32 {
     film_format_mm * 1000.0 / width.max(height) as f32
 }
 
-/// Auto-exposure compensation, Python-compatible
-/// (`spektrafilm/utils/autoexposure.py`).
-///
-/// Python downsamples the image to ≤ 256 px on the long edge using
-/// `skimage.transform.rescale(order=0)` (nearest neighbour) before
-/// measuring (`small_preview`), then meters luminance Y with one of
-/// several patterns. We mirror that — the downsample is what makes the
-/// metered mean Python-parity-compatible; measuring on the full-res
-/// image gives a different pixel set and shifts the resulting EV by
-/// tenths of a stop.
-///
-/// `method` selects the metering pattern: `average`, `median`,
-/// `center_weighted`, `partial`, `matrix`, `multi_zone`,
-/// `highlight_weighted`. Anything else meters a flat 1.0 (0 EV), matching
-/// the Python `else` branch.
-pub fn measure_autoexposure_ev(image: &ImageBuf, rgb_to_xyz: &[[f32; 3]; 3], method: &str) -> f32 {
-    const MAX_SIZE: usize = 256;
-    let w = image.width as usize;
-    let h = image.height as usize;
+/// The auto-exposure metering frame: upstream's `_compute_small_preview`
+/// (`runtime/services/resize.py`), which `ResizingService.crop_and_rescale`
+/// takes from the full frame before any crop or resize, so the metered
+/// exposure doesn't move with the crop or the working size. Frames with a
+/// long side above 256 px go through `skimage.transform.rescale(order=0)`:
+/// the output size rounds half to even, a Gaussian anti-aliasing filter of
+/// `σ = (factor − 1)/2` per axis (`scipy.ndimage`, mirror edges, 4σ radius)
+/// runs before the nearest-neighbour sampling, and the result is clipped to
+/// the input's range. The filter is only evaluated at the sampled pixels.
+pub fn metering_preview(image: &ImageBuf) -> ImageBuf {
+    const MAX_SIZE: f64 = 256.0;
+    let (w, h) = (image.width as usize, image.height as usize);
     let max_dim = w.max(h);
-    // skimage.rescale(scale, order=0) with scale = MAX/max_dim:
-    // output shape = round(orig * scale); each output pixel takes the
-    // nearest source via iy = round((oy + 0.5) / scale - 0.5)
-    // (scipy.ndimage.zoom convention).
-    let (sw, sh, ix, iy) = if max_dim > MAX_SIZE {
-        let scale = (MAX_SIZE as f64) / (max_dim as f64);
-        let sw = ((w as f64) * scale).round() as usize;
-        let sh = ((h as f64) * scale).round() as usize;
-        // skimage rounds each axis independently, so the effective per-axis
-        // scale is src_dim/out_dim — which differs from the global `scale` on
-        // the short edge (e.g. 200/171 vs 300/256). Sample at the pixel centre
-        // (skimage `warp` convention): src = round((o + 0.5)·src/out − 0.5).
-        let map = |out_dim: usize, src_dim: usize| -> Vec<usize> {
-            let axis_scale = src_dim as f64 / out_dim as f64;
-            (0..out_dim)
-                .map(|o| {
-                    let f = ((o as f64 + 0.5) * axis_scale - 0.5).round() as isize;
-                    f.clamp(0, src_dim as isize - 1) as usize
-                })
-                .collect()
-        };
-        (sw, sh, map(sw, w), map(sh, h))
-    } else {
-        let ix: Vec<usize> = (0..w).collect();
-        let iy: Vec<usize> = (0..h).collect();
-        (w, h, ix, iy)
+    if max_dim as f64 <= MAX_SIZE {
+        return image.clone();
+    }
+    let scale = MAX_SIZE / max_dim as f64;
+    let out_dim = |dim: usize| ((scale * dim as f64).round_ties_even() as usize).max(1);
+    let (out_w, out_h) = (out_dim(w), out_dim(h));
+    // scipy `zoom(grid_mode=True, order=0)`: the source of output `o` is
+    // `floor((o + 0.5)·in/out − 0.5 + 0.5)`.
+    let axis = |out: usize, dim: usize| -> (Vec<usize>, Vec<f64>) {
+        let zoom = dim as f64 / out as f64;
+        let index = (0..out)
+            .map(|o| {
+                let cc = (o as f64 + 0.5) * zoom - 0.5;
+                mirror_index((cc + 0.5).floor() as isize, dim)
+            })
+            .collect();
+        (index, gaussian_kernel(((zoom - 1.0) / 2.0).max(0.0)))
     };
-
-    // Downsampled luminance grid (row-major, sw × sh).
-    let (ix, iy) = (&ix, &iy);
-    let lum: Vec<f64> = (0..sh)
-        .into_par_iter()
-        .flat_map_iter(|y| {
-            let row_off = iy[y] * w * 3;
-            (0..sw).map(move |x| {
-                let idx = row_off + ix[x] * 3;
-                (rgb_to_xyz[1][0] * to_f32(image.data[idx])
-                    + rgb_to_xyz[1][1] * to_f32(image.data[idx + 1])
-                    + rgb_to_xyz[1][2] * to_f32(image.data[idx + 2])) as f64
+    let (rows, row_kernel) = axis(out_h, h);
+    let (cols, col_kernel) = axis(out_w, w);
+    let pixel = |y: usize, x: usize, c: usize| to_f64(image.data[(y * w + x) * 3 + c]);
+    // scipy `correlate1d` with a symmetric kernel: the centre tap, then the
+    // pairs from the outermost in.
+    let correlate = |kernel: &[f64], at: usize, dim: usize, sample: &dyn Fn(usize) -> f64| {
+        let r = kernel.len() / 2;
+        let mut acc = sample(at) * kernel[r];
+        for j in (1..=r).rev() {
+            let lo = mirror_index(at as isize - j as isize, dim);
+            let hi = mirror_index(at as isize + j as isize, dim);
+            acc += (sample(lo) + sample(hi)) * kernel[r - j];
+        }
+        acc
+    };
+    // Axis 0 (rows) at the sampled rows, every column.
+    let filtered_rows: Vec<f64> = rows
+        .par_iter()
+        .flat_map_iter(|&y| {
+            let correlate = &correlate;
+            let row_kernel = &row_kernel;
+            (0..w).flat_map(move |x| {
+                (0..3).map(move |c| correlate(row_kernel, y, h, &|yy| pixel(yy, x, c)))
             })
         })
         .collect();
-
-    let metered = meter_luminance(&lum, sw, sh, method);
-    let exposure = (metered / 0.184) as f32;
-    if exposure <= 0.0 || exposure.is_infinite() {
-        return 0.0;
+    let (lo, hi) = image
+        .data
+        .iter()
+        .map(|&v| to_f64(v))
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+    let mut data = Vec::with_capacity(out_w * out_h * 3);
+    for r in 0..out_h {
+        let row = &filtered_rows[r * w * 3..(r + 1) * w * 3];
+        for &x in &cols {
+            for c in 0..3 {
+                let v = correlate(&col_kernel, x, w, &|xx| row[xx * 3 + c]);
+                data.push(from_f64(v.clamp(lo, hi)));
+            }
+        }
     }
-    let ev = -log2_f32(exposure);
-    tracing::info!(
-        sw = sw,
-        sh = sh,
-        method = method,
-        metered = metered,
-        exposure_div_184 = exposure,
-        ev = ev,
-        "autoexposure"
-    );
-    ev
+    ImageBuf::from_data(out_w as u32, out_h as u32, data)
+}
+
+/// `scipy.ndimage` "mirror" extension (`d c b | a b c d | c b a`).
+fn mirror_index(i: isize, dim: usize) -> usize {
+    if dim == 1 {
+        return 0;
+    }
+    let period = 2 * (dim as isize - 1);
+    let i = i.rem_euclid(period);
+    (if i >= dim as isize { period - i } else { i }) as usize
+}
+
+/// `scipy.ndimage._gaussian_kernel1d` at radius `int(4σ + 0.5)`; the identity
+/// for σ ≤ 1e-15, which `gaussian_filter` skips.
+fn gaussian_kernel(sigma: f64) -> Vec<f64> {
+    if sigma <= 1e-15 {
+        return vec![1.0];
+    }
+    let radius = (4.0 * sigma + 0.5) as i64;
+    let factor = -0.5 / (sigma * sigma);
+    let phi: Vec<f64> = (-radius..=radius).map(|x| (factor * (x * x) as f64).exp()).collect();
+    let sum: f64 = phi.iter().sum();
+    phi.iter().map(|v| v / sum).collect()
+}
+
+/// Auto-exposure compensation on film raw, upstream experimental's
+/// `measure_raw_autoexposure_ev` (`utils/autoexposure.py`): the field is the
+/// mean of the raw channels, metered with `method`, and the EV brings it to
+/// `target` (1, where a mid-grey subject lands). `method` is one of
+/// `average`, `median`, `center_weighted`, `partial`, `matrix`,
+/// `multi_zone`, `highlight_weighted`; anything else, or a meter reading
+/// that isn't positive and finite, gives 0 EV.
+pub fn measure_raw_autoexposure_ev(raw: &ImageBuf, method: &str, target: f64) -> f64 {
+    let field: Vec<f64> = raw
+        .data
+        .par_chunks_exact(3)
+        .map(|p| raw_field_value([to_f64(p[0]), to_f64(p[1]), to_f64(p[2])]))
+        .collect();
+    measure_field_autoexposure_ev(&field, raw.width as usize, raw.height as usize, method, target)
+}
+
+/// The metering field value of one raw pixel: the channel mean, summed in
+/// numpy's order.
+pub fn raw_field_value(raw: [f64; 3]) -> f64 {
+    (raw[0] + raw[1] + raw[2]) / 3.0
+}
+
+/// [`measure_raw_autoexposure_ev`] on a ready `width` × `height` field
+/// (upstream `_exposure_compensation_ev(_metered_value(field, method))`).
+pub fn measure_field_autoexposure_ev(
+    field: &[f64],
+    width: usize,
+    height: usize,
+    method: &str,
+    target: f64,
+) -> f64 {
+    let Some(metered) = meter_field(field, width, height, method) else {
+        return 0.0;
+    };
+    let ev = -(metered / target).log2();
+    if ev.is_finite() { ev } else { 0.0 }
 }
 
 /// Normalized pixel coordinate along an axis: `(i/dim - 0.5) * (dim/maxdim)`,
@@ -129,11 +181,11 @@ fn norm_coord(i: usize, dim: usize, max_dim: usize) -> f64 {
     (i as f64 / dim as f64 - 0.5) * (dim as f64 / max_dim as f64)
 }
 
-/// Meter the downsampled luminance grid with the named pattern, returning the
-/// mean luminance the autoexposure should map to mid-grey (0.184).
-fn meter_luminance(lum: &[f64], sw: usize, sh: usize, method: &str) -> f64 {
+/// Meter a field with the named pattern (upstream `_metered_value`), `None`
+/// for an unknown method.
+fn meter_field(lum: &[f64], sw: usize, sh: usize, method: &str) -> Option<f64> {
     let max_dim = sw.max(sh);
-    match method {
+    let value = match method {
         "average" => lum.iter().sum::<f64>() / lum.len() as f64,
 
         "median" => {
@@ -264,16 +316,39 @@ fn meter_luminance(lum: &[f64], sw: usize, sh: usize, method: &str) -> f64 {
             }
         }
 
-        // Python's `else` branch sets `exposure = 1.0` (already post-`/0.184`),
-        // i.e. 0 EV. Returning the mid-grey target makes that division cancel.
-        _ => 0.184,
-    }
+        // Python's fallthrough returns None: no compensation.
+        _ => return None,
+    };
+    Some(value)
+}
+
+/// The film raw exposure of `rgb`, before any exposure scale: the method's
+/// TC LUT sampled under the front illuminant (CAT-adapted) when one is
+/// provided, else `None` (the simplified pipeline).
+pub fn rgb_to_film_raw(
+    rgb: &ImageBuf,
+    params: &RuntimeParams,
+    backend: &dyn ComputeBackend,
+    tc_lut: Option<&TcLut>,
+    front_illuminant: &[f32],
+) -> Option<ImageBuf> {
+    tc_lut.map(|lut| {
+        backend.hanatos2025_rgb_to_raw(
+            rgb,
+            lut,
+            &params.io.input_color_space,
+            front_illuminant,
+            params.settings.use_cat16,
+        )
+    })
 }
 
 /// Expose: convert RGB to film raw exposure.
 ///
-/// The spectral path samples the method's TC LUT when one is provided;
-/// otherwise a simplified RGB → log10 fallback.
+/// `autoexposure_ev` is the metered compensation (0 with auto exposure off;
+/// see [`measure_raw_autoexposure_ev`]). Upstream scales the film raw; the
+/// upsampler is homogeneous in the input RGB, so scaling the RGB first is
+/// the same.
 #[allow(clippy::too_many_arguments)]
 pub fn expose(
     image: ImageBuf,
@@ -283,17 +358,15 @@ pub fn expose(
     tc_lut: Option<&TcLut>,
     front_illuminant: &[f32],
     bw_filming_correction: f64,
+    autoexposure_ev: f64,
 ) -> ImageBuf {
     let pix_um = pixel_size_um(params.camera.film_format_mm, image.width, image.height);
-    let rgb_to_xyz = input_colorspace_to_xyz(&params.io.input_color_space);
 
     let mut raw = {
         // Consume the input so optical scratch does not overlap an RGB copy.
         let mut rgb = image;
-        if params.camera.auto_exposure {
-            let ae_ev =
-                measure_autoexposure_ev(&rgb, &rgb_to_xyz, &params.camera.auto_exposure_method);
-            let scale = from_f32(exp2_f32(ae_ev));
+        if autoexposure_ev != 0.0 {
+            let scale = from_f64(autoexposure_ev.exp2());
             rgb.data.par_iter_mut().for_each(|v| *v *= scale);
         }
 
@@ -301,21 +374,10 @@ pub fn expose(
         let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev));
         rgb.data.par_iter_mut().for_each(|v| *v *= exp_comp);
 
-        // RGB → film raw exposure
-        if let Some(lut) = tc_lut {
-            // Spectral upsampling: chromaticity under the front illuminant
-            // (CAT-adapted), sampled from the method's TC LUT.
-            backend.hanatos2025_rgb_to_raw(
-                &rgb,
-                lut,
-                &params.io.input_color_space,
-                front_illuminant,
-                params.settings.use_cat16,
-            )
-        } else {
-            // Simplified fallback: treat RGB values as proportional to raw exposure
-            rgb
-        }
+        // RGB → film raw exposure; the simplified fallback treats RGB values
+        // as proportional to raw exposure.
+        rgb_to_film_raw(&rgb, params, backend, tc_lut, front_illuminant)
+            .unwrap_or(rgb)
     };
     crate::pipeline::dump_if_env("SPEKTRAFILM_DUMP_FILM_RAW", &raw);
 
@@ -521,6 +583,13 @@ pub fn process(
     tc_lut: Option<&TcLut>,
 ) -> ImageBuf {
     let ref_illuminant = crate::illuminants::select_illuminant(&film.info.reference_illuminant);
+    let autoexposure_ev = if params.camera.auto_exposure {
+        let preview = metering_preview(&image);
+        let raw = rgb_to_film_raw(&preview, params, backend, tc_lut, &ref_illuminant);
+        measure_raw_autoexposure_ev(raw.as_ref().unwrap_or(&preview), &params.camera.auto_exposure_method, 1.0)
+    } else {
+        0.0
+    };
     let log_raw = expose(
         image,
         film,
@@ -529,6 +598,7 @@ pub fn process(
         tc_lut,
         &ref_illuminant,
         1.0,
+        autoexposure_ev,
     );
     develop(log_raw, film, params, backend)
 }
@@ -540,70 +610,5 @@ pub fn input_colorspace_to_xyz(name: &str) -> [[f32; 3]; 3] {
         "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::REC2020_TO_XYZ,
         "ACES2065-1" => colorspace::ACES_TO_XYZ,
         _ => colorspace::PROPHOTO_TO_XYZ,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use spektrafilm_math::precision::from_f64;
-
-    /// Deterministic synthetic image, mirrored bit-for-bit in the Python
-    /// reference: a 300×200 gradient where each channel is
-    /// `((x*7 + y*13 + c*29) % 100) / 100`.
-    fn synthetic_image() -> ImageBuf {
-        let (w, h) = (300usize, 200usize);
-        let mut data = Vec::with_capacity(w * h * 3);
-        for y in 0..h {
-            for x in 0..w {
-                for c in 0..3 {
-                    let v = ((x * 7 + y * 13 + c * 29) % 100) as f64 / 100.0;
-                    data.push(from_f64(v));
-                }
-            }
-        }
-        ImageBuf {
-            width: w as u32,
-            height: h as u32,
-            data,
-        }
-    }
-
-    /// Every metering pattern matches the upstream `measure_autoexposure_ev`
-    /// (`spektrafilm/utils/autoexposure.py`) on the synthetic image, with the
-    /// sRGB RGB→XYZ matrix and `apply_cctf_decoding=False`. The reference is
-    /// metered on the ≤256 px `small_preview` downsample — the faithful
-    /// pipeline order (downsample, then meter), which makes our nearest-edge
-    /// mapping bit-exact with `skimage.transform.rescale(order=0)`.
-    #[test]
-    fn autoexposure_methods_match_python_reference() {
-        let img = synthetic_image();
-        let rgb_to_xyz = input_colorspace_to_xyz("sRGB");
-        let cases = [
-            ("average", -1.427705567203),
-            ("median", -1.308011314552),
-            ("center_weighted", -1.427664142652),
-            ("partial", -1.425832251352),
-            ("matrix", -1.427803049578),
-            ("multi_zone", -1.439398829551),
-            ("highlight_weighted", -1.783882472180),
-        ];
-        for (method, expected) in cases {
-            let ev = measure_autoexposure_ev(&img, &rgb_to_xyz, method);
-            assert!(
-                (ev as f64 - expected).abs() < 1e-5,
-                "method {method}: got {ev}, expected {expected}",
-            );
-        }
-    }
-
-    /// An unknown method name meters a flat 1.0 → 0 EV, matching the Python
-    /// `else` branch (`exposure = 1.0`).
-    #[test]
-    fn autoexposure_unknown_method_is_zero_ev() {
-        let img = synthetic_image();
-        let rgb_to_xyz = input_colorspace_to_xyz("sRGB");
-        let ev = measure_autoexposure_ev(&img, &rgb_to_xyz, "bogus");
-        assert_eq!(ev, 0.0);
     }
 }
