@@ -718,8 +718,49 @@ import UniformTypeIdentifiers
 
     // MARK: Saving
 
+    var canExportLUT: Bool { hasCatalog && engine != nil && !saving && !exporting && !cropping }
+
+    func exportLUTPanel() {
+        guard canExportLUT else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export LUT"
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "cube") ?? .data]
+        panel.nameFieldStringValue = "\(state.film)_\(state.params["io.scan_film"].bool ? "direct_scan" : state.paper).cube"
+        panel.message = "33 × 33 × 33 CUBE · sRGB input and output. Uses the current film and paper color settings. Auto exposure, grain, halation, glare, diffusion, blur, sharpening, RAW development, and Post edits are excluded."
+        if let path = UserDefaults.standard.string(forKey: "lastLUTFolder") {
+            panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
+        }
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            UserDefaults.standard.set(url.deletingLastPathComponent().path, forKey: "lastLUTFolder")
+            Task { await self.exportLUT(to: url) }
+        }
+    }
+
+    func exportLUT(to url: URL) async {
+        guard canExportLUT, let engine else { return }
+        if let source, Self.sameFile(url, source) {
+            error = "Choose a different filename to preserve the original photograph."; return
+        }
+        let snapshot = state
+        let temporary = engine.directory.appendingPathComponent("lut-\(UUID().uuidString).cube")
+        saving = true
+        status = "Exporting LUT…"
+        defer { saving = false; try? FileManager.default.removeItem(at: temporary) }
+        do {
+            _ = try await engine.request(["command": .string("export_lut"), "film": .string(snapshot.film),
+                                          "paper": .string(snapshot.paper), "params": snapshot.params,
+                                          "size": .number(33), "output": .string(temporary.path)])
+            try await Task.detached {
+                try Data(contentsOf: temporary).write(to: url, options: .atomic)
+            }.value
+            status = "Exported \(url.lastPathComponent)"
+        } catch { report(error) }
+    }
+
     func savePanel(export: Bool) {
-        guard let source, !cropping, export ? !exporting : canSave else { return }
+        guard let source, !cropping, export ? !exporting && !saving : canSave else { return }
         let panel = NSSavePanel()
         panel.title = export ? "Export Photograph" : "Save Preview"
         panel.canCreateDirectories = true
@@ -826,7 +867,7 @@ import UniformTypeIdentifiers
     func export(to url: URL, engine exportEngine: ExportEngine, size: ExportSize = .full) async {
         // An edit made meanwhile makes the save fail; develop the photograph then.
         if exportEngine == .fast, await exportPreview(to: url, size: size) { return }
-        guard !exporting, let source, let engine else { return }
+        guard !exporting, !saving, let source, let engine else { return }
         let job = ExportJob(); exportJob = job; exporting = true; exportStarted = Date()
         defer { exporting = false; exportJob = nil }
         do {

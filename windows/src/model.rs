@@ -337,7 +337,10 @@ impl Model {
         self.preview_current && self.image.is_some() && !self.rendering && !self.saving && !self.cropping()
     }
     pub fn can_export(&self) -> bool {
-        self.source.is_some() && self.ready && !self.exporting && !self.cropping()
+        self.source.is_some() && self.ready && !self.exporting && !self.saving && !self.cropping()
+    }
+    pub fn can_export_lut(&self) -> bool {
+        self.has_catalog() && self.engine.is_some() && !self.saving && !self.exporting && !self.cropping()
     }
     pub fn can_show_original(&self) -> bool {
         self.image.is_some() && !self.cropping()
@@ -1216,6 +1219,32 @@ impl Model {
         true
     }
 
+    pub fn export_lut(&mut self, destination: PathBuf) {
+        if !self.can_export_lut() || !self.check_destination(&destination) {
+            return;
+        }
+        let Some(engine) = self.engine.clone() else { return };
+        let staging = engine::staging_path(&destination);
+        let command = json!({"command": "export_lut", "film": self.state.film,
+            "paper": self.state.paper, "params": self.state.params, "size": 33, "output": staging});
+        self.saving = true;
+        self.status = "Exporting LUT…".into();
+        self.mark(dirty::CHROME | dirty::STATUS);
+        engine.request(command, engine::timeout_for("export_lut"), move |result| {
+            let result = result.and_then(|_| crate::platform::replace_file(&staging, &destination));
+            let _ = std::fs::remove_file(&staging);
+            ui::post(move |app: &mut App| {
+                let model = &mut app.model;
+                model.saving = false;
+                match result {
+                    Ok(()) => model.status = format!("Exported {}", file_name(&destination)),
+                    Err(error) => model.report(&error),
+                }
+                model.mark(dirty::STATUS | dirty::CHROME);
+            });
+        });
+    }
+
     pub fn save_preview(&mut self, destination: PathBuf, size: ExportSize) {
         if !self.can_save() || !self.check_destination(&destination) {
             return;
@@ -1242,7 +1271,7 @@ impl Model {
     /// sibling renamed into place; if that save fails (an edit arrived
     /// meanwhile), the exporter runs.
     pub fn export(&mut self, destination: PathBuf, engine_choice: ExportEngine, size: ExportSize) {
-        if !self.check_destination(&destination) || self.exporting {
+        if !self.check_destination(&destination) || self.exporting || self.saving {
             return;
         }
         if engine_choice == ExportEngine::Fast && self.can_save() && self.render_at_export_size {

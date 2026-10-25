@@ -39,6 +39,13 @@ struct Request {
 #[serde(tag = "command", rename_all = "snake_case")]
 enum Command {
     Catalog,
+    ExportLut {
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        size: u32,
+        output: PathBuf,
+    },
     /// Unprocessed, identically framed source for the Windows original view.
     /// This does not replace the retained film render used by Save.
     Original {
@@ -141,6 +148,13 @@ impl Session {
     fn handle(&mut self, request: Request, data: &Path) -> Result<Value> {
         match request.command {
             Command::Catalog => catalog(data),
+            Command::ExportLut { film, paper, params, size, output } => {
+                let started = Instant::now();
+                let cube = spektrafilm_core::lut_export::cube(data, &film, &paper, *params, size)
+                    .map_err(anyhow::Error::msg)?;
+                std::fs::write(&output, cube)?;
+                Ok(json!({"size": size, "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0}))
+            }
             Command::Original { input, params, limit_preview, preview_path } => {
                 ensure!(input != preview_path, "Choose a different preview path to preserve the source");
                 ensure!(params.io.upscale_factor.is_finite()

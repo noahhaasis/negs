@@ -7,7 +7,6 @@ use spektrafilm_core::params::RuntimeParams;
 use spektrafilm_core::pipeline::Pipeline;
 use spektrafilm_core::profile;
 use spektrafilm_io::resize::Fit;
-use spektrafilm_math::image::ImageBuf;
 
 #[derive(Parser)]
 #[command(
@@ -116,6 +115,9 @@ enum Commands {
         /// LUT cube size (e.g. 33, 65).
         #[arg(long, default_value = "33")]
         size: u32,
+        /// Path to JSON params file for the film/paper look (Post edits excluded).
+        #[arg(long)]
+        params: Option<PathBuf>,
         /// Output .cube file path.
         #[arg(short, long)]
         output: PathBuf,
@@ -199,10 +201,11 @@ fn main() -> Result<()> {
             film,
             paper,
             size,
+            params,
             output,
             data_dir,
         } => {
-            cmd_export_lut(&film, paper.as_deref(), size, &output, &data_dir)?;
+            cmd_export_lut(&film, paper.as_deref(), size, params.as_deref(), &output, &data_dir)?;
         }
     }
 
@@ -456,67 +459,25 @@ fn cmd_export_lut(
     film_name: &str,
     paper_name: Option<&str>,
     size: u32,
+    params_file: Option<&Path>,
     output: &Path,
     data_dir: &Path,
 ) -> Result<()> {
-    let film = profile::load_profile_by_name(data_dir, film_name)
-        .with_context(|| format!("loading film profile: {film_name}"))?;
-
-    let print_stock = if let Some(p) = paper_name {
-        p.to_string()
-    } else if let Some(ref target) = film.info.target_print {
-        target.clone()
-    } else {
-        bail!("no paper specified and film has no target_print");
+    let params: RuntimeParams = match params_file {
+        Some(path) => serde_json::from_str(&std::fs::read_to_string(path)
+            .with_context(|| format!("reading params: {}", path.display()))?)?,
+        None => RuntimeParams::default(),
     };
-    let print = profile::load_profile_by_name(data_dir, &print_stock)
-        .with_context(|| format!("loading print profile: {print_stock}"))?;
-
-    let mut params = RuntimeParams::default();
-    params.film_render.grain.active = false;
-    params.film_render.halation.active = false;
-    params.film_render.dir_couplers.active = false;
-    params.camera.auto_exposure = false;
-
-    let backend = spektrafilm_gpu::select_backend();
-    let pipeline = Pipeline::new(film, print, params);
-
-    // Generate LUT: sample the pipeline on a uniform grid
-    let s = size as usize;
-    let mut cube_data = String::new();
-    cube_data.push_str(&format!("# Created by spektrafilm-rs\n"));
-    cube_data.push_str(&format!(
-        "TITLE \"spektrafilm {film_name} → {print_stock}\"\n"
-    ));
-    cube_data.push_str(&format!("LUT_3D_SIZE {size}\n"));
-    cube_data.push_str("\n");
-
-    eprintln!("Generating {s}x{s}x{s} CUBE LUT...");
-
-    for bi in 0..s {
-        for gi in 0..s {
-            for ri in 0..s {
-                let r = ri as f32 / (s - 1) as f32;
-                let g = gi as f32 / (s - 1) as f32;
-                let b = bi as f32 / (s - 1) as f32;
-
-                let img = ImageBuf::from_data(
-                    1,
-                    1,
-                    vec![
-                        spektrafilm_math::precision::from_f32(r),
-                        spektrafilm_math::precision::from_f32(g),
-                        spektrafilm_math::precision::from_f32(b),
-                    ],
-                );
-                let out = pipeline.process(img, backend.as_ref());
-                let px = out.get(0, 0);
-                cube_data.push_str(&format!("{:.6} {:.6} {:.6}\n", px[0], px[1], px[2]));
-            }
-        }
-    }
-
-    std::fs::write(output, &cube_data)
+    let film = profile::load_profile_by_name(data_dir, film_name)?;
+    let paper = if params.io.scan_film {
+        film_name
+    } else {
+        paper_name.or(film.info.target_print.as_deref())
+            .context("no paper specified and film has no target_print")?
+    };
+    let cube = spektrafilm_core::lut_export::cube(data_dir, film_name, paper, params, size)
+        .map_err(anyhow::Error::msg)?;
+    std::fs::write(output, cube)
         .with_context(|| format!("writing CUBE file: {}", output.display()))?;
     eprintln!("LUT saved: {}", output.display());
     Ok(())

@@ -147,7 +147,7 @@ import SwiftUI
                 ? symbol("crop", "Crop").withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor]))
                 : symbol("crop", "Crop")
         }
-        setEnabled(.export, photo && model.ready && !model.exporting)
+        setEnabled(.export, photo && model.ready && !model.exporting && !model.saving)
         // A ratio field being edited keeps its own Return and Escape.
         if let session = model.cropSession {
             cancelButton.keyEquivalent = session.typing ? "" : "\u{1b}"

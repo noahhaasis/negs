@@ -69,6 +69,7 @@ pub mod id {
     pub const EXPORT: u16 = 102;
     pub const SETTINGS: u16 = 103;
     pub const EXIT: u16 = 104;
+    pub const EXPORT_LUT: u16 = 105;
     pub const RECENT: u16 = 110; // ..119
     pub const UNDO: u16 = 200;
     pub const REDO: u16 = 201;
@@ -522,6 +523,7 @@ impl App {
             id::OPEN | id::EMPTY_OPEN => dialogs::open(self),
             id::SAVE_PREVIEW => dialogs::save(self, false),
             id::EXPORT => dialogs::save(self, true),
+            id::EXPORT_LUT => dialogs::export_lut(self),
             id::SETTINGS => dialogs::settings(self),
             id::EXIT => unsafe {
                 let _ = PostMessageW(self.main, WM_CLOSE, WPARAM(0), LPARAM(0));
@@ -612,6 +614,7 @@ impl App {
         let editing = focused_class().as_deref() == Some("Edit");
         enable(id::SAVE_PREVIEW, model.can_save());
         enable(id::EXPORT, model.can_export());
+        enable(id::EXPORT_LUT, model.can_export_lut());
         enable(id::UPDATES, crate::updates::configured());
         retitle(id::UNDO, &match model.undo_title() {
             Some(action) => format!("&Undo {action}\tCtrl+Z"),
@@ -835,6 +838,7 @@ fn build_menu() -> (HMENU, HMENU) {
         separator(file);
         add(file, id::SAVE_PREVIEW, "&Save Preview…\tCtrl+S");
         add(file, id::EXPORT, "&Export Photograph…\tCtrl+Shift+E");
+        add(file, id::EXPORT_LUT, "Export &LUT…\tCtrl+Shift+L");
         separator(file);
         add(file, id::SETTINGS, "Se&ttings…");
         separator(file);
@@ -878,6 +882,7 @@ fn accelerators() -> HACCEL {
         (ctrl, 'O' as u16, id::OPEN),
         (ctrl, 'S' as u16, id::SAVE_PREVIEW),
         (shift_ctrl, 'E' as u16, id::EXPORT),
+        (shift_ctrl, 'L' as u16, id::EXPORT_LUT),
         (ctrl, 'Z' as u16, id::UNDO),
         (ctrl, 'Y' as u16, id::REDO),
         (shift_ctrl, 'Z' as u16, id::REDO),

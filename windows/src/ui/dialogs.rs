@@ -23,6 +23,7 @@ use crate::platform::{pcwstr, wide};
 const OPEN_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a001);
 const EXPORT_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a002);
 const PREVIEW_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a003);
+const LUT_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a004);
 
 thread_local! {
     static TOOLTIP: Cell<isize> = const { Cell::new(0) };
@@ -365,11 +366,44 @@ impl IFileDialogControlEvents_Impl for SaveEvents_Impl {
     }
 }
 
+/// A separate LUT save dialog, available even without a photograph.
+pub fn export_lut(app: &mut App) {
+    if !app.model.can_export_lut() {
+        return;
+    }
+    let state = &app.model.state;
+    let target = if crate::json::boolean(&state.params["io"]["scan_film"]) { "direct_scan" } else { &state.paper };
+    let filename = wide(format!("{}_{}.cube", state.film, target));
+    let selected = unsafe {
+        (|| -> windows::core::Result<PathBuf> {
+            let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)?;
+            dialog.SetClientGuid(&LUT_GUID)?;
+            let title = wide("Export LUT");
+            dialog.SetTitle(pcwstr(&title))?;
+            let name = wide("3D LUT (.cube)");
+            let pattern = wide("*.cube");
+            dialog.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: pcwstr(&name), pszSpec: pcwstr(&pattern) }])?;
+            let extension = wide("cube");
+            dialog.SetDefaultExtension(pcwstr(&extension))?;
+            dialog.SetFileName(pcwstr(&filename))?;
+            dialog.SetOptions(dialog.GetOptions()? | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_NOREADONLYRETURN)?;
+            let customize: IFileDialogCustomize = dialog.cast()?;
+            let message = wide("33 × 33 × 33 CUBE · sRGB input and output. Uses the current film and paper color settings. Auto exposure, grain, halation, glare, diffusion, blur, sharpening, RAW development, and Post edits are excluded.");
+            customize.AddText(MESSAGE, pcwstr(&message))?;
+            dialog.Show(app.main)?;
+            result_path(&dialog.cast()?).ok_or_else(windows::core::Error::from_win32)
+        })()
+    };
+    if let Ok(path) = selected {
+        app.model.export_lut(path);
+    }
+}
+
 /// Save Preview or Export: the format in the type filter, the engine and
 /// size beside it, and a message that follows the choices.
 pub fn save(app: &mut App, export: bool) {
     let model = &app.model;
-    if model.source.is_none() || model.cropping() || (export && model.exporting) || (!export && !model.can_save()) {
+    if model.source.is_none() || model.cropping() || (export && !model.can_export()) || (!export && !model.can_save()) {
         return;
     }
     let prefs = &model.prefs;
