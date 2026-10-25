@@ -8,12 +8,15 @@ import SwiftUI
     let menu = NSMenu()
     private let model: EditorModel
     private let updates: UpdateController
+    private let removeAppData: () -> Void
     private let recent = NSMenu(title: "Open Recent")
     private var settings: NSWindow?
+    private var removingAppData = false
 
-    init(model: EditorModel, updates: UpdateController) {
+    init(model: EditorModel, updates: UpdateController, removeAppData: @escaping () -> Void) {
         self.model = model
         self.updates = updates
+        self.removeAppData = removeAppData
         super.init()
         let name = ProcessInfo.processInfo.processName == "NegsApp" ? "Negs" : ProcessInfo.processInfo.processName
 
@@ -95,7 +98,7 @@ import SwiftUI
     @objc private func checkForUpdates() { updates.check() }
     @objc private func showSettings() {
         if settings == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: UpdateSettings(updates: updates)))
+            let window = NSWindow(contentViewController: NSHostingController(rootView: UpdateSettings(updates: updates, model: model, removeAppData: removeAppData)))
             window.title = "Settings"
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
@@ -104,6 +107,7 @@ import SwiftUI
         }
         settings?.makeKeyAndOrderFront(nil)
     }
+    func prepareForAppDataRemoval() { removingAppData = true; settings?.orderOut(nil) }
     @objc private func openPhotograph() { model.openPanel() }
     @objc private func showRecent() {}
     @objc private func openRecent(_ item: NSMenuItem) { if let url = item.representedObject as? URL { model.open(url) } }
@@ -118,6 +122,7 @@ import SwiftUI
     @objc private func resetAdjustments() { model.reset() }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if removingAppData { return false }
         let photo = model.source != nil
         switch item.action {
         case #selector(checkForUpdates): return updates.configured && updates.canCheck

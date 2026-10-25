@@ -14,6 +14,7 @@ mod model;
 mod picture;
 mod platform;
 mod platform_events;
+mod rendered_preview;
 mod session;
 mod state;
 mod text;

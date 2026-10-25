@@ -89,3 +89,37 @@ isolated with NEGS_PROFILE_DIR. NEGS_STARTUP_REPORT records QPC stamps,
 including actual input reception and compositor completion. Run
 windows/measure_startup.ps1 -Photo PATH for repeated process-start measurements
 with real keyboard input supplied separately. NEGS_ALLOW_MULTIPLE is for tests.
+
+Restored sessions first check `%LOCALAPPDATA%\Negs\rendered-preview.cache`
+(`Cache` under `NEGS_PROFILE_DIR` for isolated profiles). This single atomic file
+holds the exact RGBA display frame, dimensions, checksum and full canonical
+identity of the rendering settings, source, helper and engine data. The canvas
+reapplies the session's crop, rotation and border. A match replaces the raw
+startup thumbnail while the helper rebuilds its saveable float output in the
+background, with no Updating badge. Rendering edits delete the frame through a
+serial I/O queue; only a finished, current, noninteractive render writes it back.
+Quit drains that queue. An unfinished edit, missing frame or identity/checksum
+mismatch keeps the existing raw-thumbnail and Developing-badge behavior.
+
+The installed app can be removed through **Settings → Apps → Installed apps**.
+The uninstaller requires running copies of Negs to close, then offers **Remove
+all app data** or **Keep settings and editing session**. Both remove the catalog,
+rendered-preview and GPU caches, diagnostic logs, unfinished settings/session
+writes and temporary engine files. Full cleanup also removes `settings.json`,
+`session.json` and the app's updater preferences under `HKCU\Software\Negs`.
+File associations and shortcuts are removed by the normal installer records.
+Only known app-owned files/subdirectories are deleted; unrelated files in the
+installation or data directories and all original photographs/exports are kept.
+
+Silent uninstall defaults to full cleanup. Add `/KEEPSETTINGS=1` to preserve
+settings and the session (`/KEEPSETTINGS=0` explicitly selects full cleanup).
+Installing an update does not run this cleanup. Custom `NEGS_PROFILE_DIR` and
+engine cache overrides are developer-managed and are not followed by the
+uninstaller. Removal failures are logged and reported during interactive use.
+
+`windows/test_uninstall.ps1 -SetupExe target/windows-dist/Negs-Setup.exe` tests
+upgrade preservation, running-app protection, both cleanup modes, and preservation
+of fixture photographs/exports, including unrelated files in the installation
+and data directories. Run it under a disposable Windows user profile; it refuses
+existing app-data directories or an existing installation. Installer compilation
+and this native uninstall test require Windows and Inno Setup.
