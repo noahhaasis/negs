@@ -525,10 +525,29 @@ impl Model {
     // MARK: Parameters
 
     pub fn value(&self, path: &str) -> &Value {
-        self.state.value(path)
+        let value = self.state.value(path);
+        match state::grain_lane(path) {
+            Some((field, index)) if value.is_null() => self.grain_preset(field, index),
+            _ => value,
+        }
     }
+    /// A grain preset lane defaults to the film's preset, not the engine's
+    /// null.
     pub fn default_value(&self, path: &str) -> &Value {
-        json::get(&self.defaults, path)
+        match state::grain_lane(path) {
+            Some((field, index)) => self.grain_preset(field, index),
+            None => json::get(&self.defaults, path),
+        }
+    }
+    fn film_stock(&self) -> Option<&Stock> {
+        self.stocks.iter().find(|s| !s.paper && s.id == self.state.film)
+    }
+    pub fn film_is_bw(&self) -> bool {
+        self.film_stock().is_some_and(|s| s.bw)
+    }
+    fn grain_preset(&self, field: &str, index: usize) -> &Value {
+        static NULL: Value = Value::Null;
+        self.film_stock().map_or(&NULL, |s| json::get(&s.grain, &format!("{field}.{index}")))
     }
     pub fn is_modified(&self, path: &str) -> bool {
         let (current, original) = (self.value(path), self.default_value(path));
@@ -540,7 +559,30 @@ impl Model {
     }
     pub fn set(&mut self, path: &str, value: Value) {
         let mut next = self.state.clone();
-        json::set(&mut next.params, path, value);
+        if let Some((field, index)) = state::grain_lane(path) {
+            // The whole array materializes from the preset; back at the
+            // preset in every lane it returns to null, so a later film
+            // change applies that film's preset.
+            let array = format!("film_render.grain.{field}");
+            let preset: Vec<f64> = self
+                .film_stock()
+                .and_then(|s| s.grain[field].as_array())
+                .map(|a| a.iter().map(json::number).collect())
+                .unwrap_or_default();
+            let mut lanes: Vec<f64> = match self.state.value(&array).as_array() {
+                Some(a) if !a.is_empty() => a.iter().map(json::number).collect(),
+                _ => preset.clone(),
+            };
+            if index < lanes.len() {
+                lanes[index] = json::number(&value);
+            }
+            let at_preset = lanes.len() == preset.len()
+                && lanes.iter().zip(&preset).all(|(a, b)| (a - b).abs() <= 1e-6 * b.abs().max(1.0));
+            let new = if at_preset { Value::Null } else { Value::Array(lanes.into_iter().map(json::num).collect()) };
+            json::set(&mut next.params, &array, new);
+        } else {
+            json::set(&mut next.params, path, value);
+        }
         self.apply(next, "Change Adjustment");
     }
     pub fn reset_value(&mut self, path: &str) {
@@ -573,6 +615,10 @@ impl Model {
         let mut next = self.state.clone();
         next.film = stock.into();
         json::set(&mut next.params, "film_render.development_time", Value::Null);
+        // A new film brings its own grain preset, as upstream applies it.
+        for field in state::GRAIN_STOCK_FIELDS {
+            json::set(&mut next.params, &format!("film_render.grain.{field}"), Value::Null);
+        }
         self.pair_film(&mut next);
         self.apply(next, "Change Film");
     }

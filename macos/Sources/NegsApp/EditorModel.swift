@@ -275,6 +275,45 @@ import UniformTypeIdentifiers
     func number(_ path: String, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
         Binding(get: { self.value(path).double }, set: { self.set(path, .number(Self.snap($0, to: range, step: step))) })
     }
+    /// Grain arrays (`film_render.grain.<field>`) are null until edited: the
+    /// engine then uses the film's preset, which the catalog resolves.
+    var filmIsBW: Bool { films.first { $0.id == film }?.bw ?? false }
+    func stockDefaults(_ path: String) -> [Double] {
+        let field = path.split(separator: ".").last.map(String.init) ?? path
+        return films.first { $0.id == film }?.grain[field].array.map(\.double) ?? []
+    }
+    func stockDefault(_ path: String, _ index: Int) -> Double {
+        let preset = stockDefaults(path)
+        return preset.indices.contains(index) ? preset[index] : 0
+    }
+    private func stockValues(_ path: String) -> [Double] {
+        let saved = value(path).array.map(\.double)
+        return saved.isEmpty ? stockDefaults(path) : saved
+    }
+    func stockNumber(_ path: String, _ index: Int, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
+        Binding(get: {
+            let values = self.stockValues(path)
+            return values.indices.contains(index) ? values[index] : 0
+        }, set: { self.setStock(path, index, Self.snap($0, to: range, step: step)) })
+    }
+    func isStockModified(_ path: String, _ index: Int) -> Bool {
+        let values = stockValues(path)
+        guard values.indices.contains(index) else { return false }
+        let preset = stockDefault(path, index)
+        return abs(values[index] - preset) > 1e-6 * max(1, abs(preset))
+    }
+    func resetStock(_ path: String, _ index: Int) { setStock(path, index, stockDefault(path, index)) }
+    /// Back at the preset in every lane, the array returns to null so a
+    /// later film change applies that film's preset.
+    private func setStock(_ path: String, _ index: Int, _ newValue: Double) {
+        var values = stockValues(path)
+        guard values.indices.contains(index) else { return }
+        values[index] = newValue
+        let preset = stockDefaults(path)
+        let atPreset = values.count == preset.count
+            && zip(values, preset).allSatisfy { abs($0 - $1) <= 1e-6 * max(1, abs($1)) }
+        set(path, atPreset ? .null : .array(values.map(JSONValue.number)))
+    }
     func toggle(_ path: String) -> Binding<Bool> {
         Binding(get: { self.value(path).bool }, set: { self.set(path, .bool($0)) })
     }
@@ -307,6 +346,8 @@ import UniformTypeIdentifiers
     func chooseFilm(_ stock: String) {
         var next = state; next.film = stock
         next.params["film_render.development_time"] = .null
+        // A new film brings its own grain preset, as upstream applies it.
+        for field in Stock.grainFields { next.params["film_render.grain.\(field)"] = .null }
         pairFilm(in: &next); apply(next, action: "Change Film")
     }
     func choosePaper(_ stock: String) {
