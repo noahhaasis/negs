@@ -79,10 +79,12 @@ pub struct CameraParams {
     pub lens_blur_um: f32,
     #[serde(default = "default_35")]
     pub film_format_mm: f32,
-    #[serde(default = "default_filter_uv")]
-    pub filter_uv: [f32; 3],
-    #[serde(default = "default_filter_ir")]
-    pub filter_ir: [f32; 3],
+    /// Camera taking filter, a key of
+    /// [`crate::color_filters::COLOR_FILTER_LIBRARY`] or `"none"`. Older
+    /// params files' `filter_uv`/`filter_ir`, which nothing used and upstream
+    /// removed, are ignored.
+    #[serde(default = "default_no_color_filter")]
+    pub color_filter: String,
     #[serde(default)]
     pub diffusion_filter: DiffusionFilterParams,
 }
@@ -95,8 +97,7 @@ impl Default for CameraParams {
             auto_exposure_method: "center_weighted".into(),
             lens_blur_um: 0.0,
             film_format_mm: 35.0,
-            filter_uv: [0.0, 410.0, 8.0],
-            filter_ir: [0.0, 675.0, 15.0],
+            color_filter: default_no_color_filter(),
             diffusion_filter: DiffusionFilterParams::default(),
         }
     }
@@ -813,11 +814,8 @@ fn default_center_weighted() -> String {
 fn default_35() -> f32 {
     35.0
 }
-fn default_filter_uv() -> [f32; 3] {
-    [0.0, 410.0, 8.0]
-}
-fn default_filter_ir() -> [f32; 3] {
-    [0.0, 675.0, 15.0]
+fn default_no_color_filter() -> String {
+    crate::color_filters::NO_COLOR_FILTER.into()
 }
 fn default_th_kg3() -> String {
     "TH-KG3".into()

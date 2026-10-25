@@ -382,8 +382,80 @@ pub fn fast_interp_image_perchannel(
     out
 }
 
+/// Akima interpolation of `(x, y)` at `xq`, as `scipy.interpolate.
+/// Akima1DInterpolator(x, y)(xq)` (method `"akima"`, no extrapolation: NaN
+/// outside `[x[0], x[n-1]]`). `x` must be strictly increasing, with at least
+/// two points.
+pub fn akima_1d(x: &[f64], y: &[f64], xq: &[f64]) -> Vec<f64> {
+    let n = x.len();
+    assert!(n >= 2 && y.len() == n, "akima_1d needs matching x and y with two points or more");
+    let dx: Vec<f64> = x.windows(2).map(|w| w[1] - w[0]).collect();
+    assert!(dx.iter().all(|&d| d > 0.0), "akima_1d needs strictly increasing x");
+    // Breakpoint slopes t, as scipy's Akima1DInterpolator.__init__.
+    let t: Vec<f64> = if n == 2 {
+        let m = (y[1] - y[0]) / dx[0];
+        vec![m, m]
+    } else {
+        let mut m = vec![0.0; n + 3];
+        for i in 0..n - 1 {
+            m[i + 2] = (y[i + 1] - y[i]) / dx[i];
+        }
+        m[1] = 2.0 * m[2] - m[3];
+        m[0] = 2.0 * m[1] - m[2];
+        m[n + 1] = 2.0 * m[n] - m[n - 1];
+        m[n + 2] = 2.0 * m[n + 1] - m[n];
+        let dm: Vec<f64> = m.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+        let f1 = &dm[2..];
+        let f2 = &dm[..dm.len() - 2];
+        let f12: Vec<f64> = f1.iter().zip(f2).map(|(a, b)| a + b).collect();
+        let max = f12.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        (0..n)
+            .map(|i| {
+                if f12[i] > 1e-9 * max {
+                    m[i + 1] + (f2[i] / f12[i]) * (m[i + 2] - m[i + 1])
+                } else {
+                    0.5 * (m[i + 3] + m[i])
+                }
+            })
+            .collect()
+    };
+    // CubicHermiteSpline coefficients, evaluated like scipy's PPoly.
+    xq.iter()
+        .map(|&v| {
+            if !(v >= x[0] && v <= x[n - 1]) {
+                return f64::NAN;
+            }
+            let i = x.partition_point(|&xi| xi <= v).clamp(1, n - 1) - 1;
+            let slope = (y[i + 1] - y[i]) / dx[i];
+            let tt = (t[i] + t[i + 1] - 2.0 * slope) / dx[i];
+            let c = [tt / dx[i], (slope - t[i]) / dx[i] - tt, t[i], y[i]];
+            let s = v - x[i];
+            let mut z = 1.0;
+            let mut res = 0.0;
+            for k in (0..4).rev() {
+                res += c[k] * z;
+                z *= s;
+            }
+            res
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    use super::akima_1d;
+
+    #[test]
+    fn akima_reproduces_lines_and_nodes() {
+        let x = [0.0, 1.0, 2.5, 4.0, 4.5];
+        let y = [1.0, 3.0, 6.0, 9.0, 10.0];
+        let got = akima_1d(&x, &y, &[0.0, 0.5, 2.5, 4.25, 4.5, 4.6, -0.1]);
+        for (g, e) in got.iter().zip([1.0, 2.0, 6.0, 9.5, 10.0]) {
+            assert!((g - e).abs() < 1e-12, "{g} vs {e}");
+        }
+        assert!(got[5].is_nan() && got[6].is_nan());
+    }
+
     use super::*;
 
     #[test]

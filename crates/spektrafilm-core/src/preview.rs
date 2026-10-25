@@ -18,6 +18,7 @@ pub fn preview_pipeline_cache_key(
         "input_color_space": params.io.input_color_space,
         "input_cctf_decoding": params.io.input_cctf_decoding,
         "input_gamut": params.io.input_gamut_compress,
+        "camera_color_filter": params.camera.color_filter,
         "output_color_space": params.io.output_color_space,
         "output_gamut": params.io.output_gamut_compress,
         "settings": {
