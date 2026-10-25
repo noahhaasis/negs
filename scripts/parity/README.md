@@ -277,6 +277,14 @@ clip described above.
 So during integration, a `*` on one item names what's left to port, and a
 row where Rust is far from every variant is a new bug.
 
+After the integration (16.10) no variant is marked on any route: the
+integrated f64 CLI matches experimental to 0 8-bit steps (mean and p99
+ΔE00 0.00); the remaining linear difference (≤ 0.12, ΔE00 max 0.15–3.75 on
+the highlight spot) is the output clip. Since `data/` now holds 28bf883's
+profiles and filter database, the `9_profiles_negs` and `5_npf_negs`
+reverts load upstream's own data and change nothing; the pre-port data is
+in Git history.
+
 The reverts patch private 28bf883 functions (`compute_hanatos2025_tc_lut`,
 the pipeline's curve refresh, `FilmingStage._auto_exposure`), so another
 upstream commit may need changes in the script. `--item` restricts the
@@ -351,6 +359,51 @@ ticket 16 has to resolve or document these as well:
 | DIR coupler diffusion (Portra / Provia scan) | cmy_film | 7.7e-6 / 2.8e-5 |
 | enlarger lens blur 1 / 2, camera lens blur 5 µm | — | pass |
 | halation | log_e_film | presets missing in Negs (main applies them too) |
+
+All of these are resolved by ticket 16 except the output clip: the halation
+presets came with 16.7, and the blurs' borders (lens blur, DIR diffusion,
+unsharp mask) reflect like Python's since `exp-edges`. Rust still clips the
+scan output to [0, 1]; see the result below.
+
+## Result after integration (ticket 16.10)
+
+Measured on 2026-10-26 with the f64 CLI built from `experimental-port`
+after every wave-1 branch and `exp-edges` were merged, against a clean
+`28bf883` tree. Values are the largest absolute error over the five
+fixtures (`frame300` is added with `--experimental-defaults`), over the
+whole image: the border band is no longer an exception.
+
+**Acceptance run** (`--case all --experimental-defaults
+--clip-reference-output`): **50/50 pass.**
+
+| Case | LUTs | Passed | log_e_film | cmy_film | cmy_print | rgb_out | 8-bit |
+|---|---|---|---|---|---|---|---|
+| portra-endura | off | 5/5 | 1.2e-08 | 5.1e-09 | 7.6e-09 | 7.7e-09 | 0 |
+| portra-endura | on | 5/5 | 1.2e-08 | 5.1e-09 | 7.6e-09 | 7.7e-09 | 0 |
+| gold-crystal-archive | off | 5/5 | 4.4e-08 | 8.9e-09 | 3.3e-08 | 9.9e-09 | 0 |
+| gold-crystal-archive | on | 5/5 | 4.4e-08 | 8.9e-09 | 3.3e-08 | 1.0e-08 | 0 |
+| provia-scan | off | 5/5 | 1.3e-08 | 2.5e-08 | — | 8.0e-09 | 0 |
+| provia-scan | on | 5/5 | 1.3e-08 | 2.5e-08 | — | 8.0e-09 | 0 |
+| doublex-2302 | off | 5/5 | 3.4e-09 | 9.9e-10 | 1.7e-09 | 8.0e-09 | 0 |
+| doublex-2302 | on | 5/5 | 3.4e-09 | 9.9e-10 | 1.7e-09 | 8.0e-09 | 0 |
+| vision3-2383 | off | 5/5 | 7.8e-09 | 5.1e-09 | 2.0e-08 | 6.8e-09 | 0 |
+| vision3-2383 | on | 5/5 | 7.8e-09 | 5.1e-09 | 2.0e-08 | 6.9e-09 | 0 |
+
+Without `--clip-reference-output` the stages before the scan are the same
+and `rgb_out` fails on the fixtures that reach outside [0, 1] (up to
+2.5e-01 on `frame300`'s highlight); the 8-bit column stays 0 because both
+sides quantise the same. **Per-pixel run** (`--case all`, every effect
+off): **40/40 pass** with and without the clip, every stage ≤ 1.3e-08.
+
+Exceptions that remain:
+
+- **Output clip.** Rust clips the scan output to [0, 1]; Python returns it
+  unclipped. Encoding is monotonic, so 8- and 16-bit exports are the same;
+  only a float export would differ, and Negs has none.
+- **Diffusion filter** (off by default): Rust keeps f64 where Python's FFT
+  runs in float32 (decided 2026-10-25).
+- **Grain** is gated statistically (`tests/grain_statistics.rs`, CPU and
+  GPU), not per pixel.
 
 ## Original methodology and surviving probes
 
