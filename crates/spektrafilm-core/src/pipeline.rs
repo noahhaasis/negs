@@ -127,8 +127,9 @@ pub struct Pipeline {
     /// exclusive with `tc_lut`.
     mallett_core: Option<[[f64; 3]; 3]>,
     /// Illuminant used by the RGB→tc projection before TC LUT lookup.
-    /// Most methods use the film reference illuminant; arctic2026alpha02
-    /// recovers reflectance in D65 coordinates and relights separately.
+    /// hanatos2025 uses the film reference illuminant; the reflectance methods
+    /// recover reflectance under their scene illuminant (D65) and relight it by
+    /// the reference illuminant when the tc LUT is built.
     front_illuminant: String,
     /// Print exposure normalization factor (1/geomean of midgray raw through enlarger).
     print_exposure_factor: f64,
@@ -297,8 +298,8 @@ impl Pipeline {
         apply_film_specific_params(&film, &mut params);
 
         // Python parity: look up per-(print, illuminant, film) neutral filter values from
-        // the JSON database — matches `apply_database_neutral_print_filters`. Defaults to
-        // params.enlarger.{c,m,y}_filter_neutral when the combo isn't in the database.
+        // the JSON database — matches `apply_database_neutral_print_filters`, including
+        // its C0 M50 Y50 fallback for combinations the database lacks.
         // Keep the f64 lookup values around (params is f32) — narrowing to
         // f32 here costs ~4e-8 precision through the `10^(-cc/100)` step.
         let mut neutral_cmy_f64: Option<[f64; 3]> = None;
@@ -306,13 +307,16 @@ impl Pipeline {
             let db = crate::neutral_filters::NeutralFilters::load(data_dir);
             let print_stock = print.info.stock.as_deref().unwrap_or("");
             let film_stock = film.info.stock.as_deref().unwrap_or("");
-            if let Some([c, m, y]) = db.lookup(print_stock, &params.enlarger.illuminant, film_stock)
-            {
-                params.enlarger.c_filter_neutral = c as f32;
-                params.enlarger.m_filter_neutral = m as f32;
-                params.enlarger.y_filter_neutral = y as f32;
-                neutral_cmy_f64 = Some([c, m, y]);
-            }
+            // Experimental falls back to C0 M50 Y50 for combinations the
+            // database lacks (`_DEFAULT_NEUTRAL_PRINT_FILTERS`), so any pair
+            // prints, instead of keeping the current filters.
+            let [c, m, y] = db
+                .lookup(print_stock, &params.enlarger.illuminant, film_stock)
+                .unwrap_or(crate::neutral_filters::DEFAULT_NEUTRAL_PRINT_FILTERS);
+            params.enlarger.c_filter_neutral = c as f32;
+            params.enlarger.m_filter_neutral = m as f32;
+            params.enlarger.y_filter_neutral = y as f32;
+            neutral_cmy_f64 = Some([c, m, y]);
         }
         let cmy_f64 = neutral_cmy_f64.unwrap_or([
             params.enlarger.c_filter_neutral as f64,
@@ -342,74 +346,69 @@ impl Pipeline {
         let ref_illuminant_f64 = select_illuminant_f64(&film.info.reference_illuminant);
         let mut front_illuminant = film.info.reference_illuminant.clone();
 
-        // RGB → film raw upsampler. Default `hanatos2025` builds the spectral tc
-        // LUT; `mallett2019` builds a 3×3 reflectance-basis matrix instead (no
-        // LUT). Dispatch mirrors Python `_rgb_to_film_raw`.
-        let (tc_lut, mallett_core): (Option<TcLut>, Option<[[f64; 3]; 3]>) =
-            match params.settings.rgb_to_raw_method.as_str() {
-                "hanatos2025" => {
-                    let spectra_lut = spectral_service::load_spectra_lut(data_dir)?;
-                    let window_params: Vec<f64> =
-                        film.data.hanatos2025_adaptation_window_params.clone();
-                    let tc_lut = if params.settings.apply_hanatos2025_adaptation_window
-                        && window_params.len() >= 4
-                    {
-                        spectral_service::compute_tc_lut_with_window(
-                            &spectra_lut,
-                            &sensitivity,
-                            &window_params,
-                            &ref_illuminant_f64,
-                        )
-                    } else {
-                        spectral_service::compute_tc_lut(&spectra_lut, &sensitivity)
-                    };
-
-                    // Bake input gamut compression into the LUT at build time, around
-                    // the film reference illuminant (the runtime's achromatic axis).
-                    // The per-pixel path then stays compression-agnostic.
-                    let input_gamut = crate::input_gamut::InputGamutCompress::from_params(
-                        &params.io.input_gamut_compress,
-                    )?;
-                    let tc_lut = if input_gamut.is_active() {
-                        let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(&ref_illuminant);
-                        input_gamut.remap(&tc_lut, [rx, ry])
-                    } else {
-                        tc_lut
-                    };
-                    (Some(tc_lut), None)
-                }
-                "arctic2026alpha02" => {
-                    front_illuminant = "D65".into();
-                    let reflectance_lut = spectral_service::load_arctic2026alpha02_lut(data_dir)?;
-                    let tc_lut = spectral_service::compute_reflectance_tc_lut(
-                        &reflectance_lut,
-                        &sensitivity,
-                        &ref_illuminant_f64,
+        // RGB → film raw upsampler, mirroring Python `_rgb_to_film_raw`: every
+        // method builds a tc → raw LUT. `hanatos2025` integrates irradiance
+        // spectra (optionally windowed); the reflectance methods
+        // (`arctic2026beta04`, `mallett2019`) relight their surfaces by the
+        // film reference illuminant, and the runtime projects chromaticity
+        // under their scene illuminant instead.
+        let method = spectral_service::upsampling_method(&params.settings.rgb_to_raw_method)?;
+        let spectra_lut = spectral_service::load_method_lut(data_dir, method)?;
+        let input_gamut =
+            crate::input_gamut::InputGamutCompress::from_params(&params.io.input_gamut_compress)?;
+        let tc_lut = match method.kind {
+            spectral_service::LutKind::Irradiance => {
+                let window_params: Vec<f64> =
+                    film.data.hanatos2025_adaptation_window_params.clone();
+                let tc_lut = if params.settings.apply_hanatos2025_adaptation_window
+                    && window_params.len() >= 4
+                {
+                    // White balance references the neutral the LUT emits at
+                    // the reference illuminant's chromaticity.
+                    let neutral = spectral_service::neutral_spectrum(
+                        &spectra_lut,
+                        spektrafilm_math::spectral::illuminant_to_xy(&ref_illuminant),
                     );
-                    let input_gamut = crate::input_gamut::InputGamutCompress::from_params(
-                        &params.io.input_gamut_compress,
-                    )?;
-                    let tc_lut = if input_gamut.is_active() {
-                        let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(
-                            &select_illuminant(&front_illuminant),
-                        );
-                        input_gamut.remap(&tc_lut, [rx, ry])
-                    } else {
-                        tc_lut
-                    };
-                    (Some(tc_lut), None)
-                }
-                "mallett2019" => (
-                    None,
-                    Some(crate::mallett::compute_core_matrix(
+                    spectral_service::compute_tc_lut_with_window(
+                        &spectra_lut,
                         &sensitivity,
-                        &ref_illuminant_f64,
-                    )),
-                ),
-                other => {
-                    return Err(format!("unsupported rgb_to_raw_method: {other:?}"));
+                        &window_params,
+                        &neutral,
+                    )
+                } else {
+                    spectral_service::compute_tc_lut(&spectra_lut, &sensitivity)
+                };
+
+                // Bake input gamut compression into the LUT at build time, around
+                // the film reference illuminant (the runtime's achromatic axis).
+                // The per-pixel path then stays compression-agnostic.
+                if input_gamut.is_active() {
+                    let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(&ref_illuminant);
+                    input_gamut.remap(&tc_lut, [rx, ry])
+                } else {
+                    tc_lut
                 }
-            };
+            }
+            spectral_service::LutKind::Reflectance { scene_illuminant } => {
+                front_illuminant = scene_illuminant.into();
+                let scene_xy =
+                    spektrafilm_math::spectral::illuminant_to_xy(&select_illuminant(scene_illuminant));
+                let tc_lut = spectral_service::compute_reflectance_tc_lut(
+                    &spectra_lut,
+                    &sensitivity,
+                    &ref_illuminant_f64,
+                    scene_xy,
+                );
+                // Centred on the scene white: the runtime addresses the LUT
+                // under the scene illuminant.
+                if input_gamut.is_active() {
+                    input_gamut.remap(&tc_lut, [scene_xy.0, scene_xy.1])
+                } else {
+                    tc_lut
+                }
+            }
+        };
+        let (tc_lut, mallett_core): (Option<TcLut>, Option<[[f64; 3]; 3]>) = (Some(tc_lut), None);
         if let Some(lut) = &tc_lut {
             dump_values_if_env("SPEKTRAFILM_DUMP_TC_LUT", || lut.data.clone());
         }

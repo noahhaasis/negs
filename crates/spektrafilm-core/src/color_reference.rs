@@ -538,10 +538,10 @@ mod parity_tests {
         let (m, q) = cref.xyz_remap.unwrap();
         // Reference values from experimental 28bf883's print path
         // (SimulationPipeline at default params, corrections on).
-        assert!((m - 1.179767743284425).abs() < 1e-6, "m = {m}");
-        assert!((q - -0.004043444483221928).abs() < 1e-7, "q = {q}");
+        assert!((m - 1.1797488764714492).abs() < 1e-6, "m = {m}");
+        assert!((q - -0.004027927281174061).abs() < 1e-7, "q = {q}");
         assert!(
-            (cref.printing_exposure_correction - 1.0636895295918904).abs() < 1e-6,
+            (cref.printing_exposure_correction - 1.0637192613949775).abs() < 1e-6,
             "printing_exposure_correction = {}",
             cref.printing_exposure_correction
         );

@@ -367,7 +367,7 @@ skipped while scanning film directly.")
   (checkbox); Black level 0…0.5
 - *Color Management*: Output gamut (Off, OKLCh, OKLrab, CAM16-UCS, ACES RGC);
   Input gamut (Off, xy Chromaticity); CAT16 adaptation (checkbox); Spectral
-  upsampling (Hanatos 2025, Arctic 2026 (Alpha), Mallett 2019)
+  upsampling (Hanatos 2025, Arctic 2026 (Beta 04), Mallett 2019)
 - *Output*: Limit preview to 12 MP (app setting, preview only; exports keep
   the full Image Size); Encode output as sRGB →
   `io.output_cctf_encoding`; Use less memory for export →
