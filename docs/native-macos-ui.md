@@ -287,10 +287,20 @@ as with Open). The toolbar's bottom-panel button and View > Show/Hide Film
 Strip (⌥⌘F) toggle it; visibility is remembered between launches. During crop
 editing the strip is disabled until Done or Cancel.
 
-Folder enumeration runs off the main thread when the strip appears or the
-folder changes. A lazy horizontal row requests 192-pixel thumbnails only as
+Folder enumeration runs off the main thread when the strip appears, the
+folder changes, or FSEvents reports external additions, removals, renames or
+writes. Notifications are batched with 200 ms latency and a one-event buffer;
+there is no idle polling. The watch stops when the strip disappears. Live
+refreshes preserve the selection and scroll position. A lazy horizontal row requests 192-pixel thumbnails only as
 cells appear, through a serial background decoder and a 16 MiB cache. RAW
 files use embedded previews only, with a generic photo icon when unavailable.
 Offscreen cells release their images; hiding the strip cancels queued work.
-The strip does not use the rendering engine, watch folders, or retain full-size
-images. Hide and show it to refresh a folder after external file changes.
+File size and modification time invalidate only changed thumbnails, allowing
+unfinished copies to recover when later writes arrive. The strip does not use
+the rendering engine or retain full-size images.
+
+`swift test --package-path macos --filter PhotoBrowserTests` covers real folder
+events, partially copied images, cache reuse, burst batching and idle shutdown.
+Set `NEGS_FILMSTRIP_BENCHMARK=1` to compare 1,000-file enumeration with the prior
+implementation, or `NEGS_FILMSTRIP_SNAPSHOTS=/tmp/negs-filmstrip` to run the window
+smoke test, which opens a newly arrived image through the already visible strip.

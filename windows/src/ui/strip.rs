@@ -2,7 +2,7 @@
 //! photograph in the current photograph's folder, in Explorer's order, with
 //! thumbnails decoded lazily for the visible cells, one at a time, from a
 //! bounded cache. Click one to open it; Left and Right open the neighbours.
-//! No folder watcher, and never a full development.
+//! OS folder notifications keep the list live; never a full development.
 
 use std::collections::{HashMap, VecDeque};
 use std::os::windows::fs::MetadataExt;
@@ -41,17 +41,40 @@ struct Thumb {
     height: i32,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PhotoFile {
+    path: PathBuf,
+    size: u64,
+    modified: u64,
+}
+
+#[derive(Clone)]
+struct ThumbnailRequest {
+    file: PhotoFile,
+    generation: u64,
+}
+
 #[derive(Default)]
 pub struct Strip {
     folder: Option<PathBuf>,
     files: Vec<PathBuf>,
+    versions: HashMap<PathBuf, PhotoFile>,
+    watch: Option<super::folder_watch::FolderWatch>,
     status: Status,
     scroll: i32,
     thumbs: HashMap<PathBuf, Option<Thumb>>,
     order: VecDeque<PathBuf>,
     selected: Option<PathBuf>,
-    requests: Option<Arc<(Mutex<Vec<PathBuf>>, Condvar)>>,
+    requests: Option<Arc<(Mutex<Vec<ThumbnailRequest>>, Condvar)>>,
     generation: u64,
+}
+
+impl Drop for Strip {
+    fn drop(&mut self) {
+        for thumb in self.thumbs.values().flatten() {
+            unsafe { let _ = DeleteObject(thumb.bitmap); }
+        }
+    }
 }
 
 pub fn register() {
@@ -74,16 +97,21 @@ fn natural_order(a: &Path, b: &Path) -> std::cmp::Ordering {
     unsafe { StrCmpLogicalW(pcwstr(&x), pcwstr(&y)).cmp(&0) }
 }
 
-fn scan(folder: &Path) -> std::io::Result<Vec<PathBuf>> {
+fn scan(folder: &Path) -> std::io::Result<Vec<PhotoFile>> {
     const HIDDEN: u32 = 0x2;
     const SYSTEM: u32 = 0x4;
-    let mut files: Vec<PathBuf> = std::fs::read_dir(folder)?
+    let mut files: Vec<PhotoFile> = std::fs::read_dir(folder)?
         .flatten()
-        .filter(|e| e.metadata().is_ok_and(|m| m.is_file() && m.file_attributes() & (HIDDEN | SYSTEM) == 0))
-        .map(|e| folder.join(e.file_name()))
-        .filter(|p| is_photo(p))
+        .filter_map(|entry| {
+            let path = folder.join(entry.file_name());
+            if !is_photo(&path) { return None; }
+            let metadata = entry.metadata().ok()?;
+            (metadata.is_file() && metadata.file_attributes() & (HIDDEN | SYSTEM) == 0).then(|| PhotoFile {
+                path, size: metadata.len(), modified: metadata.last_write_time(),
+            })
+        })
         .collect();
-    files.sort_by(|a, b| natural_order(a, b));
+    files.sort_by(|a, b| natural_order(&a.path, &b.path));
     Ok(files)
 }
 
@@ -112,14 +140,19 @@ impl Strip {
     }
 }
 
-/// Follows the current photograph: rescans when its folder changes, and
-/// keeps it selected and in the middle.
+/// Follow the current folder and keep the watch alive only while visible.
 pub fn sync(app: &mut App) {
     let visible = app.model.prefs.filmstrip_visible && app.model.source.is_some();
     unsafe {
         let _ = EnableWindow(app.strip, !app.model.cropping());
     }
     if !visible {
+        let strip = &mut app.strip_view;
+        if strip.folder.take().is_some() {
+            strip.generation += 1;
+            strip.watch = None;
+            if let Some(requests) = &strip.requests { requests.0.lock().unwrap().clear(); }
+        }
         return;
     }
     let source = app.model.source.clone();
@@ -131,25 +164,25 @@ pub fn sync(app: &mut App) {
         strip.status = Status::Loading;
         strip.generation += 1;
         let generation = strip.generation;
+        strip.watch = None;
         if let Some(folder) = folder {
-            std::thread::spawn(move || {
+            // Bound the UI mailbox to one snapshot even if a modal operation
+            // stalls the UI while a large batch of photographs arrives.
+            let pending = Arc::new(Mutex::new(None));
+            let watch_folder = folder.clone();
+            strip.watch = super::folder_watch::FolderWatch::start(&watch_folder, move || {
                 let result = scan(&folder);
-                post(move |app: &mut App| {
-                    let strip = &mut app.strip_view;
-                    if strip.generation != generation {
-                        return;
-                    }
-                    match result {
-                        Ok(files) => {
-                            strip.files = files;
-                            strip.status = Status::Ready;
-                        }
-                        Err(_) => strip.status = Status::Failed,
-                    }
-                    strip.selected = None;
-                    sync(app);
-                });
-            });
+                let enqueue = pending.lock().unwrap().replace(result).is_none();
+                if enqueue {
+                    let pending = pending.clone();
+                    post(move |app: &mut App| {
+                        let result = pending.lock().unwrap().take().unwrap();
+                        if app.strip_view.generation != generation { return; }
+                        apply_snapshot(app, result);
+                    });
+                }
+            }).ok();
+            if strip.watch.is_none() { strip.status = Status::Failed; }
         }
     }
     if app.strip_view.selected != source {
@@ -160,6 +193,31 @@ pub fn sync(app: &mut App) {
     unsafe {
         let _ = InvalidateRect(app.strip, None, false);
     }
+}
+
+fn apply_snapshot(app: &mut App, result: std::io::Result<Vec<PhotoFile>>) {
+    let strip = &mut app.strip_view;
+    let initial = strip.status == Status::Loading;
+    match result {
+        Ok(files) => {
+            let versions: HashMap<_, _> = files.iter().map(|file| (file.path.clone(), file.clone())).collect();
+            // Keep existing bitmap objects for unchanged files; discard stale
+            // successes and failures, including interrupted/unfinished copies.
+            strip.thumbs.retain(|path, thumb| {
+                if versions.contains_key(path) && versions.get(path) == strip.versions.get(path) { return true; }
+                if let Some(thumb) = thumb { unsafe { let _ = DeleteObject(thumb.bitmap); } }
+                false
+            });
+            strip.order.retain(|path| strip.thumbs.contains_key(path));
+            strip.files = files.into_iter().map(|file| file.path).collect();
+            strip.versions = versions;
+            strip.status = Status::Ready;
+        }
+        Err(_) => strip.status = Status::Failed,
+    }
+    if initial { center_selection(app); } else { clamp_scroll(app); }
+    request_visible(app);
+    unsafe { let _ = InvalidateRect(app.strip, None, false); }
 }
 
 fn center_selection(app: &mut App) {
@@ -207,16 +265,18 @@ fn request_visible(app: &mut App) {
         let _ = GetClientRect(app.strip, &mut r);
     }
     let strip = &mut app.strip_view;
-    let wanted: Vec<PathBuf> = (0..strip.files.len())
+    let wanted: Vec<ThumbnailRequest> = (0..strip.files.len())
         .filter(|&i| {
             let x = strip.cell_x(dpi, i);
             x + strip.px(dpi, CELL) >= 0 && x <= r.right
         })
         .map(|i| strip.files[i].clone())
         .filter(|p| !strip.thumbs.contains_key(p))
+        .filter_map(|p| strip.versions.get(&p).cloned())
+        .map(|file| ThumbnailRequest { file, generation: strip.generation })
         .collect();
     let requests = strip.requests.get_or_insert_with(|| {
-        let requests: Arc<(Mutex<Vec<PathBuf>>, Condvar)> = Arc::new((Mutex::new(Vec::new()), Condvar::new()));
+        let requests: Arc<(Mutex<Vec<ThumbnailRequest>>, Condvar)> = Arc::new((Mutex::new(Vec::new()), Condvar::new()));
         let worker = requests.clone();
         let pixels = (192.0 * dpi as f64 / 96.0) as i32;
         std::thread::Builder::new()
@@ -224,7 +284,7 @@ fn request_visible(app: &mut App) {
             .spawn(move || {
                 crate::thumbnail::com_thread();
                 loop {
-                    let path = {
+                    let request = {
                         let (queue, ready) = &*worker;
                         let mut queue = queue.lock().unwrap();
                         while queue.is_empty() {
@@ -232,8 +292,8 @@ fn request_visible(app: &mut App) {
                         }
                         queue.remove(0)
                     };
-                    let thumb = crate::thumbnail::strip_thumbnail(&path, pixels);
-                    post(move |app: &mut App| store(app, path, thumb));
+                    let thumb = crate::thumbnail::strip_thumbnail(&request.file.path, pixels);
+                    post(move |app: &mut App| store(app, request, thumb));
                 }
             })
             .ok();
@@ -247,8 +307,10 @@ fn request_visible(app: &mut App) {
     ready.notify_one();
 }
 
-fn store(app: &mut App, path: PathBuf, thumb: Option<(Vec<u8>, u32, u32)>) {
+fn store(app: &mut App, request: ThumbnailRequest, thumb: Option<(Vec<u8>, u32, u32)>) {
     let strip = &mut app.strip_view;
+    if strip.generation != request.generation || strip.versions.get(&request.file.path) != Some(&request.file) { return; }
+    let path = request.file.path;
     let bitmap = thumb.and_then(|(rgba, w, h)| unsafe {
         let info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -270,7 +332,10 @@ fn store(app: &mut App, path: PathBuf, thumb: Option<(Vec<u8>, u32, u32)>) {
         }
         Some(Thumb { bitmap, width: w as i32, height: h as i32 })
     });
-    strip.thumbs.insert(path.clone(), bitmap);
+    if let Some(Some(old)) = strip.thumbs.insert(path.clone(), bitmap) {
+        unsafe { let _ = DeleteObject(old.bitmap); }
+    }
+    strip.order.retain(|old| old != &path);
     strip.order.push_back(path);
     while strip.order.len() > CACHE {
         if let Some(old) = strip.order.pop_front() {
@@ -508,5 +573,82 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::{self, Receiver};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use super::super::folder_watch::FolderWatch;
+
+    struct TestFolder(PathBuf);
+
+    impl TestFolder {
+        fn new() -> Self {
+            let folder = std::env::temp_dir().join(format!("negs-strip-{}-{}", std::process::id(),
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+            std::fs::create_dir(&folder).unwrap();
+            Self(folder)
+        }
+    }
+
+    impl Drop for TestFolder {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+
+    fn receive_until(receiver: &Receiver<Vec<PhotoFile>>, predicate: impl Fn(&[PhotoFile]) -> bool) -> Vec<PhotoFile> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let files = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("Folder did not update within five seconds");
+            if predicate(&files) { return files; }
+        }
+    }
+
+    #[test]
+    fn folder_watch_tracks_copies_renames_deletes_and_bursts() {
+        let folder = TestFolder::new();
+        let first = folder.0.join("Photo1.png");
+        let second = folder.0.join("Photo2.png");
+        std::fs::write(&first, []).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let directory = folder.0.clone();
+        let watch = FolderWatch::start(&folder.0, move || { let _ = sender.send(scan(&directory).unwrap()); }).unwrap();
+        receive_until(&receiver, |files| files.len() == 1);
+        std::fs::write(&second, []).unwrap();
+        receive_until(&receiver, |files| files.len() == 2);
+        std::fs::write(&second, [7; 512]).unwrap();
+        receive_until(&receiver, |files| files.iter().any(|f| f.path == second && f.size == 512));
+        let renamed = folder.0.join("Photo10.png");
+        std::fs::rename(&first, &renamed).unwrap();
+        let files = receive_until(&receiver, |files| files.iter().any(|f| f.path == renamed));
+        assert_eq!(files.iter().map(|f| &f.path).collect::<Vec<_>>(), [&second, &renamed]);
+        std::fs::remove_file(&second).unwrap();
+        receive_until(&receiver, |files| files.len() == 1);
+        for index in 20..140 {
+            std::fs::write(folder.0.join(format!("Photo{index}.jpg")), []).unwrap();
+        }
+        receive_until(&receiver, |files| files.len() == 121);
+        drop(watch);
+        loop {
+            match receiver.recv_timeout(Duration::from_secs(2)) {
+                Ok(_) => {},
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(error) => panic!("Watch did not stop: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    fn folder_watch_is_idle_and_cancels_without_another_file_event() {
+        let folder = TestFolder::new();
+        let (sender, receiver) = mpsc::channel();
+        let watch = FolderWatch::start(&folder.0, move || { let _ = sender.send(()); }).unwrap();
+        receiver.recv_timeout(Duration::from_secs(5)).unwrap(); // initial scan
+        assert_eq!(receiver.recv_timeout(Duration::from_millis(500)), Err(mpsc::RecvTimeoutError::Timeout));
+        drop(watch);
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(2)), Err(mpsc::RecvTimeoutError::Disconnected));
     }
 }
