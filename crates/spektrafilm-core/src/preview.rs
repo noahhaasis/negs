@@ -183,9 +183,12 @@ pub fn display_rgba_with_post(
     let w = ((src_w * scale_num + max_src_dim / 2) / max_src_dim).max(1);
     let h = ((src_h * scale_num + max_src_dim / 2) / max_src_dim).max(1);
     let mut rgba = vec![0u8; w * h * 4];
+    // The scan arrives unclipped; the display shows it clipped, before Post
+    // and before interpolating, as an export clips before finishing.
+    let (lo, hi) = crate::pipeline::display_range(encoded);
     let pixel = |y: usize, x: usize| {
         let p = (y * src_w + x) * 3;
-        let rgb = [0, 1, 2].map(|c| to_f32(image.data[p + c]));
+        let rgb = [0, 1, 2].map(|c| to_f32(image.data[p + c].clamp(lo, hi)));
         post.map_or(rgb, |post| post.apply_rgb(rgb))
     };
     let write = |out: &mut [u8], rgb: [f32; 3]| {
@@ -362,6 +365,26 @@ mod tests {
         for max_dim in [96, 61, 40, 7] {
             let (w, h, rgba) = display_rgba(&image, max_dim, true);
             assert_eq!(rgba, reference_rgba(&image, w, h), "max_dim {max_dim}");
+        }
+    }
+
+    /// The scan arrives unclipped; the preview shows it as the export clips
+    /// it, per pixel before interpolating.
+    #[test]
+    fn display_clips_each_pixel_before_interpolating() {
+        let values = [-0.2f32, 0.3, 4.0, 0.9, 1.7, 0.0, 0.5, 2.5];
+        let unclipped: Vec<_> = (0..10 * 9).flat_map(|i| [values[i % values.len()]; 3]).map(from_f32).collect();
+        let unclipped = ImageBuf::from_data(10, 9, unclipped);
+        for encoded in [true, false] {
+            let mut clipped = unclipped.clone();
+            crate::pipeline::clip_to_display(&mut clipped, encoded);
+            for max_dim in [10, 7, 4] {
+                assert_eq!(
+                    display_rgba(&unclipped, max_dim, encoded),
+                    display_rgba(&clipped, max_dim, encoded),
+                    "encoded {encoded}, max_dim {max_dim}"
+                );
+            }
         }
     }
 

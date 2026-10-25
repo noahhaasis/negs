@@ -210,12 +210,23 @@ release. See `docs/windows-agent-handoff.md`.
   Windows box), re-run `quality` and the cross-machine `compare`, and commit
   the manifests (not the dumps). The presets in `scripts/gpu_cpu_quality/params`
   use the new grain fields.
-- **GPU vs f64 after the port (M1 Pro, `quality`): 76/76 pass**, but with
-  less margin. ΔE00 max 0.045 against a 0.05 gate (`synth_noise` Velvia
-  scan; before the port, 0.0054 for the worst case), p99 ≤ 0.006, at most 1
-  8-bit step. Velvia scans and Vision3 → 2383 have the highest maxima, each on
-  a few pixels; DIR saturation in f32 is the likely cause, not yet confirmed. Check this first
-  on the Windows box.
+- **GPU vs f64 after the port (M1 Pro, `quality`): 76/76 pass.** ΔE00 max
+  0.0012 (`synth_noise` Velvia scan), p99 ≤ 0.0003, at most 2 16-bit codes
+  and 1 8-bit step. Right after the port the maximum was 0.045 against the
+  0.05 gate, with two causes in the GPU scan, both fixed:
+  - It integrated with an older 4–5 digit f32 CMF table (up to 1.2 % off per
+    sample) where the CPU uses colour's exact CMFs. At the blue cusp the
+    output gamut compressor amplifies the shift about 90×, and the unsharp
+    mask amplifies it again in deep shadows: ΔE00 0.045 on Velvia scans,
+    0.027 on Vision3 → 2383. The GPU now uploads the exact CMFs rounded to
+    f32 (`spectral::CMF_*_F32`); max 0.0052.
+  - It skipped Python's near-identity `RGB_to_RGB` before the OETF (off
+    the identity by ~1e-5, because colour's sRGB matrices are rounded),
+    which the CPU applies: a bias of about −2e-5 in every encoded value
+    and most 1-step 8-bit differences. The post-scan pass applies it now;
+    8-bit differences fell from 172,881 to 6,757 over the matrix.
+
+  Check the Windows box against these numbers.
 - The engine uses Vulkan or Metal only; Windows has no DX12 path (decided
   2026-10-22).
 - The GPU gates come from two vendors (Apple, NVIDIA); AMD, Intel and

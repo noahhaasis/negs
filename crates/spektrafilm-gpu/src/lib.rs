@@ -155,8 +155,8 @@ pub trait ComputeBackend: Send + Sync {
     }
 
     /// True when `try_run_film_chain` returns the same post-scan output that
-    /// `Pipeline::apply_post_scan` would produce (final clamp and optional
-    /// sRGB encoding). Backends default to returning linear RGB and letting
+    /// `Pipeline::apply_post_scan` would produce (the optional sRGB
+    /// encoding, unclipped). Backends default to returning linear RGB and letting
     /// the pipeline apply the final CPU pass.
     fn resident_chain_applies_post_scan(&self) -> bool {
         false
@@ -254,9 +254,31 @@ pub struct FilmChainParams<'a> {
     /// when `enlarger_diffusion` is active so it can preserve the CPU
     /// print-stage ordering around preflash.
     pub print_exposure_scale: f64,
-    /// Whether the final output should be sRGB-encoded after clamping. Mirrors
+    /// Whether the final output should be sRGB-encoded (unclipped). Mirrors
     /// `RuntimeParams::io.output_cctf_encoding`.
     pub output_cctf_encoding: bool,
+    /// Applied before the encoding: Python's `RGB_to_RGB` from the output
+    /// space to itself, the identity up to ~1e-5 because colour's sRGB
+    /// matrices are rounded (`scanning::rgb_to_rgb_identity_matrix`).
+    pub output_encode_matrix: [[f64; 3]; 3],
+}
+
+impl FilmChainParams<'_> {
+    /// `output_encode_matrix` minus the identity, rows padded to four, for
+    /// the post-scan pass: it adds `delta · rgb` in f32, which keeps the
+    /// ~1e-5 entries exact where the full matrix would round them.
+    pub fn output_encode_delta(&self) -> [[f32; 4]; 3] {
+        let m = self.output_encode_matrix;
+        std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                if j < 3 {
+                    (m[i][j] - if i == j { 1.0 } else { 0.0 }) as f32
+                } else {
+                    0.0
+                }
+            })
+        })
+    }
 }
 
 /// RGB → film-raw front pass of the GPU-resident chain. It is homogeneous in

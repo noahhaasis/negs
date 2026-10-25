@@ -1,7 +1,8 @@
 //! Post adjustments: finishing edits on the scanned photograph, as an editor
-//! would make them to a lab scan. They run after the scan's clip to [0, 1],
-//! so they shape the tones the film produced but cannot recover a clipped
-//! highlight; that belongs to camera and print exposure.
+//! would make them to a lab scan. They run on the scan clipped to [0, 1]
+//! (`pipeline::clip_to_display`), as an integer file holds it, so they shape
+//! the tones the film produced but cannot recover a clipped highlight; that
+//! belongs to camera and print exposure.
 //!
 //! Tones are shaped on luminance in sRGB-encoded (perceptual) space, and each
 //! pixel keeps its colour ratios, so contrast doesn't shift the film's hues.
@@ -141,8 +142,8 @@ impl PostProcess {
         }
     }
 
-    /// Adjusts one pixel. Input channels are expected in [0, 1], as the scan
-    /// leaves them; so is the result.
+    /// Adjusts one pixel. Input channels are expected in [0, 1], clipped like
+    /// a display; so is the result.
     pub fn apply_rgb(&self, rgb: [f32; 3]) -> [f32; 3] {
         let mut c = if self.encoded {
             rgb.map(|v| lookup(&self.decode, v))

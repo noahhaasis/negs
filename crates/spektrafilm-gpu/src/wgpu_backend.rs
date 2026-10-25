@@ -933,15 +933,15 @@ impl WgpuBackend {
         let view_illu_buf = mk_storage("view_illu", bytemuck::cast_slice(&view_illu_f32));
         let cmf_x_buf = mk_storage(
             "cmf_x",
-            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_X),
+            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_X_F32),
         );
         let cmf_y_buf = mk_storage(
             "cmf_y",
-            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Y),
+            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Y_F32),
         );
         let cmf_z_buf = mk_storage(
             "cmf_z",
-            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Z),
+            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Z_F32),
         );
 
         // ── Param structs ────────────────────────────────────────────────
@@ -1052,7 +1052,7 @@ impl WgpuBackend {
         // B&W/slide luminance remap (m, q); z=1 enables it in the shader.
         // w=1 skips the shader's [0,1] clamp: glare, gamut compression and
         // the scanner unsharp mask see the unclamped scan RGB, as on the CPU
-        // and upstream, and the post-scan pass clamps once at the end.
+        // and upstream, and the output stays unclamped like theirs.
         let bw = match p.bw_xyz_remap {
             Some((m, q)) => [m as f32, q as f32, 1.0, 1.0],
             None => [1.0, 0.0, 0.0, 1.0],
@@ -1535,8 +1535,16 @@ impl WgpuBackend {
             .enlarger_diffusion
             .as_ref()
             .map(|_| build_linear_to_log_state(&self.device, n_pixels, &buf_b, self));
-        let post_scan_state =
-            build_post_scan_state(&self.device, n_pixels, p.output_cctf_encoding, &buf_b, self);
+        let post_scan_state = p.output_cctf_encoding.then(|| {
+            build_post_scan_state(
+                &self.device,
+                n_pixels,
+                p.output_cctf_encoding,
+                p.output_encode_delta(),
+                &buf_b,
+                self,
+            )
+        });
 
         // ── Single command buffer chaining everything ────────────────────
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -1629,7 +1637,7 @@ impl WgpuBackend {
             );
             profiler.mark("print_density", &mut encoder);
         }
-        // 6. Scan spectral: buf_a → buf_b (final rgb, clamped, NOT sRGB-encoded)
+        // 6. Scan spectral: buf_a → buf_b (linear rgb, unclamped)
         dispatch(&mut encoder, &scan_pipe, &bg_scan, n_pixels);
         profiler.mark("scan_spectral", &mut encoder);
         // 6b. Glare (in place on buf_b).
@@ -1654,11 +1662,13 @@ impl WgpuBackend {
             us.encode_passes(&mut encoder, n_pixels, &buf_b, img_bytes as u64);
             profiler.mark("unsharp", &mut encoder);
         }
-        // 6e. Final clamp + optional sRGB encode. This mirrors
-        // Pipeline::apply_post_scan so the resident WGSL path can return
-        // display-ready pixels without a CPU full-frame post pass.
-        post_scan_state.encode_passes(&mut encoder, n_pixels);
-        profiler.mark("post_scan", &mut encoder);
+        // 6e. The sRGB encoding, unclipped, when the output is encoded. This
+        // mirrors Pipeline::apply_post_scan so the resident WGSL path needs no
+        // CPU full-frame post pass.
+        if let Some(ps) = post_scan_state.as_ref() {
+            ps.encode_passes(&mut encoder, n_pixels);
+            profiler.mark("post_scan", &mut encoder);
+        }
 
         // Zero-copy path: when buf_b is mappable, skip the blit and map it
         // directly below. Otherwise stage it into the MAP_READ readback buffer.
@@ -1931,7 +1941,7 @@ impl ComputeBackend for WgpuBackend {
             // w=1: skip the shader clamp — the per-stage CPU callers
             // (glare, gamut compression, blur/unsharp) expect the
             // unclamped scan RGB, exactly like `scan_spectral_cpu` returns;
-            // the final encode+clip happens at the end of the scanning stage.
+            // the final encoding happens at the end of the scanning stage.
             bw: [1.0, 0.0, 0.0, 1.0],
         };
 
@@ -1954,9 +1964,9 @@ impl ComputeBackend for WgpuBackend {
                 GpuBuffer::storage_ro(bytemuck::cast_slice(&cd_flat)),
                 GpuBuffer::storage_ro(bytemuck::cast_slice(&bd)),
                 GpuBuffer::storage_ro(bytemuck::cast_slice(&illu_f32)),
-                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_X)),
-                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Y)),
-                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Z)),
+                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_X_F32)),
+                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Y_F32)),
+                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Z_F32)),
                 GpuBuffer::storage_rw(&output_bytes),
             ],
             n_pixels,
@@ -3731,6 +3741,7 @@ fn build_post_scan_state(
     device: &wgpu::Device,
     n_pixels: u32,
     output_cctf_encoding: bool,
+    delta: [[f32; 4]; 3],
     img: &wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> InplaceUnaryState {
@@ -3741,6 +3752,7 @@ fn build_post_scan_state(
         n_pixels: u32,
         output_cctf_encoding: u32,
         _pad: [u32; 2],
+        delta: [[f32; 4]; 3],
     }
     let pipe = backend.cached_pipeline(
         include_str!("../../spektrafilm-shaders/wgsl/post_scan.wgsl"),
@@ -3755,6 +3767,7 @@ fn build_post_scan_state(
             n_pixels,
             output_cctf_encoding: u32::from(output_cctf_encoding),
             _pad: [0; 2],
+            delta,
         }),
         usage: wgpu::BufferUsages::UNIFORM,
     });

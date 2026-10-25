@@ -120,8 +120,8 @@ __device__ __forceinline__ float exp10_fast(float x) {
     return exp2f(x * 3.32192809488736234787f);
 }
 
+// Unclipped, like the CPU scan: linear below 0, the power law above 1.
 __device__ __forceinline__ float srgb_encode_fast(float x) {
-    x = fminf(fmaxf(x, 0.0f), 1.0f);
     return x <= 0.0031308f ? 12.92f * x : 1.055f * powf(x, 0.4166666666666667f) - 0.055f;
 }
 
@@ -455,22 +455,24 @@ extern "C" __global__ void scan_spectral_kernel(
     }
 }
 
+// Like the CPU scan's `encode_output`: Python's near-identity RGB_to_RGB
+// matrix, added as rgb + delta · rgb (delta = matrix - identity, rows of
+// four), then the OETF.
 extern "C" __global__ void post_scan_kernel(
     float* __restrict__ rgb,
     unsigned int n_pixels,
-    unsigned int output_cctf_encoding
+    unsigned int output_cctf_encoding,
+    const float* __restrict__ delta
 ) {
     unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid >= n_pixels) return;
     unsigned int base = gid * 3u;
     if (output_cctf_encoding != 0u) {
-        rgb[base] = srgb_encode_fast(rgb[base]);
-        rgb[base + 1u] = srgb_encode_fast(rgb[base + 1u]);
-        rgb[base + 2u] = srgb_encode_fast(rgb[base + 2u]);
-    } else {
-        rgb[base] = fminf(fmaxf(rgb[base], 0.0f), 1.0f);
-        rgb[base + 1u] = fminf(fmaxf(rgb[base + 1u], 0.0f), 1.0f);
-        rgb[base + 2u] = fminf(fmaxf(rgb[base + 2u], 0.0f), 1.0f);
+        float c[3] = {rgb[base], rgb[base + 1u], rgb[base + 2u]};
+        for (int i = 0; i < 3; ++i) {
+            float v = c[i] + delta[4 * i] * c[0] + delta[4 * i + 1] * c[1] + delta[4 * i + 2] * c[2];
+            rgb[base + i] = srgb_encode_fast(v);
+        }
     }
 }
 
@@ -2157,10 +2159,12 @@ impl CudaBackend {
         img: &mut CudaSlice<f32>,
         n_pixels: u32,
         output_cctf_encoding: bool,
+        delta: [[f32; 4]; 3],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let encode = if output_cctf_encoding { 1u32 } else { 0u32 };
+        let delta_dev = self.stream.clone_htod(delta.as_flattened())?;
         let mut launch = self.stream.launch_builder(&self.post_scan_kernel);
-        launch.arg(img).arg(&n_pixels).arg(&encode);
+        launch.arg(img).arg(&n_pixels).arg(&encode).arg(&delta_dev);
         unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         Ok(())
     }
@@ -2300,9 +2304,9 @@ impl CudaBackend {
         let cd_dev = self.stream.clone_htod(&cd_flat)?;
         let bd_dev = self.stream.clone_htod(&bd)?;
         let illu_dev = self.stream.clone_htod(&illu_f32)?;
-        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X)?;
-        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y)?;
-        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z)?;
+        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
+        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
+        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
         let mut out_dev = self.alloc_f32(n_pixels as usize * 3)?;
 
         let n_wl_u32 = n_wl as u32;
@@ -2582,9 +2586,9 @@ impl CudaBackend {
         let scan_bd_dev = self.stream.clone_htod(&scan_bd)?;
         let view_illu_dev = self.stream.clone_htod(&view_illu_f32)?;
         let scan_matrix_dev = self.stream.clone_htod(&scan_matrix)?;
-        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X)?;
-        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y)?;
-        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z)?;
+        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
+        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
+        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
         let scan_n_wl = scan_cd_src.len() as u32;
         let scan_norm = p.scan_normalization as f32;
         let (bw_m, bw_q, bw_enable) = match p.bw_xyz_remap {
@@ -2592,7 +2596,7 @@ impl CudaBackend {
             None => (1.0f32, 0.0f32, 0u32),
         };
         // Unclamped scan RGB for glare, gamut compression and the unsharp
-        // mask, as on the CPU; the post-scan pass clamps once at the end.
+        // mask, as on the CPU; the output stays unclamped like the CPU's.
         let skip_clamp = 1u32;
         {
             let mut launch = self.stream.launch_builder(&self.scan_kernel);
@@ -2643,7 +2647,14 @@ impl CudaBackend {
             self.run_unsharp_device(&mut buf_b, &mut buf_a, image.width, image.height, up)?;
         }
 
-        self.run_post_scan_device(&mut buf_b, n_pixels, p.output_cctf_encoding)?;
+        if p.output_cctf_encoding {
+            self.run_post_scan_device(
+                &mut buf_b,
+                n_pixels,
+                p.output_cctf_encoding,
+                p.output_encode_delta(),
+            )?;
+        }
 
         let out = self.stream.clone_dtoh(&buf_b)?;
         Ok(Some(ImageBuf::from_data(
