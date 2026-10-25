@@ -84,12 +84,16 @@ struct Stock: Identifiable, Sendable {
     let bw: Bool
     let target: String
     let times: [Double]
+    /// The resolved grain preset, per field of `Stock.grainFields`.
+    let grain: JSONValue
+    static let grainFields = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"]
 
     init(_ value: JSONValue) {
         id = value["id"].string; name = value["name"].string
         paper = value["paper"].bool; positive = value["positive"].bool; bw = value["bw"].bool
         target = value["target_print"].string
         times = value["development_times"].array.map(\.double)
+        grain = value["grain"]
     }
 }
 

@@ -62,6 +62,8 @@ enum When {
     Mat,
     Keyline,
     FilmStyle,
+    /// Hidden for B&W films (one emulsion): per-channel grain lanes.
+    ColorFilm,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -260,7 +262,8 @@ fn rows() -> Vec<Row> {
                     Adjustment::Choice { title, path, options } => Kind::Choice(title, path, options),
                     slider => Kind::Slider(slider),
                 };
-                let row = add(rows, kind, lab, Some(header), When::Always);
+                let when = if state::color_only(control.path()) { When::ColorFilm } else { When::Always };
+                let row = add(rows, kind, lab, Some(header), when);
                 rows[row].print = section == Section::Print;
             }
         }
@@ -376,6 +379,7 @@ fn visible(row: &Row, model: &Model, expanded: &dyn Fn(usize) -> bool) -> bool {
         When::Raw => model.is_raw,
         When::CustomWhiteBalance => model.is_raw && json::string(model.value("io.raw_white_balance.mode")) == "custom",
         When::Scanning => scanning,
+        When::ColorFilm => !model.film_is_bw(),
         When::Ratio35 => photo_size(model).is_some_and(|(w, h)| !border::fits(BorderStyle::Film35, w, h)),
         When::LongestSide => model.size_mode() == state::SizeMode::LongestSide,
         When::SizeNote => !size_note(model).is_empty(),
@@ -888,6 +892,11 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
             }
             Kind::Slider(_) | Kind::BorderSlider(..) => {
                 let Some((value, default, low, _high, step)) = slider_value(model, &row.kind) else { continue };
+                if let Kind::Slider(Adjustment::Slider { title, path, .. }) = row.kind
+                    && let Some(bw) = state::bw_title(path)
+                {
+                    set_text(c[0], if model.film_is_bw() { bw } else { title });
+                }
                 let pos = ((value - low) / step).round() as isize;
                 unsafe {
                     if SendMessageW(c[1], TBM_GETPOS, WPARAM(0), LPARAM(0)).0 != pos {

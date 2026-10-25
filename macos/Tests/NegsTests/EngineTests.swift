@@ -26,17 +26,29 @@ final class EngineTests: XCTestCase {
         let (_, catalog) = try await client.request(["command": .string("catalog")])
         XCTAssertEqual(catalog["protocol"], .number(1))
         let defaults = catalog["defaults"]
+        let stocks = catalog["profiles"].array.map(Stock.init)
         for group in adjustmentGroups {
             for control in group.controls {
+                if case .stockSlider(_, let path, let index, let range, _, _) = control {
+                    // Null until edited; every film's preset fills the lane.
+                    XCTAssertEqual(defaults[path], .null, path)
+                    let field = String(path.split(separator: ".").last!)
+                    for stock in stocks where !stock.paper {
+                        let preset = stock.grain[field].array.map(\.double)
+                        XCTAssertEqual(preset.count, 3, "\(stock.id) \(field)")
+                        XCTAssertTrue(preset.indices.contains(index) && range.contains(preset[index]), "\(stock.id) \(control.id)")
+                    }
+                    continue
+                }
                 XCTAssertNotEqual(defaults[control.id], .null, "Missing Rust parameter: \(control.id)")
                 switch control {
                 case .slider(_, _, let range, _): XCTAssertTrue(range.contains(defaults[control.id].double), control.id)
                 case .toggle: if case .bool = defaults[control.id] {} else { XCTFail(control.id) }
                 case .choice(_, _, let options): XCTAssertTrue(options.contains(defaults[control.id].string), control.id)
+                case .stockSlider: break
                 }
             }
         }
-        let stocks = catalog["profiles"].array.map(Stock.init)
         XCTAssertEqual(stocks.first { $0.id == "kodak_gold_200" }?.target, "kodak_portra_endura")
         XCTAssertTrue(stocks.first { $0.id == "kodak_trix" }?.positive ?? false)
         XCTAssertGreaterThan(stocks.first { $0.id == "kodak_doublex" }?.times.count ?? 0, 1)

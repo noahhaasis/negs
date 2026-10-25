@@ -39,6 +39,13 @@ pub fn pixel_size_um(film_format_mm: f32, width: u32, height: u32) -> f32 {
     film_format_mm * 1000.0 / width.max(height) as f32
 }
 
+/// The pixel size the grain model sees, in f64 as upstream computes it: the
+/// particle counts scale with its square.
+pub fn grain_pixel_size_um(params: &RuntimeParams, width: u32, height: u32) -> f64 {
+    params.camera.film_format_mm as f64 * 1000.0 / width.max(height) as f64
+}
+
+
 /// The auto-exposure metering frame: upstream's `_compute_small_preview`
 /// (`runtime/services/resize.py`), which `ResizingService.crop_and_rescale`
 /// takes from the full frame before any crop or resize, so the metered
@@ -542,31 +549,19 @@ pub fn develop(
 
     // Log exposure has been consumed/released before allocating grain scratch.
     crate::pipeline::dump_if_env("SPEKTRAFILM_DUMP_FILM_PRE_GRAIN", &density_cmy);
-    // Grain
-    let grain = &params.film_render.grain;
-    if grain.active {
+    // Grain: upstream experimental's multilayer model on the per-sub-layer
+    // curves (`crate::grain` resolves the stock preset and the curves).
+    if crate::grain::grain_active(params) {
         let t = Instant::now();
-        // Use f64 throughout — Python reads these from JSON as f64; the
-        // f32 storage in `GrainParams` would otherwise truncate to ~7
-        // decimals and shift every Poisson lambda by ~5e-8, producing a
-        // visibly different grain pattern.
-        let norm_curves_f64 = spektrafilm_model::density_curves::normalize_density_curves_f64(
-            &film.density_curves_f64(),
-        );
-        let density_max = spektrafilm_model::density_curves::max_density_f64(&norm_curves_f64);
-        density_cmy = spektrafilm_model::grain::apply_grain_to_density(
+        let pixel_size_um = grain_pixel_size_um(params, density_cmy.width, density_cmy.height);
+        density_cmy = spektrafilm_model::grain::apply_grain(
             density_cmy,
-            pix_um,
-            grain.agx_particle_area_um2,
-            grain.agx_particle_scale,
-            grain.density_min,
-            density_max,
-            grain.uniformity,
-            grain.blur,
-            grain.n_sub_layers,
-            grain.monochrome,
+            pixel_size_um,
+            &crate::grain::grain_settings(film, &params.film_render.grain),
+            &crate::grain::grain_curves(film),
+            film.is_positive(),
+            params.film_render.grain.monochrome,
             params.settings.serial_grain,
-            backend,
         );
         print_stage_timing(stage_timings, "filming_develop.grain", t);
     }

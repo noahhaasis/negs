@@ -112,6 +112,34 @@ pub struct Stock {
     pub bw: bool,
     pub target: String,
     pub times: Vec<f64>,
+    /// The resolved grain preset, per field of `GRAIN_STOCK_FIELDS`.
+    pub grain: Value,
+}
+
+/// Grain arrays that stay null until edited, so the film's preset from the
+/// catalog applies (`Stock.grainFields` in `Parameters.swift`).
+pub const GRAIN_STOCK_FIELDS: [&str; 4] = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"];
+
+/// A slider on one lane of a grain preset array:
+/// `film_render.grain.<field>.<index>`.
+pub fn grain_lane(path: &str) -> Option<(&str, usize)> {
+    let (field, index) = path.strip_prefix("film_render.grain.")?.split_once('.')?;
+    GRAIN_STOCK_FIELDS.contains(&field).then_some(())?;
+    Some((field, index.parse().ok()?))
+}
+
+/// B&W films have one emulsion: per-channel lanes past the first are hidden.
+pub fn color_only(path: &str) -> bool {
+    grain_lane(path).is_some_and(|(field, index)| field != "particle_scale_sublayers" && index > 0)
+}
+
+/// The first lane's title on a B&W film, without its colour.
+pub fn bw_title(path: &str) -> Option<&'static str> {
+    match path {
+        "film_render.grain.rms_granularity.0" => Some("Granularity"),
+        "film_render.grain.uniformity.0" => Some("Uniformity"),
+        _ => None,
+    }
 }
 
 impl Stock {
@@ -124,6 +152,7 @@ impl Stock {
             bw: json::boolean(&value["bw"]),
             target: json::string(&value["target_print"]).into(),
             times: value["development_times"].as_array().map(|a| a.iter().map(json::number).collect()).unwrap_or_default(),
+            grain: value["grain"].clone(),
         }
     }
 
@@ -323,10 +352,21 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         section: Section::Film,
         enable: Some("film_render.grain.active"),
         controls: &[
-            slider("Particle area (µm²)", "film_render.grain.agx_particle_area_um2", 0.05, 1.0, 0.01),
-            slider("Post blur", "film_render.grain.blur", 0.0, 3.0, 0.01),
-            toggle("Sublayers", "film_render.grain.sublayers_active"),
-            slider("Sublayer count", "film_render.grain.n_sub_layers", 1.0, 4.0, 1.0),
+            slider("Red granularity", "film_render.grain.rms_granularity.0", 0.0, 80.0, 0.1),
+            slider("Green granularity", "film_render.grain.rms_granularity.1", 0.0, 80.0, 0.1),
+            slider("Blue granularity", "film_render.grain.rms_granularity.2", 0.0, 80.0, 0.1),
+            slider("Red uniformity", "film_render.grain.uniformity.0", 0.0, 1.0, 0.01),
+            slider("Green uniformity", "film_render.grain.uniformity.1", 0.0, 1.0, 0.01),
+            slider("Blue uniformity", "film_render.grain.uniformity.2", 0.0, 1.0, 0.01),
+            slider("Coarse grain size", "film_render.grain.particle_scale_sublayers.0", 0.05, 2.0, 0.01),
+            slider("Medium grain size", "film_render.grain.particle_scale_sublayers.1", 0.05, 2.0, 0.01),
+            slider("Fine grain size", "film_render.grain.particle_scale_sublayers.2", 0.05, 2.0, 0.01),
+            slider("Dye clouds (µm)", "film_render.grain.blur_dye_clouds_um", 0.0, 5.0, 0.01),
+            slider("Blur (px)", "film_render.grain.blur", 0.0, 3.0, 0.01),
+            slider("Sharpen amount", "film_render.grain.mult_usm_amount", 0.0, 3.0, 0.01),
+            slider("Sharpen radius (px)", "film_render.grain.mult_usm_sigma", 0.0, 3.0, 0.01),
+            slider("Clump blur (µm)", "film_render.grain.micro_structure.0", 0.0, 1.0, 0.01),
+            slider("Clump size (nm)", "film_render.grain.micro_structure.1", 0.0, 100.0, 1.0),
         ],
     },
     AdjustmentGroup {
@@ -511,9 +551,21 @@ mod tests {
     }
 
     #[test]
+    fn grain_lanes_follow_the_stock_preset() {
+        assert_eq!(grain_lane("film_render.grain.rms_granularity.2"), Some(("rms_granularity", 2)));
+        assert_eq!(grain_lane("film_render.grain.micro_structure.0"), None);
+        assert_eq!(grain_lane("film_render.grain.blur"), None);
+        assert!(color_only("film_render.grain.uniformity.1"));
+        assert!(!color_only("film_render.grain.uniformity.0"));
+        assert!(!color_only("film_render.grain.particle_scale_sublayers.2"));
+        let lanes: Vec<_> = ADJUSTMENT_GROUPS.iter().flat_map(|g| g.controls).filter_map(|c| grain_lane(c.path())).collect();
+        assert_eq!(lanes.len(), 9);
+    }
+
+    #[test]
     fn stocks_group_like_the_mac() {
         let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool, target: &str| Stock {
-            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![],
+            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![], grain: Value::Null,
         };
         let films = [
             stock("gold", "Gold", false, false, false, "endura"),

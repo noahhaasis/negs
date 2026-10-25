@@ -5,6 +5,7 @@ pub mod data;
 pub mod enlarger;
 pub mod illuminants;
 pub mod gamut_compression;
+pub mod grain;
 pub mod image_size;
 pub mod input_gamut;
 pub mod lut_export;

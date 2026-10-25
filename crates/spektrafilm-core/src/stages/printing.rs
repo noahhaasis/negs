@@ -109,7 +109,7 @@ fn apply_pchip_lut(
 /// `data_max = nanmax(film.density_curves, axis=0)` per channel.
 /// Mirrors Python `PrintingStage.expose`.
 fn enlarger_lut_bounds(film: &Profile, params: &RuntimeParams) -> ([f64; 3], [f64; 3]) {
-    let gmin = params.film_render.grain.density_min;
+    let gmin = crate::grain::density_min(film, params);
     let data_min = [-gmin[0], -gmin[1], -gmin[2]];
     let mut data_max = [f64::NEG_INFINITY; 3];
     for row in film.density_curves_f64() {
