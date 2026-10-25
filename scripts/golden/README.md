@@ -193,6 +193,22 @@ release. See `docs/windows-agent-handoff.md`.
 
 ## Watch next
 
+- **Manifests are stale for Velvia from ticket 14 (2026-10-25).** The fix ports
+  Python's stock-specific DIR coupler gammas for `fujifilm_velvia_100` and
+  `fujifilm_provia_100f` (`apply_film_specific_params` in
+  `crates/spektrafilm-core/src/pipeline.rs`). Velvia is in `STOCKS`, so every
+  `fujifilm_velvia_100` case (f64, f32 CPU and GPU, `default` and `det`)
+  changes. An `--exact` compare against any manifest in `manifests/` fails on
+  exactly those cases; every other case must still be identical, and anything
+  else that differs is a real regression. Not regenerated yet, on purpose:
+  ticket 15 (GPU accuracy, in progress) may change GPU output again. Once both
+  are merged, regenerate on every machine from that one commit: the Mac
+  (`macos-arm64`, then the Rosetta, UI, backend-report, capacity-guard and
+  pipeline-cache variants with the commands their reports describe) and the
+  Windows box, then re-run `quality` and the cross-machine `compare`, and
+  commit the manifests (not the dumps). Film Curves
+  (`film_render.density_curves_morph`, off by default) doesn't change any case.
+
 - The engine uses Vulkan or Metal only; Windows has no DX12 path (decided
   2026-10-22).
 - The GPU gates come from two vendors (Apple, NVIDIA); AMD, Intel and

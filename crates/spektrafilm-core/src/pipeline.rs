@@ -68,6 +68,25 @@ fn apply_film_specific_params(film: &Profile, params: &mut RuntimeParams) {
         params.film_render.dir_couplers.gamma_interlayer_b_to_rg = [0.168, 0.226];
     }
 
+    // Stock-specific DIR gammas, applied after the type defaults above
+    // (Python's "stock specifics overrides" in `_apply_film_specifics`).
+    let dir = &mut params.film_render.dir_couplers;
+    match film.info.stock.as_deref() {
+        Some("fujifilm_velvia_100") => {
+            dir.gamma_samelayer_rgb = [0.108, 0.072, 0.054];
+            dir.gamma_interlayer_r_to_gb = [0.108, 0.054];
+            dir.gamma_interlayer_g_to_rb = [0.072, 0.054];
+            dir.gamma_interlayer_b_to_rg = [0.054, 0.054];
+        }
+        Some("fujifilm_provia_100f") => {
+            dir.gamma_samelayer_rgb = [0.156, 0.104, 0.078];
+            dir.gamma_interlayer_r_to_gb = [0.156, 0.078];
+            dir.gamma_interlayer_g_to_rb = [0.104, 0.078];
+            dir.gamma_interlayer_b_to_rg = [0.078, 0.078];
+        }
+        _ => {}
+    }
+
     // Monochrome grain is derived from the film, never user-set — clear it
     // for colour so a stray params file can't correlate the colour channels'
     // noise.
