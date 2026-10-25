@@ -1,11 +1,14 @@
-// Final resident-chain post-scan pass: the sRGB OETF in place, unclipped like
-// the CPU scan (linear below 0, the power law above 1). Displays and integer
-// files clip afterwards.
+// Final resident-chain post-scan pass, in place, like the CPU scan's
+// `encode_output`: Python's near-identity RGB_to_RGB matrix, added as
+// `rgb + delta · rgb`, then the sRGB OETF, unclipped (linear below 0, the
+// power law above 1). Displays and integer files clip afterwards.
 
 struct Params {
     n_pixels: u32,
     output_cctf_encoding: u32,
     _pad: vec2<u32>,
+    // Rows of (matrix - identity); w unused.
+    delta: array<vec4<f32>, 3>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -34,8 +37,12 @@ fn main(
     }
     let base = idx * 3u;
     if params.output_cctf_encoding != 0u {
-        rgb[base] = srgb_encode(rgb[base]);
-        rgb[base + 1u] = srgb_encode(rgb[base + 1u]);
-        rgb[base + 2u] = srgb_encode(rgb[base + 2u]);
+        let c = vec3<f32>(rgb[base], rgb[base + 1u], rgb[base + 2u]);
+        let r = c.x + dot(params.delta[0].xyz, c);
+        let g = c.y + dot(params.delta[1].xyz, c);
+        let b = c.z + dot(params.delta[2].xyz, c);
+        rgb[base] = srgb_encode(r);
+        rgb[base + 1u] = srgb_encode(g);
+        rgb[base + 2u] = srgb_encode(b);
     }
 }

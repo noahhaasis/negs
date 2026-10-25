@@ -1321,19 +1321,20 @@ impl Pipeline {
             enlarger_diffusion,
             print_exposure_scale,
             output_cctf_encoding: self.params.io.output_cctf_encoding,
+            output_encode_matrix: stages::scanning::rgb_to_rgb_identity_matrix(
+                &self.params.io.output_color_space,
+            ),
         };
         backend.film_chain_capacity(&params)?;
         Ok(backend.try_run_film_chain(&params))
     }
 
-    /// After the GPU fast path returns linear RGB, apply the sRGB encoding
-    /// the CPU scan ends with, unclipped like it.
+    /// After the GPU fast path returns linear RGB, apply the encoding the CPU
+    /// scan ends with (Python's near-identity `RGB_to_RGB`, then the sRGB
+    /// OETF), unclipped like it.
     fn apply_post_scan(&self, mut rgb: ImageBuf) -> ImageBuf {
-        use rayon::prelude::*;
         if self.params.io.output_cctf_encoding {
-            rgb.data.par_iter_mut().for_each(|v| {
-                *v = spektrafilm_math::precision::srgb_encode(*v);
-            });
+            stages::scanning::encode_output(&mut rgb, &self.params.io.output_color_space);
         }
         rgb
     }

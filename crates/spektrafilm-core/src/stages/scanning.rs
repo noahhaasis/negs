@@ -372,12 +372,20 @@ pub fn scan(
         rgb = spektrafilm_model::diffusion::apply_unsharp_mask(rgb, usm_sigma, usm_amount, backend);
     }
 
-    // CCTF encoding, without a clip: like Python, the scan returns what the
-    // physics produces, highlights above 1 and the unsharp mask's undershoot
-    // below 0 included. `srgb_encode` extends linearly below 0 and follows
-    // the power law above 1, as colour's `eotf_inverse_sRGB` does. Integer
-    // files and displays clip (`pipeline::clip_to_display`, `save.rs`).
-    //
+    if params.io.output_cctf_encoding {
+        encode_output(&mut rgb, &params.io.output_color_space);
+    }
+
+    rgb
+}
+
+/// The scan's CCTF encoding, without a clip: like Python, the scan returns
+/// what the physics produces, highlights above 1 and the unsharp mask's
+/// undershoot below 0 included. `srgb_encode` extends linearly below 0 and
+/// follows the power law above 1, as colour's `eotf_inverse_sRGB` does.
+/// Integer files and displays clip (`pipeline::clip_to_display`, `save.rs`).
+/// The pipeline uses it too when a GPU chain returns linear RGB.
+pub(crate) fn encode_output(rgb: &mut ImageBuf, output_color_space: &str) {
     // Python's `_apply_cctf_encoding` calls
     // `colour.RGB_to_RGB(rgb, output_cs, output_cs, apply_cctf_encoding=True)`,
     // which — even when src == dst — runs `vecmul(M, rgb)` with
@@ -386,23 +394,19 @@ pub fn scan(
     // (because colour-science's sRGB matrix is 4-decimal-rounded so the
     // inverse round-trip isn't exact). This nudges every RGB pixel by
     // ~1e-5 before encoding. We replicate it so the scan-stage output
-    // matches Python bit-for-bit.
-    if params.io.output_cctf_encoding {
-        let m = rgb_to_rgb_identity_matrix(&params.io.output_color_space);
-        rgb.data.par_chunks_exact_mut(3).for_each(|px| {
-            let r = px[0] as f64;
-            let g = px[1] as f64;
-            let b = px[2] as f64;
-            let r2 = m[0][0] * r + m[0][1] * g + m[0][2] * b;
-            let g2 = m[1][0] * r + m[1][1] * g + m[1][2] * b;
-            let b2 = m[2][0] * r + m[2][1] * g + m[2][2] * b;
-            px[0] = spektrafilm_math::precision::srgb_encode(from_f64(r2));
-            px[1] = spektrafilm_math::precision::srgb_encode(from_f64(g2));
-            px[2] = spektrafilm_math::precision::srgb_encode(from_f64(b2));
-        });
-    }
-
-    rgb
+    // matches Python bit-for-bit. The GPU chains apply it as well.
+    let m = rgb_to_rgb_identity_matrix(output_color_space);
+    rgb.data.par_chunks_exact_mut(3).for_each(|px| {
+        let r = px[0] as f64;
+        let g = px[1] as f64;
+        let b = px[2] as f64;
+        let r2 = m[0][0] * r + m[0][1] * g + m[0][2] * b;
+        let g2 = m[1][0] * r + m[1][1] * g + m[1][2] * b;
+        let b2 = m[2][0] * r + m[2][1] * g + m[2][2] * b;
+        px[0] = spektrafilm_math::precision::srgb_encode(from_f64(r2));
+        px[1] = spektrafilm_math::precision::srgb_encode(from_f64(g2));
+        px[2] = spektrafilm_math::precision::srgb_encode(from_f64(b2));
+    });
 }
 
 /// Replicate Python `colour.matrix_RGB_to_RGB(cs, cs, 'CAT02')` —
@@ -411,7 +415,7 @@ pub fn scan(
 /// (CAT02 collapses to identity when src/dst whites match), but the
 /// product of 4-decimal-rounded sRGB matrices isn't exactly the
 /// identity in f64.
-fn rgb_to_rgb_identity_matrix(name: &str) -> [[f64; 3]; 3] {
+pub(crate) fn rgb_to_rgb_identity_matrix(name: &str) -> [[f64; 3]; 3] {
     let xyz_to_rgb = output_colorspace_from_xyz_f64(name);
     let rgb_to_xyz = match name {
         "sRGB" => colorspace::SRGB_TO_XYZ_F64,
