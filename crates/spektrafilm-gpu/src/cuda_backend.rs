@@ -2296,9 +2296,9 @@ impl CudaBackend {
         let cd_dev = self.stream.clone_htod(&cd_flat)?;
         let bd_dev = self.stream.clone_htod(&bd)?;
         let illu_dev = self.stream.clone_htod(&illu_f32)?;
-        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X)?;
-        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y)?;
-        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z)?;
+        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
+        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
+        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
         let mut out_dev = self.alloc_f32(n_pixels as usize * 3)?;
 
         let n_wl_u32 = n_wl as u32;
@@ -2578,9 +2578,9 @@ impl CudaBackend {
         let scan_bd_dev = self.stream.clone_htod(&scan_bd)?;
         let view_illu_dev = self.stream.clone_htod(&view_illu_f32)?;
         let scan_matrix_dev = self.stream.clone_htod(&scan_matrix)?;
-        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X)?;
-        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y)?;
-        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z)?;
+        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
+        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
+        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
         let scan_n_wl = scan_cd_src.len() as u32;
         let scan_norm = p.scan_normalization as f32;
         let (bw_m, bw_q, bw_enable) = match p.bw_xyz_remap {

@@ -933,15 +933,15 @@ impl WgpuBackend {
         let view_illu_buf = mk_storage("view_illu", bytemuck::cast_slice(&view_illu_f32));
         let cmf_x_buf = mk_storage(
             "cmf_x",
-            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_X),
+            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_X_F32),
         );
         let cmf_y_buf = mk_storage(
             "cmf_y",
-            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Y),
+            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Y_F32),
         );
         let cmf_z_buf = mk_storage(
             "cmf_z",
-            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Z),
+            bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Z_F32),
         );
 
         // ── Param structs ────────────────────────────────────────────────
@@ -1957,9 +1957,9 @@ impl ComputeBackend for WgpuBackend {
                 GpuBuffer::storage_ro(bytemuck::cast_slice(&cd_flat)),
                 GpuBuffer::storage_ro(bytemuck::cast_slice(&bd)),
                 GpuBuffer::storage_ro(bytemuck::cast_slice(&illu_f32)),
-                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_X)),
-                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Y)),
-                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Z)),
+                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_X_F32)),
+                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Y_F32)),
+                GpuBuffer::storage_ro(bytemuck::cast_slice(&spektrafilm_math::spectral::CMF_Z_F32)),
                 GpuBuffer::storage_rw(&output_bytes),
             ],
             n_pixels,

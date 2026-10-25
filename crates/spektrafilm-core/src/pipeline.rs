@@ -1044,18 +1044,20 @@ impl Pipeline {
         } else {
             &self.print
         };
-        let viewing_illu_f32 = select_illuminant(&scan_profile.info.viewing_illuminant);
-        let viewing_illu_f32 = &viewing_illu_f32[..];
-        let viewing_illu: Vec<f64> = viewing_illu_f32.iter().map(|&v| v as f64).collect();
+        // The illuminant, normalization and white come from the f64 tables, as
+        // in the CPU scan; the GPU rounds them, and the CMFs, to f32 once.
+        let viewing_illu =
+            select_illuminant_f64(&scan_profile.info.viewing_illuminant)
+                .into_owned();
         let n_wl = if self.params.io.scan_film {
             film_channel_density.len()
         } else {
             print_channel_density.len()
-        };
-        let scan_norm: f64 = (0..n_wl)
-            .map(|i| viewing_illu[i] * spektrafilm_math::spectral::CMF_Y[i] as f64)
-            .sum();
-        let viewing_white = spektrafilm_math::spectral::illuminant_xyz_f64(viewing_illu_f32);
+        }
+        .min(viewing_illu.len())
+        .min(spektrafilm_math::spectral::N_WAVELENGTHS);
+        let (scan_norm, viewing_white) =
+            stages::scanning::scan_normalization_and_white(&viewing_illu, n_wl);
         let output_white = spektrafilm_math::spectral::colorspace_white_xyz_f64(
             &self.params.io.output_color_space,
         );
