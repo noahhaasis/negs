@@ -32,8 +32,8 @@ the hash that the ticket uses.
   more revert, the illuminant fallback described in finding 1 (then ≤ 0.07 8-bit steps).
   So the inventory below accounts for every deterministic difference on these routes.
 - The tools and outputs are in the session scratchpad and were not committed:
-  `ablate.py`, `rust_vs_ablation.py`, `grain_cmp.py`, `cmp_profiles.py`. Phase 1 will turn
-  the useful parts into `scripts/parity/` tooling.
+  `ablate.py`, `rust_vs_ablation.py`, `grain_cmp.py`, `cmp_profiles.py`. Phase 1 turned
+  the first two into `scripts/parity/ablate_experimental.py`.
 
 ## Findings that change the ticket's inventory
 
@@ -372,6 +372,11 @@ Notes on the order:
   manifests are regenerated once, in 16.10.
 
 ## Phase 1 harness changes (for 16.1)
+
+**Done on branch `exp-harness`.** `check_parity.py` runs against 28bf883 (and still
+against main), with named cases, `--experimental-defaults` and one switch per effect.
+The starting failure table and the spatial gaps that predate ticket 16 are in
+`scripts/parity/README.md`. The original list:
 
 `scripts/parity/check_parity.py` assumes main's API:
 
