@@ -20,6 +20,12 @@ pub struct Frame {
     pub height: u32,
     pub photo_width: f64,
     pub photo_height: f64,
+    /// For Image Size readouts: the decoded source and the uncapped working
+    /// frame. Required, so records from before them never restore.
+    pub source_width: f64,
+    pub source_height: f64,
+    pub working_width: f64,
+    pub working_height: f64,
     pub raw: bool,
     #[serde(skip)]
     pub pixels: Vec<u8>,
@@ -89,7 +95,8 @@ impl RenderedPreviewCache {
 }
 
 /// Compare the entire canonical identity, so settings cannot hash-collide.
-/// Crop, rotation and border are applied separately by the restored canvas.
+/// Crop, rotation and border are applied separately by the restored canvas;
+/// with an Image Size target the crop's extent is part of `state.rendered()`.
 pub fn key(source: &Path, state: &EditState, paths: &EnginePaths) -> Option<String> {
     fn stamp(path: &Path) -> Result<String> {
         let m = std::fs::metadata(path)?;
@@ -112,7 +119,7 @@ pub fn key(source: &Path, state: &EditState, paths: &EnginePaths) -> Option<Stri
     let mut files = vec![stamp(source).ok()?, stamp(&paths.helper).ok()?, stamp(&paths.data).ok()?];
     data_stamps(&paths.data, &mut files).ok()?;
     files.sort();
-    serde_json::to_string(&serde_json::json!({"schema": 1, "state": state.rendered(), "files": files})).ok()
+    serde_json::to_string(&serde_json::json!({"schema": 2, "state": state.rendered(), "files": files})).ok()
 }
 
 fn checksum(bytes: &[u8]) -> u64 {
@@ -127,7 +134,12 @@ fn read(file: &Path, key: &str) -> Result<Frame> {
     let end = bytes.iter().take(1_048_576).position(|&b| b == b'\n').ok_or_else(|| anyhow::anyhow!("Invalid cached preview header"))?;
     let Header { key: saved, mut frame, checksum: expected } = serde_json::from_slice(&bytes[..end])?;
     ensure!(saved == key && (1..=8192).contains(&frame.width) && (1..=8192).contains(&frame.height), "Cached preview does not match");
-    ensure!(frame.photo_width.is_finite() && frame.photo_height.is_finite() && frame.photo_width > 0.0 && frame.photo_height > 0.0, "Invalid cached photograph size");
+    ensure!(
+        [frame.photo_width, frame.photo_height, frame.source_width, frame.source_height, frame.working_width, frame.working_height]
+            .iter()
+            .all(|v| v.is_finite() && *v >= 1.0),
+        "Invalid cached photograph size"
+    );
     let pixels = &bytes[end + 1..];
     ensure!(pixels.len() == frame.width as usize * frame.height as usize * 4 && checksum(pixels) == expected, "Invalid cached preview pixels");
     frame.pixels = pixels.to_vec();
@@ -164,13 +176,17 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("frame.cache");
         let pixels = vec![1, 2, 3, 255, 30, 40, 50, 255];
-        let frame = Frame { width: 2, height: 1, photo_width: 4000.0, photo_height: 2000.0, raw: true, pixels: pixels.clone() };
+        let frame = Frame {
+            width: 2, height: 1, photo_width: 4000.0, photo_height: 2000.0, source_width: 2000.0, source_height: 1000.0,
+            working_width: 8000.0, working_height: 4000.0, raw: true, pixels: pixels.clone(),
+        };
         let cache = RenderedPreviewCache::new(file.clone());
         cache.save("settings".into(), frame);
         cache.flush();
         let loaded = read(&file, "settings").unwrap();
         assert_eq!(loaded.pixels, pixels);
         assert_eq!(loaded.photo_width, 4000.0);
+        assert_eq!((loaded.source_width, loaded.working_width), (2000.0, 8000.0));
         assert!(loaded.raw);
         assert!(read(&file, "other settings").is_err());
         let mut bytes = std::fs::read(&file).unwrap();
@@ -203,6 +219,16 @@ mod tests {
         canvas.crop.angle = 2.0;
         canvas.params["io"]["rotate_cw"] = 1.into();
         assert_eq!(key(&source, &canvas, &paths).unwrap(), original);
+        // With a Longest side target the crop's extent is part of the frame.
+        let mut sized = canvas.clone();
+        sized.params["io"]["photo_long_side_px"] = 3000.into();
+        sized.crop.rect = crate::crop::Rect::new(0.1, 0.1, 0.5, 0.5);
+        let sized_key = key(&source, &sized, &paths).unwrap();
+        assert_ne!(sized_key, original);
+        sized.crop.rect.x = 0.4;
+        assert_eq!(key(&source, &sized, &paths).unwrap(), sized_key);
+        sized.crop.rect.width = 0.4;
+        assert_ne!(key(&source, &sized, &paths).unwrap(), sized_key);
         for changed in [
             EditState { film: "other".into(), ..state.clone() },
             EditState { paper: "other".into(), ..state.clone() },
