@@ -5,6 +5,24 @@ It establishes a runnable native interface and initial UI performance evidence.
 It does **not** establish film-engine correctness, full feature parity, export
 behavior, or production readiness.
 
+## Film-strip selection follow-up
+
+Fixed the strip flashing/reloading on photo selection: same-folder navigation
+now keeps the existing thumbnail widgets, only updates the selection highlight,
+and keeps the canvas visible until the new image is ready. Selecting the current
+photo no longer reloads it or clears undo history. Thumbnail work uses a separate
+folder generation so rapid selections neither cancel it nor publish stale images.
+Fast opens do not flash a loading status; that status is delayed by 400 ms.
+
+Release build, two state tests and Clippy pass. The real-desktop AT-SPI suite
+now passes eight checks, including three completed photo switches with unchanged
+thumbnail accessibility-object identities, repeated current-photo clicks with
+working Undo, and rapid selection/reselection rejecting stale loads. Evidence
+is in `target/linux-validation/ui-accessibility/result.json`. The open review
+instance was gracefully restarted to use the fix and restore its UI session.
+The startup measurements below describe the initial prototype build, rather
+than a new timing run for this follow-up.
+
 ## Tested build and machine
 
 - Source commit: `1aa6d08` (`Add native GTK Linux UI preview and desktop performance harness`).
