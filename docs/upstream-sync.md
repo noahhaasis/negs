@@ -1,5 +1,12 @@
 # Python parity audit — 2026-10-16
 
+> **Decision, 2026-10-25: Negs targets upstream `experimental`, not main.** Noah decided that
+> Negs should behave like Python spektrafilm's experimental branch (pinned `28bf883`). The audit
+> below is still accurate: the engine matches main `3bb2c2d` today. The port is planned in
+> `tickets/16-match-upstream-experimental.md` (an untracked folder on the Mac). Until it lands,
+> anything newly ported from upstream should follow experimental's behaviour, and the
+> differences from main should be documented.
+
 This records the audit **before** the subsequent B&W stock port. The
 [B&W handoff](handoff-bw-stocks.md) documents the updated three profiles,
 loading fixes, and additional passing experimental comparisons with gamut
