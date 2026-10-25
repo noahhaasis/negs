@@ -277,12 +277,16 @@ pub enum Adjustment {
     Slider { title: &'static str, path: &'static str, low: f64, high: f64, step: f64 },
     Toggle { title: &'static str, path: &'static str },
     Choice { title: &'static str, path: &'static str, options: &'static [&'static str] },
+    /// Solves the enlarger's M/Y filter shifts so a mid-grey prints neutral.
+    BalancePrint { title: &'static str, help: &'static str },
 }
 
 impl Adjustment {
+    /// The parameter a control edits; empty for the Balance Print button.
     pub fn path(&self) -> &'static str {
         match *self {
             Adjustment::Slider { path, .. } | Adjustment::Toggle { path, .. } | Adjustment::Choice { path, .. } => path,
+            Adjustment::BalancePrint { .. } => "",
         }
     }
 }
@@ -394,6 +398,18 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         ],
     },
     AdjustmentGroup {
+        title: "Film Base",
+        section: Section::Film,
+        enable: Some("film_render.base.active"),
+        controls: &[
+            slider("Density", "film_render.base.scale", 0.0, 2.0, 0.01),
+            slider("Tilt", "film_render.base.tilt", -1.0, 1.0, 0.01),
+            slider("Cyan", "film_render.base.cyan", 0.0, 2.0, 0.01),
+            slider("Magenta", "film_render.base.magenta", 0.0, 2.0, 0.01),
+            slider("Yellow", "film_render.base.yellow", 0.0, 2.0, 0.01),
+        ],
+    },
+    AdjustmentGroup {
         title: "Enlarger",
         section: Section::Print,
         enable: None,
@@ -405,6 +421,21 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
             slider("Preflash exposure", "enlarger.preflash_exposure", 0.0, 0.5, 0.01),
             slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50.0, 50.0, 0.1),
             slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50.0, 50.0, 0.1),
+            Adjustment::BalancePrint {
+                title: "Balance Print",
+                help: "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.",
+            },
+        ],
+    },
+    AdjustmentGroup {
+        title: "Print Base",
+        section: Section::Print,
+        enable: Some("print_render.base.active"),
+        controls: &[
+            slider("Density", "print_render.base.scale", 0.0, 2.0, 0.01),
+            slider("Cyan", "print_render.base.cyan", 0.0, 2.0, 0.01),
+            slider("Magenta", "print_render.base.magenta", 0.0, 2.0, 0.01),
+            slider("Yellow", "print_render.base.yellow", 0.0, 2.0, 0.01),
         ],
     },
     AdjustmentGroup {

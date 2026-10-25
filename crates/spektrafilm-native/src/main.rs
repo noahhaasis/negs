@@ -39,6 +39,13 @@ struct Request {
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 enum Command {
+    /// The enlarger M/Y filter shifts that print a mid-grey neutral with
+    /// these settings (upstream's print balance); image-independent.
+    BalancePrint {
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+    },
     Catalog,
     ExportLut {
         film: String,
@@ -165,6 +172,19 @@ impl Session {
     fn handle(&mut self, request: Request, data: &Path) -> Result<Value> {
         match request.command {
             Command::Catalog => catalog(data),
+            Command::BalancePrint { film, paper, params } => {
+                let started = Instant::now();
+                let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
+                    profile::load_profile_by_name(data, &film)?,
+                    profile::load_profile_by_name(data, &paper)?,
+                    &params,
+                    data,
+                    spektrafilm_core::print_balance::MIDGRAY,
+                )
+                .map_err(anyhow::Error::msg)?;
+                Ok(json!({"m_filter_shift": m, "y_filter_shift": y,
+                          "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0}))
+            }
             Command::ExportLut { film, paper, params, size, output } => {
                 let started = Instant::now();
                 let cube = spektrafilm_core::lut_export::cube(data, &film, &paper, *params, size)

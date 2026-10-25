@@ -35,6 +35,7 @@ const RESET: u16 = 3;
 const CHECK: u16 = 4;
 const COMBO: u16 = 5;
 const HEADER: u16 = 6;
+const ACTION: u16 = 7;
 const TAB_LAB: u16 = 900;
 const TAB_POST: u16 = 901;
 const RESET_ALL: u16 = 902;
@@ -88,6 +89,8 @@ enum Kind {
     DevTime(bool),
     BorderStyles,
     Color(bool),
+    /// The Balance Print button: title, tooltip.
+    BalancePrint(&'static str, &'static str),
 }
 
 struct Row {
@@ -260,6 +263,7 @@ fn rows() -> Vec<Row> {
                 let kind = match *control {
                     Adjustment::Toggle { title, path } => Kind::Toggle(title, path),
                     Adjustment::Choice { title, path, options } => Kind::Choice(title, path, options),
+                    Adjustment::BalancePrint { title, help } => Kind::BalancePrint(title, help),
                     slider => Kind::Slider(slider),
                 };
                 let when = if state::color_only(control.path()) { When::ColorFilm } else { When::Always };
@@ -572,6 +576,11 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             }
             controls.push(c);
         }
+        Kind::BalancePrint(title, help) => {
+            let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
+            super::dialogs::tooltip(c, help);
+            controls.push(c);
+        }
         Kind::LimitPreview => {
             let c = check("Limit preview to 12 MP");
             super::dialogs::tooltip(c, "Develops the preview faster on large photographs. Export keeps the full Image Size.");
@@ -733,6 +742,11 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
             Kind::Toggle(..) | Kind::LimitPreview | Kind::BorderToggle(..) => {
                 positions.push((c[0], x, y + ins.px(3.0), right - x, ins.px(20.0)));
                 ins.px(26.0)
+            }
+            Kind::BalancePrint(..) => {
+                let button = ins.px(120.0).min(right - x);
+                positions.push((c[0], right - button, y + ins.px(3.0), button, ins.px(26.0)));
+                ins.px(34.0)
             }
             Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode => {
                 let label = ins.px(108.0).min((right - x) / 2);
@@ -922,6 +936,10 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
             Kind::LimitPreview => {
                 set_check(c[0], model.state.limit_preview);
                 enable(c[0], on);
+            }
+            Kind::BalancePrint(title, _) => {
+                set_text(c[0], if model.balancing_print { "Balancing…" } else { title });
+                enable(c[0], on && model.can_balance_print());
             }
             Kind::SizeMode => {
                 unsafe {
@@ -1142,6 +1160,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         (Kind::Group { enable: Some(path), .. }, CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::LimitPreview, CHECK) if code == BN_CLICKED => app.model.limit_preview(checked()),
+        (Kind::BalancePrint(..), ACTION) if code == BN_CLICKED => app.model.balance_print(),
         (Kind::SizeMode, COMBO) if code == CBN_SELCHANGE => {
             let longest = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 } == 1;
             app.model.choose_image_size(if longest { state::SizeMode::LongestSide } else { state::SizeMode::Original });
@@ -2089,6 +2108,10 @@ mod tests {
         }).collect();
         for group in ADJUSTMENT_GROUPS {
             for control in group.controls {
+                if let Adjustment::BalancePrint { title, .. } = control {
+                    assert!(rows.iter().any(|r| matches!(r.kind, Kind::BalancePrint(t, _) if t == *title)));
+                    continue;
+                }
                 assert!(paths.contains(&control.path()), "{}", control.path());
             }
         }

@@ -222,6 +222,8 @@ pub struct Model {
     /// The latest edit couldn't be developed; the last good preview stays.
     pub render_failed: bool,
     pub saving: bool,
+    /// A Balance Print solve is running.
+    pub balancing_print: bool,
     pub exporting: bool,
     pub export_started: Instant,
     pub error: Option<String>,
@@ -294,6 +296,7 @@ impl Model {
             shows_activity: false,
             render_failed: false,
             saving: false,
+            balancing_print: false,
             exporting: false,
             export_started: Instant::now(),
             error: None,
@@ -362,6 +365,9 @@ impl Model {
     }
     pub fn can_export_lut(&self) -> bool {
         self.has_catalog() && self.engine.is_some() && !self.saving && !self.exporting && !self.cropping()
+    }
+    pub fn can_balance_print(&self) -> bool {
+        self.has_catalog() && self.engine.is_some() && !self.balancing_print && !self.cropping() && !json::boolean(self.value("io.scan_film"))
     }
     pub fn can_show_original(&self) -> bool {
         self.image.is_some() && !self.cropping()
@@ -1394,6 +1400,39 @@ impl Model {
             return false;
         }
         true
+    }
+
+    /// Solves the enlarger's magenta and yellow shifts so a mid-grey prints
+    /// neutral with the current settings (upstream's print balance), and
+    /// sets them as one undoable edit. Doesn't depend on the photograph.
+    pub fn balance_print(&mut self) {
+        if !self.can_balance_print() {
+            return;
+        }
+        let Some(engine) = self.engine.clone() else { return };
+        let command = json!({"command": "balance_print", "film": self.state.film,
+            "paper": self.state.paper, "params": self.state.params});
+        self.balancing_print = true;
+        self.status = "Balancing print…".into();
+        self.mark(dirty::INSPECTOR | dirty::STATUS);
+        engine.request(command, engine::timeout_for("balance_print"), move |result| {
+            ui::post(move |app: &mut App| {
+                let model = &mut app.model;
+                model.balancing_print = false;
+                match result {
+                    Ok((_, reply)) => {
+                        let (m, y) = (json::number(&reply["m_filter_shift"]), json::number(&reply["y_filter_shift"]));
+                        let mut next = model.state.clone();
+                        json::set(&mut next.params, "enlarger.m_filter_shift", json!(m));
+                        json::set(&mut next.params, "enlarger.y_filter_shift", json!(y));
+                        model.apply(next, "Balance Print");
+                        model.status = format!("Print balanced: magenta {m:.2}, yellow {y:.2}");
+                    }
+                    Err(error) => model.report(&error),
+                }
+                model.mark(dirty::INSPECTOR | dirty::STATUS);
+            });
+        });
     }
 
     pub fn export_lut(&mut self, destination: PathBuf) {
