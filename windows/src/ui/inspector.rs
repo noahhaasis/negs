@@ -73,7 +73,7 @@ enum Kind {
     BorderSlider(&'static str, BorderWidth),
     Toggle(&'static str, &'static str),
     LimitPreview,
-    /// Image Size: Original, Longest side, or an older edit's factor.
+    /// Image Size: Original or Longest side.
     SizeMode,
     LongestSide,
     /// The exported photograph's size.
@@ -404,14 +404,6 @@ fn size_note(model: &Model) -> String {
     String::new()
 }
 
-fn size_mode_titles(model: &Model) -> Vec<String> {
-    let mut titles = vec!["Original".to_string(), "Longest side".to_string()];
-    if let state::SizeMode::Legacy(factor) = model.size_mode() {
-        titles.push(format!("Scaled {} (older edit)", crate::model::percent(factor)));
-    }
-    titles
-}
-
 fn window_text(hwnd: HWND) -> String {
     let mut text = [0u16; 512];
     let n = unsafe { GetWindowTextW(hwnd, &mut text) } as usize;
@@ -584,6 +576,12 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         Kind::SizeMode => {
             controls.push(label("Size", fonts.ui));
             let c = combo(false);
+            for title in ["Original", "Longest side"] {
+                let text = wide(title);
+                unsafe {
+                    SendMessageW(c, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+                }
+            }
             super::dialogs::tooltip(c, "Original develops the photograph’s own pixels. Longest side enlarges or reduces it first, so the cropped photograph has that many pixels on its longest side.");
             controls.push(c);
         }
@@ -917,26 +915,8 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 enable(c[0], on);
             }
             Kind::SizeMode => {
-                let titles = size_mode_titles(model);
                 unsafe {
-                    let count = SendMessageW(c[1], CB_GETCOUNT, WPARAM(0), LPARAM(0)).0 as usize;
-                    let last = (count == titles.len()).then(|| {
-                        let mut text = [0u16; 128];
-                        let n = SendMessageW(c[1], CB_GETLBTEXT, WPARAM(count - 1), LPARAM(text.as_mut_ptr() as isize)).0.max(0) as usize;
-                        String::from_utf16_lossy(&text[..n.min(text.len())])
-                    });
-                    if last.as_deref() != titles.last().map(String::as_str) {
-                        SendMessageW(c[1], CB_RESETCONTENT, WPARAM(0), LPARAM(0));
-                        for title in &titles {
-                            let text = wide(title);
-                            SendMessageW(c[1], CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
-                        }
-                    }
-                    let selected = match model.size_mode() {
-                        state::SizeMode::Original => 0,
-                        state::SizeMode::LongestSide => 1,
-                        state::SizeMode::Legacy(_) => 2,
-                    };
+                    let selected = (model.size_mode() == state::SizeMode::LongestSide) as isize;
                     if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != selected {
                         SendMessageW(c[1], CB_SETCURSEL, WPARAM(selected as usize), LPARAM(0));
                     }
@@ -1154,12 +1134,8 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::LimitPreview, CHECK) if code == BN_CLICKED => app.model.limit_preview(checked()),
         (Kind::SizeMode, COMBO) if code == CBN_SELCHANGE => {
-            let index = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 };
-            match index {
-                0 => app.model.choose_image_size(state::SizeMode::Original),
-                1 => app.model.choose_image_size(state::SizeMode::LongestSide),
-                _ => {}
-            }
+            let longest = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 } == 1;
+            app.model.choose_image_size(if longest { state::SizeMode::LongestSide } else { state::SizeMode::Original });
         }
         (Kind::BorderToggle(_, which), CHECK) if code == BN_CLICKED => {
             let on = checked();

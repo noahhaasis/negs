@@ -77,7 +77,8 @@ impl EditState {
 
 /// Image Size (`ImageSize.swift`): the resolution the film develops at. A
 /// Longest side target describes the cropped photograph before borders and
-/// export reductions; older edits may carry a legacy factor instead.
+/// export reductions. The engine's older working-resolution factor stays at 1
+/// in the app; restoring a session resets it.
 pub const SIZE_TARGET: &str = "io.photo_long_side_px";
 pub const SIZE_FACTOR: &str = "io.upscale_factor";
 
@@ -85,18 +86,10 @@ pub const SIZE_FACTOR: &str = "io.upscale_factor";
 pub enum SizeMode {
     Original,
     LongestSide,
-    /// A working-resolution factor other than 1 from an older edit.
-    Legacy(f64),
 }
 
 pub fn size_mode(params: &Value) -> SizeMode {
-    if json::get(params, SIZE_TARGET).is_number() {
-        return SizeMode::LongestSide;
-    }
-    match json::get(params, SIZE_FACTOR).as_f64() {
-        Some(factor) if (factor - 1.0).abs() >= 1e-6 => SizeMode::Legacy(factor),
-        _ => SizeMode::Original,
-    }
+    if size_target(params).is_some() { SizeMode::LongestSide } else { SizeMode::Original }
 }
 
 pub fn size_target(params: &Value) -> Option<u32> {
@@ -106,9 +99,8 @@ pub fn size_target(params: &Value) -> Option<u32> {
 /// The frame `params` develops for a `source` of that size, and the
 /// photograph `crop` cuts from it, with the engine's own resolver.
 pub fn resolve_size(source: (u32, u32), params: &Value, crop: &CropSettings) -> Result<spektrafilm_io::image_size::ResolvedSize, spektrafilm_io::image_size::SizeError> {
-    let factor = json::get(params, SIZE_FACTOR).as_f64().unwrap_or(1.0) as f32;
     let engine = crop.cropped().then(|| crop.engine());
-    spektrafilm_io::image_size::resolve(source, factor, size_target(params), engine.as_ref())
+    spektrafilm_io::image_size::resolve(source, 1.0, size_target(params), engine.as_ref())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -480,7 +472,7 @@ mod tests {
     /// The crop's extent is the render's identity only with a target, as on the Mac.
     #[test]
     fn rendered_state_keeps_the_crop_extent_only_for_longest_side() {
-        let mut state = EditState { params: json!({"io": {"rotate_cw": 0, "upscale_factor": 1.0, "photo_long_side_px": null}}), ..Default::default() };
+        let mut state = EditState { params: json!({"io": {"rotate_cw": 0, "photo_long_side_px": null}}), ..Default::default() };
         let original = state.rendered();
         state.crop.rect = crate::crop::Rect::new(0.1, 0.2, 0.5, 0.5);
         assert_eq!(state.rendered(), original);
@@ -495,14 +487,13 @@ mod tests {
 
     #[test]
     fn image_size_modes_and_resolution_follow_the_engine() {
-        let params = |target: Value, factor: f64| json!({"io": {"photo_long_side_px": target, "upscale_factor": factor}});
-        assert_eq!(size_mode(&params(Value::Null, 1.0)), SizeMode::Original);
-        assert_eq!(size_mode(&params(json!(6000), 1.0)), SizeMode::LongestSide);
-        assert_eq!(size_mode(&params(Value::Null, 0.5)), SizeMode::Legacy(0.5));
+        let params = |target: Value| json!({"io": {"photo_long_side_px": target}});
+        assert_eq!(size_mode(&params(Value::Null)), SizeMode::Original);
+        assert_eq!(size_mode(&params(json!(6000))), SizeMode::LongestSide);
         let centre = CropSettings { rect: crate::crop::Rect::new(0.25, 0.25, 0.5, 0.5), ..Default::default() };
-        let size = resolve_size((6000, 4000), &params(json!(6000), 1.0), &centre).unwrap();
+        let size = resolve_size((6000, 4000), &params(json!(6000)), &centre).unwrap();
         assert_eq!((size.working, size.photo), ((12000, 8000), (6000, 4000)));
-        assert!(resolve_size((6000, 4000), &params(json!(6000), 0.5), &centre).is_err());
+        assert_eq!(resolve_size((6000, 4000), &params(Value::Null), &centre).unwrap().working, (6000, 4000));
     }
 
     #[test]

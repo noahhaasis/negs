@@ -5,7 +5,8 @@ import Foundation
 /// side target (`io.photo_long_side_px`) describes the cropped photograph,
 /// before borders and export reductions; the crop still trims the developed
 /// frame, so only the crop's extent sets the working size, never its position.
-/// Older edits may instead carry a legacy factor (`io.upscale_factor`).
+/// The engine's older working-resolution factor (`io.upscale_factor`) stays
+/// at 1 in the app; restoring a session resets it.
 ///
 /// The helper resolves sizes with `spektrafilm-io::image_size`; this projects
 /// the same frame for readouts and crop drafts without asking it. Keep the
@@ -17,18 +18,9 @@ enum ImageSize {
     /// The largest working frame an enlargement may request, in pixels.
     static let maxWorkingPixels = 128_000_000.0
 
-    enum Mode: Hashable {
-        case original, longestSide
-        /// A working-resolution factor other than 1 from an older edit.
-        case legacy(Double)
-    }
+    enum Mode { case original, longestSide }
 
-    static func mode(of params: JSONValue) -> Mode {
-        if case .number = params[targetPath] { return .longestSide }
-        let factor = params[factorPath]
-        if case .number(let value) = factor, abs(value - 1) >= 1e-6 { return .legacy(value) }
-        return .original
-    }
+    static func mode(of params: JSONValue) -> Mode { target(of: params) == nil ? .original : .longestSide }
 
     static func target(of params: JSONValue) -> Int? {
         if case .number(let value) = params[targetPath] { return Int(value) }
@@ -36,15 +28,8 @@ enum ImageSize {
     }
 
     /// The whole frame the film develops at, for a `source` of that size.
-    /// Matches `image_size::resolve`, including the legacy factor's f32 rounding.
     static func working(source: CGSize, params: JSONValue, crop: CropSettings) -> CGSize {
-        switch mode(of: params) {
-        case .original: return source
-        case .legacy(let factor):
-            let f = Float(factor)
-            return CGSize(width: Double(max((Float(source.width) * f).rounded(), 1)), height: Double(max((Float(source.height) * f).rounded(), 1)))
-        case .longestSide: return working(source: source, target: target(of: params) ?? range.lowerBound, crop: crop)
-        }
+        target(of: params).map { working(source: source, target: $0, crop: crop) } ?? source
     }
 
     /// The frame that gives `crop` a longest side of `target`: scaled from the

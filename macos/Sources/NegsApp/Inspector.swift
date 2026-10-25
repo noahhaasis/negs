@@ -263,7 +263,7 @@ struct ImageSizeSection: View {
     @State private var fieldError: String?
 
     var body: some View {
-        let params: JSONValue = .object(["io": .object(["photo_long_side_px": model.value(ImageSize.targetPath), "upscale_factor": model.value(ImageSize.factorPath)])])
+        let params: JSONValue = .object(["io": .object(["photo_long_side_px": model.value(ImageSize.targetPath)])])
         let mode = ImageSize.mode(of: params)
         let source = model.sourceSize
         let working = source == .zero ? CGSize.zero : ImageSize.working(source: source, params: params, crop: model.crop)
@@ -272,9 +272,6 @@ struct ImageSizeSection: View {
             Picker("Size", selection: Binding(get: { mode }, set: { fieldError = nil; model.chooseImageSize($0) })) {
                 Text("Original").tag(ImageSize.Mode.original)
                 Text("Longest side").tag(ImageSize.Mode.longestSide)
-                if case .legacy(let factor) = mode {
-                    Text("Scaled \(EditorModel.percent(factor)) (older edit)").tag(mode)
-                }
             }
             .help("Original develops the photograph’s own pixels. Longest side enlarges or reduces it first, so the cropped photograph has that many pixels on its longest side.")
             if mode == .longestSide {

@@ -352,7 +352,7 @@ import UniformTypeIdentifiers
         })
     }
     /// Keeps the border, crop, and Image Size's Longest side, like the film,
-    /// paper, and rotation. An older edit's working-resolution factor resets.
+    /// paper, and rotation.
     func reset() {
         guard !cropping else { return }
         var next = state; next.params = defaults; next.limitPreview = false
@@ -401,12 +401,11 @@ import UniformTypeIdentifiers
     func chooseImageSize(_ mode: ImageSize.Mode) {
         switch mode {
         case .original:
-            var next = state; next.params[ImageSize.factorPath] = .number(1); next.params[ImageSize.targetPath] = .null
+            var next = state; next.params[ImageSize.targetPath] = .null
             apply(next, action: "Change Image Size")
         case .longestSide:
             guard imageSizeMode != .longestSide else { return }
             _ = setLongestSide(ImageSize.remembered ?? nativeLongestSide)
-        case .legacy: break
         }
     }
 
@@ -427,7 +426,7 @@ import UniformTypeIdentifiers
             if ImageSize.exceedsLimit(working: working, source: sourceSize) { return ImageSize.limitMessage(working: working) }
         }
         ImageSize.remembered = pixels
-        var next = state; next.params[ImageSize.factorPath] = .number(1); next.params[ImageSize.targetPath] = .number(Double(pixels))
+        var next = state; next.params[ImageSize.targetPath] = .number(Double(pixels))
         apply(next, action: "Change Image Size")
         return nil
     }
@@ -517,6 +516,9 @@ import UniformTypeIdentifiers
         if let session {
             var restored = session.state
             restored.params = defaults.restoring(restored.params)
+            // Sessions from before Image Size may carry the old working-resolution factor.
+            let factor = defaults[ImageSize.factorPath]
+            if factor != .null { restored.params[ImageSize.factorPath] = factor }
             state = restored
             inspectorVisible = session.inspectorVisible
         } else {

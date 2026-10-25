@@ -30,7 +30,7 @@ import XCTest
         try await waitUntil { model.rendering }
         // Change state while the first request is in flight. Only the latest
         // working size and turn may become saveable or replace the canvas.
-        model.set("io.upscale_factor", .number(0.5))
+        model.setLongestSide(48)
         model.rotate()
         try await waitUntil { model.previewCurrent || model.error != nil }
         XCTAssertNil(model.error)
@@ -167,18 +167,6 @@ import XCTest
         XCTAssertEqual(model.state.params[ImageSize.targetPath], .null)
         model.chooseImageSize(.longestSide)
         XCTAssertEqual(ImageSize.target(of: model.state.params), 192)
-        // An older edit's factor shows as such, and the helper rejects mixing it with a target.
-        model.set(ImageSize.factorPath, .number(0.5))
-        XCTAssertEqual(model.imageSizeMode, .longestSide)
-        try await waitUntil { model.renderFailed || model.previewCurrent }
-        XCTAssertTrue(model.renderFailed)
-        XCTAssertTrue(model.error?.contains("factor must be 1") == true, model.error ?? "")
-        model.error = nil
-        model.chooseImageSize(.original)
-        model.set(ImageSize.factorPath, .number(0.5))
-        XCTAssertEqual(model.imageSizeMode, .legacy(0.5))
-        try await settle(model)
-        XCTAssertEqual(model.workingSize, CGSize(width: 48, height: 32))
     }
 
     func testCancelExportPreservesExistingDestinationAndRemovesStaging() async throws {

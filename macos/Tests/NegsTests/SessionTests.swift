@@ -57,13 +57,11 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(merged["camera.removed"], .null)
         XCTAssertEqual(merged["removedGroup"], .null)
         XCTAssertEqual(JSONValue.number(1).restoring(.string("wrong type")), .number(1))
-        // Image Size's target defaults to null; an older session without it
-        // keeps its legacy factor, and a saved target comes back.
-        let engine: JSONValue = .object(["io": .object(["upscale_factor": .number(1), "photo_long_side_px": .null])])
-        let older = engine.restoring(.object(["io": .object(["upscale_factor": .number(0.5)])]))
-        XCTAssertEqual(older["io.photo_long_side_px"], .null)
-        XCTAssertEqual(ImageSize.mode(of: older), .legacy(0.5))
-        let sized = engine.restoring(.object(["io": .object(["upscale_factor": .number(1), "photo_long_side_px": .number(7200)])]))
+        // Image Size's target defaults to null, so an older session without it
+        // opens at Original, and a saved target comes back.
+        let engine: JSONValue = .object(["io": .object(["photo_long_side_px": .null])])
+        XCTAssertEqual(ImageSize.mode(of: engine.restoring(.object(["io": .object([:])]))), .original)
+        let sized = engine.restoring(.object(["io": .object(["photo_long_side_px": .number(7200)])]))
         XCTAssertEqual(ImageSize.target(of: sized), 7200)
     }
 
@@ -100,6 +98,7 @@ final class SessionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: photo) }
         var saved = EditState()
         saved.film = "kodak_trix"
+        // The old working-resolution factor is dropped on restore: the photograph develops at Original.
         saved.params = .object(["io": .object(["scan_film": .bool(true), "rotate_cw": .number(1), "upscale_factor": .number(0.5)]),
                                 "camera": .object(["exposure_compensation_ev": .number(1.5)])])
         saved.crop.rect = CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
@@ -112,7 +111,8 @@ final class SessionTests: XCTestCase {
         while !model.previewCurrent && model.error == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertNil(model.error)
         XCTAssertTrue(model.previewCurrent)
-        XCTAssertEqual(model.imageSize, CGSize(width: 48, height: 32))
+        XCTAssertEqual(model.imageSize, CGSize(width: 96, height: 64))
+        XCTAssertEqual(model.value(ImageSize.factorPath), .number(1))
         XCTAssertEqual(model.imageRotation, 1)
         XCTAssertEqual(model.film, saved.film)
         XCTAssertEqual(model.crop, saved.crop)

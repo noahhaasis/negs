@@ -33,9 +33,8 @@ Resizes before film simulation, including halation and grain.
   and changes nothing. Escape restores the current value.
 - Choosing Longest side offers the last value used (a preference, never part
   of the edit), else the crop's own longest side.
-- An older edit whose working-resolution factor isn't 1 shows **Scaled N%
-  (older edit)** until another mode is chosen; it is never converted into a
-  crop-dependent target. The *Working resolution* slider is gone.
+- The *Working resolution* slider is gone. Sessions saved with it open at
+  Original: the apps reset `io.upscale_factor` to 1 on restore.
 - **Reset Adjustments** keeps the Longest side, like the crop and border.
 - **Photograph** shows the exported photograph. When the preview has fewer
   pixels than the export (the 12 MP limit, or the 8192 px display texture),
@@ -56,8 +55,9 @@ load/decode → resolve size → resize source → film/halation/grain
             → borders/Instagram → optional export reduction
 ```
 
-`io.photo_long_side_px` (default `null`) holds the target; `io.upscale_factor`
-keeps the legacy factor. A target requires factor 1; the CLI and helper reject
+`io.photo_long_side_px` (default `null`) holds the target. The engine keeps
+`io.upscale_factor` for CLI params files and the legacy GUI; the native apps
+leave it at 1. A target requires factor 1; the CLI and helper reject
 the combination instead of multiplying them. Non-finite or non-positive
 factors are rejected too.
 
@@ -156,7 +156,7 @@ in pixels grows 1.85–2.15× at 2×); GPU capacity fallback with a target; LUT
 export unchanged by a target; the helper (sizes, crop-pan reuse of the same
 render, drag frames inside the source, over-limit and mixed requests keeping
 the last render, Original never enlarging); macOS identity, startup cache,
-sessions with old factors, the remembered target, Reset, crop Done/Cancel/limit,
+sessions with an old factor opening at Original, the remembered target, Reset, crop Done/Cancel/limit,
 panning without a render, Undo/Redo, Original, and a Fast export of an enlarged
 preview; and the Windows identity, resolver and cache tests (compiled only).
 
