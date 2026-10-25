@@ -78,18 +78,22 @@ def build_cli():
 
 
 def shared_params(lut, *, defaults=False, dir_couplers=False, halation=False,
-                  auto_exposure=False, scanner_usm=False, lens_blur=None):
+                  auto_exposure=False, scanner_usm=False, lens_blur=None,
+                  input_color_space="sRGB", input_cctf_decoding=False,
+                  output_color_space="sRGB", output_cctf_encoding=False):
     """Overrides for both engines, in the Rust params JSON names.
 
     `defaults` keeps every effect at each engine's defaults except grain and
     glare, which aren't deterministic. Otherwise every spatial or image-global
-    effect is off unless its flag turns it on.
+    effect is off unless its flag turns it on. The colour spaces default to
+    linear sRGB in and out.
     """
     params = {
         "film_render": {"grain": {"active": False}, "glare": {"active": False}},
         "print_render": {"glare": {"active": False}},
-        "io": {"input_color_space": "sRGB", "input_cctf_decoding": False,
-               "output_color_space": "sRGB", "output_cctf_encoding": False},
+        "io": {"input_color_space": input_color_space, "input_cctf_decoding": input_cctf_decoding,
+               "output_color_space": output_color_space,
+               "output_cctf_encoding": output_cctf_encoding},
         "settings": {"use_enlarger_lut": lut, "use_scanner_lut": lut,
                      "lut_resolution": 17, "preview_mode": False},
     }
@@ -206,13 +210,22 @@ def effective_params(params):
 def metrics(actual, expected, atol, np):
     if actual.shape != expected.shape:
         raise ValueError(f"shape mismatch: Rust {actual.shape}, Python {expected.shape}")
-    if not np.isfinite(actual).all() or not np.isfinite(expected).all():
+    # colour's pure-gamma encodings (Adobe RGB, DCI-P3) give NaN below 0, so
+    # an encoded output may hold NaN where the unsharp mask undershoots; Rust
+    # must give NaN in exactly the same places.
+    nan = np.isnan(expected)
+    if not np.array_equal(np.isnan(actual), nan):
+        raise ValueError("NaN in different places")
+    if np.isinf(actual).any() or np.isinf(expected).any():
         raise ValueError("non-finite stage output")
-    diff = np.abs(actual - expected)
+    diff = np.abs(actual - expected)[~nan]
+    if diff.size == 0:
+        diff = np.zeros(1)
     return {
         "max_abs": float(diff.max()), "mean_abs": float(diff.mean()),
         "byte_identical": actual.astype("<f8").tobytes() == expected.astype("<f8").tobytes(),
-        "equal_values_fraction": float(np.mean(actual == expected)),
+        "equal_values_fraction": float(np.mean((actual == expected) | nan)),
+        "nan_count": int(nan.sum()),
         "passed": bool(np.all(diff <= atol)),
     }
 
@@ -399,6 +412,14 @@ def parse_args(argv=None):
     parser.add_argument("--morph-source", type=Path,
                         help="with a main reference: the experimental checkout whose film-chemistry "
                              "morph is baked into the reference's film curves")
+    parser.add_argument("--input-color-space", default="sRGB",
+                        help="colour-science name of the fixtures' colour space, e.g. 'ProPhoto RGB'")
+    parser.add_argument("--input-cctf-decoding", action="store_true",
+                        help="treat the fixtures as CCTF-encoded and let both engines decode them")
+    parser.add_argument("--output-color-space", default="sRGB",
+                        help="colour-science name of the output colour space, e.g. 'Display P3'")
+    parser.add_argument("--output-cctf-encoding", action="store_true",
+                        help="encode rgb_out with the output colour space's CCTF")
     parser.add_argument("--override", type=json.loads, metavar="JSON", default={},
                         help="extra nested params for both engines, in the Rust names, merged "
                              "last, e.g. '{\"film_render\": {\"base\": {\"tilt\": 0.5}}}'")
@@ -479,6 +500,12 @@ def main(argv=None):
         "auto_exposure": args.auto_exposure, "scanner_usm": args.scanner_usm,
         "lens_blur": args.lens_blur,
     }
+    color_spaces = {
+        "input_color_space": args.input_color_space,
+        "input_cctf_decoding": args.input_cctf_decoding,
+        "output_color_space": args.output_color_space,
+        "output_cctf_encoding": args.output_cctf_encoding,
+    }
     report = {
         "python": {**git_info(source), "source": str(source), "import": spektrafilm.__file__,
                    "api": api, "tree_sha256": tree_hash(source / "src/spektrafilm")},
@@ -492,6 +519,7 @@ def main(argv=None):
         **({} if args.case else {"film": args.film, "paper": args.paper, "scan_film": args.scan_film}),
         "fixtures": args.fixtures,
         "effects": effects,
+        "color_spaces": color_spaces,
         "film_development_time": args.film_development_time,
         "print_development_time": args.print_development_time,
         "clip_reference_output": args.clip_reference_output,
@@ -524,7 +552,7 @@ def main(argv=None):
                     overrides = shared_params(
                         lut, defaults=args.experimental_defaults, dir_couplers=args.dir_couplers,
                         halation=args.halation, auto_exposure=args.auto_exposure,
-                        scanner_usm=args.scanner_usm, lens_blur=args.lens_blur)
+                        scanner_usm=args.scanner_usm, lens_blur=args.lens_blur, **color_spaces)
                     if args.color_filter:
                         overrides.setdefault("camera", {})["color_filter"] = args.color_filter
                     if args.gamut_off:
@@ -591,8 +619,8 @@ def main(argv=None):
                         result = metrics(actual, reference, args.atol, np)
                         case["stages"][stage] = result
                         if stage == "rgb_out":
-                            a8 = np.rint(np.clip(actual, 0, 1) * 255).astype(np.int16)
-                            b8 = np.rint(np.clip(expected[stage], 0, 1) * 255).astype(np.int16)
+                            a8 = np.rint(np.clip(np.nan_to_num(actual), 0, 1) * 255).astype(np.int16)
+                            b8 = np.rint(np.clip(np.nan_to_num(expected[stage]), 0, 1) * 255).astype(np.int16)
                             case["quantized_linear_rgb"] = {
                                 "max_levels": int(np.abs(a8 - b8).max()),
                                 "identical_pixels_fraction": float(np.mean(np.all(a8 == b8, axis=2))),
