@@ -1,6 +1,7 @@
 # Experimental port plan (ticket 16, phase 0 audit)
 
-Written 2026-10-25. **Status: approved by Noah on 2026-10-25 (decisions below); porting in sub-branches.**
+Written 2026-10-25. **Status: approved by Noah on 2026-10-25 (decisions below). Wave 1 is
+integrated on `experimental-port` (2026-10-26); see [Integration status](#integration-status-1610).**
 
 Goal: make the Negs engine behave like Python spektrafilm `experimental` at
 `28bf883e1672e884307edc75852549376e13644e` (8 July 2026) instead of main `3bb2c2d`.
@@ -437,3 +438,51 @@ without approval.
 | 1 | `exp-grain` | 16.9 (item 3) | `spektrafilm-model/src/grain.rs`, `grain.wgsl`, grain UI |
 | 2 | `exp-bases` | item 7 | printing/scanning spectral density |
 | 2 | integration | full 28bf883 parity, GPU gate, docs, golden manifests (16.10) | — |
+
+## Integration status (16.10)
+
+On 2026-10-26 `experimental-port` merged `exp-harness`, `exp-data`, `exp-dir`,
+`exp-defaults`, `exp-grain` and `exp-edges`, and added what no branch owned. Against a
+clean 28bf883 tree the f64 CLI passes `check_parity.py --case all --experimental-defaults
+--clip-reference-output` on every case and fixture, LUTs off and on, over the whole image
+(≤ 4.4e-8 at every stage). The ablation marks no item, and Rust matches experimental to
+0 8-bit steps on all five routes. Numbers: `scripts/parity/README.md`, "Result after
+integration".
+
+| Item | Status | Where |
+|---|---|---|
+| 0 illuminants `T`/`K75P` | done (on main); fixture re-frozen from 28bf883 | `illuminants` |
+| 1 model-derived curves, no `density_curve_gamma` | done, CPU and GPU (the GPU gamma fields are gone) | `exp-data`, integration |
+| 2 DIR presets, Langmuir, tail 0.03 | done, CPU, wgpu and CUDA | `exp-dir` |
+| 3 grain (RMS model, presets, sub-layers, USM) | done, CPU, wgpu and CUDA; statistical gates | `exp-grain` |
+| 3 grain follows the Film Curves morph | done: grain uses the morphed sub-layer curves | integration |
+| 4 halation presets | done | `exp-defaults` |
+| 5 white balance, upsampling LUTs, filter database | done; `hanatos2025` default, `arctic2026beta04` and `mallett2019` options | `exp-data` |
+| 5 neutral filters for Negs-only stocks | Tri-X on colour papers derived with upstream's solver; B&W papers keep the fallback | integration |
+| 6 gamut defaults | done | `exp-defaults` |
+| 7 film and print bases, print balance | not started (wave 2) | — |
+| 8 auto-exposure on film raw before crop; camera colour filters | done | `exp-defaults` |
+| 8 diffusion filter float32 FFT | exception: Rust keeps f64 | — |
+| 9 profiles | done (verbatim 28bf883) | `exp-data` |
+| 10 LUT export trims | done; keeps camera exposure, print exposure and its compensation | `exp-defaults` |
+| 3D LUT interpolation | done: tetrahedral, like `apply_lut_3d`'s default (was PCHIP) | integration |
+| blur borders | done: reflect like Python on CPU, wgpu and CUDA | `exp-edges` |
+| GPU scan clamp | fixed: the resident scan clamps once, after the unsharp mask (CUDA clamped before gamut compression too) | integration |
+| 11 film-convert and workflows | separate ticket (17) | — |
+
+Exceptions, each documented where it applies:
+
+- **Output clip.** Rust clips the final output to [0, 1]; Python doesn't. Encoding is
+  monotonic, so integer exports are the same, and Negs has no float export. Removing the
+  clip would only matter for a future float/HDR export.
+- **Diffusion filter** in f64 (Noah, 2026-10-25), off by default.
+- **Grain** is gated statistically, as decided.
+- **Neutral filters on `kodak_2383`.** Re-deriving upstream's own entries with its solver
+  reproduces them within 0.035 filter units except on 2383 (0.12); the Tri-X entries come
+  from the same solver.
+- **The GPU doesn't use the enlarger and scanner LUTs**; it computes per pixel, which is
+  what the LUTs approximate. Both are off by default, in Rust as in Python, so
+  `gpu_vs_ref` compares like with like.
+
+Saved edits keep their saved gamut and grain values; nothing is migrated, and there's no
+density-floor slider.

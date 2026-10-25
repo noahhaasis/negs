@@ -193,17 +193,29 @@ release. See `docs/windows-agent-handoff.md`.
 
 ## Watch next
 
-- **Manifests are stale for every DIR case from ticket 16.6 (2026-10-26).**
-  The DIR couplers now follow upstream experimental: per-stock gammas from
-  `data/presets/couplers.toml`, Langmuir saturation and a 0.03 tail weight.
-  Every case with DIR couplers on changes (all colour and B&W films at
-  defaults), on top of ticket 14's Velvia change. Not regenerated on purpose:
-  ticket 16 regenerates the manifests once, in 16.10, on every machine from
-  one commit (the Mac variants, then the Windows box), then re-runs `quality`
-  and the cross-machine `compare`, and commits the manifests (not the dumps).
-  Film Curves (`film_render.density_curves_morph`, off by default) doesn't
-  change any case.
-
+- **Every manifest is stale on `experimental-port` (ticket 16, 2026-10-26).**
+  The engine now follows upstream experimental 28bf883: its profiles and
+  model-derived curves, white balance and neutral print filters, DIR presets
+  with Langmuir saturation, halation presets, gamut defaults, film-raw
+  auto-exposure, multilayer grain, tetrahedral LUTs and reflected blur
+  borders. Every case's hashes change, so every manifest will change:
+  `macos-arm64.json`, `macos-x86_64-rosetta.json`, `macos-ui.json`,
+  `macos-arm64-backend-report.json`, `macos-arm64-capacity-guard.json`,
+  `macos-arm64-pipeline-cache.json` and the Windows set
+  (`windows-gtx1660s-vulkan.json`, `windows-gtx1660s-backend-report.json`,
+  `windows-gtx1660s-capacity-guard.json`,
+  `windows-gtx1660s-vulkan-pipeline-cache.json`, `windows-ui.json`).
+  They aren't regenerated on the branch on purpose. Once it is merged, regenerate
+  them on every machine from that one commit (the Mac variants, then the
+  Windows box), re-run `quality` and the cross-machine `compare`, and commit
+  the manifests (not the dumps). The presets in `scripts/gpu_cpu_quality/params`
+  use the new grain fields.
+- **GPU vs f64 after the port (M1 Pro, `quality`): 76/76 pass**, but with
+  less margin. ΔE00 max 0.045 against a 0.05 gate (`synth_noise` Velvia
+  scan; before the port, 0.0054 for the worst case), p99 ≤ 0.006, at most 1
+  8-bit step. Velvia scans and Vision3 → 2383 have the highest maxima, each on
+  a few pixels; DIR saturation in f32 is the likely cause, not yet confirmed. Check this first
+  on the Windows box.
 - The engine uses Vulkan or Metal only; Windows has no DX12 path (decided
   2026-10-22).
 - The GPU gates come from two vendors (Apple, NVIDIA); AMD, Intel and
