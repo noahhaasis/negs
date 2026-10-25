@@ -23,6 +23,11 @@ Details of the fixes and the after-measurements are in
 [After the fixes](#after-the-fixes-19-october). Everything below that section
 describes the state on 18 October and is kept as the record of what was wrong.
 
+A 25 October re-check (DIR couplers, old film gamma 0.5 and 2.0, Film Curves)
+confirmed these numbers. Larger 8-bit differences seen with viewing glare on
+come from two different random glare fields, not from the engine; see
+[25 October](#25-october-the-8-bit-check-with-glare-on).
+
 The experimental CUDA backend was **not** updated (it can't be tested on this
 machine) and still has the 18 October behaviour.
 
@@ -442,6 +447,89 @@ comparable with the battery numbers above):
 | Z6, 6 MP preview size (incl. CPU resize) | 723 / 740 ms | 600 / 658 ms |
 | Z6, 24 MP full | 1098 / 1106 ms | 753 / 754 ms |
 | Q3, 60 MP full | 3789 / 3813 ms | 2017 / 2025 ms |
+
+## 25 October: the 8-bit check with glare on
+
+A quick check while validating Film Curves compared 8-bit sRGB PNGs from the
+two engines at default settings (grain off, everything else on). It found up
+to 9 steps, 2.9% of pixels over 1 step with the old film gamma
+(`film_render.density_curve_gamma`) at 2.0, and an error that seemed to grow
+with DIR couplers. The cause is the metric, not the GPU: **viewing glare was
+on, and glare is random.** Nothing has regressed since 19 October.
+
+- The CPU draws the glare field from one `StdRng` stream with seed 42
+  (`crates/spektrafilm-model/src/glare.rs`, `compute_random_glare_amount`).
+  The GPU draws it per pixel with PCG and Box–Muller
+  (`crates/spektrafilm-shaders/wgsl/glare_gen.wgsl`). Like grain, they are
+  two realizations of the same distribution. The f32 CPU engine uses the
+  same `StdRng` stream as the f64 one, which is why it matched the
+  reference at 0 mean and at most 1 step with glare on.
+- With the default `percent` 0.03, roughness 0.7 and blur 0.5 px, the field
+  adds about 3e-4 of the illuminant (σ about 2e-4) in linear RGB. In the
+  linear segment of the sRGB curve near black, one unit of linear light is
+  about 3300 codes, so that is about one step of noise, and the lognormal
+  tail reaches up to 19 steps on the test photos. The outliers sat on dark
+  text edges and in deep shadows (reference codes 0–40).
+- Proof, on the chart image (`docs/bw-expansion-review/trix400-d76-8min-source.png`,
+  Portra 400): the reference rendered with glare off plus the GPU's glare
+  field (GPU glare on minus GPU glare off) reproduces the error exactly:
+  mean 0.0626 vs 0.0626 steps, max 7 vs 7, 0.094% over 1 step in both. At
+  gamma 2.0 it's 0.4216 vs 0.4215. The two engines' glare fields have the
+  same mean and spread (2.87e-4 / 1.93e-4) and correlate by at most 0.11.
+- **The apparent DIR amplification is a tone change, not an error.** On the
+  mostly flat grey chart, the ΔE00 mean with glare on is the same with DIR
+  couplers on and off (0.022). The 8-bit mean differs (0.063 vs 0.023)
+  only because the flat background lands at a different distance from a
+  rounding boundary. With the old film gamma at 2.0 and DIR on, both engines
+  render the background at code 30 instead of 127 (96% of pixels below code
+  32), where the glare noise is worth several steps. With DIR off it stays at
+  127, hence 0.036.
+
+The same cases with glare off (`det`: grain and glare off, as on 19 October),
+worst over the images measured: the chart above and, for the rows marked 3,
+DSC_5009 and DSC_4990 at 24 MP. GPU (`spektrafilm`, wgpu) vs `spektrafilm-f64`
+with `SPEKTRAFILM_BACKEND=cpu`. Steps are the largest per-channel difference
+of the saved 8-bit PNGs, ΔE00 is computed from the `--raw-out` float output as
+on 19 October. Velvia's DIR set-up will change with ticket 14 (on CPU and
+GPU alike).
+
+| Setting | Film | Images | Max steps | > 1 step | ΔE00 p99 | ΔE00 max |
+|---|---|---:|---:|---:|---:|---:|
+| Defaults | Portra 400 → Portra Endura | 3 | 1 | 0 | 0.0036 | 0.0045 |
+| Defaults | Gold 200 → Portra Endura | 3 | 1 | 0 | 0.0036 | 0.0044 |
+| Defaults | Tri-X 400 D76 8 min → Ilford MGRC grade 2 | 3 | 1 | 0 | 0.0041 | 0.0048 |
+| Defaults | Velvia 100 (scan) | 3 | 1 | 0 | 0.0037 | 0.0045 |
+| DIR off | all four | 3 | 1 | 0 | 0.0041 | 0.0048 |
+| Halation off | all four | 1 | 1 | 0 | 0.0031 | 0.0035 |
+| Film gamma 2.0 | all four | 3 | 1 | 0 | 0.0041 | 0.0048 |
+| Film gamma 2.0, DIR off | all four | 1 | 1 | 0 | 0.0030 | 0.0033 |
+| Film gamma 0.5 | all four | 1 | 1 | 0 | 0.0033 | 0.0036 |
+
+The CPU f32 engine on the chart, same cases: at most 1 step, ΔE00 max 0.0004.
+The GPU's remaining difference (encoded output up to 1.2e-4, ΔE00 under
+0.005) is the f32 colour pipeline's rounding on the GPU, the same level as
+on 19 October. DIR couplers add nothing measurable to it.
+
+With glare on, for comparison (GPU vs reference, the two photos and four
+films, default settings): 7–19 steps max, 0.05–2.3% of pixels over 1 step,
+ΔE00 p99 0.18–0.41 and max 2.2–5.1. Velvia, scanned directly, is the worst.
+These are two different glare realizations, not engine error, so glare can
+only be compared statistically (see
+[Viewing glare](#viewing-glare-matches)). Making the GPU draw the CPU's exact
+field would mean generating it on the CPU and uploading it.
+
+Film Curves (`film_render.density_curves_morph`, branch
+`worktree-film-gamma-slider`, not on main yet) bakes the gamma into the
+curves. Measured with a copy of that branch, glare off, on the chart and
+DSC_5009, all four films: gamma 0.5 at most 1 step, ΔE00 p99 0.0040 and max 0.0048;
+gamma 2.0 at most 1 step, ΔE00 p99 0.0047 and max 0.018. At 2.0 the f32 CPU
+engine shows the same size of error on the chart (ΔE00 max 0.011, encoded
+3e-4 against the GPU's 2.3e-4), so that part is f32 arithmetic in the
+morphed curves, not the GPU.
+
+**When comparing engines pixel by pixel, switch off both grain and glare**
+(`film_render.glare` on the scan path, `print_render.glare` on the print
+path), as `scripts/gpu_cpu_quality/params/det.json` does.
 
 ## What this does not prove
 
