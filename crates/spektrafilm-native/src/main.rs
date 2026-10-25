@@ -138,11 +138,18 @@ fn catalog(data: &Path) -> Result<Value> {
         }
         let stock = path.file_stem().unwrap().to_string_lossy().into_owned();
         let p = profile::load_profile_by_name(data, &stock)?;
+        // The stock's grain preset, resolved: the apps show it while the
+        // edit leaves a value unset (null).
+        let grain = spektrafilm_core::grain::grain_settings(&p, &Default::default());
         profiles.push(json!({
             "id": stock, "name": p.info.name.as_ref().unwrap_or(&stock),
             "paper": p.info.support == "paper" || p.info.stage == "printing",
             "positive": p.is_positive(), "bw": p.is_bw(),
             "target_print": p.info.target_print, "development_times": p.data.development_time,
+            "grain": {
+                "rms_granularity": grain.rms_granularity, "density_min": grain.density_min,
+                "uniformity": grain.uniformity, "particle_scale_sublayers": grain.particle_scale_sublayers,
+            },
         }));
     }
     profiles.sort_by_key(|p| p["name"].as_str().unwrap_or_default().to_lowercase());
