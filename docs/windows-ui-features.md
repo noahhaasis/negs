@@ -368,8 +368,8 @@ skipped while scanning film directly.")
 - *Color Management*: Output gamut (Off, OKLCh, OKLrab, CAM16-UCS, ACES RGC);
   Input gamut (Off, xy Chromaticity); CAT16 adaptation (checkbox); Spectral
   upsampling (Hanatos 2025, Arctic 2026 (Alpha), Mallett 2019)
-- *Output*: Working resolution 0.1…1, 0.05 → `io.upscale_factor`; Limit
-  preview to 12 MP (app setting, preview only); Encode output as sRGB →
+- *Output*: Limit preview to 12 MP (app setting, preview only; exports keep
+  the full Image Size); Encode output as sRGB →
   `io.output_cctf_encoding`; Use less memory for export →
   `settings.serial_grain`
 
@@ -401,8 +401,20 @@ Exact paths for every group are in `adjustmentGroups` in
   the print development time). Picking a paper resets the print development
   time.
 - **Reset Adjustments:** restores engine defaults on both tabs and turns off
-  *Limit preview*. Keeps film, paper, rotation, crop and border; sets *Scan
-  film directly* from the film. Undoable. Tooltip says so.
+  *Limit preview*. Keeps film, paper, rotation, crop, border and Image Size's
+  Longest side (an older edit's working-resolution factor resets to 1); sets
+  *Scan film directly* from the film. Undoable. Tooltip says so.
+- **Image Size** (Lab, between *Film & Paper* and *Camera*; see
+  [image-size.md](image-size.md)): *Size* is Original or Longest side, plus a
+  read-only "Scaled N% (older edit)" entry while an older edit's
+  `io.upscale_factor` is not 1. *Longest side* (16…65,535 px →
+  `io.photo_long_side_px`, factor set to 1) commits on Enter or focus loss;
+  Esc restores it; an invalid or over-limit value stays in the field with its
+  error and changes nothing. Choosing Longest side offers the last value used
+  (a preference, not part of the edit), else the crop's own longest side.
+  *Photograph* shows the exported, cropped size before borders, from the
+  engine's resolver; a note says when the preview shows fewer pixels. Footer:
+  "Resizes before film simulation, including halation and grain."
 
 On Windows:
 

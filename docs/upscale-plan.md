@@ -1,6 +1,7 @@
 # Early upscale and Image Size — implementation handoff
 
-Status: ready for implementation; no application changes have been made.
+Status: implemented on `early-upscale`; see [image-size.md](image-size.md) for the
+feature, validation results and remaining limitations.
 Prepared 2026-10-25 against Negs `6e70e5e` and Python `spektrafilm@28bf883`.
 
 Work here:
