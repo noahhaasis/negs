@@ -5,7 +5,7 @@ pub mod cuda_backend;
 pub mod wgpu_backend;
 #[cfg(feature = "wgpu-backend")]
 mod pipeline_cache;
-#[cfg(all(feature = "wgpu-backend", any(target_os = "windows", test)))]
+#[cfg(all(feature = "wgpu-backend", any(target_os = "windows", target_os = "linux", test)))]
 mod capacity;
 
 use spektrafilm_math::image::ImageBuf;

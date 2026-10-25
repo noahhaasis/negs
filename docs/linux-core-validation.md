@@ -58,9 +58,63 @@ incorrect response IDs and timeouts. These were first compiled independently
 while another agent still owned the GTK sources; rerun through Cargo after
 the module is integrated.
 
+## Immutable baseline and quality
+
+At bootstrap commit `eed0a98`, copied all six engine/helper/comparison binaries
+and the exact OpenBLAS shared library into
+`target/linux-validation/baseline-bin/`. Their hashes/toolchain are in
+`baseline-provenance.json`. All 62 transferred files match `transfer.json`;
+see `input-integrity.json`. The numerical implementation was unchanged.
+
+The full baseline completed **184 cases / 484 renders, zero render failures**
+(116 f32 CPU, 184 f64, 184 GPU), using `--jobs 3 --threads 4`. Manifest and
+dumps: `target/linux-validation/linux-baseline.json`,
+`target/golden/dumps/linux-baseline/`. Preserve them unchanged.
+
+GPU versus f64 deterministic quality: **76/76 pass** under the existing gates.
+Worst ΔE00 max is 0.005353; worst 8-bit code difference is 1. Report/log:
+`target/linux-validation/linux-quality.{json,log}`.
+
+Historical Mac smoke comparison (49 outputs across 19 cases):
+
+| Engine | Reported statuses |
+|---|---|
+| f64 | 17 PASS, 1 FAIL, 1 FAIL-GRAIN |
+| GPU | 17 PASS, 2 FAIL |
+| f32 CPU | 9 PASS, 2 FAIL-GRAIN |
+
+All f64/GPU failures are the two Velvia cases whose historical reference
+predates the documented DIR-gamma correction. The f32 failures are Velvia
+default and noise/Portra/halation_big with grain. These are not labeled PASS;
+the latter is consistent with the deferred shared-stream CPU grain issue.
+This historical comparison does not prove same-revision cross-platform parity.
+Report: `target/linux-validation/mac-historical-vs-linux.{json,log}`.
+
+## Linux GPU admission and first large render
+
+The existing Windows Vulkan capacity guard now also applies on Linux:
+binding/allocation limits, conservative device-local memory estimate with a
+20% reserve, and padded FFT buffers. It routes rejected work through the
+whole CPU pipeline. Software Vulkan adapters are rejected on Linux so a
+lavapipe CPU adapter cannot be reported as hardware acceleration.
+Metal behavior and Windows admission calculations are unchanged.
+
+Three capacity unit tests and the whole-pipeline CPU fallback/rescale test
+pass. Actual forced-budget fallback and final exact matrices remain to run.
+
+First bounded 24 MP hardware smoke: two processes, three in-process iterations
+each, no diagnostic raw dump. All six GPU-resident pipelines complete and both
+TIFF hashes match. Pipelines: 1111/938/938 ms and 1066/974/976 ms; wall time
+including load/save is 3.68/3.87 s. Whole-device memory samples peak at
+1741/1742 MiB from a 580 MiB baseline. CPU compilation was running concurrently,
+so these are initial functionality/memory observations, not final quiet-machine
+performance measurements. The benchmark's watchdog-events query is Windows-only
+and returns null on Linux; no Linux device-reset claim follows from that field.
+Evidence: `target/linux-validation/core-full-resolution/` and its log.
+
 ## Pending
 
-Immutable full numerical baseline, quality and historical-reference comparison;
-Linux GPU memory admission/fallback; full-resolution/RAW validation; GTK helper
+Final exact baseline comparison; forced GPU memory fallback and Linux device-log
+checks; full-resolution/RAW validation; GTK helper
 integration, exports, cache/session/error/shutdown behavior; production package;
 and final real-desktop functional/startup/performance checks.
