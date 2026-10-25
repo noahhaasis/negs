@@ -557,7 +557,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("negs-image-size-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (input, preview) = (dir.join("input.png"), dir.join("preview.rgba"));
-        let pixels = (0..40 * 30 * 3).map(|i| ((i * 37) % 255) as f32 / 255.0).collect();
+        let pixels = (0..40 * 30 * 3).map(|i| ((i * 37) % 255) as spektrafilm_math::Scalar / 255.0).collect();
         spektrafilm_io::save_image(&ImageBuf::from_data(40, 30, pixels), &input, None).unwrap();
         let mut session = Session::default();
         let mut send = |id, command| session.handle(Request { id, command }, &data);
