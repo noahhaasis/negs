@@ -57,36 +57,9 @@ use crate::spectral_service;
 use crate::stages;
 
 fn apply_film_specific_params(film: &Profile, params: &mut RuntimeParams) {
-    if film.is_positive() {
-        params.film_render.dir_couplers.gamma_samelayer_rgb = [0.12, 0.08, 0.06];
-        params.film_render.dir_couplers.gamma_interlayer_r_to_gb = [0.12, 0.06];
-        params.film_render.dir_couplers.gamma_interlayer_g_to_rb = [0.08, 0.06];
-        params.film_render.dir_couplers.gamma_interlayer_b_to_rg = [0.06, 0.06];
-    } else if film.is_negative() {
-        params.film_render.dir_couplers.gamma_samelayer_rgb = [0.336, 0.319, 0.273];
-        params.film_render.dir_couplers.gamma_interlayer_r_to_gb = [0.353, 0.302];
-        params.film_render.dir_couplers.gamma_interlayer_g_to_rb = [0.154, 0.353];
-        params.film_render.dir_couplers.gamma_interlayer_b_to_rg = [0.168, 0.226];
-    }
-
-    // Stock-specific DIR gammas, applied after the type defaults above
-    // (Python's "stock specifics overrides" in `_apply_film_specifics`).
-    let dir = &mut params.film_render.dir_couplers;
-    match film.info.stock.as_deref() {
-        Some("fujifilm_velvia_100") => {
-            dir.gamma_samelayer_rgb = [0.108, 0.072, 0.054];
-            dir.gamma_interlayer_r_to_gb = [0.108, 0.054];
-            dir.gamma_interlayer_g_to_rb = [0.072, 0.054];
-            dir.gamma_interlayer_b_to_rg = [0.054, 0.054];
-        }
-        Some("fujifilm_provia_100f") => {
-            dir.gamma_samelayer_rgb = [0.156, 0.104, 0.078];
-            dir.gamma_interlayer_r_to_gb = [0.156, 0.078];
-            dir.gamma_interlayer_g_to_rb = [0.104, 0.078];
-            dir.gamma_interlayer_b_to_rg = [0.078, 0.078];
-        }
-        _ => {}
-    }
+    // DIR-coupler gammas from `data/presets/couplers.toml`: class defaults,
+    // the cine branch, then the stock (upstream `_apply_couplers_preset`).
+    crate::couplers_presets::apply_couplers_preset(film, &mut params.film_render.dir_couplers);
 
     // Monochrome grain is derived from the film, never user-set — clear it
     // for colour so a stray params file can't correlate the colour channels'
@@ -103,6 +76,8 @@ fn apply_film_specific_params(film: &Profile, params: &mut RuntimeParams) {
         dir.gamma_interlayer_r_to_gb = [0.0, 0.0];
         dir.gamma_interlayer_g_to_rb = [0.0, 0.0];
         dir.gamma_interlayer_b_to_rg = [0.0, 0.0];
+        dir.langmuir_donor_k_rgb = [dir.langmuir_donor_k_rgb[0]; 3];
+        dir.langmuir_receiver_k_rgb = [dir.langmuir_receiver_k_rgb[0]; 3];
         let g = &mut params.film_render.grain;
         g.agx_particle_scale = [g.agx_particle_scale[0]; 3];
         g.density_min = [g.density_min[0]; 3];
@@ -997,94 +972,46 @@ impl Pipeline {
         };
 
         // DIR couplers in the resident chain. Mirrors CPU
-        // `apply_density_correction`: build the scaled couplers matrix and
-        // pre-compute the "density curves before DIR" once. The shader
-        // re-interpolates these against `log_raw - correction`.
-        // Held in this binding so `&density_curves_0_f64` outlives the
+        // `apply_density_correction`: the same `DirCouplersModel` (scaled
+        // matrix, Langmuir terms, "density curves before DIR") as the CPU
+        // develop. The shaders saturate the donor before the matmul and the
+        // receiver after the diffusion, then re-interpolate these curves
+        // against `log_raw - correction`.
+        // Held in this binding so `&model.density_curves_0` outlives the
         // backend call.
-        let dir_inputs = if self.params.film_render.dir_couplers.active {
+        let dir_inputs = self.params.film_render.dir_couplers.active.then(|| {
             let pix_um = stages::filming::pixel_size_um(
                 self.params.camera.film_format_mm,
                 image.width,
                 image.height,
             );
             let dir = &self.params.film_render.dir_couplers;
-            let matrix = spektrafilm_model::couplers::compute_dir_couplers_matrix(
-                dir.gamma_samelayer_rgb,
-                dir.gamma_interlayer_r_to_gb,
-                dir.gamma_interlayer_g_to_rb,
-                dir.gamma_interlayer_b_to_rg,
-                dir.inhibition_samelayer,
-                dir.inhibition_interlayer,
-            );
-            let mut matrix_scaled = matrix;
-            for row in &mut matrix_scaled {
-                for v in row.iter_mut() {
-                    *v *= dir.amount;
-                }
-            }
-            let film_curves_f32 = self.film.density_curves_f32();
-            let film_log_exp_f32 = self.film.log_exposure_f32();
-            let norm_curves_f32 =
-                spektrafilm_model::density_curves::normalize_density_curves(&film_curves_f32);
-            // Narrow matrix to f32 just for the compute_curves_before_dir helper
-            // (which still operates on f32 density curves from the profile).
-            let matrix_scaled_f32: [[f32; 3]; 3] = [
-                [
-                    matrix_scaled[0][0] as f32,
-                    matrix_scaled[0][1] as f32,
-                    matrix_scaled[0][2] as f32,
-                ],
-                [
-                    matrix_scaled[1][0] as f32,
-                    matrix_scaled[1][1] as f32,
-                    matrix_scaled[1][2] as f32,
-                ],
-                [
-                    matrix_scaled[2][0] as f32,
-                    matrix_scaled[2][1] as f32,
-                    matrix_scaled[2][2] as f32,
-                ],
-            ];
-            let density_curves_0_f32 = spektrafilm_model::couplers::compute_curves_before_dir(
-                &norm_curves_f32,
-                &film_log_exp_f32,
-                &matrix_scaled_f32,
+            let model = stages::filming::dir_couplers_model(
+                dir,
+                &film_curves_norm,
+                &film_log_exp,
                 self.film.is_positive(),
             );
-            let density_curves_0_f64: Vec<[f64; 3]> = density_curves_0_f32
-                .iter()
-                .map(|row| [row[0] as f64, row[1] as f64, row[2] as f64])
-                .collect();
-            let density_max_f32 = spektrafilm_model::density_curves::max_density(&norm_curves_f32);
-            Some((
-                density_curves_0_f64,
-                matrix_scaled,
-                density_max_f32,
-                pix_um,
-                dir.diffusion_size_um,
-                dir.diffusion_tail_um,
-                dir.diffusion_tail_weight,
-                self.film.is_positive(),
-            ))
-        } else {
-            None
-        };
-        let dir_couplers = dir_inputs.as_ref().map(|d| {
+            (model, pix_um, dir)
+        });
+        let dir_couplers = dir_inputs.as_ref().map(|(model, pix_um, dir)| {
             // GPU shader path is f32 — narrow at the boundary.
-            let matrix_f32: [[f32; 3]; 3] = [
-                [d.1[0][0] as f32, d.1[0][1] as f32, d.1[0][2] as f32],
-                [d.1[1][0] as f32, d.1[1][1] as f32, d.1[1][2] as f32],
-                [d.1[2][0] as f32, d.1[2][1] as f32, d.1[2][2] as f32],
-            ];
+            let langmuir =
+                |l: &spektrafilm_model::couplers::Langmuir| spektrafilm_gpu::LangmuirGpuParams {
+                    k: l.k.map(|v| v as f32),
+                    x_ref: l.x_ref.map(|v| v as f32),
+                    saturating: l.k.map(f64::is_finite),
+                };
             spektrafilm_gpu::DirCouplersGpuParams {
-                couplers_matrix_scaled: matrix_f32,
-                density_max: d.2,
-                is_positive: d.7,
-                diffusion_size_px: (d.4 / d.3 as f64) as f32,
-                diffusion_tail_px: (d.5 / d.3 as f64) as f32,
-                diffusion_tail_weight: d.6 as f32,
-                density_curves_0: &d.0,
+                couplers_matrix_scaled: model.matrix.map(|row| row.map(|v| v as f32)),
+                density_max: model.density_max.map(|v| v as f32),
+                is_positive: model.positive,
+                donor: model.donor.as_ref().map(langmuir),
+                receiver: model.receiver.as_ref().map(langmuir),
+                diffusion_size_px: (dir.diffusion_size_um / *pix_um as f64) as f32,
+                diffusion_tail_px: (dir.diffusion_tail_um / *pix_um as f64) as f32,
+                diffusion_tail_weight: dir.diffusion_tail_weight as f32,
+                density_curves_0: &model.density_curves_0,
                 log_exposure: &film_log_exp,
                 // The Film Curves morph is baked into the curves.
                 gamma_factor: 1.0,

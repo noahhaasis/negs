@@ -25,6 +25,7 @@ tracing.workspace = true
 libm.workspace = true
 rustfft.workspace = true
 image.workspace = true
+toml = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cblas = "0.4"
