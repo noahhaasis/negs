@@ -1536,7 +1536,14 @@ impl WgpuBackend {
             .as_ref()
             .map(|_| build_linear_to_log_state(&self.device, n_pixels, &buf_b, self));
         let post_scan_state = p.output_cctf_encoding.then(|| {
-            build_post_scan_state(&self.device, n_pixels, p.output_cctf_encoding, &buf_b, self)
+            build_post_scan_state(
+                &self.device,
+                n_pixels,
+                p.output_cctf_encoding,
+                p.output_encode_delta(),
+                &buf_b,
+                self,
+            )
         });
 
         // ── Single command buffer chaining everything ────────────────────
@@ -3734,6 +3741,7 @@ fn build_post_scan_state(
     device: &wgpu::Device,
     n_pixels: u32,
     output_cctf_encoding: bool,
+    delta: [[f32; 4]; 3],
     img: &wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> InplaceUnaryState {
@@ -3744,6 +3752,7 @@ fn build_post_scan_state(
         n_pixels: u32,
         output_cctf_encoding: u32,
         _pad: [u32; 2],
+        delta: [[f32; 4]; 3],
     }
     let pipe = backend.cached_pipeline(
         include_str!("../../spektrafilm-shaders/wgsl/post_scan.wgsl"),
@@ -3758,6 +3767,7 @@ fn build_post_scan_state(
             n_pixels,
             output_cctf_encoding: u32::from(output_cctf_encoding),
             _pad: [0; 2],
+            delta,
         }),
         usage: wgpu::BufferUsages::UNIFORM,
     });

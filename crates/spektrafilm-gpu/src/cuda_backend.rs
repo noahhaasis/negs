@@ -455,18 +455,24 @@ extern "C" __global__ void scan_spectral_kernel(
     }
 }
 
+// Like the CPU scan's `encode_output`: Python's near-identity RGB_to_RGB
+// matrix, added as rgb + delta · rgb (delta = matrix - identity, rows of
+// four), then the OETF.
 extern "C" __global__ void post_scan_kernel(
     float* __restrict__ rgb,
     unsigned int n_pixels,
-    unsigned int output_cctf_encoding
+    unsigned int output_cctf_encoding,
+    const float* __restrict__ delta
 ) {
     unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid >= n_pixels) return;
     unsigned int base = gid * 3u;
     if (output_cctf_encoding != 0u) {
-        rgb[base] = srgb_encode_fast(rgb[base]);
-        rgb[base + 1u] = srgb_encode_fast(rgb[base + 1u]);
-        rgb[base + 2u] = srgb_encode_fast(rgb[base + 2u]);
+        float c[3] = {rgb[base], rgb[base + 1u], rgb[base + 2u]};
+        for (int i = 0; i < 3; ++i) {
+            float v = c[i] + delta[4 * i] * c[0] + delta[4 * i + 1] * c[1] + delta[4 * i + 2] * c[2];
+            rgb[base + i] = srgb_encode_fast(v);
+        }
     }
 }
 
@@ -2153,10 +2159,12 @@ impl CudaBackend {
         img: &mut CudaSlice<f32>,
         n_pixels: u32,
         output_cctf_encoding: bool,
+        delta: [[f32; 4]; 3],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let encode = if output_cctf_encoding { 1u32 } else { 0u32 };
+        let delta_dev = self.stream.clone_htod(delta.as_flattened())?;
         let mut launch = self.stream.launch_builder(&self.post_scan_kernel);
-        launch.arg(img).arg(&n_pixels).arg(&encode);
+        launch.arg(img).arg(&n_pixels).arg(&encode).arg(&delta_dev);
         unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         Ok(())
     }
@@ -2640,7 +2648,12 @@ impl CudaBackend {
         }
 
         if p.output_cctf_encoding {
-            self.run_post_scan_device(&mut buf_b, n_pixels, p.output_cctf_encoding)?;
+            self.run_post_scan_device(
+                &mut buf_b,
+                n_pixels,
+                p.output_cctf_encoding,
+                p.output_encode_delta(),
+            )?;
         }
 
         let out = self.stream.clone_dtoh(&buf_b)?;
