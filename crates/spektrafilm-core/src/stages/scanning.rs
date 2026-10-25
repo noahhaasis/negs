@@ -313,9 +313,9 @@ pub fn scan(
         // Use the unnormalized integration here — the scaling cancels because we apply M next.
         let mut illu_xyz = [0.0f64; 3];
         for i in 0..n_wl {
-            illu_xyz[0] += illuminant[i] * spectral::CMF_X[i] as f64;
-            illu_xyz[1] += illuminant[i] * spectral::CMF_Y[i] as f64;
-            illu_xyz[2] += illuminant[i] * spectral::CMF_Z[i] as f64;
+            illu_xyz[0] += illuminant[i] * spectral::CMF_X_F64[i];
+            illu_xyz[1] += illuminant[i] * spectral::CMF_Y_F64[i];
+            illu_xyz[2] += illuminant[i] * spectral::CMF_Z_F64[i];
         }
         for c in 0..3 {
             illu_xyz[c] /= normalization;

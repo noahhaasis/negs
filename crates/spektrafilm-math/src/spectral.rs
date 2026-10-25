@@ -973,9 +973,9 @@ pub fn illuminant_xyz(illuminant: &[f32]) -> [f32; 3] {
     let n = illuminant.len().min(N_WAVELENGTHS);
     let mut xyz = [0.0f64; 3];
     for i in 0..n {
-        xyz[0] += illuminant[i] as f64 * CMF_X[i] as f64;
-        xyz[1] += illuminant[i] as f64 * CMF_Y[i] as f64;
-        xyz[2] += illuminant[i] as f64 * CMF_Z[i] as f64;
+        xyz[0] += illuminant[i] as f64 * CMF_X_F64[i];
+        xyz[1] += illuminant[i] as f64 * CMF_Y_F64[i];
+        xyz[2] += illuminant[i] as f64 * CMF_Z_F64[i];
     }
     if xyz[1] > 0.0 {
         let s = 1.0 / xyz[1];
