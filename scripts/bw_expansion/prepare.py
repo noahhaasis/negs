@@ -62,7 +62,7 @@ def reference_gray_spectrum(data_dir):
                            illuminant=white_xy, chromatic_adaptation_transform="CAT16")
     xy = xyz[:2]/xyz.sum()
     tc = np.array([(1-xy[0])**2, xy[1]/(1-xy[0])])
-    lut = np.load(data_dir / "luts/spectral_upsampling/irradiance_xy_tc.npy").astype(float)
+    lut = np.load(data_dir / "luts/spectral_upsampling/hanatos2025_irradiance_xy_tc.npy").astype(float)
     pos = tc*(lut.shape[0]-1)
     base = np.floor(pos).astype(int)
     value = np.zeros(81)
@@ -224,7 +224,7 @@ def main():
                   paper_unexposed_reflectance=10**(-base_paper),
                   paper_maximum_density_reflectance=10**(-float(paper_points[-1, 1])),
                   source_points_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(SOURCES.glob("*.csv"))},
-                  spectral_lut_sha256=hashlib.sha256((args.data_dir / "luts/spectral_upsampling/irradiance_xy_tc.npy").read_bytes()).hexdigest(),
+                  spectral_lut_sha256=hashlib.sha256((args.data_dir / "luts/spectral_upsampling/hanatos2025_irradiance_xy_tc.npy").read_bytes()).hexdigest(),
                   profiles={})
     for kind, points, origin, base in [("film", film_points, film_origin, fcfg["base_density"]), ("paper", paper_points, paper_origin, base_paper)]:
         p = profiles[kind]

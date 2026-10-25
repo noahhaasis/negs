@@ -95,13 +95,14 @@ mod integration_tests {
         }
     }
 
-    /// Full default chain vs upstream 0.3.4 `simulate()` — the post-defaults
-    /// baseline (CAT16, input gamut `xy`, output gamut `cam16ucs`, and the
-    /// model-evaluated print curves are all active here). Reference values
-    /// dumped from upstream `origin/main` (= 0.3.4) with the stochastic /
-    /// spatial effects off and linear sRGB in/out.
+    /// Full default chain vs upstream experimental 28bf883 (CAT16, input
+    /// gamut `xy`, output gamut `cam16ucs`, model-derived curves). Reference
+    /// values from `scripts/parity/exp_data_unit_references.py`: 28bf883's
+    /// pipeline with the stochastic / spatial effects off, linear sRGB in/out,
+    /// and the ticket-16 items this branch doesn't port (gamut defaults and
+    /// centre) kept at Negs' current behaviour.
     #[test]
-    fn full_chain_matches_python_0_3_4_defaults() {
+    fn full_chain_matches_python_experimental() {
         let dir = data_dir();
         let film = profile::load_profile_by_name(&dir, "kodak_portra_400").unwrap();
         let print = profile::load_profile_by_name(&dir, "kodak_portra_endura").unwrap();
@@ -132,9 +133,9 @@ mod integration_tests {
         let img = ImageBuf::from_data(1, 1, vec![from_f64(0.184); 3]);
         let out = pipeline.process(img, &backend);
         let want = [
-            0.17518024973220059,
-            0.17883059767931708,
-            0.18934288118407094,
+            0.18168434872578296,
+            0.18165109490231654,
+            0.1815334493358714,
         ];
         for c in 0..3 {
             let got = out.get(0, 0)[c] as f64;
@@ -155,22 +156,22 @@ mod integration_tests {
         let out = pipeline.process(img, &backend);
         #[rustfmt::skip]
         let want: [[f64; 3]; 16] = [
-            [0.030140578894842104, 0.10482173080681569, 0.16323263024872359],
-            [0.28284244086494625, 0.36230193922267084, 0.42928148064834676],
-            [0.3353451807767468, 0.076427614378209482, 0.13647407034435774],
-            [0.20879086264247579, 0.29459368653984946, 0.36196826709735686],
-            [0.40612358537107524, 0.34267145956453349, 0.098468693348025937],
-            [0.13020451874838482, 0.21646938505071839, 0.28562089684501552],
-            [0.36393816309250704, 0.43921581264848525, 0.49969437202741285],
-            [0.048658768968400892, 0.12737590764642162, 0.19018617795337284],
-            [0.30145661667996704, 0.37870527708934137, 0.44581696264428788],
-            [0.35937910731344802, 0.09909092393180377, 0.16141353541124179],
-            [0.22780229482543857, 0.31345554394629804, 0.37969407564677998],
-            [0.42292203106495652, 0.36564847210885171, 0.12172785269499363],
-            [0.15476048038036888, 0.23926341868289583, 0.30831655353252529],
-            [0.37946779125297414, 0.45406130948472612, 0.51171040229547315],
-            [0.068514332830799163, 0.1501539662811362, 0.21561362102769013],
-            [0.31940096432374643, 0.39473020737167158, 0.46156726106459162],
+            [0.032376316770347, 0.10652646692566108, 0.15814299888279826],
+            [0.29524463655843336, 0.3694247495808824, 0.4237204166054831],
+            [0.3468431375595474, 0.07822039077665163, 0.13024133284612743],
+            [0.22099123444655544, 0.2988841002297578, 0.356874734618922],
+            [0.4201983960013168, 0.34710778612981563, 0.09304640446390064],
+            [0.13886429145461016, 0.21868548143177954, 0.2781940047075912],
+            [0.37743216976827965, 0.4444592967632268, 0.4920634353703614],
+            [0.052509888765679066, 0.13063132998644708, 0.18591466770817738],
+            [0.3135798769252942, 0.38642253672376825, 0.4392258829687226],
+            [0.37022906818202134, 0.10061806317075594, 0.15391198191629965],
+            [0.24159486114934672, 0.31845742397189414, 0.3757881694847447],
+            [0.4360168431769521, 0.3688569348738102, 0.11572887793528597],
+            [0.16132265109775312, 0.2409203704547354, 0.3002687711937394],
+            [0.3923247782689134, 0.45789103453716296, 0.5036896147201078],
+            [0.07481942428620926, 0.1545457388929201, 0.21196056140545308],
+            [0.3312832787229991, 0.4027565580913274, 0.4545184889118128],
         ];
         let mut max_diff = 0.0f64;
         for (i, want_px) in want.iter().enumerate() {
@@ -186,7 +187,7 @@ mod integration_tests {
                 );
             }
         }
-        eprintln!("full-chain 0.3.4 defaults: max diff vs Python {max_diff:.3e}");
+        eprintln!("full chain: max diff vs Python experimental {max_diff:.3e}");
     }
 
     #[test]
@@ -237,7 +238,8 @@ mod integration_tests {
             let mut params = RuntimeParams::default();
             params.camera.exposure_compensation_ev = ev;
             params.enlarger.print_exposure_compensation = compensation;
-            params.film_render.density_curve_gamma = gamma;
+            params.film_render.density_curves_morph.active = gamma != 1.0;
+            params.film_render.density_curves_morph.gamma_factor = gamma;
             let fresh =
                 Pipeline::new_with_spectral(film.clone(), print.clone(), params.clone(), &dir)
                     .unwrap();
@@ -358,7 +360,6 @@ mod debug_tests {
             &film,
             &params,
             &backend,
-            None,
             None,
             &ref_illuminant,
             1.0,

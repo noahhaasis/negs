@@ -30,7 +30,8 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
     ] {
         let mut params = RuntimeParams::default();
         params.camera.exposure_compensation_ev = 0.7;
-        params.film_render.density_curve_gamma = 1.1;
+        params.film_render.density_curves_morph.active = true;
+        params.film_render.density_curves_morph.gamma_factor = 1.1;
         params.film_render.development_time = Some(9.0);
         params.print_render.development_time = Some(4.0);
         params.enlarger.y_filter_shift = 8.0;

@@ -300,9 +300,9 @@ pub fn develop(
     // Mirrors Python `develop_print_morph`: when the profile carries a fitted
     // `density_curves_model`, the print density curves always come from
     // evaluating it (identity evaluation when the morph is inactive, the s023
-    // coupled-gamma morph when active), interpolated at gamma 1. Upstream
-    // 0.3.4 has no stored-curve print path at all; the fallback below covers
-    // model-less custom profiles and evaluation errors.
+    // coupled-gamma morph when active), interpolated at gamma 1. The fallback
+    // below covers model-less profiles and evaluation errors, as upstream
+    // experimental's `printing.py` falls back to the stored curves.
     let morph = &params.print_render.density_curves_morph;
     if let Some(model) = print.data.density_curves_model.as_ref() {
         match crate::print_morph::morph_density_curves(
@@ -323,12 +323,7 @@ pub fn develop(
     // Stored-curve fallback (profiles without a fitted model). Python parity
     // note for this path: print's `develop` uses `develop_simple` directly with
     // RAW (un-normalized) density curves — no nanmin subtraction.
-    backend.density_curve_interp(
-        log_raw_print,
-        &log_exposure,
-        &print.density_curves_f64(),
-        params.print_render.density_curve_gamma as f64,
-    )
+    backend.density_curve_interp(log_raw_print, &log_exposure, &print.density_curves_f64(), 1.0)
 }
 
 /// Full printing stage with pre-calibrated enlarger.
