@@ -4,7 +4,7 @@
 use rayon::prelude::*;
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::pchip3d::{PreparedPchip3d, pchip_interp, prepare_pchip_3d};
+use spektrafilm_math::tetra3d::tetrahedral_interp;
 use spektrafilm_math::precision::from_f64;
 
 use crate::params::RuntimeParams;
@@ -41,9 +41,10 @@ fn build_lut_grid(steps: usize, data_min: [f64; 3], data_max: [f64; 3]) -> Image
 }
 
 /// Run `print_spectral` on a `steps³` grid of CMY inputs spanning
-/// `[data_min, data_max]` per channel, then PCHIP-interpolate the
-/// full image against that LUT. Bit-parity with Python's
-/// `_lut_service.spectral_compute_enlarger(use_lut=True)` path.
+/// `[data_min, data_max]` per channel, then interpolate the full image
+/// tetrahedrally against that LUT. Bit-parity with Python's
+/// `_lut_service.spectral_compute_enlarger(use_lut=True)` path
+/// (experimental's default `apply_lut_3d(method='tetrahedral')`).
 #[allow(clippy::too_many_arguments)]
 fn print_spectral_via_lut(
     cmy_film: ImageBuf,
@@ -69,24 +70,24 @@ fn print_spectral_via_lut(
         preflash,
     );
     // Convert Scalar storage to f64 — no-op cast in precision-f64 mode,
-    // a widening in f32 mode. The PCHIP slopes are computed in f64
-    // regardless to match Python's f64 LUT type.
+    // a widening in f32 mode. The interpolation runs in f64 regardless to
+    // match Python's f64 LUT type.
     let lut_f64: Vec<f64> = lut_image.data.iter().map(|&v| v as f64).collect();
-    let prepared = prepare_pchip_3d(lut_f64, steps);
-    apply_pchip_lut(cmy_film, &prepared, data_min, data_max)
+    apply_lut(cmy_film, &lut_f64, steps, data_min, data_max)
 }
 
-/// Apply a prepared PCHIP LUT to every pixel. Mirrors Python's
+/// Apply a `steps³` LUT to every pixel. Mirrors Python's
 /// `compute_with_lut` normalisation (`(x - xmin) / (xmax - xmin)`)
-/// followed by `_apply_lut_pchip_3d_prepared` (which multiplies by
+/// followed by `_apply_lut_tetrahedral_3d` (which multiplies by
 /// `size - 1` and interpolates). Rayon-parallel per pixel.
-fn apply_pchip_lut(
+fn apply_lut(
     image: ImageBuf,
-    prepared: &PreparedPchip3d,
+    lut: &[f64],
+    steps: usize,
     data_min: [f64; 3],
     data_max: [f64; 3],
 ) -> ImageBuf {
-    let scale = (prepared.size - 1) as f64;
+    let scale = (steps - 1) as f64;
     let inv = [
         scale / (data_max[0] - data_min[0]),
         scale / (data_max[1] - data_min[1]),
@@ -97,7 +98,7 @@ fn apply_pchip_lut(
         let r = (dst[0] as f64 - data_min[0]) * inv[0];
         let g = (dst[1] as f64 - data_min[1]) * inv[1];
         let b = (dst[2] as f64 - data_min[2]) * inv[2];
-        let v = pchip_interp(prepared, r, g, b);
+        let v = tetrahedral_interp(lut, steps, r, g, b);
         dst[0] = from_f64(v[0]);
         dst[1] = from_f64(v[1]);
         dst[2] = from_f64(v[2]);
@@ -192,7 +193,7 @@ pub fn expose_calibrated(
     //
     // If `use_enlarger_lut` is set, evaluate the spectral function on
     // a `lut_resolution³` grid of cmy values (4913 nodes at the
-    // default resolution=17) and PCHIP-interpolate per pixel.
+    // default resolution=17) and interpolate tetrahedrally per pixel.
     // Matches Python's `_lut_service.spectral_compute_enlarger`.
     let mut log_raw_print = if params.settings.use_enlarger_lut {
         let (data_min, data_max) = enlarger_lut_bounds(film, params);

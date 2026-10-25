@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::colorspace;
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::pchip3d::{pchip_interp, prepare_pchip_3d};
+use spektrafilm_math::tetra3d::tetrahedral_interp;
 use spektrafilm_math::precision::{Scalar, from_f64};
 use spektrafilm_math::spectral;
 
@@ -76,18 +76,21 @@ fn scanner_lut_bounds(profile: &Profile, params: &RuntimeParams) -> ([f64; 3], [
     (dm, dx)
 }
 
-/// Build a 17³ log_xyz LUT (matching Python's `cmy_to_log_xyz`),
-/// PCHIP-interpolate per pixel, then apply `10^log_xyz → CAT →
-/// xyz_to_rgb` to get RGB. Glare is added after this returns in RGB
+/// The scan through Python's `cmy_to_log_xyz`, then `10^log_xyz → CAT →
+/// xyz_to_rgb` to get RGB, with the B&W/slide luminance remap on the
+/// pre-CAT XYZ in between. With `lut` (`(data_min, data_max, steps)`),
+/// `log_xyz` comes from a `steps³` LUT interpolated tetrahedrally per pixel
+/// (Python's `use_scanner_lut`); without it, it's computed per pixel, as
+/// Python does with the LUT off. Glare is added after this returns in RGB
 /// space — algebraically equivalent to Python's add_glare-in-XYZ
 /// because the matrices are linear (see comment in `scan()` below).
 ///
 /// This LUTs the *same intermediate quantity* Python LUTs
 /// (`cmy_to_log_xyz`), not the post-`10^x`/post-matrix RGB output —
-/// keeps the PCHIP interpolating the smoother log10-domain surface
-/// for bit-identical parity with Python's LUT path.
+/// interpolating the smoother log10-domain surface, for bit-identical
+/// parity with Python's LUT path.
 #[allow(clippy::too_many_arguments)]
-fn scan_spectral_via_lut(
+fn scan_spectral_log_xyz(
     density_cmy: ImageBuf,
     channel_density: &[[f64; 3]],
     base_density: &[f64],
@@ -95,34 +98,50 @@ fn scan_spectral_via_lut(
     normalization: f64,
     cat: &[[f64; 3]; 3],
     xyz_to_rgb: &[[f64; 3]; 3],
-    _backend: &dyn ComputeBackend,
-    data_min: [f64; 3],
-    data_max: [f64; 3],
-    steps: usize,
+    lut: Option<([f64; 3], [f64; 3], usize)>,
     color_ref: &crate::color_reference::ColorReference,
 ) -> ImageBuf {
-    let grid = build_lut_grid(steps, data_min, data_max);
-    // log_xyz LUT — same function Python LUTs.
-    let lut_log_xyz = spektrafilm_gpu::cpu_backend::scan_log_xyz_cpu(
-        &grid,
-        channel_density,
-        base_density,
-        illuminant,
-        normalization,
-    );
-    let prepared = prepare_pchip_3d(lut_log_xyz, steps);
-    let scale = (steps - 1) as f64;
-    let inv = [
-        scale / (data_max[0] - data_min[0]),
-        scale / (data_max[1] - data_min[1]),
-        scale / (data_max[2] - data_min[2]),
-    ];
+    let log_xyz_of = |image: &ImageBuf| {
+        spektrafilm_gpu::cpu_backend::scan_log_xyz_cpu(
+            image,
+            channel_density,
+            base_density,
+            illuminant,
+            normalization,
+        )
+    };
+    // Exactly per pixel, or a log_xyz LUT — the same function Python LUTs.
+    enum Source {
+        Exact(Vec<f64>),
+        Lut { table: Vec<f64>, steps: usize, data_min: [f64; 3], inv: [f64; 3] },
+    }
+    let source = match lut {
+        None => Source::Exact(log_xyz_of(&density_cmy)),
+        Some((data_min, data_max, steps)) => {
+            let scale = (steps - 1) as f64;
+            Source::Lut {
+                table: log_xyz_of(&build_lut_grid(steps, data_min, data_max)),
+                steps,
+                data_min,
+                inv: [
+                    scale / (data_max[0] - data_min[0]),
+                    scale / (data_max[1] - data_min[1]),
+                    scale / (data_max[2] - data_min[2]),
+                ],
+            }
+        }
+    };
     let mut out = density_cmy;
-    out.data.par_chunks_exact_mut(3).for_each(|dst| {
-        let r = (dst[0] as f64 - data_min[0]) * inv[0];
-        let g = (dst[1] as f64 - data_min[1]) * inv[1];
-        let b = (dst[2] as f64 - data_min[2]) * inv[2];
-        let log_xyz = pchip_interp(&prepared, r, g, b);
+    out.data.par_chunks_exact_mut(3).enumerate().for_each(|(i, dst)| {
+        let log_xyz = match &source {
+            Source::Exact(all) => [all[3 * i], all[3 * i + 1], all[3 * i + 2]],
+            Source::Lut { table, steps, data_min, inv } => {
+                let r = (dst[0] as f64 - data_min[0]) * inv[0];
+                let g = (dst[1] as f64 - data_min[1]) * inv[1];
+                let b = (dst[2] as f64 - data_min[2]) * inv[2];
+                tetrahedral_interp(table, *steps, r, g, b)
+            }
+        };
         // Post-LUT: 10^log_xyz → CAT → xyz_to_rgb, mirroring Python's
         // `_density_to_rgb` AFTER the LUT call. bw_correction and
         // glare run after this returns (RGB space).
@@ -223,17 +242,19 @@ pub fn scan(
     // applies the two matrices in sequence — we pass them separately.
     //
     // `use_scanner_lut` path: evaluate `scan_spectral` on a 17³ CMY
-    // grid and PCHIP-interpolate per pixel. Glare is added in RGB
+    // grid and interpolate tetrahedrally per pixel. Glare is added in RGB
     // space after this returns (the existing post-step at the bottom
     // of this function), so swapping to the LUT path is glare-safe.
     // The faithful B&W/slide luminance remap (color_ref.has_remap) applies
-    // per-pixel on the scan XYZ inside scan_spectral_via_lut — so route
-    // through the LUT path when it's active (the LUT result matches the
-    // direct spectral path to sub-LSB, and only this path exposes the
-    // pre-CAT XYZ hook). Otherwise honour use_scanner_lut.
+    // per-pixel on the scan XYZ inside scan_spectral_log_xyz, the only path
+    // that exposes the pre-CAT XYZ, so it runs whenever the remap is active,
+    // with the LUT only if use_scanner_lut asks for it.
     let mut rgb = if color_ref.has_remap() || params.settings.use_scanner_lut {
-        let (data_min, data_max) = scanner_lut_bounds(profile, params);
-        scan_spectral_via_lut(
+        let lut = params.settings.use_scanner_lut.then(|| {
+            let (data_min, data_max) = scanner_lut_bounds(profile, params);
+            (data_min, data_max, params.settings.lut_resolution as usize)
+        });
+        scan_spectral_log_xyz(
             density_cmy,
             &channel_density,
             &base_density,
@@ -241,10 +262,7 @@ pub fn scan(
             normalization,
             &adapt,
             &base_xyz_to_rgb,
-            backend,
-            data_min,
-            data_max,
-            params.settings.lut_resolution as usize,
+            lut,
             color_ref,
         )
     } else {
