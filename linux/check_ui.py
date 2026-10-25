@@ -71,6 +71,41 @@ with (out / "app.log").open("w") as log:
         (out / "tree.json").write_text(json.dumps(nodes, indent=2) + "\n")
         assert any(n["name"] == "Photograph preview" for n in nodes)
         results.append("Canvas, controls, and actions have names in the platform accessibility tree")
+        def strip_buttons():
+            return {n.get_name(): n for n in tree(app)
+                    if n.get_role() == Atspi.Role.PUSH_BUTTON and n.get_name().endswith(".jpg")}
+        buttons = wait_for(lambda: (items if len(items := strip_buttons()) == 6 else None),
+                           "Film strip did not populate")
+        identities = {name: button.path for name, button in buttons.items()}
+        def showing(name):
+            return any(n.get_role() == Atspi.Role.FRAME and n.get_name().startswith(name + " —")
+                       for n in tree(app))
+        def click_photo(name):
+            assert buttons[name].get_action_iface().do_action(0)
+        # Keep the original accessibility objects: rebuilding the strip would destroy them.
+        for filename in ["DSC_4997.jpg", "DSC_5003.jpg", "DSC_4990.jpg"]:
+            click_photo(filename)
+            wait_for(lambda: showing(filename), f"Photo selection did not open {filename}")
+            assert {name: b.path for name, b in strip_buttons().items()} == identities, "Film strip rebuilt on selection"
+        results.append("Photo switches retain all film-strip buttons and their thumbnails")
+        original_value = value.get_current_value()
+        assert value.set_current_value(1.25)
+        wait_for(lambda: abs(value.get_current_value() - 1.25) < 1e-8, "Edit did not update the value")
+        for _ in range(3):
+            click_photo("DSC_4990.jpg")
+        time.sleep(.4)
+        assert undo.get_action_iface().do_action(0)
+        wait_for(lambda: abs(value.get_current_value() - original_value) < 1e-8,
+                 "Clicking current photo reloaded it and cleared history")
+        results.append("Clicking the current photograph preserves its editing state")
+        click_photo("DSC_4997.jpg")
+        click_photo("DSC_5003.jpg")
+        click_photo("DSC_4990.jpg")
+        time.sleep(.6)
+        assert showing("DSC_4990.jpg"), "A stale photo load replaced the reselected current photo"
+        assert {name: b.path for name, b in strip_buttons().items()} == identities
+        assert all(not b.get_state_set().contains(Atspi.StateType.DEFUNCT) for b in buttons.values())
+        results.append("Rapid selections reject stale loads while retaining the strip")
         focus = f'hl.dsp.focus({{ window = "pid:{p.pid}" }})'
         subprocess.run(["hyprctl", "dispatch", focus], check=True, stdout=subprocess.DEVNULL)
         active = json.loads(subprocess.check_output(["hyprctl", "-j", "activewindow"], text=True))

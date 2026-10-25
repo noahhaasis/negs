@@ -47,6 +47,9 @@ need OpenBLAS, Fortran, or the film engine's dependencies.
 
 - Open dialog, file drop, background preview decoding, error messages and a
   bounded folder strip. The strip opens photos with the current local values.
+  Switching within a folder retains its thumbnail widgets and scroll position;
+  selecting the current photograph preserves its editing state. Thumbnail work
+  has a separate folder generation so rapid photo selections do not cancel it.
 - Native Lab/Post controls, synchronized sliders and number fields, deferred
   inspector construction, and lazily constructed effect sections. An eager
   inspection mode creates all 57 sliders for startup comparisons; the normal

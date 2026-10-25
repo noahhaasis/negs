@@ -186,9 +186,34 @@ impl Editor {
         );
     }
     pub fn open(self: &Rc<Self>, path: PathBuf) {
+        let path = gio::File::for_path(&path).path().unwrap_or(path);
+        if self.pending_path.borrow().as_ref() == Some(&path) {
+            return;
+        }
         let generation = self.generation.get() + 1;
         self.generation.set(generation);
-        self.status.set_text("Loading camera preview…");
+        if self.current_path.borrow().as_ref() == Some(&path) {
+            // Also cancel a different in-flight open if the displayed photo is chosen again.
+            self.pending_path.take();
+            self.select_strip(&path);
+            self.status
+                .set_text("Camera preview · engine not connected");
+            return;
+        }
+        self.pending_path.replace(Some(path.clone()));
+        self.select_strip(&path);
+        glib::timeout_add_local_once(
+            std::time::Duration::from_millis(400),
+            glib::clone!(
+                #[weak(rename_to=ui)]
+                self,
+                move || {
+                    if ui.generation.get() == generation && ui.pending_path.borrow().is_some() {
+                        ui.status.set_text("Loading camera preview…");
+                    }
+                }
+            ),
+        );
         let ui = self.clone();
         glib::MainContext::default().spawn_local(async move {
             let path2 = path.clone();
@@ -196,6 +221,7 @@ impl Editor {
             if ui.generation.get() != generation {
                 return;
             }
+            ui.pending_path.take();
             match result {
                 Ok(Ok(photo)) => {
                     let format = if photo.alpha {
@@ -252,26 +278,51 @@ impl Editor {
                 Ok(Err(e)) => {
                     ui.status.set_text("Could not open photograph");
                     ui.toast.add_toast(adw::Toast::new(&e));
+                    if let Some(path) = ui.current_path.borrow().as_ref() {
+                        ui.select_strip(path);
+                    }
                 }
                 Err(_) => {
                     ui.status.set_text("Image decoder stopped");
+                    if let Some(path) = ui.current_path.borrow().as_ref() {
+                        ui.select_strip(path);
+                    }
                 }
             }
         });
     }
+    fn select_strip(&self, path: &std::path::Path) {
+        for (item, button) in self.strip_entries.borrow().iter() {
+            if item == path {
+                button.add_css_class("selected");
+            } else {
+                button.remove_css_class("selected");
+            }
+        }
+    }
     fn load_strip(self: &Rc<Self>, path: PathBuf) {
+        self.select_strip(&path);
+        let folder = path.parent().map(std::path::Path::to_path_buf);
+        if self.strip_folder.borrow().as_ref() == folder.as_ref() {
+            return;
+        }
+        self.strip_folder.replace(folder);
         let ui = self.clone();
-        let generation = self.generation.get();
+        // A photo switch must not cancel thumbnail work in the same folder.
+        let generation = self.strip_generation.get() + 1;
+        self.strip_generation.set(generation);
         glib::MainContext::default().spawn_local(async move {
             let paths = gio::spawn_blocking(move || crate::photo::folder(&path))
                 .await
                 .unwrap_or_default();
-            if ui.generation.get() != generation {
+            if ui.strip_generation.get() != generation {
                 return;
             }
             while let Some(child) = ui.strip.first_child() {
                 ui.strip.remove(&child);
             }
+            ui.strip_entries.borrow_mut().clear();
+            let mut thumbnails = Vec::new();
             // Bound this visual spike to 24 files. The production strip will be virtualized.
             for path in paths.into_iter().take(24) {
                 let button = gtk::Button::new();
@@ -288,9 +339,9 @@ impl Editor {
                 cell.append(&label);
                 button.set_child(Some(&cell));
                 button.set_tooltip_text(Some(&path.to_string_lossy()));
-                if ui.current_path.borrow().as_ref() == Some(&path) {
-                    button.add_css_class("selected");
-                }
+                button.update_property(&[gtk::accessible::Property::Label(
+                    &path.file_name().unwrap_or_default().to_string_lossy(),
+                )]);
                 let p = path.clone();
                 button.connect_clicked(glib::clone!(
                     #[weak]
@@ -298,8 +349,20 @@ impl Editor {
                     move |_| ui.open(p.clone())
                 ));
                 ui.strip.append(&button);
+                ui.strip_entries.borrow_mut().push((path.clone(), button));
+                thumbnails.push((path, picture));
+            }
+            if let Some(path) = ui
+                .pending_path
+                .borrow()
+                .as_ref()
+                .or(ui.current_path.borrow().as_ref())
+            {
+                ui.select_strip(path);
+            }
+            for (path, picture) in thumbnails {
                 let decoded = gio::spawn_blocking(move || crate::photo::decode(&path, 192)).await;
-                if ui.generation.get() != generation {
+                if ui.strip_generation.get() != generation {
                     return;
                 }
                 if let Ok(Ok(photo)) = decoded {
