@@ -407,6 +407,14 @@ fn add_micro_structure(
     }
 }
 
+/// A parallel f64 sum whose rounding doesn't depend on rayon's work
+/// splitting: fixed chunks, then their sums in order. (A plain `par_iter().sum()`
+/// regroups the additions from run to run.)
+fn deterministic_sum(values: &[Scalar]) -> f64 {
+    let chunks: Vec<f64> = values.par_chunks(1 << 14).map(|c| c.iter().map(|&v| to_f64(v)).sum::<f64>()).collect();
+    chunks.iter().sum()
+}
+
 /// Upstream `apply_multiplicative_unsharp_mask` on one channel, in place:
 /// `D' = D · (D / G_σ*D)^amount`, then one scale factor so the channel's
 /// total density (its dye mass) is unchanged. The sums are image-global.
@@ -426,12 +434,12 @@ pub fn multiplicative_unsharp_mask(
     }
     let mut blur = plane.clone();
     blur_plane(&mut blur, width, height, sigma);
-    let mass: f64 = plane.par_iter().map(|&d| to_f64(d)).sum();
+    let mass = deterministic_sum(plane);
     let (eps, a, a1) = (from_f64(EPS), from_f64(amount), from_f64(1.0 + amount));
     blur.par_iter_mut().zip(plane.par_iter()).for_each(|(g, &d)| {
         *g = if d <= ZERO { ZERO } else { d.max(eps).powf(a1) / g.max(eps).powf(a) };
     });
-    let sharpened: f64 = blur.par_iter().map(|&v| to_f64(v)).sum();
+    let sharpened = deterministic_sum(&blur);
     if sharpened > 0.0 {
         let scale = from_f64(mass / sharpened);
         blur.par_iter_mut().for_each(|v| *v *= scale);
