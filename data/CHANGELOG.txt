@@ -10,8 +10,10 @@ differ from upstream, as that license asks.
 
 - profiles/: the colour and B&W profiles are verbatim copies of 28bf883's
   src/spektrafilm/data/profiles. Unchanged.
-- filters/: neutral_print_filters.json and the dichroic, heat-absorbing and
-  lens-transmission data are verbatim copies of 28bf883's. Unchanged.
+- filters/: the dichroic, heat-absorbing and lens-transmission data are
+  verbatim copies of 28bf883's. Unchanged. neutral_print_filters.json is
+  28bf883's with Negs-only entries added (below); upstream's entries are
+  unchanged.
 - luts/spectral_upsampling/: hanatos2025_irradiance_xy_tc.{npy,toml},
   arctic2026beta04_reflectance_xy_tc.{npy,toml},
   mallett2019_reflectance_xy_tc.{npy,toml} and
@@ -25,5 +27,11 @@ Negs-only data, not from spektrafilm:
 - profiles/kodak_trix400_d76_8min.json and
   profiles/ilford_mgrc_deluxe_grade2.json are new preparations from Kodak and
   Ilford datasheets, in spektrafilm's profile format. Sources and method:
-  profile-sources/bw-expansion/README.md. They have no entries in
-  neutral_print_filters.json, so they print with the C0 M50 Y50 fallback.
+  profile-sources/bw-expansion/README.md.
+- filters/neutral_print_filters.json: entries for kodak_trix400_d76_8min on
+  every colour paper under TH-KG3, derived with upstream's own solver
+  (runtime/print_balance.solve_neutral_filter_shifts at 28bf883) by
+  scripts/derive_neutral_print_filters.py, which first re-derives upstream's
+  entries for Double-X and three colour negatives to check the method. B&W
+  papers (kodak_2302, ilford_mgrc_deluxe_grade2) have no colour to balance,
+  so they get no entries and keep the C0 M50 Y50 fallback.
