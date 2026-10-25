@@ -2237,7 +2237,7 @@ impl CudaBackend {
         } else {
             0u32
         };
-        let gamma_inv = (1.0 / dp.gamma_factor) as f32;
+        let gamma_inv = 1.0f32;
         let mut launch = self.stream.launch_builder(&self.density_kernel);
         launch
             .arg(log_raw)
@@ -2450,7 +2450,8 @@ impl CudaBackend {
         } else {
             0u32
         };
-        let film_gamma_inv = (1.0 / p.film_gamma) as f32;
+        // Unit gamma: Film Curves is baked into the curves.
+        let film_gamma_inv = 1.0f32;
         {
             let mut launch = self.stream.launch_builder(&self.density_kernel);
             launch
@@ -2536,7 +2537,7 @@ impl CudaBackend {
             } else {
                 0u32
             };
-            let print_gamma_inv = (1.0 / p.print_gamma) as f32;
+            let print_gamma_inv = 1.0f32;
             {
                 let mut launch = self.stream.launch_builder(&self.density_kernel);
                 launch
