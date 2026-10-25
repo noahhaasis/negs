@@ -403,8 +403,9 @@ def parse_args(argv=None):
                         help="extra nested params for both engines, in the Rust names, merged "
                              "last, e.g. '{\"film_render\": {\"base\": {\"tilt\": 0.5}}}'")
     parser.add_argument("--clip-reference-output", action="store_true",
-                        help="clip Python's rgb_out to [0, 1] before comparing, as Rust's scan "
-                             "does; upstream leaves unsharp-mask overshoot unclipped")
+                        help="clip Python's rgb_out to [0, 1] before comparing, for older Rust "
+                             "builds whose scan clipped (main); upstream and current Rust leave "
+                             "unsharp-mask overshoot unclipped")
     parser.add_argument("--lut", choices=["off", "on", "both"], default="both")
     parser.add_argument("--no-arrays", action="store_true",
                         help="delete each case's images and stage arrays once compared "

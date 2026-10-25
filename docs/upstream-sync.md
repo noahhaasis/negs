@@ -8,8 +8,7 @@
 > engine matches 28bf883 at every stage within 4.4e-8, over the whole image, on Portra 400 →
 > Endura, Gold 200 → Crystal Archive II, Provia 100F scan, Double-X → 2302 and Vision3 500T →
 > 2383, LUTs off and on, at experimental's defaults (grain and glare off) and per effect.
-> Exceptions: Rust clips the output to [0, 1] (integer exports are unaffected), the
-> diffusion filter stays f64, and grain is gated statistically. Results:
+> Exceptions: the diffusion filter stays f64, and grain is gated statistically. Results:
 > `scripts/parity/README.md`, "Result after integration". Until the branch is merged, main
 > still matches upstream main `3bb2c2d` as audited below; after it, this audit is
 > historical.

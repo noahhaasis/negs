@@ -443,9 +443,9 @@ without approval.
 
 On 2026-10-26 `experimental-port` merged `exp-harness`, `exp-data`, `exp-dir`,
 `exp-defaults`, `exp-grain` and `exp-edges`, and added what no branch owned. Against a
-clean 28bf883 tree the f64 CLI passes `check_parity.py --case all --experimental-defaults
---clip-reference-output` on every case and fixture, LUTs off and on, over the whole image
-(≤ 4.4e-8 at every stage). The ablation marks no item, and Rust matches experimental to
+clean 28bf883 tree the f64 CLI passes `check_parity.py --case all --experimental-defaults`
+on every case and fixture, LUTs off and on, over the whole image (≤ 4.4e-8 at every stage),
+with the scan output unclipped on both sides. The ablation marks no item, and Rust matches experimental to
 0 8-bit steps on all five routes. Numbers: `scripts/parity/README.md`, "Result after
 integration".
 
@@ -468,14 +468,11 @@ integration".
 | 10 LUT export trims | done; keeps camera exposure, print exposure and its compensation | `exp-defaults` |
 | 3D LUT interpolation | done: tetrahedral, like `apply_lut_3d`'s default (was PCHIP) | integration |
 | blur borders | done: reflect like Python on CPU, wgpu and CUDA | `exp-edges` |
-| GPU scan clamp | fixed: the resident scan clamps once, after the unsharp mask (CUDA clamped before gamut compression too) | integration |
+| scan output clip | removed: the scan stays unclipped like Python on CPU, wgpu and CUDA; displays and 8/16-bit files clip, `display_range` in `pipeline.rs` | integration |
 | 11 film-convert and workflows | separate ticket (17) | — |
 
 Exceptions, each documented where it applies:
 
-- **Output clip.** Rust clips the final output to [0, 1]; Python doesn't. Encoding is
-  monotonic, so integer exports are the same, and Negs has no float export. Removing the
-  clip would only matter for a future float/HDR export.
 - **Diffusion filter** in f64 (Noah, 2026-10-25), off by default.
 - **Grain** is gated statistically, as decided.
 - **Neutral filters on `kodak_2383`.** Re-deriving upstream's own entries with its solver

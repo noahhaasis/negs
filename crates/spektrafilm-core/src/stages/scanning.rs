@@ -169,6 +169,37 @@ fn scan_spectral_log_xyz(
     out
 }
 
+/// The scan's luminance normalization `Σ illuminant·ȳ` and the viewing
+/// illuminant's white (Y = 1), in f64 from the exact CMFs. Shared with the
+/// GPU-resident chain's set-up so both scans normalise alike.
+///
+/// The white is computed at runtime (matches Python's
+/// `XYZ_to_xy(integrate(illu, CMFs)/norm) → xy_to_xyZ`). The pre-computed
+/// `illuminant_xyz_f64` constant is 3 ULPs off the runtime value because
+/// Python's `contract(...)/norm` rounds Y slightly off 1.0, which xy_to_xyY
+/// then corrects — replaying that chain is bit-exact.
+pub(crate) fn scan_normalization_and_white(illuminant: &[f64], n_wl: usize) -> (f64, [f64; 3]) {
+    // Python parity (81-element sum), with the f64 CMF_Y for the same
+    // precision reason as the illuminant.
+    let normalization: f64 = (0..n_wl)
+        .map(|i| illuminant[i] * spectral::CMF_Y_F64[i])
+        .sum();
+    let mut illu_xyz_runtime = [0.0f64; 3];
+    for i in 0..n_wl {
+        illu_xyz_runtime[0] += illuminant[i] * spectral::CMF_X_F64[i];
+        illu_xyz_runtime[1] += illuminant[i] * spectral::CMF_Y_F64[i];
+        illu_xyz_runtime[2] += illuminant[i] * spectral::CMF_Z_F64[i];
+    }
+    for c in 0..3 {
+        illu_xyz_runtime[c] /= normalization;
+    }
+    // XYZ_to_xy then xy_to_xyz roundtrip (renormalizes Y to exactly 1).
+    let sum_xyz = illu_xyz_runtime[0] + illu_xyz_runtime[1] + illu_xyz_runtime[2];
+    let vx = illu_xyz_runtime[0] / sum_xyz;
+    let vy = illu_xyz_runtime[1] / sum_xyz;
+    (normalization, [vx / vy, 1.0f64, (1.0 - vx - vy) / vy])
+}
+
 pub fn scan(
     density_cmy: ImageBuf,
     profile: &Profile,
@@ -207,38 +238,13 @@ pub fn scan(
         .min(channel_density.len())
         .min(spectral::N_WAVELENGTHS);
 
-    // Compute normalization in f64 — Python parity (81-element sum).
-    // Use f64 CMF_Y for the same precision reason.
-    let normalization: f64 = (0..n_wl)
-        .map(|i| illuminant[i] * spectral::CMF_Y_F64[i])
-        .sum();
+    let (normalization, viewing_white) = scan_normalization_and_white(&illuminant, n_wl);
     // Build XYZ→RGB matrix with chromatic adaptation from viewing illuminant to output colorspace white.
     // Python's `colour.XYZ_to_RGB` applies CAT and the XYZ→RGB matrix as
     // TWO sequential matrix multiplies per pixel; pre-combining them
     // into one (M_rgb @ M_cat) loses ~1 ULP per output channel and
     // accumulates to ~5e-6 scan-stage drift. We keep them split for
     // CPU bit-parity; the GPU path can collapse them for performance.
-    //
-    // Compute viewing_white at runtime (matches Python's
-    // `XYZ_to_xy(integrate(illu, CMFs)/norm) → xy_to_xyZ`). The
-    // pre-computed `illuminant_xyz_f64` constant is 3 ULPs off the
-    // runtime value because Python's `contract(...)/norm` rounds Y
-    // slightly off 1.0, which xy_to_xyY then corrects — replaying that
-    // chain is bit-exact.
-    let mut illu_xyz_runtime = [0.0f64; 3];
-    for i in 0..n_wl {
-        illu_xyz_runtime[0] += illuminant[i] * spectral::CMF_X_F64[i];
-        illu_xyz_runtime[1] += illuminant[i] * spectral::CMF_Y_F64[i];
-        illu_xyz_runtime[2] += illuminant[i] * spectral::CMF_Z_F64[i];
-    }
-    for c in 0..3 {
-        illu_xyz_runtime[c] /= normalization;
-    }
-    // XYZ_to_xy then xy_to_xyz roundtrip (renormalizes Y to exactly 1).
-    let sum_xyz = illu_xyz_runtime[0] + illu_xyz_runtime[1] + illu_xyz_runtime[2];
-    let vx = illu_xyz_runtime[0] / sum_xyz;
-    let vy = illu_xyz_runtime[1] / sum_xyz;
-    let viewing_white = [vx / vy, 1.0f64, (1.0 - vx - vy) / vy];
     let output_white = spectral::colorspace_white_xyz_f64(&params.io.output_color_space);
     let adapt = colorspace::chromatic_adaptation_matrix_f64(viewing_white, output_white);
     let base_xyz_to_rgb = output_colorspace_from_xyz_f64(&params.io.output_color_space);
@@ -371,9 +377,21 @@ pub fn scan(
         rgb = spektrafilm_model::diffusion::apply_unsharp_mask(rgb, usm_sigma, usm_amount, backend);
     }
 
-    // CCTF encoding + clip.
-    //
-    // Python's `_apply_cctf_encoding_and_clip` calls
+    if params.io.output_cctf_encoding {
+        encode_output(&mut rgb, &params.io.output_color_space);
+    }
+
+    rgb
+}
+
+/// The scan's CCTF encoding, without a clip: like Python, the scan returns
+/// what the physics produces, highlights above 1 and the unsharp mask's
+/// undershoot below 0 included. `srgb_encode` extends linearly below 0 and
+/// follows the power law above 1, as colour's `eotf_inverse_sRGB` does.
+/// Integer files and displays clip (`pipeline::clip_to_display`, `save.rs`).
+/// The pipeline uses it too when a GPU chain returns linear RGB.
+pub(crate) fn encode_output(rgb: &mut ImageBuf, output_color_space: &str) {
+    // Python's `_apply_cctf_encoding` calls
     // `colour.RGB_to_RGB(rgb, output_cs, output_cs, apply_cctf_encoding=True)`,
     // which — even when src == dst — runs `vecmul(M, rgb)` with
     // `M = matrix_RGB_to_RGB(src, dst, 'CAT02')`. With same src/dst
@@ -381,29 +399,19 @@ pub fn scan(
     // (because colour-science's sRGB matrix is 4-decimal-rounded so the
     // inverse round-trip isn't exact). This nudges every RGB pixel by
     // ~1e-5 before encoding. We replicate it so the scan-stage output
-    // matches Python bit-for-bit.
-    let zero = from_f64(0.0);
-    let one = from_f64(1.0);
-    if params.io.output_cctf_encoding {
-        let m = rgb_to_rgb_identity_matrix(&params.io.output_color_space);
-        rgb.data.par_chunks_exact_mut(3).for_each(|px| {
-            let r = px[0] as f64;
-            let g = px[1] as f64;
-            let b = px[2] as f64;
-            let r2 = m[0][0] * r + m[0][1] * g + m[0][2] * b;
-            let g2 = m[1][0] * r + m[1][1] * g + m[1][2] * b;
-            let b2 = m[2][0] * r + m[2][1] * g + m[2][2] * b;
-            px[0] = spektrafilm_math::precision::srgb_encode(from_f64(r2).clamp(zero, one));
-            px[1] = spektrafilm_math::precision::srgb_encode(from_f64(g2).clamp(zero, one));
-            px[2] = spektrafilm_math::precision::srgb_encode(from_f64(b2).clamp(zero, one));
-        });
-    } else {
-        rgb.data
-            .par_iter_mut()
-            .for_each(|v| *v = (*v).clamp(zero, one));
-    }
-
-    rgb
+    // matches Python bit-for-bit. The GPU chains apply it as well.
+    let m = rgb_to_rgb_identity_matrix(output_color_space);
+    rgb.data.par_chunks_exact_mut(3).for_each(|px| {
+        let r = px[0] as f64;
+        let g = px[1] as f64;
+        let b = px[2] as f64;
+        let r2 = m[0][0] * r + m[0][1] * g + m[0][2] * b;
+        let g2 = m[1][0] * r + m[1][1] * g + m[1][2] * b;
+        let b2 = m[2][0] * r + m[2][1] * g + m[2][2] * b;
+        px[0] = spektrafilm_math::precision::srgb_encode(from_f64(r2));
+        px[1] = spektrafilm_math::precision::srgb_encode(from_f64(g2));
+        px[2] = spektrafilm_math::precision::srgb_encode(from_f64(b2));
+    });
 }
 
 /// Replicate Python `colour.matrix_RGB_to_RGB(cs, cs, 'CAT02')` —
@@ -412,7 +420,7 @@ pub fn scan(
 /// (CAT02 collapses to identity when src/dst whites match), but the
 /// product of 4-decimal-rounded sRGB matrices isn't exactly the
 /// identity in f64.
-fn rgb_to_rgb_identity_matrix(name: &str) -> [[f64; 3]; 3] {
+pub(crate) fn rgb_to_rgb_identity_matrix(name: &str) -> [[f64; 3]; 3] {
     let xyz_to_rgb = output_colorspace_from_xyz_f64(name);
     let rgb_to_xyz = match name {
         "sRGB" => colorspace::SRGB_TO_XYZ_F64,
