@@ -449,6 +449,13 @@ pub struct FilmRenderingParams {
     pub dir_couplers: DirCouplersParams,
     #[serde(default)]
     pub glare: GlareParams,
+    /// Film counterpart of the print-curve morph — forward-port of upstream
+    /// experimental's `film_render.chemistry` (minus `development_time`,
+    /// above). Unlike upstream, the inactive morph keeps the profile's stored
+    /// curves rather than re-evaluating the fitted model, so default renders
+    /// are unchanged; see `Pipeline::apply_film_curves_morph`.
+    #[serde(default)]
+    pub density_curves_morph: CurvesMorphParams,
 }
 
 impl Default for FilmRenderingParams {
@@ -460,6 +467,7 @@ impl Default for FilmRenderingParams {
             halation: HalationParams::default(),
             dir_couplers: DirCouplersParams::default(),
             glare: GlareParams::default(),
+            density_curves_morph: CurvesMorphParams::default(),
         }
     }
 }
@@ -475,7 +483,7 @@ pub struct PrintRenderingParams {
     #[serde(default)]
     pub glare: GlareParams,
     #[serde(default)]
-    pub density_curves_morph: PrintCurvesMorphParams,
+    pub density_curves_morph: CurvesMorphParams,
 }
 
 impl Default for PrintRenderingParams {
@@ -484,19 +492,20 @@ impl Default for PrintRenderingParams {
             density_curve_gamma: 1.0,
             development_time: None,
             glare: GlareParams::default(),
-            density_curves_morph: PrintCurvesMorphParams::default(),
+            density_curves_morph: CurvesMorphParams::default(),
         }
     }
 }
 
-/// User-facing controls for the s023 print density-curve morph (see
-/// `crate::print_morph`). Kept in f64 — the morph is a parity-sensitive f64
-/// computation. `active` defaults to `false`, matching upstream 0.3.4 — but
-/// note that (also matching upstream) the print develop always evaluates the
-/// profile's fitted `density_curves_model` when one is present; `active` only
-/// enables the coupled-gamma morphing of that model.
+/// User-facing controls for the s023 density-curve morph (see
+/// `crate::print_morph`), shared by the film and print curves. Kept in f64 —
+/// the morph is a parity-sensitive f64 computation. `active` defaults to
+/// `false`, matching upstream 0.3.4 — but note that (also matching upstream)
+/// the print develop always evaluates the profile's fitted
+/// `density_curves_model` when one is present; `active` only enables the
+/// coupled-gamma morphing of that model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PrintCurvesMorphParams {
+pub struct CurvesMorphParams {
     #[serde(default)]
     pub active: bool,
     #[serde(default = "default_one_f64")]
@@ -515,7 +524,7 @@ pub struct PrintCurvesMorphParams {
     pub developer_exhaustion: f64,
 }
 
-impl Default for PrintCurvesMorphParams {
+impl Default for CurvesMorphParams {
     fn default() -> Self {
         Self {
             active: false,

@@ -43,6 +43,15 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Halo size", "camera.diffusion_filter.halo_size", 0.1...3, 0.01),
         .slider("Bloom size", "camera.diffusion_filter.bloom_size", 0.1...3, 0.01)
     ]),
+    .init(title: "Film Curves", symbol: "chart.xyaxis.line", section: .film, enable: "film_render.density_curves_morph.active", controls: [
+        .slider("Gamma", "film_render.density_curves_morph.gamma_factor", 0.5...2, 0.01),
+        .slider("Fast gamma", "film_render.density_curves_morph.gamma_factor_fast", 0.5...2, 0.01),
+        .slider("Slow gamma", "film_render.density_curves_morph.gamma_factor_slow", 0.5...2, 0.01),
+        .slider("Red gamma", "film_render.density_curves_morph.gamma_factor_red", 0.5...2, 0.01),
+        .slider("Green gamma", "film_render.density_curves_morph.gamma_factor_green", 0.5...2, 0.01),
+        .slider("Blue gamma", "film_render.density_curves_morph.gamma_factor_blue", 0.5...2, 0.01),
+        .slider("Developer exhaustion", "film_render.density_curves_morph.developer_exhaustion", 0...1, 0.01)
+    ]),
     .init(title: "Grain", symbol: "circle.dotted", section: .film, enable: "film_render.grain.active", controls: [
         .slider("Particle area (µm²)", "film_render.grain.agx_particle_area_um2", 0.05...1, 0.01),
         .slider("Post blur", "film_render.grain.blur", 0...3, 0.01),

@@ -18,7 +18,7 @@
 //! Properties preserved by construction: per-layer amplitudes, D(0), and
 //! D_max = sum A_i; identity at all defaults reproduces the fitted model.
 
-use crate::params::PrintCurvesMorphParams;
+use crate::params::CurvesMorphParams;
 use crate::profile::DensityCurvesModel;
 
 /// `NormCdfsFitConfig.sigma_floor` in the profile-creator.
@@ -91,7 +91,7 @@ fn speed_layer_indices(centers: &[f64]) -> (usize, usize, usize) {
     (order[0], order[n / 2], order[n - 1])
 }
 
-fn channel_gamma_factor(p: &PrintCurvesMorphParams, channel: usize) -> f64 {
+fn channel_gamma_factor(p: &CurvesMorphParams, channel: usize) -> f64 {
     [
         p.gamma_factor_red,
         p.gamma_factor_green,
@@ -250,7 +250,7 @@ fn brentq(f: &dyn Fn(f64) -> f64, xa: f64, xb: f64, xtol: f64) -> f64 {
 /// Morphed `(centers, amplitudes, sigmas, gumbel_mix_per_layer)` for one channel.
 fn morph_channel_params(
     model: &DensityCurvesModel,
-    p: &PrintCurvesMorphParams,
+    p: &CurvesMorphParams,
     channel: usize,
     positive: bool,
 ) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -302,7 +302,7 @@ fn morph_channel_params(
 pub fn morph_density_curves(
     log_exposure: &[f64],
     model: &DensityCurvesModel,
-    p: &PrintCurvesMorphParams,
+    p: &CurvesMorphParams,
     positive: bool,
 ) -> Result<Vec<[f64; 3]>, String> {
     // The port implements only the Gaussian-CDF model: upstream 0.3.4 calls
@@ -416,7 +416,7 @@ mod parity_tests {
         let positive = print.is_positive();
         assert!(!positive, "endura is a negative-type print paper");
 
-        let p = PrintCurvesMorphParams {
+        let p = CurvesMorphParams {
             active: true,
             gamma_factor: 1.1,
             gamma_factor_fast: 0.9,
@@ -501,7 +501,7 @@ mod parity_tests {
         let log_exposure = print.log_exposure_f64();
         let positive = print.is_positive();
 
-        let identity = PrintCurvesMorphParams {
+        let identity = CurvesMorphParams {
             active: true,
             ..Default::default()
         };
@@ -530,7 +530,7 @@ mod parity_tests {
             amplitudes: vec![vec![1.0; 3]; 3],
             sigmas: vec![vec![1.0; 3]; 3],
         };
-        let p = PrintCurvesMorphParams {
+        let p = CurvesMorphParams {
             active: true,
             ..Default::default()
         };

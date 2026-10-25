@@ -305,6 +305,20 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         ],
     },
     AdjustmentGroup {
+        title: "Film Curves",
+        section: Section::Film,
+        enable: Some("film_render.density_curves_morph.active"),
+        controls: &[
+            slider("Gamma", "film_render.density_curves_morph.gamma_factor", 0.5, 2.0, 0.01),
+            slider("Fast gamma", "film_render.density_curves_morph.gamma_factor_fast", 0.5, 2.0, 0.01),
+            slider("Slow gamma", "film_render.density_curves_morph.gamma_factor_slow", 0.5, 2.0, 0.01),
+            slider("Red gamma", "film_render.density_curves_morph.gamma_factor_red", 0.5, 2.0, 0.01),
+            slider("Green gamma", "film_render.density_curves_morph.gamma_factor_green", 0.5, 2.0, 0.01),
+            slider("Blue gamma", "film_render.density_curves_morph.gamma_factor_blue", 0.5, 2.0, 0.01),
+            slider("Developer exhaustion", "film_render.density_curves_morph.developer_exhaustion", 0.0, 1.0, 0.01),
+        ],
+    },
+    AdjustmentGroup {
         title: "Grain",
         section: Section::Film,
         enable: Some("film_render.grain.active"),

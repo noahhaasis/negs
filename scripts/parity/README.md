@@ -27,6 +27,18 @@ From the Rust repository root:
   --film kodak_gold_200 --paper fujifilm_crystal_archive_typeii \
   --output-dir /tmp/spektrafilm-parity-gold
 
+# Film Curves (film_render.density_curves_morph) against upstream main with
+# experimental's film-chemistry morph baked into its film profile, DIR on:
+../spektrafilm-env/bin/python scripts/parity/check_parity.py \
+  --python-source /path/to/main-checkout --morph-source /path/to/experimental-checkout \
+  --dir-couplers --film-curves-morph '{"gamma_factor": 1.4, "developer_exhaustion": 0.4}' \
+  --output-dir /tmp/spektrafilm-parity-film-curves
+
+# Refreeze the cargo-test fixture for the same morph (never from Rust output):
+../spektrafilm-env/bin/python scripts/parity/freeze_film_morph_reference.py \
+  --experimental /path/to/experimental-checkout \
+  --output crates/spektrafilm-core/tests/fixtures/film_morph_python_28bf883.json
+
 # Existing frozen Python reference tests and the full Rust suite:
 cargo test --workspace --locked
 cargo test --workspace --locked --features spektrafilm-cli/precision-f64
