@@ -7,7 +7,7 @@ use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_math::colorspace;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f32, from_f64, to_f32};
-use spektrafilm_math::spectral::{self, TcLut};
+use spektrafilm_math::spectral::TcLut;
 use std::time::Instant;
 
 use crate::params::RuntimeParams;
@@ -525,7 +525,7 @@ pub fn process(
     backend: &dyn ComputeBackend,
     tc_lut: Option<&TcLut>,
 ) -> ImageBuf {
-    let ref_illuminant = select_illuminant(&film.info.reference_illuminant);
+    let ref_illuminant = crate::illuminants::select_illuminant(&film.info.reference_illuminant);
     let log_raw = expose(
         image,
         film,
@@ -533,7 +533,7 @@ pub fn process(
         backend,
         tc_lut,
         None,
-        ref_illuminant,
+        &ref_illuminant,
         1.0,
     );
     develop(log_raw, film, params, backend)
@@ -546,15 +546,6 @@ pub fn input_colorspace_to_xyz(name: &str) -> [[f32; 3]; 3] {
         "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::REC2020_TO_XYZ,
         "ACES2065-1" => colorspace::ACES_TO_XYZ,
         _ => colorspace::PROPHOTO_TO_XYZ,
-    }
-}
-
-pub(crate) fn select_illuminant(name: &str) -> &'static [f32] {
-    match name {
-        "D50" => &spectral::ILLUMINANT_D50,
-        "D55" => &spectral::ILLUMINANT_D55,
-        "D65" => &spectral::ILLUMINANT_D65,
-        _ => &spectral::ILLUMINANT_D55,
     }
 }
 

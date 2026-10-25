@@ -50,6 +50,7 @@ fn print_stage_timing(enabled: bool, stage: &str, start: Instant) {
 }
 
 use crate::enlarger;
+use crate::illuminants::{select_illuminant, select_illuminant_f64};
 use crate::params::RuntimeParams;
 use crate::profile::Profile;
 use crate::spectral_service;
@@ -222,6 +223,11 @@ impl Pipeline {
 
 impl Pipeline {
     /// Create pipeline without spectral LUT (simplified path).
+    ///
+    /// # Panics
+    ///
+    /// On a light-source name `illuminants::check_names` rejects;
+    /// [`Pipeline::new_with_spectral`] returns an error instead.
     pub fn new(film: Profile, print: Profile, params: RuntimeParams) -> Self {
         // B&W profiles must be resolved on every construction path —
         // an unresolved family would read development-time columns as
@@ -270,6 +276,9 @@ impl Pipeline {
         // layout. Must happen before anything reads the profile data.
         let film = crate::profile::resolve_for_render(film, params.film_render.development_time);
         let print = crate::profile::resolve_for_render(print, params.print_render.development_time);
+        // Unknown light-source names are an error here (Python: `KeyError`),
+        // so the stages below can resolve them without failing.
+        crate::illuminants::check_names(&film, &print, &params)?;
 
         // Python parity: mirror `_apply_film_specifics` in
         // `spektrafilm/runtime/params_builder.py`. Python applies these
@@ -341,7 +350,7 @@ impl Pipeline {
                             &spectra_lut,
                             &sensitivity,
                             &window_params,
-                            ref_illuminant_f64,
+                            &ref_illuminant_f64,
                         )
                     } else {
                         spectral_service::compute_tc_lut(&spectra_lut, &sensitivity)
@@ -354,7 +363,7 @@ impl Pipeline {
                         &params.io.input_gamut_compress,
                     )?;
                     let tc_lut = if input_gamut.is_active() {
-                        let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(ref_illuminant);
+                        let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(&ref_illuminant);
                         input_gamut.remap(&tc_lut, [rx, ry])
                     } else {
                         tc_lut
@@ -367,14 +376,14 @@ impl Pipeline {
                     let tc_lut = spectral_service::compute_reflectance_tc_lut(
                         &reflectance_lut,
                         &sensitivity,
-                        ref_illuminant_f64,
+                        &ref_illuminant_f64,
                     );
                     let input_gamut = crate::input_gamut::InputGamutCompress::from_params(
                         &params.io.input_gamut_compress,
                     )?;
                     let tc_lut = if input_gamut.is_active() {
                         let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(
-                            select_illuminant(&front_illuminant),
+                            &select_illuminant(&front_illuminant),
                         );
                         input_gamut.remap(&tc_lut, [rx, ry])
                     } else {
@@ -386,7 +395,7 @@ impl Pipeline {
                     None,
                     Some(crate::mallett::compute_core_matrix(
                         &sensitivity,
-                        ref_illuminant_f64,
+                        &ref_illuminant_f64,
                     )),
                 ),
                 other => {
@@ -500,7 +509,7 @@ impl Pipeline {
             if let Some(lut) = &self.tc_lut {
                 enlarger::midgray_raw_hanatos(
                     lut,
-                    select_illuminant(&self.front_illuminant),
+                    &select_illuminant(&self.front_illuminant),
                     params.settings.use_cat16,
                     scale,
                 )
@@ -670,7 +679,7 @@ impl Pipeline {
             backend,
             self.tc_lut.as_ref(),
             self.mallett_core.as_ref(),
-            select_illuminant(&self.front_illuminant),
+            &select_illuminant(&self.front_illuminant),
             color_ref.filming_exposure_correction,
         );
         print_stage_timing(stage_timings, "filming_expose", t);
@@ -828,7 +837,7 @@ impl Pipeline {
             let ref_illuminant = select_illuminant(&self.front_illuminant);
             let mut rgb_to_adapted = spektrafilm_math::spectral::build_rgb_to_adapted_xyz(
                 &self.params.io.input_color_space,
-                ref_illuminant,
+                &ref_illuminant,
                 self.params.settings.use_cat16,
             );
             fold_exposure(&mut rgb_to_adapted);
@@ -931,12 +940,8 @@ impl Pipeline {
         } else {
             &self.print
         };
-        let viewing_illu_f32 = match scan_profile.info.viewing_illuminant.as_str() {
-            "D50" => &spektrafilm_math::spectral::ILLUMINANT_D50[..],
-            "D55" => &spektrafilm_math::spectral::ILLUMINANT_D55[..],
-            "D65" => &spektrafilm_math::spectral::ILLUMINANT_D65[..],
-            _ => &spektrafilm_math::spectral::ILLUMINANT_D50[..],
-        };
+        let viewing_illu_f32 = select_illuminant(&scan_profile.info.viewing_illuminant);
+        let viewing_illu_f32 = &viewing_illu_f32[..];
         let viewing_illu: Vec<f64> = viewing_illu_f32.iter().map(|&v| v as f64).collect();
         let n_wl = if self.params.io.scan_film {
             film_channel_density.len()
@@ -1319,25 +1324,5 @@ impl Pipeline {
                 .for_each(|v| *v = (*v).clamp(zero, one));
         }
         rgb
-    }
-}
-
-fn select_illuminant(name: &str) -> &'static [f32] {
-    use spektrafilm_math::spectral;
-    match name {
-        "D50" => &spectral::ILLUMINANT_D50,
-        "D55" => &spectral::ILLUMINANT_D55,
-        "D65" => &spectral::ILLUMINANT_D65,
-        _ => &spectral::ILLUMINANT_D55,
-    }
-}
-
-fn select_illuminant_f64(name: &str) -> &'static [f64] {
-    use spektrafilm_math::spectral;
-    match name {
-        "D50" => &spectral::ILLUMINANT_D50_F64,
-        "D55" => &spectral::ILLUMINANT_D55_F64,
-        "D65" => &spectral::ILLUMINANT_D65_F64,
-        _ => &spectral::ILLUMINANT_D55_F64,
     }
 }

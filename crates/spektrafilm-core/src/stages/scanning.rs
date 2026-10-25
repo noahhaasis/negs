@@ -175,7 +175,8 @@ pub fn scan(
     // Use the full-precision f64 illuminant — the f32 → f64 promotion of
     // the f32 constants drops ~7 digits per sample and accumulates ~5e-6
     // of drift in the scan stage after the 81-wavelength reduction.
-    let illuminant: Vec<f64> = select_illuminant_f64(&profile.info.viewing_illuminant).to_vec();
+    let illuminant: Vec<f64> =
+        crate::illuminants::select_illuminant_f64(&profile.info.viewing_illuminant).into_owned();
     let n_wl = illuminant
         .len()
         .min(channel_density.len())
@@ -416,15 +417,6 @@ pub fn process(
     gamut: &crate::gamut_compression::OutputGamutCompress,
 ) -> ImageBuf {
     scan(density_cmy, profile, params, backend, color_ref, gamut)
-}
-
-pub fn select_illuminant_f64(name: &str) -> &'static [f64] {
-    match name {
-        "D50" => &spectral::ILLUMINANT_D50_F64,
-        "D55" => &spectral::ILLUMINANT_D55_F64,
-        "D65" => &spectral::ILLUMINANT_D65_F64,
-        _ => &spectral::ILLUMINANT_D50_F64,
-    }
 }
 
 fn output_colorspace_from_xyz_f64(name: &str) -> [[f64; 3]; 3] {
