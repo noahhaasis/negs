@@ -44,11 +44,22 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(result["passed"])
 
     def test_nonfinite_and_shape_mismatch_are_errors(self):
-        for value in [np.nan, np.inf, -np.inf]:
+        for value in [np.inf, -np.inf]:
             with self.assertRaises(ValueError):
                 metrics(np.array([value]), np.array([value]), 1e-6, np)
+        for actual, expected in [([np.nan, 0.0], [0.0, 0.0]), ([0.0, 0.0], [np.nan, 0.0])]:
+            with self.assertRaises(ValueError):
+                metrics(np.array(actual), np.array(expected), 1e-6, np)
         with self.assertRaises(ValueError):
             metrics(np.zeros((1, 3)), np.zeros(3), 1e-6, np)
+
+    def test_nan_where_python_has_nan_is_compared_around(self):
+        # colour's pure gammas encode negatives to NaN.
+        expected = np.array([np.nan, 0.5, 0.25])
+        result = metrics(np.array([np.nan, 0.5, 0.25 + 1e-7]), expected, 1e-6, np)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["nan_count"], 1)
+        self.assertFalse(metrics(np.array([np.nan, 0.5, 0.26]), expected, 1e-6, np)["passed"])
 
 
 # Minimal stand-ins for the two upstream schemas.

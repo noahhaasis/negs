@@ -65,8 +65,9 @@ fn reference_whites_match_python() {
     for (name, want) in &fixture.reference_white_xyz {
         let table = standard_illuminant(name).unwrap();
         let got = spectral::illuminant_xyz_f64(&table);
-        // Baked whites are exact; the BB3200 fallback integrates the f32 table.
-        let tolerance = if name.starts_with("BB") { 1e-6 } else { 1e-15 };
+        // Baked whites are exact; the BB3200 fallback integrates the exact CMFs
+        // against the f32-rounded spectrum, 2.5e-9 off.
+        let tolerance = if name.starts_with("BB") { 1e-8 } else { 1e-15 };
         for c in 0..3 {
             assert!(
                 (got[c] - want[c]).abs() <= tolerance,

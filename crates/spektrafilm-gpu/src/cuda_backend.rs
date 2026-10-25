@@ -1294,20 +1294,20 @@ __device__ float3 cam16_padc_inverse_g(float3 rgb) {
         sign_g(d.z) * 100.0f / fl * powf(bz, 1.0f / 0.42f));
 }
 
-__device__ float3 xyz_to_cam16ucs_g(float3 xyz) {
+__device__ float3 xyz_to_cam16ucs_g(float3 xyz, float3 white_d, float a_w) {
     float3 rgb = mv3_g(
         make_float3(0.401288f, 0.650173f, -0.051461f),
         make_float3(-0.250268f, 1.204414f, 0.045854f),
         make_float3(-0.002079f, 0.048952f, 0.953127f),
         make_float3(xyz.x * 100.0f, xyz.y * 100.0f, xyz.z * 100.0f));
-    float3 d_rgb = make_float3(rgb.x * 1.0228770275f, rgb.y * 0.9852074783f, rgb.z * 0.9285450587f);
+    float3 d_rgb = make_float3(rgb.x * white_d.x, rgb.y * white_d.y, rgb.z * white_d.z);
     float3 p = cam16_padc_forward_g(d_rgb);
     float a = p.x - 12.0f * p.y / 11.0f + p.z / 11.0f;
     float b = (p.x + p.y - 2.0f * p.z) / 9.0f;
     float h = atan2_deg_g(b, a);
     float e_t = 0.25f * (cosf(2.0f + radians_g(h)) + 3.8f);
     float a_resp = (2.0f * p.x + p.y + p.z / 20.0f - 0.305f) * 1.0003040046f;
-    float jj = 100.0f * powf(a_resp / 37.1690753022f, 0.69f * 1.9272135955f);
+    float jj = 100.0f * powf(a_resp / a_w, 0.69f * 1.9272135955f);
     float denom = p.x + p.y + 21.0f * p.z / 20.0f;
     float t = denom != 0.0f ? 3846.1538461538f * 1.0003040046f * (e_t * sqrtf(a*a + b*b)) / denom : 0.0f;
     float cc = powf(t, 0.9f) * sqrtf(jj / 100.0f) * powf(1.64f - powf(0.29f, 0.2f), 0.73f);
@@ -1318,7 +1318,7 @@ __device__ float3 xyz_to_cam16ucs_g(float3 xyz) {
     return make_float3(jp, mp * cosf(hr), mp * sinf(hr));
 }
 
-__device__ float3 cam16ucs_to_xyz_g(float3 jab) {
+__device__ float3 cam16ucs_to_xyz_g(float3 jab, float3 white_d, float a_w) {
     float jp = jab.x;
     float mp = len2_g(jab.y, jab.z);
     float h = atan2_deg_g(jab.z, jab.y);
@@ -1328,7 +1328,7 @@ __device__ float3 cam16ucs_to_xyz_g(float3 jab) {
     float j_prime = fmaxf(jj, 1.1920929e-7f);
     float t = powf(cc / (sqrtf(j_prime / 100.0f) * powf(1.64f - powf(0.29f, 0.2f), 0.73f)), 1.0f / 0.9f);
     float e_t = 0.25f * (cosf(2.0f + radians_g(h)) + 3.8f);
-    float a_resp = 37.1690753022f * powf(jj / 100.0f, 1.0f / (0.69f * 1.9272135955f));
+    float a_resp = a_w * powf(jj / 100.0f, 1.0f / (0.69f * 1.9272135955f));
     float p1 = t != 0.0f ? 3846.1538461538f * 1.0003040046f * e_t / t : 0.0f;
     float p2 = a_resp / 1.0003040046f + 0.305f;
     float hr = radians_g(h);
@@ -1350,7 +1350,7 @@ __device__ float3 cam16ucs_to_xyz_g(float3 jab) {
     float ga = (460.0f * p2 - 891.0f * a - 261.0f * b) / 1403.0f;
     float ba = (460.0f * p2 - 220.0f * a - 6300.0f * b) / 1403.0f;
     float3 inv = cam16_padc_inverse_g(make_float3(ra, ga, ba));
-    float3 rgb = make_float3(inv.x / 1.0228770275f, inv.y / 0.9852074783f, inv.z / 0.9285450587f);
+    float3 rgb = make_float3(inv.x / white_d.x, inv.y / white_d.y, inv.z / white_d.z);
     return make_float3(
         dot3_g(make_float3(1.8620678551f, -1.0112546305f, 0.1491867754f), rgb) / 100.0f,
         dot3_g(make_float3(0.3875265432f, 0.6214474419f, -0.0089739852f), rgb) / 100.0f,
@@ -1397,7 +1397,9 @@ extern "C" __global__ void gamut_compress_kernel(
     float l_white,
     float l_min,
     float l_max,
-    const float* __restrict__ cmax
+    const float* __restrict__ cmax,
+    // Output colourspace: RGB->XYZ (9), XYZ->RGB (9), CAM16 D_RGB (3), A_w.
+    const float* __restrict__ colour
 ) {
     unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n_pixels) return;
@@ -1417,12 +1419,14 @@ extern "C" __global__ void gamut_compress_kernel(
             out = make_float3(ach * (1.0f - dc.x), ach * (1.0f - dc.y), ach * (1.0f - dc.z));
         }
     } else {
+        float3 white_d = make_float3(colour[18], colour[19], colour[20]);
+        float a_w = colour[21];
         float3 xyz = mv3_g(
-            make_float3(0.4124f, 0.3576f, 0.1805f),
-            make_float3(0.2126f, 0.7152f, 0.0722f),
-            make_float3(0.0193f, 0.1192f, 0.9505f),
+            make_float3(colour[0], colour[1], colour[2]),
+            make_float3(colour[3], colour[4], colour[5]),
+            make_float3(colour[6], colour[7], colour[8]),
             rgb);
-        float3 lab = mode == 3u ? xyz_to_cam16ucs_g(xyz) : xyz_to_oklab_g(xyz);
+        float3 lab = mode == 3u ? xyz_to_cam16ucs_g(xyz, white_d, a_w) : xyz_to_oklab_g(xyz);
         float l = lab.x;
         if (light_enable != 0u) {
             l = reinhard_knee_g(l / l_white, light_t, light_l, light_p) * l_white;
@@ -1434,11 +1438,11 @@ extern "C" __global__ void gamut_compress_kernel(
         float d_comp = reinhard_knee_g(c / safe, knee_t, knee_l, knee_p);
         float c_new = d_comp * safe;
         float3 lab_new = make_float3(l, c_new * cosf(h), c_new * sinf(h));
-        float3 xyz_new = mode == 3u ? cam16ucs_to_xyz_g(lab_new) : oklab_to_xyz_g(lab_new);
+        float3 xyz_new = mode == 3u ? cam16ucs_to_xyz_g(lab_new, white_d, a_w) : oklab_to_xyz_g(lab_new);
         out = mv3_g(
-            make_float3(3.2406f, -1.5372f, -0.4986f),
-            make_float3(-0.9689f, 1.8758f, 0.0415f),
-            make_float3(0.0557f, -0.204f, 1.057f),
+            make_float3(colour[9], colour[10], colour[11]),
+            make_float3(colour[12], colour[13], colour[14]),
+            make_float3(colour[15], colour[16], colour[17]),
             xyz_new);
     }
     img[base] = out.x;
@@ -2130,6 +2134,16 @@ impl CudaBackend {
             gp.cmax.iter().map(|&v| v as f32).collect()
         };
         let cmax_dev = self.stream.clone_htod(&cmax_f32)?;
+        let colour: Vec<f32> = gp
+            .rgb_to_xyz
+            .iter()
+            .chain(&gp.xyz_to_rgb)
+            .flatten()
+            .copied()
+            .chain(gp.cam16_d_rgb)
+            .chain([gp.cam16_a_w])
+            .collect();
+        let colour_dev = self.stream.clone_htod(&colour)?;
         let light = gp.lightness.unwrap_or([0.0, 1.0, 1.0]);
         let light_enable = if gp.lightness.is_some() { 1u32 } else { 0u32 };
         let mut launch = self.stream.launch_builder(&self.gamut_kernel);
@@ -2149,7 +2163,8 @@ impl CudaBackend {
             .arg(&gp.l_white)
             .arg(&gp.l_min)
             .arg(&gp.l_max)
-            .arg(&cmax_dev);
+            .arg(&cmax_dev)
+            .arg(&colour_dev);
         unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         Ok(())
     }

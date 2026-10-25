@@ -4519,7 +4519,11 @@ fn build_gamut_state(
         knee: [f32; 4],
         lightness: [f32; 4],
         lspace: [f32; 4],
+        rgb_to_xyz: [[f32; 4]; 3],
+        xyz_to_rgb: [[f32; 4]; 3],
+        cam16_white: [f32; 4],
     }
+    let rows = |m: [[f32; 3]; 3]| m.map(|r| [r[0], r[1], r[2], 0.0]);
     let lightness = match gp.lightness {
         Some([t, l, p]) => [t, l, p, 1.0],
         None => [0.0, 1.0, 1.0, 0.0],
@@ -4534,6 +4538,9 @@ fn build_gamut_state(
             knee: [gp.knee[0], gp.knee[1], gp.knee[2], 0.0],
             lightness,
             lspace: [gp.l_white, gp.l_min, gp.l_max, 0.0],
+            rgb_to_xyz: rows(gp.rgb_to_xyz),
+            xyz_to_rgb: rows(gp.xyz_to_rgb),
+            cam16_white: [gp.cam16_d_rgb[0], gp.cam16_d_rgb[1], gp.cam16_d_rgb[2], gp.cam16_a_w],
         }),
         usage: wgpu::BufferUsages::UNIFORM,
     });
