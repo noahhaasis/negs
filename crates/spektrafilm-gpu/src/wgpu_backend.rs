@@ -3739,9 +3739,11 @@ fn build_post_scan_state(
 /// and bind groups so they live for the encoder.
 ///
 /// CPU equivalent: `spektrafilm_model::couplers::apply_density_correction`.
-/// Encodes per-pixel matmul → two Gaussian blurs of the correction →
-/// weighted lerp via `add_scaled` → in-place subtract from log_raw via
-/// `add_scaled(scale=-1)` → re-interpolation of `density_curves_0`.
+/// Encodes per-pixel donor saturation and matmul → the Gaussian and
+/// exponential blurs of the correction, weighted → in-place subtract from
+/// log_raw via `add_scaled(scale=-1)`, or with the receiver saturation via
+/// `dir_receiver_subtract` (positives) → re-interpolation of
+/// `density_curves_0`.
 #[cfg(feature = "wgpu-backend")]
 struct DirState {
     _buf_correction: wgpu::Buffer, // matmul output (S0)
@@ -3791,6 +3793,7 @@ fn build_dir_state(
         m_row0: [f32; 4],
         m_row1: [f32; 4],
         m_row2: [f32; 4],
+        donor: LangmuirUniform,
     }
     let m = &dp.couplers_matrix_scaled;
     let matmul_params = DirMatmulParams {
@@ -3802,6 +3805,7 @@ fn build_dir_state(
         m_row0: [m[0][0], m[0][1], m[0][2], 0.0],
         m_row1: [m[1][0], m[1][1], m[1][2], 0.0],
         m_row2: [m[2][0], m[2][1], m[2][2], 0.0],
+        donor: LangmuirUniform::new(dp.donor.as_ref()),
     };
     let matmul_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("dir_matmul_params"),
@@ -3888,20 +3892,52 @@ fn build_dir_state(
         _pad: u32,
     }
 
-    // ── 3. Subtract: buf_b -= correction ─────────────────────────────
-    let subtract_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("dir_subtract_params"),
-        contents: bytemuck::bytes_of(&AddScaledParams {
-            n_pixels: n_pixels as u32,
-            scale: -1.0,
-            clear_first: 0,
-            _pad: 0,
-        }),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    // ── 3. Subtract: buf_b -= correction, or the receiver-saturated
+    //    correction for positives ─────────────────────────────────────
+    #[repr(C)]
+    #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+    struct ReceiverSubtractParams {
+        n_pixels: u32,
+        _pad: [u32; 3],
+        receiver: LangmuirUniform,
+    }
+    let (subtract_pipe, subtract_params) = match dp.receiver.as_ref() {
+        Some(receiver) => (
+            backend.cached_pipeline(
+                include_str!("../../spektrafilm-shaders/wgsl/dir_receiver_subtract.wgsl"),
+                &[
+                    wgpu::BufferBindingType::Uniform,
+                    wgpu::BufferBindingType::Storage { read_only: true },
+                    wgpu::BufferBindingType::Storage { read_only: false },
+                ],
+            ),
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("dir_receiver_subtract_params"),
+                contents: bytemuck::bytes_of(&ReceiverSubtractParams {
+                    n_pixels: n_pixels as u32,
+                    _pad: [0; 3],
+                    receiver: LangmuirUniform::new(Some(receiver)),
+                }),
+                usage: wgpu::BufferUsages::UNIFORM,
+            }),
+        ),
+        None => (
+            add_scaled_pipe,
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("dir_subtract_params"),
+                contents: bytemuck::bytes_of(&AddScaledParams {
+                    n_pixels: n_pixels as u32,
+                    scale: -1.0,
+                    clear_first: 0,
+                    _pad: 0,
+                }),
+                usage: wgpu::BufferUsages::UNIFORM,
+            }),
+        ),
+    };
     let subtract_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("dir_subtract_bg"),
-        layout: &add_scaled_pipe.layout,
+        layout: &subtract_pipe.layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -3919,7 +3955,7 @@ fn build_dir_state(
     });
     let subtract = DispatchJob {
         _params_buf: subtract_params,
-        pipeline: add_scaled_pipe,
+        pipeline: subtract_pipe,
         bg: subtract_bg,
     };
 
@@ -4018,6 +4054,35 @@ fn build_dir_state(
         subtract,
         density_curve_0,
         _owned: vec![log_exp_buf, curves_buf],
+    }
+}
+
+/// A Langmuir term as `dir_matmul.wgsl` and `dir_receiver_subtract.wgsl`
+/// read it: `k`, `x_ref` and the per-channel on/off flag, each a vec4.
+/// Linear channels get `k = 1` so the unused saturated value stays finite.
+#[cfg(feature = "wgpu-backend")]
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct LangmuirUniform {
+    k: [f32; 4],
+    x_ref: [f32; 4],
+    saturating: [u32; 4],
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl LangmuirUniform {
+    fn new(langmuir: Option<&crate::LangmuirGpuParams>) -> Self {
+        let mut u = Self { k: [1.0; 4], x_ref: [0.0; 4], saturating: [0; 4] };
+        if let Some(l) = langmuir {
+            for c in 0..3 {
+                if l.saturating[c] {
+                    u.k[c] = l.k[c];
+                    u.x_ref[c] = l.x_ref[c];
+                    u.saturating[c] = 1;
+                }
+            }
+        }
+        u
     }
 }
 
