@@ -205,7 +205,7 @@ impl ColorReference {
     ) -> Self {
         // Reference film densities, mirroring `PrintingStage.expose`:
         //   black = -grain.density_min, white = nanmax(film.density_curves).
-        let gmin = params.film_render.grain.density_min;
+        let gmin = crate::grain::density_min(film, params);
         let cmy_film_black = [-gmin[0], -gmin[1], -gmin[2]];
         let film_curves = film.density_curves_f64();
         let cmy_film_white = nanmax_per_channel(&film_curves);

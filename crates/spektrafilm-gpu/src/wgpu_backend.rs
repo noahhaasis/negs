@@ -725,6 +725,46 @@ impl WgpuBackend {
             .collect()
     }
 
+    /// The grain passes alone on a density image (the film chain's step 3c),
+    /// for tests that check the GPU grain's statistics against the CPU's.
+    pub fn run_grain(&self, density: &ImageBuf, gp: &crate::GrainGpuParams) -> ImageBuf {
+        use wgpu::util::DeviceExt;
+        let (w, h) = (density.width, density.height);
+        let bytes = density.pixel_count() as u64 * 12;
+        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+        let den = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("grain_density"),
+            contents: bytemuck::cast_slice(&scalars_to_f32(&density.data)),
+            usage,
+        });
+        let scratch: Vec<_> = (0..3)
+            .map(|_| {
+                self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("grain_scratch"),
+                    size: bytes,
+                    usage,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect();
+        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("grain_readback"),
+            size: bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let state = build_grain_state(&self.device, gp, w, h, &den, &scratch[0], &scratch[1], &scratch[2], self);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        state.encode_passes(&mut encoder);
+        encoder.copy_buffer_to_buffer(&den, 0, &readback, 0, bytes);
+        self.queue.submit(Some(encoder.finish()));
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
+        self.device.poll(wgpu::Maintain::Wait);
+        let out: Vec<f32> = bytemuck::cast_slice(&slice.get_mapped_range()).to_vec();
+        ImageBuf::from_data(w, h, f32_to_scalars(out))
+    }
+
     /// GPU-resident pipeline: runs the front pass (tc LUT lookup),
     /// highlight boost, camera diffusion/lens blur,
     /// halation, density curves, DIR, grain, print spectral, enlarger
@@ -1302,7 +1342,11 @@ impl WgpuBackend {
         // full-image storage, but keep every input/output of a dispatch distinct.
         // See docs/memory-scratch-reuse.md for the pass/lifetime table.
         // This pool is per-render: no full images enter the backend cache.
-        let scratch_count = if p.dir_couplers.is_some() || p.halation.is_some() || p.unsharp.is_some() {
+        let scratch_count = if p.dir_couplers.is_some()
+            || p.halation.is_some()
+            || p.unsharp.is_some()
+            || p.grain.is_some()
+        {
             2
         } else if p.glare.is_some()
             || p.diffusion.is_some()
@@ -1432,10 +1476,9 @@ impl WgpuBackend {
         });
 
         // ── Grain state ──────────────────────────────────────────────────
-        // Applied in place on buf_a (density_cmy) after DIR couplers,
-        // before print_spectral. Optionally followed by a Gaussian
-        // post-blur (uses buf_b as mid, since log_raw_corrected in buf_b
-        // is no longer needed after DIR's final density_curve_0).
+        // Applied to buf_a (density_cmy) after DIR couplers, before
+        // print_spectral. Uses buf_b (log_raw_corrected is no longer needed
+        // after DIR's final density_curve_0) and both scratch buffers.
         let grain_state = p.grain.as_ref().map(|gp| {
             build_grain_state(
                 &self.device,
@@ -1444,6 +1487,8 @@ impl WgpuBackend {
                 image.height,
                 &buf_a,
                 &buf_b,
+                &scratch[0],
+                &scratch[1],
                 self,
             )
         });
@@ -1554,9 +1599,9 @@ impl WgpuBackend {
             ds.encode_passes(&mut encoder, n_pixels);
             profiler.mark("dir_couplers", &mut encoder);
         }
-        // 3c. Grain (in-place on buf_a, optional post-blur via buf_b mid).
+        // 3c. Grain (buf_a in and out, via buf_b and both scratch buffers).
         if let Some(gs) = grain_state.as_ref() {
-            gs.encode_passes(&mut encoder, n_pixels);
+            gs.encode_passes(&mut encoder);
             profiler.mark("grain", &mut encoder);
         }
         // 4 + 5. Printing: print_spectral (buf_a → buf_b) then the print
@@ -2336,12 +2381,14 @@ fn build_ref_blur_channels(
         let s = sigma[c as usize] as f64;
         if s < 3.0 {
             // Same kernel as `make_gaussian_kernel`, built in f64.
-            let radius = (3.0 * s + 0.5) as u32;
+            // σ ≤ 0 is the identity (the CPU's `gaussian_blur_channel`
+            // copies), so one channel can stay unblurred among others.
+            let radius = if s > 0.0 { (3.0 * s + 0.5) as u32 } else { 0 };
             let s2 = 2.0 * s * s;
             let kernel: Vec<f64> = (0..=2 * radius)
                 .map(|i| {
                     let x = i as f64 - radius as f64;
-                    (-x * x / s2).exp()
+                    if s > 0.0 { (-x * x / s2).exp() } else { 1.0 }
                 })
                 .collect();
             let sum: f64 = kernel.iter().sum();
@@ -4535,129 +4582,295 @@ impl GamutState {
     }
 }
 
-/// Pre-built grain pass — owns the grain compute bind group plus the
-/// optional post-blur pipeline state.
+/// Pre-built grain passes: upstream experimental's multilayer model.
 ///
-/// CPU equivalent: `spektrafilm_model::grain::apply_grain_to_density`.
-/// Operates in place on `buf_a` (density_cmy). When `grain_blur > 0.4`,
-/// follows up with a separable Gaussian blur that uses `buf_b` as mid
-/// (free at this point — DIR's `density_curve_0` already overwrote
-/// buf_b's role).
-
+/// CPU equivalent: `spektrafilm_model::grain::apply_grain`. Buffers: `den`
+/// (buf_a) holds the density in and out, `layer` (buf_b, free after DIR's
+/// final density curve) one sub-layer's draws, `mid` (scratch 0) the blurs'
+/// intermediate and `acc` (scratch 1) the sum of the sub-layers. Passes:
+///
+/// 1. per sub-layer: draw (`grain.wgsl`), then the dye-cloud blur into `acc`
+///    (accumulating after the first); without a blur the draw adds itself;
+/// 2. micro-structure (`grain_micro.wgsl`), only at very small pixels;
+/// 3. the pixel blur `acc` → `layer`;
+/// 4. the multiplicative unsharp mask: clamp, blur, combine
+///    (`grain_usm.wgsl`), the per-channel sums (`grain_sum_reduce.wgsl`);
+/// 5. the renormalization and floor removal into `den` (`grain_finalize.wgsl`).
+///
+/// The renormalization sums the whole image, as upstream's does.
 #[cfg(feature = "wgpu-backend")]
 struct GrainState {
-    grain_dispatch: DispatchJob,
-    blur: Option<RefBlur>,
+    _buffers: Vec<wgpu::Buffer>,
+    passes: Vec<GrainPass>,
 }
 
 #[cfg(feature = "wgpu-backend")]
+enum GrainPass {
+    /// A per-pixel dispatch over `n` threads at the pipeline's group size.
+    Linear(DispatchJob, u32),
+    /// One 256-thread workgroup per 2048-value block.
+    Blocks(DispatchJob, u32),
+    Blur(RefBlur),
+}
+
+#[cfg(feature = "wgpu-backend")]
+#[allow(clippy::too_many_arguments)]
 fn build_grain_state(
     device: &wgpu::Device,
     gp: &crate::GrainGpuParams,
     width: u32,
     height: u32,
-    buf_a: &wgpu::Buffer,
-    buf_b: &wgpu::Buffer,
+    den: &wgpu::Buffer,
+    layer_buf: &wgpu::Buffer,
+    mid: &wgpu::Buffer,
+    acc: &wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> GrainState {
     use wgpu::util::DeviceExt;
-    let n_pixels = (width as usize) * (height as usize);
+    let n_pixels = width * height;
+    let n_layers = gp.n_layers();
+    let n_samples = gp.interp_x.len();
+    let storage = |read_only| wgpu::BufferBindingType::Storage { read_only };
+    let uniform = wgpu::BufferBindingType::Uniform;
+    let job = |pipe: &CachedPipelineRef, label: &str, params: &[u8], buffers: &[&wgpu::Buffer]| {
+        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: params,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let mut entries = vec![wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() }];
+        for (i, b) in buffers.iter().enumerate() {
+            entries.push(wgpu::BindGroupEntry { binding: i as u32 + 1, resource: b.as_entire_binding() });
+        }
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout: &pipe.layout,
+            entries: &entries,
+        });
+        DispatchJob { _params_buf: params_buf, pipeline: pipe.clone(), bg }
+    };
+    let vec4 = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
+    let mut buffers = Vec::new();
+    let mut passes = Vec::new();
 
-    let grain_pipe = backend.cached_pipeline(
+    // 1. Sub-layers.
+    let draw_pipe = backend.cached_pipeline(
         include_str!("../../spektrafilm-shaders/wgsl/grain.wgsl"),
-        &[
-            wgpu::BufferBindingType::Uniform,
-            wgpu::BufferBindingType::Storage { read_only: false },
-        ],
+        &[uniform, storage(true), storage(true), storage(false)],
     );
+    let mut curves: Vec<f32> = Vec::with_capacity(n_samples * (6 + 3 * n_layers));
+    curves.extend(gp.interp_x.iter().flatten());
+    curves.extend(gp.interp_inv_dx.iter().flatten());
+    curves.extend(gp.curves_layers.iter().flatten());
+    let curves_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("grain_curves"),
+        contents: bytemuck::cast_slice(&curves),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
     #[repr(C)]
     #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-    struct GrainParams {
+    struct DrawParams {
         n_pixels: u32,
+        n_samples: u32,
+        n_layers: u32,
+        layer: u32,
         base_seed: u32,
-        n_sub_layers: u32,
         monochrome: u32,
+        accumulate: u32,
+        positive: u32,
         density_min: [f32; 4],
         density_max: [f32; 4],
         n_particles_per_pixel: [f32; 4],
         grain_uniformity: [f32; 4],
     }
-    let params = GrainParams {
-        n_pixels: n_pixels as u32,
-        base_seed: gp.base_seed,
-        n_sub_layers: gp.n_sub_layers.max(1),
-        monochrome: gp.monochrome as u32,
-        density_min: [gp.density_min[0], gp.density_min[1], gp.density_min[2], 0.0],
-        density_max: [gp.density_max[0], gp.density_max[1], gp.density_max[2], 0.0],
-        n_particles_per_pixel: [
-            gp.n_particles_per_pixel[0],
-            gp.n_particles_per_pixel[1],
-            gp.n_particles_per_pixel[2],
-            0.0,
-        ],
-        grain_uniformity: [
-            gp.grain_uniformity[0],
-            gp.grain_uniformity[1],
-            gp.grain_uniformity[2],
-            0.0,
-        ],
-    };
-    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("grain_params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("grain_bg"),
-        layout: &grain_pipe.layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: params_buf.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: buf_a.as_entire_binding(),
-            },
-        ],
-    });
-    let grain_dispatch = DispatchJob {
-        _params_buf: params_buf,
-        pipeline: grain_pipe,
-        bg,
-    };
-
-    // Optional post-blur, in place on buf_a with buf_b as intermediate.
-    // CPU: `backend.gaussian_blur_owned(out, grain_blur)` when grain_blur
-    // > 0.4 (`gaussian_blur_channel` per channel; the per-layer particle
-    // blur is off in `apply_grain_to_density`).
-    let blur = (gp.grain_blur > 0.4).then(|| {
-        build_ref_blur(device, backend, width, height, buf_a, buf_b, buf_a, [gp.grain_blur; 3], [1.0; 3], false, "grain")
-    });
-
-    GrainState {
-        grain_dispatch,
-        blur,
+    for l in 0..n_layers {
+        let sigma = gp.dye_cloud_sigma_px[l];
+        let blurred = sigma.iter().any(|&s| s > 0.0);
+        let params = DrawParams {
+            n_pixels,
+            n_samples: n_samples as u32,
+            n_layers: n_layers as u32,
+            layer: l as u32,
+            base_seed: gp.base_seed,
+            monochrome: gp.monochrome as u32,
+            accumulate: (!blurred && l > 0) as u32,
+            positive: gp.positive as u32,
+            density_min: vec4(gp.density_min_layers[l]),
+            density_max: vec4(gp.density_max_layers[l]),
+            n_particles_per_pixel: vec4(gp.n_particles_per_pixel[l]),
+            grain_uniformity: vec4(gp.grain_uniformity),
+        };
+        let out = if blurred { layer_buf } else { acc };
+        passes.push(GrainPass::Linear(
+            job(&draw_pipe, "grain_draw", bytemuck::bytes_of(&params), &[den, &curves_buf, out]),
+            n_pixels,
+        ));
+        if blurred {
+            passes.push(GrainPass::Blur(build_ref_blur(
+                device, backend, width, height, layer_buf, mid, acc, sigma, [1.0; 3], l > 0, "grain_dye",
+            )));
+        }
     }
+    buffers.push(curves_buf);
+
+    // 2. Micro-structure.
+    if let Some([sigma2, blur_px]) = gp.micro_structure {
+        let pipe = backend.cached_pipeline(
+            include_str!("../../spektrafilm-shaders/wgsl/grain_micro.wgsl"),
+            &[uniform, storage(false), storage(false)],
+        );
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct MicroParams {
+            n_pixels: u32,
+            base_seed: u32,
+            mode: u32,
+            monochrome: u32,
+            sigma2: f32,
+            _pad: [f32; 3],
+        }
+        let params = |mode| MicroParams {
+            n_pixels,
+            base_seed: gp.base_seed,
+            mode,
+            monochrome: gp.monochrome as u32,
+            sigma2,
+            _pad: [0.0; 3],
+        };
+        if blur_px > 0.0 {
+            passes.push(GrainPass::Linear(job(&pipe, "grain_micro", bytemuck::bytes_of(&params(0)), &[acc, layer_buf]), n_pixels));
+            passes.push(GrainPass::Blur(build_ref_blur(
+                device, backend, width, height, layer_buf, mid, layer_buf, [blur_px; 3], [1.0; 3], false, "grain_micro",
+            )));
+            passes.push(GrainPass::Linear(job(&pipe, "grain_micro", bytemuck::bytes_of(&params(1)), &[acc, layer_buf]), n_pixels));
+        } else {
+            passes.push(GrainPass::Linear(job(&pipe, "grain_micro", bytemuck::bytes_of(&params(2)), &[acc, layer_buf]), n_pixels));
+        }
+    }
+
+    // 3. Pixel blur.
+    let (cur, other) = if gp.blur_px > 0.0 {
+        passes.push(GrainPass::Blur(build_ref_blur(
+            device, backend, width, height, acc, mid, layer_buf, [gp.blur_px; 3], [1.0; 3], false, "grain",
+        )));
+        (layer_buf, acc)
+    } else {
+        (acc, layer_buf)
+    };
+
+    // 4. Multiplicative unsharp mask.
+    let finalize_pipe = backend.cached_pipeline(
+        include_str!("../../spektrafilm-shaders/wgsl/grain_finalize.wgsl"),
+        &[uniform, storage(true), storage(true), storage(false)],
+    );
+    #[repr(C)]
+    #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+    struct FinalizeParams {
+        n_pixels: u32,
+        use_ratio: u32,
+        _pad: [u32; 2],
+        density_min: [f32; 4],
+    }
+    let finalize = |use_ratio: bool, src: &wgpu::Buffer, sums: &wgpu::Buffer| {
+        let params = FinalizeParams {
+            n_pixels,
+            use_ratio: use_ratio as u32,
+            _pad: [0; 2],
+            density_min: vec4(gp.density_min),
+        };
+        GrainPass::Linear(job(&finalize_pipe, "grain_finalize", bytemuck::bytes_of(&params), &[src, sums, den]), n_pixels)
+    };
+    if let Some([sigma, amount]) = gp.mult_usm {
+        let usm_pipe = backend.cached_pipeline(
+            include_str!("../../spektrafilm-shaders/wgsl/grain_usm.wgsl"),
+            &[uniform, storage(false), storage(false)],
+        );
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct UsmParams {
+            n_pixels: u32,
+            mode: u32,
+            amount: f32,
+            _pad: u32,
+        }
+        let usm = |mode| UsmParams { n_pixels, mode, amount, _pad: 0 };
+        passes.push(GrainPass::Linear(job(&usm_pipe, "grain_usm_clamp", bytemuck::bytes_of(&usm(0)), &[cur, other]), n_pixels));
+        passes.push(GrainPass::Blur(build_ref_blur(
+            device, backend, width, height, cur, mid, other, [sigma; 3], [1.0; 3], false, "grain_usm",
+        )));
+        passes.push(GrainPass::Linear(job(&usm_pipe, "grain_usm_combine", bytemuck::bytes_of(&usm(1)), &[cur, other]), n_pixels));
+
+        // Sums of `cur` (before) and `other` (after), level by level.
+        let reduce_pipe = backend.cached_pipeline(
+            include_str!("../../spektrafilm-shaders/wgsl/grain_sum_reduce.wgsl"),
+            &[uniform, storage(true), storage(true), storage(false)],
+        );
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct ReduceParams {
+            n_values: u32,
+            mode: u32,
+            _pad: [u32; 2],
+        }
+        let mut values = n_pixels;
+        let mut level = 0;
+        loop {
+            let blocks = values.div_ceil(2048).max(1);
+            let out = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("grain_sums_{level}")),
+                size: blocks as u64 * 6 * 4,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            });
+            let params = ReduceParams { n_values: values, mode: (level > 0) as u32, _pad: [0; 2] };
+            let reduce = if level == 0 {
+                job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[cur, other, &out])
+            } else {
+                let prev = buffers.last().expect("previous level");
+                job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[prev, prev, &out])
+            };
+            passes.push(GrainPass::Blocks(reduce, blocks));
+            buffers.push(out);
+            if blocks == 1 {
+                break;
+            }
+            values = blocks;
+            level += 1;
+        }
+        // 5. Renormalize and remove the floor.
+        passes.push(finalize(true, other, buffers.last().expect("sums")));
+    } else {
+        let unused = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("grain_sums_unused"),
+            size: 32,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        passes.push(finalize(false, cur, &unused));
+        buffers.push(unused);
+    }
+
+    GrainState { _buffers: buffers, passes }
 }
 
 #[cfg(feature = "wgpu-backend")]
 impl GrainState {
-    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder, n_pixels: u32) {
-        // Grain compute, at the shader's own workgroup size.
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("grain_compute"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.grain_dispatch.pipeline.pipeline);
-            pass.set_bind_group(0, &self.grain_dispatch.bg, &[]);
-            let (x, y) = linear_dispatch_grid(n_pixels, self.grain_dispatch.pipeline.workgroup_size);
-            pass.dispatch_workgroups(x, y, 1);
-        }
-        // Optional post-blur.
-        if let Some(b) = &self.blur {
-            b.encode(encoder);
+    fn encode_passes(&self, encoder: &mut wgpu::CommandEncoder) {
+        for p in &self.passes {
+            match p {
+                GrainPass::Blur(b) => b.encode(encoder),
+                GrainPass::Linear(job, n) | GrainPass::Blocks(job, n) => {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("grain"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&job.pipeline.pipeline);
+                    pass.set_bind_group(0, &job.bg, &[]);
+                    let wg = if matches!(p, GrainPass::Blocks(..)) { 1 } else { job.pipeline.workgroup_size };
+                    let (x, y) = linear_dispatch_grid(*n, wg);
+                    pass.dispatch_workgroups(x, y, 1);
+                }
+            }
         }
     }
 }
@@ -4700,8 +4913,9 @@ mod grain_tests {
     }
 
     /// The Metal threadgroup query must agree with what Apple GPUs are known
-    /// to run: every shader's default size, except grain at 1024 threads,
-    /// whose dispatches Metal dropped (hence its default of 256).
+    /// to run: every shader's default size. (The earlier single-pass grain shader
+    /// could not run 1024 threads, hence grain's default of 256; the
+    /// per-sub-layer shader that replaced it can, and keeps 256.)
     #[cfg(target_os = "macos")]
     #[test]
     fn metal_threadgroup_limits_match_apple_gpus() {
@@ -4727,10 +4941,6 @@ mod grain_tests {
             let threads = declared.or_else(|| fixed_workgroup_threads(&source)).unwrap();
             eprintln!("{name:32} {threads:5} threads, pipeline limit {limit}");
             assert!(threads <= limit, "{name}: {threads} threads > limit {limit}");
-            if name == "grain.wgsl" {
-                let at_1024 = metal_threadgroups::max_threads(&device, &source, &entries, Some(1024)).unwrap();
-                assert!(at_1024 < 1024, "grain is known not to run 1024-thread groups");
-            }
         }
     }
 
@@ -5274,44 +5484,27 @@ mod grain_tests {
         let density_max = [2.5f32 + 0.03; 3];
         let npp = [4.0f32, 40.0, 400.0];
         let uniformity = [0.97f32, 0.99, 0.97];
+        // One sub-layer whose curve is the total, so it sees the density as is.
         let gp = crate::GrainGpuParams {
-            density_min,
-            density_max,
-            n_particles_per_pixel: npp,
+            interp_x: vec![[0.0; 3], [3.0; 3]],
+            positive: false,
+            interp_inv_dx: vec![[1.0 / 3.0; 3], [0.0; 3]],
+            curves_layers: vec![[0.0; 3], [3.0; 3]],
+            density_min_layers: vec![density_min],
+            density_max_layers: vec![density_max],
+            n_particles_per_pixel: vec![npp],
+            dye_cloud_sigma_px: vec![[0.0; 3]],
             grain_uniformity: uniformity,
-            n_sub_layers: 1,
+            density_min,
+            micro_structure: None,
+            blur_px: 0.0,
+            mult_usm: None,
             base_seed: 0,
-            grain_blur: 0.0,
             monochrome: false,
         };
         let data: Vec<f32> = (0..n).flat_map(|_| density).collect();
-        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
-        let buf_a = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("grain_test_density"),
-            contents: bytemuck::cast_slice(&data),
-            usage,
-        });
-        let buf_b = backend.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("grain_test_mid"),
-            size: (n * 3 * 4) as u64,
-            usage,
-            mapped_at_creation: false,
-        });
-        let readback = backend.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("grain_test_readback"),
-            size: (n * 3 * 4) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let state = build_grain_state(&backend.device, &gp, width, height, &buf_a, &buf_b, &backend);
-        let mut encoder = backend.device.create_command_encoder(&Default::default());
-        state.encode_passes(&mut encoder, n as u32);
-        encoder.copy_buffer_to_buffer(&buf_a, 0, &readback, 0, (n * 3 * 4) as u64);
-        backend.queue.submit(Some(encoder.finish()));
-        let slice = readback.slice(..);
-        slice.map_async(wgpu::MapMode::Read, |r| r.unwrap());
-        backend.device.poll(wgpu::Maintain::Wait);
-        let out: Vec<f32> = bytemuck::cast_slice(&slice.get_mapped_range()).to_vec();
+        let out = backend.run_grain(&ImageBuf::from_data(width, height, f32_to_scalars(data)), &gp);
+        let out: Vec<f32> = out.data.iter().map(|&v| v as f32).collect();
 
         for c in 0..3 {
             let d_in = (density[c] + density_min[c]) as f64;
