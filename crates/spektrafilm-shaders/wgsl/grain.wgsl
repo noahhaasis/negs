@@ -1,33 +1,45 @@
-// Poisson-binomial film grain on density CMY.
+// One emulsion sub-layer of upstream experimental's multilayer grain.
 //
-// CPU equivalent: `spektrafilm_model::grain::apply_grain_to_density` →
-// `layer_particle_model`. Poisson and binomial draws use the same exact
-// algorithms as the CPU's numpy port (`spektrafilm_math::numpy_rng`):
-// multiplication / PTRS for Poisson, inversion / BTPE for binomial. Only the
-// uniform source differs: a per-pixel PCG32 stream instead of one MT19937,
-// so the pattern differs from the CPU but its statistics do not. Same
-// `base_seed` + same image dimensions reproduce the same noise.
+// CPU equivalent: `spektrafilm_model::grain::apply_grain` → the sub-layer
+// interpolation (`LayerInterp`) and `layer_particle_model`. Poisson and
+// binomial draws use the same exact algorithms as the CPU's numpy port
+// (`spektrafilm_math::numpy_rng`): multiplication / PTRS for Poisson,
+// inversion / BTPE for binomial. Only the uniform source differs: a per-pixel
+// PCG32 stream instead of one MT19937, so the pattern differs from the CPU but
+// its statistics do not. Same `base_seed` + same image dimensions reproduce
+// the same noise.
 //
-// Reads `density_cmy` and writes the post-grain density back to the
-// same buffer (read_write). Caller is responsible for the optional
-// `grain_blur` post-pass.
+// The host dispatches it once per sub-layer. Each pixel locates its density
+// on the total curve, reads the sub-layer's density there, adds the
+// sub-layer's floor, draws the grain and writes it to `out` (or adds it, with
+// `accumulate`). The dye-cloud blur, the micro-structure, the pixel blur, the
+// unsharp mask and the floor removal are later passes.
 
 struct Params {
     n_pixels: u32,
+    n_samples: u32,
+    n_layers: u32,
+    layer: u32,
     base_seed: u32,
-    n_sub_layers: u32,
     // 1 = B&W monochrome grain: all lanes share the channel-0 RNG stream,
     // producing one noise field (upstream n_channels==1 has a single
     // emulsion). 0 = independent per-channel streams (colour).
     monochrome: u32,
-    density_min: vec4<f32>,            // .xyz used
-    density_max: vec4<f32>,            // .xyz used (already includes density_min)
-    n_particles_per_pixel: vec4<f32>,  // .xyz used (already divided by n_sub_layers)
-    grain_uniformity: vec4<f32>,       // .xyz used
+    accumulate: u32,
+    // 1 = positive film: densities are negated to locate them on the
+    // (negated, rising) total curve.
+    positive: u32,
+    density_min: vec4<f32>,            // this sub-layer's floor, .xyz
+    density_max: vec4<f32>,            // this sub-layer's absolute maximum
+    n_particles_per_pixel: vec4<f32>,  // 0 = noise-free (RMS granularity 0)
+    grain_uniformity: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read_write> density_cmy: array<f32>;
+@group(0) @binding(1) var<storage, read> density_cmy: array<f32>;
+// [x (n_samples × 3)] [1/dx (n_samples × 3)] [layers (n_samples × n_layers × 3)]
+@group(0) @binding(2) var<storage, read> curves: array<f32>;
+@group(0) @binding(3) var<storage, read_write> out: array<f32>;
 
 // SplitMix64 finalizer truncated to u32. Used to derive a per-pixel,
 // per-channel, per-sublayer seed from the user `base_seed`.
@@ -249,6 +261,35 @@ fn sample_binomial(n: f32, p: f32, rng: ptr<function, Rng>) -> f32 {
     return n - binomial_btpe(n, q, rng);
 }
 
+// Upstream `fast_interp`: the end samples outside the curve, else a binary
+// search for the last sample at or below `x` (`searchsorted(side='right')`).
+fn layer_density(x: f32, ch: u32) -> f32 {
+    let k = params.n_samples;
+    let layers_base = 6u * k;
+    let stride = params.n_layers * 3u;
+    let off = params.layer * 3u + ch;
+    if x <= curves[ch] {
+        return curves[layers_base + off];
+    }
+    if x >= curves[(k - 1u) * 3u + ch] {
+        return curves[layers_base + (k - 1u) * stride + off];
+    }
+    var lo = 0u;
+    var hi = k - 1u;
+    while hi - lo > 1u {
+        let mid = (lo + hi) / 2u;
+        if curves[mid * 3u + ch] <= x {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let t = (x - curves[lo * 3u + ch]) * curves[3u * k + lo * 3u + ch];
+    let y0 = curves[layers_base + lo * stride + off];
+    let y1 = curves[layers_base + (lo + 1u) * stride + off];
+    return y0 + t * (y1 - y0);
+}
+
 // 256, not 1024 like the other per-pixel passes: the rejection samplers
 // need enough registers that Metal will not run 1024-thread groups of this
 // pipeline, and an oversized dispatch is dropped without an error. The host
@@ -265,43 +306,40 @@ fn main(
     let idx = gid.y * groups.x * WORKGROUP_SIZE + gid.x;
     if idx >= params.n_pixels { return; }
     let base = idx * 3u;
+    let sign = select(1.0, -1.0, params.positive != 0u);
 
-    let n_sl_f = f32(params.n_sub_layers);
-    let n_sl = i32(params.n_sub_layers);
-
-    for (var ch_i: i32 = 0; ch_i < 3; ch_i++) {
-        let ch = u32(ch_i);
-        let dmin = params.density_min[ch];
+    for (var ch: u32 = 0u; ch < 3u; ch++) {
         let dmax = params.density_max[ch];
         let npp = params.n_particles_per_pixel[ch];
         let gu = params.grain_uniformity[ch];
-        let od_particle = dmax / npp;
 
-        // CPU adds density_min before grain calc, subtracts after.
-        let d_in = density_cmy[base + ch] + dmin;
-        let p_raw = d_in / dmax;
-        let p = clamp(p_raw, 1e-6, 1.0 - 1e-6);
-        let saturation = 1.0 - p * gu * (1.0 - 1e-6);
-        let lambda = npp / saturation;
-
-        var sum: f32 = 0.0;
-        for (var sl: i32 = 0; sl < n_sl; sl++) {
-            // Matches the CPU stream split: seed = ch + sl*10, then mix
-            // with pixel index. Use SplitMix to decorrelate small ints
-            // before xor-combining. Monochrome (B&W) shares channel 0's
-            // stream across all lanes.
-            var seed_ch = u32(ch_i);
+        let d_in = layer_density(sign * density_cmy[base + ch], ch) + params.density_min[ch];
+        let p = clamp(d_in / dmax, 1e-6, 1.0 - 1e-6);
+        var value: f32;
+        if npp <= 0.0 {
+            // Noise-free limit: infinitely many grains develop the mean.
+            value = p * dmax;
+        } else {
+            let od_particle = dmax / npp;
+            let saturation = 1.0 - p * gu * (1.0 - 1e-6);
+            let lambda = npp / saturation;
+            // The CPU's stream split, seed = ch + 10·sub-layer, mixed with the
+            // pixel index; SplitMix decorrelates the small integers before they
+            // are combined. Monochrome (B&W) shares channel 0's stream.
+            var seed_ch = ch;
             if params.monochrome != 0u {
                 seed_ch = 0u;
             }
-            let layer_seed = seed_ch + u32(sl) * 10u + params.base_seed;
+            let layer_seed = seed_ch + params.layer * 10u + params.base_seed;
             var rng = Rng(splitmix32(layer_seed) ^ splitmix32(idx), (splitmix32(idx ^ 0x9e3779b9u) << 1u) | 1u);
-
             let n_seeds = sample_poisson(lambda, &rng);
             let developed = sample_binomial(n_seeds, p, &rng);
-            sum = sum + developed * od_particle * saturation;
+            value = developed * od_particle * saturation;
         }
-
-        density_cmy[base + ch] = sum / n_sl_f - dmin;
+        if params.accumulate != 0u {
+            out[base + ch] = out[base + ch] + value;
+        } else {
+            out[base + ch] = value;
+        }
     }
 }

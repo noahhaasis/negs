@@ -217,8 +217,8 @@ pub struct FilmChainParams<'a> {
     /// `Some`, inserted on the film density buffer between filming and
     /// printing. Re-interpolates density curves using `density_curves_0`.
     pub dir_couplers: Option<DirCouplersGpuParams<'a>>,
-    /// Optional grain pass — Poisson-binomial particle model on the film
-    /// density buffer, after DIR couplers and before print spectral.
+    /// Optional grain pass — the multilayer Poisson-binomial model on the
+    /// film density buffer, after DIR couplers and before print spectral.
     /// Draws Poisson and binomial counts with the same exact algorithms as
     /// the CPU (numpy's), from a per-pixel random stream.
     pub grain: Option<GrainGpuParams>,
@@ -348,22 +348,49 @@ pub struct DirCouplersGpuParams<'a> {
     pub gamma_factor: f64,
 }
 
-/// Grain parameters for the GPU-resident Poisson-binomial particle model.
-/// Mirrors `apply_grain_to_density`: per-channel n_particles_per_pixel
-/// already divided by `n_sub_layers`, density_max already includes
-/// `density_min`, etc.
-#[derive(Debug, Clone, Copy)]
+/// Grain parameters for the GPU-resident pass: upstream experimental's
+/// multilayer model (CPU: `spektrafilm_model::grain::apply_grain`), built by
+/// `spektrafilm_model::grain::gpu_params`. Per (sub-layer, channel) values
+/// are `[sub-layer][channel]`.
+#[derive(Debug, Clone)]
 pub struct GrainGpuParams {
-    pub density_min: [f32; 3],
-    pub density_max: [f32; 3],
-    pub n_particles_per_pixel: [f32; 3],
+    /// The normalized total curve the density is located on, negated for
+    /// positives so it rises, `[sample][channel]`.
+    pub interp_x: Vec<[f32; 3]>,
+    /// Positive film: densities are negated before they are located.
+    pub positive: bool,
+    /// `1 / (x[k+1] - x[k])` (0 for a repeated sample); the last row is
+    /// padding.
+    pub interp_inv_dx: Vec<[f32; 3]>,
+    /// Per-sub-layer curves, `[sample][sub-layer][channel]` flattened.
+    pub curves_layers: Vec<[f32; 3]>,
+    pub density_min_layers: Vec<[f32; 3]>,
+    /// Absolute (floor-inclusive) maximum per sub-layer.
+    pub density_max_layers: Vec<[f32; 3]>,
+    /// Grains per pixel; 0 for the noise-free limit (RMS granularity 0).
+    pub n_particles_per_pixel: Vec<[f32; 3]>,
+    /// Dye-cloud blur σ in pixels per sub-layer; 0 is no blur.
+    pub dye_cloud_sigma_px: Vec<[f32; 3]>,
     pub grain_uniformity: [f32; 3],
-    pub n_sub_layers: u32,
+    /// The floor removed at the end.
+    pub density_min: [f32; 3],
+    /// Lognormal micro-structure `(ln(1 + σ²), blur σ px)` when it is on;
+    /// a blur of 0 is none.
+    pub micro_structure: Option<[f32; 2]>,
+    /// Pixel blur σ in pixels; 0 is off.
+    pub blur_px: f32,
+    /// Multiplicative unsharp mask `(σ px, amount)` when it is on.
+    pub mult_usm: Option<[f32; 2]>,
     pub base_seed: u32,
-    pub grain_blur: f32,
     /// One shared noise field across all channels (B&W single emulsion)
     /// instead of independent per-channel RNG streams.
     pub monochrome: bool,
+}
+
+impl GrainGpuParams {
+    pub fn n_layers(&self) -> usize {
+        self.density_max_layers.len()
+    }
 }
 
 /// Output gamut compression parameters for the GPU-resident per-pixel pass.

@@ -4,10 +4,15 @@ enum Adjustment: Identifiable {
     case slider(String, String, ClosedRange<Double>, Double)
     case toggle(String, String)
     case choice(String, String, [String])
+    /// One lane (index) of an engine array that stays null until edited, so
+    /// the film's grain preset from the catalog applies. B&W films have one
+    /// emulsion: they show the lane under `bw`, or hide it when that is nil.
+    case stockSlider(String, String, Int, ClosedRange<Double>, Double, bw: String?)
 
     var id: String {
         switch self {
         case .slider(_, let path, _, _), .toggle(_, let path), .choice(_, let path, _): return path
+        case .stockSlider(_, let path, let index, _, _, _): return "\(path).\(index)"
         }
     }
 }
@@ -53,10 +58,21 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Developer exhaustion", "film_render.density_curves_morph.developer_exhaustion", 0...1, 0.01)
     ]),
     .init(title: "Grain", symbol: "circle.dotted", section: .film, enable: "film_render.grain.active", controls: [
-        .slider("Particle area (µm²)", "film_render.grain.agx_particle_area_um2", 0.05...1, 0.01),
-        .slider("Post blur", "film_render.grain.blur", 0...3, 0.01),
-        .toggle("Sublayers", "film_render.grain.sublayers_active"),
-        .slider("Sublayer count", "film_render.grain.n_sub_layers", 1...4, 1)
+        .stockSlider("Red granularity", "film_render.grain.rms_granularity", 0, 0...80, 0.1, bw: "Granularity"),
+        .stockSlider("Green granularity", "film_render.grain.rms_granularity", 1, 0...80, 0.1, bw: nil),
+        .stockSlider("Blue granularity", "film_render.grain.rms_granularity", 2, 0...80, 0.1, bw: nil),
+        .stockSlider("Red uniformity", "film_render.grain.uniformity", 0, 0...1, 0.01, bw: "Uniformity"),
+        .stockSlider("Green uniformity", "film_render.grain.uniformity", 1, 0...1, 0.01, bw: nil),
+        .stockSlider("Blue uniformity", "film_render.grain.uniformity", 2, 0...1, 0.01, bw: nil),
+        .stockSlider("Coarse grain size", "film_render.grain.particle_scale_sublayers", 0, 0.05...2, 0.01, bw: "Coarse grain size"),
+        .stockSlider("Medium grain size", "film_render.grain.particle_scale_sublayers", 1, 0.05...2, 0.01, bw: "Medium grain size"),
+        .stockSlider("Fine grain size", "film_render.grain.particle_scale_sublayers", 2, 0.05...2, 0.01, bw: "Fine grain size"),
+        .slider("Dye clouds (µm)", "film_render.grain.blur_dye_clouds_um", 0...5, 0.01),
+        .slider("Blur (px)", "film_render.grain.blur", 0...3, 0.01),
+        .slider("Sharpen amount", "film_render.grain.mult_usm_amount", 0...3, 0.01),
+        .slider("Sharpen radius (px)", "film_render.grain.mult_usm_sigma", 0...3, 0.01),
+        .slider("Clump blur (µm)", "film_render.grain.micro_structure.0", 0...1, 0.01),
+        .slider("Clump size (nm)", "film_render.grain.micro_structure.1", 0...100, 1)
     ]),
     .init(title: "Halation", symbol: "sun.haze", section: .film, enable: "film_render.halation.active", controls: [
         .slider("Amount", "film_render.halation.halation_amount", 0...3, 0.01),
@@ -126,6 +142,14 @@ struct AdjustmentControl: View {
             }.resettable(model, path)
         case .slider(let title, let path, let range, let step):
             SliderRow(model: model, title: title, path: path, range: range, step: step)
+        case .stockSlider(let title, let path, let index, let range, let step, let bwTitle):
+            if !model.filmIsBW || bwTitle != nil {
+                LabeledSlider(title: model.filmIsBW ? bwTitle ?? title : title,
+                              value: model.stockNumber(path, index, range: range, step: step), range: range, step: step,
+                              defaultValue: model.stockDefault(path, index), modified: model.isStockModified(path, index),
+                              reset: { model.resetStock(path, index) },
+                              editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+            }
         }
     }
 }

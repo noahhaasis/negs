@@ -82,10 +82,7 @@ pub fn apply_film_specific_params(film: &Profile, params: &mut RuntimeParams) {
         dir.gamma_interlayer_b_to_rg = [0.0, 0.0];
         dir.langmuir_donor_k_rgb = [dir.langmuir_donor_k_rgb[0]; 3];
         dir.langmuir_receiver_k_rgb = [dir.langmuir_receiver_k_rgb[0]; 3];
-        let g = &mut params.film_render.grain;
-        g.agx_particle_scale = [g.agx_particle_scale[0]; 3];
-        g.density_min = [g.density_min[0]; 3];
-        g.uniformity = [g.uniformity[0]; 3];
+        // Grain broadcasts channel 0 in `crate::grain::grain_settings`.
         let h = &mut params.film_render.halation;
         h.halation_strength = [h.halation_strength[0]; 3];
         h.scatter_core_um = [h.scatter_core_um[0]; 3];
@@ -248,7 +245,6 @@ impl Pipeline {
             None => self.autoexposure_ev(&stages::filming::metering_preview(image)),
         }
     }
-
 
     /// Bake the film-curve morph into `film.data.density_curves` and
     /// `film.data.density_curves_layers`, as upstream experimental bakes
@@ -1150,53 +1146,18 @@ impl Pipeline {
             }
         });
 
-        // Grain in the resident chain — same per-channel particle math as
-        // `apply_grain_to_density`, with the same exact Poisson/binomial
-        // algorithms; only the random stream differs.
-        let grain = if self.params.film_render.grain.active {
-            let pix_um = stages::filming::pixel_size_um(
-                self.params.camera.film_format_mm,
-                image.width,
-                image.height,
-            );
-            let g = &self.params.film_render.grain;
-            let pixel_area = pix_um * pix_um;
-            let n_sub = g.n_sub_layers.max(1);
-            // GPU shaders are f32 — narrow the f64 grain params at the boundary.
-            let mut npp = [0.0f32; 3];
-            for c in 0..3 {
-                let particle_area = g.agx_particle_area_um2 * g.agx_particle_scale[c];
-                npp[c] = ((pixel_area as f64 / particle_area) / n_sub as f64) as f32;
-            }
-            let film_curves_f32 = self.film.density_curves_f32();
-            let norm_curves_f32 =
-                spektrafilm_model::density_curves::normalize_density_curves(&film_curves_f32);
-            let dmax_curves = spektrafilm_model::density_curves::max_density(&norm_curves_f32);
-            let mut density_max = [0.0f32; 3];
-            for c in 0..3 {
-                density_max[c] = dmax_curves[c] + g.density_min[c] as f32;
-            }
-            Some(spektrafilm_gpu::GrainGpuParams {
-                density_min: [
-                    g.density_min[0] as f32,
-                    g.density_min[1] as f32,
-                    g.density_min[2] as f32,
-                ],
-                density_max,
-                n_particles_per_pixel: npp,
-                grain_uniformity: [
-                    g.uniformity[0] as f32,
-                    g.uniformity[1] as f32,
-                    g.uniformity[2] as f32,
-                ],
-                n_sub_layers: n_sub,
-                base_seed: 0,
-                grain_blur: g.blur,
-                monochrome: g.monochrome,
-            })
-        } else {
-            None
-        };
+        // Grain in the resident chain — the same multilayer model, inputs and
+        // exact Poisson/binomial algorithms as `apply_grain`; only the random
+        // stream differs.
+        let grain = crate::grain::grain_active(&self.params).then(|| {
+            spektrafilm_model::grain::gpu_params(
+                &crate::grain::grain_curves(&self.film),
+                &crate::grain::grain_settings(&self.film, &self.params.film_render.grain),
+                stages::filming::grain_pixel_size_um(&self.params, image.width, image.height),
+                self.film.is_positive(),
+                self.params.film_render.grain.monochrome,
+            )
+        });
 
         // Glare in the resident chain — applied after scan_spectral on the
         // final RGB buffer. Mirrors the CPU lognormal + blur + add. The CPU
