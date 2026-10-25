@@ -39,6 +39,13 @@ From the Rust repository root:
   --experimental /path/to/experimental-checkout \
   --output crates/spektrafilm-core/tests/fixtures/film_morph_python_28bf883.json
 
+# Light sources by name (tests/illuminants.rs): spectra, reference whites and
+# the cine pairs 500T -> 2383 and 200T -> 2393, from a `git archive` of main
+# 3bb2c2d. From a worktree, pass --git-repo explicitly:
+../spektrafilm-env/bin/python -I scripts/parity/freeze_illuminants_reference.py \
+  --python-source /tmp/pymain --git-repo /path/to/spektrafilm \
+  --output crates/spektrafilm-core/tests/fixtures/illuminants_python_3bb2c2d.json
+
 # Existing frozen Python reference tests and the full Rust suite:
 cargo test --workspace --locked
 cargo test --workspace --locked --features spektrafilm-cli/precision-f64

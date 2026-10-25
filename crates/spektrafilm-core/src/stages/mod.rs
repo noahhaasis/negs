@@ -352,7 +352,7 @@ mod debug_tests {
         let img = ImageBuf::from_data(1, 1, vec![gray, gray, gray]);
         eprintln!("Input: {:?}", img.get(0, 0));
 
-        let ref_illuminant = stages::filming::select_illuminant(&film.info.reference_illuminant);
+        let ref_illuminant = crate::illuminants::select_illuminant(&film.info.reference_illuminant);
         let log_raw = stages::filming::expose(
             img,
             &film,
@@ -360,7 +360,7 @@ mod debug_tests {
             &backend,
             None,
             None,
-            ref_illuminant,
+            &ref_illuminant,
             1.0,
         );
         eprintln!("log_raw: {:?}", log_raw.get(0, 0));

@@ -35,7 +35,7 @@ use spektrafilm_math::spectral::{self, CMF_Y_F64};
 use crate::params::RuntimeParams;
 use crate::profile::Profile;
 use crate::stages::printing::compute_single_pixel_raw;
-use crate::stages::scanning::select_illuminant_f64;
+use crate::illuminants::select_illuminant_f64;
 
 /// Pre-computed scanner exposure correction for the active stocks/params.
 #[derive(Clone, Copy, Debug)]
