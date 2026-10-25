@@ -1,0 +1,656 @@
+{
+ "reference": {
+  "commit": null,
+  "status": null,
+  "tree_sha256": "d03e1807ecfa9b23e7537c26ff25407aab14369cf7767b076206cccf4afe4a53"
+ },
+ "table": [
+  {
+   "use": "still",
+   "antihalation": "strong",
+   "sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "use": "still",
+   "antihalation": "weak",
+   "sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "use": "still",
+   "antihalation": "no",
+   "sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "strength": [
+    0.3,
+    0.1,
+    0.015
+   ]
+  },
+  {
+   "use": "cine",
+   "antihalation": "strong",
+   "sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "use": "cine",
+   "antihalation": "weak",
+   "sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "use": "cine",
+   "antihalation": "no",
+   "sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "strength": [
+    0.3,
+    0.1,
+    0.015
+   ]
+  }
+ ],
+ "profiles": [
+  {
+   "stock": "fujifilm_c200",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_crystal_archive_typeii",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": false,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.05,
+    0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_pro_400h",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_provia_100f",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_velvia_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_xtra_400",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "ilford_mgrc_deluxe_grade2",
+   "use": "still",
+   "antihalation": "no",
+   "is_film": false,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.05,
+    0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_2302",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_2383",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_2393",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_doublex",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_ektachrome_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_ektacolor_edge",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": false,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.05,
+    0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_ektar_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_endura_premier",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": false,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.05,
+    0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_gold_200",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_kodachrome_64",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_portra_160",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_portra_400",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_portra_800",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_portra_800_push1",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_portra_800_push2",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_portra_endura",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": false,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.05,
+    0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_supra_endura",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": false,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.05,
+    0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_trix",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_trix400_d76_8min",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_ultra_endura",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": false,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.05,
+    0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_ultramax_400",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_verita_200d",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_vision3_200t",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_vision3_250d",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_vision3_500t",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_vision3_50d",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  }
+ ]
+}
