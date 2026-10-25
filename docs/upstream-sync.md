@@ -121,7 +121,8 @@ that every upstream difference has been classified.
    Follow-up: the [experimental gamut port](handoff-experimental-gamut.md)
    now provides an explicit preset, smooth input boundary, and fixed D65
    center. B&W routes pass with compression enabled, including saturated
-   inputs. The main-compatible runtime defaults are preserved.
+   inputs. Since ticket 16.8 these settings are the defaults, and the
+   preset is gone.
 3. **Additional spectral recovery.** Reflectance LUT methods, including
    Arctic 2026, Otsu 2018, and Jakob 2019, add data/descriptor handling and
    normalization rules. Although experimental's GUI history changes its

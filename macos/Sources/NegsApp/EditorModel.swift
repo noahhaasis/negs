@@ -807,7 +807,7 @@ import UniformTypeIdentifiers
         panel.canCreateDirectories = true
         panel.allowedContentTypes = [UTType(filenameExtension: "cube") ?? .data]
         panel.nameFieldStringValue = "\(state.film)_\(state.params["io.scan_film"].bool ? "direct_scan" : state.paper).cube"
-        panel.message = "33 × 33 × 33 CUBE · sRGB input and output. Uses the current film and paper color settings. Auto exposure, grain, halation, glare, diffusion, blur, sharpening, RAW development, and Post edits are excluded."
+        panel.message = "33 × 33 × 33 CUBE · sRGB input and output. Uses the current film and paper color settings. Auto exposure, print filter shifts, preflash, grain, halation, glare, diffusion, blur, sharpening, RAW development, and Post edits are excluded."
         if let path = UserDefaults.standard.string(forKey: "lastLUTFolder") {
             panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
         }

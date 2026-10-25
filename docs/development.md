@@ -117,9 +117,6 @@ SPEKTRAFILM_BACKEND=cpu \
 # Override any params via JSON (matches RuntimeParams struct)
 ... --params my_params.json
 
-# Opt into pinned experimental 28bf883 gamut settings
-... --params data/presets/experimental-gamut.json
-
 # Image Size: develop the film so the cropped photograph is 9000 px on its
 # longest side. The source is resized before the film (grain and halation form
 # at that size), the crop still applies after it, and --long-edge/--short-edge
@@ -138,11 +135,12 @@ echo '{"io": {"photo_long_side_px": 9000}}' > size.json
 
 ## Parity
 
-The optional [experimental gamut preset](handoff-experimental-gamut.md)
-adds the smooth input boundary and D65 compression center. All 24 tested
-B&W cases pass against pinned Python `28bf883`, including saturated inputs,
-with maximum final RGB error `5.313e-10`. The existing runtime defaults are
-preserved; colour-profile normalization remains a separate port.
+The gamut defaults are experimental `28bf883`'s: the smooth input boundary,
+the D65 compression center and the OkLCh output compressor
+([gamut handoff](handoff-experimental-gamut.md)). All 24 tested B&W cases
+pass against pinned Python `28bf883`, including saturated inputs, with
+maximum final RGB error `5.313e-10`; colour-profile normalization remains a
+separate port.
 
 The [repeatable parity runner](../scripts/parity/README.md) checks intermediate f64 arrays and final RGB against an explicitly selected Python checkout. The [October 2026 audit](upstream-sync.md) passes all 12 tested cases against upstream main `3bb2c2d`, with maximum final linear RGB error `3.631e-9`. The sibling Python checkout is on experimental `28bf883`, which changes the model and fails all six tested Portra/Endura cases. Version `0.3.4` alone does not identify a stable reference.
 
