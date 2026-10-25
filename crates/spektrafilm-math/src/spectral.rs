@@ -903,15 +903,15 @@ const D50_ILLUMINANT_XYZ: [f32; 3] = [0.964220, 1.0, 0.825210]; // from colour-s
 const D55_ILLUMINANT_XYZ: [f32; 3] = [0.956791, 1.0, 0.921367]; // exact Python value
 const D65_ILLUMINANT_XYZ: [f32; 3] = [0.950456, 1.0, 1.089058]; // from sRGB whitepoint
 
-/// f64 pre-computed illuminant XYZ. Exactly matches Python's `_illuminant_to_xy`
-/// → `(x/y, 1, (1-x-y)/y)` chain, computed at full f64 precision.
-const D50_ILLUMINANT_XYZ_F64: [f64; 3] = [0.96419686124892201, 1.0, 0.82512259200404314];
-const D55_ILLUMINANT_XYZ_F64: [f64; 3] = [0.9567908993343901, 1.0, 0.92136745658606822];
-const D65_ILLUMINANT_XYZ_F64: [f64; 3] = [0.95042966940215057, 1.0, 1.0888005470297513];
-/// Frozen from Python's `_illuminant_to_xy('T')` / `('K75P')` by
-/// `scripts/parity/freeze_illuminants_reference.py`.
-const T_ILLUMINANT_XYZ_F64: [f64; 3] = [1.1046024645024972, 1.0, 0.3460799808452583];
-const K75P_ILLUMINANT_XYZ_F64: [f64; 3] = [0.947089788128642, 1.0, 1.0571900691589704];
+/// f64 pre-computed illuminant XYZ: Python's `_illuminant_to_xy` followed by
+/// colour's `xyY_to_XYZ(xy_to_xyY(xy))`, as `RGB_to_XYZ` adapts to it.
+/// Checked bit for bit against `tests/fixtures/colorspaces_python_28bf883.json`
+/// (`scripts/parity/freeze_colorspaces_reference.py`).
+const D50_ILLUMINANT_XYZ_F64: [f64; 3] = [0.9641968612489219, 1.0, 0.8251225920040428];
+const D55_ILLUMINANT_XYZ_F64: [f64; 3] = [0.9567908993343899, 1.0, 0.9213674565860677];
+const D65_ILLUMINANT_XYZ_F64: [f64; 3] = [0.9504296694021502, 1.0, 1.0888005470297515];
+const T_ILLUMINANT_XYZ_F64: [f64; 3] = [1.1046024645024972, 1.0, 0.34607998084525843];
+const K75P_ILLUMINANT_XYZ_F64: [f64; 3] = [0.947089788128642, 1.0, 1.0571900691589706];
 
 /// The pre-computed white of a baked illuminant table. Compares the whole
 /// table: a blackbody (`BB<temperature>`) can share any single sample with one.
@@ -928,53 +928,25 @@ fn known_illuminant_xyz_f64(illuminant: &[f32]) -> Option<[f64; 3]> {
     .map(|(_, xyz)| xyz)
 }
 
-/// Get the native white point XYZ for a named colorspace.
-/// Uses xy chromaticity → XYZ conversion to match Python colour-science exactly.
+/// Native white point XYZ of a named input colorspace (unknown names: ProPhoto).
 pub fn colorspace_white_xyz(name: &str) -> [f32; 3] {
-    match name {
-        // sRGB: whitepoint xy = (0.3127, 0.329) per colour-science
-        "sRGB" => colorspace::xy_to_xyz(0.3127, 0.329),
-        // ProPhoto: whitepoint = D50 xy = (0.3457, 0.3585)
-        "ProPhoto RGB" => colorspace::xy_to_xyz(0.3457, 0.3585),
-        // Rec.2020: whitepoint = D65 xy = (0.3127, 0.329)
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::xy_to_xyz(0.3127, 0.329),
-        // ACES: whitepoint xy = (0.32168, 0.33767)
-        "ACES2065-1" => colorspace::xy_to_xyz(0.32168, 0.33767),
-        _ => colorspace::xy_to_xyz(0.3457, 0.3585), // ProPhoto default
-    }
+    colorspace_white_xyz_f64(name).map(|v| v as f32)
 }
 
-/// f64 variant: native white point XYZ for a named colorspace.
+/// f64 variant: colour's `xy_to_XYZ(colourspace.whitepoint)`, the white the
+/// CAT in `RGB_to_XYZ` adapts from.
 pub fn colorspace_white_xyz_f64(name: &str) -> [f64; 3] {
-    match name {
-        "sRGB" => colorspace::xy_to_xyz_f64(0.3127, 0.329),
-        "ProPhoto RGB" => colorspace::xy_to_xyz_f64(0.3457, 0.3585),
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::xy_to_xyz_f64(0.3127, 0.329),
-        "ACES2065-1" => colorspace::xy_to_xyz_f64(0.32168, 0.33767),
-        _ => colorspace::xy_to_xyz_f64(0.3457, 0.3585),
-    }
+    colorspace::RgbColourspace::input(name).whitepoint_xyz
 }
 
-/// Get the RGB→XYZ matrix for a named colorspace.
+/// RGB→XYZ matrix of a named input colorspace (unknown names: ProPhoto).
 pub fn colorspace_to_xyz(name: &str) -> [[f32; 3]; 3] {
-    match name {
-        "sRGB" => colorspace::SRGB_TO_XYZ,
-        "ProPhoto RGB" => colorspace::PROPHOTO_TO_XYZ,
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::REC2020_TO_XYZ,
-        "ACES2065-1" => colorspace::ACES_TO_XYZ,
-        _ => colorspace::PROPHOTO_TO_XYZ,
-    }
+    colorspace::mat_f32(colorspace_to_xyz_f64(name))
 }
 
-/// f64 variant: RGB→XYZ matrix for a named colorspace.
+/// f64 variant: colour's `matrix_RGB_to_XYZ`.
 pub fn colorspace_to_xyz_f64(name: &str) -> [[f64; 3]; 3] {
-    match name {
-        "sRGB" => colorspace::SRGB_TO_XYZ_F64,
-        "ProPhoto RGB" => colorspace::PROPHOTO_TO_XYZ_F64,
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::REC2020_TO_XYZ_F64,
-        "ACES2065-1" => colorspace::ACES_TO_XYZ_F64,
-        _ => colorspace::PROPHOTO_TO_XYZ_F64,
-    }
+    colorspace::RgbColourspace::input(name).rgb_to_xyz
 }
 
 /// Compute the reference illuminant's XYZ (for CAT02 target white).
@@ -1001,9 +973,9 @@ pub fn illuminant_xyz(illuminant: &[f32]) -> [f32; 3] {
     let n = illuminant.len().min(N_WAVELENGTHS);
     let mut xyz = [0.0f64; 3];
     for i in 0..n {
-        xyz[0] += illuminant[i] as f64 * CMF_X[i] as f64;
-        xyz[1] += illuminant[i] as f64 * CMF_Y[i] as f64;
-        xyz[2] += illuminant[i] as f64 * CMF_Z[i] as f64;
+        xyz[0] += illuminant[i] as f64 * CMF_X_F64[i];
+        xyz[1] += illuminant[i] as f64 * CMF_Y_F64[i];
+        xyz[2] += illuminant[i] as f64 * CMF_Z_F64[i];
     }
     if xyz[1] > 0.0 {
         let s = 1.0 / xyz[1];
@@ -1047,7 +1019,7 @@ pub fn illuminant_xyz_f64(illuminant: &[f32]) -> [f64; 3] {
     if y <= 0.0 {
         return [1.0, 1.0, 1.0];
     }
-    [x / y, 1.0, (1.0 - x - y) / y]
+    colorspace::xy_to_xyz_f64(x, y)
 }
 
 /// f64 variant of XYZ → CIE xy.

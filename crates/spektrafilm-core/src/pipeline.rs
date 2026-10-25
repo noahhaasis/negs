@@ -255,7 +255,7 @@ impl Pipeline {
             return 0.0;
         }
         static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
-        let raw = stages::filming::rgb_to_film_raw(
+        let raw = stages::filming::encoded_rgb_to_film_raw(
             preview,
             &self.params,
             &CPU,
@@ -808,10 +808,7 @@ impl Pipeline {
             match self.try_gpu_resident(&image, backend, &color_ref, autoexposure_ev) {
                 Ok(Some(out)) => {
                     tracing::info!("pipeline: gpu-resident fast path complete");
-                    if backend.resident_chain_applies_post_scan() {
-                        return Ok((out, backend.name()));
-                    }
-                    return Ok((self.apply_post_scan(out), backend.name()));
+                    return Ok((self.finish_resident(out, backend), backend.name()));
                 }
                 Err(reason) => {
                     // Returning None alone would dispatch the individual GPU
@@ -916,11 +913,7 @@ impl Pipeline {
         );
         let autoexposure_ev = self.frame_autoexposure_ev(image);
         let out = self.try_gpu_resident(image, backend, &color_ref, autoexposure_ev).ok()??;
-        let out = if backend.resident_chain_applies_post_scan() {
-            out
-        } else {
-            self.apply_post_scan(out)
-        };
+        let out = self.finish_resident(out, backend);
         Some(self.apply_post(out))
     }
 
@@ -936,7 +929,8 @@ impl Pipeline {
 
     /// Try the GPU-resident fast path. Builds all the per-stage data and
     /// hands it to the backend's `try_run_film_chain`. The output is linear RGB,
-    /// unclipped; backends that don't encode it leave that to `apply_post_scan`.
+    /// unclipped, unless the backend applies the post-scan pass; see
+    /// `finish_resident`.
     fn try_gpu_resident(
         &self,
         image: &ImageBuf,
@@ -944,6 +938,16 @@ impl Pipeline {
         color_ref: &crate::color_reference::ColorReference,
         autoexposure_ev: f64,
     ) -> Result<Option<ImageBuf>, String> {
+        // The front pass expects linear RGB.
+        let decoded;
+        let image = if self.params.io.input_cctf_decoding {
+            let mut d = image.clone();
+            stages::filming::decode_input_cctf(&mut d, &self.params);
+            decoded = d;
+            &decoded
+        } else {
+            image
+        };
         // Bake the exposure scale (auto-exposure × manual EV compensation)
         // into the front-pass matrix. The upsampler is homogeneous in the
         // input RGB, so scaling the matrix is
@@ -1086,22 +1090,14 @@ impl Pipeline {
         .min(spektrafilm_math::spectral::N_WAVELENGTHS);
         let (scan_norm, viewing_white) =
             stages::scanning::scan_normalization_and_white(&viewing_illu, n_wl);
-        let output_white = spektrafilm_math::spectral::colorspace_white_xyz_f64(
+        let output = spektrafilm_math::colorspace::RgbColourspace::output(
             &self.params.io.output_color_space,
         );
         let adapt = spektrafilm_math::colorspace::chromatic_adaptation_matrix_f64(
             viewing_white,
-            output_white,
+            output.whitepoint_xyz,
         );
-        let base_xyz_to_rgb = match self.params.io.output_color_space.as_str() {
-            "sRGB" => spektrafilm_math::colorspace::XYZ_TO_SRGB_F64,
-            "ProPhoto RGB" => spektrafilm_math::colorspace::XYZ_TO_PROPHOTO_F64,
-            "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => {
-                spektrafilm_math::colorspace::XYZ_TO_REC2020_F64
-            }
-            "ACES2065-1" => spektrafilm_math::colorspace::XYZ_TO_ACES_F64,
-            _ => spektrafilm_math::colorspace::XYZ_TO_SRGB_F64,
-        };
+        let base_xyz_to_rgb = output.xyz_to_rgb;
         let mut scan_xyz_to_rgb = [[0.0f64; 3]; 3];
         for i in 0..3 {
             for j in 0..3 {
@@ -1232,9 +1228,9 @@ impl Pipeline {
             // glare_rgb_offset = (XYZ→RGB) · illuminant_xyz / 100.
             let mut illu_xyz = [0.0f64; 3];
             for i in 0..n_wl {
-                illu_xyz[0] += viewing_illu[i] * spektrafilm_math::spectral::CMF_X[i] as f64;
-                illu_xyz[1] += viewing_illu[i] * spektrafilm_math::spectral::CMF_Y[i] as f64;
-                illu_xyz[2] += viewing_illu[i] * spektrafilm_math::spectral::CMF_Z[i] as f64;
+                illu_xyz[0] += viewing_illu[i] * spektrafilm_math::spectral::CMF_X_F64[i];
+                illu_xyz[1] += viewing_illu[i] * spektrafilm_math::spectral::CMF_Y_F64[i];
+                illu_xyz[2] += viewing_illu[i] * spektrafilm_math::spectral::CMF_Z_F64[i];
             }
             for c in 0..3 {
                 illu_xyz[c] /= scan_norm;
@@ -1348,23 +1344,46 @@ impl Pipeline {
             diffusion,
             enlarger_diffusion,
             print_exposure_scale,
-            output_cctf_encoding: self.params.io.output_cctf_encoding,
-            output_encode_matrix: stages::scanning::rgb_to_rgb_identity_matrix(
+            // The GPU post-scan passes only know the sRGB curve; other
+            // curves are encoded on the CPU (`gpu_encodes_output`).
+            output_cctf_encoding: self.params.io.output_cctf_encoding && self.gpu_encodes_output(),
+            output_encode_matrix: spektrafilm_math::colorspace::RgbColourspace::output(
                 &self.params.io.output_color_space,
-            ),
+            )
+            .rgb_to_rgb_self,
         };
         backend.film_chain_capacity(&params)?;
         Ok(backend.try_run_film_chain(&params))
     }
 
     /// After the GPU fast path returns linear RGB, apply the encoding the CPU
-    /// scan ends with (Python's near-identity `RGB_to_RGB`, then the sRGB
-    /// OETF), unclipped like it.
+    /// scan ends with (Python's near-identity `RGB_to_RGB`, then the output
+    /// space's curve), unclipped like it.
     fn apply_post_scan(&self, mut rgb: ImageBuf) -> ImageBuf {
         if self.params.io.output_cctf_encoding {
             stages::scanning::encode_output(&mut rgb, &self.params.io.output_color_space);
         }
         rgb
+    }
+
+    /// Whether a GPU chain that applies the post-scan pass also encodes the
+    /// output: its shaders implement only the sRGB curve.
+    fn gpu_encodes_output(&self) -> bool {
+        spektrafilm_math::colorspace::RgbColourspace::output(&self.params.io.output_color_space)
+            .cctf
+            .is_srgb()
+    }
+
+    /// The resident chain's output, finished: encoded on the CPU when the
+    /// backend left the post-scan pass to us or couldn't encode this curve.
+    fn finish_resident(&self, rgb: ImageBuf, backend: &dyn ComputeBackend) -> ImageBuf {
+        if !backend.resident_chain_applies_post_scan()
+            || (self.params.io.output_cctf_encoding && !self.gpu_encodes_output())
+        {
+            self.apply_post_scan(rgb)
+        } else {
+            rgb
+        }
     }
 }
 

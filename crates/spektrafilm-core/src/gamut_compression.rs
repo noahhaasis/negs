@@ -10,31 +10,20 @@
 //! lightness. A one-sided lightness compression first rolls super-bright
 //! highlights (`L > white`) back into range.
 //!
-//! Ported (sRGB output): `oklch`, `oklrab`, upstream's default `cam16ucs`
-//! (full CIECAM16), and `aces_rgc` (per-channel). `jzazbz` remains a follow-up.
-//! Gated behind
-//! `io.output_gamut_compress` (default off → no change).
+//! Ported: `oklch` (the default), `oklrab`, `cam16ucs` (full CIECAM16), and
+//! `aces_rgc` (per-channel), for every output colourspace of
+//! `spektrafilm_math::colorspace`. `jzazbz` remains a follow-up.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::params::OutputGamutCompressParams;
+use spektrafilm_math::colorspace::RgbColourspace;
+use spektrafilm_math::colorspace_data::{
+    CAM16_C, CAM16_F_L, CAM16_N, CAM16_N_BB, CAM16_N_C, CAM16_N_CB, CAM16_Z, CAT16 as CAM16_M16,
+    CAT16_INVERSE as CAM16_M16I,
+};
 
-// sRGB linear RGB ↔ XYZ (colour-science's rounded sRGB matrices, D65; no CAT
-// since the conversion uses the colourspace's own whitepoint).
-const SRGB_RGB_TO_XYZ: [[f64; 3]; 3] = [
-    [0.4124, 0.3576, 0.1805],
-    [0.2126, 0.7152, 0.0722],
-    [0.0193, 0.1192, 0.9505],
-];
-const SRGB_XYZ_TO_RGB: [[f64; 3]; 3] = [
-    [3.2406, -1.5372, -0.4986],
-    [-0.9689, 1.8758, 0.0415],
-    [0.0557, -0.204, 1.057],
-];
-// sRGB (D65) whitepoint as XYZ at Y=1, from the exact xy = (0.3127, 0.329)
-// — matches colour's `_xy_to_xyz_unit_y(whitepoint)`.
-const SRGB_WHITE_XYZ: [f64; 3] = [0.3127 / 0.329, 1.0, (1.0 - 0.3127 - 0.329) / 0.329];
+use crate::params::OutputGamutCompressParams;
 
 // OkLab (Ottosson) matrices, exactly as colour-science stores them.
 const M1_XYZ_TO_LMS: [[f64; 3]; 3] = [
@@ -142,24 +131,28 @@ enum Space {
 }
 
 impl Space {
-    /// linear sRGB → perceptual reconstruction coords `[L, a, b]`.
+    /// linear output RGB → perceptual reconstruction coords `[L, a, b]`.
+    ///
+    /// Upstream converts with `RGB_to_XYZ`/`XYZ_to_RGB(illuminant=whitepoint)`,
+    /// whose CAT02 from the whitepoint to itself is the identity to ~1e-16,
+    /// so only the colourspace's matrices are applied.
     #[inline]
-    fn from_rgb(self, rgb: [f64; 3]) -> [f64; 3] {
-        let xyz = mat_vec(&SRGB_RGB_TO_XYZ, rgb);
+    fn from_rgb(self, cs: &RgbColourspace, rgb: [f64; 3]) -> [f64; 3] {
+        let xyz = mat_vec(&cs.rgb_to_xyz, rgb);
         match self {
             // oklrab shares OkLab coords; only the C_max lookup index differs.
             Space::Oklch | Space::Oklrab => xyz_to_oklab(xyz),
-            Space::Cam16ucs => xyz_to_cam16ucs(xyz),
+            Space::Cam16ucs => xyz_to_cam16ucs(cs, xyz),
         }
     }
-    /// perceptual reconstruction coords `[L, a, b]` → linear sRGB.
+    /// perceptual reconstruction coords `[L, a, b]` → linear output RGB.
     #[inline]
-    fn to_rgb(self, lab: [f64; 3]) -> [f64; 3] {
+    fn to_rgb(self, cs: &RgbColourspace, lab: [f64; 3]) -> [f64; 3] {
         let xyz = match self {
             Space::Oklch | Space::Oklrab => oklab_to_xyz(lab),
-            Space::Cam16ucs => cam16ucs_to_xyz(lab),
+            Space::Cam16ucs => cam16ucs_to_xyz(cs, lab),
         };
-        mat_vec(&SRGB_XYZ_TO_RGB, xyz)
+        mat_vec(&cs.xyz_to_rgb, xyz)
     }
     /// Reconstruction lightness `L` → C_max-table lookup index. Identity except
     /// oklrab, which indexes the table by Ottosson's rebased `Lr`.
@@ -179,9 +172,8 @@ impl Space {
         }
     }
     /// `(l_min, l_max, chroma_upper)` — the C_max table's lightness-axis
-    /// bounds and the bisection's chroma ceiling, fixed per space for the
-    /// sRGB output cube. Owned by `Space` so the table cache can key by
-    /// space alone.
+    /// bounds and the bisection's chroma ceiling, fixed per space as
+    /// upstream's `_get_output_c_max_table` fixes them for every output.
     fn table_geometry(self) -> (f64, f64, f64) {
         match self {
             Space::Oklch | Space::Oklrab => (0.02, 1.0, 0.5),
@@ -204,6 +196,8 @@ enum Kind {
 #[derive(Clone)]
 pub struct OutputGamutCompress {
     kind: Kind,
+    /// The output colourspace whose cube the compressor targets.
+    output: &'static RgbColourspace,
     knee: (f64, f64, f64),
     lightness: Option<(f64, f64, f64)>,
     /// Perceptual lightness of the output white (1.0 for OkLab, ~100 for CAM16-UCS).
@@ -213,7 +207,8 @@ pub struct OutputGamutCompress {
     l_max: f64,
     /// `C_max(L, h)` table, row-major `[N_L][N_H]`. Empty for off/aces_rgc.
     /// Shared via the process-wide cache — the table depends only on the
-    /// perceptual space (the knee/lightness params don't enter the bake),
+    /// perceptual space and the output colourspace (the knee/lightness
+    /// params don't enter the bake),
     /// and the ~105 ms bisection would otherwise re-run on every pipeline
     /// rebuild (the GUI rebuilds the pipeline per slider change).
     cmax: Arc<Vec<f64>>,
@@ -224,6 +219,7 @@ impl OutputGamutCompress {
     pub fn identity() -> Self {
         Self {
             kind: Kind::Off,
+            output: &spektrafilm_math::colorspace::SRGB,
             knee: (0.0, 1.0, 1.0),
             lightness: None,
             l_white: 1.0,
@@ -237,13 +233,14 @@ impl OutputGamutCompress {
         self.kind != Kind::Off
     }
 
-    /// Build from params for the given output color space. `off` is a silent
-    /// identity; `oklch`/`cam16ucs` (sRGB only) build their `C_max` table. An
-    /// unported-but-valid algorithm (`jzazbz`/`oklrab`/`aces_rgc`), an unknown
-    /// algorithm, or a non-sRGB output all log an error and fall back to
-    /// identity (so colors pass through uncompressed rather than silently
-    /// appearing to be handled).
+    /// Build from params for the given output color space (unknown names:
+    /// sRGB, as the scan's output). `off` is a silent identity; the
+    /// perceptual algorithms build their `C_max` table for that output's cube.
+    /// `jzazbz` (not yet ported) and unknown algorithms log an error and fall
+    /// back to identity (so colors pass through uncompressed rather than
+    /// silently appearing to be handled).
     pub fn build(params: &OutputGamutCompressParams, output_color_space: &str) -> Self {
+        let output = RgbColourspace::output(output_color_space);
         let knee = (
             params.knee[0] as f64,
             params.knee[1] as f64,
@@ -256,6 +253,7 @@ impl OutputGamutCompress {
         if params.algorithm == "aces_rgc" {
             return Self {
                 kind: Kind::AcesRgc,
+                output,
                 knee,
                 lightness: None,
                 l_white: 1.0,
@@ -266,17 +264,9 @@ impl OutputGamutCompress {
         }
         let space = match params.algorithm.as_str() {
             "off" => return Self::identity(),
-            "oklch" if output_color_space == "sRGB" => Space::Oklch,
-            "oklrab" if output_color_space == "sRGB" => Space::Oklrab,
-            "cam16ucs" if output_color_space == "sRGB" => Space::Cam16ucs,
-            algo @ ("oklch" | "oklrab" | "cam16ucs") => {
-                tracing::error!(
-                    algorithm = algo,
-                    output = output_color_space,
-                    "output gamut compression: only sRGB output is supported; disabling"
-                );
-                return Self::identity();
-            }
+            "oklch" => Space::Oklch,
+            "oklrab" => Space::Oklrab,
+            "cam16ucs" => Space::Cam16ucs,
             other @ "jzazbz" => {
                 tracing::error!(
                     algorithm = other,
@@ -294,17 +284,19 @@ impl OutputGamutCompress {
         };
         // Perceptual white: OkLab white sits at L=1; CAM16-UCS Jp at the output
         // white (~100 under the configured viewing conditions). The white is
-        // the exact D65 chromaticity (matching Python's `_output_cs_whitepoint_xyz`
-        // → `_xy_to_xyz_unit_y`), NOT the rounded sRGB matrix's column sums.
+        // the exact whitepoint chromaticity (matching Python's
+        // `_output_cs_whitepoint_xyz` → `_xy_to_xyz_unit_y`), NOT the rounded
+        // matrix's column sums.
         let l_white = match space {
             // OkLab white sits at L=1, and Lr(1)=1, so both are 1.0.
             Space::Oklch | Space::Oklrab => 1.0,
-            Space::Cam16ucs => xyz_to_cam16ucs(SRGB_WHITE_XYZ)[0],
+            Space::Cam16ucs => xyz_to_cam16ucs(output, output.whitepoint_xyz_unit_y)[0],
         };
         let (l_min, l_max, _) = space.table_geometry();
-        let cmax = cmax_table_cached(space);
+        let cmax = cmax_table_cached(space, output);
         Self {
             kind: Kind::Perceptual(space),
+            output,
             knee,
             lightness,
             l_white,
@@ -338,6 +330,10 @@ impl OutputGamutCompress {
             cmax: &self.cmax,
             n_l: N_L as u32,
             n_h: N_H as u32,
+            rgb_to_xyz: spektrafilm_math::colorspace::mat_f32(self.output.rgb_to_xyz),
+            xyz_to_rgb: spektrafilm_math::colorspace::mat_f32(self.output.xyz_to_rgb),
+            cam16_d_rgb: self.output.cam16_d_rgb.map(|v| v as f32),
+            cam16_a_w: self.output.cam16_a_w as f32,
         })
     }
 
@@ -376,7 +372,7 @@ impl OutputGamutCompress {
             Kind::AcesRgc => return self.compress_aces_rgc(rgb),
             Kind::Perceptual(s) => s,
         };
-        let lab = space.from_rgb(rgb);
+        let lab = space.from_rgb(self.output, rgb);
         // One-sided lightness compression first (so C_max is looked up at the
         // corrected L), normalized by the perceptual white.
         let mut l = lab[0];
@@ -393,7 +389,7 @@ impl OutputGamutCompress {
         let safe = c_max.max(1e-9);
         let d_comp = reinhard_knee(c / safe, self.knee.0, self.knee.1, self.knee.2);
         let c_new = d_comp * safe;
-        space.to_rgb([l, c_new * h.cos(), c_new * h.sin()])
+        space.to_rgb(self.output, [l, c_new * h.cos(), c_new * h.sin()])
     }
 
     /// ACES Reference Gamut Compression v1.3: per-channel Reinhard knee on the
@@ -417,42 +413,33 @@ impl OutputGamutCompress {
 // ─────────────────────────────────────────────────────────────────────────
 // CAM16-UCS (upstream's default `cam16ucs` method).
 //
-// Fixed viewing conditions: XYZ_w = output (sRGB/D65) white, L_A = 64 cd/m²,
-// Y_b = 20, Average surround. Every viewing-condition-dependent quantity is
-// therefore constant and precomputed (extracted from colour-science). The
-// per-pixel path is the CIECAM16 forward/inverse + the Luo 2006 UCS transform.
+// Fixed viewing conditions: XYZ_w = output colourspace white, L_A = 64 cd/m²,
+// Y_b = 20, Average surround. The white-independent quantities, and each
+// colourspace's `D_RGB` and `A_w`, are generated from colour-science
+// (`spektrafilm_math::colorspace_data`). The per-pixel path is the CIECAM16
+// forward/inverse + the Luo 2006 UCS transform.
 // XYZ here is at Y=1; CIECAM16 works in the Y=100 domain, hence the ×/÷100.
 // ─────────────────────────────────────────────────────────────────────────
-const CAM16_M16: [[f64; 3]; 3] = [
-    [0.401288, 0.650173, -0.051461],
-    [-0.250268, 1.204414, 0.045854],
-    [-0.002079, 0.048952, 0.953127],
-];
-const CAM16_M16I: [[f64; 3]; 3] = [
-    [1.8620678550872327, -1.0112546305316843, 0.14918677544445175],
-    [
-        0.3875265432361372,
-        0.6214474419314753,
-        -0.008973985167612516,
-    ],
-    [
-        -0.015841498849333863,
-        -0.03412293802851557,
-        1.0499644368778496,
-    ],
-];
-const CAM16_D_RGB: [f64; 3] = [1.0228770275436545, 0.9852074782801457, 0.9285450586783286];
-const CAM16_F_L: f64 = 0.6839903845696502;
-const CAM16_N: f64 = 0.2;
-const CAM16_N_BB: f64 = 1.0003040045593807;
-const CAM16_N_CB: f64 = 1.0003040045593807;
-const CAM16_Z: f64 = 1.9272135954999579;
-const CAM16_A_W: f64 = 37.16907530221132;
-const CAM16_C: f64 = 0.69;
-const CAM16_N_C: f64 = 1.0;
 // Luo 2006 CAM16-UCS coefficients (K_L=1.0, c1, c2).
 const UCS_C1: f64 = 0.007;
 const UCS_C2: f64 = 0.0228;
+
+/// colour's `spow`, `sign(a) * |a| ** p`, which CIECAM02/16 use so that
+/// out-of-range responses stay finite instead of NaN.
+#[inline]
+fn spow(a: f64, p: f64) -> f64 {
+    if a.is_nan() {
+        return a;
+    }
+    let sign = if a > 0.0 {
+        1.0
+    } else if a < 0.0 {
+        -1.0
+    } else {
+        0.0
+    };
+    sign * a.abs().powf(p)
+}
 
 #[inline]
 fn atan2_deg(y: f64, x: f64) -> f64 {
@@ -475,34 +462,31 @@ fn cam16_padc_inverse(rgb: [f64; 3]) -> [f64; 3] {
     for i in 0..3 {
         let d = rgb[i] - 0.1;
         let base = (27.13 * d.abs()) / (400.0 - d.abs());
-        out[i] = d.signum() * 100.0 / CAM16_F_L * base.powf(1.0 / 0.42);
+        out[i] = d.signum() * 100.0 / CAM16_F_L * spow(base, 1.0 / 0.42);
     }
     out
 }
 
-/// XYZ (Y=1) → CAM16-UCS `(Jp, ap, bp)`.
-fn xyz_to_cam16ucs(xyz: [f64; 3]) -> [f64; 3] {
+/// XYZ (Y=1) → CAM16-UCS `(Jp, ap, bp)`, adapted to `cs`'s whitepoint.
+fn xyz_to_cam16ucs(cs: &RgbColourspace, xyz: [f64; 3]) -> [f64; 3] {
+    let (d_rgb, a_w) = (cs.cam16_d_rgb, cs.cam16_a_w);
     let xyz100 = [xyz[0] * 100.0, xyz[1] * 100.0, xyz[2] * 100.0];
     let rgb = mat_vec(&CAM16_M16, xyz100);
-    let rgb_c = [
-        rgb[0] * CAM16_D_RGB[0],
-        rgb[1] * CAM16_D_RGB[1],
-        rgb[2] * CAM16_D_RGB[2],
-    ];
+    let rgb_c = [rgb[0] * d_rgb[0], rgb[1] * d_rgb[1], rgb[2] * d_rgb[2]];
     let [ra, ga, ba] = cam16_padc_forward(rgb_c);
     let a = ra - 12.0 * ga / 11.0 + ba / 11.0;
     let b = (ra + ga - 2.0 * ba) / 9.0;
     let h = atan2_deg(b, a);
     let e_t = 0.25 * ((2.0 + h * std::f64::consts::PI / 180.0).cos() + 3.8);
     let a_resp = (2.0 * ra + ga + ba / 20.0 - 0.305) * CAM16_N_BB;
-    let jj = 100.0 * (a_resp / CAM16_A_W).powf(CAM16_C * CAM16_Z);
+    let jj = 100.0 * spow(a_resp / a_w, CAM16_C * CAM16_Z);
     let denom = ra + ga + 21.0 * ba / 20.0;
     let t = if denom != 0.0 {
         (50000.0 / 13.0) * CAM16_N_C * CAM16_N_CB * (e_t * (a * a + b * b).sqrt()) / denom
     } else {
         0.0
     };
-    let cc = t.powf(0.9) * (jj / 100.0).powf(0.5) * (1.64 - 0.29f64.powf(CAM16_N)).powf(0.73);
+    let cc = spow(t, 0.9) * spow(jj / 100.0, 0.5) * spow(1.64 - 0.29f64.powf(CAM16_N), 0.73);
     let m = cc * CAM16_F_L.powf(0.25);
     let jp = (1.0 + 100.0 * UCS_C1) * jj / (1.0 + UCS_C1 * jj);
     let mp = (1.0 / UCS_C2) * (1.0 + UCS_C2 * m).ln();
@@ -510,24 +494,36 @@ fn xyz_to_cam16ucs(xyz: [f64; 3]) -> [f64; 3] {
     [jp, mp * hr.cos(), mp * hr.sin()]
 }
 
-/// CAM16-UCS `(Jp, ap, bp)` → XYZ (Y=1).
-fn cam16ucs_to_xyz(jab: [f64; 3]) -> [f64; 3] {
+/// colour's `sdiv` in its default "Ignore Zero Conversion" mode:
+/// `np.nan_to_num(a / b)`, so NaN becomes 0 and ±inf the largest finite value.
+#[inline]
+fn sdiv(a: f64, b: f64) -> f64 {
+    let q = a / b;
+    if q.is_nan() {
+        0.0
+    } else {
+        q.clamp(f64::MIN, f64::MAX)
+    }
+}
+
+/// CAM16-UCS `(Jp, ap, bp)` → XYZ (Y=1), adapted to `cs`'s whitepoint.
+fn cam16ucs_to_xyz(cs: &RgbColourspace, jab: [f64; 3]) -> [f64; 3] {
+    let (d_rgb, a_w) = (cs.cam16_d_rgb, cs.cam16_a_w);
     let [jp, ap, bp] = jab;
     let mp = (ap * ap + bp * bp).sqrt();
     let h = atan2_deg(bp, ap);
     let jj = jp / ((1.0 + 100.0 * UCS_C1) - UCS_C1 * jp);
     let m = ((UCS_C2 * mp).exp() - 1.0) / UCS_C2;
     let cc = m / CAM16_F_L.powf(0.25);
-    let j_prime = jj.max(f64::EPSILON);
-    let t = (cc / ((j_prime / 100.0).sqrt() * (1.64 - 0.29f64.powf(CAM16_N)).powf(0.73)))
-        .powf(1.0 / 0.9);
+    // `np.maximum`, which keeps NaN.
+    let j_prime = if jj.is_nan() { jj } else { jj.max(f64::EPSILON) };
+    let t = spow(
+        cc / ((j_prime / 100.0).sqrt() * spow(1.64 - 0.29f64.powf(CAM16_N), 0.73)),
+        1.0 / 0.9,
+    );
     let e_t = 0.25 * ((2.0 + h * std::f64::consts::PI / 180.0).cos() + 3.8);
-    let a_resp = CAM16_A_W * (jj / 100.0).powf(1.0 / (CAM16_C * CAM16_Z));
-    let p1 = if t != 0.0 {
-        (50000.0 / 13.0) * CAM16_N_C * CAM16_N_CB * e_t / t
-    } else {
-        0.0
-    };
+    let a_resp = a_w * spow(jj / 100.0, 1.0 / (CAM16_C * CAM16_Z));
+    let p1 = sdiv((50000.0 / 13.0) * CAM16_N_C * CAM16_N_CB * e_t, t);
     let p2 = a_resp / CAM16_N_BB + 0.305;
     let p3 = 21.0 / 20.0;
     let (mut a, mut b) = cam16_opponent_inverse(p1, p2, p3, h);
@@ -541,60 +537,64 @@ fn cam16ucs_to_xyz(jab: [f64; 3]) -> [f64; 3] {
     let ga = (460.0 * p2 - 891.0 * a - 261.0 * b) / 1403.0;
     let ba = (460.0 * p2 - 220.0 * a - 6300.0 * b) / 1403.0;
     let rgb_c = cam16_padc_inverse([ra, ga, ba]);
-    let rgb = [
-        rgb_c[0] / CAM16_D_RGB[0],
-        rgb_c[1] / CAM16_D_RGB[1],
-        rgb_c[2] / CAM16_D_RGB[2],
-    ];
+    let rgb = [rgb_c[0] / d_rgb[0], rgb_c[1] / d_rgb[1], rgb_c[2] / d_rgb[2]];
     let xyz100 = mat_vec(&CAM16_M16I, rgb);
     [xyz100[0] / 100.0, xyz100[1] / 100.0, xyz100[2] / 100.0]
 }
 
 /// Inverse opponent dimensions (CIECAM02/16 `opponent_colour_dimensions_inverse`).
+/// A NaN hue (chroma lost in the forward pass, e.g. for negative luminance)
+/// fails both of colour's branch masks and comes back achromatic.
 fn cam16_opponent_inverse(p1: f64, p2: f64, p3: f64, h: f64) -> (f64, f64) {
     let hr = h * std::f64::consts::PI / 180.0;
     let s = hr.sin();
     let c = hr.cos();
+    let (cos_sin, sin_cos) = (sdiv(c, s), sdiv(s, c));
     let nn = p2 * (2.0 + p3) * (460.0 / 1403.0);
     if s.abs() >= c.abs() {
-        let p4 = if s != 0.0 { p1 / s } else { 0.0 };
+        let p4 = sdiv(p1, s);
         let b = nn
-            / (p4 + (2.0 + p3) * (220.0 / 1403.0) * (c / s) - (27.0 / 1403.0)
+            / (p4 + (2.0 + p3) * (220.0 / 1403.0) * cos_sin - (27.0 / 1403.0)
                 + p3 * (6300.0 / 1403.0));
-        (b * (c / s), b)
-    } else {
-        let p5 = if c != 0.0 { p1 / c } else { 0.0 };
+        (b * cos_sin, b)
+    } else if s.abs() < c.abs() {
+        let p5 = sdiv(p1, c);
         let a = nn
             / (p5 + (2.0 + p3) * (220.0 / 1403.0)
-                - ((27.0 / 1403.0) - p3 * (6300.0 / 1403.0)) * (s / c));
-        (a, a * (s / c))
+                - ((27.0 / 1403.0) - p3 * (6300.0 / 1403.0)) * sin_cos);
+        (a, a * sin_cos)
+    } else {
+        (0.0, 0.0)
     }
 }
 
-/// Process-wide `C_max` table cache, keyed by perceptual space. The bake's
-/// other inputs come from `Space::table_geometry`, so the space alone
-/// identifies the table. The build runs outside the lock — a racing
-/// double-build is harmless and cheaper than serializing on it.
-fn cmax_table_cached(space: Space) -> Arc<Vec<f64>> {
-    static CACHE: OnceLock<Mutex<HashMap<u8, Arc<Vec<f64>>>>> = OnceLock::new();
+/// Process-wide `C_max` table cache, keyed by perceptual space and output
+/// colourspace. The bake's other inputs come from `Space::table_geometry`.
+/// The build runs outside the lock — a racing double-build is harmless and
+/// cheaper than serializing on it.
+fn cmax_table_cached(space: Space, cs: &'static RgbColourspace) -> Arc<Vec<f64>> {
+    type Cache = Mutex<HashMap<(u8, &'static str), Arc<Vec<f64>>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
     let key = match space {
         Space::Oklch => 0u8,
         Space::Oklrab => 1,
         Space::Cam16ucs => 2,
     };
+    let key = (key, cs.name);
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(table) = cache.lock().unwrap().get(&key) {
         return table.clone();
     }
-    let table = Arc::new(build_cmax_table(space));
+    let table = Arc::new(build_cmax_table(space, cs));
     cache.lock().unwrap().insert(key, table.clone());
     table
 }
 
 /// Bisect the max in-gamut chroma at each `(L, h)` grid node for the given
-/// perceptual space, mirroring `_build_polar_perceptual_c_max_table`. Built
-/// once per space (see `cmax_table_cached`).
-fn build_cmax_table(space: Space) -> Vec<f64> {
+/// perceptual space and output cube, mirroring
+/// `_build_polar_perceptual_c_max_table`. Built once per pair (see
+/// `cmax_table_cached`).
+fn build_cmax_table(space: Space, cs: &RgbColourspace) -> Vec<f64> {
     use rayon::prelude::*;
     let (l_min, l_max, chroma_upper) = space.table_geometry();
     let mut table = vec![0.0f64; N_L * N_H];
@@ -613,7 +613,7 @@ fn build_cmax_table(space: Space) -> Vec<f64> {
                 let mut hi = chroma_upper;
                 for _ in 0..N_BISECT {
                     let mid = (lo + hi) * 0.5;
-                    let rgb = space.to_rgb([l, mid * cos_h, mid * sin_h]);
+                    let rgb = space.to_rgb(cs, [l, mid * cos_h, mid * sin_h]);
                     let in_gamut = rgb.iter().all(|&v| v >= -1e-6 && v <= 1.0 + 1e-6);
                     if in_gamut {
                         lo = mid;

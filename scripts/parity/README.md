@@ -53,6 +53,14 @@ From the Rust repository root:
               "print_render": {"base": {"scale": 1.2, "magenta": 0.8}}}' \
   --output-dir /tmp/spektrafilm-parity-bases
 
+# Other colour spaces, by colour's names (both engines share them): input
+# space and CCTF decoding, output space and CCTF encoding:
+../spektrafilm-env/bin/python -I scripts/parity/check_parity.py \
+  --python-source /path/to/exp --case all --experimental-defaults \
+  --input-color-space "DaVinci Wide Gamut" --input-cctf-decoding \
+  --output-color-space "Adobe RGB (1998)" --output-cctf-encoding \
+  --output-dir /tmp/spektrafilm-parity-dwg-adobe
+
 # The same against upstream main, with experimental's morph baked into its
 # film profile:
 ../spektrafilm-env/bin/python -I scripts/parity/check_parity.py \
@@ -99,6 +107,18 @@ EXPDATA_REFERENCE=/path/to/experimental-checkout \
 ../spektrafilm-env/bin/python -I scripts/parity/freeze_print_balance_reference.py \
   --python-source /path/to/28bf883-archive --git-repo ../spektrafilm \
   --output crates/spektrafilm-core/tests/fixtures/print_balance_python_28bf883.json
+
+# Colour spaces (tests/colorspaces.rs): colour's matrices, whites, CCTFs and
+# CATs, the input projection, the scan's XYZ_to_RGB, the gamut compressor per
+# output space, the output encoding and seven pipelines across spaces. Needs
+# NUMBA_CACHE_DIR, MPLCONFIGDIR and XDG_CACHE_HOME pointing somewhere writable:
+../spektrafilm-env/bin/python -I scripts/parity/freeze_colorspaces_reference.py \
+  --python-source /path/to/28bf883-archive --spektrafilm-repo ../spektrafilm \
+  --output crates/spektrafilm-core/tests/fixtures/colorspaces_python_28bf883.json
+
+# The engine's colour-space table itself, from colour 0.4.7:
+../spektrafilm-env/bin/python -I scripts/gen_colorspaces.py \
+  > crates/spektrafilm-math/src/colorspace_data.rs
 
 # Existing frozen Python reference tests and the full Rust suite:
 cargo test --workspace --locked
@@ -191,10 +211,15 @@ Effects, by default all off so that per-pixel parity is isolated:
   so the unsharp mask's overshoot, unclipped. Rust does too since ticket
   16.10; older builds (main) clip, and against them this option shows
   what's left once the clip is accounted for.
+- `--input-color-space`, `--input-cctf-decoding`, `--output-color-space` and
+  `--output-cctf-encoding` set `io` in both engines (default: sRGB in and
+  out, neither curve). Adobe RGB and DCI-P3 encode negatives to NaN
+  in colour; the comparison requires NaN in the same places and compares the
+  rest.
 - `--no-arrays` deletes each case's images and arrays after comparing (the
   scene keeps about 20 MB per case).
 
-Every float must be finite and within absolute tolerance `1e-6`, with no
+Every float must be finite (bar the NaN above) and within absolute tolerance `1e-6`, with no
 relative tolerance. This matches the existing Rust f64 reference tests.
 `--atol 0` requires numerical equality; the separately reported
 `byte_identical` field compares canonical little-endian f64 buffers (even
