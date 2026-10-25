@@ -59,6 +59,20 @@ pub fn number(
         "{} value",
         knob.0
     ))]);
+    let knob_default = knob.4;
+    let reset = gtk::Button::from_icon_name("edit-undo-symbolic");
+    reset.add_css_class("flat");
+    reset.set_tooltip_text(Some(&format!("Reset {} to {}{}", knob.0, knob.4, knob.5)));
+    reset.update_property(&[gtk::accessible::Property::Label(&format!(
+        "Reset {}",
+        knob.0
+    ))]);
+    reset.connect_clicked(glib::clone!(
+        #[weak]
+        adjustment,
+        move |_| adjustment.set_value(knob_default)
+    ));
+    line.append(&reset);
     line.append(&spin);
     if !knob.5.is_empty() {
         let unit = gtk::Label::new(Some(knob.5));
@@ -72,6 +86,53 @@ pub fn number(
     scale.update_property(&[gtk::accessible::Property::Label(knob.0)]);
     outer.append(&scale);
     row.set_child(Some(&outer));
+    reset_menu(&row, &reset);
+    let update_modified = glib::clone!(
+        #[weak]
+        reset,
+        #[weak]
+        label,
+        move |a: &gtk::Adjustment| {
+            let modified = (a.value() - knob_default).abs() > 1e-9;
+            reset.set_visible(modified);
+            if modified {
+                label.add_css_class("modified");
+            } else {
+                label.remove_css_class("modified");
+            }
+        }
+    );
+    update_modified(&adjustment);
+    adjustment.connect_value_changed(update_modified);
+    // Escape discards a typed value; Return/focus loss use GtkSpinButton's native commit.
+    let typing_value = Rc::new(Cell::new(value));
+    let focus = gtk::EventControllerFocus::new();
+    focus.connect_enter(glib::clone!(
+        #[weak]
+        adjustment,
+        #[strong]
+        typing_value,
+        move |_| typing_value.set(adjustment.value())
+    ));
+    spin.add_controller(focus);
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(glib::clone!(
+        #[weak]
+        spin,
+        #[weak]
+        adjustment,
+        #[upgrade_or]
+        glib::Propagation::Proceed,
+        move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                spin.set_value(typing_value.get());
+                spin.set_text(&format!("{:.1$}", adjustment.value(), digits as usize));
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        }
+    ));
+    spin.add_controller(keys);
     let dragging = Rc::new(Cell::new(false));
     // Observe raw events without competing with GtkRange's own drag gesture.
     let gesture = gtk::EventControllerLegacy::new();
@@ -149,7 +210,7 @@ fn section(body: &gtk::Box, name: &str) {
     label.add_css_class("section-label");
     body.append(&label);
 }
-fn combo(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, options: &[&str]) {
+pub fn combo(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, options: &[&str]) -> adw::ComboRow {
     let model = gtk::StringList::new(options);
     let row = adw::ComboRow::builder().title(title).model(&model).build();
     row.set_selected(
@@ -182,10 +243,12 @@ fn combo(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, options: &[&str]) {
             ui.sync_history();
         }
     ));
+    choice_reset(ui, &row, title, "0");
     ui.choices.borrow_mut().push((title.into(), row.clone()));
     list.append(&row);
+    row
 }
-fn toggle(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, active: bool) {
+pub fn toggle(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, active: bool) -> adw::SwitchRow {
     let row = adw::SwitchRow::builder()
         .title(title)
         .active(active)
@@ -211,10 +274,12 @@ fn toggle(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, active: bool) {
             ui.sync_history();
         }
     ));
+    choice_reset(ui, &row, title, if active { "true" } else { "false" });
     ui.toggles
         .borrow_mut()
         .push((title.into(), active, row.clone()));
     list.append(&row);
+    row
 }
 
 pub fn build(ui: &Rc<Editor>) {
@@ -283,77 +348,199 @@ pub fn build(ui: &Rc<Editor>) {
     lab.add_css_class("inspector-body");
     section(&lab, "FILM & PAPER");
     let profiles = list();
-    combo(
-        ui,
-        &profiles,
-        "Film",
-        &[
-            "Kodak Portra 400",
-            "Kodak Gold 200",
-            "Kodak Ektar 100",
-            "Fujifilm Velvia 100",
-            "Kodak Tri-X 400",
-            "Kodak Double-X",
-        ],
-    );
+    stock(ui, &profiles, false);
+    development(ui, &profiles, false);
     toggle(ui, &profiles, "Scan film directly", false);
-    combo(
+    let paper = stock(ui, &profiles, true);
+    visible(ui, &paper, |s| !flag(s, "Scan film directly", false));
+    development(ui, &profiles, true);
+    lab.append(&profiles);
+    section(&lab, "IMAGE SIZE");
+    image_size(ui, &lab);
+    section(&lab, "CAMERA");
+    let camera = list();
+    toggle(ui, &camera, "Auto exposure", true);
+    let meter = combo(
         ui,
-        &profiles,
-        "Paper",
+        &camera,
+        "Metering",
         &[
-            "Kodak Portra Endura",
-            "Kodak Ultra Endura",
-            "Fujifilm Crystal Archive",
-            "Ilford Multigrade RC",
+            "Average",
+            "Median",
+            "Center-Weighted",
+            "Partial",
+            "Matrix",
+            "Multi-Zone",
+            "Highlight-Weighted",
         ],
     );
-    lab.append(&profiles);
+    visible(ui, &meter, |s| flag(s, "Auto exposure", true));
+    for k in fixtures::GROUPS[0].knobs {
+        camera.append(&knob(ui, "Camera", k));
+    }
+    lab.append(&camera);
+    let raw = list();
+    combo(
+        ui,
+        &raw,
+        "White balance",
+        &["As Shot", "Daylight", "Tungsten", "Custom"],
+    );
+    for k in &[
+        Knob("Temperature", 1667., 25000., 1., 6500., "K"),
+        Knob("Tint", 0.01, 4., 0.01, 1., ""),
+    ] {
+        let row = knob(ui, "RAW", k);
+        visible(ui, &row, |s| choice(s, "White balance") == 3);
+        raw.append(&row);
+    }
+    let raw_caption = gtk::Label::new(Some(
+        "RAW white balance · re-decoding waits for the engine connection",
+    ));
+    raw_caption.set_wrap(true);
+    raw_caption.add_css_class("caption");
+    lab.append(&raw_caption);
+    lab.append(&raw);
+    for widget in [
+        raw.upcast::<gtk::Widget>(),
+        raw_caption.upcast::<gtk::Widget>(),
+    ] {
+        // Updated after every successful open, without rebuilding the inspector.
+        let owner = Rc::downgrade(ui);
+        ui.rules.borrow_mut().push(Box::new(move |_| {
+            if let Some(ui) = owner.upgrade() {
+                widget.set_visible(
+                    ui.current_path
+                        .borrow()
+                        .as_deref()
+                        .is_some_and(crate::photo::is_raw),
+                );
+            }
+        }));
+    }
     section(&lab, "DEVELOPMENT");
     let groups = fixtures::GROUPS
         .iter()
         .filter(|g| g.name == "Enlarger")
-        .chain(fixtures::GROUPS.iter().filter(|g| g.name != "Enlarger"));
+        .chain(
+            fixtures::GROUPS
+                .iter()
+                .filter(|g| g.name != "Enlarger" && g.name != "Camera"),
+        );
     for group in groups {
         let rows = list();
         let expander = adw::ExpanderRow::builder().title(group.name).build();
+        if matches!(
+            group.name,
+            "Film Curves"
+                | "Grain"
+                | "Halation"
+                | "DIR Couplers"
+                | "Lens Diffusion"
+                | "Print Curves"
+                | "Glare"
+        ) {
+            let switch = gtk::Switch::new();
+            switch.set_valign(gtk::Align::Center);
+            let key = format!("{} enabled", group.name);
+            let default = !matches!(
+                group.name,
+                "Lens Diffusion" | "Film Curves" | "Print Curves"
+            );
+            switch.set_active(flag(&ui.history.borrow().state, &key, default));
+            switch.update_property(&[gtk::accessible::Property::Label(&format!(
+                "Enable {}",
+                group.name
+            ))]);
+            expander.add_suffix(&switch);
+            let reset = gtk::Button::from_icon_name("edit-undo-symbolic");
+            reset.set_valign(gtk::Align::Center);
+            reset.add_css_class("flat");
+            reset.set_tooltip_text(Some("Reset effect switch to Default"));
+            reset.update_property(&[gtk::accessible::Property::Label(&format!(
+                "Reset {} switch",
+                group.name
+            ))]);
+            expander.add_suffix(&reset);
+            reset.connect_clicked(glib::clone!(
+                #[weak]
+                ui,
+                #[strong]
+                key,
+                move |_| {
+                    let mut h = ui.history.borrow_mut();
+                    h.begin(&format!("Reset {key}"));
+                    h.state.choices.remove(&key);
+                    h.commit();
+                    drop(h);
+                    ui.sync_state();
+                }
+            ));
+            reset_menu(&expander, &reset);
+            ui.rules.borrow_mut().push(Box::new(glib::clone!(
+                #[strong]
+                key,
+                move |s| reset.set_visible(flag(s, &key, default) != default)
+            )));
+
+            switch.connect_active_notify(glib::clone!(
+                #[weak]
+                ui,
+                #[strong]
+                key,
+                move |w| {
+                    if ui.syncing.get() {
+                        return;
+                    }
+                    let mut h = ui.history.borrow_mut();
+                    h.begin(&format!("Change {key}"));
+                    h.state
+                        .choices
+                        .insert(key.clone(), w.is_active().to_string());
+                    h.commit();
+                    drop(h);
+                    ui.sync_state();
+                }
+            ));
+            ui.rules
+                .borrow_mut()
+                .push(Box::new(move |s| switch.set_active(flag(s, &key, default))));
+        }
         let built = Rc::new(Cell::new(false));
-        if group.name == "Camera"
-            || group.name == "Enlarger"
+        if group.name == "Enlarger"
             || std::env::var("NEGS_INSPECTOR_MODE").as_deref() == Ok("eager")
         {
-            if group.name == "Camera" {
-                toggle(ui, &list_in_expander(&expander), "Auto exposure", true);
-            }
-            for k in group.knobs {
-                expander.add_row(&knob(ui, group.name, k));
-            }
+            group_controls(ui, &expander, group);
             built.set(true);
         }
+        let name = group.name.to_string();
+        expander.set_expanded(ui.preferences.borrow().expanded.iter().any(|v| v == &name));
         expander.connect_expanded_notify(glib::clone!(
             #[weak]
             ui,
+            #[strong]
+            built,
             move |e| {
                 if e.is_expanded() && !built.replace(true) {
-                    for k in group.knobs {
-                        e.add_row(&knob(&ui, group.name, k));
-                    }
+                    group_controls(&ui, e, group);
+                    ui.sync_state();
+                }
+                let mut prefs = ui.preferences.borrow_mut();
+                prefs.expanded.retain(|n| n != &name);
+                if e.is_expanded() {
+                    prefs.expanded.push(name.clone());
                 }
             }
         ));
-        expander.set_expanded(group.name == "Enlarger");
+        if expander.is_expanded() && !built.replace(true) {
+            group_controls(ui, &expander, group);
+        }
+        if matches!(group.name, "Enlarger" | "Print Curves" | "Glare") {
+            sensitive(ui, &expander, |s| !flag(s, "Scan film directly", false));
+        }
         rows.append(&expander);
         lab.append(&rows);
     }
-    section(&lab, "IMAGE SIZE");
-    let sizing = list();
-    combo(
-        ui,
-        &sizing,
-        "Develop at",
-        &["Original size", "Longest side…"],
-    );
-    lab.append(&sizing);
     section(&lab, "SCAN & COLOR");
     let color = list();
     combo(
@@ -362,6 +549,8 @@ pub fn build(ui: &Rc<Editor>) {
         "Output gamut",
         &["OKLCh", "Off", "OKLrab", "CAM16-UCS", "ACES RGC"],
     );
+    combo(ui, &color, "Input gamut", &["Off", "xy Chromaticity"]);
+    toggle(ui, &color, "CAT16 adaptation", false);
     combo(
         ui,
         &color,
@@ -369,6 +558,8 @@ pub fn build(ui: &Rc<Editor>) {
         &["Hanatos 2025", "Arctic 2026 (Alpha)", "Mallett 2019"],
     );
     toggle(ui, &color, "Limit preview to 12 MP", true);
+    toggle(ui, &color, "Encode output as sRGB", true);
+    toggle(ui, &color, "Use less memory for export", false);
     lab.append(&color);
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -401,6 +592,16 @@ pub fn build(ui: &Rc<Editor>) {
     hint.add_css_class("caption");
     footer.append(&hint);
     ui.inspector.append(&footer);
+    stack.set_visible_child_name(&ui.preferences.borrow().tab);
+    stack.connect_visible_child_name_notify(glib::clone!(
+        #[weak]
+        ui,
+        move |s| {
+            if let Some(name) = s.visible_child_name() {
+                ui.preferences.borrow_mut().tab = name.to_string();
+            }
+        }
+    ));
     ui.tabs.replace(Some(stack));
     ui.perf
         .detail("initial_slider_count", ui.adjustments.borrow().len() + 3);
@@ -408,9 +609,440 @@ pub fn build(ui: &Rc<Editor>) {
     ui.perf.write();
 }
 
-fn list_in_expander(expander: &adw::ExpanderRow) -> gtk::ListBox {
-    // A separate boxed list keeps native switch rows available inside an expander.
-    let list = list();
-    expander.add_row(&list);
-    list
+pub fn flag(s: &crate::model::State, key: &str, default: bool) -> bool {
+    s.choices.get(key).map(|v| v == "true").unwrap_or(default)
+}
+pub fn choice(s: &crate::model::State, key: &str) -> u32 {
+    s.choices.get(key).and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+fn visible(
+    ui: &Rc<Editor>,
+    widget: &impl IsA<gtk::Widget>,
+    test: impl Fn(&crate::model::State) -> bool + 'static,
+) {
+    let w = widget.clone().upcast::<gtk::Widget>();
+    ui.rules
+        .borrow_mut()
+        .push(Box::new(move |s| w.set_visible(test(s))));
+}
+fn sensitive(
+    ui: &Rc<Editor>,
+    widget: &impl IsA<gtk::Widget>,
+    test: impl Fn(&crate::model::State) -> bool + 'static,
+) {
+    let w = widget.clone().upcast::<gtk::Widget>();
+    ui.rules
+        .borrow_mut()
+        .push(Box::new(move |s| w.set_sensitive(test(s))));
+}
+fn group_controls(ui: &Rc<Editor>, expander: &adw::ExpanderRow, group: &'static fixtures::Group) {
+    let content = list();
+    let key = format!("{} enabled", group.name);
+    let default = !matches!(
+        group.name,
+        "Lens Diffusion" | "Film Curves" | "Print Curves"
+    );
+    sensitive(ui, &content, move |s| flag(s, &key, default));
+    match group.name {
+        "Lens Diffusion" => {
+            combo(
+                ui,
+                &content,
+                "Filter",
+                &["Black Pro-Mist", "Glimmerglass", "Pro-Mist", "CineBloom"],
+            );
+        }
+        "Grain" => {
+            toggle(ui, &content, "Sublayers", true);
+        }
+        "Enlarger" => {
+            toggle(ui, &content, "Exposure compensation", true);
+        }
+        "Scanner" => {
+            toggle(ui, &content, "White correction", true);
+            toggle(ui, &content, "Black correction", true);
+        }
+        _ => {}
+    }
+    for k in group.knobs {
+        let row = knob(ui, group.name, k);
+        if k.0 == "Sublayer count" {
+            sensitive(ui, &row, |s| flag(s, "Sublayers", true));
+        }
+        if k.0 == "White level" {
+            sensitive(ui, &row, |s| flag(s, "White correction", true));
+        }
+        if k.0 == "Black level" {
+            sensitive(ui, &row, |s| flag(s, "Black correction", true));
+        }
+        if matches!(
+            k.0,
+            "Red gamma"
+                | "Green gamma"
+                | "Blue gamma"
+                | "Magenta shift"
+                | "Yellow shift"
+                | "Preflash magenta"
+                | "Preflash yellow"
+        ) {
+            visible(ui, &row, |s| !crate::catalog::selected(s, false).bw);
+        }
+        content.append(&row);
+    }
+    expander.add_row(&content);
+}
+fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
+    let stocks = crate::catalog::stocks(paper);
+    let labels: Vec<_> = stocks
+        .iter()
+        .map(|s| format!("{} · {}", s.group, s.name))
+        .collect();
+    let names: Vec<_> = labels.iter().map(String::as_str).collect();
+    let row = adw::ComboRow::builder()
+        .title(if paper { "Paper" } else { "Film" })
+        .model(&gtk::StringList::new(&names))
+        .enable_search(true)
+        .build();
+    row.set_selected(
+        stocks
+            .iter()
+            .position(|s| s.id == crate::catalog::selected(&ui.history.borrow().state, paper).id)
+            .unwrap_or(0) as u32,
+    );
+    let selected_factory = gtk::SignalListItemFactory::new();
+    selected_factory.connect_setup(|_, o| {
+        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
+        let label = gtk::Label::new(None);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.set_max_width_chars(23);
+        item.set_child(Some(&label));
+    });
+    selected_factory.connect_bind(move |_, o| {
+        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
+        if let Some(stock) = crate::catalog::stocks(paper).into_iter().find(|s| {
+            item.item()
+                .and_downcast::<gtk::StringObject>()
+                .is_some_and(|v| v.string() == format!("{} · {}", s.group, s.name))
+        }) {
+            item.child()
+                .and_downcast::<gtk::Label>()
+                .unwrap()
+                .set_text(&stock.name);
+        }
+    });
+    row.set_factory(Some(&selected_factory));
+    let popup_factory = gtk::SignalListItemFactory::new();
+    popup_factory.connect_setup(|_, o| {
+        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
+        let b = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        let group = gtk::Label::new(None);
+        group.set_xalign(0.);
+        group.add_css_class("caption");
+        group.add_css_class("dim-label");
+        let name = gtk::Label::new(None);
+        name.set_xalign(0.);
+        name.set_wrap(true);
+        b.append(&group);
+        b.append(&name);
+        item.set_child(Some(&b));
+    });
+    popup_factory.connect_bind(move |_, o| {
+        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
+        let stocks = crate::catalog::stocks(paper);
+        let index = stocks
+            .iter()
+            .position(|s| {
+                item.item()
+                    .and_downcast::<gtk::StringObject>()
+                    .is_some_and(|v| v.string() == format!("{} · {}", s.group, s.name))
+            })
+            .unwrap_or(0);
+        if let Some(stock) = stocks.get(index) {
+            let b = item.child().and_downcast::<gtk::Box>().unwrap();
+            let group = b.first_child().and_downcast::<gtk::Label>().unwrap();
+            group.set_text(&stock.group);
+            group.set_visible(index == 0 || stocks[index - 1].group != stock.group);
+            b.last_child()
+                .and_downcast::<gtk::Label>()
+                .unwrap()
+                .set_text(&stock.name);
+        }
+    });
+    row.set_list_factory(Some(&popup_factory));
+    row.connect_selected_notify(glib::clone!(
+        #[weak]
+        ui,
+        move |r| {
+            if ui.syncing.get() {
+                return;
+            }
+            let Some(stock) = stocks.get(r.selected() as usize) else {
+                return;
+            };
+            let mut h = ui.history.borrow_mut();
+            h.begin(if paper { "Change Paper" } else { "Change Film" });
+            h.state.choices.insert(
+                if paper { "Paper ID" } else { "Film ID" }.into(),
+                stock.id.clone(),
+            );
+            h.state.choices.remove(if paper {
+                "Print development"
+            } else {
+                "Development"
+            });
+            if !paper {
+                h.state
+                    .choices
+                    .insert("Scan film directly".into(), stock.positive.to_string());
+                if !stock.target.is_empty() {
+                    h.state
+                        .choices
+                        .insert("Paper ID".into(), stock.target.clone());
+                    h.state.choices.remove("Print development");
+                }
+            }
+            h.commit();
+            drop(h);
+            ui.sync_state();
+        }
+    ));
+    let stocks = crate::catalog::stocks(paper);
+    ui.rules.borrow_mut().push(Box::new(glib::clone!(
+        #[weak]
+        row,
+        move |s| {
+            row.set_selected(
+                stocks
+                    .iter()
+                    .position(|stock| stock.id == crate::catalog::selected(s, paper).id)
+                    .unwrap_or(0) as u32,
+            );
+        }
+    )));
+    list.append(&row);
+    row
+}
+fn development(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) {
+    let title = if paper {
+        "Print development"
+    } else {
+        "Development"
+    };
+    let row = combo(ui, list, title, &["Profile default"]);
+    let last = Rc::new(std::cell::RefCell::new(String::new()));
+    ui.rules.borrow_mut().push(Box::new(move |s| {
+        let stock = crate::catalog::selected(s, paper);
+        if *last.borrow() != stock.id {
+            *last.borrow_mut() = stock.id.clone();
+            let options: Vec<_> = std::iter::once("Profile default".to_string())
+                .chain(stock.times.iter().map(|v| format!("{v} min")))
+                .collect();
+            row.set_model(Some(&gtk::StringList::new(
+                &options.iter().map(String::as_str).collect::<Vec<_>>(),
+            )));
+        }
+        row.set_visible(stock.times.len() > 1 && (!paper || !flag(s, "Scan film directly", false)));
+        row.set_selected(choice(s, title));
+    }));
+}
+fn image_size(ui: &Rc<Editor>, body: &gtk::Box) {
+    let sizing = list();
+    combo(
+        ui,
+        &sizing,
+        "Develop at",
+        &["Original size", "Longest side…"],
+    );
+    let row = adw::ActionRow::builder().title("Longest side").build();
+    let entry = gtk::Entry::builder()
+        .width_chars(7)
+        .max_width_chars(9)
+        .valign(gtk::Align::Center)
+        .input_purpose(gtk::InputPurpose::Digits)
+        .text("2048")
+        .build();
+    entry.update_property(&[gtk::accessible::Property::Label(
+        "Image Size longest side in pixels",
+    )]);
+    row.add_suffix(&entry);
+    row.add_suffix(&gtk::Label::new(Some("px")));
+    sizing.append(&row);
+    let error = gtk::Label::new(None);
+    error.set_wrap(true);
+    error.set_xalign(0.);
+    error.add_css_class("error");
+    let readout = gtk::Label::new(None);
+    readout.set_wrap(true);
+    readout.set_xalign(0.);
+    readout.add_css_class("caption");
+    body.append(&sizing);
+    body.append(&error);
+    body.append(&readout);
+    let commit = Rc::new(glib::clone!(
+        #[weak]
+        ui,
+        #[weak]
+        error,
+        #[weak]
+        entry,
+        move || {
+            let source = ui.canvas.source_size();
+            let crop = ui.history.borrow().state.crop;
+            match crate::image_size::validate(&entry.text(), source, crop) {
+                Ok(value) => {
+                    entry.remove_css_class("error");
+                    error.set_text("");
+                    let mut h = ui.history.borrow_mut();
+                    h.begin("Change Image Size");
+                    h.state
+                        .values
+                        .insert("Image Size.Longest side".into(), value as f64);
+                    h.commit();
+                    drop(h);
+                    ui.sync_state();
+                }
+                Err(message) => {
+                    error.set_text(&message);
+                    entry.add_css_class("error");
+                }
+            }
+        }
+    ));
+    entry.connect_activate(glib::clone!(
+        #[strong]
+        commit,
+        move |_| commit()
+    ));
+    let focus = gtk::EventControllerFocus::new();
+    focus.connect_leave(move |_| commit());
+    entry.add_controller(focus);
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(glib::clone!(
+        #[weak]
+        ui,
+        #[weak]
+        entry,
+        #[weak]
+        error,
+        #[upgrade_or]
+        glib::Propagation::Proceed,
+        move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                entry.set_text(&format!(
+                    "{:.0}",
+                    ui.history
+                        .borrow()
+                        .state
+                        .values
+                        .get("Image Size.Longest side")
+                        .copied()
+                        .unwrap_or(2048.)
+                ));
+                entry.remove_css_class("error");
+                error.set_text("");
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        }
+    ));
+    entry.add_controller(keys);
+    let owner = Rc::downgrade(ui);
+    ui.rules.borrow_mut().push(Box::new(move |s| {
+        let Some(ui) = owner.upgrade() else {
+            return;
+        };
+        row.set_visible(choice(s, "Develop at") == 1);
+        let target = s
+            .values
+            .get("Image Size.Longest side")
+            .copied()
+            .unwrap_or(2048.) as u32;
+        if !entry.has_focus() && !entry.has_css_class("error") {
+            entry.set_text(&target.to_string());
+        }
+        if ui.current_path.borrow().is_none() {
+            readout.set_text("Resizes before film simulation, including halation and grain.");
+            return;
+        }
+        let (working, photo) = crate::image_size::project(
+            ui.canvas.source_size(),
+            s.crop,
+            (choice(s, "Develop at") == 1).then_some(target),
+        );
+        let source = ui.canvas.source_size();
+        readout.set_text(&format!(
+            "Source {} × {} px
+Working {} × {} px · Photograph {} × {} px
+Resizes before film simulation. This preview still displays the camera image.",
+            source.0, source.1, working.0, working.1, photo.0, photo.1
+        ));
+    }));
+}
+
+pub(crate) fn reset_menu(widget: &impl IsA<gtk::Widget>, reset: &gtk::Button) {
+    let widget = widget.as_ref().clone();
+    let click = gtk::GestureClick::new();
+    click.set_button(3);
+    click.connect_pressed(glib::clone!(
+        #[weak]
+        reset,
+        #[weak(rename_to=widget)]
+        widget,
+        move |_, _, x, y| {
+            let popover = gtk::Popover::new();
+            popover.set_parent(&widget);
+            popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+            let button = gtk::Button::with_label("Reset to Default");
+            button.set_sensitive(reset.is_visible());
+            button.connect_clicked(glib::clone!(
+                #[weak]
+                reset,
+                #[weak]
+                popover,
+                move |_| {
+                    reset.emit_clicked();
+                    popover.popdown();
+                }
+            ));
+            popover.set_child(Some(&button));
+            popover.connect_closed(|p| p.unparent());
+            popover.popup();
+        }
+    ));
+    widget.add_controller(click);
+}
+fn choice_reset(ui: &Rc<Editor>, row: &impl IsA<adw::ActionRow>, key: &str, default: &str) {
+    let reset = gtk::Button::from_icon_name("edit-undo-symbolic");
+    reset.set_valign(gtk::Align::Center);
+    reset.add_css_class("flat");
+    reset.set_tooltip_text(Some("Reset to Default"));
+    reset.update_property(&[gtk::accessible::Property::Label(&format!("Reset {key}"))]);
+    row.add_suffix(&reset);
+    let key = key.to_string();
+    let default = default.to_string();
+    reset.connect_clicked(glib::clone!(
+        #[weak]
+        ui,
+        #[strong]
+        key,
+        move |_| {
+            let mut h = ui.history.borrow_mut();
+            h.begin(&format!("Reset {key}"));
+            h.state.choices.remove(&key);
+            h.commit();
+            drop(h);
+            ui.sync_state();
+        }
+    ));
+    let widget = row.clone().upcast::<adw::ActionRow>();
+    reset_menu(&widget, &reset);
+    ui.rules.borrow_mut().push(Box::new(move |s| {
+        let modified = s.choices.get(&key).is_some_and(|v| v != &default);
+        reset.set_visible(modified);
+        if modified {
+            widget.add_css_class("modified");
+        } else {
+            widget.remove_css_class("modified");
+        }
+    }));
 }

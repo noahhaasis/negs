@@ -10,6 +10,33 @@ pub struct State {
     #[serde(default)]
     pub border: crate::border::Settings,
     pub crop: Option<[f64; 4]>,
+    #[serde(default)]
+    pub straighten: f64,
+}
+
+impl State {
+    pub fn sanitize(&mut self) {
+        self.rotation %= 4;
+        self.straighten = if self.straighten.is_finite() {
+            self.straighten.clamp(-45., 45.)
+        } else {
+            0.
+        };
+        self.crop = self.crop.filter(|v| {
+            v.iter().all(|n| n.is_finite())
+                && v[0] >= 0.
+                && v[1] >= 0.
+                && v[2] > 0.
+                && v[3] > 0.
+                && v[0] + v[2] <= 1.00001
+                && v[1] + v[3] <= 1.00001
+        });
+        let defaults = crate::fixtures::state();
+        self.values.retain(|_, v| v.is_finite());
+        for (key, value) in defaults.values {
+            self.values.entry(key).or_insert(value);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -61,6 +88,12 @@ impl History {
         Some(name)
     }
 
+    pub fn undo_name(&self) -> Option<&str> {
+        self.undo.last().map(|(n, _)| n.as_str())
+    }
+    pub fn redo_name(&self) -> Option<&str> {
+        self.redo.last().map(|(n, _)| n.as_str())
+    }
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }

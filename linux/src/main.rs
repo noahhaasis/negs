@@ -2,11 +2,18 @@ mod actions;
 mod border;
 mod border_ui;
 mod canvas;
+mod catalog;
+mod crop_geometry;
+mod crop_ui;
+mod export_ui;
+mod filmstrip;
 mod fixtures;
+mod image_size;
 mod inspector;
 mod model;
 mod perf;
 mod photo;
+mod preferences;
 mod validation;
 
 use adw::prelude::*;
@@ -16,6 +23,8 @@ use std::{
     path::PathBuf,
     rc::Rc,
 };
+
+type StateRule = Box<dyn Fn(&model::State)>;
 
 pub(crate) struct Editor {
     window: adw::ApplicationWindow,
@@ -33,11 +42,19 @@ pub(crate) struct Editor {
     title: adw::WindowTitle,
     dimensions: gtk::Label,
     status: gtk::Label,
-    strip: gtk::Box,
     strip_scroll: gtk::ScrolledWindow,
     strip_folder: RefCell<Option<PathBuf>>,
     strip_generation: Cell<u64>,
-    strip_entries: RefCell<Vec<(PathBuf, gtk::Button)>>,
+    strip_paths: RefCell<Vec<PathBuf>>,
+    strip_model: RefCell<Option<gtk::StringList>>,
+    strip_selection: RefCell<Option<gtk::SingleSelection>>,
+    strip_view: RefCell<Option<gtk::ListView>>,
+    thumbnail_cache: RefCell<std::collections::VecDeque<filmstrip::Cached>>,
+    thumbnail_jobs: RefCell<std::collections::VecDeque<filmstrip::Job>>,
+    thumbnail_workers: Cell<u32>,
+    changed_paths: RefCell<std::collections::BTreeSet<PathBuf>>,
+    current_stamp: Cell<Option<filmstrip::Stamp>>,
+    last_color: RefCell<Option<(bool, std::time::Instant, model::State)>>,
     stage: gtk::Stack,
     toast: adw::ToastOverlay,
     crop_bar: gtk::Box,
@@ -48,6 +65,15 @@ pub(crate) struct Editor {
     undo: gio::SimpleAction,
     redo: gio::SimpleAction,
     tabs: RefCell<Option<gtk::Stack>>,
+    rules: RefCell<Vec<StateRule>>,
+    history_labels: RefCell<(String, String)>,
+    crop_before: RefCell<Option<model::State>>,
+    recent: RefCell<Vec<PathBuf>>,
+    recent_menu: gio::Menu,
+    history_menu: gio::Menu,
+    folder_monitor: RefCell<Option<gio::FileMonitor>>,
+    folder_debounce: RefCell<Option<glib::SourceId>>,
+    preferences: RefCell<preferences::Preferences>,
 }
 
 fn icon(name: &str, tooltip: &str, action: &str) -> gtk::Button {
@@ -94,9 +120,36 @@ impl Editor {
         ));
         header.pack_start(&undos);
         let menu = gio::Menu::new();
-        menu.append(Some("Save Preview…"), Some("win.export"));
+        menu.append(Some("Open Photograph…"), Some("win.open"));
+        let recent_menu = gio::Menu::new();
+        menu.append_submenu(Some("Open Recent"), &recent_menu);
+        menu.append(Some("Save Preview…"), Some("win.save-preview"));
+        menu.append(Some("Export Photograph…"), Some("win.export"));
         menu.append(Some("Export LUT…"), Some("win.lut"));
-        menu.append(Some("Appearance…"), Some("win.appearance"));
+        let edit = gio::Menu::new();
+        edit.append(Some("Undo"), Some("win.undo"));
+        edit.append(Some("Redo"), Some("win.redo"));
+        edit.append(Some("Reset Adjustments"), Some("win.reset"));
+        menu.append_section(None, &edit);
+        let view = gio::Menu::new();
+        for (title, action) in [
+            ("Fit Photograph", "fit"),
+            ("Actual Size", "actual"),
+            ("Show Original", "original"),
+            ("Crop…", "crop"),
+            ("Rotate Clockwise", "rotate"),
+            ("Rotate Counterclockwise", "rotate-left"),
+            ("Toggle Film Strip", "strip"),
+            ("Toggle Adjustments", "inspector"),
+            ("Previous Photograph", "previous"),
+            ("Next Photograph", "next"),
+        ] {
+            view.append(Some(title), Some(&format!("win.{action}")));
+        }
+        menu.append_submenu(Some("View"), &view);
+        menu.append(Some("Settings…"), Some("win.settings"));
+        menu.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
+        menu.append(Some("Quit"), Some("win.quit"));
         menu.append(Some("About Negs"), Some("win.about"));
         let menub = gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
@@ -123,7 +176,20 @@ impl Editor {
             .build();
         let inspector = gtk::Box::new(gtk::Orientation::Vertical, 0);
         inspector.add_css_class("inspector");
-        split.set_sidebar(Some(&inspector));
+        let sidebar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let resize = gtk::Button::new();
+        resize.add_css_class("inspector-resize");
+        resize.add_css_class("flat");
+        resize.set_width_request(7);
+        resize.set_cursor_from_name(Some("ew-resize"));
+        resize.set_tooltip_text(Some(
+            "Resize adjustments · drag or use Left/Right arrow keys",
+        ));
+        resize.update_property(&[gtk::accessible::Property::Label("Resize Adjustments")]);
+        sidebar.append(&resize);
+        sidebar.append(&inspector);
+        inspector.set_hexpand(true);
+        split.set_sidebar(Some(&sidebar));
         let main = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let tools = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         tools.add_css_class("canvas-toolbar");
@@ -178,22 +244,6 @@ impl Editor {
         crop_bar.set_halign(gtk::Align::Center);
         crop_bar.add_css_class("crop-hint");
         crop_bar.set_visible(false);
-        let hint = gtk::Label::new(Some("Drag corners to crop"));
-        crop_bar.append(&hint);
-        for (label, action) in [
-            ("Original", "win.crop-original"),
-            ("3:2", "win.crop-3-2"),
-            ("Square", "win.crop-square"),
-            ("Cancel", "win.crop-cancel"),
-            ("Done", "win.crop-done"),
-        ] {
-            let b = gtk::Button::with_label(label);
-            b.set_action_name(Some(action));
-            if label == "Done" {
-                b.add_css_class("suggested-action");
-            }
-            crop_bar.append(&b);
-        }
         well.append(&crop_bar);
         stage.add_named(&well, Some("photo"));
         main.append(&stage);
@@ -215,6 +265,8 @@ impl Editor {
         statusbar.append(&gap());
         let status = gtk::Label::new(Some("Camera preview · engine not connected"));
         status.add_css_class("dim-label");
+        status.set_selectable(true);
+        dimensions.set_selectable(true);
         statusbar.append(&status);
         status.set_ellipsize(gtk::pango::EllipsizeMode::End);
         status.set_max_width_chars(36);
@@ -222,6 +274,7 @@ impl Editor {
         dimensions.set_max_width_chars(22);
         let original = gtk::Button::with_label("Original");
         original.add_css_class("flat");
+        original.set_action_name(Some("win.original"));
         original.set_tooltip_text(Some(
             "This UI preview displays the camera original; film processing is not connected.",
         ));
@@ -258,11 +311,19 @@ impl Editor {
             title,
             dimensions,
             status,
-            strip,
             strip_scroll,
             strip_folder: RefCell::new(None),
             strip_generation: Cell::new(0),
-            strip_entries: RefCell::new(Vec::new()),
+            strip_paths: RefCell::new(Vec::new()),
+            strip_model: RefCell::new(None),
+            strip_selection: RefCell::new(None),
+            strip_view: RefCell::new(None),
+            thumbnail_cache: RefCell::new(std::collections::VecDeque::new()),
+            thumbnail_jobs: RefCell::new(std::collections::VecDeque::new()),
+            thumbnail_workers: Cell::new(0),
+            changed_paths: RefCell::new(std::collections::BTreeSet::new()),
+            current_stamp: Cell::new(None),
+            last_color: RefCell::new(None),
             stage,
             toast,
             crop_bar,
@@ -273,7 +334,50 @@ impl Editor {
             undo: gio::SimpleAction::new("undo", None),
             redo: gio::SimpleAction::new("redo", None),
             tabs: RefCell::new(None),
+            rules: RefCell::new(Vec::new()),
+            history_labels: RefCell::new((String::new(), String::new())),
+            crop_before: RefCell::new(None),
+            recent: RefCell::new(Vec::new()),
+            recent_menu,
+            history_menu: edit,
+            folder_monitor: RefCell::new(None),
+            folder_debounce: RefCell::new(None),
+            preferences: RefCell::new(preferences::Preferences::default()),
         });
+        crop_ui::build(&ui);
+        filmstrip::build(&ui);
+        let resize_origin = Rc::new(Cell::new(340.));
+        let drag = gtk::GestureDrag::new();
+        drag.connect_drag_begin(glib::clone!(
+            #[weak]
+            ui,
+            #[strong]
+            resize_origin,
+            move |_, _, _| resize_origin.set(ui.inspector.width() as f64)
+        ));
+        drag.connect_drag_update(glib::clone!(
+            #[weak]
+            ui,
+            move |_, dx, _| ui.resize_inspector(resize_origin.get() - dx)
+        ));
+        resize.add_controller(drag);
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed(glib::clone!(
+            #[weak]
+            ui,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, key, _, _| {
+                let delta = match key {
+                    gdk::Key::Left => 16.,
+                    gdk::Key::Right => -16.,
+                    _ => return glib::Propagation::Proceed,
+                };
+                ui.resize_inspector(ui.inspector.width() as f64 + delta);
+                glib::Propagation::Stop
+            }
+        ));
+        resize.add_controller(keys);
         ui.actions(app);
         ui.sync_history();
         ui.perf.watch(&ui.window);
@@ -317,18 +421,86 @@ impl Editor {
         ui.stage.add_controller(drop);
         let hold = Rc::new(RefCell::new(Some(ui.clone())));
         ui.window.connect_close_request(move |_| {
-            if let Some(ui) = hold.borrow_mut().take() {
-                ui.save_session();
+            let ui = hold.borrow_mut().take();
+            if let Some(ui) = ui {
+                if let Err(error) = ui.save_session() {
+                    ui.toast.add_toast(adw::Toast::new(&format!(
+                        "Could not save the UI session: {error}"
+                    )));
+                    hold.borrow_mut().replace(ui);
+                    return glib::Propagation::Stop;
+                }
                 ui.perf.write();
             }
             glib::Propagation::Proceed
         });
         ui
     }
+    fn resize_inspector(&self, width: f64) {
+        let width = width.clamp(280., 560.);
+        self.split.set_min_sidebar_width(width);
+        self.split.set_max_sidebar_width(width);
+        self.preferences.borrow_mut().sidebar_width = width;
+    }
     fn sync_history(&self) {
         let h = self.history.borrow();
         self.undo.set_enabled(h.can_undo());
         self.redo.set_enabled(h.can_redo());
+        let labels = (
+            h.undo_name()
+                .map(|s| format!("Undo {s}"))
+                .unwrap_or("Undo".into()),
+            h.redo_name()
+                .map(|s| format!("Redo {s}"))
+                .unwrap_or("Redo".into()),
+        );
+        if *self.history_labels.borrow() != labels {
+            self.history_menu.remove_all();
+            self.history_menu.append(Some(&labels.0), Some("win.undo"));
+            self.history_menu.append(Some(&labels.1), Some("win.redo"));
+            self.history_menu
+                .append(Some("Reset Adjustments"), Some("win.reset"));
+            self.history_labels.replace(labels);
+        }
+        let has_photo = self.current_path.borrow().is_some();
+        let cropping = self.canvas.cropping();
+        for key in [
+            "fit",
+            "actual",
+            "reset",
+            "original",
+            "export",
+            "save-preview",
+            "previous",
+            "next",
+            "strip",
+        ] {
+            if let Some(a) = self
+                .window
+                .lookup_action(key)
+                .and_downcast::<gio::SimpleAction>()
+            {
+                a.set_enabled(!cropping && (has_photo || key == "reset"));
+            }
+        }
+        for key in ["rotate", "rotate-left", "crop", "zoom-in", "zoom-out"] {
+            if let Some(a) = self
+                .window
+                .lookup_action(key)
+                .and_downcast::<gio::SimpleAction>()
+            {
+                a.set_enabled(has_photo);
+            }
+        }
+        self.strip_scroll.set_sensitive(!cropping);
+        self.inspector.set_sensitive(!cropping);
+        self.undo.set_enabled(!cropping && h.can_undo());
+        self.redo.set_enabled(!cropping && h.can_redo());
+        let syncing = self.syncing.replace(true);
+        for rule in self.rules.borrow().iter() {
+            rule(&h.state);
+        }
+        self.syncing.set(syncing);
     }
     fn sync_state(&self) {
         self.syncing.set(true);
@@ -370,17 +542,26 @@ impl Editor {
             .unwrap_or_else(|| glib::user_config_dir().join("negs/ui-preview"))
             .join("session.json")
     }
-    fn save_session(&self) {
+    fn save_session(&self) -> Result<(), String> {
         let path = Self::session_path();
-        let value = serde_json::json!({"ui_only":true,"photo":*self.current_path.borrow(),"state":self.history.borrow().state});
+        let mut prefs = self.preferences.borrow_mut();
+        prefs.inspector = self.split.shows_sidebar();
+        prefs.strip = self.strip_scroll.is_visible();
+        prefs.width = self.window.width();
+        prefs.height = self.window.height();
+        prefs.maximized = self.window.is_maximized();
+        let mut state = self.history.borrow().state.clone();
+        if self.canvas.cropping() {
+            state.crop = Some(self.canvas.crop_draft());
+            state.straighten = self.canvas.draft_angle();
+        }
+        let value = serde_json::json!({"ui_only":true,"photo":*self.current_path.borrow(),"state":state,"preferences":*prefs,"recent":*self.recent.borrow()});
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        if let Ok(bytes) = serde_json::to_vec_pretty(&value)
-            && std::fs::write(path.with_extension("tmp"), bytes).is_ok()
-        {
-            let _ = std::fs::rename(path.with_extension("tmp"), path);
-        }
+        let bytes = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
+        std::fs::write(path.with_extension("tmp"), bytes).map_err(|e| e.to_string())?;
+        std::fs::rename(path.with_extension("tmp"), path).map_err(|e| e.to_string())
     }
 }
 
@@ -404,9 +585,37 @@ fn main() -> glib::ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let app = adw::Application::builder()
         .application_id("dev.negs.app.UiPreview")
-        .flags(gio::ApplicationFlags::NON_UNIQUE)
+        .flags(
+            if std::env::var_os("NEGS_PROFILE_DIR").is_some()
+                || args.iter().any(|a| a == "--fresh" || a == "--demo")
+            {
+                gio::ApplicationFlags::NON_UNIQUE | gio::ApplicationFlags::HANDLES_OPEN
+            } else {
+                gio::ApplicationFlags::HANDLES_OPEN
+            },
+        )
         .build();
+    app.connect_open(|app, files, _| {
+        app.activate();
+        if let Some(window) = app.active_window() {
+            if let Some(path) = files.first().and_then(|f| f.path()) {
+                let _ = gtk::prelude::WidgetExt::activate_action(
+                    &window,
+                    "win.open-path",
+                    Some(&path.to_string_lossy().to_string().to_variant()),
+                );
+            }
+            window.present();
+        }
+    });
+    let launch_files: Vec<String> = std::iter::once("negs".to_string())
+        .chain(args.iter().filter(|s| !s.starts_with('-')).cloned())
+        .collect();
     app.connect_activate(move |app| {
+        if let Some(window) = app.active_window() {
+            window.present();
+            return;
+        }
         if let Some(display) = gdk::Display::default() {
             let css = gtk::CssProvider::new();
             css.load_from_string(include_str!("../style.css"));
@@ -434,16 +643,26 @@ fn main() -> glib::ExitCode {
             });
         }
         let ui = Editor::new(app, perf.clone());
-        let session = std::fs::read(Editor::session_path())
+        let session = std::fs::metadata(Editor::session_path())
             .ok()
+            .filter(|m| m.len() <= 1_048_576)
+            .and_then(|_| std::fs::read(Editor::session_path()).ok())
             .and_then(|s| serde_json::from_slice::<serde_json::Value>(&s).ok());
-        if !args.iter().any(|s| s == "--fresh")
+        if !args
+            .iter()
+            .any(|s| s == "--fresh" || s == "--demo" || !s.starts_with('-'))
             && let Some(state) = session
                 .as_ref()
                 .and_then(|s| s.get("state"))
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
         {
             ui.history.borrow_mut().state = state;
+            ui.history.borrow_mut().state.sanitize();
+        }
+        if !args.iter().any(|s| s == "--fresh")
+            && let Some(session) = session.as_ref()
+        {
+            ui.restore_preferences(session);
         }
         ui.window.present();
         ui.perf.mark("present_called_ms");
@@ -510,5 +729,5 @@ fn main() -> glib::ExitCode {
             );
         }
     });
-    app.run_with_args(&["negs"])
+    app.run_with_args(&launch_files)
 }

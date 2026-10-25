@@ -33,6 +33,51 @@ impl Editor {
         ));
         self.window.add_action(&self.redo);
         self.action("open", |ui| ui.open_dialog());
+        let recent = gio::SimpleAction::new("open-recent", Some(glib::VariantTy::STRING));
+        recent.connect_activate(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |_, value| {
+                if let Some(path) = value.and_then(|v| v.str()) {
+                    let path = PathBuf::from(path);
+                    if path.is_file() {
+                        ui.open(path);
+                    } else {
+                        ui.recent.borrow_mut().retain(|p| p != &path);
+                        ui.refresh_recent();
+                        ui.toast.add_toast(adw::Toast::new(
+                            "This photograph is no longer available and was removed from Recent.",
+                        ));
+                    }
+                }
+            }
+        ));
+        self.window.add_action(&recent);
+        let open_path = gio::SimpleAction::new("open-path", Some(glib::VariantTy::STRING));
+        open_path.connect_activate(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |_, value| {
+                if let Some(path) = value.and_then(|v| v.str()) {
+                    ui.open(PathBuf::from(path));
+                }
+            }
+        ));
+        self.window.add_action(&open_path);
+        self.action("clear-recent", |ui| {
+            ui.recent.borrow_mut().clear();
+            ui.refresh_recent();
+        });
+        self.action("quit", |ui| ui.window.close());
+        self.action("settings", |ui| ui.settings());
+        self.action("fullscreen", |ui| {
+            ui.window.set_fullscreened(!ui.window.is_fullscreen())
+        });
+        self.action("shortcuts", |ui| ui.shortcuts());
+        self.action("previous", |ui| ui.navigate(-1));
+        self.action("next", |ui| ui.navigate(1));
+        self.action("original", |ui| ui.toast.add_toast(adw::Toast::new("The camera original is already displayed. Developed comparison will be available when the engine is connected.")));
+        self.refresh_recent();
         self.action("fit", |ui| ui.canvas.fit());
         self.action("actual", |ui| ui.canvas.actual_size());
         self.action("zoom-in", |ui| {
@@ -57,7 +102,26 @@ impl Editor {
             let mut h = ui.history.borrow_mut();
             h.begin("Rotate");
             h.state.rotation = (h.state.rotation + 1) % 4;
-            h.commit();
+            if ui.canvas.cropping() {
+                rotate_crop_options(&mut h.state);
+            }
+            if !ui.canvas.cropping() {
+                h.commit();
+            }
+            drop(h);
+            ui.sync_state();
+            ui.canvas.fit();
+        });
+        self.action("rotate-left", |ui| {
+            let mut h = ui.history.borrow_mut();
+            h.begin("Rotate");
+            h.state.rotation = (h.state.rotation + 3) % 4;
+            if ui.canvas.cropping() {
+                rotate_crop_options(&mut h.state);
+            }
+            if !ui.canvas.cropping() {
+                h.commit();
+            }
             drop(h);
             ui.sync_state();
             ui.canvas.fit();
@@ -66,14 +130,45 @@ impl Editor {
             ui.split.set_show_sidebar(!ui.split.shows_sidebar())
         });
         self.action("strip", |ui| {
-            ui.strip_scroll.set_visible(!ui.strip_scroll.is_visible())
+            ui.strip_scroll.set_visible(!ui.strip_scroll.is_visible());
+            ui.preferences.borrow_mut().strip = ui.strip_scroll.is_visible();
         });
         self.action("reset", |ui| {
             let mut h = ui.history.borrow_mut();
             h.begin("Reset Adjustments");
             let s = fixtures::state();
+            let kept_values: Vec<_> = h
+                .state
+                .values
+                .iter()
+                .filter(|(k, _)| k.starts_with("Image Size.") || k.starts_with("Crop "))
+                .map(|(k, v)| (k.clone(), *v))
+                .collect();
+            let kept_choices: Vec<_> = h
+                .state
+                .choices
+                .iter()
+                .filter(|(k, _)| {
+                    [
+                        "Film",
+                        "Paper",
+                        "Film ID",
+                        "Paper ID",
+                        "Develop at",
+                        "Crop aspect",
+                        "Crop portrait",
+                    ]
+                    .contains(&k.as_str())
+                })
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
             h.state.values = s.values;
-            h.state.choices.clear();
+            h.state.values.extend(kept_values);
+            h.state.choices = kept_choices.into_iter().collect();
+            let positive = crate::catalog::selected(&h.state, false).positive;
+            h.state
+                .choices
+                .insert("Scan film directly".into(), positive.to_string());
             h.commit();
             drop(h);
             ui.sync_state();
@@ -85,22 +180,39 @@ impl Editor {
             if ui.canvas.cropping() {
                 ui.finish_crop(true);
             } else {
+                ui.crop_before
+                    .replace(Some(ui.history.borrow().state.clone()));
+                ui.history.borrow_mut().begin("Crop");
                 ui.canvas.begin_crop();
                 ui.crop_bar.set_visible(true);
                 ui.canvas.grab_focus();
+                ui.sync_history();
             }
         });
         self.action("crop-cancel", |ui| ui.finish_crop(false));
         self.action("crop-done", |ui| ui.finish_crop(true));
-        self.action("crop-original", |ui| ui.canvas.crop_ratio(1.5));
+        self.action("crop-original", |ui| {
+            let (w, h) = ui.canvas.source_size();
+            ui.canvas.crop_ratio(w.max(1) as f64 / h.max(1) as f64);
+        });
         self.action("crop-3-2", |ui| ui.canvas.crop_ratio(1.5));
         self.action("crop-square", |ui| ui.canvas.crop_ratio(1.));
-        self.action("export", |ui| ui.export_dialog(false));
-        self.action("lut", |ui| ui.export_dialog(true));
-        self.action("appearance", |ui| ui.appearance_dialog());
+        self.action("export", |ui| ui.export_dialog("photo"));
+        self.action("save-preview", |ui| ui.export_dialog("preview"));
+        self.action("lut", |ui| ui.export_dialog("lut"));
+        self.action("appearance", |ui| ui.settings());
         self.action("about",|ui|{let d=adw::AboutDialog::builder().application_name("Negs").application_icon("camera-photo-symbolic").version("0.7.0 · Linux UI preview").developer_name("Negs contributors").comments("A native GTK4/libadwaita editor.\nFilm processing is not connected in this preview.").license_type(gtk::License::Gpl30).build();d.present(Some(&ui.window));});
         for (action, keys) in [
             ("win.open", vec!["<Control>o"]),
+            ("win.quit", vec!["<Control>q"]),
+            ("win.settings", vec!["<Control>comma"]),
+            ("win.shortcuts", vec!["<Control>question"]),
+            ("win.save-preview", vec!["<Control>s"]),
+            ("win.lut", vec!["<Control><Shift>l"]),
+            ("win.fullscreen", vec!["F11"]),
+            ("win.rotate-left", vec!["<Control><Shift>r"]),
+            ("win.previous", vec!["<Alt>Left"]),
+            ("win.next", vec!["<Alt>Right"]),
             ("win.undo", vec!["<Control>z"]),
             ("win.redo", vec!["<Control><Shift>z", "<Control>y"]),
             ("win.fit", vec!["<Control>0"]),
@@ -125,12 +237,25 @@ impl Editor {
                     return glib::Propagation::Proceed;
                 }
                 match key {
+                    gdk::Key::backslash => {
+                        let _ = gtk::prelude::WidgetExt::activate_action(
+                            &ui.window,
+                            "win.original",
+                            None,
+                        );
+                    }
                     gdk::Key::c => {
                         let _ =
                             gtk::prelude::WidgetExt::activate_action(&ui.window, "win.crop", None);
                     }
                     gdk::Key::Escape if ui.canvas.cropping() => ui.finish_crop(false),
                     gdk::Key::Return if ui.canvas.cropping() => ui.finish_crop(true),
+                    gdk::Key::Left if ui.canvas.cropping() => ui.canvas.nudge_crop(-0.001, 0.),
+                    gdk::Key::Right if ui.canvas.cropping() => ui.canvas.nudge_crop(0.001, 0.),
+                    gdk::Key::Up if ui.canvas.cropping() => ui.canvas.nudge_crop(0., -0.001),
+                    gdk::Key::Down if ui.canvas.cropping() => ui.canvas.nudge_crop(0., 0.001),
+                    gdk::Key::Left => ui.navigate(-1),
+                    gdk::Key::Right => ui.navigate(1),
                     _ => return glib::Propagation::Proceed,
                 }
                 glib::Propagation::Stop
@@ -142,22 +267,34 @@ impl Editor {
         if !self.canvas.cropping() {
             return;
         }
+        let angle = self.canvas.draft_angle();
         let crop = self.canvas.end_crop();
         self.crop_bar.set_visible(false);
         if apply {
             let mut h = self.history.borrow_mut();
             h.begin("Crop");
-            h.state.crop = Some(crop);
+            h.state.crop = if crop == [0., 0., 1., 1.] {
+                None
+            } else {
+                Some(crop)
+            };
+            h.state.straighten = angle;
+            h.commit();
+        } else if let Some(before) = self.crop_before.take() {
+            let mut h = self.history.borrow_mut();
+            h.state = before;
             h.commit();
         }
+        self.crop_before.take();
         self.sync_state();
     }
     fn open_dialog(self: &Rc<Self>) {
         let filter = gtk::FileFilter::new();
         filter.set_name(Some("Photographs"));
-        for ext in [
-            "jpg", "jpeg", "png", "tif", "tiff", "nef", "dng", "arw", "cr2",
-        ] {
+        for ext in ["jpg", "jpeg", "png", "tif", "tiff"]
+            .iter()
+            .chain(crate::photo::RAW_EXTENSIONS)
+        {
             filter.add_suffix(ext);
         }
         let filters = gio::ListStore::new::<gtk::FileFilter>();
@@ -192,13 +329,18 @@ impl Editor {
         }
         let generation = self.generation.get() + 1;
         self.generation.set(generation);
-        if self.current_path.borrow().as_ref() == Some(&path) {
+        if self.current_path.borrow().as_ref() == Some(&path)
+            && self.current_stamp.get() == Some(crate::filmstrip::stamp(&path))
+        {
             // Also cancel a different in-flight open if the displayed photo is chosen again.
             self.pending_path.take();
             self.select_strip(&path);
             self.status
                 .set_text("Camera preview · engine not connected");
             return;
+        }
+        if self.canvas.cropping() {
+            self.finish_crop(false);
         }
         self.pending_path.replace(Some(path.clone()));
         self.select_strip(&path);
@@ -236,13 +378,18 @@ impl Editor {
                         &glib::Bytes::from_owned(photo.bytes),
                         photo.stride,
                     );
-                    if ui.current_path.borrow().is_some() {
+                    if ui.current_path.borrow().is_some()
+                        && ui.current_path.borrow().as_ref() != Some(&path)
+                    {
                         let mut state = ui.history.borrow().state.clone();
                         state.crop = None;
                         state.rotation = 0;
+                        state.straighten = 0.;
                         ui.history.replace(crate::model::History::new(state));
                     }
                     ui.canvas.set_texture(texture.upcast_ref(), photo.source);
+                    ui.current_path.replace(Some(path.clone()));
+                    ui.current_stamp.set(Some(crate::filmstrip::stamp(&path)));
                     ui.sync_state();
                     ui.hist.replace(Some(photo.histogram));
                     if let Some(hist) = ui.histogram.borrow().as_ref() {
@@ -257,7 +404,7 @@ impl Editor {
                         .set_title(Some(&format!("{name} — Negs UI Preview")));
                     ui.status.set_text("Camera preview · engine not connected");
                     ui.stage.set_visible_child_name("photo");
-                    ui.strip_scroll.set_visible(true);
+                    ui.strip_scroll.set_visible(ui.preferences.borrow().strip);
                     ui.current_path.replace(Some(path.clone()));
                     ui.perf.mark("preview_texture_ready_ms");
                     let p = ui.perf.clone();
@@ -272,6 +419,7 @@ impl Editor {
                         p.write();
                         glib::ControlFlow::Break
                     });
+                    ui.remember(path.clone());
                     ui.load_strip(path);
                     ui.perf.write();
                 }
@@ -292,196 +440,51 @@ impl Editor {
         });
     }
     fn select_strip(&self, path: &std::path::Path) {
-        for (item, button) in self.strip_entries.borrow().iter() {
-            if item == path {
-                button.add_css_class("selected");
-            } else {
-                button.remove_css_class("selected");
-            }
-        }
+        crate::filmstrip::select(self, path);
     }
     fn load_strip(self: &Rc<Self>, path: PathBuf) {
-        self.select_strip(&path);
-        let folder = path.parent().map(std::path::Path::to_path_buf);
-        if self.strip_folder.borrow().as_ref() == folder.as_ref() {
+        crate::filmstrip::load(self, path, false);
+    }
+    fn navigate(self: &Rc<Self>, offset: isize) {
+        if self.canvas.cropping() {
             return;
         }
-        self.strip_folder.replace(folder);
-        let ui = self.clone();
-        // A photo switch must not cancel thumbnail work in the same folder.
-        let generation = self.strip_generation.get() + 1;
-        self.strip_generation.set(generation);
-        glib::MainContext::default().spawn_local(async move {
-            let paths = gio::spawn_blocking(move || crate::photo::folder(&path))
-                .await
-                .unwrap_or_default();
-            if ui.strip_generation.get() != generation {
-                return;
-            }
-            while let Some(child) = ui.strip.first_child() {
-                ui.strip.remove(&child);
-            }
-            ui.strip_entries.borrow_mut().clear();
-            let mut thumbnails = Vec::new();
-            // Bound this visual spike to 24 files. The production strip will be virtualized.
-            for path in paths.into_iter().take(24) {
-                let button = gtk::Button::new();
-                let cell = gtk::Box::new(gtk::Orientation::Vertical, 5);
-                let picture = gtk::Picture::new();
-                picture.set_size_request(104, 68);
-                picture.set_content_fit(gtk::ContentFit::Contain);
-                cell.append(&picture);
-                let label = gtk::Label::new(Some(
-                    &path.file_name().unwrap_or_default().to_string_lossy(),
-                ));
-                label.set_max_width_chars(16);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-                cell.append(&label);
-                button.set_child(Some(&cell));
-                button.set_tooltip_text(Some(&path.to_string_lossy()));
-                button.update_property(&[gtk::accessible::Property::Label(
-                    &path.file_name().unwrap_or_default().to_string_lossy(),
-                )]);
-                let p = path.clone();
-                button.connect_clicked(glib::clone!(
-                    #[weak]
-                    ui,
-                    move |_| ui.open(p.clone())
-                ));
-                ui.strip.append(&button);
-                ui.strip_entries.borrow_mut().push((path.clone(), button));
-                thumbnails.push((path, picture));
-            }
-            if let Some(path) = ui
-                .pending_path
-                .borrow()
-                .as_ref()
-                .or(ui.current_path.borrow().as_ref())
-            {
-                ui.select_strip(path);
-            }
-            for (path, picture) in thumbnails {
-                let decoded = gio::spawn_blocking(move || crate::photo::decode(&path, 192)).await;
-                if ui.strip_generation.get() != generation {
-                    return;
-                }
-                if let Ok(Ok(photo)) = decoded {
-                    let format = if photo.alpha {
-                        gdk::MemoryFormat::R8g8b8a8
-                    } else {
-                        gdk::MemoryFormat::R8g8b8
-                    };
-                    let texture = gdk::MemoryTexture::new(
-                        photo.width,
-                        photo.height,
-                        format,
-                        &glib::Bytes::from_owned(photo.bytes),
-                        photo.stride,
-                    );
-                    picture.set_paintable(Some(&texture));
-                }
-            }
-        });
+        let entries = self.strip_paths.borrow();
+        let path = self
+            .pending_path
+            .borrow()
+            .clone()
+            .or_else(|| self.current_path.borrow().clone());
+        let next = entries
+            .iter()
+            .position(|p| Some(p) == path.as_ref())
+            .and_then(|index| index.checked_add_signed(offset))
+            .and_then(|index| entries.get(index))
+            .cloned();
+        drop(entries);
+        if let Some(path) = next {
+            self.open(path);
+        }
     }
-    fn export_dialog(&self, lut: bool) {
-        let dialog = adw::Dialog::builder()
-            .title(if lut {
-                "Export LUT"
-            } else {
-                "Export Photograph"
-            })
-            .content_width(440)
-            .build();
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 16);
-        body.set_margin_start(24);
-        body.set_margin_end(24);
-        body.set_margin_top(16);
-        body.set_margin_bottom(24);
-        let group = adw::PreferencesGroup::new();
-        for (title, options) in if lut {
-            vec![
-                ("Format", vec!["Cube (.cube)"]),
-                ("Grid size", vec!["33 × 33 × 33", "65 × 65 × 65"]),
-            ]
-        } else {
-            vec![
-                ("Engine", vec!["Fast (GPU / f32)", "Reference (CPU / f64)"]),
-                (
-                    "Format",
-                    vec!["TIFF · 16-bit", "PNG · 16-bit", "JPEG · 8-bit"],
-                ),
-                ("Size", vec!["Full developed size", "Longest side…"]),
-            ]
-        } {
-            group.add(
-                &adw::ComboRow::builder()
-                    .title(title)
-                    .model(&gtk::StringList::new(&options))
-                    .build(),
-            );
-        }
-        if !lut {
-            group.add(
-                &adw::SwitchRow::builder()
-                    .title("Include border")
-                    .active(true)
-                    .build(),
-            );
-            group.add(
-                &adw::SwitchRow::builder()
-                    .title("Copy photograph metadata")
-                    .active(true)
-                    .build(),
-            );
-        }
-        body.append(&group);
-        let hint = gtk::Label::new(Some(
-            "The export interface is ready to review. Saving will be enabled when the Rust engine is connected.",
-        ));
-        hint.set_wrap(true);
-        hint.set_xalign(0.);
-        hint.add_css_class("dim-label");
-        body.append(&hint);
-        let save = gtk::Button::with_label(if lut {
-            "Export LUT…"
-        } else {
-            "Export Photograph…"
-        });
-        save.add_css_class("suggested-action");
-        save.set_sensitive(false);
-        body.append(&save);
-        toolbar.set_content(Some(&body));
-        dialog.set_child(Some(&toolbar));
+    fn shortcuts(&self) {
+        let dialog=adw::AlertDialog::builder().heading("Keyboard Shortcuts").body("Ctrl+O  Open photograph\nCtrl+S  Save Preview options\nCtrl+Shift+E  Export options\nCtrl+Z / Ctrl+Shift+Z  Undo / Redo\nCtrl+0 / Ctrl+1  Fit / Actual Size\nCtrl++ / Ctrl+−  Zoom\nCtrl+R / Ctrl+Shift+R  Rotate\nC  Crop (canvas focused)\nEnter / Escape  Apply / Cancel crop\nArrow keys  Move crop / Previous and next photo\nAlt+Left / Alt+Right  Previous / Next photograph\nF6 / F7  Film Strip / Adjustments\nCtrl+,  Settings\nCtrl+Q  Quit").build();
+        dialog.add_response("close", "Close");
         dialog.present(Some(&self.window));
     }
-    fn appearance_dialog(&self) {
-        let d = adw::Dialog::builder()
-            .title("Appearance")
-            .content_width(360)
-            .build();
-        let t = adw::ToolbarView::new();
-        t.add_top_bar(&adw::HeaderBar::new());
-        let b = gtk::Box::new(gtk::Orientation::Vertical, 16);
-        b.set_margin_top(24);
-        b.set_margin_bottom(24);
-        b.set_margin_start(24);
-        b.set_margin_end(24);
-        let row = adw::ComboRow::builder()
-            .title("Appearance")
-            .model(&gtk::StringList::new(&["Follow system", "Light", "Dark"]))
-            .build();
-        row.connect_selected_notify(|r| {
-            adw::StyleManager::default().set_color_scheme(match r.selected() {
-                1 => adw::ColorScheme::ForceLight,
-                2 => adw::ColorScheme::ForceDark,
-                _ => adw::ColorScheme::Default,
-            })
-        });
-        b.append(&row);
-        t.set_content(Some(&b));
-        d.set_child(Some(&t));
-        d.present(Some(&self.window));
+    fn export_dialog(self: &Rc<Self>, kind: &str) {
+        crate::export_ui::present(self, kind);
+    }
+}
+
+fn rotate_crop_options(state: &mut crate::model::State) {
+    let portrait = crate::inspector::flag(state, "Crop portrait", false);
+    state
+        .choices
+        .insert("Crop portrait".into(), (!portrait).to_string());
+    if crate::inspector::choice(state, "Crop aspect") == 8 {
+        let w = state.values.get("Crop width").copied().unwrap_or(5.);
+        let h = state.values.get("Crop height").copied().unwrap_or(4.);
+        state.values.insert("Crop width".into(), h);
+        state.values.insert("Crop height".into(), w);
     }
 }

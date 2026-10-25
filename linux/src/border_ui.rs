@@ -89,13 +89,7 @@ fn color_row(
         entry,
         move || {
             match Color::try_from(entry.text().to_string()) {
-                Ok(color) => update(&ui, "Change Border Color", |s| {
-                    if line {
-                        s.line_color = color;
-                    } else {
-                        s.color = color;
-                    }
-                }),
+                Ok(color) => apply_color(&ui, line, color),
                 Err(_) => entry.add_css_class("error"),
             }
         }
@@ -120,19 +114,31 @@ fn color_row(
         #[weak]
         ui,
         move |picker| {
-            update(&ui, "Change Border Color", |s| {
-                let color = Color::from_rgba(picker.rgba());
-                if line {
-                    s.line_color = color;
-                } else {
-                    s.color = color;
-                }
-            });
+            apply_color(&ui, line, Color::from_rgba(picker.rgba()));
         }
     ));
     row.add_suffix(&entry);
     row.add_suffix(&apply);
     row.add_suffix(&picker);
+    reset_control(
+        ui,
+        &row,
+        title,
+        move |s| {
+            if line {
+                s.line_color != Settings::default().line_color
+            } else {
+                s.color != Settings::default().color
+            }
+        },
+        move |s| {
+            if line {
+                s.line_color = Settings::default().line_color
+            } else {
+                s.color = Settings::default().color
+            }
+        },
+    );
     (row, entry, picker)
 }
 pub fn build(ui: &Rc<Editor>) -> gtk::Box {
@@ -145,6 +151,13 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
     let heading = gtk::ListBox::new();
     heading.set_selection_mode(gtk::SelectionMode::None);
     heading.add_css_class("boxed-list");
+    reset_control(
+        ui,
+        &enabled,
+        "Add border",
+        |s| s.enabled,
+        |s| s.enabled = false,
+    );
     heading.append(&enabled);
     body.append(&heading);
     let options = gtk::ListBox::new();
@@ -163,9 +176,86 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
     style.connect_selected_notify(glib::clone!(
         #[weak]
         ui,
-        move |row| update(&ui, "Change Border Style", |s| s.style =
-            Style::from_index(row.selected()))
+        move |row| {
+            if !ui.syncing.get() && row.selected() == 3 && !fits_35mm(&ui) {
+                ui.toast.add_toast(adw::Toast::new(
+                    "35mm needs a 3:2 or 3:4 photograph. Crop to 3:2 or 4:3 first.",
+                ));
+                ui.sync_state();
+                return;
+            }
+            update(&ui, "Change Border Style", |s| {
+                s.style = Style::from_index(row.selected())
+            });
+        }
     ));
+    let factory = gtk::SignalListItemFactory::new();
+    factory.connect_setup(|_, o| {
+        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
+        let b = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        let swatch = gtk::DrawingArea::new();
+        swatch.set_size_request(56, 40);
+        b.append(&swatch);
+        b.append(&gtk::Label::new(None));
+        item.set_child(Some(&b));
+    });
+    factory.connect_bind(glib::clone!(
+        #[weak]
+        ui,
+        move |_, o| {
+            let item = o.downcast_ref::<gtk::ListItem>().unwrap();
+            let index = item.position();
+            let b = item.child().and_downcast::<gtk::Box>().unwrap();
+            b.last_child()
+                .and_downcast::<gtk::Label>()
+                .unwrap()
+                .set_text(
+                    ["Solid", "Film", "Keyline", "35mm"]
+                        .get(index as usize)
+                        .copied()
+                        .unwrap_or(""),
+                );
+            let compatible = index != 3 || fits_35mm(&ui);
+            item.set_selectable(compatible);
+            item.set_activatable(compatible);
+            b.set_sensitive(compatible);
+            b.first_child()
+                .and_downcast::<gtk::DrawingArea>()
+                .unwrap()
+                .set_draw_func(move |_, cr, w, h| {
+                    cr.set_source_rgb(
+                        if index == 0 || index == 2 { 0.94 } else { 0.04 },
+                        if index == 0 || index == 2 { 0.92 } else { 0.04 },
+                        if index == 0 || index == 2 { 0.87 } else { 0.04 },
+                    );
+                    let _ = cr.paint();
+                    if index == 2 {
+                        cr.set_source_rgb(0.05, 0.05, 0.05);
+                        cr.rectangle(6., 6., w as f64 - 12., h as f64 - 12.);
+                        let _ = cr.fill();
+                    }
+                    cr.set_source_rgb(0.28, 0.42, 0.48);
+                    cr.rectangle(8., 8., w as f64 - 16., h as f64 - 16.);
+                    let _ = cr.fill();
+                    if index == 3 {
+                        for x in (4..w).step_by(9) {
+                            cr.set_source_rgb(0.75, 0.7, 0.6);
+                            cr.rectangle(x as f64, 2., 5., 3.);
+                            cr.rectangle(x as f64, h as f64 - 5., 5., 3.);
+                            let _ = cr.fill();
+                        }
+                    }
+                });
+        }
+    ));
+    style.set_list_factory(Some(&factory));
+    reset_control(
+        ui,
+        &style,
+        "Border style",
+        |s| s.style != Settings::default().style,
+        |s| s.style = Settings::default().style,
+    );
     options.append(&style);
     let width = inspector::number(
         ui,
@@ -205,6 +295,13 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
         move |row| update(&ui, "Change Instagram Frame", |s| s.instagram =
             row.is_active())
     ));
+    reset_control(
+        ui,
+        &instagram,
+        "Instagram frame",
+        |s| s.instagram,
+        |s| s.instagram = false,
+    );
     options.append(&instagram);
     let export = adw::SwitchRow::builder()
         .title("Include border in export")
@@ -216,8 +313,28 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
         move |row| update(&ui, "Change Border Export", |s| s.export = row.is_active())
     ));
     export.set_subtitle("Saved for when export is connected");
+    reset_control(
+        ui,
+        &export,
+        "Border export",
+        |s| !s.export,
+        |s| s.export = true,
+    );
     options.append(&export);
     body.append(&options);
+    let warning = gtk::Label::new(Some(
+        "35mm needs a 3:2 or 3:4 photograph. Crop to 3:2 or 4:3 to use it.",
+    ));
+    warning.set_wrap(true);
+    warning.set_xalign(0.);
+    warning.add_css_class("caption");
+    body.append(&warning);
+    let owner = Rc::downgrade(ui);
+    ui.rules.borrow_mut().push(Box::new(move |s| {
+        if let Some(ui) = owner.upgrade() {
+            warning.set_visible(s.border.enabled && !fits_35mm(&ui));
+        }
+    }));
     let help = gtk::Label::new(Some(
         "Thickness is a percentage of the photograph’s long edge. 35mm needs a 3:2 or 4:3 crop; other ratios show the photograph without that border.",
     ));
@@ -241,4 +358,69 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
     controls.sync(&state);
     ui.border.replace(Some(controls));
     body
+}
+
+fn fits_35mm(ui: &Editor) -> bool {
+    let (w, h) = ui.canvas.source_size();
+    let crop = ui.history.borrow().state.crop.unwrap_or([0., 0., 1., 1.]);
+    w <= 0 || h <= 0 || crate::border::format(w as f64 * crop[2], h as f64 * crop[3]).is_some()
+}
+
+fn reset_control(
+    ui: &Rc<Editor>,
+    row: &impl IsA<adw::ActionRow>,
+    name: &str,
+    modified: impl Fn(&Settings) -> bool + 'static,
+    change: impl Fn(&mut Settings) + 'static,
+) {
+    let button = gtk::Button::from_icon_name("edit-undo-symbolic");
+    button.add_css_class("flat");
+    button.set_valign(gtk::Align::Center);
+    button.set_tooltip_text(Some("Reset to Default"));
+    button.update_property(&[gtk::accessible::Property::Label(&format!("Reset {name}"))]);
+    row.add_suffix(&button);
+    let name = name.to_string();
+    button.connect_clicked(glib::clone!(
+        #[weak]
+        ui,
+        move |_| update(&ui, &format!("Reset {name}"), &change)
+    ));
+    inspector::reset_menu(&row.clone().upcast::<adw::ActionRow>(), &button);
+    ui.rules
+        .borrow_mut()
+        .push(Box::new(move |s| button.set_visible(modified(&s.border))));
+}
+fn apply_color(ui: &Rc<Editor>, line: bool, color: Color) {
+    if ui.syncing.get() {
+        return;
+    }
+    let mut h = ui.history.borrow_mut();
+    let current = if line {
+        h.state.border.line_color
+    } else {
+        h.state.border.color
+    };
+    if current == color {
+        return;
+    }
+    let coalesced = ui
+        .last_color
+        .borrow()
+        .as_ref()
+        .is_some_and(|(last, when, state)| {
+            *last == line && when.elapsed() < std::time::Duration::from_secs(1) && *state == h.state
+        });
+    if !coalesced {
+        h.begin("Change Border Color");
+    }
+    if line {
+        h.state.border.line_color = color;
+    } else {
+        h.state.border.color = color;
+    }
+    h.commit();
+    ui.last_color
+        .replace(Some((line, std::time::Instant::now(), h.state.clone())));
+    drop(h);
+    ui.sync_state();
 }

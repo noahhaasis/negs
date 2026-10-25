@@ -12,13 +12,8 @@ pub struct Photo {
 }
 
 pub fn decode(path: &Path, max: i32) -> Result<Photo, String> {
-    let pixbuf = if matches!(
-        path.extension()
-            .and_then(|s| s.to_str())
-            .map(str::to_lowercase)
-            .as_deref(),
-        Some("nef" | "dng" | "cr2" | "arw")
-    ) {
+    let embedded_source = std::rc::Rc::new(std::cell::Cell::new((0, 0)));
+    let pixbuf = if is_raw(path) {
         // Preview only: extract an embedded camera JPEG, never develop RAW on the UI thread.
         let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
         use std::io::Read;
@@ -42,7 +37,9 @@ pub fn decode(path: &Path, max: i32) -> Result<Photo, String> {
         let mut found = None;
         for (a, b) in candidates.into_iter().take(5) {
             let loader = gdk_pixbuf::PixbufLoader::new();
+            let source = embedded_source.clone();
             loader.connect_size_prepared(move |loader, w, h| {
+                source.set((w, h));
                 let factor = (max as f64 / w.max(h) as f64).min(1.);
                 loader.set_size(
                     (w as f64 * factor).round() as i32,
@@ -60,10 +57,21 @@ pub fn decode(path: &Path, max: i32) -> Result<Photo, String> {
     } else {
         gdk_pixbuf::Pixbuf::from_file_at_scale(path, max, max, true).map_err(|e| e.to_string())?
     };
+    let swaps = pixbuf
+        .option("orientation")
+        .and_then(|v| v.parse::<u8>().ok())
+        .is_some_and(|v| (5..=8).contains(&v));
     let pixbuf = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
     let source = gdk_pixbuf::Pixbuf::file_info(path)
         .map(|(_, w, h)| (w, h))
-        .unwrap_or((pixbuf.width(), pixbuf.height()));
+        .unwrap_or_else(|| {
+            if embedded_source.get().0 > 0 {
+                embedded_source.get()
+            } else {
+                (pixbuf.width(), pixbuf.height())
+            }
+        });
+    let source = if swaps { (source.1, source.0) } else { source };
     let raw = pixbuf.read_pixel_bytes();
     let bytes = raw.as_ref().to_vec();
     let mut histogram = [vec![0; 256], vec![0; 256], vec![0; 256]];
@@ -103,16 +111,51 @@ pub fn folder(path: &Path) -> Vec<PathBuf> {
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .starts_with('.')
-                && matches!(
-                    p.extension()
-                        .and_then(|s| s.to_str())
-                        .map(str::to_lowercase)
-                        .as_deref(),
-                    Some("jpg" | "jpeg" | "png" | "tif" | "tiff" | "nef" | "dng" | "arw" | "cr2")
-                )
+                && supported(p)
         })
-        .take(200)
+        .take(10_000)
         .collect();
-    paths.sort();
+    paths.sort_by_cached_key(|p| natural_key(&p.file_name().unwrap_or_default().to_string_lossy()));
     paths
+}
+
+pub const RAW_EXTENSIONS: &[&str] = &[
+    "nef", "nrw", "dng", "arw", "srf", "sr2", "cr2", "cr3", "crw", "raf", "rw2", "orf", "pef",
+    "ptx", "rwl", "srw", "3fr", "fff", "iiq", "kdc", "dcr", "mos", "mrw", "erf", "raw",
+];
+pub fn is_raw(path: &Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| RAW_EXTENSIONS.contains(&s.to_ascii_lowercase().as_str()))
+}
+pub fn supported(path: &Path) -> bool {
+    is_raw(path)
+        || path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
+            ["jpg", "jpeg", "png", "tif", "tiff"].contains(&s.to_ascii_lowercase().as_str())
+        })
+}
+fn natural_key(name: &str) -> String {
+    let mut result = String::new();
+    let mut digits = String::new();
+    for c in name.to_lowercase().chars().chain(std::iter::once('\0')) {
+        if c.is_ascii_digit() {
+            digits.push(c);
+        } else {
+            if !digits.is_empty() {
+                let value = digits.trim_start_matches('0');
+                result.push_str(&format!("{:08}{value}", value.len()));
+                digits.clear();
+            }
+            result.push(c);
+        }
+    }
+    result
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn natural_photo_order_and_raw_parity() {
+        assert!(super::natural_key("photo9.JPG") < super::natural_key("photo10.jpg"));
+        assert!(super::is_raw(std::path::Path::new("CAMERA.CR3")));
+    }
 }

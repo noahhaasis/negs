@@ -24,6 +24,10 @@ mod imp {
         pub(super) asset: RefCell<Option<Asset>>,
         pub asset_key: RefCell<Option<String>>,
         pub crop: Cell<Option<[f64; 4]>>,
+        pub angle: Cell<f64>,
+        pub draft_angle: Cell<f64>,
+        pub angle_base: Cell<[f64; 4]>,
+        pub ratio: Cell<f64>,
         pub cropping: Cell<bool>,
         pub draft: Cell<[f64; 4]>,
         pub drag_origin: Cell<(f64, f64)>,
@@ -124,6 +128,20 @@ mod imp {
             snapshot.rotate(self.rotation.get() as f32 * 90.);
             snapshot.translate(&graphene::Point::new((-cw / 2.) as f32, (-ch / 2.) as f32));
             snapshot.push_clip(&graphene::Rect::new(0., 0., cw as f32, ch as f32));
+            snapshot.save();
+            snapshot.translate(&graphene::Point::new(
+                (iw / 2. - crop[0] * iw) as f32,
+                (ih / 2. - crop[1] * ih) as f32,
+            ));
+            snapshot.rotate(if self.cropping.get() {
+                self.draft_angle.get()
+            } else {
+                self.angle.get()
+            } as f32);
+            snapshot.translate(&graphene::Point::new(
+                (-iw / 2. + crop[0] * iw) as f32,
+                (-ih / 2. + crop[1] * ih) as f32,
+            ));
             snapshot.append_texture(
                 &texture,
                 &graphene::Rect::new(
@@ -133,6 +151,7 @@ mod imp {
                     ih as f32,
                 ),
             );
+            snapshot.restore();
             snapshot.pop();
             if self.cropping.get() {
                 let [x, y, w, h] = self.draft.get();
@@ -151,6 +170,21 @@ mod imp {
                     };
                     rect(snapshot, &color, x + w * n as f64 / 3., y, thin, h);
                     rect(snapshot, &color, x, y + h * n as f64 / 3., w, thin);
+                }
+                for (hx, hy, horizontal) in [
+                    (x + w / 2., y, true),
+                    (x + w / 2., y + h, true),
+                    (x, y + h / 2., false),
+                    (x + w, y + h / 2., false),
+                ] {
+                    rect(
+                        snapshot,
+                        &gdk::RGBA::WHITE,
+                        hx - if horizontal { 8. / zoom } else { 1.5 / zoom },
+                        hy - if horizontal { 1.5 / zoom } else { 8. / zoom },
+                        if horizontal { 16. / zoom } else { 3. / zoom },
+                        if horizontal { 3. / zoom } else { 16. / zoom },
+                    );
                 }
                 let line = 3. / zoom;
                 let len = 16. / zoom;
@@ -338,11 +372,20 @@ impl Canvas {
                 imp.drag_point.set(obj.image_point(x, y));
                 let (nx, ny) = imp.drag_point.get();
                 let [cx, cy, cw, ch] = imp.draft.get();
-                let handle = [(cx, cy), (cx + cw, cy), (cx, cy + ch), (cx + cw, cy + ch)]
-                    .iter()
-                    .position(|(hx, hy)| (nx - hx).abs() < 0.05 && (ny - hy).abs() < 0.05)
-                    .map(|n| n as u8 + 1)
-                    .unwrap_or(0);
+                let handle = [
+                    (cx, cy),
+                    (cx + cw, cy),
+                    (cx, cy + ch),
+                    (cx + cw, cy + ch),
+                    (cx, cy + ch / 2.),
+                    (cx + cw, cy + ch / 2.),
+                    (cx + cw / 2., cy),
+                    (cx + cw / 2., cy + ch),
+                ]
+                .iter()
+                .position(|(hx, hy)| (nx - hx).abs() < 0.05 && (ny - hy).abs() < 0.05)
+                .map(|n| n as u8 + 1)
+                .unwrap_or(0);
                 imp.crop_handle.set(handle);
                 obj.set_cursor_from_name(Some("grabbing"));
             }
@@ -362,27 +405,77 @@ impl Canvas {
                     let (dx, dy) = (nx - ox, ny - oy);
                     let draft = match imp.crop_handle.get() {
                         1 => {
-                            let xx = (x + dx).clamp(0., x + w - 0.1);
-                            let yy = (y + dy).clamp(0., y + h - 0.1);
+                            let xx = (x + dx).clamp(0., x + w - 0.01);
+                            let yy = (y + dy).clamp(0., y + h - 0.01);
                             [xx, yy, x + w - xx, y + h - yy]
                         }
                         2 => {
-                            let yy = (y + dy).clamp(0., y + h - 0.1);
-                            [x, yy, (w + dx).clamp(0.1, 1. - x), y + h - yy]
+                            let yy = (y + dy).clamp(0., y + h - 0.01);
+                            [x, yy, (w + dx).clamp(0.01, 1. - x), y + h - yy]
                         }
                         3 => {
-                            let xx = (x + dx).clamp(0., x + w - 0.1);
-                            [xx, y, x + w - xx, (h + dy).clamp(0.1, 1. - y)]
+                            let xx = (x + dx).clamp(0., x + w - 0.01);
+                            [xx, y, x + w - xx, (h + dy).clamp(0.01, 1. - y)]
                         }
                         4 => [
                             x,
                             y,
-                            (w + dx).clamp(0.1, 1. - x),
-                            (h + dy).clamp(0.1, 1. - y),
+                            (w + dx).clamp(0.01, 1. - x),
+                            (h + dy).clamp(0.01, 1. - y),
                         ],
-                        _ => [(x + dx).clamp(0., 1. - w), (y + dy).clamp(0., 1. - h), w, h],
+                        5 => {
+                            let xx = (x + dx).clamp(0., x + w - 0.01);
+                            [xx, y, x + w - xx, h]
+                        }
+                        6 => [x, y, (w + dx).clamp(0.01, 1. - x), h],
+                        7 => {
+                            let yy = (y + dy).clamp(0., y + h - 0.01);
+                            [x, yy, w, y + h - yy]
+                        }
+                        8 => [x, y, w, (h + dy).clamp(0.01, 1. - y)],
+                        _ => [
+                            (x + dx).clamp(0., (1. - w).max(0.)),
+                            (y + dy).clamp(0., (1. - h).max(0.)),
+                            w,
+                            h,
+                        ],
                     };
-                    imp.draft.set(draft);
+                    let mut draft = draft;
+                    if imp.ratio.get() > 0. && imp.crop_handle.get() != 0 {
+                        let (iw, ih) = obj.image_size();
+                        let ratio = imp.ratio.get() * ih / iw;
+                        let width = match imp.crop_handle.get() {
+                            5 | 6 => draft[2],
+                            7 | 8 => draft[3] * ratio,
+                            _ => draft[2].max(draft[3] * ratio),
+                        }
+                        .min(1.)
+                        .min(ratio);
+                        let height = width / ratio;
+                        let left = matches!(imp.crop_handle.get(), 1 | 3 | 5);
+                        let top = matches!(imp.crop_handle.get(), 1 | 2 | 7);
+                        draft = [
+                            if left {
+                                (x + w - width).max(0.)
+                            } else {
+                                draft[0].min(1. - width)
+                            },
+                            if top {
+                                (y + h - height).max(0.)
+                            } else {
+                                draft[1].min(1. - height)
+                            },
+                            width,
+                            height,
+                        ];
+                    }
+                    imp.draft.set(crate::crop_geometry::constrain(
+                        imp.crop_origin.get(),
+                        draft,
+                        imp.draft_angle.get(),
+                        obj.image_size(),
+                    ));
+                    imp.angle_base.set(imp.draft.get());
                 } else {
                     let (x, y) = imp.drag_origin.get();
                     imp.pan.set((x + dx, y + dy));
@@ -506,6 +599,7 @@ impl Canvas {
     }
     pub fn apply(&self, state: &crate::model::State) {
         self.imp().rotation.set(state.rotation);
+        self.imp().angle.set(state.straighten);
         self.imp().border.replace(state.border.clone());
         self.imp().crop.set(state.crop);
         self.load_border_asset(state);
@@ -515,13 +609,7 @@ impl Canvas {
         let (w, h) = self.image_size();
         let crop = state.crop.unwrap_or([0., 0., 1., 1.]);
         let format = crate::border::format(w * crop[2], h * crop[3]);
-        let film = state
-            .choices
-            .get("Film")
-            .and_then(|s| s.parse::<usize>().ok())
-            .and_then(|i| crate::border::FILM_IDS.get(i))
-            .copied()
-            .unwrap_or(crate::border::FILM_IDS[0]);
+        let film = &crate::catalog::selected(state, false).id;
         let key = if !state.border.enabled {
             None
         } else {
@@ -597,7 +685,10 @@ impl Canvas {
     pub fn begin_crop(&self) {
         self.imp()
             .draft
-            .set(self.imp().crop.get().unwrap_or([0.08, 0.08, 0.84, 0.84]));
+            .set(self.imp().crop.get().unwrap_or([0., 0., 1., 1.]));
+        self.imp().angle_base.set(self.imp().draft.get());
+        self.imp().draft_angle.set(self.imp().angle.get());
+        self.imp().ratio.set(0.);
         self.imp().cropping.set(true);
         self.fit();
     }
@@ -609,12 +700,76 @@ impl Canvas {
     pub fn cropping(&self) -> bool {
         self.imp().cropping.get()
     }
+    pub fn source_size(&self) -> (i32, i32) {
+        self.imp().source_size.get()
+    }
+    pub fn crop_draft(&self) -> [f64; 4] {
+        self.imp().draft.get()
+    }
+    pub fn draft_angle(&self) -> f64 {
+        self.imp().draft_angle.get()
+    }
+    pub fn set_angle(&self, degrees: f64) {
+        self.imp().draft_angle.set(degrees.clamp(-45., 45.));
+        self.imp().draft.set(crate::crop_geometry::inscribe(
+            self.imp().angle_base.get(),
+            degrees,
+            self.image_size(),
+        ));
+        self.queue_draw();
+    }
+    pub fn reset_crop(&self) {
+        self.imp().draft.set([0., 0., 1., 1.]);
+        self.imp().angle_base.set([0., 0., 1., 1.]);
+        self.imp().draft_angle.set(0.);
+        self.imp().ratio.set(0.);
+        self.queue_draw();
+    }
+    pub fn nudge_crop(&self, dx: f64, dy: f64) {
+        let old = self.imp().draft.get();
+        let [x, y, w, h] = old;
+        let target = [
+            (x + dx).clamp(0., (1. - w).max(0.)),
+            (y + dy).clamp(0., (1. - h).max(0.)),
+            w,
+            h,
+        ];
+        self.imp().draft.set(crate::crop_geometry::constrain(
+            old,
+            target,
+            self.draft_angle(),
+            self.image_size(),
+        ));
+        self.imp().angle_base.set(self.imp().draft.get());
+        self.queue_draw();
+    }
+    pub fn lock_ratio(&self, ratio: f64) {
+        self.imp().ratio.set(ratio);
+    }
     pub fn crop_ratio(&self, ratio: f64) {
-        if let Some(t) = self.imp().texture.borrow().as_ref() {
-            let w = 0.84f64.min(0.84 * t.height() as f64 * ratio / t.width() as f64);
-            let h = w * t.width() as f64 / ratio / t.height() as f64;
-            self.imp().draft.set([(1. - w) / 2., (1. - h) / 2., w, h]);
-            self.queue_draw();
+        self.imp().ratio.set(ratio);
+        if ratio <= 0. {
+            return;
         }
+        let ratio = if self.imp().rotation.get() % 2 == 1 {
+            1. / ratio
+        } else {
+            ratio
+        };
+        self.imp().ratio.set(ratio);
+        let (iw, ih) = self.image_size();
+        let r = self.imp().draft.get();
+        let w = 1f64.min(ih * ratio / iw);
+        let h = w * iw / ratio / ih;
+        let draft = [
+            (r[0] + r[2] / 2. - w / 2.).clamp(0., (1. - w).max(0.)),
+            (r[1] + r[3] / 2. - h / 2.).clamp(0., (1. - h).max(0.)),
+            w,
+            h,
+        ];
+        let draft = crate::crop_geometry::inscribe(draft, self.draft_angle(), self.image_size());
+        self.imp().draft.set(draft);
+        self.imp().angle_base.set(draft);
+        self.queue_draw();
     }
 }
