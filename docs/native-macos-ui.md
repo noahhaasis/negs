@@ -43,7 +43,7 @@ returns dimensions/timing and writes an RGBA display buffer into the client's
 private temporary directory; `save` writes the retained float output and checks
 the requested render ID. Diagnostics go to stderr. EOF releases the engine.
 Input decoding, calibrated pipelines, and the source resampled to the working
-resolution or 12 MP limit are cached, so an edit that keeps the image size skips
+size ([Image Size](image-size.md)) or 12 MP limit are cached, so an edit that keeps the image size skips
 the full-resolution resample (at 0.5 working resolution on a 10 MP JPEG, about
 420 ms per edit before, 90 ms after). Both UIs use the same
 `spektrafilm-core::preview` cache key and resize policy.

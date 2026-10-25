@@ -95,7 +95,7 @@ runs with:
 - **Export…** — re-runs the pipeline at full resolution and writes a PNG/TIFF/JPEG. The engine box next to the format picks **Reference (CPU, 64-bit)** (default; `spektrafilm-f64` with the enlarger and scanner LUTs on) or **Fast (GPU)** (`spektrafilm` on wgpu, like the preview; located via `$SPEKTRAFILM_F32_CLI`, next to the GUI, on `PATH`, or `target/release`; not bundled in the embedded Windows build). Status bar shows elapsed time and reports a Fast export that fell back to the CPU; **Cancel** kills the child cleanly. Closing the GUI mid-export also kills the child (no orphans).
 - **Serial grain for export (less RAM)** — optional checkbox under Output, off by default. Processes grain channels one at a time during CPU export: less peak memory, identical output, but slower. Previews keep parallel grain. CLI users can set `settings.serial_grain: true` in their params JSON.
 - **Save…** — write the f32 GPU preview directly (instant, less precise).
-- **Limit preview to 12 MP** — optional checkbox under Output, off by default. Caps the image before preview processing to reduce memory and rendering time while preserving aspect ratio. Smaller images are not enlarged. Export still uses the Working resolution setting (full resolution at 1.0); Save writes the reduced preview. Disable the cap to inspect fine grain and detail at full working resolution. The full decoded source remains in memory, and RAW loading and full-resolution export peaks are unaffected.
+- **Limit preview to 12 MP** — optional checkbox under Output, off by default. Caps the image before preview processing to reduce memory and rendering time while preserving aspect ratio. Smaller images are not enlarged. Export still develops the full working frame; Save writes the reduced preview. Disable the cap to inspect fine grain and detail at full working resolution. The full decoded source remains in memory, and RAW loading and full-resolution export peaks are unaffected. The native macOS and Windows apps replace the legacy GUI's working-resolution slider with [Image Size](image-size.md).
 
 ### CLI
 
@@ -119,6 +119,14 @@ SPEKTRAFILM_BACKEND=cpu \
 
 # Opt into pinned experimental 28bf883 gamut settings
 ... --params data/presets/experimental-gamut.json
+
+# Image Size: develop the film so the cropped photograph is 9000 px on its
+# longest side. The source is resized before the film (grain and halation form
+# at that size), the crop still applies after it, and --long-edge/--short-edge
+# still only reduce the finished, bordered file. See docs/image-size.md.
+echo '{"io": {"photo_long_side_px": 9000}}' > size.json
+./target/release/spektrafilm process input.NEF -o out.tiff \
+    --film kodak_portra_400 --params size.json --crop 0.25,0.25,0.5,0.5 --data-dir data
 
 # RAW input WB (also available via io.raw_white_balance in --params)
 ./target/release/spektrafilm process input.ORF -o out.png \

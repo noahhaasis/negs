@@ -26,6 +26,7 @@ Pick a film, pick a paper, drag a slider, and watch the picture change as you mo
 
 - Opens RAW files from most cameras, including Nikon HE★ and 60 MP medium format, plus JPEG, TIFF and PNG
 - Crop, straighten, and add borders with each stock's real edge print
+- Image Size enlarges a photo *before* the film, so grain and halation form at print size instead of being stretched afterwards
 - Undo, keyboard shortcuts, pinch to zoom: it behaves like a Mac app
 - Exports PNG, TIFF or JPEG and keeps your camera's EXIF
 - Export the current film and paper colors as a 33³ sRGB `.cube` LUT from File → Export LUT… on macOS and Windows. No photograph is needed; spatial effects and Post edits are excluded.
