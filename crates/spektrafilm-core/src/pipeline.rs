@@ -122,6 +122,10 @@ pub struct Pipeline {
     preflash_raw: [f64; 3],
     /// Output gamut compressor (built once; identity unless oklch is enabled).
     output_gamut: crate::gamut_compression::OutputGamutCompress,
+    /// The film's density curves as loaded (after the B&W development-time
+    /// collapse), before the film-curve morph. `film.data.density_curves`
+    /// holds the morphed curves while the morph is active.
+    film_stock_density_curves: Vec<Vec<f64>>,
 }
 
 impl Pipeline {
@@ -145,7 +149,8 @@ impl Pipeline {
     /// Return a copy of this calibrated pipeline with updated runtime params.
     /// Callers must only use this when the calibration-affecting inputs match
     /// the pipeline that was originally built. The print exposure factor
-    /// follows `params` (exposure compensation, film gamma), so those don't.
+    /// follows `params` (exposure compensation, film gamma, film curves), so
+    /// those don't.
     pub fn with_params(mut self, params: RuntimeParams) -> Self {
         let mut params = params;
         apply_film_specific_params(&self.film, &mut params);
@@ -154,8 +159,45 @@ impl Pipeline {
             &params.io.output_color_space,
         );
         self.params = params;
+        self.apply_film_curves_morph();
         self.print_exposure_factor = self.compute_print_exposure_factor();
         self
+    }
+
+    /// Bake the film-curve morph into `film.data.density_curves`, as upstream
+    /// experimental bakes `film_render.chemistry` into the film profile before
+    /// any stage reads it. Active: the curves are re-evaluated from the fitted
+    /// model with the morph applied (upstream's
+    /// `apply_print_curves_morph_with_layers`; the per-layer curves it also
+    /// returns feed upstream's layered grain, which this port doesn't have).
+    /// Inactive, or a profile without a usable model: the stored curves.
+    /// Upstream re-evaluates the fitted model even when inactive; keeping the
+    /// stored curves leaves default renders byte-identical to upstream main.
+    fn apply_film_curves_morph(&mut self) {
+        let mut morph = self.params.film_render.density_curves_morph.clone();
+        if self.film.is_bw() {
+            // Upstream morphs a B&W stock's single channel with the red
+            // factor; keep the three broadcast lanes identical.
+            morph.gamma_factor_green = morph.gamma_factor_red;
+            morph.gamma_factor_blue = morph.gamma_factor_red;
+        }
+        let morphed = match (morph.active, self.film.data.density_curves_model.as_ref()) {
+            (true, Some(model)) => match crate::print_morph::morph_density_curves(
+                &self.film.data.log_exposure,
+                model,
+                &morph,
+                self.film.is_positive(),
+            ) {
+                Ok(curves) => Some(curves.iter().map(|row| row.to_vec()).collect()),
+                Err(e) => {
+                    tracing::error!(error = %e, "film-curve morph failed; using stored curves");
+                    None
+                }
+            },
+            _ => None,
+        };
+        self.film.data.density_curves =
+            morphed.unwrap_or_else(|| self.film_stock_density_curves.clone());
     }
 }
 
@@ -178,7 +220,8 @@ impl Pipeline {
             &params.io.output_color_space,
         );
         let front_illuminant = film.info.reference_illuminant.clone();
-        Self {
+        let film_stock_density_curves = film.data.density_curves.clone();
+        let mut pipeline = Self {
             film,
             print,
             params,
@@ -190,7 +233,10 @@ impl Pipeline {
             print_sensitivity: Vec::new(),
             preflash_raw: [0.0; 3],
             output_gamut,
-        }
+            film_stock_density_curves,
+        };
+        pipeline.apply_film_curves_morph();
+        pipeline
     }
 
     /// Create pipeline with full Hanatos2025 spectral upsampling and calibration.
@@ -375,6 +421,7 @@ impl Pipeline {
             &params.io.output_gamut_compress,
             &params.io.output_color_space,
         );
+        let film_stock_density_curves = film.data.density_curves.clone();
         let mut pipeline = Self {
             film,
             print,
@@ -387,7 +434,9 @@ impl Pipeline {
             print_sensitivity,
             preflash_raw,
             output_gamut,
+            film_stock_density_curves,
         };
+        pipeline.apply_film_curves_morph();
         pipeline.print_exposure_factor = pipeline.compute_print_exposure_factor();
 
         tracing::info!(

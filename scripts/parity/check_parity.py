@@ -103,6 +103,25 @@ def expand_bw_stage(expected, actual_shape, is_bw, np):
     return expected
 
 
+def film_morph_curves(source, film, morph, np):
+    """Experimental's film-chemistry morph of `film`'s fitted model, computed
+    in its own process (see film_morph_reference.py)."""
+    model = film.data.density_curves_model
+    request = {
+        "log_exposure": np.asarray(film.data.log_exposure, dtype=float).tolist(),
+        "model": {"model_type": model.model_type,
+                  **{k: np.asarray(getattr(model, k), dtype=float).tolist()
+                     for k in ["centers", "amplitudes", "sigmas"]}},
+        "profile_type": film.info.type,
+        "morph": morph,
+    }
+    result = subprocess.run(
+        [sys.executable, "-I", str(Path(__file__).resolve().parent / "film_morph_reference.py"), str(source)],
+        input=json.dumps(request), capture_output=True, text=True, check=True,
+    )
+    return np.asarray(json.loads(result.stdout)["curves"], dtype=float)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python-source", type=Path, required=True,
@@ -126,6 +145,13 @@ def main():
                         help="also compare saturated and imaginary linear RGB inputs")
     parser.add_argument("--adversarial-input", action="store_true",
                         help="also compare 1024 seeded HDR/imaginary/near-black pixels")
+    parser.add_argument("--dir-couplers", action="store_true",
+                        help="keep DIR couplers on (they are off by default)")
+    parser.add_argument("--film-curves-morph", type=json.loads, metavar="JSON",
+                        help="film_render.density_curves_morph settings, e.g. '{\"gamma_factor\": 1.4}' "
+                             "(active is implied); the reference film curves come from --morph-source")
+    parser.add_argument("--morph-source", type=Path,
+                        help="upstream experimental checkout whose film-chemistry morph is the reference")
     parser.add_argument("--lut", choices=["off", "on", "both"], default="both")
     parser.add_argument("--atol", type=float, default=1e-6,
                         help="absolute tolerance for every float (default matches f64 Rust tests)")
@@ -138,6 +164,11 @@ def main():
     source = args.python_source.resolve()
     if not (source / "src/spektrafilm/__init__.py").is_file():
         parser.error("--python-source must contain src/spektrafilm/__init__.py")
+    film_morph = None
+    if args.film_curves_morph is not None:
+        if args.morph_source is None or not (args.morph_source / "src/spektrafilm/utils/morph_curves.py").is_file():
+            parser.error("--film-curves-morph needs --morph-source with src/spektrafilm/utils/morph_curves.py")
+        film_morph = {**args.film_curves_morph, "active": True}
     out = args.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=False)
     # Keep caches out of the reference checkout, which may be read-only.
@@ -175,6 +206,11 @@ def main():
         "experimental_gamut": args.experimental_gamut,
         "gamut_stress": args.gamut_stress,
         "adversarial_input": args.adversarial_input,
+        "dir_couplers": args.dir_couplers,
+        "film_curves_morph": film_morph,
+        "morph_source": None if film_morph is None else {
+            **git_info(args.morph_source.resolve()), "source": str(args.morph_source.resolve()),
+            "tree_sha256": tree_hash(args.morph_source.resolve() / "src/spektrafilm")},
         "atol": args.atol, "rtol": 0,
         "cases": [],
     }
@@ -209,6 +245,8 @@ def main():
             report["cases"].append(case)
             try:
                 overrides = common_params(lut)
+                if args.dir_couplers:
+                    overrides["film_render"]["dir_couplers"]["active"] = True
                 params = init_params(args.film, args.paper)
                 apply_params(params, overrides)
                 if args.experimental_gamut:
@@ -239,8 +277,15 @@ def main():
                             apply_params(rendering, {"development_time": time})
                         overrides[group]["development_time"] = time
                 overrides["io"]["scan_film"] = args.scan_film
+                if film_morph is not None:
+                    # Rust-only key: the reference instead gets the morphed
+                    # curves baked into its film profile, as experimental does.
+                    overrides["film_render"]["density_curves_morph"] = film_morph
                 (directory / "params.json").write_text(json.dumps(overrides, indent=2) + "\n")
                 params = digest_params(params)
+                if film_morph is not None:
+                    params.film.data.density_curves = film_morph_curves(
+                        args.morph_source.resolve(), params.film, film_morph, np)
                 # Record effective defaults as well as shared overrides: changes
                 # in defaults/profiles are intentionally visible in this audit.
                 effective = {key: dataclasses.asdict(getattr(params, key)) for key in overrides}
