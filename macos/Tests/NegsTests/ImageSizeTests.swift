@@ -4,16 +4,15 @@ import XCTest
 /// The app's projection must agree with `spektrafilm-io::image_size`, whose
 /// tests use the same examples.
 final class ImageSizeTests: XCTestCase {
-    private func params(target: Int? = nil, factor: Double = 1) -> JSONValue {
-        .object(["io": .object(["photo_long_side_px": target.map { .number(Double($0)) } ?? .null, "upscale_factor": .number(factor)])])
+    private func params(target: Int? = nil) -> JSONValue {
+        .object(["io": .object(["photo_long_side_px": target.map { .number(Double($0)) } ?? .null])])
     }
 
     func testModesFromParameters() {
         XCTAssertEqual(ImageSize.mode(of: params()), .original)
         XCTAssertEqual(ImageSize.mode(of: params(target: 6000)), .longestSide)
-        XCTAssertEqual(ImageSize.mode(of: params(factor: 0.5)), .legacy(0.5))
         // An old session without the field is Original.
-        XCTAssertEqual(ImageSize.mode(of: .object(["io": .object(["upscale_factor": .number(1)])])), .original)
+        XCTAssertEqual(ImageSize.mode(of: .object(["io": .object([:])])), .original)
     }
 
     func testProjectionMatchesTheEngine() {
@@ -26,9 +25,7 @@ final class ImageSizeTests: XCTestCase {
         let panned = CropSettings(rect: CGRect(x: 0.137, y: 0.41, width: 0.5, height: 0.5))
         XCTAssertEqual(ImageSize.working(source: source, params: params(target: 6000), crop: panned), working)
         XCTAssertLessThanOrEqual(abs(panned.size(of: working).width - 6000), 1)
-        // Legacy factors keep the engine's f32 rounding; Original is the source.
-        XCTAssertEqual(ImageSize.working(source: CGSize(width: 6001, height: 4001), params: params(factor: 0.5), crop: CropSettings()),
-                       CGSize(width: 3001, height: 2001))
+        // Original is the source, whatever the crop.
         XCTAssertEqual(ImageSize.working(source: source, params: params(), crop: centre), source)
         // Half-pixel edges, as in the engine's test.
         let half = CropSettings(rect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.25))

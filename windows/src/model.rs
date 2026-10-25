@@ -600,7 +600,6 @@ impl Model {
         match mode {
             state::SizeMode::Original => {
                 let mut next = self.state.clone();
-                json::set(&mut next.params, state::SIZE_FACTOR, json::num(1.0));
                 json::set(&mut next.params, state::SIZE_TARGET, Value::Null);
                 self.apply(next, "Change Image Size");
             }
@@ -625,7 +624,6 @@ impl Model {
     /// changes nothing.
     pub fn set_longest_side(&mut self, pixels: u32) -> std::result::Result<(), String> {
         let mut next = self.state.clone();
-        json::set(&mut next.params, state::SIZE_FACTOR, json::num(1.0));
         json::set(&mut next.params, state::SIZE_TARGET, json::num(pixels as f64));
         let checked = if !PHOTO_LONG_SIDE_RANGE.contains(&pixels) {
             Err(format!("Enter a whole number from {} to {} px.", PHOTO_LONG_SIDE_RANGE.start(), PHOTO_LONG_SIDE_RANGE.end()))
@@ -671,7 +669,7 @@ impl Model {
     }
 
     /// Keeps the border, crop, and Image Size's Longest side, like the film,
-    /// paper, and rotation. An older edit's working-resolution factor resets.
+    /// paper, and rotation.
     pub fn reset(&mut self) {
         if self.cropping() {
             return;
@@ -897,6 +895,11 @@ impl Model {
         if let Some(session) = session {
             let mut restored = session.state;
             restored.params = json::restoring(&self.defaults, &restored.params);
+            // Sessions from before Image Size may carry the old working-resolution factor.
+            let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
+            if !factor.is_null() {
+                json::set(&mut restored.params, state::SIZE_FACTOR, factor);
+            }
             self.state = restored;
         } else {
             json::set(&mut self.state.params, "io.rotate_cw", json::num(0.0));
