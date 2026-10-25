@@ -16,6 +16,22 @@ pub fn knob(ui: &Rc<Editor>, group: &str, knob: &Knob) -> gtk::ListBoxRow {
         .get(&key)
         .copied()
         .unwrap_or(knob.4);
+    let (row, adjustment) = number(ui, knob, value, false, move |state, value| {
+        state.values.insert(key.clone(), value);
+    });
+    ui.adjustments
+        .borrow_mut()
+        .push((format!("{group}.{}", knob.0), adjustment));
+    row
+}
+
+pub fn number(
+    ui: &Rc<Editor>,
+    knob: &Knob,
+    value: f64,
+    presentation: bool,
+    change: impl Fn(&mut crate::model::State, f64) + 'static,
+) -> (gtk::ListBoxRow, gtk::Adjustment) {
     let adjustment = gtk::Adjustment::new(value, knob.1, knob.2, knob.3, knob.3 * 10., 0.);
     let row = gtk::ListBoxRow::new();
     row.set_activatable(false);
@@ -105,20 +121,20 @@ pub fn knob(ui: &Rc<Editor>, group: &str, knob: &Knob) -> gtk::ListBoxRow {
             let value = (a.value() / step).round() * step;
             let mut h = ui.history.borrow_mut();
             h.begin(&title);
-            h.state.values.insert(key.clone(), value);
+            change(&mut h.state, value);
             if !dragging.get() {
                 h.commit();
             }
             drop(h);
+            if presentation {
+                ui.canvas.apply(&ui.history.borrow().state);
+            }
             ui.sync_history();
             ui.perf
                 .slider_sample((glib::monotonic_time() - started) as f64 / 1000.);
         }
     ));
-    ui.adjustments
-        .borrow_mut()
-        .push((format!("{group}.{}", knob.0), adjustment));
-    row
+    (row, adjustment)
 }
 
 fn list() -> gtk::ListBox {
@@ -160,6 +176,9 @@ fn combo(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, options: &[&str]) {
                 .insert(key.clone(), row.selected().to_string());
             h.commit();
             drop(h);
+            if key == "Film" {
+                ui.canvas.apply(&ui.history.borrow().state);
+            }
             ui.sync_history();
         }
     ));
@@ -365,36 +384,7 @@ pub fn build(ui: &Rc<Editor>) {
     }
     post.append(&tone);
     section(&post, "FRAME");
-    let frame = list();
-    let border = adw::ComboRow::builder()
-        .title("Border")
-        .model(&gtk::StringList::new(&[
-            "None",
-            "White mat",
-            "Keyline",
-            "Black mat",
-        ]))
-        .build();
-    border.set_selected(ui.history.borrow().state.border as u32);
-    border.connect_selected_notify(glib::clone!(
-        #[weak]
-        ui,
-        move |row| {
-            if ui.syncing.get() {
-                return;
-            }
-            let mut h = ui.history.borrow_mut();
-            h.begin("Change Border");
-            h.state.border = row.selected() as u8;
-            h.commit();
-            drop(h);
-            ui.sync_state();
-        }
-    ));
-    ui.border.replace(Some(border.clone()));
-    frame.append(&border);
-    toggle(ui, &frame, "Include border in export", true);
-    post.append(&frame);
+    post.append(&crate::border_ui::build(ui));
     let postscroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&post)
@@ -413,7 +403,7 @@ pub fn build(ui: &Rc<Editor>) {
     ui.inspector.append(&footer);
     ui.tabs.replace(Some(stack));
     ui.perf
-        .detail("initial_slider_count", ui.adjustments.borrow().len());
+        .detail("initial_slider_count", ui.adjustments.borrow().len() + 3);
     ui.perf.mark("inspector_ready_ms");
     ui.perf.write();
 }

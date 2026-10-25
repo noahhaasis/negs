@@ -1,4 +1,6 @@
 mod actions;
+mod border;
+mod border_ui;
 mod canvas;
 mod fixtures;
 mod inspector;
@@ -25,7 +27,7 @@ pub(crate) struct Editor {
     adjustments: RefCell<Vec<(String, gtk::Adjustment)>>,
     choices: RefCell<Vec<(String, adw::ComboRow)>>,
     toggles: RefCell<Vec<(String, bool, adw::SwitchRow)>>,
-    border: RefCell<Option<adw::ComboRow>>,
+    border: RefCell<Option<border_ui::Controls>>,
     hist: RefCell<Option<[Vec<u32>; 3]>>,
     histogram: RefCell<Option<gtk::DrawingArea>>,
     title: adw::WindowTitle,
@@ -354,8 +356,8 @@ impl Editor {
                     .unwrap_or(*default),
             );
         }
-        if let Some(row) = self.border.borrow().as_ref() {
-            row.set_selected(h.state.border as u32);
+        if let Some(controls) = self.border.borrow().as_ref() {
+            controls.sync(&h.state.border);
         }
         self.canvas.apply(&h.state);
         drop(h);
@@ -380,6 +382,20 @@ impl Editor {
             let _ = std::fs::rename(path.with_extension("tmp"), path);
         }
     }
+}
+
+fn data_root() -> PathBuf {
+    if let Some(path) = std::env::var_os("NEGS_DATA_DIR") {
+        return PathBuf::from(path);
+    }
+    if let Some(root) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.join("data")))
+        && root.is_dir()
+    {
+        return root;
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data")
 }
 
 fn main() -> glib::ExitCode {

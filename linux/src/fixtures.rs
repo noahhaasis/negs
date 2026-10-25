@@ -117,11 +117,11 @@ pub const GROUPS: &[Group] = &[
     },
 ];
 pub const POST: &[Knob] = &[
-    Knob("Brightness", -2., 2., 0.01, 0., ""),
-    Knob("Contrast", 0., 2., 0.01, 1., ""),
-    Knob("Saturation", 0., 2., 0.01, 1., ""),
-    Knob("Temperature", -1., 1., 0.01, 0., ""),
-    Knob("Tint", -1., 1., 0.01, 0., ""),
+    Knob("Brightness", -100., 100., 1., 0., ""),
+    Knob("Contrast", -100., 100., 1., 0., ""),
+    Knob("Whites", -100., 100., 1., 0., ""),
+    Knob("Blacks", -100., 100., 1., 0., ""),
+    Knob("Saturation", -100., 100., 1., 0., ""),
 ];
 
 pub fn state() -> crate::model::State {

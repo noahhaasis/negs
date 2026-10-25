@@ -1,5 +1,13 @@
+use crate::border::{Layout, Settings, Style};
 use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
+
+#[derive(Clone)]
+struct Asset {
+    texture: gdk::Texture,
+    source: (f64, f64),
+    window: [f64; 4],
+}
 
 mod imp {
     use super::*;
@@ -12,7 +20,9 @@ mod imp {
         pub fitting: Cell<bool>,
         pub pan: Cell<(f64, f64)>,
         pub rotation: Cell<u8>,
-        pub border: Cell<u8>,
+        pub border: RefCell<Settings>,
+        pub(super) asset: RefCell<Option<Asset>>,
+        pub asset_key: RefCell<Option<String>>,
         pub crop: Cell<Option<[f64; 4]>>,
         pub cropping: Cell<bool>,
         pub draft: Cell<[f64; 4]>,
@@ -61,12 +71,10 @@ mod imp {
             } else {
                 (cw, ch)
             };
-            let border = if self.cropping.get() {
-                0
-            } else {
-                self.border.get()
-            };
-            let mat = if border > 0 { ow.max(oh) * 0.045 } else { 0. };
+            let border = self.border.borrow().clone();
+            let shown = !self.cropping.get() && border.visible(ow, oh);
+            let asset = self.asset.borrow().clone();
+            let layout = obj.border_layout(ow, oh);
             let zoom = obj.display_scale();
             let (px, py) = self.pan.get();
             snapshot.save();
@@ -75,31 +83,44 @@ mod imp {
                 (obj.height() as f64 / 2. + py) as f32,
             ));
             snapshot.scale(zoom as f32, zoom as f32);
-            if border > 0 {
-                let color = if border == 3 {
-                    gdk::RGBA::BLACK
-                } else {
+            if shown {
+                let color = if matches!(border.style, Style::Solid | Style::Keyline) {
+                    border.color.rgba()
+                } else if border.instagram {
                     gdk::RGBA::WHITE
+                } else {
+                    gdk::RGBA::BLACK
                 };
                 rect(
                     snapshot,
                     &color,
-                    -ow / 2. - mat,
-                    -oh / 2. - mat,
-                    ow + mat * 2.,
-                    oh + mat * 2.,
+                    -layout.width / 2.,
+                    -layout.height / 2.,
+                    layout.width,
+                    layout.height,
                 );
-                if border == 2 {
+                if matches!(border.style, Style::Film | Style::Film35) {
                     rect(
                         snapshot,
                         &gdk::RGBA::BLACK,
-                        -ow / 2. - 1.5 / zoom,
-                        -oh / 2. - 1.5 / zoom,
-                        ow + 3. / zoom,
-                        oh + 3. / zoom,
+                        -layout.frame_width / 2.,
+                        -layout.frame_height / 2.,
+                        layout.frame_width,
+                        layout.frame_height,
+                    );
+                }
+                if border.style == Style::Keyline {
+                    rect(
+                        snapshot,
+                        &border.line_color.rgba(),
+                        -ow / 2. - layout.line,
+                        -oh / 2. - layout.line,
+                        ow + 2. * layout.line,
+                        oh + 2. * layout.line,
                     );
                 }
             }
+            snapshot.save();
             snapshot.rotate(self.rotation.get() as f32 * 90.);
             snapshot.translate(&graphene::Point::new((-cw / 2.) as f32, (-ch / 2.) as f32));
             snapshot.push_clip(&graphene::Rect::new(0., 0., cw as f32, ch as f32));
@@ -158,6 +179,46 @@ mod imp {
                 }
             }
             snapshot.restore();
+            if shown && let Some(asset) = asset {
+                match border.style {
+                    Style::Film => {
+                        let inset = (ow.min(oh) * 0.003).round().max(1.);
+                        nine_patch(
+                            snapshot,
+                            &asset.texture,
+                            ow + 2. * inset,
+                            oh + 2. * inset,
+                            (ow.min(oh) * 0.025).round().max(2.),
+                        );
+                    }
+                    Style::Film35 => {
+                        let turned = (asset.window[2] * asset.source.0
+                            > asset.window[3] * asset.source.1)
+                            != (ow > oh);
+                        snapshot.save();
+                        if turned {
+                            snapshot.rotate(-90.);
+                        }
+                        let (w, h) = if turned {
+                            (layout.frame_height, layout.frame_width)
+                        } else {
+                            (layout.frame_width, layout.frame_height)
+                        };
+                        snapshot.append_texture(
+                            &asset.texture,
+                            &graphene::Rect::new(
+                                (-w / 2.) as f32,
+                                (-h / 2.) as f32,
+                                w as f32,
+                                h as f32,
+                            ),
+                        );
+                        snapshot.restore();
+                    }
+                    _ => {}
+                }
+            }
+            snapshot.restore();
         }
     }
 }
@@ -171,12 +232,75 @@ fn rect(s: &gtk::Snapshot, c: &gdk::RGBA, x: f64, y: f64, w: f64, h: f64) {
     }
 }
 
+fn nine_patch(s: &gtk::Snapshot, texture: &gdk::Texture, w: f64, h: f64, pad: f64) {
+    s.save();
+    let (w, h) = if h > w {
+        s.rotate(-90.);
+        (h, w)
+    } else {
+        (w, h)
+    };
+    let (tw, th) = (texture.width() as f64, texture.height() as f64);
+    let scale = w.min(h) / tw.min(th);
+    let sx = (pad / scale).min(tw / 2.);
+    let sy = (pad / scale).min(th / 2.);
+    let xs = [0., sx, tw - sx, tw];
+    let ys = [0., sy, th - sy, th];
+    let xd = [-w / 2., -w / 2. + pad, w / 2. - pad, w / 2.];
+    let yd = [-h / 2., -h / 2. + pad, h / 2. - pad, h / 2.];
+    for y in 0..3 {
+        for x in 0..3 {
+            let (dw, dh) = (xd[x + 1] - xd[x], yd[y + 1] - yd[y]);
+            let (kx, ky) = (dw / (xs[x + 1] - xs[x]), dh / (ys[y + 1] - ys[y]));
+            if dw <= 0. || dh <= 0. {
+                continue;
+            }
+            s.push_clip(&graphene::Rect::new(
+                xd[x] as f32,
+                yd[y] as f32,
+                dw as f32,
+                dh as f32,
+            ));
+            s.append_texture(
+                texture,
+                &graphene::Rect::new(
+                    (xd[x] - xs[x] * kx) as f32,
+                    (yd[y] - ys[y] * ky) as f32,
+                    (tw * kx) as f32,
+                    (th * ky) as f32,
+                ),
+            );
+            s.pop();
+        }
+    }
+    s.restore();
+}
+
 glib::wrapper! {
     pub struct Canvas(ObjectSubclass<imp::Canvas>) @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Canvas {
+    fn border_layout(&self, w: f64, h: f64) -> Layout {
+        let s = self.imp().border.borrow();
+        if self.imp().cropping.get() || !s.visible(w, h) {
+            return Layout {
+                width: w,
+                height: h,
+                frame_width: w,
+                frame_height: h,
+                inset: 0.,
+                line: 0.,
+            };
+        }
+        let asset = self.imp().asset.borrow();
+        s.layout(
+            w,
+            h,
+            asset.as_ref().map(|a| (a.source.0, a.source.1, a.window)),
+        )
+    }
     fn image_size(&self) -> (f64, f64) {
         let (w, h) = self.imp().source_size.get();
         (w.max(1) as f64, h.max(1) as f64)
@@ -322,13 +446,9 @@ impl Canvas {
         } else {
             (w, h)
         };
-        let mat = if imp.border.get() > 0 && !imp.cropping.get() {
-            w.max(h) * 0.09
-        } else {
-            0.
-        };
-        (((self.width() - 72).max(1) as f64 / (w + mat))
-            .min((self.height() - 72).max(1) as f64 / (h + mat)))
+        let layout = self.border_layout(w, h);
+        (((self.width() - 72).max(1) as f64 / layout.width)
+            .min((self.height() - 72).max(1) as f64 / layout.height))
         .max(0.005)
     }
 
@@ -386,9 +506,93 @@ impl Canvas {
     }
     pub fn apply(&self, state: &crate::model::State) {
         self.imp().rotation.set(state.rotation);
-        self.imp().border.set(state.border);
+        self.imp().border.replace(state.border.clone());
         self.imp().crop.set(state.crop);
+        self.load_border_asset(state);
         self.queue_draw();
+    }
+    fn load_border_asset(&self, state: &crate::model::State) {
+        let (w, h) = self.image_size();
+        let crop = state.crop.unwrap_or([0., 0., 1., 1.]);
+        let format = crate::border::format(w * crop[2], h * crop[3]);
+        let film = state
+            .choices
+            .get("Film")
+            .and_then(|s| s.parse::<usize>().ok())
+            .and_then(|i| crate::border::FILM_IDS.get(i))
+            .copied()
+            .unwrap_or(crate::border::FILM_IDS[0]);
+        let key = if !state.border.enabled {
+            None
+        } else {
+            match state.border.style {
+                Style::Film => Some("film".to_string()),
+                Style::Film35 => format.map(|f| format!("{f}/{film}")),
+                _ => None,
+            }
+        };
+        if *self.imp().asset_key.borrow() == key {
+            return;
+        }
+        self.imp().asset_key.replace(key.clone());
+        self.imp().asset.take();
+        let Some(key) = key else {
+            return;
+        };
+        let canvas = self.clone();
+        let data = crate::data_root();
+        let worker_key = key.clone();
+        gtk::glib::MainContext::default().spawn_local(async move {
+            let decoded = gtk::gio::spawn_blocking(move || -> Result<_, String> {
+                let (mut path, mut window) = (data.join("borders/film.png"), [0., 0., 1., 1.]);
+                if worker_key != "film" {
+                    let (format, film) = worker_key.split_once('/').unwrap();
+                    let root = data.join("borders/35mm");
+                    let frames: serde_json::Value = serde_json::from_slice(
+                        &std::fs::read(root.join("frames.json")).map_err(|e| e.to_string())?,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    for (i, v) in window.iter_mut().enumerate() {
+                        *v = frames[format]["window"][i]
+                            .as_f64()
+                            .ok_or("Invalid film gate")?;
+                    }
+                    path = root.join(format).join(format!("{film}.png"));
+                    if !path.is_file() {
+                        path = root.join(format).join("generic.png");
+                    }
+                }
+                Ok((crate::photo::decode(&path, 4096)?, window))
+            })
+            .await;
+            if canvas.imp().asset_key.borrow().as_ref() != Some(&key) {
+                return;
+            }
+            match decoded {
+                Ok(Ok((photo, window))) => {
+                    let format = if photo.alpha {
+                        gdk::MemoryFormat::R8g8b8a8
+                    } else {
+                        gdk::MemoryFormat::R8g8b8
+                    };
+                    let texture = gdk::MemoryTexture::new(
+                        photo.width,
+                        photo.height,
+                        format,
+                        &glib::Bytes::from_owned(photo.bytes),
+                        photo.stride,
+                    );
+                    canvas.imp().asset.replace(Some(Asset {
+                        texture: texture.upcast(),
+                        source: (photo.source.0 as f64, photo.source.1 as f64),
+                        window,
+                    }));
+                    canvas.queue_draw();
+                }
+                Ok(Err(e)) => eprintln!("Border asset could not load: {e}"),
+                Err(_) => eprintln!("Border loader stopped before completing"),
+            }
+        });
     }
     pub fn begin_crop(&self) {
         self.imp()
