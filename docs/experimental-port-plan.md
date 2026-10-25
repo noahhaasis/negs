@@ -1,6 +1,6 @@
 # Experimental port plan (ticket 16, phase 0 audit)
 
-Written 2026-10-25. **Status: awaiting Noah's approval; nothing is ported yet.**
+Written 2026-10-25. **Status: approved by Noah on 2026-10-25 (decisions below); porting in sub-branches.**
 
 Goal: make the Negs engine behave like Python spektrafilm `experimental` at
 `28bf883e1672e884307edc75852549376e13644e` (8 July 2026) instead of main `3bb2c2d`.
@@ -402,3 +402,31 @@ Notes on the order:
    16.3 + 16.4 (data) and 16.7 + 16.8 (defaults)?
 7. **Old look:** keep a `main-3bb2c2d` preset (old gamut defaults, etc.) for users who
    liked it, or drop main compatibility after 16.10?
+
+## Decisions (Noah, 2026-10-25)
+
+1. Film-convert/workflows (item 11) is a separate follow-up, not part of this port.
+2. The illuminant fix (16.2) lands first, on main, after before/after review.
+3. Upsampling options follow experimental: `hanatos2025` (default), `arctic2026beta04` and
+   `mallett2019`. `arctic2026alpha02` is removed, as it was upstream.
+4. Diffusion filter: keep f64 and document the parity exception.
+5. Grain: statistical gates only.
+6. The agent chooses the review granularity.
+7. Match experimental. No main-compatibility preset and no old defaults.
+
+## Work split
+
+Each branch is created from `experimental-port`, except `illuminants`, which is created
+from `main`. Branches are integrated into `experimental-port`, and nothing goes into main
+without approval.
+
+| Wave | Branch | Sub-tickets | Main files |
+|---|---|---|---|
+| 1 | `illuminants` (from main) | 16.2 | `spektrafilm-math/src/spectral.rs`, illuminant resolvers |
+| 1 | `exp-harness` | 16.1 | `scripts/parity/` |
+| 1 | `exp-data` | 16.3, 16.4 (items 9, 1, 5) | `data/profiles`, `data/filters`, `profile.rs`, `print_morph.rs`, `pipeline.rs`, `spectral_service.rs`, `mallett.rs` |
+| 1 | `exp-dir` | 16.6 (item 2) | `spektrafilm-model/src/couplers.rs`, `dir_matmul.wgsl`, `data/presets/couplers.toml` |
+| 1 | `exp-defaults` | 16.5, 16.7, 16.8, camera colour filters, LUT-mode trims (items 4, 6, 8, 10) | `params.rs`, `stages/filming.rs`, `lut_export.rs` |
+| 1 | `exp-grain` | 16.9 (item 3) | `spektrafilm-model/src/grain.rs`, `grain.wgsl`, grain UI |
+| 2 | `exp-bases` | item 7 | printing/scanning spectral density |
+| 2 | integration | full 28bf883 parity, GPU gate, docs, golden manifests (16.10) | — |
