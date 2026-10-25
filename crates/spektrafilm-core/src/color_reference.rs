@@ -524,6 +524,7 @@ mod parity_tests {
         params.scanner.black_correction = true;
         params.camera.auto_exposure = false;
         params.film_render.grain.active = false;
+        crate::params::main_3bb2c2d_gamut(&mut params.io);
 
         let pipeline = Pipeline::new_with_spectral(film, print, params, &dir).unwrap();
         let cref = ColorReference::compute(

@@ -117,6 +117,7 @@ mod integration_tests {
         params.film_render.dir_couplers.active = false;
         params.print_render.glare.active = false;
         params.scanner.unsharp_mask = [0.0, 0.0];
+        crate::params::main_3bb2c2d_gamut(&mut params.io);
 
         let backend = spektrafilm_gpu::cpu_backend::CpuBackend;
         let pipeline =

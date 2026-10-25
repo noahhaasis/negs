@@ -135,11 +135,14 @@ pub struct InputGamutCompress {
 impl InputGamutCompress {
     /// Resolve from the param algorithm string. `"off"` → inactive (identity);
     /// `"xy"` → active radial compression. Any other value errors. The knee is
-    /// validated as in upstream `InputGamutCompressSpec.__post_init__`.
+    /// validated as in upstream `InputGamutCompressSpec.__post_init__`. The
+    /// boundary is the raw locus centred on the given white, upstream main's.
     pub fn build(algorithm: &str, knee: [f32; 3]) -> Result<Self, String> {
         Self::from_params(&InputGamutCompressParams {
             algorithm: algorithm.into(),
             knee,
+            boundary: "locus".into(),
+            center: "reference".into(),
             ..Default::default()
         })
     }
@@ -315,7 +318,9 @@ mod tests {
                     (ray_polygon_distance(case.white, direction, &hull) - radius).abs() < 1e-11
                 );
             }
-            let compressor = InputGamutCompress::from_params(&case.spec).unwrap();
+            // Python's remap centres on the white it is given.
+            let spec = InputGamutCompressParams { center: "reference".into(), ..case.spec.clone() };
+            let compressor = InputGamutCompress::from_params(&spec).unwrap();
             let actual = compressor.remap(&synthetic_lut(16), case.white);
             assert_eq!(actual.data.len(), case.remapped_lut.len());
             for (i, (a, e)) in actual.data.iter().zip(&case.remapped_lut).enumerate() {
@@ -333,10 +338,12 @@ mod tests {
     }
 
     #[test]
-    fn boundary_configuration_preserves_legacy_defaults_and_rejects_invalid_values() {
-        let legacy: InputGamutCompressParams =
-            serde_json::from_str(r#"{"algorithm":"xy","knee":[0,1,6]}"#).unwrap();
-        assert_eq!(legacy, InputGamutCompressParams::default());
+    fn boundary_configuration_parses_main_settings_and_rejects_invalid_values() {
+        let legacy: InputGamutCompressParams = serde_json::from_str(
+            r#"{"algorithm":"xy","knee":[0,1,6],"boundary":"locus","center":"reference"}"#,
+        )
+        .unwrap();
+        assert!(InputGamutCompress::from_params(&legacy).is_ok());
         for detail in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             let params = InputGamutCompressParams {
                 boundary: "inscribed_hull".into(),

@@ -109,8 +109,6 @@ Black and white stocks:
 - Film: Kodak Double-X 5222 or Kodak Tri-X 7266 reversal.
 - For Double-X prints, select Kodak 2302 in the paper/print selector.
 - Tri-X 7266 uses direct film scan. Development times are available for Double-X/2302.
-- The experimental gamut preset is available to the CLI as
-  Contents/Resources/data/presets/experimental-gamut.json inside the app.
 
 Source:
 - The matching source archive is available beside the download.

@@ -94,3 +94,56 @@ fn experimental_output_gamut_matches_python() {
         }
     }
 }
+
+#[derive(Deserialize)]
+struct DefaultsFixture {
+    input: PythonInputSpec,
+    input_center: String,
+    output: PythonOutputSpec,
+    params_io_input: PythonInputSpec,
+    params_io_output: PythonOutputSpec,
+}
+
+#[derive(Deserialize, PartialEq, Debug)]
+struct PythonInputSpec {
+    active: bool,
+    algorithm: String,
+    boundary: String,
+    hull_detail: f64,
+    knee: [f64; 3],
+}
+
+#[derive(Deserialize, PartialEq, Debug)]
+struct PythonOutputSpec {
+    algorithm: String,
+    knee: [f64; 3],
+    lightness_compression: Option<[f64; 3]>,
+}
+
+/// The gamut defaults, including those of a params file that leaves the
+/// gamut out, are experimental 28bf883's (scripts/parity/freeze_gamut_defaults.py).
+#[test]
+fn gamut_defaults_match_python() {
+    let fixture: DefaultsFixture =
+        serde_json::from_str(include_str!("fixtures/gamut_defaults_python_28bf883.json")).unwrap();
+    assert_eq!(fixture.input, fixture.params_io_input);
+    assert_eq!(fixture.output, fixture.params_io_output);
+    let parsed: RuntimeParams = serde_json::from_str("{}").unwrap();
+    for params in [RuntimeParams::default(), parsed] {
+        let input = &params.io.input_gamut_compress;
+        assert!(fixture.input.active);
+        let knee = |k: [f32; 3]| k.map(f64::from);
+        // The f32 knees round-trip the Python literals.
+        let python_knee = |k: [f64; 3]| k.map(|v| v as f32).map(f64::from);
+        assert_eq!(
+            (input.algorithm.as_str(), input.boundary.as_str(), input.hull_detail, input.center.as_str()),
+            (fixture.input.algorithm.as_str(), fixture.input.boundary.as_str(), fixture.input.hull_detail,
+             fixture.input_center.as_str())
+        );
+        assert_eq!(knee(input.knee), python_knee(fixture.input.knee));
+        let output = &params.io.output_gamut_compress;
+        assert_eq!(output.algorithm, fixture.output.algorithm);
+        assert_eq!(knee(output.knee), python_knee(fixture.output.knee));
+        assert_eq!(output.lightness_compression.map(knee), fixture.output.lightness_compression.map(python_knee));
+    }
+}

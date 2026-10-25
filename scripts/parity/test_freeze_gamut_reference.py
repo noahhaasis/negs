@@ -9,7 +9,7 @@ from freeze_gamut_reference import require, validate_report
 class ProvenanceTests(unittest.TestCase):
     def report(self):
         return {
-            "passed": True, "experimental_gamut": True, "gamut_stress": True,
+            "passed": True, "gamut_off": False, "gamut_stress": True,
             "atol": 1e-6, "rtol": 0, "python": {"tree_sha256": "pinned"},
             "cases": [{"id": f"{name}-lut-{mode}", "passed": True,
                        "stages": {s: {"passed": True, "max_abs": 1e-12} for s in
@@ -25,6 +25,7 @@ class ProvenanceTests(unittest.TestCase):
                          lambda r: r["cases"][0]["stages"].clear(),
                          lambda r: r["cases"][0]["stages"].pop("log_e_film"),
                          lambda r: r.update(atol=0.01),
+                         lambda r: r.update(gamut_off=True),
                          lambda r: r["python"].update(tree_sha256="modified")]:
             changed = copy.deepcopy(report)
             mutation(changed)
