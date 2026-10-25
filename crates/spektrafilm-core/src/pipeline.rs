@@ -11,7 +11,30 @@ use std::time::Instant;
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_io::image_size::SizeError;
 use spektrafilm_math::image::ImageBuf;
+use spektrafilm_math::precision::{Scalar, from_f64};
 use spektrafilm_math::spectral::TcLut;
+
+/// The range a display or an integer file holds: [0, 1] in linear light, or
+/// up to the encoder's own white, `srgb_encode(1)`, once sRGB-encoded (it
+/// rounds to 0.99999994 in f32). Clipping an encoded value to it gives
+/// exactly what clipping before encoding would, so integer exports are the
+/// same as when the scan clipped.
+pub fn display_range(encoded: bool) -> (Scalar, Scalar) {
+    let one = from_f64(1.0);
+    let white = if encoded { spektrafilm_math::precision::srgb_encode(one) } else { one };
+    (from_f64(0.0), white)
+}
+
+/// Clips the scan to [`display_range`]. The pipeline, like Python, returns
+/// the scan unclipped: highlights may exceed 1 and the scanner's unsharp
+/// mask undershoots below 0. Negs' finishing (Post, crop, border, resize,
+/// the preview) works on the photograph as an integer file holds it, so it
+/// clips first; the writers clip again when they quantise.
+pub fn clip_to_display(image: &mut ImageBuf, encoded: bool) {
+    use rayon::prelude::*;
+    let (lo, hi) = display_range(encoded);
+    image.data.par_iter_mut().for_each(|v| *v = v.clamp(lo, hi));
+}
 
 /// Diagnostic helper: when env var `$var` is set, dump the image's f64
 /// pixel data to that path as a raw little-endian f64 blob. Used to
@@ -690,10 +713,12 @@ impl Pipeline {
         Ok((self.apply_post(image), used_backend))
     }
 
-    /// The post adjustments, last, on the scanned photograph.
+    /// The post adjustments, last, on the scanned photograph, clipped to
+    /// what a display holds first.
     fn apply_post(&self, mut image: ImageBuf) -> ImageBuf {
         let post = &self.params.post;
         if !post.is_identity() {
+            clip_to_display(&mut image, self.params.io.output_cctf_encoding);
             crate::post::PostProcess::new(
                 post,
                 self.params.io.output_cctf_encoding,
@@ -882,8 +907,8 @@ impl Pipeline {
     }
 
     /// Try the GPU-resident fast path. Builds all the per-stage data and
-    /// hands it to the backend's `try_run_film_chain`. The output is linear RGB
-    /// (clipped to [0,1]) — sRGB encoding is applied by `apply_post_scan`.
+    /// hands it to the backend's `try_run_film_chain`. The output is linear RGB,
+    /// unclipped; backends that don't encode it leave that to `apply_post_scan`.
     fn try_gpu_resident(
         &self,
         image: &ImageBuf,
@@ -1299,22 +1324,42 @@ impl Pipeline {
         Ok(backend.try_run_film_chain(&params))
     }
 
-    /// After the GPU fast path returns linear RGB, apply sRGB encoding + clip
-    /// (the only post-scan op when no scanner blur/unsharp/glare is active).
+    /// After the GPU fast path returns linear RGB, apply the sRGB encoding
+    /// the CPU scan ends with, unclipped like it.
     fn apply_post_scan(&self, mut rgb: ImageBuf) -> ImageBuf {
         use rayon::prelude::*;
-        use spektrafilm_math::precision::from_f64;
-        let zero = from_f64(0.0);
-        let one = from_f64(1.0);
         if self.params.io.output_cctf_encoding {
             rgb.data.par_iter_mut().for_each(|v| {
-                *v = spektrafilm_math::precision::srgb_encode((*v).clamp(zero, one));
+                *v = spektrafilm_math::precision::srgb_encode(*v);
             });
-        } else {
-            rgb.data
-                .par_iter_mut()
-                .for_each(|v| *v = (*v).clamp(zero, one));
         }
         rgb
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spektrafilm_math::precision::srgb_encode;
+
+    /// Clipping the encoded scan gives what clipping before encoding gave,
+    /// bit for bit, so integer exports don't change with the unclipped scan.
+    #[test]
+    fn display_clip_of_encoded_matches_clipping_before_encoding() {
+        let values = [-0.3, -1e-7, 0.0, 1e-4, 0.0031308, 0.5, 0.99999, 1.0, 1.0000001, 1.5, 40.0];
+        let data = values.iter().flat_map(|&v| [from_f64(v); 3]).collect();
+        let image = ImageBuf::from_data(values.len() as u32, 1, data);
+        let before: Vec<Scalar> = image
+            .data
+            .iter()
+            .map(|&v| srgb_encode(v.clamp(from_f64(0.0), from_f64(1.0))))
+            .collect();
+        let mut encoded = image.clone();
+        encoded.data.iter_mut().for_each(|v| *v = srgb_encode(*v));
+        clip_to_display(&mut encoded, true);
+        assert_eq!(encoded.data, before);
+        let mut linear = image.clone();
+        clip_to_display(&mut linear, false);
+        assert!(linear.data.iter().zip(&image.data).all(|(c, v)| *c == v.clamp(from_f64(0.0), from_f64(1.0))));
     }
 }

@@ -117,7 +117,11 @@ pub fn cube(
         if pixel.iter().any(|v| !v.is_finite()) {
             return Err("The selected settings produced non-finite LUT values".into());
         }
-        writeln!(text, "{:.8} {:.8} {:.8}", pixel[0], pixel[1], pixel[2]).unwrap();
+        // The scan is unclipped; like upstream's LUT creator (`np.clip(code,
+        // 0, 1)` in `_bake_sublut`), the table holds [0, 1], which is what
+        // applications expect within DOMAIN_MIN..DOMAIN_MAX.
+        let [r, g, b] = [pixel[0], pixel[1], pixel[2]].map(|v| v.clamp(from_f64(0.0), from_f64(1.0)));
+        writeln!(text, "{r:.8} {g:.8} {b:.8}").unwrap();
     }
     Ok(text)
 }

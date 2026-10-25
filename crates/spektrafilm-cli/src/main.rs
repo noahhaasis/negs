@@ -360,6 +360,14 @@ fn cmd_process(
     };
     eprintln!("Backend: {used_backend}");
 
+    // The scan is unclipped, like Python's. Crop, border and resize work on the
+    // photograph as the file will hold it, so clip first when one applies;
+    // otherwise `--raw-out` keeps the unclipped values and the writer clips.
+    let mut result = result;
+    if crop.is_some() || border.is_some() || fit.is_some() {
+        spektrafilm_core::pipeline::clip_to_display(&mut result, encoded);
+    }
+
     // User crop and rotation from the GUI (post-pipeline, matches the preview).
     let result = match crop {
         Some(crop) => crop.apply(&result),
