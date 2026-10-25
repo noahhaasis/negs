@@ -25,6 +25,9 @@ than a new timing run for this follow-up.
 
 ## Tested build and machine
 
+The following startup figures describe the initial prototype. Subsequent fixes
+and their separate validation are noted above and below.
+
 - Source commit: `1aa6d08` (`Add native GTK Linux UI preview and desktop performance harness`).
 - Rust: 1.93.1 (`01f6ddf75`, 2026-02-11); release build, locked separate UI workspace.
 - Executable: `target/linux-ui/release/negs`, approximately 1 MiB, dynamically linked.
@@ -169,6 +172,27 @@ actual sizes and scale rather than assuming the requested default window
 size controls a tiled window.
 
 ## Remaining validation
+
+### Opaque photograph follow-up
+
+Omarchy's default-opacity tag applied whole-surface opacity of 0.985 focused
+and 0.96 inactive, so even opaque image pixels showed the desktop behind them.
+A Negs-only user rule now removes that tag and sets focused, inactive and
+fullscreen opacity to `1 override`. The rule and an idempotent installer live
+in `linux/omarchy/negs-window-rules.lua` and `linux/install_omarchy_rules.py`.
+The user configuration was backed up before installation; `hyprctl reload`
+succeeded and `hyprctl configerrors` was empty. The canvas now independently
+paints an opaque neutral background before its texture.
+
+A test with an alpha-zero PNG region and an opaque colored region compared
+actual focused/inactive Wayland captures against GTK's rendered pixels at
+125% scale. Both states matched exactly: background RGB (24, 25, 27) and image
+RGB (80, 120, 160). The compositor reported opacity 1, with no default-opacity
+tag. Evidence: `target/linux-validation/opacity-check/result.json`. Release
+build, Clippy and the state tests pass. The compositor exception was also
+applied to the open review window and persists across launches.
+
+### Still pending
 
 Engine integration, numerical parity, real exports, all border/35mm and
 straighten semantics, developed-preview caching, large watched folders, RAW

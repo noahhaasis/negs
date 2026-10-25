@@ -43,6 +43,23 @@ On another machine install Rust normally, plus GTK/libadwaita development
 libraries, pkg-config and the Adwaita icon theme. This UI workspace does not
 need OpenBLAS, Fortran, or the film engine's dependencies.
 
+On Omarchy, install the app-specific compositor exception so photographs remain
+fully opaque when the window is focused, unfocused or fullscreen:
+
+```sh
+python3 linux/install_omarchy_rules.py
+hyprctl reload
+hyprctl configerrors
+```
+
+This is installed on the validation machine. The installer backs up changed
+files, writes `~/.config/hypr/negs-window-rules.lua`, and includes it after
+Omarchy's defaults. It exempts only `dev.negs.app` and its UI-preview variant
+from Omarchy's default-opacity tag and sets all three opacity values to an
+absolute 1. Other applications keep their desktop behavior. GTK cannot undo
+compositor opacity through widget styling. The canvas also paints its own
+opaque neutral background, including behind transparent input pixels.
+
 ## What can be tried
 
 - Open dialog, file drop, background preview decoding, error messages and a
