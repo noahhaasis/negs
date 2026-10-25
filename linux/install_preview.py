@@ -32,8 +32,11 @@ temporary.replace(app / "bin/negs")
 shutil.copytree(root / "data/borders", app / "data/borders", dirs_exist_ok=True)
 shutil.copy2(root / "LICENSE", app / "LICENSE")
 shutil.copy2(root / "docs/linux-app.md", app / "README.md")
+documentation = [root / "docs" / name for name in ["linux-app.md", "linux-ui-parity.md", "linux-ui-validation.md"]]
+for document in documentation:
+    shutil.copy2(document, app / document.name)
 with tarfile.open(app / "source.tar.gz", "w:gz") as archive:
-    for item in [root / "linux", root / "assets", root / "LICENSE", root / "docs/linux-app.md"]:
+    for item in [root / "linux", root / "assets", root / "LICENSE", *documentation]:
         archive.add(item, arcname=str(item.relative_to(root)), filter=lambda entry: None if "__pycache__" in Path(entry.name).parts else entry)
 bin_dir.mkdir(parents=True, exist_ok=True)
 launcher = bin_dir / "negs-ui-preview"
