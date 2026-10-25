@@ -725,8 +725,8 @@ impl WgpuBackend {
             .collect()
     }
 
-    /// GPU-resident pipeline: runs the front pass (hanatos LUT lookup or
-    /// mallett matmul), highlight boost, camera diffusion/lens blur,
+    /// GPU-resident pipeline: runs the front pass (tc LUT lookup),
+    /// highlight boost, camera diffusion/lens blur,
     /// halation, density curves, DIR, grain, print spectral, enlarger
     /// diffusion, scan spectral, glare, gamut compression, scanner lens blur,
     /// and unsharp as a single command buffer with ping-pong image storage.
@@ -907,9 +907,7 @@ impl WgpuBackend {
         );
 
         // ── Param structs ────────────────────────────────────────────────
-        // Front pass (hanatos LUT lookup or mallett matmul). Both shaders
-        // share this uniform layout; `lut_size` is hanatos-only (0 for
-        // mallett, where the field is a pad).
+        // Front pass (tc LUT lookup).
         #[repr(C)]
         #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
         struct FrontParams {
@@ -926,7 +924,6 @@ impl WgpuBackend {
                 tc_lut,
                 rgb_to_adapted_xyz,
             } => (rgb_to_adapted_xyz, tc_lut.size as u32),
-            crate::FrontPass::Mallett2019 { matrix } => (matrix, 0u32),
         };
         let front_params = FrontParams {
             width: image.width,
@@ -1074,9 +1071,8 @@ impl WgpuBackend {
 
         // ── Build bind groups (per dispatch, but no buffer creation) ─────
 
-        // Front pass: hanatos (params + rgb_in + tc_lut + raw_out) or mallett
-        // (params + rgb_in + raw_out). The tc_lut buffer rides along in the
-        // tuple to outlive the encoder on the hanatos arm.
+        // Front pass: params + rgb_in + tc_lut + raw_out. The tc_lut buffer
+        // rides along in the tuple to outlive the encoder.
         let (front_pipe, bg_front, _front_tc_lut) = match &p.front {
             crate::FrontPass::Hanatos2025 { tc_lut, .. } => {
                 let tc_lut_f32: Vec<f32> = tc_lut.data.iter().map(|&v| v as f32).collect();
@@ -1112,36 +1108,7 @@ impl WgpuBackend {
                         }, // raw_out
                     ],
                 });
-                (pipe, bg, Some(tc_lut_buf))
-            }
-            crate::FrontPass::Mallett2019 { .. } => {
-                let pipe = self.cached_pipeline(
-                    include_str!("../../spektrafilm-shaders/wgsl/mallett_rgb_to_raw.wgsl"),
-                    &[
-                        wgpu::BufferBindingType::Uniform,
-                        wgpu::BufferBindingType::Storage { read_only: true },
-                        wgpu::BufferBindingType::Storage { read_only: false },
-                    ],
-                );
-                let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("bg_mallett"),
-                    layout: &pipe.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: front_params_buf.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: buf_a.as_entire_binding(),
-                        }, // rgb_in
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: buf_b.as_entire_binding(),
-                        }, // raw_out
-                    ],
-                });
-                (pipe, bg, None)
+                (pipe, bg, tc_lut_buf)
             }
         };
         // After the front pass: log10 + density curve interp into normalized
@@ -1544,7 +1511,7 @@ impl WgpuBackend {
 
         let mut profiler = GpuStageProfiler::new(&self.device, &self.queue);
         profiler.mark("upload", &mut encoder);
-        // 1. Front pass (hanatos or mallett): buf_a (rgb in) → buf_b (raw)
+        // 1. Front pass (tc LUT lookup): buf_a (rgb in) → buf_b (raw)
         dispatch(&mut encoder, &front_pipe, &bg_front, n_pixels);
         profiler.mark("front", &mut encoder);
         // 1a. Highlight boost on raw, before optical scatter.

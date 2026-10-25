@@ -361,7 +361,6 @@ mod debug_tests {
             &params,
             &backend,
             None,
-            None,
             &ref_illuminant,
             1.0,
         );
