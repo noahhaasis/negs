@@ -35,6 +35,16 @@ mod imp {
     impl WidgetImpl for Canvas {
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
+            // Keep the display canvas opaque independently of its container/theme,
+            // including when an input image contains transparent pixels.
+            rect(
+                snapshot,
+                &gdk::RGBA::new(24. / 255., 25. / 255., 27. / 255., 1.),
+                0.,
+                0.,
+                obj.width() as f64,
+                obj.height() as f64,
+            );
             let Some(texture) = self.texture.borrow().clone() else {
                 return;
             };
