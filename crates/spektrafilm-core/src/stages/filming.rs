@@ -441,14 +441,15 @@ pub fn develop(
     // f32 versions kept for DIR couplers (still f32 API) and grain (legacy).
     let log_exposure = &film.log_exposure_f32();
     let density_curves = &film.density_curves_f32();
-    let gamma = params.film_render.density_curve_gamma;
 
     // Filming.develop uses NORMALIZED curves (Python `develop` subtracts nanmin).
     let norm_curves_f64 =
         spektrafilm_model::density_curves::normalize_density_curves_f64(&density_curves_f64);
     let t = Instant::now();
+    // Unit gamma: the Film Curves morph is baked into the curves
+    // (`Pipeline::apply_film_curves_morph`), as upstream experimental does.
     let mut density_cmy =
-        backend.density_curve_interp(&log_raw, &log_exposure_f64, &norm_curves_f64, gamma as f64);
+        backend.density_curve_interp(&log_raw, &log_exposure_f64, &norm_curves_f64, 1.0);
     print_stage_timing(stage_timings, "filming_develop.density_interp", t);
 
     // DIR couplers
@@ -475,7 +476,7 @@ pub fn develop(
             dir.diffusion_tail_um,
             dir.diffusion_tail_weight,
             film.is_positive(),
-            gamma,
+            1.0,
             backend,
         );
         print_stage_timing(stage_timings, "filming_develop.dir_couplers", t);
