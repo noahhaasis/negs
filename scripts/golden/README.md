@@ -104,6 +104,47 @@ NaN/Inf and size differences always fail. ΔE00 is computed like
 significant digits). Statuses other than PASS/IDENTICAL are printed with their
 counts so a relaxed gate is never silent.
 
+## Results on 2026-10-26 (M1 Pro, after ticket 16, 13e672e)
+
+Every macOS manifest was regenerated from 13e672e (clean tree) with the
+reference inputs, whose hashes are unchanged. Against the previous manifests,
+every raw and TIFF hash changed (484 renders each); cases, sizes, inputs and
+the adapter (Apple M1 Pro, Metal, resident path) did not. The data and preset
+tree hashes changed with the port (`grain_*_coarse` now set `rms_granularity`).
+The sections below from 2026-10-22 describe the engine before the port.
+
+**Same machine:** five independent arm64 runs (`macos-arm64`, `macos-ui`,
+`macos-arm64-backend-report`, `macos-arm64-capacity-guard`, and
+`macos-arm64-pipeline-cache` from a GPU and a CPU run, merged as before) are
+484/484 identical under `compare --exact`. The `macos-ui` run follows a release
+build of the helper and the app: 7/7 helper tests pass, and
+`scripts/check_native_macos.py --expected-backend wgpu` passes (21 requests).
+
+**GPU vs f64 (`quality`): 76/76 pass.** ΔE00 max 0.0012 (`synth_noise` Velvia
+scan), p99 ≤ 0.0003, p99.9 ≤ 0.0006, at most 2 16-bit codes and 1 8-bit step.
+
+**arm64 vs x86_64 under Rosetta, tolerance mode: fails, in f32 CPU grain only.**
+
+| Engine | Result | Worst |
+|---|---|---|
+| f64 | 180 PASS, 2 PASS-BORDER, 2 PASS-GRAIN | strict cases ×0.075 of the gate (`unsharp_strong`), no 16-bit code changed; `dir_wide` ×16 (see below) |
+| f32 CPU | 3 IDENTICAL, 108 PASS, 1 PASS-GRAIN, **4 FAIL-GRAIN** | strict cases ×0.85; the failures reach ΔE00 2.8 and 5 8-bit steps |
+| GPU | 182 IDENTICAL, 2 PASS | border and resize (CPU-side, 1 f32 ulp) |
+
+- The four FAIL-GRAIN cases are `photo_7858115920` with Vision3 → 2383,
+  Double-X → 2302 and Tri-X scan, and `photo_DSC_5003` with Pro 400H, all
+  `default`. Stage dumps: every stage up to `FILM_PRE_GRAIN` differs by a
+  few f32 ulps at most (≤ 2e-6, from the f32 libm), and `FILM_DENSITY`
+  then differs by up to 0.027 in 3–65 % of values. It is the shared-MT19937 stream divergence
+  described for Windows below, now also between Apple's arm64 and x86_64 libm
+  (before the port: 8 PASS-GRAIN, no failure). Not accepted yet; the
+  cross-platform decision on f32 CPU grain is still open.
+- `dir_wide` (f64) exceeds the strict f64 gate 16×: 1.9e-11, in a stage
+  before grain. The DIR couplers amplify the ~1e-15 TC-LUT differences
+  over 1000× (`FILM_LOG_RAW` 2e-15 → `FILM_PRE_GRAIN` 3.6e-12); grain then
+  adds nothing. The harness labels it PASS-GRAIN because the preset has grain
+  on. No 16-bit code changes.
+
 ## Results on 2026-10-22 (M1 Pro; x86_64 build under Rosetta, SSE4.2 only)
 
 **arm64 vs x86_64, tolerance mode: everything passes.**
@@ -193,24 +234,26 @@ release. See `docs/windows-agent-handoff.md`.
 
 ## Watch next
 
-- **Every manifest is stale on `experimental-port` (ticket 16, 2026-10-26).**
+- **The Windows manifests are stale since ticket 16 (2026-10-26).**
   The engine now follows upstream experimental 28bf883: its profiles and
   model-derived curves, white balance and neutral print filters, DIR presets
   with Langmuir saturation, halation presets, gamut defaults, film-raw
   auto-exposure, multilayer grain, tetrahedral LUTs and reflected blur
-  borders. Every case's hashes change, so every manifest will change:
-  `macos-arm64.json`, `macos-x86_64-rosetta.json`, `macos-ui.json`,
-  `macos-arm64-backend-report.json`, `macos-arm64-capacity-guard.json`,
-  `macos-arm64-pipeline-cache.json` and the Windows set
-  (`windows-gtx1660s-vulkan.json`, `windows-gtx1660s-backend-report.json`,
+  borders, so every case's hashes changed. The macOS manifests were
+  regenerated from 13e672e (see "Results on 2026-10-26"). The Windows set
+  still predates the port: `windows-gtx1660s-vulkan.json`,
+  `windows-gtx1660s-backend-report.json`,
   `windows-gtx1660s-capacity-guard.json`,
-  `windows-gtx1660s-vulkan-pipeline-cache.json`, `windows-ui.json`).
-  They aren't regenerated on the branch on purpose. Once it is merged, regenerate
-  them on every machine from that one commit (the Mac variants, then the
-  Windows box), re-run `quality` and the cross-machine `compare`, and commit
-  the manifests (not the dumps). The presets in `scripts/gpu_cpu_quality/params`
-  use the new grain fields.
-- **GPU vs f64 after the port (M1 Pro, `quality`): 76/76 pass.** ΔE00 max
+  `windows-gtx1660s-vulkan-pipeline-cache.json` and `windows-ui.json`.
+  Regenerate them on the Windows box from 13e672e, re-run `quality` and the
+  `compare` against the new `macos-arm64.json`, and commit the manifests
+  (not the dumps). The presets in `scripts/gpu_cpu_quality/params` use the
+  new grain fields.
+- **f32 CPU grain now diverges between arm64 and x86_64 on the Mac too**:
+  4 FAIL-GRAIN cases under Rosetta (see "Results on 2026-10-26"). The
+  Windows count will likely differ from the 82 before the port.
+- **GPU vs f64 after the port (M1 Pro, `quality`): 76/76 pass**, confirmed on
+  the regenerated `macos-arm64.json`. ΔE00 max
   0.0012 (`synth_noise` Velvia scan), p99 ≤ 0.0003, at most 2 16-bit codes
   and 1 8-bit step. Right after the port the maximum was 0.045 against the
   0.05 gate, with two causes in the GPU scan, both fixed:
