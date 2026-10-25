@@ -319,8 +319,10 @@ repo. The GPU column is the wgpu backend (`crates/spektrafilm-gpu/src/wgpu_backe
   `digest_params(lut_mode)` (`params_builder.py:103-138`) the per-image trims (filter
   shifts, preflash), crop/upscale and the internal enlarger/scanner LUTs are forced to
   neutral/exact.
-- **Rust:** `lut_export.rs::per_pixel_params` should adopt the same neutralisations
-  (filter shifts and preflash are kept today). The rest of the LUT creator (bundles, OCIO,
+- **Rust:** `lut_export.rs::per_pixel_params` adopts the same neutralisations
+  (filter shifts, preflash, scanner white/black correction, exact spectral compute).
+  It keeps the manual exposure controls, which upstream re-adds only as the LUT
+  creator's input gain. The rest of the LUT creator (bundles, OCIO,
   QA) is a separate feature.
 - **Default output:** only the exported `.cube`.
 - **Risk:** low.
