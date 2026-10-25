@@ -32,6 +32,110 @@ pub fn interp_1d(x: &[f32], y: &[f32], xq: f32) -> f32 {
     y[i] + t * (y[i + 1] - y[i])
 }
 
+/// `np.interp(x, xp, fp)` in f64, step for step as numpy's `arr_interp`
+/// (`numpy/_core/src/multiarray/compiled_base.c`): the guessed binary search,
+/// the precomputed slopes, the exact-hit and NaN fallbacks. Matching the
+/// search also matches numpy on an `xp` that isn't monotonic, which a pushed
+/// DIR `amount` can produce.
+pub fn np_interp(x: &[f64], xp: &[f64], fp: &[f64]) -> Vec<f64> {
+    assert_eq!(xp.len(), fp.len());
+    assert!(!xp.is_empty());
+    let n = xp.len();
+    if n == 1 {
+        return x
+            .iter()
+            .map(|v| if v.is_nan() { *v } else { fp[0] })
+            .collect();
+    }
+    let (left, right) = (fp[0], fp[n - 1]);
+    let slopes: Option<Vec<f64>> = (n <= x.len()).then(|| {
+        (0..n - 1)
+            .map(|i| (fp[i + 1] - fp[i]) / (xp[i + 1] - xp[i]))
+            .collect()
+    });
+    let mut j = 0isize;
+    x.iter()
+        .map(|&xv| {
+            if xv.is_nan() {
+                return xv;
+            }
+            j = np_binary_search_with_guess(xv, xp, j);
+            if j == -1 {
+                return left;
+            }
+            let ju = j as usize;
+            if ju == n {
+                return right;
+            }
+            if ju == n - 1 || xp[ju] == xv {
+                return fp[ju];
+            }
+            let slope = match &slopes {
+                Some(s) => s[ju],
+                None => (fp[ju + 1] - fp[ju]) / (xp[ju + 1] - xp[ju]),
+            };
+            let mut v = slope * (xv - xp[ju]) + fp[ju];
+            if v.is_nan() {
+                v = slope * (xv - xp[ju + 1]) + fp[ju + 1];
+                if v.is_nan() && fp[ju] == fp[ju + 1] {
+                    v = fp[ju];
+                }
+            }
+            v
+        })
+        .collect()
+}
+
+/// numpy's `binary_search_with_guess`: the index `i` with
+/// `arr[i] <= key < arr[i + 1]`, -1 below the range and `len` above it.
+fn np_binary_search_with_guess(key: f64, arr: &[f64], guess: isize) -> isize {
+    const LIKELY_IN_CACHE_SIZE: isize = 8;
+    let len = arr.len() as isize;
+    let at = |i: isize| arr[i as usize];
+    if key > at(len - 1) {
+        return len;
+    } else if key < at(0) {
+        return -1;
+    }
+    if len <= 4 {
+        let mut i = 1;
+        while i < len && key >= at(i) {
+            i += 1;
+        }
+        return i - 1;
+    }
+    let guess = guess.min(len - 3).max(1);
+    let (mut imin, mut imax) = (0, len);
+    if key < at(guess) {
+        if key < at(guess - 1) {
+            imax = guess - 1;
+            if guess > LIKELY_IN_CACHE_SIZE && key >= at(guess - LIKELY_IN_CACHE_SIZE) {
+                imin = guess - LIKELY_IN_CACHE_SIZE;
+            }
+        } else {
+            return guess - 1;
+        }
+    } else if key < at(guess + 1) {
+        return guess;
+    } else if key < at(guess + 2) {
+        return guess + 1;
+    } else {
+        imin = guess + 2;
+        if guess < len - LIKELY_IN_CACHE_SIZE - 1 && key < at(guess + LIKELY_IN_CACHE_SIZE) {
+            imax = guess + LIKELY_IN_CACHE_SIZE;
+        }
+    }
+    while imin < imax {
+        let imid = imin + ((imax - imin) >> 1);
+        if key >= at(imid) {
+            imin = imid + 1;
+        } else {
+            imax = imid;
+        }
+    }
+    imin - 1
+}
+
 /// Interpolate a uniformly-spaced table.
 #[inline]
 pub fn interp_uniform(x_min: f32, x_max: f32, y: &[f32], xq: f32) -> f32 {

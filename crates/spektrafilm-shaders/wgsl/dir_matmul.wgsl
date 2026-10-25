@@ -2,7 +2,8 @@
 //
 // CPU equivalent: in `compute_exposure_correction`:
 //   density_silver = positive ? (density_max - density_cmy) : density_cmy
-//   correction[m] = sum_c density_silver[c] * couplers_matrix[c][m]
+//   donor = Langmuir(density_silver)  (negatives; linear for positives)
+//   correction[m] = sum_c donor[c] * couplers_matrix[c][m]
 //
 // `couplers_matrix` is already pre-scaled by `amount` on the CPU side.
 // `positive` is encoded as 0 (negative) or 1 (positive film) in params.
@@ -18,6 +19,11 @@ struct Params {
     m_row0: vec4<f32>,
     m_row1: vec4<f32>,
     m_row2: vec4<f32>,
+    // Donor Langmuir `x (k + x_ref) / (k + x)` on the channels whose
+    // `donor_saturating` is non-zero (all zero: the linear donor).
+    donor_k: vec4<f32>,
+    donor_ref: vec4<f32>,
+    donor_saturating: vec4<u32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -46,6 +52,9 @@ fn main(
     if params.positive != 0u {
         silver = params.density_max.xyz - silver;
     }
+    let k = params.donor_k.xyz;
+    let saturated = silver * (k + params.donor_ref.xyz) / (k + silver);
+    silver = select(silver, saturated, params.donor_saturating.xyz != vec3<u32>(0u));
 
     // correction[m] = silver[0]*M[0][m] + silver[1]*M[1][m] + silver[2]*M[2][m]
     let c0 = silver.x * params.m_row0.x + silver.y * params.m_row1.x + silver.z * params.m_row2.x;

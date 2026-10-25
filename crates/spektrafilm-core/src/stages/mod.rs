@@ -282,7 +282,7 @@ mod integration_tests {
             .with_params(params);
         assert_eq!(
             pipeline.params.film_render.dir_couplers.gamma_samelayer_rgb,
-            [0.12, 0.08, 0.06],
+            [0.2291, 0.1029, 0.2651],
             "GUI-style with_params must preserve positive-film DIR parameters"
         );
         let result = pipeline.process(img, &backend);

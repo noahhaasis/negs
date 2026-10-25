@@ -404,6 +404,34 @@ pub fn expose(
     raw
 }
 
+/// The DIR couplers' matrix, Langmuir terms and inverted curves for `dir`.
+/// `norm_curves` are the normalized film curves. Shared with the GPU set-up
+/// in `pipeline.rs`.
+pub fn dir_couplers_model(
+    dir: &crate::params::DirCouplersParams,
+    norm_curves: &[[f64; 3]],
+    log_exposure: &[f64],
+    positive: bool,
+) -> spektrafilm_model::couplers::DirCouplersModel {
+    let matrix = spektrafilm_model::couplers::compute_dir_couplers_matrix(
+        dir.gamma_samelayer_rgb,
+        dir.gamma_interlayer_r_to_gb,
+        dir.gamma_interlayer_g_to_rb,
+        dir.gamma_interlayer_b_to_rg,
+        dir.inhibition_samelayer,
+        dir.inhibition_interlayer,
+    );
+    spektrafilm_model::couplers::DirCouplersModel::new(
+        norm_curves,
+        log_exposure,
+        &matrix,
+        dir.amount,
+        dir.langmuir_donor_k_rgb,
+        dir.langmuir_receiver_k_rgb,
+        positive,
+    )
+}
+
 /// Develop: log_raw → density_cmy via density curves + DIR couplers + grain.
 pub fn develop(
     log_raw: ImageBuf,
@@ -416,9 +444,6 @@ pub fn develop(
     // f64 chain for Python parity — curves are f64 in the profile JSON.
     let log_exposure_f64 = film.log_exposure_f64();
     let density_curves_f64 = film.density_curves_f64();
-    // f32 versions kept for DIR couplers (still f32 API) and grain (legacy).
-    let log_exposure = &film.log_exposure_f32();
-    let density_curves = &film.density_curves_f32();
 
     // Filming.develop uses NORMALIZED curves (Python `develop` subtracts nanmin).
     let norm_curves_f64 =
@@ -434,26 +459,17 @@ pub fn develop(
     let dir = &params.film_render.dir_couplers;
     if dir.active {
         let t = Instant::now();
-        let matrix = spektrafilm_model::couplers::compute_dir_couplers_matrix(
-            dir.gamma_samelayer_rgb,
-            dir.gamma_interlayer_r_to_gb,
-            dir.gamma_interlayer_g_to_rb,
-            dir.gamma_interlayer_b_to_rg,
-            dir.inhibition_samelayer,
-            dir.inhibition_interlayer,
-        );
+        let model =
+            dir_couplers_model(dir, &norm_curves_f64, &log_exposure_f64, film.is_positive());
         density_cmy = spektrafilm_model::couplers::apply_density_correction(
             density_cmy,
             log_raw,
             pix_um,
-            log_exposure,
-            density_curves,
-            &matrix,
-            dir.amount,
+            &log_exposure_f64,
+            &model,
             dir.diffusion_size_um,
             dir.diffusion_tail_um,
             dir.diffusion_tail_weight,
-            film.is_positive(),
             1.0,
             backend,
         );

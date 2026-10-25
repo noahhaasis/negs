@@ -1,4 +1,5 @@
 pub mod color_reference;
+pub mod couplers_presets;
 pub mod data;
 pub mod enlarger;
 pub mod illuminants;
