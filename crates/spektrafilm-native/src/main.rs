@@ -209,7 +209,7 @@ impl Session {
                     post,
                     image,
                     ..
-                } = self.output.as_ref().context("No preview to save")?;
+                } = self.output.as_mut().context("No preview to save")?;
                 ensure!(
                     *id == render_id,
                     "The preview changed; wait for the current render and try again"
@@ -222,6 +222,11 @@ impl Session {
                     crop.validate()?;
                 }
                 let metadata = spektrafilm_io::read_metadata(source);
+                // The render is the unclipped scan; Post, crop, border and resize
+                // work on it as the file will hold it. Clipping in place keeps
+                // memory flat, and the display clips the same way.
+                spektrafilm_core::pipeline::clip_to_display(image, *encoded);
+                let image = &*image;
                 // Crop in the unrotated orientation, then rotate, then add the border.
                 let cropped = crop.map(|crop| crop.apply(image));
                 let image = cropped.as_ref().unwrap_or(image);

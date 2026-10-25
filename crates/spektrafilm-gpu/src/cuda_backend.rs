@@ -120,8 +120,8 @@ __device__ __forceinline__ float exp10_fast(float x) {
     return exp2f(x * 3.32192809488736234787f);
 }
 
+// Unclipped, like the CPU scan: linear below 0, the power law above 1.
 __device__ __forceinline__ float srgb_encode_fast(float x) {
-    x = fminf(fmaxf(x, 0.0f), 1.0f);
     return x <= 0.0031308f ? 12.92f * x : 1.055f * powf(x, 0.4166666666666667f) - 0.055f;
 }
 
@@ -467,10 +467,6 @@ extern "C" __global__ void post_scan_kernel(
         rgb[base] = srgb_encode_fast(rgb[base]);
         rgb[base + 1u] = srgb_encode_fast(rgb[base + 1u]);
         rgb[base + 2u] = srgb_encode_fast(rgb[base + 2u]);
-    } else {
-        rgb[base] = fminf(fmaxf(rgb[base], 0.0f), 1.0f);
-        rgb[base + 1u] = fminf(fmaxf(rgb[base + 1u], 0.0f), 1.0f);
-        rgb[base + 2u] = fminf(fmaxf(rgb[base + 2u], 0.0f), 1.0f);
     }
 }
 
@@ -2592,7 +2588,7 @@ impl CudaBackend {
             None => (1.0f32, 0.0f32, 0u32),
         };
         // Unclamped scan RGB for glare, gamut compression and the unsharp
-        // mask, as on the CPU; the post-scan pass clamps once at the end.
+        // mask, as on the CPU; the output stays unclamped like the CPU's.
         let skip_clamp = 1u32;
         {
             let mut launch = self.stream.launch_builder(&self.scan_kernel);
@@ -2643,7 +2639,9 @@ impl CudaBackend {
             self.run_unsharp_device(&mut buf_b, &mut buf_a, image.width, image.height, up)?;
         }
 
-        self.run_post_scan_device(&mut buf_b, n_pixels, p.output_cctf_encoding)?;
+        if p.output_cctf_encoding {
+            self.run_post_scan_device(&mut buf_b, n_pixels, p.output_cctf_encoding)?;
+        }
 
         let out = self.stream.clone_dtoh(&buf_b)?;
         Ok(Some(ImageBuf::from_data(

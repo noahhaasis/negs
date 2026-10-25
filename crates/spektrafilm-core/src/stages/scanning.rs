@@ -366,9 +366,13 @@ pub fn scan(
         rgb = spektrafilm_model::diffusion::apply_unsharp_mask(rgb, usm_sigma, usm_amount, backend);
     }
 
-    // CCTF encoding + clip.
+    // CCTF encoding, without a clip: like Python, the scan returns what the
+    // physics produces, highlights above 1 and the unsharp mask's undershoot
+    // below 0 included. `srgb_encode` extends linearly below 0 and follows
+    // the power law above 1, as colour's `eotf_inverse_sRGB` does. Integer
+    // files and displays clip (`pipeline::clip_to_display`, `save.rs`).
     //
-    // Python's `_apply_cctf_encoding_and_clip` calls
+    // Python's `_apply_cctf_encoding` calls
     // `colour.RGB_to_RGB(rgb, output_cs, output_cs, apply_cctf_encoding=True)`,
     // which — even when src == dst — runs `vecmul(M, rgb)` with
     // `M = matrix_RGB_to_RGB(src, dst, 'CAT02')`. With same src/dst
@@ -377,8 +381,6 @@ pub fn scan(
     // inverse round-trip isn't exact). This nudges every RGB pixel by
     // ~1e-5 before encoding. We replicate it so the scan-stage output
     // matches Python bit-for-bit.
-    let zero = from_f64(0.0);
-    let one = from_f64(1.0);
     if params.io.output_cctf_encoding {
         let m = rgb_to_rgb_identity_matrix(&params.io.output_color_space);
         rgb.data.par_chunks_exact_mut(3).for_each(|px| {
@@ -388,14 +390,10 @@ pub fn scan(
             let r2 = m[0][0] * r + m[0][1] * g + m[0][2] * b;
             let g2 = m[1][0] * r + m[1][1] * g + m[1][2] * b;
             let b2 = m[2][0] * r + m[2][1] * g + m[2][2] * b;
-            px[0] = spektrafilm_math::precision::srgb_encode(from_f64(r2).clamp(zero, one));
-            px[1] = spektrafilm_math::precision::srgb_encode(from_f64(g2).clamp(zero, one));
-            px[2] = spektrafilm_math::precision::srgb_encode(from_f64(b2).clamp(zero, one));
+            px[0] = spektrafilm_math::precision::srgb_encode(from_f64(r2));
+            px[1] = spektrafilm_math::precision::srgb_encode(from_f64(g2));
+            px[2] = spektrafilm_math::precision::srgb_encode(from_f64(b2));
         });
-    } else {
-        rgb.data
-            .par_iter_mut()
-            .for_each(|v| *v = (*v).clamp(zero, one));
     }
 
     rgb

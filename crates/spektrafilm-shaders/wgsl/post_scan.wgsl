@@ -1,5 +1,6 @@
-// Final resident-chain post-scan pass:
-// clamp linear RGB to [0, 1], optionally apply sRGB OETF in place.
+// Final resident-chain post-scan pass: the sRGB OETF in place, unclipped like
+// the CPU scan (linear below 0, the power law above 1). Displays and integer
+// files clip afterwards.
 
 struct Params {
     n_pixels: u32,
@@ -10,8 +11,7 @@ struct Params {
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> rgb: array<f32>;
 
-fn srgb_encode(x_in: f32) -> f32 {
-    let x = clamp(x_in, 0.0, 1.0);
+fn srgb_encode(x: f32) -> f32 {
     if x <= 0.0031308 {
         return 12.92 * x;
     }
@@ -37,9 +37,5 @@ fn main(
         rgb[base] = srgb_encode(rgb[base]);
         rgb[base + 1u] = srgb_encode(rgb[base + 1u]);
         rgb[base + 2u] = srgb_encode(rgb[base + 2u]);
-    } else {
-        rgb[base] = clamp(rgb[base], 0.0, 1.0);
-        rgb[base + 1u] = clamp(rgb[base + 1u], 0.0, 1.0);
-        rgb[base + 2u] = clamp(rgb[base + 2u], 0.0, 1.0);
     }
 }
