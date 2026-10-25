@@ -181,7 +181,6 @@ pub struct FilmChainParams<'a> {
     pub front: FrontPass<'a>,
     pub film_log_exposure: &'a [f64],
     pub film_density_curves_normalized: &'a [[f64; 3]],
-    pub film_gamma: f64,
     pub film_channel_density: &'a [[f64; 3]],
     pub film_base_density: &'a [f64],
     pub print_illuminant: &'a [f64],
@@ -189,7 +188,6 @@ pub struct FilmChainParams<'a> {
     pub print_normalization_factor: f64,
     pub print_log_exposure: &'a [f64],
     pub print_density_curves: &'a [[f64; 3]],
-    pub print_gamma: f64,
     pub print_channel_density: &'a [[f64; 3]],
     pub print_base_density: &'a [f64],
     /// Constant enlarger preflash raw 3-vector, added to the print exposure
@@ -345,7 +343,6 @@ pub struct DirCouplersGpuParams<'a> {
     /// pass with the corrected log-exposure.
     pub density_curves_0: &'a [[f64; 3]],
     pub log_exposure: &'a [f64],
-    pub gamma_factor: f64,
 }
 
 /// Grain parameters for the GPU-resident pass: upstream experimental's

@@ -1141,8 +1141,6 @@ impl Pipeline {
                 diffusion_tail_weight: dir.diffusion_tail_weight as f32,
                 density_curves_0: &model.density_curves_0,
                 log_exposure: &film_log_exp,
-                // The Film Curves morph is baked into the curves.
-                gamma_factor: 1.0,
             }
         });
 
@@ -1268,7 +1266,6 @@ impl Pipeline {
             front,
             film_log_exposure: &film_log_exp,
             film_density_curves_normalized: &film_curves_norm,
-            film_gamma: 1.0,
             film_channel_density: &film_channel_density,
             film_base_density: &film_base_density,
             print_illuminant: &self.print_illuminant,
@@ -1276,7 +1273,6 @@ impl Pipeline {
             print_normalization_factor: print_norm_factor,
             print_log_exposure: &print_log_exp,
             print_density_curves: &print_curves,
-            print_gamma: 1.0,
             print_channel_density: &print_channel_density,
             print_base_density: &print_base_density,
             preflash: self.preflash_raw,

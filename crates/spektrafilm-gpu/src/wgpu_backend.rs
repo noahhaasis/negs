@@ -779,7 +779,6 @@ impl WgpuBackend {
         let image = p.image;
         let film_log_exposure = p.film_log_exposure;
         let film_density_curves_normalized = p.film_density_curves_normalized;
-        let film_gamma = p.film_gamma;
         let film_channel_density = p.film_channel_density;
         let film_base_density = p.film_base_density;
         let print_illuminant = p.print_illuminant;
@@ -787,7 +786,6 @@ impl WgpuBackend {
         let print_normalization_factor = p.print_normalization_factor;
         let print_log_exposure = p.print_log_exposure;
         let print_density_curves = p.print_density_curves;
-        let print_gamma = p.print_gamma;
         let preflash = p.preflash;
         let print_channel_density = p.print_channel_density;
         let print_base_density = p.print_base_density;
@@ -991,7 +989,8 @@ impl WgpuBackend {
             height: image.height,
             k: film_log_exposure.len() as u32,
             uniform_grid: if is_uniform(film_log_exposure) { 1 } else { 0 },
-            gamma_inv: [(1.0 / film_gamma) as f32; 3],
+            // Unit gamma: Film Curves is baked into the curves.
+            gamma_inv: [1.0; 3],
             _pad: 0.0,
         };
         let film_density_params_buf =
@@ -1029,7 +1028,7 @@ impl WgpuBackend {
             height: image.height,
             k: print_log_exposure.len() as u32,
             uniform_grid: if is_uniform(print_log_exposure) { 1 } else { 0 },
-            gamma_inv: [(1.0 / print_gamma) as f32; 3],
+            gamma_inv: [1.0; 3],
             _pad: 0.0,
         };
         let print_density_params_buf = mk_uniform(
@@ -4048,7 +4047,7 @@ fn build_dir_state(
         height,
         k: dp.log_exposure.len() as u32,
         uniform_grid: if is_uniform(dp.log_exposure) { 1 } else { 0 },
-        gamma_inv: [(1.0 / dp.gamma_factor) as f32; 3],
+        gamma_inv: [1.0; 3],
         _pad: 0.0,
     };
     let density_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
