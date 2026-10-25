@@ -326,6 +326,7 @@ mod tests {
         params.io.input_color_space = "sRGB".to_string();
         params.io.input_cctf_decoding = false;
         params.io.output_cctf_encoding = false; // keep linear for parity
+        crate::params::main_3bb2c2d_gamut(&mut params.io);
 
         // Stage outputs accumulate f32 Scalar rounding; the f64 build
         // tracks the Python taps tightly.

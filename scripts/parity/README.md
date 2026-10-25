@@ -208,13 +208,13 @@ compressors in both implementations; this isolates stock parity from the
 gamut algorithms/defaults. The report records these options, so such a
 pass is not confused with default-settings parity.
 
-`--experimental-gamut` applies the pinned experimental `28bf883` gamut
-settings (`data/presets/experimental-gamut.json`) to both implementations,
-including Rust's explicit D65 center. It is mutually exclusive with
-`--gamut-off`. Add `--gamut-stress` to compare saturated, imaginary, and
-above-white inputs as well. See the
-[gamut handoff](../../docs/handoff-experimental-gamut.md) for the preset,
-passing B&W routes, and Python fixture regeneration.
+Both implementations default to experimental `28bf883`'s gamut settings,
+so a run against `28bf883` compares them without flags (the former
+`--experimental-gamut` flag and preset were removed in ticket 16.8). Against
+main, use `--gamut-off`. Add `--gamut-stress` to compare saturated,
+imaginary, and above-white inputs as well as the ordinary three fixtures.
+See the [gamut handoff](../../docs/handoff-experimental-gamut.md) for the
+passing B&W routes and Python fixture regeneration.
 
 `--adversarial-input` adds 1024 seeded HDR/imaginary/near-black pixels.
 `--rust-binary /path/to/spektrafilm-f64 --rust-data /path/to/data` checks an

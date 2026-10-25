@@ -22,6 +22,14 @@ from check_parity import apply_params, tree_hash
 COMMIT = "28bf883e1672e884307edc75852549376e13644e"
 MODULE = "src/spektrafilm/utils/gamut_compression.py"
 ROOT = Path(__file__).resolve().parents[2]
+# Experimental's gamut defaults, which are also Rust's since ticket 16.8;
+# `center` is Rust's name for the D65 centre Python hard-codes.
+EXPERIMENTAL_GAMUT = {
+    "input_gamut_compress": {"algorithm": "xy", "boundary": "inscribed_hull", "hull_detail": 5.0,
+                             "center": "D65", "knee": [0.815, 1.0, 1.2]},
+    "output_gamut_compress": {"algorithm": "oklch", "knee": [0.95, 1.0, 1.6],
+                              "lightness_compression": [0.95, 1.0, 1.6]},
+}
 
 
 def require(condition, message):
@@ -44,7 +52,7 @@ def pinned_tree_hash(repo, commit):
 
 def validate_report(report, source_hash):
     require(report.get("passed") is True, "reference run did not pass")
-    require(report.get("experimental_gamut") and report.get("gamut_stress"), "missing gamut/stress settings")
+    require(not report.get("gamut_off") and report.get("gamut_stress"), "missing gamut/stress settings")
     require(report.get("python", {}).get("tree_sha256") == source_hash, "reference tree hash mismatch")
     require(0 <= report.get("atol", float("inf")) <= 1e-6 and report.get("rtol") == 0, "invalid tolerance")
     cases = report.get("cases", [])
@@ -63,7 +71,7 @@ def main():
     parser.add_argument("--python-source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--bw-runs", nargs="+", type=Path, required=True,
-                        help="passing check_parity --experimental-gamut --gamut-stress directories")
+                        help="passing check_parity --gamut-stress directories")
     args = parser.parse_args()
     source = args.python_source.resolve()
     # Verify the implementation even for git archives without a .git directory.
@@ -85,7 +93,7 @@ def main():
         inscribed_locus_hull, remap_tc_lut_for_compression,
     )
 
-    preset = json.loads((ROOT / "data/presets/experimental-gamut.json").read_text())["io"]
+    preset = json.loads(json.dumps(EXPERIMENTAL_GAMUT))
     for values in preset.values():
         for name in ["knee", "lightness_compression"]:
             if name in values:
@@ -132,8 +140,10 @@ def main():
             for name in ["gradient4-lut-off", "gamut-stress4-lut-off"]:
                 directory = run / name
                 params = json.loads((directory / "params.json").read_text())
-                require(params["io"]["input_gamut_compress"] == json.loads(json.dumps(preset["input_gamut_compress"])), "input preset mismatch")
-                require(params["io"]["output_gamut_compress"] == json.loads(json.dumps(preset["output_gamut_compress"])), "output preset mismatch")
+                for key, values in EXPERIMENTAL_GAMUT.items():
+                    # Runs use the defaults; keep the frozen params explicit.
+                    require(params["io"].get(key, values) == values, f"{key} differs from the experimental defaults")
+                    params["io"][key] = values
                 image = oiio.ImageBuf(str(directory / "input.tif"))
                 pixels = image.get_pixels(oiio.FLOAT)
                 require(pixels.shape == (4, 4, 3) and np.isfinite(pixels).all(), "invalid input pixels")

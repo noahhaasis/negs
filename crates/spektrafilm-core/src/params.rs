@@ -617,24 +617,25 @@ impl Default for IoParams {
 
 /// Input gamut compression config — mirrors upstream `InputGamutCompressSpec`.
 /// Baked into the tc_lut at build time, so the per-pixel path stays
-/// compression-agnostic. `"xy"` (the default, matching upstream main 3bb2c2d) applies
-/// the ACES-RGC-style radial compression toward the spectral locus;
-/// `algorithm = "off"` passes input chromaticities through unchanged.
+/// compression-agnostic. `"xy"` applies the ACES-RGC-style radial compression
+/// toward the boundary; `algorithm = "off"` passes input chromaticities
+/// through unchanged. The defaults are experimental 28bf883's: the inscribed
+/// hull at detail 5, a D65 center and the ACES RGC knee `(0.815, 1, 1.2)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InputGamutCompressParams {
     #[serde(default = "default_xy")]
     pub algorithm: String,
-    #[serde(default = "default_gamut_knee")]
+    #[serde(default = "default_input_gamut_knee")]
     pub knee: [f32; 3],
-    /// `"locus"` preserves the main baseline; `"inscribed_hull"` opts into the
-    /// smooth boundary introduced in experimental 28bf883.
+    /// `"inscribed_hull"`, a smooth hull inside the spectral locus, or
+    /// `"locus"`, the raw locus polygon (upstream main's boundary).
     #[serde(default = "default_gamut_boundary")]
     pub boundary: String,
     /// Gaussian Fourier width (modes kept) for the inscribed hull.
     #[serde(default = "default_hull_detail")]
     pub hull_detail: f64,
-    /// `"reference"` uses the upsampler's reference white (legacy behavior);
-    /// `"D65"` uses experimental's fixed compression center.
+    /// `"D65"`, experimental's fixed compression center, or `"reference"`,
+    /// the upsampler's reference white (upstream main).
     #[serde(default = "default_gamut_center")]
     pub center: String,
 }
@@ -643,7 +644,7 @@ impl Default for InputGamutCompressParams {
     fn default() -> Self {
         Self {
             algorithm: "xy".into(),
-            knee: [0.0, 1.0, 6.0],
+            knee: default_input_gamut_knee(),
             boundary: default_gamut_boundary(),
             hull_detail: default_hull_detail(),
             center: default_gamut_center(),
@@ -652,14 +653,14 @@ impl Default for InputGamutCompressParams {
 }
 
 /// Output gamut compression config — mirrors upstream `OutputGamutCompressSpec`.
-/// `"cam16ucs"` (the default, matching upstream main 3bb2c2d) applies the CAM16-UCS
+/// `"oklch"` (the default, as in experimental 28bf883) applies the OkLCh
 /// chroma knee + one-sided lightness roll-off; `"off"` passes RGB through
 /// unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputGamutCompressParams {
-    #[serde(default = "default_cam16ucs")]
+    #[serde(default = "default_oklch")]
     pub algorithm: String,
-    #[serde(default = "default_gamut_knee")]
+    #[serde(default = "default_output_gamut_knee")]
     pub knee: [f32; 3],
     #[serde(default = "default_gamut_lightness")]
     pub lightness_compression: Option<[f32; 3]>,
@@ -668,9 +669,9 @@ pub struct OutputGamutCompressParams {
 impl Default for OutputGamutCompressParams {
     fn default() -> Self {
         Self {
-            algorithm: "cam16ucs".into(),
-            knee: [0.0, 1.0, 6.0],
-            lightness_compression: Some([0.7, 1.0, 2.2]),
+            algorithm: default_oklch(),
+            knee: default_output_gamut_knee(),
+            lightness_compression: default_gamut_lightness(),
         }
     }
 }
@@ -679,22 +680,25 @@ fn default_xy() -> String {
     "xy".into()
 }
 fn default_gamut_boundary() -> String {
-    "locus".into()
+    "inscribed_hull".into()
 }
 fn default_hull_detail() -> f64 {
     5.0
 }
 fn default_gamut_center() -> String {
-    "reference".into()
+    "D65".into()
 }
-fn default_cam16ucs() -> String {
-    "cam16ucs".into()
+fn default_oklch() -> String {
+    "oklch".into()
 }
-fn default_gamut_knee() -> [f32; 3] {
-    [0.0, 1.0, 6.0]
+fn default_input_gamut_knee() -> [f32; 3] {
+    [0.815, 1.0, 1.2]
+}
+fn default_output_gamut_knee() -> [f32; 3] {
+    [0.95, 1.0, 1.6]
 }
 fn default_gamut_lightness() -> Option<[f32; 3]> {
-    Some([0.7, 1.0, 2.2])
+    Some([0.95, 1.0, 1.6])
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -878,3 +882,22 @@ fn default_17() -> u32 {
 fn default_640() -> u32 {
     640
 }
+
+/// Upstream main 3bb2c2d's gamut settings, for the unit tests whose Python
+/// references were dumped from main.
+#[cfg(test)]
+pub(crate) fn main_3bb2c2d_gamut(io: &mut IoParams) {
+    io.input_gamut_compress = InputGamutCompressParams {
+        algorithm: "xy".into(),
+        knee: [0.0, 1.0, 6.0],
+        boundary: "locus".into(),
+        hull_detail: 5.0,
+        center: "reference".into(),
+    };
+    io.output_gamut_compress = OutputGamutCompressParams {
+        algorithm: "cam16ucs".into(),
+        knee: [0.0, 1.0, 6.0],
+        lightness_compression: Some([0.7, 1.0, 2.2]),
+    };
+}
+

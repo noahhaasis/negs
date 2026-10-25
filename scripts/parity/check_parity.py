@@ -350,11 +350,8 @@ def parse_args(argv=None):
                         help="limit the input images (repeatable; default: all four)")
     parser.add_argument("--film-development-time", type=float)
     parser.add_argument("--print-development-time", type=float)
-    gamut = parser.add_mutually_exclusive_group()
-    gamut.add_argument("--gamut-off", action="store_true",
-                       help="disable both gamut compressors to isolate stock/model parity")
-    gamut.add_argument("--experimental-gamut", action="store_true",
-                       help="set both implementations to pinned 28bf883 gamut settings")
+    parser.add_argument("--gamut-off", action="store_true",
+                        help="disable both gamut compressors to isolate stock/model parity")
     parser.add_argument("--gamut-stress", action="store_true",
                         help="also compare saturated and imaginary linear RGB inputs")
     parser.add_argument("--adversarial-input", action="store_true",
@@ -474,7 +471,6 @@ def main(argv=None):
         "print_development_time": args.print_development_time,
         "clip_reference_output": args.clip_reference_output,
         "gamut_off": args.gamut_off,
-        "experimental_gamut": args.experimental_gamut,
         "film_curves_morph": film_morph,
         "print_curves_morph": print_morph,
         "morph_source": None if args.morph_source is None else {
@@ -502,9 +498,6 @@ def main(argv=None):
                         lut, defaults=args.experimental_defaults, dir_couplers=args.dir_couplers,
                         halation=args.halation, auto_exposure=args.auto_exposure,
                         scanner_usm=args.scanner_usm, lens_blur=args.lens_blur)
-                    if args.experimental_gamut:
-                        preset = json.loads((ROOT / "data/presets/experimental-gamut.json").read_text())["io"]
-                        overrides["io"].update(copy.deepcopy(preset))
                     if args.gamut_off:
                         overrides["io"]["input_gamut_compress"] = {"algorithm": "off"}
                         overrides["io"]["output_gamut_compress"] = {"algorithm": "off"}
