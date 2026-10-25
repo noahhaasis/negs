@@ -460,7 +460,8 @@ integration".
 | 5 white balance, upsampling LUTs, filter database | done; `hanatos2025` default, `arctic2026beta04` and `mallett2019` options | `exp-data` |
 | 5 neutral filters for Negs-only stocks | Tri-X on colour papers derived with upstream's solver; B&W papers keep the fallback | integration |
 | 6 gamut defaults | done | `exp-defaults` |
-| 7 film and print bases, print balance | not started (wave 2) | — |
+| 7 film and print bases | done: tuned base in the print exposure, both scans, the midgray metering and the colour reference; GPU and CUDA take the CPU-baked base | `exp-bases` |
+| 7 print balance | done: "Balance Print" in the Enlarger group (macOS, Windows); solver matches Python to 1.6e-13 filter units (f64) | `exp-bases` |
 | 8 auto-exposure on film raw before crop; camera colour filters | done | `exp-defaults` |
 | 8 diffusion filter float32 FFT | exception: Rust keeps f64 | — |
 | 9 profiles | done (verbatim 28bf883) | `exp-data` |
@@ -480,6 +481,9 @@ Exceptions, each documented where it applies:
 - **Neutral filters on `kodak_2383`.** Re-deriving upstream's own entries with its solver
   reproduces them within 0.035 filter units except on 2383 (0.12); the Tri-X entries come
   from the same solver.
+- **Print balance** solves with grain and glare off (Python keeps them on, so its
+  answer moves with the random seed) and uses a damped Newton step with central
+  differences instead of SciPy's Levenberg-Marquardt; both converge to the same root.
 - **The GPU doesn't use the enlarger and scanner LUTs**; it computes per pixel, which is
   what the LUTs approximate. Both are off by default, in Rust as in Python, so
   `gpu_vs_ref` compares like with like.
