@@ -1513,16 +1513,10 @@ impl App {
                 let mut changed = false;
                 changed |= ui.checkbox(&mut g.active, "Active").changed();
                 changed |= ui
-                    .add(
-                        egui::Slider::new(&mut g.agx_particle_area_um2, 0.05..=1.0)
-                            .text("Particle area (µm²)"),
-                    )
+                    .add(egui::Slider::new(&mut g.blur, 0.0..=3.0).text("Blur σ (px)"))
                     .changed();
                 changed |= ui
-                    .add(egui::Slider::new(&mut g.blur, 0.0..=3.0).text("Post-blur σ"))
-                    .changed();
-                changed |= ui
-                    .add(egui::Slider::new(&mut g.n_sub_layers, 1..=4).text("Sub-layers"))
+                    .add(egui::Slider::new(&mut g.mult_usm_amount, 0.0..=3.0).text("Sharpen amount"))
                     .changed();
                 if changed {
                     self.mark_dirty();

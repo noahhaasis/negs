@@ -54,7 +54,8 @@ fn scanner_lut_bounds(profile: &Profile, params: &RuntimeParams) -> ([f64; 3], [
         }
     }
     let (data_min, data_max) = if params.io.scan_film {
-        let gmin = params.film_render.grain.density_min;
+        // On the scan_film path `profile` is the film.
+        let gmin = crate::grain::density_min(profile, params);
         ([-gmin[0], -gmin[1], -gmin[2]], dmax_curves)
     } else {
         (dmin_curves, dmax_curves)
