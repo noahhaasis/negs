@@ -6,17 +6,24 @@ import IOSurface
 /// helper's temporary buffers. Serial I/O keeps invalidation ahead of later
 /// writes. A frame is published atomically only after a settled render.
 final class RenderedPreviewCache: @unchecked Sendable {
+    /// Records without the source and working sizes don't decode, and their
+    /// keys predate schema 2, so they are never restored.
     struct Header: Codable {
         var key: String
         var width: Int
         var height: Int
         var photoSize: CGSize
+        var sourceSize: CGSize
+        var workingSize: CGSize
         var raw: Bool
         var checksum: String
     }
     struct Frame {
         var surface: IOSurface
         var photoSize: CGSize
+        /// For Image Size readouts: the decoded source and the uncapped working frame.
+        var sourceSize: CGSize
+        var workingSize: CGSize
         var raw: Bool
     }
 
@@ -31,9 +38,10 @@ final class RenderedPreviewCache: @unchecked Sendable {
 
     /// Canvas-only edits (crop, rotation and border) are reapplied by the
     /// canvas, exactly as for a fresh render, and don't change these pixels.
+    /// With an Image Size target the crop's extent is part of `state.rendered`.
     static func key(source: URL, state: EditState, paths: EnginePaths) -> String? {
         struct Identity: Encodable {
-            var schema = 1
+            var schema = 2
             var state: EditState
             var files: [String]
         }
@@ -79,16 +87,17 @@ final class RenderedPreviewCache: @unchecked Sendable {
               let header = try? JSONDecoder().decode(Header.self, from: data[..<newline]),
               header.key == key, (1...8192).contains(header.width), (1...8192).contains(header.height),
               header.photoSize.width.isFinite, header.photoSize.height.isFinite,
-              header.photoSize.width > 0, header.photoSize.height > 0 else { return nil }
+              header.photoSize.width > 0, header.photoSize.height > 0,
+              [header.sourceSize, header.workingSize].allSatisfy({ $0.width.isFinite && $0.height.isFinite && $0.width >= 1 && $0.height >= 1 }) else { return nil }
         let pixels = Data(data[(newline + 1)...])
         guard pixels.count == header.width * header.height * 4, Self.digest(pixels) == header.checksum,
               let surface = try? EditorModel.previewSurface(pixels, width: header.width, height: header.height, bgra: true) else { return nil }
-        return Frame(surface: surface, photoSize: header.photoSize, raw: header.raw)
+        return Frame(surface: surface, photoSize: header.photoSize, sourceSize: header.sourceSize, workingSize: header.workingSize, raw: header.raw)
     }
 
     /// Retains the finished surface until its bytes are safely on disk. It
     /// never reads the helper's preview file, which the next render can reuse.
-    func save(_ surface: IOSurface, photoSize: CGSize, raw: Bool, key: String) {
+    func save(_ surface: IOSurface, photoSize: CGSize, sourceSize: CGSize, workingSize: CGSize, raw: Bool, key: String) {
         queue.async {
             let width = surface.width, height = surface.height
             surface.lock(options: .readOnly, seed: nil)
@@ -99,7 +108,7 @@ final class RenderedPreviewCache: @unchecked Sendable {
                 }
             }
             surface.unlock(options: .readOnly, seed: nil)
-            let header = Header(key: key, width: width, height: height, photoSize: photoSize, raw: raw, checksum: Self.digest(pixels))
+            let header = Header(key: key, width: width, height: height, photoSize: photoSize, sourceSize: sourceSize, workingSize: workingSize, raw: raw, checksum: Self.digest(pixels))
             do {
                 var data = try JSONEncoder().encode(header); data.append(10)
                 try FileManager.default.createDirectory(at: self.file.deletingLastPathComponent(), withIntermediateDirectories: true)

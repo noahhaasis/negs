@@ -255,6 +255,113 @@ private final class FocusingTextField: NSTextField {
     }
 }
 
+/// Image Size, in the Lab between the film and the camera: the photograph's
+/// resolution before the film develops it. Reads only its own parameters,
+/// the crop and the source's size, so other edits don't redraw it.
+struct ImageSizeSection: View {
+    let model: EditorModel
+    @State private var fieldError: String?
+
+    var body: some View {
+        let params: JSONValue = .object(["io": .object(["photo_long_side_px": model.value(ImageSize.targetPath), "upscale_factor": model.value(ImageSize.factorPath)])])
+        let mode = ImageSize.mode(of: params)
+        let source = model.sourceSize
+        let working = source == .zero ? CGSize.zero : ImageSize.working(source: source, params: params, crop: model.crop)
+        let photograph = model.crop.size(of: working)
+        Section {
+            Picker("Size", selection: Binding(get: { mode }, set: { fieldError = nil; model.chooseImageSize($0) })) {
+                Text("Original").tag(ImageSize.Mode.original)
+                Text("Longest side").tag(ImageSize.Mode.longestSide)
+                if case .legacy(let factor) = mode {
+                    Text("Scaled \(EditorModel.percent(factor)) (older edit)").tag(mode)
+                }
+            }
+            .help("Original develops the photograph’s own pixels. Longest side enlarges or reduces it first, so the cropped photograph has that many pixels on its longest side.")
+            if mode == .longestSide {
+                LabeledContent("Longest side") {
+                    HStack(spacing: 4) {
+                        PixelField(title: "Longest side", value: ImageSize.target(of: params) ?? 0) { pixels in
+                            fieldError = model.setLongestSide(pixels)
+                            return fieldError == nil
+                        }
+                        .frame(width: 72)
+                        Text("px").foregroundStyle(.secondary)
+                    }
+                }
+                .help("The cropped photograph’s longest side, before any border. Exports can still be reduced in the save panel.")
+                if let fieldError {
+                    Text(fieldError).font(.caption).foregroundStyle(.red)
+                }
+            }
+            LabeledContent("Photograph") {
+                Text(photograph == .zero ? "—" : "\(Int(photograph.width)) × \(Int(photograph.height)) · \(ImageSize.megapixels(photograph)) MP")
+                    .monospacedDigit()
+            }
+            .help("The exported photograph, cropped, before rotation, the border, and any export size.")
+            if ImageSize.exceedsLimit(working: working, source: source) {
+                Label(ImageSize.limitMessage(working: working), systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.red)
+            } else if model.previewScale < 1, model.image != nil {
+                Text("The preview shows \(EditorModel.percent(model.previewScale)) of these pixels. Exports develop all of them; inspect grain in an exported file.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } header: { Text("Image Size") } footer: {
+            Text("Resizes before film simulation, including halation and grain.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// A whole number of pixels, committed on Return or when focus leaves. An
+/// invalid value stays in the field until corrected; Escape restores the
+/// current one. AppKit, like `ValueField`, so the inspector column can focus it.
+private struct PixelField: NSViewRepresentable {
+    let title: String
+    let value: Int
+    /// Applies a typed value; false keeps the typing for correction.
+    let commit: (Int) -> Bool
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.controlSize = .small
+        field.bezelStyle = .roundedBezel
+        field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize(for: .small), weight: .regular)
+        field.alignment = .right
+        field.setAccessibilityLabel(title)
+        field.delegate = context.coordinator
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.parent = self
+        if field.currentEditor() == nil, !context.coordinator.rejected { field.stringValue = "\(value)" }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: PixelField
+        /// The field holds a value that wasn't applied.
+        var rejected = false
+        init(_ parent: PixelField) { self.parent = parent }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+            rejected = false
+            (control as? NSTextField)?.stringValue = "\(parent.value)"
+            control.window?.makeFirstResponder(nil)
+            return true
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            let text = field.stringValue.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")
+            guard text != "\(parent.value)" || rejected else { return }
+            rejected = !parent.commit(Int(text) ?? -1)
+        }
+    }
+}
+
 private extension View {
     func resettable(_ model: EditorModel, _ path: String) -> some View {
         resettable(modified: model.isModified(path)) { model.resetValue(path) }
@@ -297,7 +404,7 @@ struct AdjustmentInspector: View {
                 Text("Reset Adjustments").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.extraLarge)
-            .help("Restore defaults on both tabs while keeping the film, paper, rotation, and border. You can undo this.")
+            .help("Restore defaults on both tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.")
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
@@ -324,6 +431,7 @@ struct AdjustmentInspector: View {
                 developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")
             }
         }
+        ImageSizeSection(model: model)
         Section("Camera") {
             Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
             if model.value("camera.auto_exposure").bool {
@@ -352,9 +460,8 @@ struct AdjustmentInspector: View {
         Section("Scan & Color") {
             groups(.scan)
             disclosure("Output", symbol: "square.and.arrow.down.on.square") {
-                control(.slider("Working resolution", "io.upscale_factor", 0.1...1, 0.05))
                 Toggle("Limit preview to 12 MP", isOn: Binding(get: { model.limitsPreview }, set: model.limitPreview))
-                    .help("Develops the preview faster on large photographs. Export keeps the working resolution.")
+                    .help("Develops the preview faster on large photographs. Export keeps the full Image Size.")
                 Toggle("Encode output as sRGB", isOn: model.toggle("io.output_cctf_encoding"))
                 Toggle("Use less memory for export", isOn: model.toggle("settings.serial_grain"))
                     .help("Processes grain channels one at a time. Same result, less memory, longer export.")

@@ -57,6 +57,14 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(merged["camera.removed"], .null)
         XCTAssertEqual(merged["removedGroup"], .null)
         XCTAssertEqual(JSONValue.number(1).restoring(.string("wrong type")), .number(1))
+        // Image Size's target defaults to null; an older session without it
+        // keeps its legacy factor, and a saved target comes back.
+        let engine: JSONValue = .object(["io": .object(["upscale_factor": .number(1), "photo_long_side_px": .null])])
+        let older = engine.restoring(.object(["io": .object(["upscale_factor": .number(0.5)])]))
+        XCTAssertEqual(older["io.photo_long_side_px"], .null)
+        XCTAssertEqual(ImageSize.mode(of: older), .legacy(0.5))
+        let sized = engine.restoring(.object(["io": .object(["upscale_factor": .number(1), "photo_long_side_px": .number(7200)])]))
+        XCTAssertEqual(ImageSize.target(of: sized), 7200)
     }
 
     func testUpdaterRequiresBothHTTPSFeedAndValidPublicKey() {

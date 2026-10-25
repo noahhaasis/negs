@@ -150,11 +150,32 @@ import XCTest
         XCTAssertEqual(atan2(corner.y - center.y, corner.x - center.x) * 180 / .pi, 135 - 10, accuracy: 1e-6)
     }
 
+    /// At Original, a crop only trims the developed photograph. With an Image
+    /// Size target its extent sets the working size (see ImageSizeTests).
     func testCropEditsDoNotChangeTheRenderedState() {
         var state = EditState()
         let rendered = state.rendered
         state.crop = CropSettings(rect: CGRect(x: 0, y: 0, width: 0.5, height: 0.5))
         XCTAssertEqual(state.rendered, rendered)
+        state.params[ImageSize.targetPath] = .number(3000)
+        let sized = state.rendered
+        state.crop.rect.origin = CGPoint(x: 0.5, y: 0.25)
+        XCTAssertEqual(state.rendered, sized)
+        state.crop.rect.size.width = 0.25
+        XCTAssertNotEqual(state.rendered, sized)
+    }
+
+    /// A draft too small for the Longest side reports the limit before Done.
+    func testCropDraftProjectsTheWorkingSize() {
+        var start = EditState()
+        start.params[ImageSize.targetPath] = .number(6000)
+        let session = CropSession(start: start, photo: CGSize(width: 6000, height: 4000), rotation: 0, source: CGSize(width: 6000, height: 4000))
+        session.rect = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        XCTAssertEqual(session.projectedWorking, CGSize(width: 12000, height: 8000))
+        XCTAssertNil(session.sizeError)
+        session.rect = CGRect(x: 0.4, y: 0.4, width: 0.2, height: 0.2)
+        XCTAssertNotNil(session.sizeError)
+        XCTAssertNil(CropSession(start: EditState(), photo: CGSize(width: 60, height: 40), rotation: 0, source: CGSize(width: 60, height: 40)).projectedWorking)
     }
 
     /// The canvas shows only the crop's pixels: layer contents are y-up, so
