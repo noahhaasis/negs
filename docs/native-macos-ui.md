@@ -77,6 +77,21 @@ UI responsiveness depends on a few SwiftUI/AppKit details:
 
 ## Startup
 
+Session restoration first checks a single lossless rendered-preview cache in
+`~/Library/Caches/dev.negs.app`. Its SHA-256 identity includes the rendering
+settings and file identities for the photograph, helper and engine data.
+Crop, rotation and borders are reapplied by the canvas from the saved session.
+A match appears without flashing the raw thumbnail or showing an Updating
+badge. The helper still renders in the background to restore its float output
+for Save Preview and Fast export; saving waits for that render as before.
+
+Rendering edits invalidate the disk frame immediately through the serial cache
+queue. Only a completed, current, noninteractive render can publish a new frame,
+using an atomic rename and a pixel checksum. Quit drains pending cache I/O.
+If an edit was unfinished at quit, or the cache is missing, corrupt or stale,
+startup uses the raw thumbnail and Developing badge as before. Only one display
+frame is retained; float output and undo history are never persisted.
+
 AppKit runs the application, menus, window, and toolbar
 (`EditorWindowController`, `MainMenu`); the canvas and inspector are SwiftUI
 views in `NSHostingController`s. Measured on an M1 Pro on battery, from launch

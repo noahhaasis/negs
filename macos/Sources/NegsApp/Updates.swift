@@ -10,12 +10,14 @@ import SwiftUI
     @Published private(set) var automaticChecks = false
     @Published private(set) var lastCheck: Date?
     @Published private(set) var configurationError: String?
+    @Published private(set) var sessionInProgress = false
     private var controller: SPUStandardUpdaterController?
     private var observations: [NSKeyValueObservation] = []
     private var launchTask: Task<Void, Never>?
     private var installTask: Task<Void, Never>?
     private weak var model: EditorModel?
     private(set) var installing = false
+    private var stopped = false
 
     var configured: Bool {
         Self.validConfiguration(Bundle.main.infoDictionary ?? [:])
@@ -30,7 +32,7 @@ import SwiftUI
 
     func schedule(afterStartupOf model: EditorModel) {
         self.model = model
-        guard configured, launchTask == nil else { return }
+        guard !stopped, configured, launchTask == nil else { return }
         launchTask = Task { [weak self, weak model] in
             // Avoid adding work during the first window layout and first render.
             try? await Task.sleep(for: .seconds(3))
@@ -44,11 +46,14 @@ import SwiftUI
     }
 
     private func start() {
-        guard configured, controller == nil else { return }
+        guard !stopped, configured, controller == nil else { return }
         let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
         self.controller = controller
         let updater = controller.updater
         observations = [
+            updater.observe(\.sessionInProgress, options: [.initial, .new]) { [weak self] updater, _ in
+                MainActor.assumeIsolated { self?.sessionInProgress = updater.sessionInProgress }
+            },
             updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
                 MainActor.assumeIsolated { self?.canCheck = updater.canCheckForUpdates }
             },
@@ -102,13 +107,24 @@ import SwiftUI
     }
 
     func stop() {
+        stopped = true
         launchTask?.cancel()
         installTask?.cancel()
+    }
+
+    func stopForAppDataRemoval() {
+        stop()
+        controller?.updater.automaticallyChecksForUpdates = false
+        observations.removeAll()
+        controller = nil
+        canCheck = false
     }
 }
 
 struct UpdateSettings: View {
     @ObservedObject var updates: UpdateController
+    var model: EditorModel
+    var removeAppData: () -> Void
 
     var body: some View {
         Form {
@@ -126,6 +142,18 @@ struct UpdateSettings: View {
             } else {
                 Text("Updates are not configured for this build.")
                 Text("Install a release build to receive updates.").foregroundStyle(.secondary)
+            }
+            Divider().padding(.vertical, 8)
+            Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
+                .disabled(model.saving || model.exporting || updates.installing || updates.sessionInProgress)
+            Text("Removes settings, the saved editing session, and caches. Your original photographs and exported images are kept.")
+                .font(.callout).foregroundStyle(.secondary)
+            if model.saving || model.exporting {
+                Text("Wait for the current save or export to finish before removing app data.")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else if updates.sessionInProgress || updates.installing {
+                Text("Finish or close the update dialog before removing app data.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
         }
         .padding(24).frame(width: 420)

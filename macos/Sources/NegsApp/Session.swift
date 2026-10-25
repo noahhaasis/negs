@@ -63,4 +63,7 @@ actor SessionStore {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: file, options: .atomic)
     }
+
+    /// An actor barrier: earlier session reads/writes finish before cleanup.
+    func finishPendingIO() {}
 }

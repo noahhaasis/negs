@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use serde_json::{Value, json};
 
 use crate::border::{BorderColor, BorderSettings, BorderStyle};
@@ -17,6 +17,7 @@ use crate::histogram::Histogram;
 use crate::json;
 use crate::picture::Picture;
 use crate::session::{CatalogCache, EditorSession, Preferences};
+use crate::rendered_preview::{self, Frame, RenderedPreviewCache};
 use crate::state::{EditState, Stock};
 use crate::ui::{self, App};
 
@@ -177,6 +178,7 @@ pub struct Rendered {
     pub interactive: bool,
     pub result: Value,
     pub picture: Picture,
+    pub cached: Option<(String, Frame)>,
 }
 
 pub struct Model {
@@ -228,6 +230,8 @@ pub struct Model {
     /// The shown frame was rendered at canvas size while a slider moved;
     /// letting go renders the photograph at export size.
     showing_interactive_frame: bool,
+    showing_cached_preview: bool,
+    preview_cache: RenderedPreviewCache,
     pending_render: bool,
     activity_timer: bool,
     interaction_start: Option<EditState>,
@@ -290,6 +294,8 @@ impl Model {
             render_at_export_size: false,
             render_on_gpu: false,
             showing_interactive_frame: false,
+            showing_cached_preview: false,
+            preview_cache: RenderedPreviewCache::default(),
             pending_render: false,
             activity_timer: false,
             interaction_start: None,
@@ -440,7 +446,7 @@ impl Model {
         }
         self.mark(dirty::STATUS | dirty::CHROME | dirty::INSPECTOR);
         if self.source.is_some() {
-            self.changed();
+            self.changed_with_cache(false);
         }
     }
 
@@ -768,6 +774,7 @@ impl Model {
         self.image = None;
         self.placeholder = None;
         self.preview_current = false;
+        self.showing_cached_preview = false;
         self.render_failed = false;
         self.update_histogram();
         self.interaction_start = None;
@@ -778,6 +785,7 @@ impl Model {
         self.holding_original = false;
         self.source_generation += 1;
         let generation = self.source_generation;
+        let restoring = session.is_some();
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
         if let Some(session) = session {
             let mut restored = session.state;
@@ -796,14 +804,36 @@ impl Model {
         crate::ui::note_recent_document(path);
         self.status = if self.ready { String::new() } else { "Starting…".into() };
         self.mark(dirty::ALL & !dirty::ERROR);
-        // Show the photograph at once; the developed render replaces it.
+        // Check the exact developed frame before decoding the raw placeholder.
         let path = path.to_path_buf();
-        std::thread::spawn(move || {
+        let state = self.state.clone();
+        let fallback = move || {
             if let Some((picture, size)) = crate::thumbnail::placeholder(&path) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
             }
-        });
-        self.changed();
+        };
+        if restoring && let Some(paths) = self.paths.clone() {
+            let expected = state.rendered();
+            self.preview_cache.load(self.source.clone().unwrap(), state, paths, move |frame| {
+                if let Some(frame) = frame {
+                    let size = Size::new(frame.photo_width, frame.photo_height);
+                    let raw = frame.raw;
+                    let picture = Picture::new(frame.pixels, frame.width, frame.height);
+                    ui::post(move |app: &mut App| {
+                        let model = &mut app.model;
+                        if generation != model.source_generation || model.image.is_some() || model.closing { return; }
+                        if model.state.rendered() != expected { std::thread::spawn(fallback); return; }
+                        model.image = Some(picture); model.image_size = size; model.is_raw = raw;
+                        model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
+                        model.update_histogram();
+                        model.mark(dirty::CANVAS | dirty::STATUS | dirty::INSPECTOR);
+                    });
+                } else { fallback(); }
+            });
+        } else {
+            std::thread::spawn(fallback);
+        }
+        self.changed_with_cache(!restoring);
     }
 
     fn show_placeholder(&mut self, picture: Picture, size: Size, generation: u64) {
@@ -909,6 +939,14 @@ impl Model {
     // MARK: Rendering
 
     fn changed(&mut self) {
+        self.changed_with_cache(true);
+    }
+
+    fn changed_with_cache(&mut self, invalidate: bool) {
+        if invalidate {
+            self.preview_cache.invalidate();
+            self.showing_cached_preview = false;
+        }
         self.revision += 1;
         self.preview_current = false;
         if self.render_failed {
@@ -959,22 +997,34 @@ impl Model {
             command["interactive_scale"] = json!(scale);
         }
         let started = Instant::now();
-        engine.request(command, engine::timeout_for("render"), move |result| {
-            // Read the buffer off the UI thread, before the next render can
-            // overwrite it.
-            let rendered = result.and_then(|(id, result)| {
-                let (w, h) = (json::number(&result["width"]) as u32, json::number(&result["height"]) as u32);
-                let picture = Picture::read(&buffer, w, h)?;
-                // A long GPU render may have outlived a driver reset.
-                if engine::elapsed_ms(started) > 1500.0
-                    && ExportEngine::ran_on_gpu(json::string(&result["backend"]))
-                    && crate::platform_events::display_reset_since(std::time::SystemTime::now() - started.elapsed())
-                {
-                    return Err(anyhow!("The graphics driver reset while developing the photograph, so this preview was discarded. Edit again to retry."));
-                }
-                Ok(Rendered { id, revision, generation, interactive: interactive_scale.is_some(), result, picture })
+        let state = self.state.clone();
+        let paths = self.paths.clone();
+        std::thread::spawn(move || {
+            let cache_key = if interactive_scale.is_none() { paths.and_then(|paths| rendered_preview::key(&source, &state, &paths)) } else { None };
+            engine.request(command, engine::timeout_for("render"), move |result| {
+                // Read the buffer off the UI thread, before the next render can
+                // overwrite it.
+                let rendered = result.and_then(|(id, result)| {
+                    let (w, h) = (json::number(&result["width"]) as u32, json::number(&result["height"]) as u32);
+                    ensure!(w > 0 && h > 0 && w <= crate::picture::MAX_PREVIEW && h <= crate::picture::MAX_PREVIEW, "Invalid preview dimensions");
+                    let pixels = std::fs::read(&buffer)?;
+                    ensure!(pixels.len() == w as usize * h as usize * 4, "Invalid preview buffer");
+                    let cached = cache_key.map(|key| (key, Frame {
+                        width: w, height: h, photo_width: json::number(&result["photo_width"]), photo_height: json::number(&result["photo_height"]),
+                        raw: json::boolean(&result["raw"]), pixels: pixels.clone(),
+                    }));
+                    let picture = Picture::new(pixels, w, h);
+                    // A long GPU render may have outlived a driver reset.
+                    if engine::elapsed_ms(started) > 1500.0
+                        && ExportEngine::ran_on_gpu(json::string(&result["backend"]))
+                        && crate::platform_events::display_reset_since(std::time::SystemTime::now() - started.elapsed())
+                    {
+                        return Err(anyhow!("The graphics driver reset while developing the photograph, so this preview was discarded. Edit again to retry."));
+                    }
+                    Ok(Rendered { id, revision, generation, interactive: interactive_scale.is_some(), result, picture, cached })
+                });
+                ui::post(move |app: &mut App| app.model.render_finished(rendered, revision, generation, interactive_scale.is_some()));
             });
-            ui::post(move |app: &mut App| app.model.render_finished(rendered, revision, generation, interactive_scale.is_some()));
         });
     }
 
@@ -1000,6 +1050,8 @@ impl Model {
                     self.hide_activity();
                     self.render_at_export_size = json::boolean(&result["export_resolution"]);
                     self.render_on_gpu = ExportEngine::ran_on_gpu(json::string(&result["backend"]));
+                    self.showing_cached_preview = false;
+                    if let Some((key, frame)) = rendered.cached { self.preview_cache.save(key, frame); }
                 }
                 let seconds = json::number(&result["elapsed_ms"]) / 1000.0;
                 let time = format!("developed in {seconds:.*} s", if seconds < 10.0 { 2 } else { 1 });
@@ -1069,7 +1121,7 @@ impl Model {
                 return;
             }
             model.activity_timer = false;
-            if !model.preview_current && !model.interacting() && !model.render_failed && model.source.is_some() {
+            if !model.preview_current && !model.showing_cached_preview && !model.interacting() && !model.render_failed && model.source.is_some() {
                 model.shows_activity = true;
                 model.mark(dirty::CANVAS);
             }
@@ -1290,6 +1342,7 @@ impl Model {
         if let Some(engine) = &self.engine {
             engine.stop();
         }
+        self.preview_cache.flush();
     }
 
     pub fn report(&mut self, error: &anyhow::Error) {

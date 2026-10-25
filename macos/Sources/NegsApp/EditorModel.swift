@@ -77,6 +77,8 @@ import UniformTypeIdentifiers
     /// The shown frame was rendered at canvas size while a slider moved;
     /// letting go renders the photograph at export size.
     @ObservationIgnored private var showingInteractiveFrame = false
+    @ObservationIgnored private var showingCachedPreview = false
+    @ObservationIgnored private let previewCache: RenderedPreviewCache
     @ObservationIgnored let canvasScale = CanvasScale()
     @ObservationIgnored private var pendingRender: Task<Void, Never>?
     @ObservationIgnored private var activityTimer: Task<Void, Never>?
@@ -116,7 +118,8 @@ import UniformTypeIdentifiers
     /// A slider is being dragged; its edits share one undo step.
     var interacting: Bool { interactionStart != nil }
 
-    init() {
+    init(previewCache: RenderedPreviewCache = RenderedPreviewCache()) {
+        self.previewCache = previewCache
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
     }
 
@@ -125,7 +128,7 @@ import UniformTypeIdentifiers
     /// last launch's catalog, if the helper is unchanged, fills in the stocks
     /// and defaults so the inspector's first frame is complete.
     func launch(paths: EnginePaths? = nil) {
-        guard engine == nil else { return }
+        guard !closing, engine == nil else { return }
         do {
             let engine = try EngineClient(paths: paths ?? EnginePaths.locate())
             self.engine = engine
@@ -145,6 +148,7 @@ import UniformTypeIdentifiers
         catalogRequest = nil
         do {
             let (_, catalog) = try await request.value
+            guard !closing else { return }
             guard catalog["protocol"].double == 1 else { throw EngineError(message: "The image engine version doesn't match this app. Rebuild the app bundle.") }
             // An unchanged catalog keeps edits made while the helper started.
             if catalog != self.catalog {
@@ -155,17 +159,18 @@ import UniformTypeIdentifiers
             // parameters before ready/changed so no default render is wasted.
             if let restoration, !explicitOpenRequested {
                 do {
-                    if let session = try await restoration.value, !explicitOpenRequested {
+                    if let session = try await restoration.value, !explicitOpenRequested, !closing {
                         try restore(session)
                     }
                 } catch {
                     if !explicitOpenRequested { status = error.localizedDescription }
                 }
             }
+            guard !closing else { return }
             ready = true
             if source == nil, status == "Starting…" { status = "" }
-            if source != nil { changed() }
-        } catch { report(error) }
+            if source != nil { changed(invalidateCache: false) }
+        } catch { if !closing { report(error) } }
     }
 
     private func apply(catalog: JSONValue) {
@@ -339,6 +344,7 @@ import UniformTypeIdentifiers
     /// A border, crop, or rotation change only redraws the canvas; anything
     /// else re-renders.
     private func replaceState(_ next: EditState) {
+        guard !closing else { return }
         let render = next.rendered != state.rendered
         state = next
         if render { changed() }
@@ -364,7 +370,7 @@ import UniformTypeIdentifiers
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
     var session: EditorSession? {
-        guard ready, let source else { return nil }
+        guard !closing, ready, let source else { return nil }
         var saved = state
         // Include a crop being drawn, without forcing the user to press Done.
         if let cropSession { saved.crop = cropSession.settings }
@@ -429,13 +435,14 @@ import UniformTypeIdentifiers
     }
 
     private func open(_ url: URL, restoring session: EditorSession?) {
-        guard url.isFileURL else { return }
+        guard !closing, url.isFileURL else { return }
         guard FileManager.default.isReadableFile(atPath: url.path) else {
             recentFiles.removeAll { $0 == url }; saveRecents()
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        showingCachedPreview = false
         updateHistogram()
         interactionStart = nil; cropSession = nil
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
@@ -457,12 +464,24 @@ import UniformTypeIdentifiers
         recentFiles = Array(recentFiles.prefix(10)); saveRecents()
         NSDocumentController.shared.noteNewRecentDocumentURL(url)
         status = ready ? "" : "Starting…"
-        // Show the photograph at once; the developed render replaces it.
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let (thumbnail, size) = Self.thumbnail(url) else { return }
-            await self?.showPlaceholder(thumbnail, size: size, generation: generation)
+        // Try the exact developed frame before decoding the raw placeholder,
+        // so a cache hit never flashes the unprocessed photograph.
+        let snapshot = state, paths = engine?.paths, cache = previewCache
+        Task { [weak self] in
+            if session != nil, let paths,
+               let cached = await cache.load(source: url, state: snapshot, paths: paths) {
+                guard let self, generation == self.sourceGeneration, self.image == nil, !self.closing else { return }
+                if self.state.rendered == snapshot.rendered {
+                    self.image = cached.surface; self.imageSize = cached.photoSize; self.isRaw = cached.raw
+                    self.showingCachedPreview = true; self.placeholder = nil; self.hideActivity()
+                    self.updateHistogram(); self.updateFilmStrip()
+                    return
+                }
+            }
+            let thumbnail = await Task.detached(priority: .userInitiated) { Self.thumbnail(url) }.value
+            if let (thumbnail, size) = thumbnail { self?.showPlaceholder(thumbnail, size: size, generation: generation) }
         }
-        changed()
+        changed(invalidateCache: session == nil)
     }
     private func showPlaceholder(_ thumbnail: CGImage, size: CGSize, generation: Int) {
         guard generation == sourceGeneration, image == nil else { return }
@@ -552,7 +571,8 @@ import UniformTypeIdentifiers
 
     // MARK: Rendering
 
-    private func changed() {
+    private func changed(invalidateCache: Bool = true) {
+        if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
         if renderFailed { renderFailed = false }
         guard ready, source != nil, !closing else { return }
@@ -582,6 +602,10 @@ import UniformTypeIdentifiers
             if revision != currentRevision || (interactiveScale != nil && !interacting), !closing { scheduleRender() }
         }
         do {
+            let cacheKey = await Task.detached(priority: .utility) {
+                interactiveScale == nil ? RenderedPreviewCache.key(source: source, state: snapshot, paths: engine.paths) : nil
+            }.value
+            guard shouldShow(currentRevision, generation) else { return }
             var command: [String: JSONValue] = [
                 "command": .string("render"), "input": .string(source.path),
                 "source_generation": .number(Double(generation)),
@@ -605,8 +629,10 @@ import UniformTypeIdentifiers
             isRaw = result["raw"].bool
             if revision == currentRevision, interactiveScale == nil {
                 renderID = id; previewCurrent = true; hideActivity()
+                showingCachedPreview = false
                 renderAtExportSize = result["export_resolution"].bool
                 renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
+                if let cacheKey { previewCache.save(developed, photoSize: imageSize, raw: isRaw, key: cacheKey) }
             }
             let seconds = result["elapsed_ms"].double / 1000
             let time = "developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
@@ -649,7 +675,7 @@ import UniformTypeIdentifiers
             try? await Task.sleep(for: .milliseconds(400))
             guard let self, !Task.isCancelled else { return }
             self.activityTimer = nil
-            if !self.previewCurrent, !self.interacting, !self.renderFailed, self.source != nil {
+            if !self.previewCurrent, !self.showingCachedPreview, !self.interacting, !self.renderFailed, self.source != nil {
                 self.showsActivity = true
             }
         }
@@ -662,10 +688,13 @@ import UniformTypeIdentifiers
     /// Reads the engine's RGBA buffer into an sRGB-tagged IOSurface. Core
     /// Animation composites it directly, with no conversion on the main thread.
     nonisolated static func readPreview(_ url: URL, width: Int, height: Int) throws -> IOSurface {
+        try previewSurface(Data(contentsOf: url), width: width, height: height)
+    }
+
+    nonisolated static func previewSurface(_ data: Data, width: Int, height: Int, bgra: Bool = false) throws -> IOSurface {
         let invalid = EngineError(message: "The image engine returned an invalid preview buffer.")
         guard width > 0, height > 0, width <= 8192, height <= 8192 else { throw EngineError(message: "Invalid preview dimensions") }
-        var bytes = try Data(contentsOf: url)
-        guard bytes.count == width * height * 4,
+        guard data.count == width * height * 4,
               let surface = IOSurface(properties: [
                   .width: width, .height: height, .bytesPerElement: 4,
                   .bytesPerRow: IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, width * 4),
@@ -675,11 +704,11 @@ import UniformTypeIdentifiers
         else { throw invalid }
         surface.lock(options: [], seed: nil)
         defer { surface.unlock(options: [], seed: nil) }
-        let permuted = bytes.withUnsafeMutableBytes { raw -> vImage_Error in
-            var source = vImage_Buffer(data: raw.baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 4)
+        let permuted = data.withUnsafeBytes { raw -> vImage_Error in
+            var source = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: raw.baseAddress), height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 4)
             var destination = vImage_Buffer(data: surface.baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: surface.bytesPerRow)
             // RGBA → BGRA, and opaque regardless of the engine's alpha byte.
-            let error = vImagePermuteChannels_ARGB8888(&source, &destination, [2, 1, 0, 3], vImage_Flags(kvImageNoFlags))
+            let error = vImagePermuteChannels_ARGB8888(&source, &destination, bgra ? [0, 1, 2, 3] : [2, 1, 0, 3], vImage_Flags(kvImageNoFlags))
             return error == kvImageNoError ? vImageOverwriteChannelsWithScalar_ARGB8888(255, &destination, &destination, 0x1, vImage_Flags(kvImageNoFlags)) : error
         }
         guard permuted == kvImageNoError else { throw invalid }
@@ -810,6 +839,7 @@ import UniformTypeIdentifiers
         catch { report(error) }
     }
     func cancelExport() { exportJob?.cancel() }
+    func flushPreviewCache() async { await previewCache.flush() }
     func shutdown() {
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
         exportJob?.cancel(); engine?.stop()

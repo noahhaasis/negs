@@ -160,6 +160,18 @@ final class ScratchSpace: @unchecked Sendable {
 
     deinit { remove() }
 
+    /// Clear abandoned launches while respecting another running app's lock.
+    static func cleanForRemoval(root: URL = defaultRoot) throws {
+        var info = stat()
+        if lstat(root.path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK {
+            guard unlink(root.path) == 0 else { throw EngineError(message: "Could not remove the temporary-data link.") }
+            return
+        }
+        sweep(root)
+        guard rmdir(root.path) != 0, errno != ENOENT else { return }
+        throw EngineError(message: "Could not remove temporary data: \(String(cString: strerror(errno))). Close any other running copy of Negs and retry.")
+    }
+
     /// Deletes the folder. The engine calls this when it stops.
     func remove() {
         lock.lock(); defer { lock.unlock() }

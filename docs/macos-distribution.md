@@ -17,6 +17,21 @@ to open it, use System Settings → Privacy & Security → Open Anyway. This rem
 a user-visible limitation of distributing without Developer ID. Sparkle's
 Ed25519 update signatures are independent of Apple signing and cost nothing.
 
+## Removing Negs and its data
+
+In **Negs → Settings**, choose **Remove All App Data and Quit…** and confirm.
+It discards the editing session, preferences and recent-file history, and
+removes app-owned caches (including the rendered startup frame), updater/HTTP
+storage, logs, saved window state and abandoned temporary engine files. Original
+photographs and exported images are preserved. Then move Negs from Applications
+to the Trash if you also want to remove the app itself.
+
+The action waits for an active save/export or update session to finish before
+it becomes available. It stops the helper and updater and drains pending I/O
+before deleting data, and quitting does not save a replacement session. Failed
+removals are reported with a Retry option; another running copy's locked
+temporary files are preserved. Normal quits and updates still save the session.
+
 ## Update UI and restart behavior
 
 Release builds use Sparkle 2.10.0's native windows and release notes. The

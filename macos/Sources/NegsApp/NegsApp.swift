@@ -23,6 +23,8 @@ import SwiftUI
     private var menu: MainMenu?
     private var editor: EditorWindowController?
     private var terminating = false
+    private var removingAppData = false
+    private var appDataRemovalFinished = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // The helper starts while AppKit builds the window, and the cached
@@ -39,7 +41,7 @@ import SwiftUI
         }
         #endif
         Task { await model.start(restoration: restoration) }
-        menu = MainMenu(model: model, updates: updates)
+        menu = MainMenu(model: model, updates: updates) { [weak self] in self?.removeAllAppData() }
         NSApp.mainMenu = menu?.menu
         editor = EditorWindowController(model: model)
     }
@@ -61,6 +63,8 @@ import SwiftUI
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Cleanup intentionally discards the session. Never recreate it here.
+        if removingAppData { return appDataRemovalFinished ? .terminateNow : .terminateCancel }
         guard !terminating else { return .terminateLater }
         if model.saving || (updates.installing && model.exporting) { return .terminateCancel }
         if model.exporting {
@@ -79,6 +83,7 @@ import SwiftUI
         Task {
             do {
                 try await sessions.save(session)
+                await model.flushPreviewCache()
                 sender.reply(toApplicationShouldTerminate: true)
             } catch {
                 terminating = false
@@ -87,6 +92,45 @@ import SwiftUI
             }
         }
         return .terminateLater
+    }
+
+    private func removeAllAppData() {
+        guard !removingAppData, !terminating, !model.saving, !model.exporting, !updates.installing, !updates.sessionInProgress else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Remove all Negs app data and quit?"
+        alert.informativeText = "This removes your settings, saved editing session, recent-file history, and caches. Your current adjustments will be discarded. Original photographs and exported images are kept.\n\nNegs remains installed. You can move it to the Trash after it quits."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Remove App Data and Quit")
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        removingAppData = true
+        updates.stopForAppDataRemoval()
+        editor?.prepareForAppDataRemoval()
+        menu?.prepareForAppDataRemoval()
+        model.shutdown()
+        Task {
+            await model.flushPreviewCache()
+            // Wait for an in-flight startup load before deleting session files.
+            await sessions.finishPendingIO()
+            let locations = AppDataLocations.current
+            while true {
+                NSDocumentController.shared.clearRecentDocuments(nil)
+                var failures = await Task.detached(priority: .userInitiated) { AppDataCleaner.removeFiles(at: locations) }.value
+                if !AppDataCleaner.removePreferences(domain: locations.preferencesDomain) {
+                    failures.append("The saved preferences could not be cleared.")
+                }
+                if failures.isEmpty { break }
+                let failed = NSAlert()
+                failed.alertStyle = .warning
+                failed.messageText = "Some app data could not be removed."
+                failed.informativeText = failures.joined(separator: "\n\n")
+                failed.addButton(withTitle: "Retry")
+                failed.addButton(withTitle: "Quit")
+                if failed.runModal() != .alertFirstButtonReturn { break }
+            }
+            appDataRemovalFinished = true
+            NSApp.terminate(nil)
+        }
     }
     func applicationWillTerminate(_ notification: Notification) { updates.stop(); model.shutdown() }
 }

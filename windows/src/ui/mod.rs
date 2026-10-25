@@ -1038,6 +1038,9 @@ fn forward_to_running(path: Option<&Path>) -> bool {
 /// catalog first, the window's first frame next, then the adjustments, the
 /// GPU and everything else.
 pub fn run() {
+    // Held until process exit, including test launches with multiple instances.
+    // The installer/uninstaller waits for every app to stop before touching data.
+    let _app_lifetime_mutex = unsafe { CreateMutexW(None, false, w!("Local\\Negs.AppLifetime")) };
     let launched = platform::qpc();
     let path = std::env::args_os().skip(1).map(PathBuf::from).find(|p| !p.to_string_lossy().starts_with('-') && p.is_file());
     let path = path.map(|p| std::path::absolute(&p).unwrap_or(p));

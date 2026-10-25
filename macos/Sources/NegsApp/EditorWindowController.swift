@@ -86,6 +86,13 @@ import SwiftUI
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Prevent window closure during data removal from restoring preferences.
+    func prepareForAppDataRemoval() {
+        window?.setFrameAutosaveName("")
+        (window?.contentViewController as? NSSplitViewController)?.splitView.autosaveName = nil
+        window?.orderOut(nil)
+    }
+
     // MARK: State
 
     private func windowChangedOcclusion() {
