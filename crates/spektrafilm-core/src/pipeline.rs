@@ -142,10 +142,6 @@ pub struct Pipeline {
     preflash_raw: [f64; 3],
     /// Output gamut compressor (built once; identity unless oklch is enabled).
     output_gamut: crate::gamut_compression::OutputGamutCompress,
-    /// The film's density curves as loaded (after the B&W development-time
-    /// collapse), before the film-curve morph. `film.data.density_curves`
-    /// holds the morphed curves while the morph is active.
-    film_stock_density_curves: Vec<Vec<f64>>,
 }
 
 impl Pipeline {
@@ -184,16 +180,18 @@ impl Pipeline {
         self
     }
 
-    /// Bake the film-curve morph into `film.data.density_curves`, as upstream
-    /// experimental bakes `film_render.chemistry` into the film profile before
-    /// any stage reads it. Active: the curves are re-evaluated from the fitted
-    /// model with the morph applied (upstream's
-    /// `apply_print_curves_morph_with_layers`; the per-layer curves it also
-    /// returns feed upstream's layered grain, which this port doesn't have).
-    /// Inactive, or a profile without a usable model: the stored curves.
-    /// Upstream re-evaluates the fitted model even when inactive; keeping the
-    /// stored curves leaves default renders byte-identical to upstream main.
+    /// Bake the film-curve morph into `film.data.density_curves` and
+    /// `film.data.density_curves_layers`, as upstream experimental bakes
+    /// `film_render.chemistry` into the film profile before any stage reads
+    /// it (`apply_print_curves_morph_with_layers`). The curves are always
+    /// re-evaluated from the fitted model; inactive or identity settings
+    /// reproduce the model-derived curves the profile was loaded with.
     fn apply_film_curves_morph(&mut self) {
+        let Some(model) = self.film.data.density_curves_model.as_ref() else {
+            // Only programmatically built profiles lack a model; `load_profile`
+            // refuses them. Keep their curves as they are.
+            return;
+        };
         let mut morph = self.params.film_render.density_curves_morph.clone();
         if self.film.is_bw() {
             // Upstream morphs a B&W stock's single channel with the red
@@ -201,23 +199,35 @@ impl Pipeline {
             morph.gamma_factor_green = morph.gamma_factor_red;
             morph.gamma_factor_blue = morph.gamma_factor_red;
         }
-        let morphed = match (morph.active, self.film.data.density_curves_model.as_ref()) {
-            (true, Some(model)) => match crate::print_morph::morph_density_curves(
-                &self.film.data.log_exposure,
-                model,
-                &morph,
-                self.film.is_positive(),
-            ) {
-                Ok(curves) => Some(curves.iter().map(|row| row.to_vec()).collect()),
-                Err(e) => {
-                    tracing::error!(error = %e, "film-curve morph failed; using stored curves");
-                    None
-                }
-            },
-            _ => None,
-        };
-        self.film.data.density_curves =
-            morphed.unwrap_or_else(|| self.film_stock_density_curves.clone());
+        let log_exposure = &self.film.data.log_exposure;
+        let positive = self.film.is_positive();
+        let result =
+            crate::print_morph::morph_density_curves_with_layers(log_exposure, model, &morph, positive)
+                .or_else(|e| {
+                    tracing::error!(error = %e, "film-curve morph failed; using the fitted curves");
+                    let inactive = crate::params::CurvesMorphParams { active: false, ..morph.clone() };
+                    crate::print_morph::morph_density_curves_with_layers(
+                        log_exposure,
+                        model,
+                        &inactive,
+                        positive,
+                    )
+                });
+        match result {
+            Ok((total, layers)) => {
+                let n_layers = model.n_layers();
+                self.film.data.density_curves = total.iter().map(|row| row.to_vec()).collect();
+                self.film.data.density_curves_layers = if n_layers > 1 {
+                    layers
+                        .iter()
+                        .map(|row| row.iter().map(|l| l.to_vec()).collect())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            }
+            Err(e) => tracing::error!(error = %e, "film density curve model is unusable"),
+        }
     }
 }
 
@@ -245,7 +255,6 @@ impl Pipeline {
             &params.io.output_color_space,
         );
         let front_illuminant = film.info.reference_illuminant.clone();
-        let film_stock_density_curves = film.data.density_curves.clone();
         let mut pipeline = Self {
             film,
             print,
@@ -258,7 +267,6 @@ impl Pipeline {
             print_sensitivity: Vec::new(),
             preflash_raw: [0.0; 3],
             output_gamut,
-            film_stock_density_curves,
         };
         pipeline.apply_film_curves_morph();
         pipeline
@@ -449,7 +457,6 @@ impl Pipeline {
             &params.io.output_gamut_compress,
             &params.io.output_color_space,
         );
-        let film_stock_density_curves = film.data.density_curves.clone();
         let mut pipeline = Self {
             film,
             print,
@@ -462,7 +469,6 @@ impl Pipeline {
             print_sensitivity,
             preflash_raw,
             output_gamut,
-            film_stock_density_curves,
         };
         pipeline.apply_film_curves_morph();
         pipeline.print_exposure_factor = pipeline.compute_print_exposure_factor();
@@ -890,30 +896,24 @@ impl Pipeline {
         // Print density curves: model-evaluated at gamma 1 whenever the
         // profile carries a fitted `density_curves_model` (identity when the
         // morph is inactive, morphed when active — matching the CPU
-        // `develop_print_morph` path); stored RAW curves at the configured
-        // gamma only for model-less profiles. Computed once on CPU here so
+        // `develop_print_morph` path); stored RAW curves only for model-less
+        // profiles. Computed once on CPU here so
         // the resident print density pass needs no shader change.
         let morph = &self.params.print_render.density_curves_morph;
-        let (print_curves, print_gamma_eff) = match self.print.data.density_curves_model.as_ref() {
+        let print_curves = match self.print.data.density_curves_model.as_ref() {
             Some(model) => match crate::print_morph::morph_density_curves(
                 &print_log_exp,
                 model,
                 morph,
                 self.print.is_positive(),
             ) {
-                Ok(curves) => (curves, 1.0),
+                Ok(curves) => curves,
                 Err(e) => {
                     tracing::error!(error = %e, "print-curve model eval failed; using stored curves");
-                    (
-                        self.print.density_curves_f64(),
-                        self.params.print_render.density_curve_gamma as f64,
-                    )
+                    self.print.density_curves_f64()
                 }
             },
-            None => (
-                self.print.density_curves_f64(),
-                self.params.print_render.density_curve_gamma as f64,
-            ),
+            None => self.print.density_curves_f64(),
         };
         let print_channel_density: Vec<[f64; 3]> = self
             .print
@@ -1090,7 +1090,6 @@ impl Pipeline {
                 dir.diffusion_tail_um,
                 dir.diffusion_tail_weight,
                 self.film.is_positive(),
-                self.params.film_render.density_curve_gamma as f64,
             ))
         } else {
             None
@@ -1111,7 +1110,8 @@ impl Pipeline {
                 diffusion_tail_weight: d.6 as f32,
                 density_curves_0: &d.0,
                 log_exposure: &film_log_exp,
-                gamma_factor: d.8,
+                // The Film Curves morph is baked into the curves.
+                gamma_factor: 1.0,
             }
         });
 
@@ -1272,7 +1272,7 @@ impl Pipeline {
             front,
             film_log_exposure: &film_log_exp,
             film_density_curves_normalized: &film_curves_norm,
-            film_gamma: self.params.film_render.density_curve_gamma as f64,
+            film_gamma: 1.0,
             film_channel_density: &film_channel_density,
             film_base_density: &film_base_density,
             print_illuminant: &self.print_illuminant,
@@ -1280,7 +1280,7 @@ impl Pipeline {
             print_normalization_factor: print_norm_factor,
             print_log_exposure: &print_log_exp,
             print_density_curves: &print_curves,
-            print_gamma: print_gamma_eff,
+            print_gamma: 1.0,
             print_channel_density: &print_channel_density,
             print_base_density: &print_base_density,
             preflash: self.preflash_raw,

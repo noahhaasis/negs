@@ -433,8 +433,6 @@ impl Default for GlareParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilmRenderingParams {
-    #[serde(default = "default_one")]
-    pub density_curve_gamma: f32,
     /// Development time (minutes) for B&W development-time families —
     /// forward-port of upstream dev's `chemistry.development_time`. Selects
     /// the nearest entry of the profile's family; `None` picks the
@@ -451,9 +449,9 @@ pub struct FilmRenderingParams {
     pub glare: GlareParams,
     /// Film counterpart of the print-curve morph — forward-port of upstream
     /// experimental's `film_render.chemistry` (minus `development_time`,
-    /// above). Unlike upstream, the inactive morph keeps the profile's stored
-    /// curves rather than re-evaluating the fitted model, so default renders
-    /// are unchanged; see `Pipeline::apply_film_curves_morph`.
+    /// above), which replaced the old `density_curve_gamma`. The curves are
+    /// always re-evaluated from the fitted model; inactive or identity
+    /// settings reproduce it. See `Pipeline::apply_film_curves_morph`.
     #[serde(default)]
     pub density_curves_morph: CurvesMorphParams,
 }
@@ -461,7 +459,6 @@ pub struct FilmRenderingParams {
 impl Default for FilmRenderingParams {
     fn default() -> Self {
         Self {
-            density_curve_gamma: 1.0,
             development_time: None,
             grain: GrainParams::default(),
             halation: HalationParams::default(),
@@ -474,8 +471,6 @@ impl Default for FilmRenderingParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrintRenderingParams {
-    #[serde(default = "default_one")]
-    pub density_curve_gamma: f32,
     /// Development time (minutes) for B&W print stocks (e.g. kodak_2302) —
     /// same semantics as `FilmRenderingParams::development_time`.
     #[serde(default)]
@@ -489,7 +484,6 @@ pub struct PrintRenderingParams {
 impl Default for PrintRenderingParams {
     fn default() -> Self {
         Self {
-            density_curve_gamma: 1.0,
             development_time: None,
             glare: GlareParams::default(),
             density_curves_morph: CurvesMorphParams::default(),

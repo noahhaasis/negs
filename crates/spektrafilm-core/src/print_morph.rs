@@ -305,11 +305,28 @@ pub fn morph_density_curves(
     p: &CurvesMorphParams,
     positive: bool,
 ) -> Result<Vec<[f64; 3]>, String> {
+    morph_density_curves_with_layers(log_exposure, model, p, positive).map(|(total, _)| total)
+}
+
+/// [`morph_density_curves`] that also returns the per-sub-layer curves,
+/// `(total [n_le][3], layers [n_le][n_layers][3])`. Port of upstream
+/// `apply_print_curves_morph_with_layers`, which bakes the film chemistry
+/// into the film profile so the grain sub-layers stay consistent with the
+/// morph. The total is the in-order sum of the layers, which is also how
+/// upstream's `apply_print_curves_morph` accumulates it, so both agree
+/// bit for bit.
+#[allow(clippy::type_complexity)]
+pub fn morph_density_curves_with_layers(
+    log_exposure: &[f64],
+    model: &DensityCurvesModel,
+    p: &CurvesMorphParams,
+    positive: bool,
+) -> Result<(Vec<[f64; 3]>, Vec<Vec<[f64; 3]>>), String> {
     // The port implements only the Gaussian-CDF model: upstream 0.3.4 calls
     // it "cdfs", upstream dev renames it "norm_cdfs" (identical formula —
-    // dev's `_GAUSS_MODEL_TYPES = ('norm_cdfs',)`); the B&W profiles carry
-    // the new name. The skewed "sept_norm_cdfs" variant would evaluate
-    // wrongly as Gaussian — refuse rather than emit silently-wrong densities.
+    // dev's `_GAUSS_MODEL_TYPES = ('norm_cdfs',)`). The skewed
+    // "sept_norm_cdfs" variant would evaluate wrongly as Gaussian — refuse
+    // rather than emit silently-wrong densities.
     if model.model_type != "cdfs" && model.model_type != "norm_cdfs" {
         return Err(format!(
             "unsupported density_curves_model type {:?} (expected \"cdfs\"/\"norm_cdfs\")",
@@ -335,57 +352,54 @@ pub fn morph_density_curves(
             return Err(format!("density_curves_model.{name} must be 3×{n_layers}"));
         }
     }
-    // Upstream `apply_print_curves_morph` short-circuits when inactive: the
-    // fitted model is evaluated as-is (`_evaluate_fitted_density`) and the
-    // morph parameters — including invalid ones — are never read.
-    if !p.active {
-        let zero_mix = vec![0.0f64; n_layers];
-        let mut out = vec![[0.0f64; 3]; log_exposure.len()];
-        for channel in 0..3 {
-            let col = evaluate_channel_density(
-                log_exposure,
-                &model.centers[channel],
-                &model.amplitudes[channel],
-                &model.sigmas[channel],
-                positive,
-                &zero_mix,
-            );
-            for (row, &v) in out.iter_mut().zip(col.iter()) {
-                row[channel] = v;
+    // Upstream short-circuits when inactive: the fitted model is evaluated
+    // as-is and the morph parameters — including invalid ones — are never
+    // read.
+    if p.active {
+        for (name, v) in [
+            ("gamma_factor", p.gamma_factor),
+            ("gamma_factor_fast", p.gamma_factor_fast),
+            ("gamma_factor_slow", p.gamma_factor_slow),
+            ("gamma_factor_red", p.gamma_factor_red),
+            ("gamma_factor_green", p.gamma_factor_green),
+            ("gamma_factor_blue", p.gamma_factor_blue),
+        ] {
+            if v <= 0.0 {
+                return Err(format!("{name} must be strictly positive (got {v})"));
             }
         }
-        return Ok(out);
-    }
-
-    for (name, v) in [
-        ("gamma_factor", p.gamma_factor),
-        ("gamma_factor_fast", p.gamma_factor_fast),
-        ("gamma_factor_slow", p.gamma_factor_slow),
-        ("gamma_factor_red", p.gamma_factor_red),
-        ("gamma_factor_green", p.gamma_factor_green),
-        ("gamma_factor_blue", p.gamma_factor_blue),
-    ] {
-        if v <= 0.0 {
-            return Err(format!("{name} must be strictly positive (got {v})"));
+        if !(0.0..=1.0).contains(&p.developer_exhaustion) {
+            return Err(format!(
+                "developer_exhaustion must be in [0, 1] (got {})",
+                p.developer_exhaustion
+            ));
         }
     }
-    if !(0.0..=1.0).contains(&p.developer_exhaustion) {
-        return Err(format!(
-            "developer_exhaustion must be in [0, 1] (got {})",
-            p.developer_exhaustion
-        ));
-    }
 
-    let mut out = vec![[0.0f64; 3]; log_exposure.len()];
+    let mut total = vec![[0.0f64; 3]; log_exposure.len()];
+    let mut layers = vec![vec![[0.0f64; 3]; n_layers]; log_exposure.len()];
     for channel in 0..3 {
-        let (centers, amplitudes, sigmas, mix) = morph_channel_params(model, p, channel, positive);
-        let col =
-            evaluate_channel_density(log_exposure, &centers, &amplitudes, &sigmas, positive, &mix);
-        for (row, &v) in out.iter_mut().zip(col.iter()) {
-            row[channel] = v;
+        let (centers, amplitudes, sigmas, mix) = if p.active {
+            morph_channel_params(model, p, channel, positive)
+        } else {
+            (
+                model.centers[channel].clone(),
+                model.amplitudes[channel].clone(),
+                model.sigmas[channel].clone(),
+                vec![0.0f64; n_layers],
+            )
+        };
+        for (i, &x) in log_exposure.iter().enumerate() {
+            let mut sum = 0.0f64;
+            for l in 0..n_layers {
+                let d = amplitudes[l] * layer_cdf((x - centers[l]) / sigmas[l], positive, mix[l]);
+                layers[i][l][channel] = d;
+                sum += d;
+            }
+            total[i][channel] = sum;
         }
     }
-    Ok(out)
+    Ok((total, layers))
 }
 
 #[cfg(test)]
@@ -403,8 +417,8 @@ mod parity_tests {
     }
 
     /// s023 print-curve morph regression guard. Morphed density curves for the
-    /// kodak_portra_endura fitted model are cross-checked against a faithful
-    /// transcription of upstream `morph_curves.py` (scipy `norm.cdf` + `brentq`)
+    /// kodak_portra_endura fitted model are cross-checked against upstream
+    /// experimental 28bf883's `morph_curves.py` (scipy `norm.cdf` + `brentq`)
     /// with a non-identity setting that exercises every control, including the
     /// developer-exhaustion offset solve.
     #[test]
@@ -428,56 +442,17 @@ mod parity_tests {
         };
         let morphed = morph_density_curves(&log_exposure, model, &p, positive).unwrap();
 
-        // (sample_index, R, G, B) from /tmp/morph_ref.py against the same model.
+        // (sample_index, R, G, B) from experimental 28bf883's
+        // `apply_print_curves_morph` on the same (28bf883) model.
         let expect: [(usize, [f64; 3]); 8] = [
-            (
-                0,
-                [
-                    1.2906643409588795e-31,
-                    2.2185991932034967e-26,
-                    3.4424343941784738e-29,
-                ],
-            ),
-            (
-                32,
-                [
-                    1.731310059675948e-16,
-                    5.7293695795930524e-14,
-                    1.7834501481392706e-15,
-                ],
-            ),
-            (
-                64,
-                [
-                    1.2936031327160644e-06,
-                    7.7307480947653245e-06,
-                    1.817160255677715e-06,
-                ],
-            ),
-            (
-                100,
-                [
-                    0.20550253856702763,
-                    0.18645371342322808,
-                    0.14121296658559268,
-                ],
-            ),
-            (
-                128,
-                [2.2534590034222939, 1.7620679006649806, 1.7425395878923342],
-            ),
-            (
-                160,
-                [2.4610942432356335, 2.0655320765552783, 1.8208891086219476],
-            ),
-            (
-                200,
-                [2.462127527752795, 2.0678714180801663, 1.8213460466547904],
-            ),
-            (
-                255,
-                [2.462132276731988, 2.0678883162266803, 1.8213486357958832],
-            ),
+            (0, [6.04374181357351e-32, 1.8626071677241133e-26, 5.133309699665567e-29]),
+            (32, [1.0587496409351388e-16, 5.213366461788462e-14, 2.4555235615139012e-15]),
+            (64, [9.939369217475997e-07, 7.439137710938368e-06, 2.241644080123102e-06]),
+            (100, [0.1912862823336439, 0.18531041493200068, 0.15164796399974384]),
+            (128, [2.2414834969040576, 1.7608119481223927, 1.7480868974096948]),
+            (160, [2.45869493442771, 2.0652999342370912, 1.8206426676953955]),
+            (200, [2.4597462787423585, 2.067618475281535, 1.8210696107660937]),
+            (255, [2.4597509970155245, 2.067634980096055, 1.8210719974895442]),
         ];
         for (i, want) in expect {
             for c in 0..3 {
@@ -529,6 +504,7 @@ mod parity_tests {
             centers: vec![vec![0.0; 3]; 3],
             amplitudes: vec![vec![1.0; 3]; 3],
             sigmas: vec![vec![1.0; 3]; 3],
+            alphas: None,
         };
         let p = CurvesMorphParams {
             active: true,
