@@ -537,10 +537,11 @@ Behaviour:
   rotation, border and size. Only when the preview is current.
 - **Export LUT…**, directly below Export Photograph in File on both platforms,
   exports a 33³ `.cube` with sRGB encoded input/output. It snapshots the current
-  film/paper settings, including manual exposure, development, print filters and
-  color controls. No photo is required. The dialog and file comments explain
-  the exclusions: auto exposure, grain, halation/scatter, highlight boost,
-  glare, diffusion, blur, sharpening, RAW development, resizing and Post edits.
+  film/paper settings, including manual exposure, development, the neutral print
+  filters and color controls. No photo is required. The dialog and file comments
+  explain the exclusions: auto exposure, print filter shifts, preflash, grain,
+  halation/scatter, highlight boost, glare, diffusion, blur, sharpening, RAW
+  development, resizing and Post edits.
   DIR color inhibition remains active without spatial diffusion. Export uses
   the same calibrated spectral pipeline as the preview, in one grid render,
   and preserves the active preview. `spektrafilm export-lut --params` shares
