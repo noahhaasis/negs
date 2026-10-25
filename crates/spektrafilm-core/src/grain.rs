@@ -157,54 +157,19 @@ pub fn grain_active(params: &RuntimeParams) -> bool {
 }
 
 /// The curves the grain reads: the film's normalized total curves (as
-/// `develop` uses them) and its per-sub-layer curves.
+/// `develop` uses them) and its per-sub-layer curves
+/// ([`Profile::density_curves_layers_f64`]). Read from the pipeline's film,
+/// both carry the Film Curves morph, as upstream's
+/// `apply_print_curves_morph_with_layers` bakes it into the curves and the
+/// layers the grain samples. A single-layer model has no layers (upstream's
+/// `None`) and grains the total as one layer.
 pub fn grain_curves(film: &Profile) -> GrainCurves {
     let total =
         spektrafilm_model::density_curves::normalize_density_curves_f64(&film.density_curves_f64());
-    match film_density_curves_layers(film) {
+    match film.density_curves_layers_f64() {
         Some(layers) => GrainCurves::new(total, &layers),
         None => GrainCurves::single_layer(total),
     }
-}
-
-/// INTERIM, until exp-data lands: the per-sub-layer curves
-/// (`[sample][sub-layer][channel]`), evaluated here from the profile's fitted
-/// Gaussian-CDF model on its log-exposure grid (upstream
-/// `evaluate_density_curves_layers`, `model/density_curves.py:117`). Upstream
-/// takes them from `apply_print_curves_morph_with_layers`, so with Film Curves
-/// on they carry the morph; these don't. Replace this function's body with
-/// exp-data's `density_curves_layers` and nothing else changes. `None` for a
-/// single-layer or missing model, as upstream.
-fn film_density_curves_layers(film: &Profile) -> Option<Vec<Vec<[f64; 3]>>> {
-    let model = film.data.density_curves_model.as_ref()?;
-    if !matches!(model.model_type.as_str(), "cdfs" | "norm_cdfs") || model.n_channels() != 3 {
-        return None;
-    }
-    let n_layers = model.n_layers();
-    if n_layers <= 1
-        || [&model.centers, &model.amplitudes, &model.sigmas]
-            .iter()
-            .any(|rows| rows.iter().any(|r| r.len() != n_layers))
-    {
-        return None;
-    }
-    let sign = if film.is_positive() { -1.0 } else { 1.0 };
-    Some(
-        film.data
-            .log_exposure
-            .iter()
-            .map(|&x| {
-                (0..n_layers)
-                    .map(|l| {
-                        std::array::from_fn(|ch| {
-                            let z = sign * (x - model.centers[ch][l]) / model.sigmas[ch][l];
-                            model.amplitudes[ch][l] * crate::print_morph::norm_cdf(z)
-                        })
-                    })
-                    .collect()
-            })
-            .collect(),
-    )
 }
 
 #[cfg(test)]
@@ -243,24 +208,47 @@ mod tests {
     }
 
     #[test]
-    fn model_layers_sum_to_the_model_total() {
+    fn grain_layers_sum_to_the_film_curves() {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let morph = crate::params::CurvesMorphParams {
+            active: true,
+            gamma_factor: 1.3,
+            gamma_factor_fast: 0.8,
+            developer_exhaustion: 0.4,
+            ..Default::default()
+        };
         for name in ["kodak_portra_400", "fujifilm_provia_100f", "kodak_doublex"] {
-            let f = film(name);
-            let layers = film_density_curves_layers(&f).unwrap();
-            let model = f.data.density_curves_model.as_ref().unwrap();
-            let total = crate::print_morph::morph_density_curves(
-                &f.data.log_exposure,
-                model,
-                &Default::default(),
-                f.is_positive(),
-            )
-            .unwrap();
-            for (row, t) in layers.iter().zip(&total) {
-                for ch in 0..3 {
-                    let sum: f64 = row.iter().map(|v| v[ch]).sum();
-                    assert!((sum - t[ch]).abs() < 1e-12, "{name}");
+            let load = |n: &str| crate::profile::load_profile_by_name(&data, n).unwrap();
+            let paper = if name == "kodak_doublex" { "kodak_2302" } else { "kodak_portra_endura" };
+            let mut params = RuntimeParams::default();
+            let plain = crate::pipeline::Pipeline::new(load(name), load(paper), params.clone());
+            params.film_render.density_curves_morph = morph.clone();
+            let morphed = crate::pipeline::Pipeline::new(load(name), load(paper), params);
+            let mut moved = 0.0f64;
+            for pipeline in [&plain, &morphed] {
+                // The layers the grain samples add up to the curves the film
+                // develops with, morph included.
+                let f = &pipeline.film;
+                let layers = f.density_curves_layers_f64().unwrap();
+                for (row, t) in layers.iter().zip(f.density_curves_f64()) {
+                    for ch in 0..3 {
+                        let sum: f64 = row.iter().map(|v| v[ch]).sum();
+                        assert!((sum - t[ch]).abs() < 1e-12, "{name}");
+                    }
                 }
             }
+            let (a, b) = (
+                plain.film.density_curves_layers_f64().unwrap(),
+                morphed.film.density_curves_layers_f64().unwrap(),
+            );
+            for (ra, rb) in a.iter().zip(&b) {
+                for (la, lb) in ra.iter().zip(rb) {
+                    for ch in 0..3 {
+                        moved = moved.max((la[ch] - lb[ch]).abs());
+                    }
+                }
+            }
+            assert!(moved > 1e-2, "{name}: the morph doesn't reach the grain layers");
         }
     }
 }
