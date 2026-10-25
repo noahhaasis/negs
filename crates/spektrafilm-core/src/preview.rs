@@ -2,7 +2,7 @@
 use crate::params::RuntimeParams;
 use rayon::prelude::*;
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::precision::{Scalar, from_f32, to_f32};
+use spektrafilm_math::precision::{from_f32, to_f32};
 
 pub fn preview_pipeline_cache_key(
     film_name: &str,
@@ -59,6 +59,13 @@ pub fn preview_dimensions(width: u32, height: u32, factor: f32, limited: bool) -
             ((height as f32 * factor).round() as u32).max(1),
         )
     };
+    preview_cap((width, height), limited)
+}
+
+/// The preview of a `working` frame: the frame itself, or with `limited`,
+/// at most [`PREVIEW_PIXEL_LIMIT`] pixels with its aspect ratio. Never larger
+/// than the working frame, and never the size an export develops at.
+pub fn preview_cap((width, height): (u32, u32), limited: bool) -> (u32, u32) {
     let pixels = u64::from(width) * u64::from(height);
     if !limited || pixels <= PREVIEW_PIXEL_LIMIT {
         return (width, height);
@@ -72,24 +79,37 @@ pub fn preview_dimensions(width: u32, height: u32, factor: f32, limited: bool) -
     )
 }
 
-pub fn rescale_preview_input_fast(image: &ImageBuf, (new_w, new_h): (u32, u32)) -> ImageBuf {
-    // The normal f32 GUI can resize directly from the retained source,
-    // avoiding another full-resolution RGB allocation just to downsample.
-    #[cfg(not(feature = "precision-f64"))]
-    let f32buf = image.data.as_slice();
-    #[cfg(feature = "precision-f64")]
-    let f32buf: Vec<f32> = image.data.par_iter().map(|&v| to_f32(v)).collect();
-    let src = image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(image.width, image.height, f32buf)
-        .expect("ImageBuf dims match its data length");
-    let dst = image::imageops::resize(&src, new_w, new_h, image::imageops::FilterType::CatmullRom);
-    let data: Vec<Scalar> = dst.into_raw().into_par_iter().map(from_f32).collect();
-    ImageBuf::from_data(new_w, new_h, data)
+/// The frame rendered while a slider moves: `scale` (screen pixels per
+/// photograph pixel, below 1) of the `photo` frame, reduced further as needed
+/// to fit inside the `source`, so a drag never enlarges the source and
+/// [`downsample_area`] always applies. Image Size enlarges only the settled
+/// frame. Keeps the aspect ratio.
+pub fn interactive_dimensions(photo: (u32, u32), scale: f32, source: (u32, u32)) -> (u32, u32) {
+    let frame = (
+        ((photo.0 as f32 * scale).round() as u32).max(1),
+        ((photo.1 as f32 * scale).round() as u32).max(1),
+    );
+    if frame.0 <= source.0 && frame.1 <= source.1 {
+        return frame;
+    }
+    let fit = (f64::from(source.0) / f64::from(frame.0)).min(f64::from(source.1) / f64::from(frame.1));
+    (
+        ((f64::from(frame.0) * fit).floor() as u32).clamp(1, source.0),
+        ((f64::from(frame.1) * fit).floor() as u32).clamp(1, source.1),
+    )
+}
+
+/// The source resampled for a settled preview, with the same Catmull–Rom
+/// as exports (`spektrafilm_io::resize::catmull_rom`): parallel, and
+/// highlights above 1 are kept.
+pub fn rescale_preview_input_fast(image: &ImageBuf, dimensions: (u32, u32)) -> ImageBuf {
+    spektrafilm_io::resize::catmull_rom(image, dimensions)
 }
 
 /// The source reduced for an interactive preview: each output pixel is the
-/// mean of the source area it covers. Parallel over output rows, so a 60 MP
-/// source takes tens of milliseconds, where the bicubic resample above takes
-/// about a second. Only for frames shown while a slider moves.
+/// mean of the source area it covers. Parallel over output rows and cheaper
+/// than the cubic resample above: a 60 MP source takes tens of milliseconds.
+/// Only for frames shown while a slider moves; see [`interactive_dimensions`].
 pub fn downsample_area(image: &ImageBuf, (new_w, new_h): (u32, u32)) -> ImageBuf {
     assert!(new_w >= 1 && new_h >= 1 && new_w <= image.width && new_h <= image.height);
     let (sw, sh) = (image.width as usize, image.height as usize);
@@ -280,6 +300,29 @@ mod tests {
         let flat = ImageBuf::from_data(7, 5, vec![from_f32(0.25); 7 * 5 * 3]);
         let out = downsample_area(&flat, (3, 2));
         assert!(out.data.iter().all(|&v| (to_f32(v) - 0.25).abs() < 1e-6));
+    }
+
+    #[test]
+    fn preview_cap_keeps_the_aspect_and_never_enlarges() {
+        assert_eq!(preview_cap((12_000, 8000), false), (12_000, 8000));
+        let (w, h) = preview_cap((12_000, 8000), true);
+        assert!(u64::from(w) * u64::from(h) <= PREVIEW_PIXEL_LIMIT);
+        assert_eq!((w, h), (4242, 2828));
+        assert_eq!(preview_cap((3000, 2000), true), (3000, 2000));
+        assert_eq!(preview_dimensions(6000, 4000, 0.5, true), (3000, 2000));
+    }
+
+    #[test]
+    fn interactive_frames_fit_inside_the_source() {
+        // Zoomed past fit on a 3x enlargement: the old frame was 1.5x the source.
+        assert_eq!(interactive_dimensions((18_000, 12_000), 0.5, (6000, 4000)), (6000, 4000));
+        assert_eq!(interactive_dimensions((18_000, 12_000), 0.25, (6000, 4000)), (4500, 3000));
+        // An odd aspect from rounding the working frame still fits both sides.
+        let (w, h) = interactive_dimensions((12_001, 7999), 0.9, (6000, 4000));
+        assert!(w <= 6000 && h <= 4000 && w >= 5990, "{w}x{h}");
+        let source = ImageBuf::from_data(60, 40, vec![from_f32(0.5); 60 * 40 * 3]);
+        let frame = interactive_dimensions((180, 120), 0.75, (60, 40));
+        assert_eq!(downsample_area(&source, frame).width, 60);
     }
 
     /// Per-pixel bilinear sampling, as the display proxy did before it read

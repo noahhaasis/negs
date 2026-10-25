@@ -9,6 +9,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use spektrafilm_gpu::ComputeBackend;
+use spektrafilm_io::image_size::SizeError;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::spectral::TcLut;
 
@@ -486,19 +487,35 @@ impl Pipeline {
         }
     }
 
+    /// Panics if the params ask for an invalid working size; see
+    /// [`Self::try_process_with_backend`].
     pub fn process(&self, image: ImageBuf, backend: &dyn ComputeBackend) -> ImageBuf {
         self.process_with_backend(image, backend).0
     }
 
     /// Return the backend that actually rendered the image, including a
     /// capacity-triggered CPU fallback, for CLI and native-helper reporting.
+    /// Panics if the params ask for an invalid working size; callers that
+    /// take sizes from users prepare the image with
+    /// [`crate::image_size::prepare`] first, or use the fallible version.
     pub fn process_with_backend<'a>(
         &self,
         image: ImageBuf,
         backend: &'a dyn ComputeBackend,
     ) -> (ImageBuf, &'a str) {
-        let (image, used_backend) = self.process_scan(image, backend);
-        (self.apply_post(image), used_backend)
+        self.try_process_with_backend(image, backend)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// [`Self::process_with_backend`], failing before any allocation at the
+    /// working size if the params ask for an invalid one.
+    pub fn try_process_with_backend<'a>(
+        &self,
+        image: ImageBuf,
+        backend: &'a dyn ComputeBackend,
+    ) -> Result<(ImageBuf, &'a str), SizeError> {
+        let (image, used_backend) = self.process_scan(image, backend)?;
+        Ok((self.apply_post(image), used_backend))
     }
 
     /// The post adjustments, last, on the scanned photograph.
@@ -516,15 +533,20 @@ impl Pipeline {
     }
 
     /// Everything up to and including the scan, without the post adjustments.
-    fn process_scan<'a>(&self, image: ImageBuf, backend: &'a dyn ComputeBackend) -> (ImageBuf, &'a str) {
+    fn process_scan<'a>(
+        &self,
+        image: ImageBuf,
+        backend: &'a dyn ComputeBackend,
+    ) -> Result<(ImageBuf, &'a str), SizeError> {
         let stage_timings = stage_timings_enabled();
-        // Working-resolution rescale (io.upscale_factor) — mirrors Python's
-        // ResizingService.crop_and_rescale. Done first so the whole pipeline
-        // (and the diffusion-filter kernel size, which scales with the image)
-        // runs at the chosen resolution. pixel_size_um is derived per-stage
-        // from the image dims, so it follows automatically.
+        // Working-resolution rescale (Image Size, or the legacy
+        // io.upscale_factor) — mirrors Python's ResizingService.crop_and_rescale.
+        // Done first so the whole pipeline (grain, halation, and the
+        // diffusion-filter kernel size, which scales with the image) runs at
+        // the chosen resolution. pixel_size_um is derived per-stage from the
+        // image dims, so it follows automatically.
         let t = Instant::now();
-        let image = self.rescale_working(image);
+        let image = self.rescale_working(image)?;
         print_stage_timing(stage_timings, "rescale", t);
         static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
         let mut backend = backend;
@@ -558,9 +580,9 @@ impl Pipeline {
                 Ok(Some(out)) => {
                     tracing::info!("pipeline: gpu-resident fast path complete");
                     if backend.resident_chain_applies_post_scan() {
-                        return (out, backend.name());
+                        return Ok((out, backend.name()));
                     }
-                    return (self.apply_post_scan(out), backend.name());
+                    return Ok((self.apply_post_scan(out), backend.name()));
                 }
                 Err(reason) => {
                     // Returning None alone would dispatch the individual GPU
@@ -633,19 +655,24 @@ impl Pipeline {
             tracing::info!("pipeline: scanning complete");
             result
         };
-        (result, backend.name())
+        Ok((result, backend.name()))
     }
 
     /// Run only the GPU-resident path from a borrowed image. This is used by
     /// the live GUI when it has already decided the working resolution, so a
     /// full-resolution preview does not need to deep-clone the loaded image
-    /// just to satisfy `process(ImageBuf)`.
+    /// just to satisfy `process(ImageBuf)`. `None` if the params still ask
+    /// for a working size: `process` resizes first.
     pub fn process_resident_borrowed(
         &self,
         image: &ImageBuf,
         backend: &dyn ComputeBackend,
     ) -> Option<ImageBuf> {
         if self.tc_lut.is_none() && self.mallett_core.is_none() {
+            return None;
+        }
+        let io = &self.params.io;
+        if io.photo_long_side_px.is_some() || (io.upscale_factor - 1.0).abs() >= 1e-6 {
             return None;
         }
         backend.image_capacity(image.width, image.height).ok()?;
@@ -669,34 +696,14 @@ impl Pipeline {
         Some(self.apply_post(out))
     }
 
-    /// Resize the working image by `io.upscale_factor` (bicubic), mirroring
-    /// Python's `ResizingService.crop_and_rescale`. No-op at factor 1.0.
-    /// Lets callers trade resolution for speed (the whole pipeline, and the
-    /// diffusion-filter kernel, scale with the image).
-    fn rescale_working(&self, image: ImageBuf) -> ImageBuf {
-        use spektrafilm_math::precision::{Scalar, from_f32, to_f32};
-        let uf = self.params.io.upscale_factor;
-        if uf <= 0.0 || (uf - 1.0).abs() < 1e-6 {
-            return image;
-        }
-        let new_w = (((image.width as f32) * uf).round() as u32).max(1);
-        let new_h = (((image.height as f32) * uf).round() as u32).max(1);
-        if new_w == image.width && new_h == image.height {
-            return image;
-        }
-        let f32buf: Vec<f32> = image.data.iter().map(|&v| to_f32(v)).collect();
-        let src =
-            image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(image.width, image.height, f32buf)
-                .expect("ImageBuf dims match its data length");
-        let dst =
-            image::imageops::resize(&src, new_w, new_h, image::imageops::FilterType::CatmullRom);
-        let data: Vec<Scalar> = dst.into_raw().into_iter().map(from_f32).collect();
-        tracing::info!(
-            from = format!("{}x{}", image.width, image.height),
-            to = format!("{new_w}x{new_h}"),
-            "pipeline: rescaled working image"
-        );
-        ImageBuf::from_data(new_w, new_h, data)
+    /// Resize the working image to the requested size, mirroring Python's
+    /// `ResizingService.crop_and_rescale`: Image Size's Longest side, for the
+    /// full frame since the pipeline doesn't know the crop, or the legacy
+    /// `io.upscale_factor`. No-op at Original. Lets callers trade resolution
+    /// for speed, or enlarge so grain and halation form at the larger size.
+    fn rescale_working(&self, image: ImageBuf) -> Result<ImageBuf, SizeError> {
+        let mut params = self.params.clone();
+        Ok(crate::image_size::prepare(image, &mut params, None)?.0)
     }
 
     /// Try the GPU-resident fast path. Builds all the per-stage data and

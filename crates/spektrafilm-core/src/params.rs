@@ -549,8 +549,16 @@ pub struct IoParams {
     pub crop_center: [f32; 2],
     #[serde(default = "default_crop_size")]
     pub crop_size: [f32; 2],
+    /// The legacy working-resolution factor. 1 unless `photo_long_side_px`
+    /// is unset; never combined with it.
     #[serde(default = "default_one")]
     pub upscale_factor: f32,
+    /// Image Size's Longest side: the cropped photograph's longest side in
+    /// pixels, before borders and export reductions. The source is resized
+    /// before the film so grain and halation develop at this size. `None`
+    /// uses `upscale_factor`. See `spektrafilm_io::image_size`.
+    #[serde(default)]
+    pub photo_long_side_px: Option<u32>,
     #[serde(default)]
     pub scan_film: bool,
     #[serde(default)]
@@ -577,6 +585,7 @@ impl Default for IoParams {
             crop_center: [0.5, 0.5],
             crop_size: [0.1, 0.1],
             upscale_factor: 1.0,
+            photo_long_side_px: None,
             scan_film: false,
             output_gamut_compress: OutputGamutCompressParams::default(),
             input_gamut_compress: InputGamutCompressParams::default(),

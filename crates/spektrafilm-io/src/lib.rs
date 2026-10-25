@@ -15,6 +15,7 @@
 pub mod border;
 pub mod crop;
 pub mod film35;
+pub mod image_size;
 pub mod metadata;
 pub mod raw;
 pub mod resize;

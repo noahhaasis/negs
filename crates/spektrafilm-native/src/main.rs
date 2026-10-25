@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use spektrafilm_core::{
+    image_size,
     params::RuntimeParams,
     pipeline::Pipeline,
     post::{PostParams, PostProcess},
@@ -67,6 +68,11 @@ enum Command {
         /// size (the canvas resolution), a preview that is never saved.
         #[serde(default)]
         interactive_scale: Option<f32>,
+        /// The crop, sent with an Image Size target only: the target describes
+        /// the cropped photograph, so its extent sets the working size. The
+        /// render itself is never cropped.
+        #[serde(default)]
+        crop: Option<Crop>,
     },
     Save {
         render_id: u64,
@@ -163,11 +169,15 @@ impl Session {
                 let source = spektrafilm_io::load_image_with_wb(
                     &input, spektrafilm_io::Formats::Any, params.io.raw_white_balance,
                 )?;
-                let dimensions = preview_dimensions(source.width, source.height,
-                    params.io.upscale_factor, limit_preview);
-                let working = rescale_preview_input_fast(&source, dimensions);
+                // Never enlarged: an Image Size target is ignored, and the
+                // canvas fits the original to the developed photograph.
+                let factor = if params.io.photo_long_side_px.is_some() { 1.0 } else { params.io.upscale_factor };
+                let dimensions = preview_dimensions(source.width, source.height, factor, limit_preview);
+                let resized = (dimensions != (source.width, source.height))
+                    .then(|| rescale_preview_input_fast(&source, dimensions));
+                let working = resized.as_ref().unwrap_or(&source);
                 let encoded = !spektrafilm_io::input_is_linear_srgb(&input);
-                let (width, height) = write_display(&working, encoded, &PostParams::default(), &preview_path)?;
+                let (width, height) = write_display(working, encoded, &PostParams::default(), &preview_path)?;
                 Ok(json!({"width": width, "height": height}))
             }
             Command::Save {
@@ -237,6 +247,7 @@ impl Session {
                 limit_preview,
                 preview_path,
                 interactive_scale,
+                crop,
             } => {
                 let started = Instant::now();
                 ensure!(
@@ -261,15 +272,53 @@ impl Session {
                 params.settings.serial_grain = false;
                 // Applied to the display and on save, so the pipeline runs without them.
                 let post = std::mem::take(&mut params.post);
+                let wb = params.io.raw_white_balance;
+                let reload = self.source_generation != source_generation
+                    || self.source.as_ref().is_none_or(|(path, old_wb, _)| {
+                        path != &input || (spektrafilm_io::is_raw(&input) && *old_wb != wb)
+                    });
+                if reload {
+                    // Release the last source's caches before decoding the next.
+                    self.source = None;
+                    self.scaled = None;
+                    self.interactive = None;
+                    let image = spektrafilm_io::load_image_with_wb(
+                        &input,
+                        spektrafilm_io::Formats::Any,
+                        wb,
+                    )?;
+                    self.source = Some((input.clone(), wb, image));
+                    self.source_generation = source_generation;
+                }
+                let source = &self.source.as_ref().unwrap().2;
+                let (source_width, source_height) = (source.width, source.height);
+                // The uncapped frame an export develops, and the photograph the
+                // crop cuts from it; an invalid or too-large request fails here,
+                // before anything is allocated at that size.
+                let size = image_size::resolve(&params, (source_width, source_height), crop.as_ref())?;
+                image_size::clear(&mut params);
+                // The photograph's preview, at most 12 MP if limited; an
+                // interactive render is a smaller frame of it that never
+                // enlarges the source.
+                let photo_dimensions = preview_cap(size.working, limit_preview);
+                let dimensions = match interactive_scale.filter(|&s| s < 1.0) {
+                    Some(s) => interactive_dimensions(photo_dimensions, s, (source_width, source_height)),
+                    None => photo_dimensions,
+                };
+                // The resolved size, not the crop: panning a crop, or any crop
+                // with the same working size, reuses the render.
                 let render_key = json!({
                     "input": input, "source_generation": source_generation, "film": film,
                     "paper": paper, "params": params, "limit_preview": limit_preview,
-                    "interactive_scale": interactive_scale,
+                    "interactive_scale": interactive_scale, "working": size.working,
                 });
                 let reused = self.output.take().filter(|last| last.key == render_key);
                 if let Some(last) = reused {
                     write_display(&last.image, last.encoded, &post, &preview_path)?;
                     let mut response = last.response.clone();
+                    // Edge rounding moves the crop's pixels with its position.
+                    response["photo_crop_width"] = json!(size.photo.0);
+                    response["photo_crop_height"] = json!(size.photo.1);
                     response["elapsed_ms"] = json!(started.elapsed().as_secs_f64() * 1000.0);
                     self.output = Some(Rendered {
                         id: request.id,
@@ -277,22 +326,6 @@ impl Session {
                         ..last
                     });
                     return Ok(response);
-                }
-                let wb = params.io.raw_white_balance;
-                let reload = self.source_generation != source_generation
-                    || self.source.as_ref().is_none_or(|(path, old_wb, _)| {
-                        path != &input || (spektrafilm_io::is_raw(&input) && *old_wb != wb)
-                    });
-                if reload {
-                    let image = spektrafilm_io::load_image_with_wb(
-                        &input,
-                        spektrafilm_io::Formats::Any,
-                        wb,
-                    )?;
-                    self.source = Some((input.clone(), wb, image));
-                    self.scaled = None;
-                    self.interactive = None;
-                    self.source_generation = source_generation;
                 }
                 let key = preview_pipeline_cache_key(&film, &paper, &params);
                 if self.pipeline.as_ref().is_none_or(|(old, _)| old != &key) {
@@ -310,21 +343,6 @@ impl Session {
                     .map_err(anyhow::Error::msg)?;
                     self.pipeline = Some((key, pipeline));
                 }
-                let source = &self.source.as_ref().unwrap().2;
-                let (source_width, source_height) = (source.width, source.height);
-                let upscale_factor = params.io.upscale_factor;
-                // The photograph's size; an interactive render is a smaller
-                // frame of the same photograph.
-                let photo_dimensions =
-                    preview_dimensions(source_width, source_height, upscale_factor, limit_preview);
-                let dimensions = match interactive_scale.filter(|&s| s < 1.0) {
-                    Some(s) => (
-                        ((photo_dimensions.0 as f32 * s).round() as u32).max(1),
-                        ((photo_dimensions.1 as f32 * s).round() as u32).max(1),
-                    ),
-                    None => photo_dimensions,
-                };
-                params.io.upscale_factor = 1.0;
                 let pipeline = self
                     .pipeline
                     .as_ref()
@@ -355,13 +373,16 @@ impl Session {
                 };
                 let encoded = params.io.output_cctf_encoding;
                 let (width, height) = write_display(&output, encoded, &post, &preview_path)?;
-                // At this size the output is byte-identical to a Fast (GPU)
-                // export, so the app can save it instead of rendering again.
-                let export_resolution = dimensions
-                    == preview_dimensions(source_width, source_height, upscale_factor, false);
+                // At the uncapped working size the output is byte-identical to
+                // a Fast (GPU) export, so the app can save it instead of
+                // rendering again. The display proxy's limit doesn't matter:
+                // Save uses this float output.
+                let export_resolution = (output.width, output.height) == size.working;
                 let response = json!({
                     "width": width, "height": height, "output_width": output.width, "output_height": output.height,
                     "photo_width": photo_dimensions.0, "photo_height": photo_dimensions.1,
+                    "working_width": size.working.0, "working_height": size.working.1,
+                    "photo_crop_width": size.photo.0, "photo_crop_height": size.photo.1,
                     "source_width": source_width, "source_height": source_height,
                     "export_resolution": export_resolution,
                     "raw": spektrafilm_io::is_raw(&input), "backend": used_backend,
@@ -520,6 +541,78 @@ mod tests {
         assert_eq!(std::fs::read(input).unwrap(), std::fs::read(saved).unwrap());
         std::fs::remove_dir_all(dir).unwrap();
     }
+    fn render(input: &Path, preview: &Path, target: Option<u32>, crop: Option<Crop>, interactive_scale: Option<f32>) -> Command {
+        let mut params = RuntimeParams::default();
+        params.io.photo_long_side_px = target;
+        Command::Render {
+            input: input.into(), source_generation: 1, film: "kodak_portra_400".into(),
+            paper: "kodak_portra_endura".into(), params: Box::new(params), limit_preview: false,
+            preview_path: preview.into(), interactive_scale, crop,
+        }
+    }
+
+    #[test]
+    fn image_size_renders_report_sizes_reuse_pans_and_keep_drags_within_the_source() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-image-size-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (input, preview) = (dir.join("input.png"), dir.join("preview.rgba"));
+        let pixels = (0..40 * 30 * 3).map(|i| ((i * 37) % 255) as f32 / 255.0).collect();
+        spektrafilm_io::save_image(&ImageBuf::from_data(40, 30, pixels), &input, None).unwrap();
+        let mut session = Session::default();
+        let mut send = |id, command| session.handle(Request { id, command }, &data);
+
+        // A centred half-extent crop at 60 px develops the whole frame at 120 × 90.
+        let centre = Crop { x: 0.25, y: 0.25, width: 0.5, height: 0.5, angle: 0.0 };
+        let full = send(1, render(&input, &preview, Some(60), Some(centre), None)).unwrap();
+        assert_eq!((full["working_width"].as_u64(), full["working_height"].as_u64()), (Some(120), Some(90)));
+        assert_eq!((full["photo_crop_width"].as_u64(), full["photo_crop_height"].as_u64()), (Some(60), Some(45)));
+        assert_eq!((full["output_width"].as_u64(), full["source_width"].as_u64()), (Some(120), Some(40)));
+        assert_eq!(full["export_resolution"], true);
+        drop(send);
+        let image = session.output.as_ref().unwrap().image.data.as_ptr();
+
+        // Panning the crop reuses the simulation and reports its own pixels.
+        let mut send = |id, command| session.handle(Request { id, command }, &data);
+        let panned = Crop { x: 0.2, y: 0.3, ..centre };
+        let reused = send(2, render(&input, &preview, Some(60), Some(panned), None)).unwrap();
+        assert_eq!(reused["photo_crop_width"].as_u64(), Some(60));
+        assert_eq!(reused["output_width"].as_u64(), Some(120));
+        drop(send);
+        let retained = session.output.as_ref().unwrap();
+        assert_eq!((retained.id, retained.image.data.as_ptr()), (2, image));
+
+        // Zoomed past fit on a 3x enlargement, a drag frame stays inside the
+        // source and is never saved as an export.
+        let mut send = |id, command| session.handle(Request { id, command }, &data);
+        let drag = send(3, render(&input, &preview, Some(120), None, Some(0.6))).unwrap();
+        assert_eq!((drag["output_width"].as_u64(), drag["output_height"].as_u64()), (Some(40), Some(30)));
+        assert_eq!(drag["export_resolution"], false);
+        assert_eq!(drag["working_width"].as_u64(), Some(120));
+
+        // Too large a request fails before allocation and keeps the last render.
+        let speck = Crop { x: 0.5, y: 0.5, width: 0.002, height: 0.002, angle: 0.0 };
+        let error = send(4, render(&input, &preview, Some(65_535), Some(speck), None)).unwrap_err().to_string();
+        assert!(error.contains("MP limit"), "{error}");
+        let mixed = {
+            let Command::Render { mut params, .. } = render(&input, &preview, Some(60), None, None) else { unreachable!() };
+            params.io.upscale_factor = 0.5;
+            Command::Render { input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
+                paper: "kodak_portra_endura".into(), params, limit_preview: false, preview_path: preview.clone(),
+                interactive_scale: None, crop: None }
+        };
+        assert!(send(5, mixed).unwrap_err().to_string().contains("factor must be 1"));
+        // Original never enlarges, whatever the target.
+        let original = send(6, Command::Original { input: input.clone(), params: {
+            let mut params = RuntimeParams::default(); params.io.photo_long_side_px = Some(400); Box::new(params)
+        }, limit_preview: false, preview_path: preview.clone() }).unwrap();
+        assert_eq!((original["width"].as_u64(), original["height"].as_u64()), (Some(40), Some(30)));
+        drop(send);
+        assert_eq!(session.output.as_ref().unwrap().id, 3);
+        assert_ne!(session.output.as_ref().unwrap().image.data.as_ptr(), image);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn working_source_is_resampled_once_per_size() {
         let source = ImageBuf::from_data(4, 2, vec![0.5; 24]);

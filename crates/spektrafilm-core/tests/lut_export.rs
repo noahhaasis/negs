@@ -50,7 +50,7 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
         assert!(text.contains("DOMAIN_MIN 0.0 0.0 0.0\nDOMAIN_MAX 1.0 1.0 1.0"));
         let values = rows(&text);
         assert_eq!(values.len(), 33_usize.pow(3));
-        let clean = lut_export::per_pixel_params(params);
+        let clean = lut_export::per_pixel_params(params.clone());
         let pipeline = Pipeline::new_with_spectral(
             profile::load_profile_by_name(&data, film).unwrap(),
             profile::load_profile_by_name(&data, if scan { film } else { paper }).unwrap(),
@@ -85,6 +85,11 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
                 );
             }
         }
+        // Image Size never enlarges the grid or changes its entries.
+        let mut sized = params.clone();
+        sized.io.upscale_factor = 1.0;
+        sized.io.photo_long_side_px = Some(12_000);
+        assert_eq!(lut_export::cube(&data, film, paper, sized, 33).unwrap(), text);
         // Different manual settings must produce a different LUT.
         let mut changed = clean.clone();
         changed.camera.exposure_compensation_ev = -1.0;
