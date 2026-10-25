@@ -44,6 +44,15 @@ From the Rust repository root:
   --film-curves-morph '{"gamma_factor": 1.4, "developer_exhaustion": 0.4}' \
   --output-dir /tmp/spektrafilm-parity-film-curves
 
+# Any parameter in the Rust JSON names, merged over the case's overrides
+# (here a tuned film and print base, ticket 16 item 7):
+../spektrafilm-env/bin/python -I scripts/parity/check_parity.py \
+  --python-source /path/to/exp --case all --experimental-defaults \
+  --clip-reference-output \
+  --override '{"film_render": {"base": {"scale": 1.1, "tilt": 0.3, "cyan": 1.2}},
+              "print_render": {"base": {"scale": 1.2, "magenta": 0.8}}}' \
+  --output-dir /tmp/spektrafilm-parity-bases
+
 # The same against upstream main, with experimental's morph baked into its
 # film profile:
 ../spektrafilm-env/bin/python -I scripts/parity/check_parity.py \
@@ -84,6 +93,12 @@ EXPDATA_REFERENCE=/path/to/experimental-checkout \
 ../spektrafilm-env/bin/python -I scripts/parity/freeze_dir_couplers_reference.py \
   --python-source /path/to/28bf883-archive --git-repo ../spektrafilm \
   --output crates/spektrafilm-core/tests/fixtures/dir_couplers_python_28bf883.json
+
+# Tuned film/print bases and the print-balance solver (tests/print_balance.rs)
+# from a `git archive` of 28bf883:
+../spektrafilm-env/bin/python -I scripts/parity/freeze_print_balance_reference.py \
+  --python-source /path/to/28bf883-archive --git-repo ../spektrafilm \
+  --output crates/spektrafilm-core/tests/fixtures/print_balance_python_28bf883.json
 
 # Existing frozen Python reference tests and the full Rust suite:
 cargo test --workspace --locked
@@ -132,6 +147,9 @@ The runner writes one override file in the **Rust** JSON names
 | `print_render.density_curves_morph` | `print_render.chemistry` | `print_render.density_curves_morph` |
 | `io.input_gamut_compress.algorithm = "off"` | `io.input_gamut_compress.active = false` | same as experimental |
 | `io.*_gamut_compress.center` | dropped (Python hard-codes D65) | dropped |
+
+`--override JSON` merges any further Rust-named parameters over the case's
+own (leaves replace) before the translation; the report records it.
 
 Frozen dataclasses (`chemistry`, the gamut specs) are replaced with
 `dataclasses.replace`. A name the reference doesn't have is an error, so a
@@ -394,6 +412,12 @@ and `rgb_out` fails on the fixtures that reach outside [0, 1] (up to
 2.5e-01 on `frame300`'s highlight); the 8-bit column stays 0 because both
 sides quantise the same. **Per-pixel run** (`--case all`, every effect
 off): **40/40 pass** with and without the clip, every stage ≤ 1.3e-08.
+
+**Film and print bases** (ticket 16 item 7, `exp-bases`): the same run
+with `--override` tuning both bases (film scale 0.9, tilt -0.4, C/M/Y 0.8,
+1.15, 0.95; print scale 0.8, C/M/Y 0.9, 1.2, 1.3) and scanner white and
+black correction on passes 50/50, every stage ≤ 8.1e-08 and `rgb_out`
+≤ 3.9e-08. Scale-only bases (1.3 film, 1.4 print) pass 50/50, ≤ 4.4e-08.
 
 Exceptions that remain:
 
