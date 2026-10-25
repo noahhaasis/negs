@@ -281,9 +281,11 @@ enum CropGeometry {
     /// The crop when straightening began. The crop shrinks from it to stay on
     /// the turned photograph, and grows back as the angle returns.
     @ObservationIgnored private var intended: CGRect?
+    /// The decoded source's size, to project Image Size's working frame; zero if unknown.
+    @ObservationIgnored let source: CGSize
 
-    init(start: EditState, photo: CGSize, rotation: Int) {
-        self.start = start
+    init(start: EditState, photo: CGSize, rotation: Int, source: CGSize = .zero) {
+        self.start = start; self.source = source
         let settings = start.crop
         rect = settings.rect; aspect = settings.aspect; custom = settings.custom; angle = settings.angle
         self.photo = photo; self.rotation = rotation
@@ -300,6 +302,18 @@ enum CropGeometry {
         return CropSettings(rect: whole ? CropSettings.full : unit, aspect: aspect, custom: custom)
     }
     var modified: Bool { rect != CropSettings.full || aspect != .original || angle != 0 }
+
+    /// With an Image Size target, the frame this draft would develop: the
+    /// smaller the crop, the larger the frame. Nil without a target.
+    var projectedWorking: CGSize? {
+        guard source != .zero, let target = ImageSize.target(of: start.params) else { return nil }
+        return ImageSize.working(source: source, target: target, crop: settings)
+    }
+    /// The draft needs more working pixels than the helper develops; Done keeps the draft.
+    var sizeError: String? {
+        guard let working = projectedWorking, ImageSize.exceedsLimit(working: working, source: source) else { return nil }
+        return ImageSize.limitMessage(working: working)
+    }
     var orientationPortrait: Bool { aspect == .custom ? custom.height > custom.width : portrait }
 
     /// Width over height of the locked ratio, as shown; nil for freeform.
@@ -696,10 +710,19 @@ struct CropInspector: View {
             }
             Section {
                 LabeledContent("Size") {
-                    let size = session.shown
+                    let size = exportedSize
                     Text("\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px").monospacedDigit()
                 }
-                .help("The cropped preview’s size. Export crops the same part at the working resolution.")
+                .help("The exported photograph’s size, before the border.")
+                if let working = session.projectedWorking, session.source.width > 0 {
+                    let scale = working.width / session.source.width
+                    Text(scale >= 1 ? "Image Size develops the whole frame \(scale.formatted(FloatingPointFormatStyle<Double>.number.precision(.fractionLength(1))))× the source." : "Image Size develops the whole frame at \(EditorModel.percent(scale)) of the source.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let error = session.sizeError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.red)
+                }
             }
             Section {
                 Button("Reset Crop", action: session.reset).frame(maxWidth: .infinity)
@@ -712,6 +735,13 @@ struct CropInspector: View {
         }
         .formStyle(.grouped)
         .onChange(of: field) { _, focused in session.typing = focused }
+    }
+
+    /// The draft's pixels in the frame an export develops: projected for a
+    /// Longest side target, otherwise the last render's working frame.
+    private var exportedSize: CGSize {
+        if let working = session.projectedWorking { return session.settings.size(of: working) }
+        return model.workingSize == .zero ? session.shown.size : session.settings.size(of: model.workingSize)
     }
 
     private func ratioField(_ title: String, value: CGFloat, set: @escaping (CGFloat) -> Void) -> some View {

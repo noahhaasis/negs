@@ -38,7 +38,16 @@ import UniformTypeIdentifiers
     private(set) var original: IOSurface?
     /// The tones of `image` within the crop; nil until it develops.
     private(set) var histogram: Histogram?
+    /// The developed preview's frame, uncropped, which the canvas lays out:
+    /// the working frame, or less with the 12 MP limit.
     private(set) var imageSize = CGSize.zero
+    /// The decoded source and the uncapped frame an export develops, from the
+    /// last render; zero before one finishes.
+    private(set) var sourceSize = CGSize.zero
+    private(set) var workingSize = CGSize.zero
+    /// The shown texture's linear fraction of the working frame, below 1 when
+    /// the preview is limited or larger than the display proxy.
+    private(set) var previewScale = 1.0
     private(set) var placeholderSize = CGSize.zero
     private(set) var imageRotation = 0
     private(set) var isRaw = false
@@ -113,6 +122,20 @@ import UniformTypeIdentifiers
     /// The shown photograph's size after cropping, before rotation; zero
     /// before one opens. Borders fit this size.
     var photoSize: CGSize { crop.size(of: image != nil ? imageSize : placeholderSize) }
+    var imageSizeMode: ImageSize.Mode { ImageSize.mode(of: state.params) }
+    /// The frame the current edit develops at, uncapped, projected from the
+    /// source like the helper resolves it; zero until the source's size is known.
+    var projectedWorkingSize: CGSize {
+        sourceSize == .zero ? .zero : ImageSize.working(source: sourceSize, params: state.params, crop: crop)
+    }
+    /// The exported photograph, cropped, before rotation, borders and export
+    /// reductions; zero until the source's size is known.
+    var photographSize: CGSize { crop.size(of: projectedWorkingSize) }
+    /// The current edit asks for more working pixels than the helper develops.
+    var imageSizeError: String? {
+        let working = projectedWorkingSize
+        return ImageSize.exceedsLimit(working: working, source: sourceSize) ? ImageSize.limitMessage(working: working) : nil
+    }
     /// The developed photograph as shown, uncropped, after rotation.
     private var shownImageSize: CGSize { imageRotation % 2 != 0 ? CGSize(width: imageSize.height, height: imageSize.width) : imageSize }
     /// A slider is being dragged; its edits share one undo step.
@@ -328,11 +351,13 @@ import UniformTypeIdentifiers
             self.lastColorEdit = (setting, next, Date())
         })
     }
-    /// Keeps the border and crop, like the film, paper, and rotation.
+    /// Keeps the border, crop, and Image Size's Longest side, like the film,
+    /// paper, and rotation. An older edit's working-resolution factor resets.
     func reset() {
         guard !cropping else { return }
         var next = state; next.params = defaults; next.limitPreview = false
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
+        next.params[ImageSize.targetPath] = state.params[ImageSize.targetPath]
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
         apply(next, action: "Reset Adjustments")
     }
@@ -369,6 +394,44 @@ import UniformTypeIdentifiers
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
+    // MARK: Image Size
+
+    /// Original develops the source's own pixels; Longest side resizes the
+    /// source so the cropped photograph has that many pixels on its longest side.
+    func chooseImageSize(_ mode: ImageSize.Mode) {
+        switch mode {
+        case .original:
+            var next = state; next.params[ImageSize.factorPath] = .number(1); next.params[ImageSize.targetPath] = .null
+            apply(next, action: "Change Image Size")
+        case .longestSide:
+            guard imageSizeMode != .longestSide else { return }
+            _ = setLongestSide(ImageSize.remembered ?? nativeLongestSide)
+        case .legacy: break
+        }
+    }
+
+    /// The crop's longest side in the source's own pixels, within the field's range.
+    private var nativeLongestSide: Int {
+        let size = crop.size(of: sourceSize == .zero ? placeholderSize : sourceSize)
+        let side = Int(max(size.width, size.height))
+        return side > 0 ? min(max(side, ImageSize.range.lowerBound), ImageSize.range.upperBound) : 4000
+    }
+
+    /// Sets a Longest side target; returns why it can't be used, changing nothing.
+    @discardableResult func setLongestSide(_ pixels: Int) -> String? {
+        guard ImageSize.range.contains(pixels) else {
+            return "Enter a whole number from \(ImageSize.range.lowerBound) to \(ImageSize.range.upperBound.formatted()) px."
+        }
+        if sourceSize != .zero {
+            let working = ImageSize.working(source: sourceSize, target: pixels, crop: crop)
+            if ImageSize.exceedsLimit(working: working, source: sourceSize) { return ImageSize.limitMessage(working: working) }
+        }
+        ImageSize.remembered = pixels
+        var next = state; next.params[ImageSize.factorPath] = .number(1); next.params[ImageSize.targetPath] = .number(Double(pixels))
+        apply(next, action: "Change Image Size")
+        return nil
+    }
+
     var session: EditorSession? {
         guard !closing, ready, let source else { return nil }
         var saved = state
@@ -392,12 +455,14 @@ import UniformTypeIdentifiers
     func beginCrop() {
         guard !cropping, image != nil, imageSize != .zero else { return }
         holdOriginal(false)
-        cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation)
+        cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, source: sourceSize)
     }
     /// Done applies the crop, and any rotation while cropping, as one undo
     /// step. Cancel restores the rotation and keeps the previous crop.
     func endCrop(apply: Bool) {
         guard let session = cropSession else { return }
+        // A crop too small for the Longest side stays a draft, with its error shown.
+        if apply, session.sizeError != nil { NSSound.beep(); return }
         cropSession = nil
         let rotation = session.start.params["io.rotate_cw"]
         if apply {
@@ -442,6 +507,7 @@ import UniformTypeIdentifiers
             return
         }
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
         updateHistogram()
         interactionStart = nil; cropSession = nil
@@ -473,6 +539,8 @@ import UniformTypeIdentifiers
                 guard let self, generation == self.sourceGeneration, self.image == nil, !self.closing else { return }
                 if self.state.rendered == snapshot.rendered {
                     self.image = cached.surface; self.imageSize = cached.photoSize; self.isRaw = cached.raw
+                    self.sourceSize = cached.sourceSize; self.workingSize = cached.workingSize
+                    self.previewScale = cached.workingSize.width > 0 ? Double(cached.surface.width) / cached.workingSize.width : 1
                     self.showingCachedPreview = true; self.placeholder = nil; self.hideActivity()
                     self.updateHistogram(); self.updateFilmStrip()
                     return
@@ -550,7 +618,9 @@ import UniformTypeIdentifiers
     /// actual size.
     private func loadOriginal() {
         guard originalLoad == nil, let source, let image else { return }
-        let raw = isRaw, maxPixels = max(image.width, image.height), generation = sourceGeneration
+        // Never above the source's own resolution: Image Size can enlarge the preview.
+        let sourceLong = Int(max(sourceSize.width, sourceSize.height))
+        let raw = isRaw, maxPixels = sourceLong > 0 ? min(max(image.width, image.height), sourceLong) : max(image.width, image.height), generation = sourceGeneration
         originalLoad = Task { [weak self] in
             let surface = await Task.detached(priority: .userInitiated) {
                 OriginalImage.load(source, raw: raw, maxPixels: maxPixels)
@@ -613,6 +683,8 @@ import UniformTypeIdentifiers
                 "limit_preview": .bool(snapshot.limitPreview), "preview_path": .string(buffer.path)
             ]
             if let interactiveScale { command["interactive_scale"] = .number(Double(interactiveScale)) }
+            // The target describes the cropped photograph; the helper sizes the frame from the crop.
+            if ImageSize.mode(of: snapshot.params) == .longestSide, let crop = Self.cropJSON(snapshot.crop) { command["crop"] = crop }
             let (id, result) = try await engine.request(command)
             guard shouldShow(currentRevision, generation) else { return }
             let width = Int(result["width"].double), height = Int(result["height"].double)
@@ -621,6 +693,9 @@ import UniformTypeIdentifiers
             }.value
             guard shouldShow(currentRevision, generation) else { return }
             imageSize = CGSize(width: result["photo_width"].double, height: result["photo_height"].double)
+            sourceSize = CGSize(width: result["source_width"].double, height: result["source_height"].double)
+            workingSize = CGSize(width: result["working_width"].double, height: result["working_height"].double)
+            previewScale = workingSize.width > 0 ? min(Double(width) / workingSize.width, 1) : 1
             showingInteractiveFrame = interactiveScale != nil
             image = developed; placeholder = nil
             updateHistogram()
@@ -632,13 +707,16 @@ import UniformTypeIdentifiers
                 showingCachedPreview = false
                 renderAtExportSize = result["export_resolution"].bool
                 renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
-                if let cacheKey { previewCache.save(developed, photoSize: imageSize, raw: isRaw, key: cacheKey) }
+                if let cacheKey { previewCache.save(developed, photoSize: imageSize, sourceSize: sourceSize, workingSize: workingSize, raw: isRaw, key: cacheKey) }
             }
             let seconds = result["elapsed_ms"].double / 1000
             let time = "developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
+            // The photograph as exported, and whether the shown texture has fewer
+            // pixels: inspect grain in an export when it does.
+            let photograph = crop.size(of: workingSize)
             status = interactiveScale != nil
                 ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
-                : "\(Int(imageSize.width)) × \(Int(imageSize.height)) · \(time)"
+                : "\(Int(photograph.width)) × \(Int(photograph.height))\(previewScale < 1 ? " · shown at \(Self.percent(previewScale))" : "") · \(time)"
         } catch {
             if currentRevision == revision, generation == sourceGeneration, !closing {
                 renderFailed = true; hideActivity(); report(error)
@@ -768,6 +846,8 @@ import UniformTypeIdentifiers
         // usually the Open panel's, so start where the last save went.
         if let folder = Self.lastSaveFolder { panel.directoryURL = folder }
         var extras = ""
+        let photograph = photographSize
+        if photograph != .zero { extras += " The photograph is \(Int(photograph.width)) × \(Int(photograph.height)) px." }
         if state.crop.cropped { extras += " Crops the photograph." }
         if let border = state.border.exported(for: photoSize) {
             extras += " Adds the \(border.style.title.lowercased()) border\(border.instagram ? ", extended to 3:4 for Instagram" : "")."
@@ -820,10 +900,7 @@ import UniformTypeIdentifiers
     private func saveCommand(to url: URL, size: ExportSize) -> [String: JSONValue] {
         var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path),
                                             "rotate_cw": .number(Double(imageRotation))]
-        if state.crop.cropped {
-            let r = state.crop.rect
-            command["crop"] = .object(["x": .number(r.minX), "y": .number(r.minY), "width": .number(r.width), "height": .number(r.height), "angle": .number(state.crop.angle)])
-        }
+        if let crop = Self.cropJSON(state.crop) { command["crop"] = crop }
         if let border = state.border.exported(for: photoSize) {
             command["border"] = .string(border.style.rawValue)
             command["border_options"] = .object(border.options)
@@ -831,6 +908,18 @@ import UniformTypeIdentifiers
         }
         if let fit = size.json { command["fit"] = fit }
         return command
+    }
+
+    /// A crop for the helper, or nil when uncropped.
+    nonisolated static func cropJSON(_ crop: CropSettings) -> JSONValue? {
+        guard crop.cropped else { return nil }
+        let r = crop.rect
+        return .object(["x": .number(r.minX), "y": .number(r.minY), "width": .number(r.width), "height": .number(r.height), "angle": .number(crop.angle)])
+    }
+
+    /// A reduction such as 68%; below 10% with one decimal.
+    nonisolated static func percent(_ fraction: Double) -> String {
+        (fraction * 100).formatted(.number.precision(.fractionLength(fraction < 0.1 ? 1 : 0))) + "%"
     }
 
     private func savePreview(to url: URL, size: ExportSize = .full) async {

@@ -21,11 +21,13 @@ final class RenderedPreviewCacheTests: XCTestCase {
         let key = try XCTUnwrap(RenderedPreviewCache.key(source: photo, state: state, paths: paths))
         let rgba = Data([1, 2, 3, 255, 10, 11, 12, 255, 70, 80, 90, 255, 250, 251, 252, 255])
         let surface = try EditorModel.previewSurface(rgba, width: 2, height: 2)
-        cache.save(surface, photoSize: CGSize(width: 4000, height: 3000), raw: true, key: key)
+        cache.save(surface, photoSize: CGSize(width: 4000, height: 3000), sourceSize: CGSize(width: 2000, height: 1500), workingSize: CGSize(width: 8000, height: 6000), raw: true, key: key)
         let loaded = await cache.load(source: photo, state: state, paths: paths)
         let frame = try XCTUnwrap(loaded)
         XCTAssertEqual(bytes(frame.surface), bytes(surface))
         XCTAssertEqual(frame.photoSize, CGSize(width: 4000, height: 3000)); XCTAssertTrue(frame.raw)
+        XCTAssertEqual(frame.sourceSize, CGSize(width: 2000, height: 1500))
+        XCTAssertEqual(frame.workingSize, CGSize(width: 8000, height: 6000))
 
         // Canvas edits reuse the very same pixels with their restored framing.
         var decorated = state
@@ -33,6 +35,16 @@ final class RenderedPreviewCacheTests: XCTestCase {
         decorated.crop.rect = CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6)
         decorated.border.enabled = true
         XCTAssertEqual(RenderedPreviewCache.key(source: photo, state: decorated, paths: paths), key)
+        // With a Longest side target the crop's extent is part of the frame;
+        // its position is not.
+        var sized = decorated
+        sized.params["io.photo_long_side_px"] = .number(3000)
+        let sizedKey = RenderedPreviewCache.key(source: photo, state: sized, paths: paths)
+        XCTAssertNotEqual(sizedKey, key)
+        sized.crop.rect.origin = CGPoint(x: 0.3, y: 0.1)
+        XCTAssertEqual(RenderedPreviewCache.key(source: photo, state: sized, paths: paths), sizedKey)
+        sized.crop.rect.size.width = 0.5
+        XCTAssertNotEqual(RenderedPreviewCache.key(source: photo, state: sized, paths: paths), sizedKey)
         for change in ["exposure", "film", "paper", "resolution"] {
             var changed = state
             switch change {
@@ -51,13 +63,13 @@ final class RenderedPreviewCacheTests: XCTestCase {
             try original.write(to: url)
         }
         let newKey = try XCTUnwrap(RenderedPreviewCache.key(source: photo, state: state, paths: paths))
-        cache.save(surface, photoSize: frame.photoSize, raw: true, key: newKey)
+        cache.save(surface, photoSize: frame.photoSize, sourceSize: frame.sourceSize, workingSize: frame.workingSize, raw: true, key: newKey)
         await cache.flush()
         var corrupt = try Data(contentsOf: cache.file); corrupt[corrupt.count - 1] ^= 1
         try corrupt.write(to: cache.file)
         let invalid = await cache.load(source: photo, state: state, paths: paths)
         XCTAssertNil(invalid)
-        cache.save(surface, photoSize: frame.photoSize, raw: true, key: newKey)
+        cache.save(surface, photoSize: frame.photoSize, sourceSize: frame.sourceSize, workingSize: frame.workingSize, raw: true, key: newKey)
         cache.invalidate()
         await cache.flush()
         XCTAssertFalse(FileManager.default.fileExists(atPath: cache.file.path), "An earlier queued save must not resurrect an invalidated frame")
@@ -97,7 +109,8 @@ final class RenderedPreviewCacheTests: XCTestCase {
                     log.write(json.dumps(c['params']) + '\\n')
                 time.sleep(1)
                 pathlib.Path(c['preview_path']).write_bytes(bytes([10, 30, 80, 255]) * 48)
-                r = {'width': 8, 'height': 6, 'photo_width': 80, 'photo_height': 60, 'raw': False, 'export_resolution': True, 'backend': 'cpu'}
+                r = {'width': 8, 'height': 6, 'photo_width': 80, 'photo_height': 60, 'working_width': 80, 'working_height': 60,
+                     'source_width': 80, 'source_height': 60, 'raw': False, 'export_resolution': True, 'backend': 'cpu'}
             else:
                 r = {}
             print(json.dumps({'id': c['id'], 'result': r}), flush=True)
@@ -128,6 +141,8 @@ final class RenderedPreviewCacheTests: XCTestCase {
         XCTAssertNil(restored.placeholder, "No raw flash on a cache hit")
         XCTAssertFalse(restored.previewCurrent, "The matching frame must appear before rendering finishes")
         XCTAssertEqual(restored.imageSize, CGSize(width: 80, height: 60))
+        XCTAssertEqual(restored.workingSize, CGSize(width: 80, height: 60), "Image Size readouts restore with the frame")
+        XCTAssertEqual(restored.sourceSize, CGSize(width: 80, height: 60))
         XCTAssertEqual(restored.imageRotation, 1)
         try await Task.sleep(for: .milliseconds(450))
         XCTAssertFalse(restored.showsActivity, "A matching cache needs no Updating badge")

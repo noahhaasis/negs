@@ -147,9 +147,14 @@ struct EditState: Codable, Equatable, Sendable {
 
     /// The state without presentation-only settings, to decide whether an
     /// edit needs a new render. The preview is never rotated: the canvas
-    /// turns it, and saving and exporting rotate the result.
+    /// turns it, and saving and exporting rotate the result. With an Image
+    /// Size target the crop's extent sets the working size, so it stays; its
+    /// position, angle and ratio never change the render.
     var rendered: EditState {
         var state = self; state.border = BorderSettings(); state.crop = CropSettings()
+        if ImageSize.mode(of: params) == .longestSide, crop.cropped {
+            state.crop.rect = CGRect(origin: .zero, size: crop.rect.size)
+        }
         state.params["io.rotate_cw"] = .null
         return state
     }

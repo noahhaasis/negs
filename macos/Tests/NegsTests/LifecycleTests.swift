@@ -67,6 +67,120 @@ import XCTest
         XCTAssertEqual(NSImage(contentsOf: destination)?.representations.first?.pixelsWide, 96)
     }
 
+    /// Image Size end to end with the real helper: the target, its remembered
+    /// value, Reset, crop Done/Cancel/limit, panning, Undo, Original, and a
+    /// Fast export of the enlarged preview.
+    func testImageSizeLongestSideLifecycle() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let remembered = ImageSize.remembered
+        defer { ImageSize.remembered = remembered }
+        UserDefaults.standard.removeObject(forKey: "imageSizeLongestSide")
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths())
+        // Each edit is its own undo group, as one event would make it.
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        func step() { undo.endUndoGrouping(); undo.beginUndoGrouping() }
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        model.open(fixture)
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertEqual(model.workingSize, CGSize(width: 96, height: 64))
+        XCTAssertEqual(model.imageSizeMode, .original)
+        // Opening clears the undo stack, so the first group starts here.
+        undo.beginUndoGrouping()
+
+        // Longest side starts at the crop's own pixels, then enlarges before the film.
+        model.chooseImageSize(.longestSide)
+        XCTAssertEqual(ImageSize.target(of: model.state.params), 96)
+        let rejected = model.setLongestSide(10)
+        XCTAssertEqual(rejected?.contains("16"), true, "Out of range changes nothing")
+        XCTAssertEqual(ImageSize.target(of: model.state.params), 96)
+        let accepted = model.setLongestSide(192)
+        XCTAssertNil(accepted)
+        try await settle(model)
+        XCTAssertEqual(model.workingSize, CGSize(width: 192, height: 128))
+        XCTAssertEqual(model.imageSize, CGSize(width: 192, height: 128))
+        XCTAssertEqual(model.photographSize, CGSize(width: 192, height: 128))
+        XCTAssertTrue(model.status.hasPrefix("192 × 128"), model.status)
+        step()
+        model.reset()
+        step()
+        XCTAssertEqual(ImageSize.target(of: model.state.params), 192, "Reset Adjustments keeps the size")
+
+        // A half-extent crop doubles the frame on Done, keeping the photograph's size.
+        model.beginCrop()
+        let session = try XCTUnwrap(model.cropSession)
+        session.rect = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        XCTAssertEqual(session.projectedWorking, CGSize(width: 384, height: 256))
+        model.endCrop(apply: true)
+        step()
+        XCTAssertFalse(model.previewCurrent, "A new extent develops a new frame")
+        try await settle(model)
+        XCTAssertEqual(model.workingSize, CGSize(width: 384, height: 256))
+        XCTAssertEqual(model.photographSize, CGSize(width: 192, height: 128))
+
+        // Panning the same extent reuses the simulation.
+        model.beginCrop()
+        let pan = try XCTUnwrap(model.cropSession)
+        pan.rect = CGRect(x: 0.4, y: 0.1, width: 0.5, height: 0.5)
+        model.endCrop(apply: true)
+        undo.endUndoGrouping() // nothing below registers undo before Undo
+        XCTAssertTrue(model.previewCurrent, "Panning never develops the film again")
+        XCTAssertEqual(model.crop.rect.origin, CGPoint(x: 0.4, y: 0.1))
+
+        // A crop too small for the target stays a draft with its error; Cancel keeps the last crop.
+        model.beginCrop()
+        let draft = try XCTUnwrap(model.cropSession)
+        draft.rect = CGRect(x: 0.5, y: 0.5, width: 0.01, height: 0.01)
+        XCTAssertNotNil(model.cropSession?.sizeError)
+        model.endCrop(apply: true)
+        XCTAssertTrue(model.cropping, "Done keeps an over-limit draft")
+        model.endCrop(apply: false)
+        XCTAssertEqual(model.crop.rect.size, CGSize(width: 0.5, height: 0.5))
+        XCTAssertTrue(model.previewCurrent)
+
+        // Undo restores the earlier extent and its frame; Redo returns.
+        undo.undo() // the pan
+        undo.undo() // the crop
+        try await settle(model)
+        XCTAssertEqual(model.workingSize, CGSize(width: 192, height: 128))
+        XCTAssertEqual(ImageSize.target(of: model.state.params), 192)
+        undo.redo()
+        try await settle(model)
+        XCTAssertEqual(model.workingSize, CGSize(width: 384, height: 256))
+        model.undoManager = nil
+
+        // A Fast export saves the uncapped enlarged preview, cropped.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("export.png")
+        await model.export(to: destination, engine: .fast)
+        XCTAssertNil(model.error)
+        XCTAssertEqual(NSImage(contentsOf: destination)?.representations.first?.pixelsWide, 192)
+
+        // Original develops the source; Longest side comes back at the remembered value.
+        model.chooseImageSize(.original)
+        try await settle(model)
+        XCTAssertEqual(model.workingSize, CGSize(width: 96, height: 64))
+        XCTAssertEqual(model.state.params[ImageSize.targetPath], .null)
+        model.chooseImageSize(.longestSide)
+        XCTAssertEqual(ImageSize.target(of: model.state.params), 192)
+        // An older edit's factor shows as such, and the helper rejects mixing it with a target.
+        model.set(ImageSize.factorPath, .number(0.5))
+        XCTAssertEqual(model.imageSizeMode, .longestSide)
+        try await waitUntil { model.renderFailed || model.previewCurrent }
+        XCTAssertTrue(model.renderFailed)
+        XCTAssertTrue(model.error?.contains("factor must be 1") == true, model.error ?? "")
+        model.error = nil
+        model.chooseImageSize(.original)
+        model.set(ImageSize.factorPath, .number(0.5))
+        XCTAssertEqual(model.imageSizeMode, .legacy(0.5))
+        try await settle(model)
+        XCTAssertEqual(model.workingSize, CGSize(width: 48, height: 32))
+    }
+
     func testCancelExportPreservesExistingDestinationAndRemovesStaging() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -286,6 +400,11 @@ import XCTest
         XCTAssertEqual(corner.x, 200, accuracy: 0.001)
         XCTAssertEqual(corner.y, 300, accuracy: 0.001)
         XCTAssertTrue(photo.contents as AnyObject === image)
+    }
+
+    private func settle(_ model: EditorModel) async throws {
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
     }
 
     private func waitUntil(_ predicate: () -> Bool) async throws {
