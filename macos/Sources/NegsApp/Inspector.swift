@@ -294,7 +294,8 @@ struct ImageSizeSection: View {
                 }
             }
             LabeledContent("Photograph") {
-                Text(photograph == .zero ? "—" : "\(Int(photograph.width)) × \(Int(photograph.height)) · \(ImageSize.megapixels(photograph)) MP")
+                // Verbatim, so pixel counts read like the status bar's, without grouping.
+                Text(verbatim: photograph == .zero ? "—" : "\(Int(photograph.width)) × \(Int(photograph.height)) · \(ImageSize.megapixels(photograph)) MP")
                     .monospacedDigit()
             }
             .help("The exported photograph, cropped, before rotation, the border, and any export size.")
