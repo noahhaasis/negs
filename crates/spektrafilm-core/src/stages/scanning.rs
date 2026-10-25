@@ -3,7 +3,7 @@
 /// Dispatches the spectral integration to the GPU backend when available.
 use rayon::prelude::*;
 use spektrafilm_gpu::ComputeBackend;
-use spektrafilm_math::colorspace;
+use spektrafilm_math::colorspace::{self, RgbColourspace};
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::tetra3d::tetrahedral_interp;
 use spektrafilm_math::precision::{Scalar, from_f64};
@@ -197,7 +197,7 @@ pub(crate) fn scan_normalization_and_white(illuminant: &[f64], n_wl: usize) -> (
     let sum_xyz = illu_xyz_runtime[0] + illu_xyz_runtime[1] + illu_xyz_runtime[2];
     let vx = illu_xyz_runtime[0] / sum_xyz;
     let vy = illu_xyz_runtime[1] / sum_xyz;
-    (normalization, [vx / vy, 1.0f64, (1.0 - vx - vy) / vy])
+    (normalization, colorspace::xy_to_xyz_f64(vx, vy))
 }
 
 pub fn scan(
@@ -245,9 +245,9 @@ pub fn scan(
     // into one (M_rgb @ M_cat) loses ~1 ULP per output channel and
     // accumulates to ~5e-6 scan-stage drift. We keep them split for
     // CPU bit-parity; the GPU path can collapse them for performance.
-    let output_white = spectral::colorspace_white_xyz_f64(&params.io.output_color_space);
-    let adapt = colorspace::chromatic_adaptation_matrix_f64(viewing_white, output_white);
-    let base_xyz_to_rgb = output_colorspace_from_xyz_f64(&params.io.output_color_space);
+    let output = RgbColourspace::output(&params.io.output_color_space);
+    let adapt = colorspace::chromatic_adaptation_matrix_f64(viewing_white, output.whitepoint_xyz);
+    let base_xyz_to_rgb = output.xyz_to_rgb;
 
     // Dispatch spectral integration to backend (GPU or CPU). The backend
     // applies the two matrices in sequence — we pass them separately.
@@ -386,58 +386,33 @@ pub fn scan(
 
 /// The scan's CCTF encoding, without a clip: like Python, the scan returns
 /// what the physics produces, highlights above 1 and the unsharp mask's
-/// undershoot below 0 included. `srgb_encode` extends linearly below 0 and
-/// follows the power law above 1, as colour's `eotf_inverse_sRGB` does.
+/// undershoot below 0 included. Each output space's curve treats values
+/// outside [0, 1] as colour's does: sRGB, BT.2020, ROMM, V-Log and DaVinci
+/// Intermediate extend linearly below 0, and the pure gammas (Adobe RGB,
+/// DCI-P3) give NaN there, which the writers' clip turns into 0, the code
+/// clipping first would have given.
 /// Integer files and displays clip (`pipeline::clip_to_display`, `save.rs`).
 /// The pipeline uses it too when a GPU chain returns linear RGB.
-pub(crate) fn encode_output(rgb: &mut ImageBuf, output_color_space: &str) {
-    // Python's `_apply_cctf_encoding` calls
-    // `colour.RGB_to_RGB(rgb, output_cs, output_cs, apply_cctf_encoding=True)`,
-    // which — even when src == dst — runs `vecmul(M, rgb)` with
-    // `M = matrix_RGB_to_RGB(src, dst, 'CAT02')`. With same src/dst
-    // M should be identity but in f64 it has off-diagonals around 1e-5
-    // (because colour-science's sRGB matrix is 4-decimal-rounded so the
-    // inverse round-trip isn't exact). This nudges every RGB pixel by
-    // ~1e-5 before encoding. We replicate it so the scan-stage output
-    // matches Python bit-for-bit. The GPU chains apply it as well.
-    let m = rgb_to_rgb_identity_matrix(output_color_space);
+///
+/// Python's `_apply_cctf_encoding` calls
+/// `colour.RGB_to_RGB(rgb, output_cs, output_cs, apply_cctf_encoding=True)`,
+/// which, even with src == dst, multiplies by `matrix_RGB_to_RGB(cs, cs)`.
+/// That isn't the identity where colour stores published, rounded matrices:
+/// off-diagonals around 1e-5 for sRGB and 1e-4 for ProPhoto. We apply it
+/// too (the GPU chains as well), then encode with the space's own curve.
+pub fn encode_output(rgb: &mut ImageBuf, output_color_space: &str) {
+    let output = RgbColourspace::output(output_color_space);
+    let m = output.rgb_to_rgb_self;
+    let cctf = output.cctf;
+    let encode = |v: f64| from_f64(cctf.encode(from_f64(v) as f64));
     rgb.data.par_chunks_exact_mut(3).for_each(|px| {
         let r = px[0] as f64;
         let g = px[1] as f64;
         let b = px[2] as f64;
-        let r2 = m[0][0] * r + m[0][1] * g + m[0][2] * b;
-        let g2 = m[1][0] * r + m[1][1] * g + m[1][2] * b;
-        let b2 = m[2][0] * r + m[2][1] * g + m[2][2] * b;
-        px[0] = spektrafilm_math::precision::srgb_encode(from_f64(r2));
-        px[1] = spektrafilm_math::precision::srgb_encode(from_f64(g2));
-        px[2] = spektrafilm_math::precision::srgb_encode(from_f64(b2));
+        px[0] = encode(m[0][0] * r + m[0][1] * g + m[0][2] * b);
+        px[1] = encode(m[1][0] * r + m[1][1] * g + m[1][2] * b);
+        px[2] = encode(m[2][0] * r + m[2][1] * g + m[2][2] * b);
     });
-}
-
-/// Replicate Python `colour.matrix_RGB_to_RGB(cs, cs, 'CAT02')` —
-/// returns the redundant near-identity matrix that colour-science
-/// computes when src == dst. The result is `M_xyz_to_rgb @ M_rgb_to_xyz`
-/// (CAT02 collapses to identity when src/dst whites match), but the
-/// product of 4-decimal-rounded sRGB matrices isn't exactly the
-/// identity in f64.
-pub(crate) fn rgb_to_rgb_identity_matrix(name: &str) -> [[f64; 3]; 3] {
-    let xyz_to_rgb = output_colorspace_from_xyz_f64(name);
-    let rgb_to_xyz = match name {
-        "sRGB" => colorspace::SRGB_TO_XYZ_F64,
-        "ProPhoto RGB" => colorspace::PROPHOTO_TO_XYZ_F64,
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::REC2020_TO_XYZ_F64,
-        "ACES2065-1" => colorspace::ACES_TO_XYZ_F64,
-        _ => colorspace::SRGB_TO_XYZ_F64,
-    };
-    let mut m = [[0.0f64; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            m[i][j] = xyz_to_rgb[i][0] * rgb_to_xyz[0][j]
-                + xyz_to_rgb[i][1] * rgb_to_xyz[1][j]
-                + xyz_to_rgb[i][2] * rgb_to_xyz[2][j];
-        }
-    }
-    m
 }
 
 pub fn process(
@@ -449,14 +424,4 @@ pub fn process(
     gamut: &crate::gamut_compression::OutputGamutCompress,
 ) -> ImageBuf {
     scan(density_cmy, profile, params, backend, color_ref, gamut)
-}
-
-fn output_colorspace_from_xyz_f64(name: &str) -> [[f64; 3]; 3] {
-    match name {
-        "sRGB" => colorspace::XYZ_TO_SRGB_F64,
-        "ProPhoto RGB" => colorspace::XYZ_TO_PROPHOTO_F64,
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::XYZ_TO_REC2020_F64,
-        "ACES2065-1" => colorspace::XYZ_TO_ACES_F64,
-        _ => colorspace::XYZ_TO_SRGB_F64,
-    }
 }

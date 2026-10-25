@@ -24,6 +24,15 @@ struct Params {
     lightness: vec4<f32>,
     // x=l_white (perceptual white), y=l_min, z=l_max (table L-axis bounds).
     lspace: vec4<f32>,
+    // Output colourspace linear RGB → XYZ and XYZ → RGB, rows in xyz.
+    rgb2xyz_r0: vec4<f32>,
+    rgb2xyz_r1: vec4<f32>,
+    rgb2xyz_r2: vec4<f32>,
+    xyz2rgb_r0: vec4<f32>,
+    xyz2rgb_r1: vec4<f32>,
+    xyz2rgb_r2: vec4<f32>,
+    // CAM16 D_RGB (xyz) and A_w (w) for the output whitepoint.
+    cam16_white: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -31,14 +40,6 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> img: array<f32>;  // [H*W*3]
 
 const PI: f32 = 3.141592653589793;
-
-// sRGB linear RGB ↔ XYZ (colour-science's rounded sRGB matrices, D65).
-const RGB2XYZ_R0 = vec3<f32>(0.4124, 0.3576, 0.1805);
-const RGB2XYZ_R1 = vec3<f32>(0.2126, 0.7152, 0.0722);
-const RGB2XYZ_R2 = vec3<f32>(0.0193, 0.1192, 0.9505);
-const XYZ2RGB_R0 = vec3<f32>(3.2406, -1.5372, -0.4986);
-const XYZ2RGB_R1 = vec3<f32>(-0.9689, 1.8758, 0.0415);
-const XYZ2RGB_R2 = vec3<f32>(0.0557, -0.204, 1.057);
 
 // OkLab (Ottosson) matrices.
 const M1_R0 = vec3<f32>(0.8189330101, 0.3618667424, -0.1288597137);
@@ -54,18 +55,17 @@ const M2I_R0 = vec3<f32>(1.0, 0.3963377922, 0.2158037581);
 const M2I_R1 = vec3<f32>(1.0, -0.1055613423, -0.0638541748);
 const M2I_R2 = vec3<f32>(1.0, -0.0894841821, -1.2914855379);
 
-// CAM16 viewing-condition constants (L_A = 64 cd/m², Y_b = 20, Average).
+// CAM16 viewing-condition constants (L_A = 64 cd/m², Y_b = 20, Average);
+// the white-dependent D_RGB and A_w come in `params.cam16_white`.
 const CAM16_M16_R0 = vec3<f32>(0.401288, 0.650173, -0.051461);
 const CAM16_M16_R1 = vec3<f32>(-0.250268, 1.204414, 0.045854);
 const CAM16_M16_R2 = vec3<f32>(-0.002079, 0.048952, 0.953127);
 const CAM16_M16I_R0 = vec3<f32>(1.8620678551, -1.0112546305, 0.1491867754);
 const CAM16_M16I_R1 = vec3<f32>(0.3875265432, 0.6214474419, -0.0089739852);
 const CAM16_M16I_R2 = vec3<f32>(-0.0158414988, -0.0341229380, 1.0499644369);
-const CAM16_D_RGB = vec3<f32>(1.0228770275, 0.9852074783, 0.9285450587);
 const CAM16_F_L: f32 = 0.6839903846;
 const CAM16_N_BB: f32 = 1.0003040046;
 const CAM16_CZ: f32 = 0.69 * 1.9272135955; // c * z
-const CAM16_A_W: f32 = 37.1690753022;
 // (50000/13) * N_c * N_cb with N_c = 1, N_cb = N_BB.
 const CAM16_ECC: f32 = 3846.1538461538 * 1.0003040046;
 // (1.64 - 0.29^n)^0.73 and F_L^0.25 — const-folded at shader compile.
@@ -142,13 +142,13 @@ fn cam16_padc_inverse(rgb: vec3<f32>) -> vec3<f32> {
 // XYZ (Y=1) → CAM16-UCS (Jp, ap, bp).
 fn xyz_to_cam16ucs(xyz: vec3<f32>) -> vec3<f32> {
     let rgb = mv(CAM16_M16_R0, CAM16_M16_R1, CAM16_M16_R2, xyz * 100.0);
-    let p = cam16_padc_forward(rgb * CAM16_D_RGB);
+    let p = cam16_padc_forward(rgb * params.cam16_white.xyz);
     let a = p.x - 12.0 * p.y / 11.0 + p.z / 11.0;
     let b = (p.x + p.y - 2.0 * p.z) / 9.0;
     let h = atan2_deg(b, a);
     let e_t = 0.25 * (cos(2.0 + radians(h)) + 3.8);
     let a_resp = (2.0 * p.x + p.y + p.z / 20.0 - 0.305) * CAM16_N_BB;
-    let jj = 100.0 * pow(a_resp / CAM16_A_W, CAM16_CZ);
+    let jj = 100.0 * pow(a_resp / params.cam16_white.w, CAM16_CZ);
     let denom = p.x + p.y + 21.0 * p.z / 20.0;
     var t = 0.0;
     if denom != 0.0 {
@@ -173,7 +173,7 @@ fn cam16ucs_to_xyz(jab: vec3<f32>) -> vec3<f32> {
     let j_prime = max(jj, 1.1920929e-7);
     let t = pow(cc / (sqrt(j_prime / 100.0) * CAM16_CC_F), 1.0 / 0.9);
     let e_t = 0.25 * (cos(2.0 + radians(h)) + 3.8);
-    let a_resp = CAM16_A_W * pow(jj / 100.0, 1.0 / CAM16_CZ);
+    let a_resp = params.cam16_white.w * pow(jj / 100.0, 1.0 / CAM16_CZ);
     var p1 = 0.0;
     if t != 0.0 {
         p1 = CAM16_ECC * e_t / t;
@@ -213,7 +213,7 @@ fn cam16ucs_to_xyz(jab: vec3<f32>) -> vec3<f32> {
     let ra = (460.0 * p2 + 451.0 * a + 288.0 * b) / 1403.0;
     let ga = (460.0 * p2 - 891.0 * a - 261.0 * b) / 1403.0;
     let ba = (460.0 * p2 - 220.0 * a - 6300.0 * b) / 1403.0;
-    let rgb = cam16_padc_inverse(vec3<f32>(ra, ga, ba)) / CAM16_D_RGB;
+    let rgb = cam16_padc_inverse(vec3<f32>(ra, ga, ba)) / params.cam16_white.xyz;
     return mv(CAM16_M16I_R0, CAM16_M16I_R1, CAM16_M16I_R2, rgb) / 100.0;
 }
 
@@ -263,7 +263,7 @@ fn compress_aces_rgc(rgb: vec3<f32>) -> vec3<f32> {
 }
 
 fn compress_perceptual(rgb: vec3<f32>) -> vec3<f32> {
-    let xyz = mv(RGB2XYZ_R0, RGB2XYZ_R1, RGB2XYZ_R2, rgb);
+    let xyz = mv(params.rgb2xyz_r0.xyz, params.rgb2xyz_r1.xyz, params.rgb2xyz_r2.xyz, rgb);
     var lab: vec3<f32>;
     if params.mode == 3u {
         lab = xyz_to_cam16ucs(xyz);
@@ -300,7 +300,7 @@ fn compress_perceptual(rgb: vec3<f32>) -> vec3<f32> {
     } else {
         xyz_new = oklab_to_xyz(lab_new);
     }
-    return mv(XYZ2RGB_R0, XYZ2RGB_R1, XYZ2RGB_R2, xyz_new);
+    return mv(params.xyz2rgb_r0.xyz, params.xyz2rgb_r1.xyz, params.xyz2rgb_r2.xyz, xyz_new);
 }
 
 // Threads per workgroup; the host may lower it to what the GPU's
