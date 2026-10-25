@@ -335,7 +335,7 @@ impl Pipeline {
 
         // Film sensitivity: Python `sensitivity = np.nan_to_num(10 ** log_sensitivity)` — f64.
         let log_sens = film.log_sensitivity_f64();
-        let sensitivity: Vec<[f64; 3]> = log_sens
+        let mut sensitivity: Vec<[f64; 3]> = log_sens
             .iter()
             .map(|row| {
                 let mut out = [0.0f64; 3];
@@ -346,6 +346,18 @@ impl Pipeline {
                 out
             })
             .collect();
+        // A camera taking filter multiplies the light reaching the film, so
+        // it folds into the sensitivity that every upsampler integrates,
+        // without renormalisation (upstream `_rgb_to_film_raw`).
+        if let Some(transmittance) =
+            crate::color_filters::transmittance(data_dir, &params.camera.color_filter)?
+        {
+            for (row, t) in sensitivity.iter_mut().zip(transmittance) {
+                for v in row.iter_mut() {
+                    *v *= t;
+                }
+            }
+        }
         dump_values_if_env("SPEKTRAFILM_DUMP_FILM_SENSITIVITY", || {
             sensitivity.iter().flatten().copied().collect()
         });
