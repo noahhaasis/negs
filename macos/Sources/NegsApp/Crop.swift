@@ -711,7 +711,7 @@ struct CropInspector: View {
             Section {
                 LabeledContent("Size") {
                     let size = exportedSize
-                    Text("\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px").monospacedDigit()
+                    Text(verbatim: "\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px").monospacedDigit()
                 }
                 .help("The exported photograph’s size, before the border.")
                 if let working = session.projectedWorking, session.source.width > 0 {
