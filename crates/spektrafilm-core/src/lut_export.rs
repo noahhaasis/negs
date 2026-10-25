@@ -31,6 +31,7 @@ pub fn per_pixel_params(mut params: RuntimeParams) -> RuntimeParams {
     params.io.output_color_space = "sRGB".into();
     params.io.output_cctf_encoding = true;
     params.io.upscale_factor = 1.0;
+    params.io.photo_long_side_px = None;
     params.io.crop = false;
     params.io.rotate_cw = 0;
     params.settings.preview_mode = false;

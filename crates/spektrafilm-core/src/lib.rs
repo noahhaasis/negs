@@ -2,6 +2,7 @@ pub mod color_reference;
 pub mod data;
 pub mod enlarger;
 pub mod gamut_compression;
+pub mod image_size;
 pub mod input_gamut;
 pub mod lut_export;
 pub mod mallett;

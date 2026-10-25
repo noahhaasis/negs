@@ -40,7 +40,9 @@ enum Commands {
         /// Print per-stage timing information.
         #[arg(long)]
         timings: bool,
-        /// Path to JSON params file for overrides.
+        /// Path to JSON params file for overrides. `io.photo_long_side_px`
+        /// enlarges or reduces the source before the film so the cropped
+        /// photograph (see --crop) has this many pixels on its longest side.
         #[arg(long)]
         params: Option<PathBuf>,
         /// RAW input WB (overrides io.raw_white_balance.mode in --params).
@@ -295,6 +297,24 @@ fn cmd_process(
         (image.pixel_count() as f64 / 1e6 * 10.0).round() / 10.0,
         t.elapsed().as_millis()
     );
+
+    // Image Size: resize the source before the film, so grain and halation
+    // form at the working size. A Longest side target in the params describes
+    // the cropped photograph, so it is resolved with --crop; the crop itself
+    // still applies after the pipeline. The params then ask for no resize.
+    let t = Instant::now();
+    let (image, size) = spektrafilm_core::image_size::prepare(image, &mut params, crop.as_ref())
+        .context("image size")?;
+    if size.resizes() {
+        eprintln!(
+            "Working size: {}x{} (photograph {}x{}), {} ms",
+            size.working.0,
+            size.working.1,
+            size.photo.0,
+            size.photo.1,
+            t.elapsed().as_millis()
+        );
+    }
 
     // Select backend
     let backend = spektrafilm_gpu::select_backend();

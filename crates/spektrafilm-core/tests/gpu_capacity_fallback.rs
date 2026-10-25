@@ -1,5 +1,6 @@
 //! Capacity rejection must use CPU for the entire pipeline, preserve the
-//! working-size rescale exactly once, and avoid all GPU stage allocations.
+//! working-size rescale exactly once (checked at the enlarged size), and
+//! avoid all GPU stage allocations.
 use spektrafilm_core::{params::RuntimeParams, pipeline::Pipeline, profile};
 use spektrafilm_gpu::{ComputeBackend, FilmChainParams, Lut3D, cpu_backend::CpuBackend};
 use spektrafilm_math::{image::ImageBuf, precision::from_f64};
@@ -56,13 +57,21 @@ impl ComputeBackend for RejectGpu {
 
 #[test]
 fn capacity_rejections_match_explicit_cpu_without_double_rescale() {
+    // The legacy factor and an Image Size target asking for the same frame.
+    for (factor, target) in [(1.5, None), (1.0, Some(48))] {
+        capacity_rejection_matches_explicit_cpu(factor, target);
+    }
+}
+
+fn capacity_rejection_matches_explicit_cpu(factor: f32, target: Option<u32>) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
     let film = profile::load_profile_by_name(&dir, "kodak_portra_400").unwrap();
     let paper = profile::load_profile_by_name(&dir, "kodak_portra_endura").unwrap();
     let mut params = RuntimeParams::default();
     params.io.input_color_space = "sRGB".into();
     params.io.input_cctf_decoding = false;
-    params.io.upscale_factor = 1.5;
+    params.io.upscale_factor = factor;
+    params.io.photo_long_side_px = target;
     let pipeline = Pipeline::new_with_spectral(film, paper, params, &dir).unwrap();
     let mut image = ImageBuf::new(32, 24);
     for (i, value) in image.data.iter_mut().enumerate() {
