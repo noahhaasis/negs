@@ -122,13 +122,10 @@ pub struct Pipeline {
     pub print: Profile,
     pub params: RuntimeParams,
     tc_lut: Option<TcLut>,
-    /// Mallett2019 reflectance-basis core matrix (linear-sRGB → raw), when that
-    /// upsampler is selected instead of the hanatos2025 tc LUT. Mutually
-    /// exclusive with `tc_lut`.
-    mallett_core: Option<[[f64; 3]; 3]>,
     /// Illuminant used by the RGB→tc projection before TC LUT lookup.
-    /// Most methods use the film reference illuminant; arctic2026alpha02
-    /// recovers reflectance in D65 coordinates and relights separately.
+    /// hanatos2025 uses the film reference illuminant; the reflectance methods
+    /// recover reflectance under their scene illuminant (D65) and relight it by
+    /// the reference illuminant when the tc LUT is built.
     front_illuminant: String,
     /// Print exposure normalization factor (1/geomean of midgray raw through enlarger).
     print_exposure_factor: f64,
@@ -142,10 +139,6 @@ pub struct Pipeline {
     preflash_raw: [f64; 3],
     /// Output gamut compressor (built once; identity unless oklch is enabled).
     output_gamut: crate::gamut_compression::OutputGamutCompress,
-    /// The film's density curves as loaded (after the B&W development-time
-    /// collapse), before the film-curve morph. `film.data.density_curves`
-    /// holds the morphed curves while the morph is active.
-    film_stock_density_curves: Vec<Vec<f64>>,
 }
 
 impl Pipeline {
@@ -184,16 +177,18 @@ impl Pipeline {
         self
     }
 
-    /// Bake the film-curve morph into `film.data.density_curves`, as upstream
-    /// experimental bakes `film_render.chemistry` into the film profile before
-    /// any stage reads it. Active: the curves are re-evaluated from the fitted
-    /// model with the morph applied (upstream's
-    /// `apply_print_curves_morph_with_layers`; the per-layer curves it also
-    /// returns feed upstream's layered grain, which this port doesn't have).
-    /// Inactive, or a profile without a usable model: the stored curves.
-    /// Upstream re-evaluates the fitted model even when inactive; keeping the
-    /// stored curves leaves default renders byte-identical to upstream main.
+    /// Bake the film-curve morph into `film.data.density_curves` and
+    /// `film.data.density_curves_layers`, as upstream experimental bakes
+    /// `film_render.chemistry` into the film profile before any stage reads
+    /// it (`apply_print_curves_morph_with_layers`). The curves are always
+    /// re-evaluated from the fitted model; inactive or identity settings
+    /// reproduce the model-derived curves the profile was loaded with.
     fn apply_film_curves_morph(&mut self) {
+        let Some(model) = self.film.data.density_curves_model.as_ref() else {
+            // Only programmatically built profiles lack a model; `load_profile`
+            // refuses them. Keep their curves as they are.
+            return;
+        };
         let mut morph = self.params.film_render.density_curves_morph.clone();
         if self.film.is_bw() {
             // Upstream morphs a B&W stock's single channel with the red
@@ -201,23 +196,35 @@ impl Pipeline {
             morph.gamma_factor_green = morph.gamma_factor_red;
             morph.gamma_factor_blue = morph.gamma_factor_red;
         }
-        let morphed = match (morph.active, self.film.data.density_curves_model.as_ref()) {
-            (true, Some(model)) => match crate::print_morph::morph_density_curves(
-                &self.film.data.log_exposure,
-                model,
-                &morph,
-                self.film.is_positive(),
-            ) {
-                Ok(curves) => Some(curves.iter().map(|row| row.to_vec()).collect()),
-                Err(e) => {
-                    tracing::error!(error = %e, "film-curve morph failed; using stored curves");
-                    None
-                }
-            },
-            _ => None,
-        };
-        self.film.data.density_curves =
-            morphed.unwrap_or_else(|| self.film_stock_density_curves.clone());
+        let log_exposure = &self.film.data.log_exposure;
+        let positive = self.film.is_positive();
+        let result =
+            crate::print_morph::morph_density_curves_with_layers(log_exposure, model, &morph, positive)
+                .or_else(|e| {
+                    tracing::error!(error = %e, "film-curve morph failed; using the fitted curves");
+                    let inactive = crate::params::CurvesMorphParams { active: false, ..morph.clone() };
+                    crate::print_morph::morph_density_curves_with_layers(
+                        log_exposure,
+                        model,
+                        &inactive,
+                        positive,
+                    )
+                });
+        match result {
+            Ok((total, layers)) => {
+                let n_layers = model.n_layers();
+                self.film.data.density_curves = total.iter().map(|row| row.to_vec()).collect();
+                self.film.data.density_curves_layers = if n_layers > 1 {
+                    layers
+                        .iter()
+                        .map(|row| row.iter().map(|l| l.to_vec()).collect())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            }
+            Err(e) => tracing::error!(error = %e, "film density curve model is unusable"),
+        }
     }
 }
 
@@ -245,20 +252,17 @@ impl Pipeline {
             &params.io.output_color_space,
         );
         let front_illuminant = film.info.reference_illuminant.clone();
-        let film_stock_density_curves = film.data.density_curves.clone();
         let mut pipeline = Self {
             film,
             print,
             params,
             tc_lut: None,
-            mallett_core: None,
             front_illuminant,
             print_exposure_factor: 1.0,
             print_illuminant,
             print_sensitivity: Vec::new(),
             preflash_raw: [0.0; 3],
             output_gamut,
-            film_stock_density_curves,
         };
         pipeline.apply_film_curves_morph();
         pipeline
@@ -289,8 +293,8 @@ impl Pipeline {
         apply_film_specific_params(&film, &mut params);
 
         // Python parity: look up per-(print, illuminant, film) neutral filter values from
-        // the JSON database — matches `apply_database_neutral_print_filters`. Defaults to
-        // params.enlarger.{c,m,y}_filter_neutral when the combo isn't in the database.
+        // the JSON database — matches `apply_database_neutral_print_filters`, including
+        // its C0 M50 Y50 fallback for combinations the database lacks.
         // Keep the f64 lookup values around (params is f32) — narrowing to
         // f32 here costs ~4e-8 precision through the `10^(-cc/100)` step.
         let mut neutral_cmy_f64: Option<[f64; 3]> = None;
@@ -298,13 +302,16 @@ impl Pipeline {
             let db = crate::neutral_filters::NeutralFilters::load(data_dir);
             let print_stock = print.info.stock.as_deref().unwrap_or("");
             let film_stock = film.info.stock.as_deref().unwrap_or("");
-            if let Some([c, m, y]) = db.lookup(print_stock, &params.enlarger.illuminant, film_stock)
-            {
-                params.enlarger.c_filter_neutral = c as f32;
-                params.enlarger.m_filter_neutral = m as f32;
-                params.enlarger.y_filter_neutral = y as f32;
-                neutral_cmy_f64 = Some([c, m, y]);
-            }
+            // Experimental falls back to C0 M50 Y50 for combinations the
+            // database lacks (`_DEFAULT_NEUTRAL_PRINT_FILTERS`), so any pair
+            // prints, instead of keeping the current filters.
+            let [c, m, y] = db
+                .lookup(print_stock, &params.enlarger.illuminant, film_stock)
+                .unwrap_or(crate::neutral_filters::DEFAULT_NEUTRAL_PRINT_FILTERS);
+            params.enlarger.c_filter_neutral = c as f32;
+            params.enlarger.m_filter_neutral = m as f32;
+            params.enlarger.y_filter_neutral = y as f32;
+            neutral_cmy_f64 = Some([c, m, y]);
         }
         let cmy_f64 = neutral_cmy_f64.unwrap_or([
             params.enlarger.c_filter_neutral as f64,
@@ -334,74 +341,69 @@ impl Pipeline {
         let ref_illuminant_f64 = select_illuminant_f64(&film.info.reference_illuminant);
         let mut front_illuminant = film.info.reference_illuminant.clone();
 
-        // RGB → film raw upsampler. Default `hanatos2025` builds the spectral tc
-        // LUT; `mallett2019` builds a 3×3 reflectance-basis matrix instead (no
-        // LUT). Dispatch mirrors Python `_rgb_to_film_raw`.
-        let (tc_lut, mallett_core): (Option<TcLut>, Option<[[f64; 3]; 3]>) =
-            match params.settings.rgb_to_raw_method.as_str() {
-                "hanatos2025" => {
-                    let spectra_lut = spectral_service::load_spectra_lut(data_dir)?;
-                    let window_params: Vec<f64> =
-                        film.data.hanatos2025_adaptation_window_params.clone();
-                    let tc_lut = if params.settings.apply_hanatos2025_adaptation_window
-                        && window_params.len() >= 4
-                    {
-                        spectral_service::compute_tc_lut_with_window(
-                            &spectra_lut,
-                            &sensitivity,
-                            &window_params,
-                            &ref_illuminant_f64,
-                        )
-                    } else {
-                        spectral_service::compute_tc_lut(&spectra_lut, &sensitivity)
-                    };
-
-                    // Bake input gamut compression into the LUT at build time, around
-                    // the film reference illuminant (the runtime's achromatic axis).
-                    // The per-pixel path then stays compression-agnostic.
-                    let input_gamut = crate::input_gamut::InputGamutCompress::from_params(
-                        &params.io.input_gamut_compress,
-                    )?;
-                    let tc_lut = if input_gamut.is_active() {
-                        let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(&ref_illuminant);
-                        input_gamut.remap(&tc_lut, [rx, ry])
-                    } else {
-                        tc_lut
-                    };
-                    (Some(tc_lut), None)
-                }
-                "arctic2026alpha02" => {
-                    front_illuminant = "D65".into();
-                    let reflectance_lut = spectral_service::load_arctic2026alpha02_lut(data_dir)?;
-                    let tc_lut = spectral_service::compute_reflectance_tc_lut(
-                        &reflectance_lut,
-                        &sensitivity,
-                        &ref_illuminant_f64,
+        // RGB → film raw upsampler, mirroring Python `_rgb_to_film_raw`: every
+        // method builds a tc → raw LUT. `hanatos2025` integrates irradiance
+        // spectra (optionally windowed); the reflectance methods
+        // (`arctic2026beta04`, `mallett2019`) relight their surfaces by the
+        // film reference illuminant, and the runtime projects chromaticity
+        // under their scene illuminant instead.
+        let method = spectral_service::upsampling_method(&params.settings.rgb_to_raw_method)?;
+        let spectra_lut = spectral_service::load_method_lut(data_dir, method)?;
+        let input_gamut =
+            crate::input_gamut::InputGamutCompress::from_params(&params.io.input_gamut_compress)?;
+        let tc_lut = match method.kind {
+            spectral_service::LutKind::Irradiance => {
+                let window_params: Vec<f64> =
+                    film.data.hanatos2025_adaptation_window_params.clone();
+                let tc_lut = if params.settings.apply_hanatos2025_adaptation_window
+                    && window_params.len() >= 4
+                {
+                    // White balance references the neutral the LUT emits at
+                    // the reference illuminant's chromaticity.
+                    let neutral = spectral_service::neutral_spectrum(
+                        &spectra_lut,
+                        spektrafilm_math::spectral::illuminant_to_xy(&ref_illuminant),
                     );
-                    let input_gamut = crate::input_gamut::InputGamutCompress::from_params(
-                        &params.io.input_gamut_compress,
-                    )?;
-                    let tc_lut = if input_gamut.is_active() {
-                        let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(
-                            &select_illuminant(&front_illuminant),
-                        );
-                        input_gamut.remap(&tc_lut, [rx, ry])
-                    } else {
-                        tc_lut
-                    };
-                    (Some(tc_lut), None)
-                }
-                "mallett2019" => (
-                    None,
-                    Some(crate::mallett::compute_core_matrix(
+                    spectral_service::compute_tc_lut_with_window(
+                        &spectra_lut,
                         &sensitivity,
-                        &ref_illuminant_f64,
-                    )),
-                ),
-                other => {
-                    return Err(format!("unsupported rgb_to_raw_method: {other:?}"));
+                        &window_params,
+                        &neutral,
+                    )
+                } else {
+                    spectral_service::compute_tc_lut(&spectra_lut, &sensitivity)
+                };
+
+                // Bake input gamut compression into the LUT at build time, around
+                // the film reference illuminant (the runtime's achromatic axis).
+                // The per-pixel path then stays compression-agnostic.
+                if input_gamut.is_active() {
+                    let (rx, ry) = spektrafilm_math::spectral::illuminant_to_xy(&ref_illuminant);
+                    input_gamut.remap(&tc_lut, [rx, ry])
+                } else {
+                    tc_lut
                 }
-            };
+            }
+            spectral_service::LutKind::Reflectance { scene_illuminant } => {
+                front_illuminant = scene_illuminant.into();
+                let scene_xy =
+                    spektrafilm_math::spectral::illuminant_to_xy(&select_illuminant(scene_illuminant));
+                let tc_lut = spectral_service::compute_reflectance_tc_lut(
+                    &spectra_lut,
+                    &sensitivity,
+                    &ref_illuminant_f64,
+                    scene_xy,
+                );
+                // Centred on the scene white: the runtime addresses the LUT
+                // under the scene illuminant.
+                if input_gamut.is_active() {
+                    input_gamut.remap(&tc_lut, [scene_xy.0, scene_xy.1])
+                } else {
+                    tc_lut
+                }
+            }
+        };
+        let tc_lut = Some(tc_lut);
         if let Some(lut) = &tc_lut {
             dump_values_if_env("SPEKTRAFILM_DUMP_TC_LUT", || lut.data.clone());
         }
@@ -449,20 +451,17 @@ impl Pipeline {
             &params.io.output_gamut_compress,
             &params.io.output_color_space,
         );
-        let film_stock_density_curves = film.data.density_curves.clone();
         let mut pipeline = Self {
             film,
             print,
             params,
             tc_lut,
-            mallett_core,
             front_illuminant,
             print_exposure_factor: 1.0,
             print_illuminant,
             print_sensitivity,
             preflash_raw,
             output_gamut,
-            film_stock_density_curves,
         };
         pipeline.apply_film_curves_morph();
         pipeline.print_exposure_factor = pipeline.compute_print_exposure_factor();
@@ -499,29 +498,19 @@ impl Pipeline {
         let params = &self.params;
         // The simplified pipeline (`Pipeline::new`) has no upsampler and
         // doesn't normalize the print exposure.
-        if self.tc_lut.is_none() && self.mallett_core.is_none() {
+        let Some(lut) = &self.tc_lut else {
             return 1.0;
-        }
+        };
         // Midgray sensor raw for the print-exposure normalization — always in
-        // sRGB (Python `_rgb_to_film_raw` default), through whichever upsampler
-        // is active. `scale` folds the EV compensation for the `_comp` branch.
+        // sRGB (Python `_rgb_to_film_raw` default), through the upsampler's
+        // TC LUT. `scale` folds the EV compensation for the `_comp` branch.
         let midgray_raw = |scale: f64| -> [f64; 3] {
-            if let Some(lut) = &self.tc_lut {
-                enlarger::midgray_raw_hanatos(
-                    lut,
-                    &select_illuminant(&self.front_illuminant),
-                    params.settings.use_cat16,
-                    scale,
-                )
-            } else {
-                let core = self
-                    .mallett_core
-                    .as_ref()
-                    .expect("one upsampler is always built");
-                let m = crate::mallett::film_matrix(core, "sRGB");
-                let g = 0.184 * scale;
-                crate::mallett::apply(&m, [g, g, g])
-            }
+            enlarger::midgray_raw_hanatos(
+                lut,
+                &select_illuminant(&self.front_illuminant),
+                params.settings.use_cat16,
+                scale,
+            )
         };
 
         // Compute midgray spectral density (gray card through full filming path)
@@ -652,7 +641,7 @@ impl Pipeline {
         // extended resident chain, including camera/scanner lens blur,
         // highlight boost, and enlarger diffusion. Backends that do not
         // implement the resident chain return `None` and fall through.
-        if self.tc_lut.is_some() || self.mallett_core.is_some() {
+        if self.tc_lut.is_some() {
             match self.try_gpu_resident(&image, backend, &color_ref) {
                 Ok(Some(out)) => {
                     tracing::info!("pipeline: gpu-resident fast path complete");
@@ -678,7 +667,6 @@ impl Pipeline {
             &self.params,
             backend,
             self.tc_lut.as_ref(),
-            self.mallett_core.as_ref(),
             &select_illuminant(&self.front_illuminant),
             color_ref.filming_exposure_correction,
         );
@@ -745,9 +733,7 @@ impl Pipeline {
         image: &ImageBuf,
         backend: &dyn ComputeBackend,
     ) -> Option<ImageBuf> {
-        if self.tc_lut.is_none() && self.mallett_core.is_none() {
-            return None;
-        }
+        self.tc_lut.as_ref()?;
         let io = &self.params.io;
         if io.photo_long_side_px.is_some() || (io.upscale_factor - 1.0).abs() >= 1e-6 {
             return None;
@@ -793,8 +779,8 @@ impl Pipeline {
         color_ref: &crate::color_reference::ColorReference,
     ) -> Result<Option<ImageBuf>, String> {
         // Bake the exposure scale (auto-exposure × manual EV compensation)
-        // into the front-pass matrix. Both upsamplers (hanatos and mallett)
-        // are homogeneous in the input RGB, so scaling the matrix is
+        // into the front-pass matrix. The upsampler is homogeneous in the
+        // input RGB, so scaling the matrix is
         // equivalent to scaling the input — saves a separate "scale" compute
         // pass at the head of the chain. Auto-exposure metering itself stays
         // on CPU (~30 ms at 6 MP after the per-row rayon parallelization);
@@ -816,8 +802,8 @@ impl Pipeline {
             exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
         }
         // B&W/slide filming exposure correction is a linear scale on the raw
-        // film exposure (CPU: `raw *= factor` before log10). Since both
-        // upsamplers are homogeneous in the input RGB, folding it into the
+        // film exposure (CPU: `raw *= factor` before log10). Since the
+        // upsampler is homogeneous in the input RGB, folding it into the
         // exposure scale is equivalent. 1.0 (no-op) on every path except a
         // corrected slide scan.
         exposure_scale_f64 *= color_ref.filming_exposure_correction;
@@ -831,9 +817,10 @@ impl Pipeline {
             }
         };
 
-        // Front pass: hanatos TC LUT lookup, or the mallett 3×3 matmul
-        // (`core · M_cs`, same fold as the CPU `expose` dispatch).
-        let front = if let Some(tc_lut) = self.tc_lut.as_ref() {
+        // Front pass: TC LUT lookup, with the same exposure fold as the CPU
+        // `expose` dispatch.
+        let front = {
+            let Some(tc_lut) = self.tc_lut.as_ref() else { return Ok(None) };
             let ref_illuminant = select_illuminant(&self.front_illuminant);
             let mut rgb_to_adapted = spektrafilm_math::spectral::build_rgb_to_adapted_xyz(
                 &self.params.io.input_color_space,
@@ -845,11 +832,6 @@ impl Pipeline {
                 tc_lut,
                 rgb_to_adapted_xyz: rgb_to_adapted,
             }
-        } else {
-            let Some(core) = self.mallett_core.as_ref() else { return Ok(None) };
-            let mut matrix = crate::mallett::film_matrix(core, &self.params.io.input_color_space);
-            fold_exposure(&mut matrix);
-            spektrafilm_gpu::FrontPass::Mallett2019 { matrix }
         };
 
         // Film density curves: normalized (filming.develop subtracts nanmin).
@@ -890,30 +872,24 @@ impl Pipeline {
         // Print density curves: model-evaluated at gamma 1 whenever the
         // profile carries a fitted `density_curves_model` (identity when the
         // morph is inactive, morphed when active — matching the CPU
-        // `develop_print_morph` path); stored RAW curves at the configured
-        // gamma only for model-less profiles. Computed once on CPU here so
+        // `develop_print_morph` path); stored RAW curves only for model-less
+        // profiles. Computed once on CPU here so
         // the resident print density pass needs no shader change.
         let morph = &self.params.print_render.density_curves_morph;
-        let (print_curves, print_gamma_eff) = match self.print.data.density_curves_model.as_ref() {
+        let print_curves = match self.print.data.density_curves_model.as_ref() {
             Some(model) => match crate::print_morph::morph_density_curves(
                 &print_log_exp,
                 model,
                 morph,
                 self.print.is_positive(),
             ) {
-                Ok(curves) => (curves, 1.0),
+                Ok(curves) => curves,
                 Err(e) => {
                     tracing::error!(error = %e, "print-curve model eval failed; using stored curves");
-                    (
-                        self.print.density_curves_f64(),
-                        self.params.print_render.density_curve_gamma as f64,
-                    )
+                    self.print.density_curves_f64()
                 }
             },
-            None => (
-                self.print.density_curves_f64(),
-                self.params.print_render.density_curve_gamma as f64,
-            ),
+            None => self.print.density_curves_f64(),
         };
         let print_channel_density: Vec<[f64; 3]> = self
             .print
@@ -1090,7 +1066,6 @@ impl Pipeline {
                 dir.diffusion_tail_um,
                 dir.diffusion_tail_weight,
                 self.film.is_positive(),
-                self.params.film_render.density_curve_gamma as f64,
             ))
         } else {
             None
@@ -1111,7 +1086,8 @@ impl Pipeline {
                 diffusion_tail_weight: d.6 as f32,
                 density_curves_0: &d.0,
                 log_exposure: &film_log_exp,
-                gamma_factor: d.8,
+                // The Film Curves morph is baked into the curves.
+                gamma_factor: 1.0,
             }
         });
 
@@ -1272,7 +1248,7 @@ impl Pipeline {
             front,
             film_log_exposure: &film_log_exp,
             film_density_curves_normalized: &film_curves_norm,
-            film_gamma: self.params.film_render.density_curve_gamma as f64,
+            film_gamma: 1.0,
             film_channel_density: &film_channel_density,
             film_base_density: &film_base_density,
             print_illuminant: &self.print_illuminant,
@@ -1280,7 +1256,7 @@ impl Pipeline {
             print_normalization_factor: print_norm_factor,
             print_log_exposure: &print_log_exp,
             print_density_curves: &print_curves,
-            print_gamma: print_gamma_eff,
+            print_gamma: 1.0,
             print_channel_density: &print_channel_density,
             print_base_density: &print_base_density,
             preflash: self.preflash_raw,

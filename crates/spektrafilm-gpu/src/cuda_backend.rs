@@ -239,23 +239,6 @@ extern "C" __global__ void hanatos_front_kernel(
     raw_out[base + 2u] = lb * brightness;
 }
 
-extern "C" __global__ void mallett_front_kernel(
-    const float* __restrict__ rgb_in,
-    unsigned int n_pixels,
-    const float* __restrict__ matrix,
-    float* __restrict__ raw_out
-) {
-    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (gid >= n_pixels) return;
-    unsigned int base = gid * 3u;
-    float r = rgb_in[base];
-    float g = rgb_in[base + 1u];
-    float b = rgb_in[base + 2u];
-    raw_out[base] = matrix[0] * r + matrix[1] * g + matrix[2] * b;
-    raw_out[base + 1u] = matrix[3] * r + matrix[4] * g + matrix[5] * b;
-    raw_out[base + 2u] = matrix[6] * r + matrix[7] * g + matrix[8] * b;
-}
-
 extern "C" __global__ void log10_inplace_kernel(
     float* __restrict__ data,
     unsigned int n_pixels
@@ -1141,7 +1124,6 @@ pub struct CudaBackend {
     stream: Arc<CudaStream>,
     _module: Arc<CudaModule>,
     hanatos_kernel: CudaFunction,
-    mallett_kernel: CudaFunction,
     log10_kernel: CudaFunction,
     max_reduce_kernel: CudaFunction,
     highlight_boost_kernel: CudaFunction,
@@ -1180,7 +1162,6 @@ impl CudaBackend {
         let ptx = compile_ptx(CUDA_SRC).ok()?;
         let module = ctx.load_module(ptx).ok()?;
         let hanatos_kernel = module.load_function("hanatos_front_kernel").ok()?;
-        let mallett_kernel = module.load_function("mallett_front_kernel").ok()?;
         let log10_kernel = module.load_function("log10_inplace_kernel").ok()?;
         let max_reduce_kernel = module.load_function("max_reduce_kernel").ok()?;
         let highlight_boost_kernel = module.load_function("highlight_boost_kernel").ok()?;
@@ -1215,7 +1196,6 @@ impl CudaBackend {
             stream,
             _module: module,
             hanatos_kernel,
-            mallett_kernel,
             log10_kernel,
             max_reduce_kernel,
             highlight_boost_kernel,
@@ -1935,17 +1915,6 @@ impl CudaBackend {
                     .arg(&lut_size)
                     .arg(&matrix_dev)
                     .arg(&tc_lut_dev)
-                    .arg(&mut buf_b);
-                unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
-            }
-            FrontPass::Mallett2019 { matrix } => {
-                let matrix = matrix_f32(matrix);
-                let matrix_dev = self.stream.clone_htod(&matrix)?;
-                let mut launch = self.stream.launch_builder(&self.mallett_kernel);
-                launch
-                    .arg(&buf_a)
-                    .arg(&n_pixels)
-                    .arg(&matrix_dev)
                     .arg(&mut buf_b);
                 unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
             }

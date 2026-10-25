@@ -480,8 +480,8 @@ pub fn midgray_raw_hanatos(
 ///   raw → log10(raw + 1e-10) → develop_simple (RAW curves, no normalization)
 ///   → compute_density_spectral (einsum + base_density).
 ///
-/// The raw is computed by the configured upsampler (`midgray_raw_hanatos` or
-/// the Mallett core matrix). Python's `_rgb_to_film_raw(rgb)` defaults to
+/// The raw is computed from the upsampler's TC LUT (`midgray_raw_hanatos`).
+/// Python's `_rgb_to_film_raw(rgb)` defaults to
 /// `color_space="sRGB"`, so midgray calibration is always done in sRGB
 /// regardless of the runtime input color space — otherwise the print exposure
 /// normalization would shift with the working space. Callers must honour that.
@@ -492,7 +492,7 @@ pub fn midgray_raw_hanatos(
 pub fn midgray_density_spectral_from_raw(
     raw: [f64; 3],
     film: &crate::profile::Profile,
-    params: &crate::params::RuntimeParams,
+    _params: &crate::params::RuntimeParams,
 ) -> Vec<f64> {
     // Python: log_raw = np.log10(raw + 1e-10)
     let log_raw: [f64; 3] = [
@@ -501,14 +501,13 @@ pub fn midgray_density_spectral_from_raw(
         (raw[2] + 1e-10).log10(),
     ];
 
-    // Python: density_cmy = interpolate_exposure_to_density(log_raw, density_curves, log_exposure, gamma_factor)
+    // Python: density_cmy = develop_simple(log_raw, log_exposure, density_curves)
     // - density_curves is used RAW (not normalized) in the midgray path
-    // - gamma_factor scalar → broadcast to [gamma, gamma, gamma] per channel
-    // - x-axis per channel = log_exposure / gamma_factor[c]
+    // - experimental removed density_curve_gamma: the Film Curves morph is
+    //   baked into the curves, which are interpolated at unit gamma
     let log_exposure = film.log_exposure_f64();
     let density_curves = film.density_curves_f64();
-    let g = params.film_render.density_curve_gamma as f64;
-    let gamma = [g, g, g];
+    let gamma = [1.0f64; 3];
 
     let density_cmy =
         interp_density_curve_at_log_raw(&log_raw, &log_exposure, &density_curves, &gamma);
@@ -639,9 +638,9 @@ mod parity_tests {
     /// Enlarger preflash regression guard. The constant preflash raw vector is
     /// the film base density lit by the preflash-filtered illuminant, integrated
     /// against the print sensitivity and scaled by `preflash_exposure` — Python
-    /// `PrintingStage._compute_raw_preflash`. Reference values were computed from
-    /// a faithful numpy transcription (`density_to_light` + `einsum`) on the real
-    /// kodak_portra_400 base density and kodak_portra_endura sensitivity, with the
+    /// `PrintingStage._compute_raw_preflash`. Reference values come from
+    /// experimental 28bf883's `_compute_raw_preflash` on the kodak_portra_400
+    /// base density and kodak_portra_endura sensitivity, with the
     /// baked TH-KG3 (C0 M65 Y55) default-filter illuminant and exposure 0.0625
     /// (an f32-exact value, so the f32→f64 widening of `preflash_exposure` is
     /// not part of the comparison).
@@ -661,7 +660,7 @@ mod parity_tests {
         let pipeline = Pipeline::new_with_spectral(film, print, params, &dir).unwrap();
         let p = pipeline.preflash_raw();
 
-        let expect = [0.4567086334477163, 0.3959958805787103, 0.5172324967476551];
+        let expect = [0.4567088038449616, 0.39599598403601427, 0.5172322808628251];
         for c in 0..3 {
             assert!(
                 (p[c] - expect[c]).abs() < 1e-12,

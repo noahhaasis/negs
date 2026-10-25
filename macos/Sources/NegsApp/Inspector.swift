@@ -108,7 +108,7 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .choice("Output gamut", "io.output_gamut_compress.algorithm", ["off", "oklch", "oklrab", "cam16ucs", "aces_rgc"]),
         .choice("Input gamut", "io.input_gamut_compress.algorithm", ["off", "xy"]),
         .toggle("CAT16 adaptation", "settings.use_cat16"),
-        .choice("Spectral upsampling", "settings.rgb_to_raw_method", ["hanatos2025", "arctic2026alpha02", "mallett2019"])
+        .choice("Spectral upsampling", "settings.rgb_to_raw_method", ["hanatos2025", "arctic2026beta04", "mallett2019"])
     ])
 ]
 

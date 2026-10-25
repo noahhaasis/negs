@@ -298,11 +298,12 @@ mod tests {
         sign * (1.0 - poly * (-x * x).exp())
     }
 
-    /// Stage-by-stage parity against upstream 0.3.4 on a 1x1 linear 0.184
-    /// pixel at default settings (CAT16, input gamut `xy` baked into the
-    /// LUT, model-evaluated print curves), stochastic/spatial effects off.
+    /// Stage-by-stage parity against upstream experimental 28bf883 on a 1x1
+    /// linear 0.184 pixel at default settings (CAT16, input gamut `xy` baked
+    /// into the LUT, model-derived curves), stochastic/spatial effects off.
     /// Reference values are the upstream pipeline taps (`log_e_film`,
-    /// `cmy_film`, `log_e_print`, `cmy_print`) dumped from `origin/main`.
+    /// `cmy_film`, `log_e_print`, `cmy_print`) from
+    /// `scripts/parity/exp_data_unit_references.py`.
     /// When full-chain parity breaks, this pinpoints the diverging stage.
     /// Note the final scan here bypasses output gamut compression (identity),
     /// so there is no `rgb_out` assertion — the full-chain test covers it.
@@ -355,7 +356,6 @@ mod tests {
             &pipeline.params,
             &backend,
             pipeline.tc_lut(),
-            None,
             &crate::illuminants::select_illuminant(&pipeline.film.info.reference_illuminant),
             1.0,
         );
@@ -363,9 +363,9 @@ mod tests {
             "log_e_film",
             log_raw.get(0, 0),
             [
-                0.0055470069132583094,
-                -0.0046291033978263334,
-                -0.037191809233513652,
+                0.00013947940693042875,
+                -2.0131473140879673e-05,
+                0.0001502978441153382,
             ],
         );
 
@@ -375,9 +375,9 @@ mod tests {
             "cmy_film",
             density_cmy.get(0, 0),
             [
-                0.68987884029422741,
-                0.70272493086202847,
-                0.84508598425873571,
+                0.6836686495664199,
+                0.7045697619028768,
+                0.8644087416111411,
             ],
         );
 
@@ -396,9 +396,9 @@ mod tests {
             "log_e_print",
             log_raw_print.get(0, 0),
             [
-                -0.0058943653645049067,
-                0.0016183559749744021,
-                0.0019890502790478998,
+                0.001969950966870182,
+                -0.0006825658193388163,
+                -0.0012859242354915346,
             ],
         );
 
@@ -412,9 +412,9 @@ mod tests {
             "cmy_print",
             density_print.get(0, 0),
             [
-                0.64189250593682268,
-                0.54211141885697389,
-                0.52002829327970834,
+                0.6292509597907645,
+                0.5353204737731871,
+                0.5382977975113571,
             ],
         );
     }

@@ -67,6 +67,20 @@ From the Rust repository root:
 ../spektrafilm-env/bin/python -I scripts/parity/freeze_illuminants_reference.py \
   --python-source /tmp/pymain --git-repo /path/to/spektrafilm \
   --output crates/spektrafilm-core/tests/fixtures/illuminants_python_3bb2c2d.json
+# Spectral-upsampling tc LUTs (hanatos2025, arctic2026beta04, mallett2019)
+# and the neutral print filter database with its fallback:
+../spektrafilm-env/bin/python -I scripts/parity/freeze_spectral_upsampling_reference.py \
+  --experimental /path/to/experimental-checkout \
+  --output crates/spektrafilm-core/tests/fixtures/spectral_upsampling_python_28bf883.json
+
+# Ticket 16: experimental with the other wave-1 branches' items reverted
+# (exp_data_reference.py). Print the inline test values, and refreeze the
+# slide fixture's RGB expectations:
+EXPDATA_REFERENCE=/path/to/experimental-checkout \
+  ../spektrafilm-env/bin/python -I scripts/parity/exp_data_unit_references.py
+EXPDATA_REFERENCE=/path/to/experimental-checkout \
+  ../spektrafilm-env/bin/python -I scripts/parity/refreeze_slide_dir_rgb.py \
+  crates/spektrafilm-core/tests/fixtures/slide_dir_python_3bb2c2d.json
 
 # Existing frozen Python reference tests and the full Rust suite:
 cargo test --workspace --locked

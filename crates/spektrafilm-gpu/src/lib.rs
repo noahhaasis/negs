@@ -261,20 +261,18 @@ pub struct FilmChainParams<'a> {
     pub output_cctf_encoding: bool,
 }
 
-/// RGB → film-raw front pass of the GPU-resident chain. Both variants are
-/// homogeneous in the input RGB, so the caller folds the exposure scale
-/// (auto-exposure × EV compensation × B&W filming correction) into the
-/// matrix — no separate scale pass.
+/// RGB → film-raw front pass of the GPU-resident chain. It is homogeneous in
+/// the input RGB, so the caller folds the exposure scale (auto-exposure × EV
+/// compensation × B&W filming correction) into the matrix — no separate
+/// scale pass. Every upsampling method builds a tc LUT, the reflectance ones
+/// included.
 pub enum FrontPass<'a> {
-    /// Hanatos2025 spectral upsampling: per-pixel chromaticity LUT lookup.
+    /// Spectral upsampling: per-pixel chromaticity LUT lookup.
     Hanatos2025 {
         tc_lut: &'a spektrafilm_math::spectral::TcLut,
         /// Combined input-RGB → CAT-adapted-XYZ matrix (row-major).
         rgb_to_adapted_xyz: [[f64; 3]; 3],
     },
-    /// Mallett2019 reflectance-basis upsampling: one rgb → raw 3×3 matmul
-    /// (`core · M_cs`, see `spektrafilm-core/src/mallett.rs`).
-    Mallett2019 { matrix: [[f64; 3]; 3] },
 }
 
 /// Pre-computed plan for the GPU-resident diffusion filter. The per-channel
