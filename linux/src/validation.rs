@@ -17,6 +17,10 @@ pub fn schedule(ui: &Rc<Editor>) {
                 ui.perf.detail("window_width", ui.window.width());
                 ui.perf.detail("window_height", ui.window.height());
                 ui.perf.detail(
+                    "data_directory",
+                    crate::data_root().to_string_lossy().to_string(),
+                );
+                ui.perf.detail(
                     "surface_scale",
                     ui.window.surface().map(|s| s.scale()).unwrap_or(1.),
                 );
@@ -26,7 +30,14 @@ pub fn schedule(ui: &Rc<Editor>) {
                             if let Some(tabs) = ui.tabs.borrow().as_ref() {
                                 tabs.set_visible_child_name("post");
                             }
-                            ui.history.borrow_mut().state.border = 2;
+                            ui.history.borrow_mut().state.border.enabled = true;
+                            ui.history.borrow_mut().state.border.style =
+                                crate::border::Style::from_index(
+                                    std::env::var("NEGS_BORDER_STYLE")
+                                        .ok()
+                                        .and_then(|s| s.parse().ok())
+                                        .unwrap_or(2),
+                                );
                             ui.sync_state();
                         }
                         "crop" => {

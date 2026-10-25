@@ -24,6 +24,20 @@ camera JPEG and prepares smaller display copies of the transferred TIFFs
 under ignored `target/linux-validation/ui-demo/`. It requires ImageMagick;
 it does not modify the transferred files. Photos are not compiled into the app.
 
+For a per-user installation of this preview:
+
+```sh
+python3 linux/install_preview.py
+```
+
+This copies the executable, border assets/licenses and source archive under
+`$XDG_DATA_HOME/negs-ui-preview`, installs a launcher and a matching desktop
+entry/icon, and offers Open With support without changing defaults. When an
+existing Hyprland Lua configuration is found, it also installs the Negs-only
+opacity exception, reloads the active Hyprland session, and checks for errors.
+The installer is tested with isolated XDG roots; distribution packaging and
+dependency installation remain pending. `--no-reload` is for staging/tests.
+
 To open your own JPEG, PNG, TIFF or supported embedded RAW preview:
 
 ```sh
@@ -69,13 +83,16 @@ opaque neutral background, including behind transparent input pixels.
   has a separate folder generation so rapid photo selections do not cancel it.
 - Native Lab/Post controls, synchronized sliders and number fields, deferred
   inspector construction, and lazily constructed effect sections. An eager
-  inspection mode creates all 57 sliders for startup comparisons; the normal
-  first inspector creates 14.
+  inspection mode creates all 60 sliders, including the three border sliders;
+  the normal first inspector creates 17. The original startup report predates
+  the border controls and counts 57/14 respectively.
 - Local undo/redo/reset. Slider pointer events are observed without taking
   over GTK's drag gesture, and one drag is committed as one edit.
 - Fit, actual size accounting for fractional surface scaling, pointer-centered
   Control+scroll zoom, panning, rotation, crop corners and crop ratios.
-- White/black mat and keyline presentation; light/dark appearance; export and
+- Configurable Solid/Film/Keyline/35mm borders, thickness and opaque sRGB colors,
+  film-specific strip textures, Instagram extension and saved export inclusion;
+  light/dark appearance; export and
   LUT option dialogs with the saving action visibly disabled.
 - A libadwaita breakpoint changes the inspector into an overlay below 900 sp.
   F7 opens/closes it; F6 toggles the film strip.
@@ -94,8 +111,10 @@ Settings/session data use `$XDG_CONFIG_HOME/negs/ui-preview` (normally
 `~/.config/negs/ui-preview`). `NEGS_PROFILE_DIR` isolates tests. Session writes
 use a temporary sibling and rename. The preview has its own application ID,
 `dev.negs.app.UiPreview`, and currently allows multiple instances for testing.
-No desktop entry, file association, system installation, package publication,
-or updater has been installed. Run/package integration remains future work.
+The preview installer provides a per-user desktop entry and optional Open With
+registration. It has not been installed into the validation user's application
+directories; tests use isolated XDG locations. No distro package or updater has
+been published.
 
 ## Validation commands
 
@@ -104,12 +123,13 @@ bash linux/cargo.sh test --release --locked
 bash linux/cargo.sh clippy --locked -- -D warnings
 bash linux/cargo.sh fmt --check
 python3 linux/check_ui.py
+python3 linux/check_borders.py
 python3 linux/measure_ui.py --runs 5
 python3 linux/measure_ui.py --runs 3 --benchmark \
   --out target/linux-validation/ui-interaction
 ```
 
-The last three require an unlocked Hyprland session. Python's AT-SPI/GObject
+The UI checks and timing runners require an unlocked Hyprland session. Python's AT-SPI/GObject
 introspection and `wtype` are used for real accessibility/input checks.
 The benchmark understands this machine's Hyprland Lua dispatch API and only
 targets the process it launches. It refuses a locked/asleep desktop. It sends
@@ -135,13 +155,16 @@ film-processing workload. `developed_image_ms` is explicitly null.
 
 See [linux-ui-validation.md](linux-ui-validation.md) for machine evidence,
 measurements, screenshots, and remaining limits.
+See [linux-ui-parity.md](linux-ui-parity.md) for the explicit control-by-control
+UI gaps; this prototype does not yet provide the full original interface.
 
 ## Deferred work
 
 Connect the persistent helper and its real catalog/defaults; coalesce renders
 and reject stale replies; build the developed-preview cache; implement both
-export paths and cancellation; carry over the full crop/straighten/border/35mm
-and Image Size semantics; complete profile grouping, RAW WB/B&W behavior and
+export paths and cancellation; validate border/35mm parity with exports and
+carry over the full crop/straighten and Image Size semantics; complete profile
+grouping, RAW WB/B&W behavior and
 recent files; virtualize and watch folders; implement single-instance file-open
 activation and packaging. Then execute the numerical, color, capacity and
 full application checks from `linux-agent-handoff.md`.

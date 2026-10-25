@@ -7,7 +7,8 @@ pub struct State {
     pub values: BTreeMap<String, f64>,
     pub choices: BTreeMap<String, String>,
     pub rotation: u8,
-    pub border: u8,
+    #[serde(default)]
+    pub border: crate::border::Settings,
     pub crop: Option<[f64; 4]>,
 }
 
@@ -100,10 +101,10 @@ mod tests {
         h.commit();
         h.undo();
         h.begin("Border");
-        h.state.border = 2;
+        h.state.border.enabled = true;
         h.commit();
         assert!(h.redo().is_none());
         assert_eq!(h.state.rotation, 0);
-        assert_eq!(h.state.border, 2);
+        assert!(h.state.border.enabled);
     }
 }
