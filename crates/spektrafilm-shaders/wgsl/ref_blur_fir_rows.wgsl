@@ -28,6 +28,22 @@ const ROW_PIXELS: u32 = 256u;
 var<workgroup> tile: array<vec4<f32>, 274>; // ROW_PIXELS + 2·MAX_RADIUS
 var<workgroup> weights: array<vec3<f32>, 19>; // 2·MAX_RADIUS + 1 taps
 
+// Python `_reflect` (scipy.ndimage `mode='reflect'`): d c b a | a b c d |
+// d c b a, the edge sample repeated, with period 2n so that a kernel wider
+// than the image keeps folding across it. Same as `reflect_index` in
+// spektrafilm-math's gaussian.rs.
+fn reflect_index(i: i32, n: i32) -> u32 {
+    if i >= 0 && i < n {
+        return u32(i);
+    }
+    let period = 2 * n;
+    var m = i % period;
+    if m < 0 {
+        m += period;
+    }
+    return u32(select(m, period - 1 - m, m >= n));
+}
+
 fn load_pixel(x: u32, y: u32) -> vec4<f32> {
     let b = (y * params.width + x) * 3u;
     return vec4<f32>(input[b], input[b + 1u], input[b + 2u], 0.0);
@@ -59,7 +75,7 @@ fn main(
     }
     let w = params.width;
     let h = params.height;
-    // Pixels x0 − r … x0 + 255 + r of row y, clamped to the image.
+    // Pixels x0 − r … x0 + 255 + r of row y, reflected at the borders.
     // Segments are numbered row by row and wrap into y (see
     // `linear_dispatch_grid`), so images taller than 65535 rows fit.
     let segments = (w + ROW_PIXELS - 1u) / ROW_PIXELS;
@@ -70,8 +86,7 @@ fn main(
     let x0 = (segment % segments) * ROW_PIXELS;
     let y = segment / segments;
     for (var p = lid; p < ROW_PIXELS + 2u * r; p += 256u) {
-        let sx = clamp(i32(x0 + p) - i32(r), 0, i32(w) - 1);
-        tile[p] = load_pixel(u32(sx), y);
+        tile[p] = load_pixel(reflect_index(i32(x0 + p) - i32(r), i32(w)), y);
     }
     workgroupBarrier();
     let x = x0 + lid;

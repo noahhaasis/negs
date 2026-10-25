@@ -5245,6 +5245,105 @@ mod grain_tests {
         }
     }
 
+    /// `RefBlur` at the image borders against an f64 reference of the CPU
+    /// blur: the FIR (σ < 3) reflected with the edge sample repeated (Python's
+    /// `_reflect`), the IIR from the edge samples. Bright pixels sit on every
+    /// edge and in the corners; the small fields are narrower than the FIR
+    /// kernels, and 300 px spans two row segments of the row pass.
+    #[test]
+    fn ref_blur_borders_match_f64_reference() {
+        let Some(backend) = WgpuBackend::new() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        // Python `_reflect`, written out independently of `reflect_index`.
+        let reflect = |i: isize, n: usize| -> usize {
+            let n = n as isize;
+            let mut i = i;
+            while i < 0 || i >= n {
+                i = if i < 0 { -i - 1 } else { 2 * n - 1 - i };
+            }
+            i as usize
+        };
+        let fir = |line: &mut Vec<f64>, s: f64| {
+            let r = (3.0 * s + 0.5) as isize;
+            let k: Vec<f64> = (-r..=r).map(|x| (-(x * x) as f64 / (2.0 * s * s)).exp()).collect();
+            let sum: f64 = k.iter().sum();
+            let src = line.clone();
+            for (j, out) in line.iter_mut().enumerate() {
+                *out = (-r..=r).map(|d| src[reflect(j as isize + d, src.len())] * k[(d + r) as usize]).sum::<f64>() / sum;
+            }
+        };
+        let iir = |line: &mut Vec<f64>, s: f64| {
+            let (b1, b2, b3) = young_van_vliet_b(s);
+            let a = 1.0 - b1 - b2 - b3;
+            let n = line.len();
+            let (mut w1, mut w2, mut w3) = (line[0], line[0], line[0]);
+            for j in 0..n {
+                let v = a * line[j] + b1 * w1 + b2 * w2 + b3 * w3;
+                line[j] = v;
+                (w3, w2, w1) = (w2, w1, v);
+            }
+            let xn = line[n - 1];
+            (w1, w2, w3) = (xn, xn, xn);
+            for j in (0..n).rev() {
+                let v = a * line[j] + b1 * w1 + b2 * w2 + b3 * w3;
+                line[j] = v;
+                (w3, w2, w1) = (w2, w1, v);
+            }
+        };
+        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+        // FIR and IIR channels mixed in one blur, as halation and DIR do.
+        let sigmas = [[0.75f32, 1.7, 2.99], [0.3, 2.5, 3.0], [4.5, 9.0, 1.0]];
+        for (w, h) in [(300usize, 37usize), (23, 17), (5, 3), (1, 9), (9, 1)] {
+            let mut src = vec![0.0f64; w * h * 3];
+            for y in 0..h {
+                for x in 0..w {
+                    for c in 0..3 {
+                        let v = 0.2 + 0.1 * (0.7 * x as f64 + 0.3 * y as f64 + c as f64).sin();
+                        let edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
+                        let corner = (x == 0 || x == w - 1) && (y == 0 || y == h - 1);
+                        let bright = if corner { 6.0 } else if edge && (x + y) % 3 == 0 { 3.0 } else { 0.0 };
+                        src[(y * w + x) * 3 + c] = v + bright;
+                    }
+                }
+            }
+            let src_f32: Vec<f32> = src.iter().map(|&v| v as f32).collect();
+            let mk = |label: &str| {
+                backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytemuck::cast_slice(&src_f32), usage })
+            };
+            for sigma in sigmas {
+                let mut expected = src.clone();
+                for c in 0..3 {
+                    let s = sigma[c] as f64;
+                    let blur = |line: &mut Vec<f64>| if s < 3.0 { fir(line, s) } else { iir(line, s) };
+                    for y in 0..h {
+                        let mut line: Vec<f64> = (0..w).map(|x| expected[(y * w + x) * 3 + c]).collect();
+                        blur(&mut line);
+                        for x in 0..w {
+                            expected[(y * w + x) * 3 + c] = line[x];
+                        }
+                    }
+                    for x in 0..w {
+                        let mut line: Vec<f64> = (0..h).map(|y| expected[(y * w + x) * 3 + c]).collect();
+                        blur(&mut line);
+                        for y in 0..h {
+                            expected[(y * w + x) * 3 + c] = line[y];
+                        }
+                    }
+                }
+                let (src_buf, mid, out) = (mk("border_src"), mk("border_mid"), mk("border_out"));
+                let blur = build_ref_blur(&backend.device, &backend, w as u32, h as u32, &src_buf, &mid, &out, sigma, [1.0; 3], false, "border_test");
+                let got = run_and_read(&backend, &out, w * h * 3 * 4, |encoder| blur.encode(encoder));
+                for c in 0..3 {
+                    let err = (0..w * h).map(|i| (got[i * 3 + c] as f64 - expected[i * 3 + c]).abs()).fold(0.0, f64::max);
+                    eprintln!("{w}×{h} σ {}: max |GPU − f64| = {err:.1e}", sigma[c]);
+                    assert!(err < 5e-6, "{w}×{h} σ {}: max error {err}", sigma[c]);
+                }
+            }
+        }
+    }
+
     /// Time of each blur pass at 24 MP with the default halation and DIR
     /// sizes; run with `cargo test --release -p spektrafilm-gpu
     /// bench_ref_blur_passes -- --ignored --nocapture`. Each pass is submitted
