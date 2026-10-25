@@ -1,9 +1,9 @@
-"""Freeze Python main references for the illuminant spectra (ticket 16.2).
+"""Freeze Python experimental references for the illuminant spectra (ticket 16.2).
 
 Rust only knew D50/D55/D65 (and TH-KG3 in the enlarger) and silently fell
 back to D55 or D50 for any other name, so the cine stocks (reference `T`,
 viewing `K75P`) rendered under the wrong light. This freezes, from a clean
-Python main tree only (never from Rust):
+`git archive` of experimental 28bf883 only (never from Rust):
 
 - `standard_illuminant(name)` for every name Rust resolves, including a few
   `BB<temperature>` blackbodies;
@@ -13,13 +13,14 @@ Python main tree only (never from Rust):
 
 `T` and `K75P` are colour-science's `SDS_LIGHT_SOURCES['Incandescent']` and
 `['Kinoton 75P']`, so the spectra depend on the colour-science version
-recorded in the fixture. They are the same on Python experimental 28bf883.
+recorded in the fixture. They were the same on Python main 3bb2c2d; the
+pipeline outputs follow experimental's defaults.
 
 Usage (from the repository root):
 
     ../spektrafilm-env/bin/python -I scripts/parity/freeze_illuminants_reference.py \
-      --python-source /tmp/pymain \
-      --output crates/spektrafilm-core/tests/fixtures/illuminants_python_3bb2c2d.json
+      --python-source /path/to/28bf883-archive \
+      --output crates/spektrafilm-core/tests/fixtures/illuminants_python_28bf883.json
 
 `--python-source` must be `git archive` of COMMIT; every file under
 src/spektrafilm is checked against the Git objects of --git-repo.
@@ -38,7 +39,7 @@ from check_parity import apply_params, common_params, tree_hash  # noqa: E402
 from freeze_gamut_reference import pinned_tree_hash, require  # noqa: E402
 
 
-COMMIT = "3bb2c2d2801ff68b92019cf1dbcbb133d60832bc"
+COMMIT = "28bf883e1672e884307edc75852549376e13644e"
 ROOT = Path(__file__).resolve().parents[2]
 SPECTRA = ["D50", "D55", "D65", "T", "K75P", "TH-KG3", "TH-KG3-L",
            "BB2856", "BB3200", "BB5500", "BB6504.5"]

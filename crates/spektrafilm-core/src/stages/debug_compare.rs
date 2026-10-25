@@ -326,7 +326,6 @@ mod tests {
         params.io.input_color_space = "sRGB".to_string();
         params.io.input_cctf_decoding = false;
         params.io.output_cctf_encoding = false; // keep linear for parity
-        crate::params::main_3bb2c2d_gamut(&mut params.io);
 
         // Stage outputs accumulate f32 Scalar rounding; the f64 build
         // tracks the Python taps tightly.
@@ -365,9 +364,9 @@ mod tests {
             "log_e_film",
             log_raw.get(0, 0),
             [
-                0.00013947940693042875,
-                -2.0131473140879673e-05,
-                0.0001502978441153382,
+                0.00013947940693081435,
+                -2.013147313996352e-05,
+                0.0001502978441133138,
             ],
         );
 
@@ -377,9 +376,9 @@ mod tests {
             "cmy_film",
             density_cmy.get(0, 0),
             [
-                0.6836686495664199,
-                0.7045697619028768,
-                0.8644087416111411,
+                0.6836686495664202,
+                0.7045697619028772,
+                0.86440874161114,
             ],
         );
 
@@ -398,9 +397,9 @@ mod tests {
             "log_e_print",
             log_raw_print.get(0, 0),
             [
-                0.001969950966870182,
-                -0.0006825658193388163,
-                -0.0012859242354915346,
+                0.0019699509668697017,
+                -0.0006825658193391544,
+                -0.0012859242354906642,
             ],
         );
 
@@ -414,9 +413,9 @@ mod tests {
             "cmy_print",
             density_print.get(0, 0),
             [
-                0.6292509597907645,
-                0.5353204737731871,
-                0.5382977975113571,
+                0.6292509597907634,
+                0.5353204737731865,
+                0.5382977975113589,
             ],
         );
     }

@@ -874,21 +874,3 @@ fn default_640() -> u32 {
     640
 }
 
-/// Upstream main 3bb2c2d's gamut settings, for the unit tests whose Python
-/// references were dumped from main.
-#[cfg(test)]
-pub(crate) fn main_3bb2c2d_gamut(io: &mut IoParams) {
-    io.input_gamut_compress = InputGamutCompressParams {
-        algorithm: "xy".into(),
-        knee: [0.0, 1.0, 6.0],
-        boundary: "locus".into(),
-        hull_detail: 5.0,
-        center: "reference".into(),
-    };
-    io.output_gamut_compress = OutputGamutCompressParams {
-        algorithm: "cam16ucs".into(),
-        knee: [0.0, 1.0, 6.0],
-        lightness_compression: Some([0.7, 1.0, 2.2]),
-    };
-}
-
