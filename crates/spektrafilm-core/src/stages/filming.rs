@@ -270,27 +270,10 @@ fn meter_luminance(lum: &[f64], sw: usize, sh: usize, method: &str) -> f64 {
     }
 }
 
-/// Per-pixel `raw = m · rgb` for the Mallett2019 path (f64 matmul, rayon-parallel).
-fn apply_mallett_matrix(image: &ImageBuf, m: &[[f64; 3]; 3]) -> ImageBuf {
-    let mut out = image.clone();
-    out.data
-        .par_chunks_exact_mut(3)
-        .zip(image.data.par_chunks_exact(3))
-        .for_each(|(dst, src)| {
-            let rgb = [src[0] as f64, src[1] as f64, src[2] as f64];
-            let v = crate::mallett::apply(m, rgb);
-            dst[0] = from_f64(v[0]);
-            dst[1] = from_f64(v[1]);
-            dst[2] = from_f64(v[2]);
-        });
-    out
-}
-
 /// Expose: convert RGB to film raw exposure.
 ///
-/// Dispatches on the configured upsampler: the Mallett2019 per-pixel matrix
-/// (when `mallett_core` is set), the full Hanatos2025 spectral path (when a
-/// TC LUT is provided), or a simplified RGB → log10 fallback.
+/// The spectral path samples the method's TC LUT when one is provided;
+/// otherwise a simplified RGB → log10 fallback.
 #[allow(clippy::too_many_arguments)]
 pub fn expose(
     image: ImageBuf,
@@ -298,7 +281,6 @@ pub fn expose(
     params: &RuntimeParams,
     backend: &dyn ComputeBackend,
     tc_lut: Option<&TcLut>,
-    mallett_core: Option<&[[f64; 3]; 3]>,
     front_illuminant: &[f32],
     bw_filming_correction: f64,
 ) -> ImageBuf {
@@ -320,13 +302,9 @@ pub fn expose(
         rgb.data.par_iter_mut().for_each(|v| *v *= exp_comp);
 
         // RGB → film raw exposure
-        if let Some(core) = mallett_core {
-            // Mallett2019: per-pixel `raw = (core · M_cs) · rgb`, a single 3×3
-            // matrix folding the input-colour-space → linear-sRGB conversion.
-            let m = crate::mallett::film_matrix(core, &params.io.input_color_space);
-            apply_mallett_matrix(&rgb, &m)
-        } else if let Some(lut) = tc_lut {
-            // Full Hanatos2025 spectral upsampling with CAT02 adaptation.
+        if let Some(lut) = tc_lut {
+            // Spectral upsampling: chromaticity under the front illuminant
+            // (CAT-adapted), sampled from the method's TC LUT.
             backend.hanatos2025_rgb_to_raw(
                 &rgb,
                 lut,
@@ -533,7 +511,6 @@ pub fn process(
         params,
         backend,
         tc_lut,
-        None,
         &ref_illuminant,
         1.0,
     );

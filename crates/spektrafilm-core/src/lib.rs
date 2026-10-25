@@ -6,7 +6,6 @@ pub mod gamut_compression;
 pub mod image_size;
 pub mod input_gamut;
 pub mod lut_export;
-pub mod mallett;
 pub mod neutral_filters;
 pub mod params;
 pub mod pipeline;

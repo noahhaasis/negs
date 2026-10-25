@@ -356,7 +356,6 @@ mod tests {
             &pipeline.params,
             &backend,
             pipeline.tc_lut(),
-            None,
             &crate::illuminants::select_illuminant(&pipeline.film.info.reference_illuminant),
             1.0,
         );

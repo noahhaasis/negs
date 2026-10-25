@@ -122,10 +122,6 @@ pub struct Pipeline {
     pub print: Profile,
     pub params: RuntimeParams,
     tc_lut: Option<TcLut>,
-    /// Mallett2019 reflectance-basis core matrix (linear-sRGB → raw), when that
-    /// upsampler is selected instead of the hanatos2025 tc LUT. Mutually
-    /// exclusive with `tc_lut`.
-    mallett_core: Option<[[f64; 3]; 3]>,
     /// Illuminant used by the RGB→tc projection before TC LUT lookup.
     /// hanatos2025 uses the film reference illuminant; the reflectance methods
     /// recover reflectance under their scene illuminant (D65) and relight it by
@@ -261,7 +257,6 @@ impl Pipeline {
             print,
             params,
             tc_lut: None,
-            mallett_core: None,
             front_illuminant,
             print_exposure_factor: 1.0,
             print_illuminant,
@@ -408,7 +403,7 @@ impl Pipeline {
                 }
             }
         };
-        let (tc_lut, mallett_core): (Option<TcLut>, Option<[[f64; 3]; 3]>) = (Some(tc_lut), None);
+        let tc_lut = Some(tc_lut);
         if let Some(lut) = &tc_lut {
             dump_values_if_env("SPEKTRAFILM_DUMP_TC_LUT", || lut.data.clone());
         }
@@ -461,7 +456,6 @@ impl Pipeline {
             print,
             params,
             tc_lut,
-            mallett_core,
             front_illuminant,
             print_exposure_factor: 1.0,
             print_illuminant,
@@ -504,29 +498,19 @@ impl Pipeline {
         let params = &self.params;
         // The simplified pipeline (`Pipeline::new`) has no upsampler and
         // doesn't normalize the print exposure.
-        if self.tc_lut.is_none() && self.mallett_core.is_none() {
+        let Some(lut) = &self.tc_lut else {
             return 1.0;
-        }
+        };
         // Midgray sensor raw for the print-exposure normalization — always in
-        // sRGB (Python `_rgb_to_film_raw` default), through whichever upsampler
-        // is active. `scale` folds the EV compensation for the `_comp` branch.
+        // sRGB (Python `_rgb_to_film_raw` default), through the upsampler's
+        // TC LUT. `scale` folds the EV compensation for the `_comp` branch.
         let midgray_raw = |scale: f64| -> [f64; 3] {
-            if let Some(lut) = &self.tc_lut {
-                enlarger::midgray_raw_hanatos(
-                    lut,
-                    &select_illuminant(&self.front_illuminant),
-                    params.settings.use_cat16,
-                    scale,
-                )
-            } else {
-                let core = self
-                    .mallett_core
-                    .as_ref()
-                    .expect("one upsampler is always built");
-                let m = crate::mallett::film_matrix(core, "sRGB");
-                let g = 0.184 * scale;
-                crate::mallett::apply(&m, [g, g, g])
-            }
+            enlarger::midgray_raw_hanatos(
+                lut,
+                &select_illuminant(&self.front_illuminant),
+                params.settings.use_cat16,
+                scale,
+            )
         };
 
         // Compute midgray spectral density (gray card through full filming path)
@@ -657,7 +641,7 @@ impl Pipeline {
         // extended resident chain, including camera/scanner lens blur,
         // highlight boost, and enlarger diffusion. Backends that do not
         // implement the resident chain return `None` and fall through.
-        if self.tc_lut.is_some() || self.mallett_core.is_some() {
+        if self.tc_lut.is_some() {
             match self.try_gpu_resident(&image, backend, &color_ref) {
                 Ok(Some(out)) => {
                     tracing::info!("pipeline: gpu-resident fast path complete");
@@ -683,7 +667,6 @@ impl Pipeline {
             &self.params,
             backend,
             self.tc_lut.as_ref(),
-            self.mallett_core.as_ref(),
             &select_illuminant(&self.front_illuminant),
             color_ref.filming_exposure_correction,
         );
@@ -750,9 +733,7 @@ impl Pipeline {
         image: &ImageBuf,
         backend: &dyn ComputeBackend,
     ) -> Option<ImageBuf> {
-        if self.tc_lut.is_none() && self.mallett_core.is_none() {
-            return None;
-        }
+        self.tc_lut.as_ref()?;
         let io = &self.params.io;
         if io.photo_long_side_px.is_some() || (io.upscale_factor - 1.0).abs() >= 1e-6 {
             return None;
@@ -798,8 +779,8 @@ impl Pipeline {
         color_ref: &crate::color_reference::ColorReference,
     ) -> Result<Option<ImageBuf>, String> {
         // Bake the exposure scale (auto-exposure × manual EV compensation)
-        // into the front-pass matrix. Both upsamplers (hanatos and mallett)
-        // are homogeneous in the input RGB, so scaling the matrix is
+        // into the front-pass matrix. The upsampler is homogeneous in the
+        // input RGB, so scaling the matrix is
         // equivalent to scaling the input — saves a separate "scale" compute
         // pass at the head of the chain. Auto-exposure metering itself stays
         // on CPU (~30 ms at 6 MP after the per-row rayon parallelization);
@@ -821,8 +802,8 @@ impl Pipeline {
             exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
         }
         // B&W/slide filming exposure correction is a linear scale on the raw
-        // film exposure (CPU: `raw *= factor` before log10). Since both
-        // upsamplers are homogeneous in the input RGB, folding it into the
+        // film exposure (CPU: `raw *= factor` before log10). Since the
+        // upsampler is homogeneous in the input RGB, folding it into the
         // exposure scale is equivalent. 1.0 (no-op) on every path except a
         // corrected slide scan.
         exposure_scale_f64 *= color_ref.filming_exposure_correction;
@@ -836,9 +817,10 @@ impl Pipeline {
             }
         };
 
-        // Front pass: hanatos TC LUT lookup, or the mallett 3×3 matmul
-        // (`core · M_cs`, same fold as the CPU `expose` dispatch).
-        let front = if let Some(tc_lut) = self.tc_lut.as_ref() {
+        // Front pass: TC LUT lookup, with the same exposure fold as the CPU
+        // `expose` dispatch.
+        let front = {
+            let Some(tc_lut) = self.tc_lut.as_ref() else { return Ok(None) };
             let ref_illuminant = select_illuminant(&self.front_illuminant);
             let mut rgb_to_adapted = spektrafilm_math::spectral::build_rgb_to_adapted_xyz(
                 &self.params.io.input_color_space,
@@ -850,11 +832,6 @@ impl Pipeline {
                 tc_lut,
                 rgb_to_adapted_xyz: rgb_to_adapted,
             }
-        } else {
-            let Some(core) = self.mallett_core.as_ref() else { return Ok(None) };
-            let mut matrix = crate::mallett::film_matrix(core, &self.params.io.input_color_space);
-            fold_exposure(&mut matrix);
-            spektrafilm_gpu::FrontPass::Mallett2019 { matrix }
         };
 
         // Film density curves: normalized (filming.develop subtracts nanmin).
