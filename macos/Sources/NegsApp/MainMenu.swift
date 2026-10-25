@@ -48,6 +48,7 @@ import SwiftUI
         file.addItem(.separator())
         command(file, "Save Preview…", #selector(savePreview), "s")
         command(file, "Export Photograph…", #selector(exportPhotograph), "e", [.command, .shift])
+        command(file, "Export LUT…", #selector(exportLUT), "l", [.command, .shift])
 
         let edit = submenu("Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -113,6 +114,7 @@ import SwiftUI
     @objc private func openRecent(_ item: NSMenuItem) { if let url = item.representedObject as? URL { model.open(url) } }
     @objc private func savePreview() { model.savePanel(export: false) }
     @objc private func exportPhotograph() { model.savePanel(export: true) }
+    @objc private func exportLUT() { model.exportLUTPanel() }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
     @objc private func toggleAdjustments() { model.inspectorVisible.toggle() }
     @objc private func fitPhotograph() { model.zoom(fit: true) }
@@ -128,7 +130,8 @@ import SwiftUI
         case #selector(checkForUpdates): return updates.configured && updates.canCheck
         case #selector(showRecent): return !model.recentFiles.isEmpty
         case #selector(savePreview): return model.canSave
-        case #selector(exportPhotograph): return photo && model.ready && !model.exporting && !model.cropping
+        case #selector(exportPhotograph): return photo && model.ready && !model.exporting && !model.saving && !model.cropping
+        case #selector(exportLUT): return model.canExportLUT
         case #selector(toggleFilmstrip):
             item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
             return true

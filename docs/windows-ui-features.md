@@ -73,6 +73,7 @@ Suggested Windows menu bar (with `&` access keys):
 | File | Recent Photographs ▸ (up to 10) | — | — | list not empty |
 | File | Save Preview… | ⌘S | Ctrl+S | preview current, not saving, not cropping |
 | File | Export Photograph… | ⇧⌘E | Ctrl+Shift+E | photo open, engine ready, not exporting, not cropping |
+| File | Export LUT… | ⇧⌘L | Ctrl+Shift+L | catalog loaded, not saving/exporting/cropping; no photo needed |
 | File | Settings… (Mac: app menu) | ⌘, | — | always |
 | File | Exit (Mac: Quit / Close) | ⌘Q / ⌘W | Alt+F4 | always |
 | Edit | Undo *action* | ⌘Z | Ctrl+Z | something to undo |
@@ -523,6 +524,16 @@ Behaviour:
 
 - **Save Preview** saves the current preview (no re-render) with crop,
   rotation, border and size. Only when the preview is current.
+- **Export LUT…**, directly below Export Photograph in File on both platforms,
+  exports a 33³ `.cube` with sRGB encoded input/output. It snapshots the current
+  film/paper settings, including manual exposure, development, print filters and
+  color controls. No photo is required. The dialog and file comments explain
+  the exclusions: auto exposure, grain, halation/scatter, highlight boost,
+  glare, diffusion, blur, sharpening, RAW development, resizing and Post edits.
+  DIR color inhibition remains active without spatial diffusion. Export uses
+  the same calibrated spectral pipeline as the preview, in one grid render,
+  and preserves the active preview. `spektrafilm export-lut --params` shares
+  this implementation.
 - **Export** develops the photo at full resolution with one of two engines:
   - **Fast (GPU)** (default) — `spektrafilm` f32 CLI with
     `SPEKTRAFILM_BACKEND=wgpu`. If the current preview is already at export

@@ -78,6 +78,19 @@ def main():
             try:
                 _, catalog = request("catalog")
                 assert catalog["protocol"] == 1
+                # LUT export needs no source image and must preserve the session.
+                lut_params = copy.deepcopy(catalog["defaults"])
+                lut = work / "look.cube"
+                _, exported_lut = request("export_lut", film="kodak_gold_200", paper="kodak_portra_endura",
+                                          params=lut_params, size=33, output=str(lut))
+                assert exported_lut["size"] == 33
+                lut_text = lut.read_text()
+                assert "DOMAIN_MIN 0.0 0.0 0.0" in lut_text
+                assert "DOMAIN_MAX 1.0 1.0 1.0" in lut_text
+                assert len([line for line in lut_text.splitlines() if line[:1].isdigit()]) == 33**3
+                request("export_lut", expect_error=True, film="kodak_gold_200", paper="kodak_portra_endura",
+                        params=lut_params, size=1, output=str(lut))
+                assert lut.read_text() == lut_text, "Failed LUT exports must preserve the destination"
                 params = catalog["defaults"]
                 # Deterministic, small fixture still exercises the spectral pipeline.
                 params["film_render"]["grain"]["active"] = False
@@ -91,6 +104,11 @@ def main():
                 assert all(first_bytes[i] == 255 for i in range(3, len(first_bytes), 4))
                 request("save", render_id=first_id, output=str(saved))
                 assert saved.read_bytes().startswith(b"\x89PNG")
+                request("export_lut", film="kodak_trix", paper="unused_paper",
+                        params=lut_params | {"io": lut_params["io"] | {"scan_film": True}},
+                        size=3, output=str(lut))
+                request("save", render_id=first_id, output=str(saved))
+                assert buffer.read_bytes() == first_bytes, "LUT export must preserve the current preview"
                 params["camera"]["exposure_compensation_ev"] = 1.5
                 params["io"]["rotate_cw"] = 1  # The exporter rotates; the app passes it to save.
                 second_id, result = request("render", **render_args)
