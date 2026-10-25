@@ -1,4 +1,6 @@
 pub mod colorspace;
+#[rustfmt::skip]
+pub mod colorspace_data;
 pub mod fft_conv;
 pub mod gaussian;
 pub mod image;

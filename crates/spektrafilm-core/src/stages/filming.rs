@@ -4,7 +4,7 @@
 /// 2D LUT lookup (spectra × sensitivity) → per-channel film raw exposure.
 use rayon::prelude::*;
 use spektrafilm_gpu::ComputeBackend;
-use spektrafilm_math::colorspace;
+use spektrafilm_math::colorspace::{self, RgbColourspace};
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f32, from_f64, to_f64};
 use spektrafilm_math::spectral::TcLut;
@@ -350,6 +350,38 @@ pub fn rgb_to_film_raw(
     })
 }
 
+/// Decode the input CCTF in place when `io.input_cctf_decoding` asks for it,
+/// as `colour.RGB_to_XYZ(..., apply_cctf_decoding=True)` does in upstream's
+/// `_rgb_to_tc_b`: after the resize, before any exposure scale.
+pub fn decode_input_cctf(rgb: &mut ImageBuf, params: &RuntimeParams) {
+    if !params.io.input_cctf_decoding {
+        return;
+    }
+    let cctf = RgbColourspace::input(&params.io.input_color_space).cctf;
+    if cctf != colorspace::Cctf::Linear {
+        rgb.data
+            .par_iter_mut()
+            .for_each(|v| *v = from_f64(cctf.decode(to_f64(*v))));
+    }
+}
+
+/// [`rgb_to_film_raw`] for an image that still carries the input CCTF
+/// (the auto-exposure metering frame).
+pub fn encoded_rgb_to_film_raw(
+    rgb: &ImageBuf,
+    params: &RuntimeParams,
+    backend: &dyn ComputeBackend,
+    tc_lut: Option<&TcLut>,
+    front_illuminant: &[f32],
+) -> Option<ImageBuf> {
+    if !params.io.input_cctf_decoding {
+        return rgb_to_film_raw(rgb, params, backend, tc_lut, front_illuminant);
+    }
+    let mut decoded = rgb.clone();
+    decode_input_cctf(&mut decoded, params);
+    rgb_to_film_raw(&decoded, params, backend, tc_lut, front_illuminant)
+}
+
 /// Expose: convert RGB to film raw exposure.
 ///
 /// `autoexposure_ev` is the metered compensation (0 with auto exposure off;
@@ -372,6 +404,7 @@ pub fn expose(
     let mut raw = {
         // Consume the input so optical scratch does not overlap an RGB copy.
         let mut rgb = image;
+        decode_input_cctf(&mut rgb, params);
         if autoexposure_ev != 0.0 {
             let scale = from_f64(autoexposure_ev.exp2());
             rgb.data.par_iter_mut().for_each(|v| *v *= scale);
@@ -580,7 +613,7 @@ pub fn process(
     let ref_illuminant = crate::illuminants::select_illuminant(&film.info.reference_illuminant);
     let autoexposure_ev = if params.camera.auto_exposure {
         let preview = metering_preview(&image);
-        let raw = rgb_to_film_raw(&preview, params, backend, tc_lut, &ref_illuminant);
+        let raw = encoded_rgb_to_film_raw(&preview, params, backend, tc_lut, &ref_illuminant);
         measure_raw_autoexposure_ev(raw.as_ref().unwrap_or(&preview), &params.camera.auto_exposure_method, 1.0)
     } else {
         0.0
@@ -596,14 +629,4 @@ pub fn process(
         autoexposure_ev,
     );
     develop(log_raw, film, params, backend)
-}
-
-pub fn input_colorspace_to_xyz(name: &str) -> [[f32; 3]; 3] {
-    match name {
-        "sRGB" => colorspace::SRGB_TO_XYZ,
-        "ProPhoto RGB" => colorspace::PROPHOTO_TO_XYZ,
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::REC2020_TO_XYZ,
-        "ACES2065-1" => colorspace::ACES_TO_XYZ,
-        _ => colorspace::PROPHOTO_TO_XYZ,
-    }
 }

@@ -44,8 +44,8 @@ pub fn per_pixel_params(mut params: RuntimeParams) -> RuntimeParams {
     params.settings.use_enlarger_lut = false;
     params.settings.use_scanner_lut = false;
     params.io.input_color_space = "sRGB".into();
-    // Like the PNG loader, cube() decodes sRGB before calling the pipeline.
-    // The engine's input_cctf_decoding field does not perform that conversion.
+    // Like the PNG loader, cube() decodes sRGB before calling the pipeline,
+    // so the engine mustn't decode it again.
     params.io.input_cctf_decoding = false;
     params.io.output_color_space = "sRGB".into();
     params.io.output_cctf_encoding = true;

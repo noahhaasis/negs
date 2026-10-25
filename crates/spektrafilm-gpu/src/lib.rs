@@ -254,12 +254,13 @@ pub struct FilmChainParams<'a> {
     /// when `enlarger_diffusion` is active so it can preserve the CPU
     /// print-stage ordering around preflash.
     pub print_exposure_scale: f64,
-    /// Whether the final output should be sRGB-encoded (unclipped). Mirrors
-    /// `RuntimeParams::io.output_cctf_encoding`.
+    /// Whether the final output should be sRGB-encoded (unclipped). The
+    /// pipeline sets it only when the output space's curve is sRGB's and
+    /// encodes other curves on the CPU.
     pub output_cctf_encoding: bool,
     /// Applied before the encoding: Python's `RGB_to_RGB` from the output
     /// space to itself, the identity up to ~1e-5 because colour's sRGB
-    /// matrices are rounded (`scanning::rgb_to_rgb_identity_matrix`).
+    /// matrices are rounded (`RgbColourspace::rgb_to_rgb_self`).
     pub output_encode_matrix: [[f64; 3]; 3],
 }
 
@@ -435,6 +436,12 @@ pub struct GamutGpuParams<'a> {
     pub cmax: &'a [f64],
     pub n_l: u32,
     pub n_h: u32,
+    /// The output colourspace's linear RGB ↔ XYZ matrices.
+    pub rgb_to_xyz: [[f32; 3]; 3],
+    pub xyz_to_rgb: [[f32; 3]; 3],
+    /// CAM16 `D_RGB` and `A_w` for the output whitepoint (cam16ucs only).
+    pub cam16_d_rgb: [f32; 3],
+    pub cam16_a_w: f32,
 }
 
 /// Unsharp mask parameters: blur sigma in pixels and amount.
