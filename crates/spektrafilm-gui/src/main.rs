@@ -1678,13 +1678,13 @@ impl App {
                     )
                     .changed();
                 // RGB → film raw spectral upsampler. hanatos2025 is the default
-                // spectral LUT; arctic2026alpha02 is the new memory-color
-                // reflectance LUT; mallett2019 is a faster matrix basis.
+                // irradiance LUT; arctic2026beta04 and mallett2019 are
+                // reflectance LUTs.
                 let method = &mut self.params.settings.rgb_to_raw_method;
                 egui::ComboBox::from_label("RGB→raw upsampling")
                     .selected_text(method.clone())
                     .show_ui(ui, |ui| {
-                        for opt in ["hanatos2025", "arctic2026alpha02", "mallett2019"] {
+                        for opt in ["hanatos2025", "arctic2026beta04", "mallett2019"] {
                             changed |= ui.selectable_value(method, opt.to_string(), opt).changed();
                         }
                     });

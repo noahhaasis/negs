@@ -130,7 +130,7 @@ func optionTitle(_ option: String) -> String {
         "as_shot": "As Shot", "daylight": "Daylight", "tungsten": "Tungsten", "custom": "Custom",
         "black_pro_mist": "Black Pro-Mist", "glimmerglass": "Glimmerglass", "pro_mist": "Pro-Mist", "cinebloom": "CineBloom",
         "off": "Off", "oklch": "OKLCh", "oklrab": "OKLrab", "cam16ucs": "CAM16-UCS", "aces_rgc": "ACES RGC", "xy": "xy Chromaticity",
-        "hanatos2025": "Hanatos 2025", "arctic2026alpha02": "Arctic 2026 (Alpha)", "mallett2019": "Mallett 2019"
+        "hanatos2025": "Hanatos 2025", "arctic2026beta04": "Arctic 2026 (Beta 04)", "mallett2019": "Mallett 2019"
     ]
     return titles[option] ?? option.replacingOccurrences(of: "_", with: " ").capitalized
 }

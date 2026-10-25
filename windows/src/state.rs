@@ -200,7 +200,7 @@ pub fn option_title(option: &str) -> String {
         "aces_rgc" => "ACES RGC",
         "xy" => "xy Chromaticity",
         "hanatos2025" => "Hanatos 2025",
-        "arctic2026alpha02" => "Arctic 2026 (Alpha)",
+        "arctic2026beta04" => "Arctic 2026 (Beta 04)",
         "mallett2019" => "Mallett 2019",
         _ => {
             return option
@@ -413,7 +413,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
             choice("Output gamut", "io.output_gamut_compress.algorithm", &["off", "oklch", "oklrab", "cam16ucs", "aces_rgc"]),
             choice("Input gamut", "io.input_gamut_compress.algorithm", &["off", "xy"]),
             toggle("CAT16 adaptation", "settings.use_cat16"),
-            choice("Spectral upsampling", "settings.rgb_to_raw_method", &["hanatos2025", "arctic2026alpha02", "mallett2019"]),
+            choice("Spectral upsampling", "settings.rgb_to_raw_method", &["hanatos2025", "arctic2026beta04", "mallett2019"]),
         ],
     },
 ];
