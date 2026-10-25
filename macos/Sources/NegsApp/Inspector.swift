@@ -8,11 +8,14 @@ enum Adjustment: Identifiable {
     /// the film's grain preset from the catalog applies. B&W films have one
     /// emulsion: they show the lane under `bw`, or hide it when that is nil.
     case stockSlider(String, String, Int, ClosedRange<Double>, Double, bw: String?)
+    /// A button that solves for parameters: title, help.
+    case balancePrint(String, String)
 
     var id: String {
         switch self {
         case .slider(_, let path, _, _), .toggle(_, let path), .choice(_, let path, _): return path
         case .stockSlider(_, let path, let index, _, _, _): return "\(path).\(index)"
+        case .balancePrint(let title, _): return title
         }
     }
 }
@@ -88,6 +91,13 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Tail (µm)", "film_render.dir_couplers.diffusion_tail_um", 0...400, 1),
         .slider("Tail weight", "film_render.dir_couplers.diffusion_tail_weight", 0...1, 0.01)
     ]),
+    .init(title: "Film Base", symbol: "square.stack.3d.down.right", section: .film, enable: "film_render.base.active", controls: [
+        .slider("Density", "film_render.base.scale", 0...2, 0.01),
+        .slider("Tilt", "film_render.base.tilt", -1...1, 0.01),
+        .slider("Cyan", "film_render.base.cyan", 0...2, 0.01),
+        .slider("Magenta", "film_render.base.magenta", 0...2, 0.01),
+        .slider("Yellow", "film_render.base.yellow", 0...2, 0.01)
+    ]),
     .init(title: "Enlarger", symbol: "light.overhead.left", section: .print, controls: [
         .slider("Print exposure", "enlarger.print_exposure", 0.1...5, 0.01),
         .toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
@@ -95,7 +105,8 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Yellow shift", "enlarger.y_filter_shift", -50...50, 0.1),
         .slider("Preflash exposure", "enlarger.preflash_exposure", 0...0.5, 0.01),
         .slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50...50, 0.1),
-        .slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50...50, 0.1)
+        .slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50...50, 0.1),
+        .balancePrint("Balance Print", "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.")
     ]),
     .init(title: "Print Curves", symbol: "chart.xyaxis.line", section: .print, enable: "print_render.density_curves_morph.active", controls: [
         .slider("Gamma", "print_render.density_curves_morph.gamma_factor", 0.5...2, 0.01),
@@ -105,6 +116,12 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Green gamma", "print_render.density_curves_morph.gamma_factor_green", 0.5...2, 0.01),
         .slider("Blue gamma", "print_render.density_curves_morph.gamma_factor_blue", 0.5...2, 0.01),
         .slider("Developer exhaustion", "print_render.density_curves_morph.developer_exhaustion", 0...1, 0.01)
+    ]),
+    .init(title: "Print Base", symbol: "square.stack.3d.down.right", section: .print, enable: "print_render.base.active", controls: [
+        .slider("Density", "print_render.base.scale", 0...2, 0.01),
+        .slider("Cyan", "print_render.base.cyan", 0...2, 0.01),
+        .slider("Magenta", "print_render.base.magenta", 0...2, 0.01),
+        .slider("Yellow", "print_render.base.yellow", 0...2, 0.01)
     ]),
     .init(title: "Glare", symbol: "light.max", section: .print, enable: "print_render.glare.active", controls: [
         .slider("Amount", "print_render.glare.percent", 0...0.2, 0.001),
@@ -149,6 +166,13 @@ struct AdjustmentControl: View {
                               defaultValue: model.stockDefault(path, index), modified: model.isStockModified(path, index),
                               reset: { model.resetStock(path, index) },
                               editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+            }
+        case .balancePrint(let title, let help):
+            HStack {
+                Spacer()
+                Button(model.balancingPrint ? "Balancing…" : title) { model.balancePrint() }
+                    .disabled(!model.canBalancePrint)
+                    .help(help)
             }
         }
     }

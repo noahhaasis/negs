@@ -135,7 +135,7 @@ impl ColorReference {
     ) -> Self {
         // Scan spectral inputs come from the film (scan_film scans the film).
         let channel_density = profile_channel_density(film);
-        let base_density = film.data.base_density.clone();
+        let base_density = crate::bases::film_base_density(film, params);
         let illuminant: Vec<f64> = select_illuminant_f64(&film.info.viewing_illuminant).to_vec();
         let normalization = scan_normalization(&illuminant, &channel_density);
 
@@ -164,7 +164,8 @@ impl ColorReference {
         let density_midgray = -(0.184f64.log10());
         let density_midgray_corrected = -(midgray_corrected.log10());
         let density_curve_av = nanmean_per_step(&curves);
-        let density_min_av = nanmean(&base_density);
+        // Upstream averages the profile's base here, not the tuned one.
+        let density_min_av = nanmean(&film.data.base_density);
         let log_exposure = film.log_exposure_f64();
         // Positive film: density falls with exposure, so Python negates both
         // axes to feed np.interp an ascending x.
@@ -213,7 +214,7 @@ impl ColorReference {
         // Enlarger spectral exposure of those references
         // (`_film_cmy_to_print_log_raw`, sans the unported preflash term).
         let film_channel_density = profile_channel_density(film);
-        let film_base_density = film.data.base_density.clone();
+        let film_base_density = crate::bases::film_base_density(film, params);
         let print_sensitivity = profile_sensitivity(print);
         let n_wl = print_illuminant
             .len()
@@ -249,7 +250,7 @@ impl ColorReference {
 
         // Scan those densities through the print profile → reference luminances.
         let print_channel_density = profile_channel_density(print);
-        let print_base_density = print.data.base_density.clone();
+        let print_base_density = crate::bases::print_base_density(print, params);
         let illuminant: Vec<f64> = select_illuminant_f64(&print.info.viewing_illuminant).to_vec();
         let normalization = scan_normalization(&illuminant, &print_channel_density);
         let scan_y = |cmy: [f64; 3]| -> f64 {
@@ -274,7 +275,8 @@ impl ColorReference {
         let density_midgray = -(0.184f64.log10());
         let density_midgray_corrected = -(midgray_corrected.log10());
         let density_curve_av = nanmean_per_step(&print_curves);
-        let density_min_av = nanmean(&print_base_density);
+        // Upstream averages the profile's base here, not the tuned one.
+        let density_min_av = nanmean(&print.data.base_density);
         let le_corrected = interp(
             density_midgray_corrected - density_min_av,
             &density_curve_av,
