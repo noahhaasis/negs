@@ -855,6 +855,26 @@ extern "C" __global__ void grain_kernel(
     }
 }
 
+// Langmuir `x (k + x_ref) / (k + x)` for channel `c`; `l` is
+// [k0, k1, k2, ref0, ref1, ref2, on0, on1, on2], linear where `on` is 0.
+__device__ float langmuir_g(float x, const float* l, int c) {
+    return l[6 + c] != 0.0f ? x * (l[c] + l[3 + c]) / (l[c] + x) : x;
+}
+
+// DIR receiver saturation of the diffused correction, in place (positives).
+extern "C" __global__ void dir_receiver_kernel(
+    float* __restrict__ correction,
+    unsigned int n_pixels,
+    const float* __restrict__ receiver
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_pixels) return;
+    unsigned int base = idx * 3u;
+    for (int c = 0; c < 3; ++c) {
+        correction[base + c] = langmuir_g(correction[base + c], receiver, c);
+    }
+}
+
 extern "C" __global__ void dir_matmul_kernel(
     const float* __restrict__ density,
     unsigned int n_pixels,
@@ -863,6 +883,7 @@ extern "C" __global__ void dir_matmul_kernel(
     float dmax_g,
     float dmax_b,
     const float* __restrict__ matrix,
+    const float* __restrict__ donor,
     float* __restrict__ correction
 ) {
     unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -876,6 +897,9 @@ extern "C" __global__ void dir_matmul_kernel(
         s1 = dmax_g - s1;
         s2 = dmax_b - s2;
     }
+    s0 = langmuir_g(s0, donor, 0);
+    s1 = langmuir_g(s1, donor, 1);
+    s2 = langmuir_g(s2, donor, 2);
     correction[base] = s0 * matrix[0] + s1 * matrix[3] + s2 * matrix[6];
     correction[base + 1u] = s0 * matrix[1] + s1 * matrix[4] + s2 * matrix[7];
     correction[base + 2u] = s0 * matrix[2] + s1 * matrix[5] + s2 * matrix[8];
@@ -1145,6 +1169,7 @@ pub struct CudaBackend {
     unsharp_kernel: CudaFunction,
     grain_kernel: CudaFunction,
     dir_matmul_kernel: CudaFunction,
+    dir_receiver_kernel: CudaFunction,
     gamut_kernel: CudaFunction,
     post_scan_kernel: CudaFunction,
     device_name: String,
@@ -1185,6 +1210,7 @@ impl CudaBackend {
         let unsharp_kernel = module.load_function("unsharp_combine_kernel").ok()?;
         let grain_kernel = module.load_function("grain_kernel").ok()?;
         let dir_matmul_kernel = module.load_function("dir_matmul_kernel").ok()?;
+        let dir_receiver_kernel = module.load_function("dir_receiver_kernel").ok()?;
         let gamut_kernel = module.load_function("gamut_compress_kernel").ok()?;
         let post_scan_kernel = module.load_function("post_scan_kernel").ok()?;
         let device_name = ctx
@@ -1217,6 +1243,7 @@ impl CudaBackend {
             unsharp_kernel,
             grain_kernel,
             dir_matmul_kernel,
+            dir_receiver_kernel,
             gamut_kernel,
             post_scan_kernel,
             device_name,
@@ -1701,6 +1728,19 @@ impl CudaBackend {
             .flat_map(|r| r.iter().copied())
             .collect();
         let matrix_dev = self.stream.clone_htod(&matrix)?;
+        // [k; 3], [x_ref; 3], [on; 3]; linear channels get k = 1.
+        let langmuir = |l: Option<&crate::LangmuirGpuParams>| -> Vec<f32> {
+            let mut v = vec![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            for c in 0..3 {
+                if let Some(l) = l.filter(|l| l.saturating[c]) {
+                    v[c] = l.k[c];
+                    v[3 + c] = l.x_ref[c];
+                    v[6 + c] = 1.0;
+                }
+            }
+            v
+        };
+        let donor_dev = self.stream.clone_htod(&langmuir(dp.donor.as_ref()))?;
         let mut correction = self.alloc_f32(n_pixels as usize * 3)?;
         {
             let positive = if dp.is_positive { 1u32 } else { 0u32 };
@@ -1713,6 +1753,7 @@ impl CudaBackend {
                 .arg(&dp.density_max[1])
                 .arg(&dp.density_max[2])
                 .arg(&matrix_dev)
+                .arg(&donor_dev)
                 .arg(&mut correction);
             unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         }
@@ -1739,6 +1780,12 @@ impl CudaBackend {
         let w = dp.diffusion_tail_weight;
         self.add_scaled(&gaussian, n_pixels, 1.0 - w, true, &mut mix)?;
         self.add_scaled(&tail, n_pixels, w, false, &mut mix)?;
+        if let Some(receiver) = dp.receiver.as_ref() {
+            let receiver_dev = self.stream.clone_htod(&langmuir(Some(receiver)))?;
+            let mut launch = self.stream.launch_builder(&self.dir_receiver_kernel);
+            launch.arg(&mut mix).arg(&n_pixels).arg(&receiver_dev);
+            unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
+        }
         self.add_scaled(&mix, n_pixels, -1.0, false, log_raw)?;
 
         let log_exp_f32: Vec<f32> = dp.log_exposure.iter().map(|&v| v as f32).collect();

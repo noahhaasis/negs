@@ -313,6 +313,16 @@ pub struct HighlightBoostGpuParams {
     pub protect_ev: f32,
 }
 
+/// Per-channel Langmuir saturation `x (k + x_ref) / (k + x)`; a channel with
+/// `saturating == false` (an infinite `k`) stays linear. CPU equivalent:
+/// `spektrafilm_model::couplers::Langmuir`.
+#[derive(Debug, Clone, Copy)]
+pub struct LangmuirGpuParams {
+    pub k: [f32; 3],
+    pub x_ref: [f32; 3],
+    pub saturating: [bool; 3],
+}
+
 /// DIR couplers parameters for the GPU-resident matmul + diffusion + final
 /// density-curve re-interpolation pass. Mirrors the CPU
 /// `apply_density_correction`.
@@ -324,6 +334,10 @@ pub struct DirCouplersGpuParams<'a> {
     /// `is_positive` is true; ignored otherwise).
     pub density_max: [f32; 3],
     pub is_positive: bool,
+    /// Donor saturation before the matmul (negatives).
+    pub donor: Option<LangmuirGpuParams>,
+    /// Receiver saturation after the diffusion (positives).
+    pub receiver: Option<LangmuirGpuParams>,
     pub diffusion_size_px: f32,
     pub diffusion_tail_px: f32,
     pub diffusion_tail_weight: f32,
