@@ -108,6 +108,16 @@ def shared_params(lut, *, defaults=False, dir_couplers=False, halation=False,
     return params
 
 
+def merge_overrides(params, extra):
+    """Merge nested `extra` into `params` in place; leaves replace."""
+    for name, value in extra.items():
+        if isinstance(value, dict) and isinstance(params.get(name), dict):
+            merge_overrides(params[name], value)
+        else:
+            params[name] = copy.deepcopy(value)
+    return params
+
+
 def common_params(lut):
     """Every effect off (the overrides that freeze_slide_dir_reference.py uses)."""
     return shared_params(lut)
@@ -389,6 +399,9 @@ def parse_args(argv=None):
     parser.add_argument("--morph-source", type=Path,
                         help="with a main reference: the experimental checkout whose film-chemistry "
                              "morph is baked into the reference's film curves")
+    parser.add_argument("--override", type=json.loads, metavar="JSON", default={},
+                        help="extra nested params for both engines, in the Rust names, merged "
+                             "last, e.g. '{\"film_render\": {\"base\": {\"tilt\": 0.5}}}'")
     parser.add_argument("--clip-reference-output", action="store_true",
                         help="clip Python's rgb_out to [0, 1] before comparing, as Rust's scan "
                              "does; upstream leaves unsharp-mask overshoot unclipped")
@@ -485,6 +498,7 @@ def main(argv=None):
         "color_filter": args.color_filter,
         "film_curves_morph": film_morph,
         "print_curves_morph": print_morph,
+        "override": args.override,
         "morph_source": None if args.morph_source is None else {
             **git_info(args.morph_source.resolve()), "source": str(args.morph_source.resolve()),
             "tree_sha256": tree_hash(args.morph_source.resolve() / "src/spektrafilm")},
@@ -523,6 +537,7 @@ def main(argv=None):
                             overrides[group]["development_time"] = time
                         if morph is not None:
                             overrides[group]["density_curves_morph"] = morph
+                    merge_overrides(overrides, args.override)
                     (directory / "params.json").write_text(json.dumps(overrides, indent=2) + "\n")
                     python = python_overrides(overrides, api)
                     (directory / "python-overrides.json").write_text(json.dumps(python, indent=2) + "\n")

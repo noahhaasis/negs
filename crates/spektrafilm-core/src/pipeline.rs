@@ -141,6 +141,9 @@ pub struct Pipeline {
     print_exposure_factor: f64,
     /// Filtered enlarger illuminant for printing stage (f64 for Python parity).
     print_illuminant: Vec<f64>,
+    /// The enlarger's neutral C/M/Y filters in f64 (the database lookup when
+    /// it applies), which `print_illuminant` adds the M/Y shifts to.
+    neutral_cmy: [f64; 3],
     /// Print paper sensitivity, `10^log_sensitivity` with NaN → 0; empty for
     /// the simplified pipeline. Kept for [`Self::compute_print_exposure_factor`].
     print_sensitivity: Vec<[f64; 3]>,
@@ -190,6 +193,23 @@ impl Pipeline {
         self.apply_film_curves_morph();
         self.print_exposure_factor = self.compute_print_exposure_factor();
         self
+    }
+
+    /// Re-filter the enlarger with M and Y filter shifts in f64, the unknowns
+    /// of [`crate::print_balance`], and renormalize the print exposure, as
+    /// upstream's solver does by setting `enlarger.{m,y}_filter_shift` on a
+    /// built pipeline. The C filter and the preflash don't change.
+    pub(crate) fn set_print_filter_shifts(&mut self, m_shift: f64, y_shift: f64) {
+        let [c, m, y] = self.neutral_cmy;
+        self.print_illuminant = enlarger::enlarger_filtered_illuminant_f64(
+            &self.params.enlarger.illuminant,
+            c,
+            m + m_shift,
+            y + y_shift,
+        );
+        self.params.enlarger.m_filter_shift = m_shift as f32;
+        self.params.enlarger.y_filter_shift = y_shift as f32;
+        self.print_exposure_factor = self.compute_print_exposure_factor();
     }
 
     /// Meter auto exposure on `preview`, the
@@ -321,6 +341,11 @@ impl Pipeline {
             &params.io.output_color_space,
         );
         let front_illuminant = film.info.reference_illuminant.clone();
+        let neutral_cmy = [
+            params.enlarger.c_filter_neutral as f64,
+            params.enlarger.m_filter_neutral as f64,
+            params.enlarger.y_filter_neutral as f64,
+        ];
         let mut pipeline = Self {
             film,
             print,
@@ -329,6 +354,7 @@ impl Pipeline {
             front_illuminant,
             print_exposure_factor: 1.0,
             print_illuminant,
+            neutral_cmy,
             print_sensitivity: Vec::new(),
             preflash_raw: [0.0; 3],
             output_gamut,
@@ -520,6 +546,7 @@ impl Pipeline {
         // Constant enlarger preflash exposure (Python `_compute_raw_preflash`):
         // film base density lit by the preflash-filtered illuminant, integrated
         // against the print sensitivity. Off (→ [0; 3]) unless preflash_exposure > 0.
+        // Upstream lights the profile's base here, without `film_render.base`.
         let preflash_raw = enlarger::compute_preflash_raw(
             &params.enlarger,
             c_neutral_f64,
@@ -541,6 +568,7 @@ impl Pipeline {
             front_illuminant,
             print_exposure_factor: 1.0,
             print_illuminant,
+            neutral_cmy: cmy_f64,
             print_sensitivity,
             preflash_raw,
             output_gamut,
@@ -955,7 +983,7 @@ impl Pipeline {
                 ]
             })
             .collect();
-        let film_base_density = self.film.data.base_density.clone();
+        let film_base_density = crate::bases::film_base_density(&self.film, &self.params);
 
         // Print sensitivity (10**log_sensitivity, NaN→0).
         let print_sens: Vec<[f64; 3]> = self
@@ -1007,7 +1035,7 @@ impl Pipeline {
                 ]
             })
             .collect();
-        let print_base_density = self.print.data.base_density.clone();
+        let print_base_density = crate::bases::print_base_density(&self.print, &self.params);
 
         // Scanning: viewing illuminant + normalization + combined XYZ→RGB
         // matrix. For scan_film we scan the developed film directly, so the

@@ -492,7 +492,7 @@ pub fn midgray_raw_hanatos(
 pub fn midgray_density_spectral_from_raw(
     raw: [f64; 3],
     film: &crate::profile::Profile,
-    _params: &crate::params::RuntimeParams,
+    params: &crate::params::RuntimeParams,
 ) -> Vec<f64> {
     // Python: log_raw = np.log10(raw + 1e-10)
     let log_raw: [f64; 3] = [
@@ -512,14 +512,16 @@ pub fn midgray_density_spectral_from_raw(
     let density_cmy =
         interp_density_curve_at_log_raw(&log_raw, &log_exposure, &density_curves, &gamma);
 
-    // Python: compute_density_spectral — einsum + base_density. NaN propagates per wavelength.
+    // Python: compute_density_spectral — einsum + the tuned film base. NaN
+    // propagates per wavelength.
+    let base_density = crate::bases::film_base_density(film, params);
     let n_wl = film.data.channel_density.len();
     let mut spectral = vec![0.0f64; n_wl];
     for wl in 0..n_wl {
         let cd = &film.data.channel_density[wl];
         let s = density_cmy[0] * cd[0] + density_cmy[1] * cd[1] + density_cmy[2] * cd[2];
-        let bd = if wl < film.data.base_density.len() {
-            film.data.base_density[wl]
+        let bd = if wl < base_density.len() {
+            base_density[wl]
         } else {
             0.0
         };
