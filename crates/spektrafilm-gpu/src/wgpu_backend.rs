@@ -1050,12 +1050,12 @@ impl WgpuBackend {
         }
         let s = scan_xyz_to_rgb;
         // B&W/slide luminance remap (m, q); z=1 enables it in the shader.
-        // w=1 skips the shader's [0,1] clamp — required when the gamut
-        // compression pass follows (it needs the out-of-gamut values).
-        let skip_clamp = if p.gamut.is_some() { 1.0 } else { 0.0 };
+        // w=1 skips the shader's [0,1] clamp: glare, gamut compression and
+        // the scanner unsharp mask see the unclamped scan RGB, as on the CPU
+        // and upstream, and the post-scan pass clamps once at the end.
         let bw = match p.bw_xyz_remap {
-            Some((m, q)) => [m as f32, q as f32, 1.0, skip_clamp],
-            None => [1.0, 0.0, 0.0, skip_clamp],
+            Some((m, q)) => [m as f32, q as f32, 1.0, 1.0],
+            None => [1.0, 0.0, 0.0, 1.0],
         };
         let scan_params = ScanParams {
             width: image.width,

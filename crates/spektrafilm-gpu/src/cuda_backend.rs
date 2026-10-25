@@ -2577,7 +2577,9 @@ impl CudaBackend {
             Some((m, q)) => (m as f32, q as f32, 1u32),
             None => (1.0f32, 0.0f32, 0u32),
         };
-        let skip_clamp = 0u32;
+        // Unclamped scan RGB for glare, gamut compression and the unsharp
+        // mask, as on the CPU; the post-scan pass clamps once at the end.
+        let skip_clamp = 1u32;
         {
             let mut launch = self.stream.launch_builder(&self.scan_kernel);
             launch
