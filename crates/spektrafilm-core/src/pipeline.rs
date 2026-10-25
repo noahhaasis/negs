@@ -56,10 +56,14 @@ use crate::profile::Profile;
 use crate::spectral_service;
 use crate::stages;
 
-fn apply_film_specific_params(film: &Profile, params: &mut RuntimeParams) {
+/// The film-specific part of upstream `digest_params` (`_apply_film_specifics`
+/// and the single-channel B&W layout). Every pipeline constructor runs it.
+pub fn apply_film_specific_params(film: &Profile, params: &mut RuntimeParams) {
     // DIR-coupler gammas from `data/presets/couplers.toml`: class defaults,
     // the cine branch, then the stock (upstream `_apply_couplers_preset`).
     crate::couplers_presets::apply_couplers_preset(film, &mut params.film_render.dir_couplers);
+
+    apply_halation_preset(film, params);
 
     // Monochrome grain is derived from the film, never user-set — clear it
     // for colour so a stray params file can't correlate the colour channels'
@@ -88,6 +92,40 @@ fn apply_film_specific_params(film: &Profile, params: &mut RuntimeParams) {
         h.scatter_tail_um = [h.scatter_tail_um[0]; 3];
         h.scatter_tail_weight = [h.scatter_tail_weight[0]; 3];
         h.halation_first_sigma_um = [h.halation_first_sigma_um[0]; 3];
+    }
+}
+
+/// Back-reflection halation baselines keyed by the profile's
+/// `(use, antihalation)` tags, upstream's `_HALATION_PRESETS`
+/// (`runtime/params_builder.py`, identical on main and experimental 28bf883).
+/// The base material sets the first-bounce width (still triacetate 65 µm,
+/// cine PET 50 µm) and the antihalation layer sets the strength. The
+/// user-facing `halation_amount` and `halation_spatial_scale` scale these.
+pub fn halation_preset(usage: &str, antihalation: &str) -> Option<([f64; 3], [f64; 3])> {
+    let sigma_um = match usage {
+        "still" => [65.0; 3],
+        "cine" => [50.0; 3],
+        _ => return None,
+    };
+    let strength = match antihalation {
+        "strong" => [0.015, 0.005, 0.0],
+        "weak" => [0.08, 0.02, 0.0],
+        "no" => [0.30, 0.10, 0.015],
+        _ => return None,
+    };
+    Some((sigma_um, strength))
+}
+
+/// Upstream `_apply_halation_preset`: film profiles take the preset for their
+/// tags, overriding `halation_first_sigma_um` and `halation_strength`.
+fn apply_halation_preset(film: &Profile, params: &mut RuntimeParams) {
+    if !film.is_film() {
+        return;
+    }
+    if let Some((sigma_um, strength)) = halation_preset(&film.info.usage, &film.info.antihalation) {
+        let h = &mut params.film_render.halation;
+        h.halation_first_sigma_um = sigma_um;
+        h.halation_strength = strength;
     }
 }
 
