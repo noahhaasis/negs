@@ -18,7 +18,8 @@ use crate::json;
 use crate::picture::Picture;
 use crate::session::{CatalogCache, EditorSession, Preferences};
 use crate::rendered_preview::{self, Frame, RenderedPreviewCache};
-use crate::state::{EditState, Stock};
+use crate::state::{self, EditState, Stock};
+use spektrafilm_io::image_size::PHOTO_LONG_SIDE_RANGE;
 use crate::ui::{self, App};
 
 pub mod dirty {
@@ -51,6 +52,11 @@ pub fn is_photo(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
         .is_some_and(|e| RAW_EXTENSIONS.contains(&e.as_str()) || IMAGE_EXTENSIONS.contains(&e.as_str()))
+}
+
+/// A reduction such as 68%; below 10% with one decimal.
+pub fn percent(fraction: f64) -> String {
+    format!("{:.*}%", if fraction < 0.1 { 1 } else { 0 }, fraction * 100.0)
 }
 
 pub fn file_name(path: &Path) -> String {
@@ -194,7 +200,18 @@ pub struct Model {
     /// The undeveloped photograph, shown in place of `image` while held.
     pub original: Option<Picture>,
     pub histogram: Option<Histogram>,
+    /// The developed preview's frame, uncropped, which the canvas lays out:
+    /// the working frame, or less with the 12 MP limit.
     pub image_size: Size,
+    /// The decoded source and the uncapped frame an export develops, from the
+    /// last render; zero before one finishes.
+    pub source_size: (u32, u32),
+    pub working_size: Size,
+    /// The shown texture's linear fraction of the working frame, below 1 when
+    /// the preview is limited or larger than the display proxy.
+    pub preview_scale: f64,
+    /// Why the last typed Longest side wasn't used.
+    pub size_error: Option<String>,
     pub placeholder_size: Size,
     pub is_raw: bool,
     pub ready: bool,
@@ -265,6 +282,10 @@ impl Model {
             original: None,
             histogram: None,
             image_size: Size::ZERO,
+            source_size: (0, 0),
+            working_size: Size::ZERO,
+            preview_scale: 1.0,
+            size_error: None,
             placeholder_size: Size::ZERO,
             is_raw: false,
             ready: false,
@@ -355,6 +376,28 @@ impl Model {
     /// before one opens. Borders fit this size.
     pub fn photo_size(&self) -> Size {
         self.state.crop.size_of(if self.image.is_some() { self.image_size } else { self.placeholder_size })
+    }
+    pub fn size_mode(&self) -> state::SizeMode {
+        state::size_mode(&self.state.params)
+    }
+    /// The frame and photograph the current edit develops, uncapped, with the
+    /// engine's resolver; None until the source's size is known.
+    pub fn resolved_size(&self) -> Option<Result<spektrafilm_io::image_size::ResolvedSize, spektrafilm_io::image_size::SizeError>> {
+        (self.source_size.0 > 0).then(|| state::resolve_size(self.source_size, &self.state.params, &self.state.crop))
+    }
+    /// The exported photograph, cropped, before rotation, borders and export
+    /// reductions; zero until known.
+    pub fn photograph_size(&self) -> Size {
+        match self.resolved_size() {
+            Some(Ok(size)) => Size::new(size.photo.0 as f64, size.photo.1 as f64),
+            _ => Size::ZERO,
+        }
+    }
+    /// The crop being drawn, resolved like an export: with a target, a
+    /// smaller crop needs a larger frame. None before the source's size is known.
+    pub fn crop_draft_size(&self) -> Option<Result<spektrafilm_io::image_size::ResolvedSize, spektrafilm_io::image_size::SizeError>> {
+        let session = self.crop_session.as_ref()?;
+        (self.source_size.0 > 0).then(|| state::resolve_size(self.source_size, &session.start.params, &session.settings()))
     }
     /// The developed photograph as shown, uncropped, after rotation.
     fn shown_image_size(&self) -> Size {
@@ -550,6 +593,56 @@ impl Model {
         }
     }
 
+    /// Original develops the source's own pixels; Longest side resizes the
+    /// source so the cropped photograph has that many pixels on its longest side.
+    pub fn choose_image_size(&mut self, mode: state::SizeMode) {
+        self.size_error = None;
+        match mode {
+            state::SizeMode::Original => {
+                let mut next = self.state.clone();
+                json::set(&mut next.params, state::SIZE_FACTOR, json::num(1.0));
+                json::set(&mut next.params, state::SIZE_TARGET, Value::Null);
+                self.apply(next, "Change Image Size");
+            }
+            state::SizeMode::LongestSide if self.size_mode() != state::SizeMode::LongestSide => {
+                let pixels = self.prefs.image_size_long_side.filter(|p| PHOTO_LONG_SIDE_RANGE.contains(p)).unwrap_or_else(|| self.native_long_side());
+                let _ = self.set_longest_side(pixels);
+            }
+            _ => {}
+        }
+        self.mark(dirty::INSPECTOR);
+    }
+
+    /// The crop's longest side in the source's own pixels, within the field's range.
+    fn native_long_side(&self) -> u32 {
+        let source = if self.source_size.0 > 0 { Size::new(self.source_size.0 as f64, self.source_size.1 as f64) } else { self.placeholder_size };
+        let size = self.state.crop.size_of(source);
+        let side = size.width.max(size.height) as u32;
+        if side == 0 { 4000 } else { side.clamp(*PHOTO_LONG_SIDE_RANGE.start(), *PHOTO_LONG_SIDE_RANGE.end()) }
+    }
+
+    /// Sets a Longest side target, or explains why it can't be used and
+    /// changes nothing.
+    pub fn set_longest_side(&mut self, pixels: u32) -> std::result::Result<(), String> {
+        let mut next = self.state.clone();
+        json::set(&mut next.params, state::SIZE_FACTOR, json::num(1.0));
+        json::set(&mut next.params, state::SIZE_TARGET, json::num(pixels as f64));
+        let checked = if !PHOTO_LONG_SIDE_RANGE.contains(&pixels) {
+            Err(format!("Enter a whole number from {} to {} px.", PHOTO_LONG_SIDE_RANGE.start(), PHOTO_LONG_SIDE_RANGE.end()))
+        } else if self.source_size.0 > 0 {
+            state::resolve_size(self.source_size, &next.params, &next.crop).map(|_| ()).map_err(|e| e.to_string())
+        } else {
+            Ok(())
+        };
+        self.size_error = checked.clone().err();
+        self.mark(dirty::INSPECTOR);
+        checked?;
+        self.prefs.image_size_long_side = Some(pixels);
+        self.prefs.save();
+        self.apply(next, "Change Image Size");
+        Ok(())
+    }
+
     pub fn limit_preview(&mut self, enabled: bool) {
         let mut next = self.state.clone();
         next.limit_preview = enabled;
@@ -577,7 +670,8 @@ impl Model {
         self.set_border(|b| if line { b.line_color = color } else { b.color = color }, "Change Border Color");
     }
 
-    /// Keeps the border and crop, like the film, paper, and rotation.
+    /// Keeps the border, crop, and Image Size's Longest side, like the film,
+    /// paper, and rotation. An older edit's working-resolution factor resets.
     pub fn reset(&mut self) {
         if self.cropping() {
             return;
@@ -586,6 +680,7 @@ impl Model {
         next.params = self.defaults.clone();
         next.limit_preview = false;
         json::set(&mut next.params, "io.rotate_cw", self.state.value("io.rotate_cw").clone());
+        json::set(&mut next.params, state::SIZE_TARGET, self.state.value(state::SIZE_TARGET).clone());
         let positive = self.stocks.iter().find(|s| !s.paper && s.id == next.film).is_some_and(|s| s.positive);
         json::set(&mut next.params, "io.scan_film", Value::Bool(positive));
         self.apply(next, "Reset Adjustments");
@@ -733,6 +828,11 @@ impl Model {
     /// Done applies the crop, and any rotation while cropping, as one undo
     /// step. Cancel restores the rotation and keeps the previous crop.
     pub fn end_crop(&mut self, apply: bool) {
+        // A crop too small for the Longest side stays a draft, with its error shown.
+        if apply && matches!(self.crop_draft_size(), Some(Err(spektrafilm_io::image_size::SizeError::TooLarge { .. }))) {
+            self.mark(dirty::CROP);
+            return;
+        }
         let Some(session) = self.crop_session.take() else { return };
         let rotation = session.start.value("io.rotate_cw").clone();
         if apply {
@@ -776,6 +876,10 @@ impl Model {
         self.source = Some(path.to_path_buf());
         self.image = None;
         self.placeholder = None;
+        self.source_size = (0, 0);
+        self.working_size = Size::ZERO;
+        self.preview_scale = 1.0;
+        self.size_error = None;
         self.preview_current = false;
         self.showing_cached_preview = false;
         self.render_failed = false;
@@ -820,6 +924,9 @@ impl Model {
             self.preview_cache.load(self.source.clone().unwrap(), state, paths, move |frame| {
                 if let Some(frame) = frame {
                     let size = Size::new(frame.photo_width, frame.photo_height);
+                    let source_size = (frame.source_width as u32, frame.source_height as u32);
+                    let working = Size::new(frame.working_width, frame.working_height);
+                    let scale = (frame.width as f64 / frame.working_width).min(1.0);
                     let raw = frame.raw;
                     let picture = Picture::new(frame.pixels, frame.width, frame.height);
                     ui::post(move |app: &mut App| {
@@ -827,6 +934,7 @@ impl Model {
                         if generation != model.source_generation || model.image.is_some() || model.closing { return; }
                         if model.state.rendered() != expected { std::thread::spawn(fallback); return; }
                         model.image = Some(picture); model.image_size = size; model.is_raw = raw;
+                        model.source_size = source_size; model.working_size = working; model.preview_scale = scale;
                         model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
                         model.update_histogram();
                         model.mark(dirty::CANVAS | dirty::STATUS | dirty::INSPECTOR);
@@ -888,7 +996,9 @@ impl Model {
             return;
         }
         let (Some(source), Some(image)) = (self.source.clone(), &self.image) else { return };
-        let max_pixels = image.width.max(image.height);
+        // Never above the source's own resolution: Image Size can enlarge the preview.
+        let source_long = self.source_size.0.max(self.source_size.1);
+        let max_pixels = if source_long > 0 { image.width.max(image.height).min(source_long) } else { image.width.max(image.height) };
         let generation = self.source_generation;
         self.original_loading = true;
         let name = file_name(&source);
@@ -999,6 +1109,11 @@ impl Model {
         if let Some(scale) = interactive_scale {
             command["interactive_scale"] = json!(scale);
         }
+        // The target describes the cropped photograph; the helper sizes the frame from the crop.
+        if self.size_mode() == state::SizeMode::LongestSide && self.state.crop.cropped() {
+            let r = self.state.crop.rect;
+            command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": self.state.crop.angle});
+        }
         let started = Instant::now();
         let state = self.state.clone();
         let paths = self.paths.clone();
@@ -1014,6 +1129,8 @@ impl Model {
                     ensure!(pixels.len() == w as usize * h as usize * 4, "Invalid preview buffer");
                     let cached = cache_key.map(|key| (key, Frame {
                         width: w, height: h, photo_width: json::number(&result["photo_width"]), photo_height: json::number(&result["photo_height"]),
+                        source_width: json::number(&result["source_width"]), source_height: json::number(&result["source_height"]),
+                        working_width: json::number(&result["working_width"]), working_height: json::number(&result["working_height"]),
                         raw: json::boolean(&result["raw"]), pixels: pixels.clone(),
                     }));
                     let picture = Picture::new(pixels, w, h);
@@ -1038,6 +1155,9 @@ impl Model {
             Ok(rendered) if self.should_show(revision, generation) => {
                 let result = &rendered.result;
                 self.image_size = Size::new(json::number(&result["photo_width"]), json::number(&result["photo_height"]));
+                self.source_size = (json::number(&result["source_width"]) as u32, json::number(&result["source_height"]) as u32);
+                self.working_size = Size::new(json::number(&result["working_width"]), json::number(&result["working_height"]));
+                self.preview_scale = if self.working_size.width > 0.0 { (json::number(&result["width"]) / self.working_size.width).min(1.0) } else { 1.0 };
                 self.showing_interactive_frame = rendered.interactive;
                 self.image = Some(rendered.picture);
                 self.placeholder = None;
@@ -1066,7 +1186,11 @@ impl Model {
                         json::number(&result["output_height"]) as u64
                     )
                 } else {
-                    format!("{} × {} · {time}{backend}", self.image_size.width as u64, self.image_size.height as u64)
+                    // The photograph as exported, and whether the shown texture
+                    // has fewer pixels: inspect grain in an export when it does.
+                    let photograph = self.state.crop.size_of(self.working_size);
+                    let shown = if self.preview_scale < 1.0 { format!(" · shown at {}", percent(self.preview_scale)) } else { String::new() };
+                    format!("{} × {}{shown} · {time}{backend}", photograph.width as u64, photograph.height as u64)
                 };
                 self.mark(dirty::CANVAS | dirty::STATUS | dirty::INSPECTOR | dirty::CROP);
             }
@@ -1176,6 +1300,10 @@ impl Model {
 
     pub fn save_extras(&self) -> String {
         let mut extras = String::new();
+        let photograph = self.photograph_size();
+        if !photograph.is_zero() {
+            extras += &format!(" The photograph is {} × {} px.", photograph.width as u64, photograph.height as u64);
+        }
         if self.state.crop.cropped() {
             extras += " Crops the photograph.";
         }

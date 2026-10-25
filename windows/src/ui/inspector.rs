@@ -57,6 +57,8 @@ enum When {
     CustomWhiteBalance,
     Scanning,
     Ratio35,
+    LongestSide,
+    SizeNote,
     Mat,
     Keyline,
     FilmStyle,
@@ -71,6 +73,13 @@ enum Kind {
     BorderSlider(&'static str, BorderWidth),
     Toggle(&'static str, &'static str),
     LimitPreview,
+    /// Image Size: Original, Longest side, or an older edit's factor.
+    SizeMode,
+    LongestSide,
+    /// The exported photograph's size.
+    Photograph,
+    /// An Image Size error, or that the preview shows fewer pixels.
+    SizeNote,
     BorderToggle(&'static str, u8),
     Choice(&'static str, &'static str, &'static [&'static str]),
     Stock(bool),
@@ -225,6 +234,12 @@ fn rows() -> Vec<Row> {
     add(&mut rows, Kind::Toggle("Scan film directly", "io.scan_film"), lab, None, When::Always);
     add(&mut rows, Kind::Stock(true), lab, None, When::NotScanning);
     add(&mut rows, Kind::DevTime(true), lab, None, When::PaperTimes);
+    add(&mut rows, Kind::Section("Image Size"), lab, None, When::Always);
+    add(&mut rows, Kind::SizeMode, lab, None, When::Always);
+    add(&mut rows, Kind::LongestSide, lab, None, When::LongestSide);
+    add(&mut rows, Kind::Photograph, lab, None, When::Always);
+    add(&mut rows, Kind::SizeNote, lab, None, When::SizeNote);
+    add(&mut rows, Kind::Footer("Resizes before film simulation, including halation and grain."), lab, None, When::Always);
     add(&mut rows, Kind::Section("Camera"), lab, None, When::Always);
     add(&mut rows, Kind::Toggle("Auto exposure", "camera.auto_exposure"), lab, None, When::Always);
     add(&mut rows, Kind::Choice("Metering", "camera.auto_exposure_method", state::METERING), lab, None, When::AutoExposure);
@@ -259,7 +274,6 @@ fn rows() -> Vec<Row> {
     add(&mut rows, Kind::Section("Scan & Color"), lab, None, When::Always);
     groups(&mut rows, Section::Scan);
     let output = add(&mut rows, Kind::Group { title: "Output", enable: None }, lab, None, When::Always);
-    add(&mut rows, Kind::Slider(state::WORKING_RESOLUTION), lab, Some(output), When::Always);
     add(&mut rows, Kind::LimitPreview, lab, Some(output), When::Always);
     add(&mut rows, Kind::Toggle("Encode output as sRGB", "io.output_cctf_encoding"), lab, Some(output), When::Always);
     add(&mut rows, Kind::Toggle("Use less memory for export", "settings.serial_grain"), lab, Some(output), When::Always);
@@ -303,7 +317,7 @@ pub fn build(app: &mut App) {
     ins.tabs[1] = create(w!("BUTTON"), "Post", tab_style, WINDOW_EX_STYLE(0), ins.panel, TAB_POST, fonts.ui);
     ins.rows_panel = create(w!("NegsRows"), "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
     ins.reset = create(w!("BUTTON"), "Reset Adjustments", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, RESET_ALL, fonts.ui);
-    super::dialogs::tooltip(ins.reset, "Restore defaults on both tabs while keeping the film, paper, rotation, and border. You can undo this.");
+    super::dialogs::tooltip(ins.reset, "Restore defaults on both tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.");
     ins.rows = rows();
     ins.built = true;
     ITEM_HEIGHT.with(|h| h.set(ins.px(20.0)));
@@ -363,11 +377,45 @@ fn visible(row: &Row, model: &Model, expanded: &dyn Fn(usize) -> bool) -> bool {
         When::CustomWhiteBalance => model.is_raw && json::string(model.value("io.raw_white_balance.mode")) == "custom",
         When::Scanning => scanning,
         When::Ratio35 => photo_size(model).is_some_and(|(w, h)| !border::fits(BorderStyle::Film35, w, h)),
+        When::LongestSide => model.size_mode() == state::SizeMode::LongestSide,
+        When::SizeNote => !size_note(model).is_empty(),
         When::Mat => matches!(border.style, BorderStyle::Solid | BorderStyle::Keyline),
         When::Keyline => border.style == BorderStyle::Keyline,
         When::FilmStyle => border.style == BorderStyle::Film,
     };
     shown && row.group.is_none_or(|g| expanded(g))
+}
+
+/// Why the Image Size can't be used, or that the preview has fewer pixels
+/// than the export; empty otherwise.
+fn size_note(model: &Model) -> String {
+    if let Some(error) = &model.size_error {
+        return error.clone();
+    }
+    if let Some(Err(error)) = model.resolved_size() {
+        return error.to_string();
+    }
+    if model.preview_scale < 1.0 && model.image.is_some() {
+        return format!(
+            "The preview shows {} of these pixels. Exports develop all of them; inspect grain in an exported file.",
+            crate::model::percent(model.preview_scale)
+        );
+    }
+    String::new()
+}
+
+fn size_mode_titles(model: &Model) -> Vec<String> {
+    let mut titles = vec!["Original".to_string(), "Longest side".to_string()];
+    if let state::SizeMode::Legacy(factor) = model.size_mode() {
+        titles.push(format!("Scaled {} (older edit)", crate::model::percent(factor)));
+    }
+    titles
+}
+
+fn window_text(hwnd: HWND) -> String {
+    let mut text = [0u16; 512];
+    let n = unsafe { GetWindowTextW(hwnd, &mut text) } as usize;
+    String::from_utf16_lossy(&text[..n])
 }
 
 fn row_title(kind: &Kind) -> &'static str {
@@ -433,8 +481,17 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
             }
         }
     }
+    // The note's height follows its text, so set it before laying out.
+    let mut note_changed = false;
+    for row in ins.rows.iter().filter(|r| r.kind == Kind::SizeNote && r.shown) {
+        let note = size_note(model);
+        if window_text(row.controls[0]) != note {
+            set_text(row.controls[0], &note);
+            note_changed = true;
+        }
+    }
     let t1 = crate::platform::qpc();
-    if changed || created || structure {
+    if changed || created || structure || note_changed {
         layout_rows(ins, model);
     }
     let t2 = crate::platform::qpc();
@@ -521,8 +578,34 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         }
         Kind::LimitPreview => {
             let c = check("Limit preview to 12 MP");
-            super::dialogs::tooltip(c, "Develops the preview faster on large photographs. Export keeps the working resolution.");
+            super::dialogs::tooltip(c, "Develops the preview faster on large photographs. Export keeps the full Image Size.");
             controls.push(c);
+        }
+        Kind::SizeMode => {
+            controls.push(label("Size", fonts.ui));
+            let c = combo(false);
+            super::dialogs::tooltip(c, "Original develops the photograph’s own pixels. Longest side enlarges or reduces it first, so the cropped photograph has that many pixels on its longest side.");
+            controls.push(c);
+        }
+        Kind::LongestSide => {
+            controls.push(label("Longest side", fonts.ui));
+            let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL | ES_NUMBER) as u32), WINDOW_EX_STYLE(WS_EX_CLIENTEDGE.0), parent, id(EDIT), fonts.ui);
+            super::accessible_name(edit, "Longest side in pixels");
+            super::dialogs::tooltip(edit, "The cropped photograph’s longest side, before any border. Press Enter to apply. Exports can still be reduced in the save dialog.");
+            unsafe {
+                let _ = SetWindowSubclass(edit, Some(size_edit_subclass), 1, 0);
+            }
+            controls.push(edit);
+            controls.push(create(w!("STATIC"), "px", hidden | WINDOW_STYLE(SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.ui));
+        }
+        Kind::Photograph => {
+            controls.push(label("Photograph", fonts.ui));
+            let value = create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
+            super::dialogs::tooltip(value, "The exported photograph, cropped, before rotation, the border, and any export size.");
+            controls.push(value);
+        }
+        Kind::SizeNote => {
+            controls.push(create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), fonts.small));
         }
         Kind::Choice(title, _, options) => {
             controls.push(label(title, fonts.ui));
@@ -609,10 +692,24 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 positions.push((c[0], pad, y + ins.px(10.0), right - pad, ins.px(18.0)));
                 ins.px(32.0)
             }
-            Kind::Footer(_) => {
+            Kind::Footer(_) | Kind::SizeNote => {
                 let text_height = footer_height(ins, c[0], right - x);
                 positions.push((c[0], x, y, right - x, text_height));
                 text_height + ins.px(4.0)
+            }
+            Kind::LongestSide => {
+                let label = ins.px(108.0).min((right - x) / 2);
+                let (field, unit) = (ins.px(72.0), ins.px(22.0));
+                positions.push((c[0], x, y + ins.px(6.0), label - ins.px(4.0), ins.px(18.0)));
+                positions.push((c[1], right - unit - field, y + ins.px(2.0), field, ins.px(23.0)));
+                positions.push((c[2], right - unit + ins.px(4.0), y + ins.px(6.0), unit - ins.px(4.0), ins.px(18.0)));
+                ins.px(30.0)
+            }
+            Kind::Photograph => {
+                let label = ins.px(108.0).min((right - x) / 2);
+                positions.push((c[0], x, y + ins.px(4.0), label - ins.px(4.0), ins.px(18.0)));
+                positions.push((c[1], x + label, y + ins.px(4.0), right - x - label, ins.px(18.0)));
+                ins.px(26.0)
             }
             Kind::Group { enable, .. } => {
                 let check = if enable.is_some() { ins.px(46.0) } else { 0 };
@@ -635,7 +732,7 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 positions.push((c[0], x, y + ins.px(3.0), right - x, ins.px(20.0)));
                 ins.px(26.0)
             }
-            Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) => {
+            Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode => {
                 let label = ins.px(108.0).min((right - x) / 2);
                 positions.push((c[0], x, y + ins.px(6.0), label - ins.px(4.0), ins.px(18.0)));
                 positions.push((c[1], x + label, y + ins.px(2.0), right - x - label, ins.px(300.0)));
@@ -819,6 +916,51 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 set_check(c[0], model.state.limit_preview);
                 enable(c[0], on);
             }
+            Kind::SizeMode => {
+                let titles = size_mode_titles(model);
+                unsafe {
+                    let count = SendMessageW(c[1], CB_GETCOUNT, WPARAM(0), LPARAM(0)).0 as usize;
+                    let last = (count == titles.len()).then(|| {
+                        let mut text = [0u16; 128];
+                        let n = SendMessageW(c[1], CB_GETLBTEXT, WPARAM(count - 1), LPARAM(text.as_mut_ptr() as isize)).0.max(0) as usize;
+                        String::from_utf16_lossy(&text[..n.min(text.len())])
+                    });
+                    if last.as_deref() != titles.last().map(String::as_str) {
+                        SendMessageW(c[1], CB_RESETCONTENT, WPARAM(0), LPARAM(0));
+                        for title in &titles {
+                            let text = wide(title);
+                            SendMessageW(c[1], CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+                        }
+                    }
+                    let selected = match model.size_mode() {
+                        state::SizeMode::Original => 0,
+                        state::SizeMode::LongestSide => 1,
+                        state::SizeMode::Legacy(_) => 2,
+                    };
+                    if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != selected {
+                        SendMessageW(c[1], CB_SETCURSEL, WPARAM(selected as usize), LPARAM(0));
+                    }
+                }
+                enable_all(c, catalog);
+            }
+            Kind::LongestSide => {
+                // A rejected value stays for correction until it is fixed or Esc restores it.
+                let focused = unsafe { GetFocus() } == c[1];
+                if !focused && model.size_error.is_none() {
+                    set_text(c[1], &state::size_target(&model.state.params).map_or_else(String::new, |v| v.to_string()));
+                }
+                enable_all(c, catalog);
+            }
+            Kind::Photograph => {
+                let size = model.photograph_size();
+                set_text(c[1], &if size.is_zero() {
+                    "—".to_string()
+                } else {
+                    let mp = size.width * size.height / 1e6;
+                    format!("{} × {} · {:.*} MP", size.width as u64, size.height as u64, if mp < 10.0 { 1 } else { 0 }, mp)
+                });
+            }
+            Kind::SizeNote => {}
             Kind::BorderToggle(_, which) => {
                 let b = model.state.border;
                 set_check(c[0], [b.enabled, b.instagram, b.export][which as usize]);
@@ -1011,6 +1153,14 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         (Kind::Group { enable: Some(path), .. }, CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::LimitPreview, CHECK) if code == BN_CLICKED => app.model.limit_preview(checked()),
+        (Kind::SizeMode, COMBO) if code == CBN_SELCHANGE => {
+            let index = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 };
+            match index {
+                0 => app.model.choose_image_size(state::SizeMode::Original),
+                1 => app.model.choose_image_size(state::SizeMode::LongestSide),
+                _ => {}
+            }
+        }
         (Kind::BorderToggle(_, which), CHECK) if code == BN_CLICKED => {
             let on = checked();
             app.model.set_border(
@@ -1448,6 +1598,53 @@ extern "system" fn edit_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
     }
 }
 
+/// The Longest side field: Enter or leaving it applies the value; Esc
+/// restores the current one. An invalid value stays, with its error shown.
+extern "system" fn size_edit_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_GETDLGCODE if matches!(VIRTUAL_KEY(wparam.0 as u16), VK_RETURN | VK_ESCAPE) => LRESULT(DLGC_WANTALLKEYS as isize),
+            WM_KEYDOWN if wparam.0 == VK_RETURN.0 as usize => {
+                commit_size(hwnd);
+                SendMessageW(hwnd, EM_SETSEL, WPARAM(0), LPARAM(-1));
+                LRESULT(0)
+            }
+            WM_KEYDOWN if wparam.0 == VK_ESCAPE.0 as usize => {
+                let raw = hwnd.0 as isize;
+                post(move |app: &mut App| {
+                    app.model.size_error = None;
+                    let hwnd = HWND(raw as *mut _);
+                    set_text(hwnd, &state::size_target(&app.model.state.params).map_or_else(String::new, |v| v.to_string()));
+                    app.model.dirty |= dirty::INSPECTOR;
+                    let _ = SetFocus(app.inspector.rows_panel);
+                });
+                LRESULT(0)
+            }
+            WM_CHAR if wparam.0 == 13 || wparam.0 == 27 => LRESULT(0),
+            WM_KILLFOCUS => {
+                commit_size(hwnd);
+                DefSubclassProc(hwnd, msg, wparam, lparam)
+            }
+            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
+fn commit_size(hwnd: HWND) {
+    let text = window_text(hwnd);
+    post(move |app: &mut App| {
+        let digits: String = text.chars().filter(|c| !matches!(c, ',' | '.' | ' ' | '\u{a0}' | '\u{202f}' | '\'')).collect();
+        let current = state::size_target(&app.model.state.params);
+        let pixels = digits.parse::<u32>().unwrap_or(0);
+        // Leaving an unchanged field changes nothing.
+        if current == Some(pixels) && app.model.size_error.is_none() {
+            return;
+        }
+        let _ = app.model.set_longest_side(pixels);
+        app.model.dirty |= dirty::INSPECTOR;
+    });
+}
+
 fn commit_edit(hwnd: HWND) {
     let mut text = [0u16; 64];
     let n = unsafe { GetWindowTextW(hwnd, &mut text) } as usize;
@@ -1582,6 +1779,7 @@ const C_SIZE: u16 = CROP_FIRST + 17;
 const C_RESET: u16 = CROP_FIRST + 18;
 const C_DONE: u16 = CROP_FIRST + 19;
 const C_CANCEL: u16 = CROP_FIRST + 20;
+const C_SIZE_NOTE: u16 = CROP_FIRST + 21;
 const C_LABELS: u16 = CROP_FIRST + 30;
 
 impl CropPanel {
@@ -1636,7 +1834,8 @@ fn build_crop(app: &mut App) {
     super::dialogs::tooltip(angle, "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.");
     add(C_LABELS + 6, w!("STATIC"), "Size", WINDOW_STYLE(0), fonts.ui);
     let size = add(C_SIZE, w!("STATIC"), "", WINDOW_STYLE(SS_RIGHT.0), fonts.ui);
-    super::dialogs::tooltip(size, "The cropped preview’s size. Export crops the same part at the working resolution.");
+    super::dialogs::tooltip(size, "The exported photograph’s size, before the border.");
+    add(C_SIZE_NOTE, w!("STATIC"), "", WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), fonts.small);
     let reset_crop = add(C_RESET, w!("BUTTON"), "Reset Crop", WS_TABSTOP | WS_GROUP, fonts.ui);
     super::dialogs::tooltip(reset_crop, "Show the whole, unturned photograph again.");
     add(
@@ -1701,7 +1900,9 @@ fn layout_crop(app: &mut App) {
     y += ins.px(40.0);
     place(C_LABELS + 6, pad, y, ins.px(90.0), ins.px(18.0));
     place(C_SIZE, pad + ins.px(90.0), y, right - pad - ins.px(90.0), ins.px(18.0));
-    y += ins.px(32.0);
+    y += ins.px(22.0);
+    place(C_SIZE_NOTE, pad, y, right - pad, ins.px(48.0));
+    y += ins.px(56.0);
     place(C_RESET, pad, y, right - pad, ins.px(28.0));
     y += ins.px(40.0);
     place(C_LABELS + 7, pad, y, right - pad, ins.px(90.0));
@@ -1742,8 +1943,32 @@ fn sync_crop(app: &mut App) {
         let _ = ShowWindow(crop.get(C_ANGLE_RESET), if session.angle != 0.0 { SW_SHOWNA } else { SW_HIDE });
     }
     set_text(crop.get(C_ANGLE_VALUE), &format!("{}°", format(session.angle, 0.1, decimal)));
-    let shown = session.shown();
-    set_text(crop.get(C_SIZE), &format!("{} × {} px", shown.width.round() as i64, shown.height.round() as i64));
+    // The draft's pixels in the frame an export develops; with a target, a
+    // smaller crop needs a larger frame, up to the working limit.
+    let (size, note) = match app.model.crop_draft_size() {
+        Some(Ok(size)) => {
+            let source = app.model.source_size.0 as f64;
+            let scale = size.working.0 as f64 / source;
+            let note = if app.model.size_mode() != state::SizeMode::LongestSide {
+                String::new()
+            } else if scale >= 1.0 {
+                format!("Image Size develops the whole frame {scale:.1}× the source.")
+            } else {
+                format!("Image Size develops the whole frame at {} of the source.", crate::model::percent(scale))
+            };
+            ((size.photo.0 as f64, size.photo.1 as f64), note)
+        }
+        Some(Err(error)) => {
+            let shown = session.shown();
+            ((shown.width, shown.height), error.to_string())
+        }
+        None => {
+            let shown = session.shown();
+            ((shown.width, shown.height), String::new())
+        }
+    };
+    set_text(crop.get(C_SIZE), &format!("{} × {} px", size.0.round() as i64, size.1.round() as i64));
+    set_text(crop.get(C_SIZE_NOTE), &note);
     enable(crop.get(C_RESET), session.modified());
     let custom_visible = unsafe { IsWindowVisible(crop.get(C_WIDTH)).as_bool() };
     if custom_visible != (session.aspect == CropAspect::Custom) {

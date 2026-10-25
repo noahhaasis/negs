@@ -133,6 +133,9 @@ pub struct Preferences {
     /// The adjustments column's width, in DIPs.
     pub inspector_width: f64,
     pub check_for_updates: bool,
+    /// The last Image Size Longest side chosen, offered when switching to it
+    /// again. Never switches the mode by itself.
+    pub image_size_long_side: Option<u32>,
 }
 
 impl Default for Preferences {
@@ -150,6 +153,7 @@ impl Default for Preferences {
             window: None,
             inspector_width: 340.0,
             check_for_updates: true,
+            image_size_long_side: None,
         }
     }
 }
