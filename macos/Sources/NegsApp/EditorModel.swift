@@ -76,6 +76,8 @@ import UniformTypeIdentifiers
     private(set) var presetStatus: [PresetFile: PresetStatus] = [:]
     /// The preset whose name is being edited in the list.
     var renamingPreset: URL?
+    /// A preset New Preset just made: Escape while naming it removes it.
+    @ObservationIgnored private var unnamedPreset: URL?
     var zoomCommand = UUID()
     var fitImage = true
     var recentFiles: [URL] = []
@@ -1128,6 +1130,7 @@ import UniformTypeIdentifiers
                                                             "paper": .string(snapshot.paper), "params": snapshot.params])
                 let file = try await presetLibrary.add(Data(result["text"].string.utf8), name: name)
                 await refreshPresets()
+                unnamedPreset = file.url
                 renamingPreset = file.url
             } catch { report(error) }
         }
@@ -1149,21 +1152,29 @@ import UniformTypeIdentifiers
     }
 
     /// Copies each file that the engine reads into the Presets folder, under
-    /// its own name, and lists the ones that it refuses.
-    func importPresets(_ urls: [URL]) {
+    /// its own name, and lists the ones that it refuses. They go to the end,
+    /// or before the preset at `position` (a drop between rows).
+    func importPresets(_ urls: [URL], at position: Int? = nil) {
         guard canChangePresets, let engine, !urls.isEmpty else { return }
         showPane(.presets)
         Task {
-            var failures: [String] = [], imported = 0
+            var failures: [String] = [], added: [URL] = []
             for url in urls {
                 do {
                     let data = try await Task.detached(priority: .userInitiated) { try PresetLibrary.read(url) }.value
                     _ = try await engine.request(["command": .string("preset_import"), "text": .string(try Self.presetText(data))])
-                    _ = try await presetLibrary.add(data, name: PresetName.from(fileName: url.deletingPathExtension().lastPathComponent))
-                    imported += 1
+                    added.append(try await presetLibrary.add(data, name: PresetName.from(fileName: url.deletingPathExtension().lastPathComponent)).url)
                 } catch {
                     failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
                 }
+            }
+            let imported = added.count
+            if let position, imported > 0, let listed = try? await presetLibrary.list() {
+                let moved = listed.filter { added.contains($0.url) }
+                var order = listed.filter { !added.contains($0.url) }
+                let before = listed.prefix(position).filter { !added.contains($0.url) }.count
+                order.insert(contentsOf: moved, at: min(before, order.count))
+                do { try await presetLibrary.setOrder(order) } catch { report(error) }
             }
             await refreshPresets()
             if imported > 0 { status = imported == 1 ? "Imported 1 preset" : "Imported \(imported) presets" }
@@ -1174,8 +1185,33 @@ import UniformTypeIdentifiers
         }
     }
 
+    /// Moves presets in the list, as dragged, and remembers the order.
+    func movePresets(from source: IndexSet, to destination: Int) {
+        var order = presets
+        order.move(fromOffsets: source, toOffset: destination)
+        guard order != presets else { return }
+        presets = order
+        Task {
+            do { try await presetLibrary.setOrder(order) } catch { report(error) }
+            await refreshPresets()
+        }
+    }
+
+    /// Escape while naming: keeps the old name, or removes a preset New
+    /// Preset just made.
+    func cancelRename(_ preset: PresetFile) {
+        renamingPreset = nil
+        guard preset.url == unnamedPreset else { return }
+        unnamedPreset = nil
+        Task {
+            do { try await presetLibrary.delete(preset) } catch { report(error) }
+            await refreshPresets()
+        }
+    }
+
     func renamePreset(_ preset: PresetFile, to name: String) {
         renamingPreset = nil
+        if preset.url == unnamedPreset { unnamedPreset = nil }
         guard name != preset.name else { return }
         Task {
             do { _ = try await presetLibrary.rename(preset, to: name) } catch { report(error) }
