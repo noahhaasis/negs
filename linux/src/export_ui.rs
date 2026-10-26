@@ -48,13 +48,19 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         .selected(if lut { 0 } else { p.output_format.min(2) })
         .build();
     group.add(&format);
-    let depth = adw::ActionRow::builder()
+    let depth = adw::ComboRow::builder()
         .title("Bit depth")
+        .model(&gtk::StringList::new(&["8-bit", "16-bit"]))
         .visible(!lut)
         .build();
-    let depth_label = gtk::Label::new(None);
-    depth.add_suffix(&depth_label);
     group.add(&depth);
+    let color_space = adw::ComboRow::builder()
+        .title("Colour space")
+        .visible(!lut)
+        .build();
+    group.add(&color_space);
+    // Set while refresh rewrites the rows, so their handlers don't store it.
+    let updating = Rc::new(std::cell::Cell::new(false));
     if lut {
         group.add(
             &adw::ActionRow::builder()
@@ -64,9 +70,12 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         );
     }
     let quality_row = adw::ActionRow::builder().title("JPEG quality").build();
-    let quality = gtk::SpinButton::with_range(1., 100., 1.);
+    let quality = gtk::Scale::with_range(gtk::Orientation::Horizontal, 1., 100., 1.);
     quality.set_value(p.jpeg_quality.clamp(1, 100) as f64);
-    quality.set_width_chars(4);
+    quality.set_digits(0);
+    quality.set_draw_value(true);
+    quality.set_value_pos(gtk::PositionType::Left);
+    quality.set_width_request(220);
     quality.set_valign(gtk::Align::Center);
     quality.update_property(&[gtk::accessible::Property::Label("JPEG quality")]);
     quality_row.add_suffix(&quality);
@@ -161,7 +170,11 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         #[weak]
         border,
         #[weak]
-        depth_label,
+        depth,
+        #[weak]
+        color_space,
+        #[strong]
+        updating,
         #[weak]
         quality_row,
         #[weak]
@@ -171,11 +184,22 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         move || {
             pixels_row.set_visible(!lut && edge.selected() != 0);
             quality_row.set_visible(!lut && format.selected() == 1);
-            depth_label.set_text(if format.selected() == 2 {
-                "16-bit"
-            } else {
-                "8-bit"
-            });
+            let p = ui.preferences.borrow();
+            let bits = p.bit_depth(format.selected());
+            let space = p.color_space(format.selected()).to_string();
+            drop(p);
+            // ProPhoto RGB is offered at 16 bits only.
+            let spaces = &crate::preferences::COLOR_SPACES[..if bits == 16 { 4 } else { 3 }];
+            updating.set(true);
+            depth.set_selected(if bits == 16 { 1 } else { 0 });
+            depth.set_sensitive(format.selected() != 1);
+            depth.set_subtitle(if format.selected() == 1 { "JPEG is 8-bit only" } else { "" });
+            if color_space.model().is_none_or(|m| m.n_items() as usize != spaces.len()) {
+                color_space.set_model(Some(&gtk::StringList::new(spaces)));
+            }
+            color_space.set_selected(spaces.iter().position(|s| *s == space).unwrap_or(0) as u32);
+            color_space.set_subtitle(if bits == 16 { "" } else { "ProPhoto RGB needs 16-bit" });
+            updating.set(false);
             let current = filename.text();
             let stem = std::path::Path::new(current.as_str())
                 .file_stem()
@@ -205,6 +229,13 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
                 }
                 if border.is_active() && ui.history.borrow().state.border.enabled {
                     message.push_str(" Adds the border.");
+                }
+                if space != "sRGB" {
+                    message.push_str(&if preview {
+                        format!(" Converts to {space}; the preview's colours stay within sRGB.")
+                    } else {
+                        format!(" Develops in {space} and embeds its profile.")
+                    });
                 }
                 if edge.selected() != 0 {
                     message.push_str(&format!(
@@ -267,6 +298,39 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         move |v| {
             ui.preferences.borrow_mut().export_pixels = v.value() as u32;
             refresh();
+        }
+    ));
+    depth.connect_selected_notify(glib::clone!(
+        #[weak]
+        ui,
+        #[weak]
+        format,
+        #[strong]
+        refresh,
+        #[strong]
+        updating,
+        move |r| {
+            if !updating.get() {
+                let bits = if r.selected() == 1 { 16 } else { 8 };
+                ui.preferences.borrow_mut().set_bit_depth(format.selected(), bits);
+                refresh();
+            }
+        }
+    ));
+    color_space.connect_selected_notify(glib::clone!(
+        #[weak]
+        ui,
+        #[strong]
+        refresh,
+        #[strong]
+        updating,
+        move |r| {
+            if !updating.get() {
+                if let Some(name) = crate::preferences::COLOR_SPACES.get(r.selected() as usize) {
+                    ui.preferences.borrow_mut().color_space = (*name).into();
+                }
+                refresh();
+            }
         }
     ));
     quality.connect_value_changed(glib::clone!(

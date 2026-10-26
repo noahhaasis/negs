@@ -7,6 +7,7 @@ use spektrafilm_core::params::RuntimeParams;
 use spektrafilm_core::pipeline::Pipeline;
 use spektrafilm_core::profile;
 use spektrafilm_io::resize::Fit;
+use spektrafilm_math::colorspace::RgbColourspace;
 
 #[derive(Parser)]
 #[command(
@@ -30,6 +31,18 @@ enum Commands {
         /// JPEG encoder quality; PNG/TIFF remain lossless.
         #[arg(long, default_value_t = 95, value_parser = clap::value_parser!(u8).range(1..=100))]
         jpeg_quality: u8,
+        /// Bits per channel: 8 or 16. Defaults to 16 for TIFF and 8 for PNG;
+        /// JPEG is always 8-bit.
+        #[arg(long, value_parser = clap::builder::TypedValueParser::map(
+            clap::builder::PossibleValuesParser::new(["8", "16"]),
+            |s: String| s.parse::<u8>().unwrap(),
+        ))]
+        bit_depth: Option<u8>,
+        /// Output colour space, as colour names it (e.g. sRGB, "Display P3",
+        /// "Adobe RGB (1998)", "ProPhoto RGB"). Overrides
+        /// io.output_color_space in --params; the file carries its ICC profile.
+        #[arg(long)]
+        color_space: Option<String>,
         /// Omit the source photograph's camera metadata.
         #[arg(long)]
         no_metadata: bool,
@@ -150,6 +163,8 @@ fn main() -> Result<()> {
             input,
             output,
             jpeg_quality,
+            bit_depth,
+            color_space,
             no_metadata,
             film,
             paper,
@@ -186,7 +201,13 @@ fn main() -> Result<()> {
             cmd_process(
                 &input,
                 &output,
-                spektrafilm_io::save::SaveOptions { jpeg_quality, copy_metadata: !no_metadata },
+                spektrafilm_io::save::SaveOptions {
+                    jpeg_quality,
+                    copy_metadata: !no_metadata,
+                    bit_depth,
+                    ..Default::default()
+                },
+                color_space.as_deref(),
                 &film,
                 paper.as_deref(),
                 scan_film,
@@ -227,7 +248,8 @@ fn main() -> Result<()> {
 fn cmd_process(
     input: &Path,
     output: &Path,
-    save_options: spektrafilm_io::save::SaveOptions,
+    mut save_options: spektrafilm_io::save::SaveOptions,
+    color_space: Option<&str>,
     film_name: &str,
     paper_name: Option<&str>,
     scan_film: bool,
@@ -282,8 +304,17 @@ fn cmd_process(
         raw_temperature,
         raw_tint,
     )?;
+    if let Some(name) = color_space {
+        let space = RgbColourspace::find(name)
+            .with_context(|| format!("unknown colour space: {name}"))?;
+        params.io.output_color_space = space.name.into();
+    }
     let rotate_cw = params.io.rotate_cw;
     let encoded = params.io.output_cctf_encoding;
+    // The pipeline falls back to sRGB for a name it doesn't know; so does the profile.
+    save_options.color_space = RgbColourspace::output(&params.io.output_color_space).name.into();
+    save_options.linear = !encoded;
+    save_options.check(output)?;
 
     // Auto-detect input color space from file extension
     if spektrafilm_io::input_is_linear_srgb(input) {
@@ -415,7 +446,7 @@ fn cmd_process(
     // Save output, carrying over the input's camera metadata (EXIF).
     let t = Instant::now();
     let metadata = spektrafilm_io::read_metadata(input);
-    spektrafilm_io::save::save_image_with_options(&result, output, metadata.as_ref(),save_options)?;
+    spektrafilm_io::save::save_image_with_options(&result, output, metadata.as_ref(), &save_options)?;
     eprintln!(
         "Saved: {} ({}x{}), {} ms",
         output.display(),
