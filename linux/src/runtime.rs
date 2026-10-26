@@ -32,6 +32,7 @@ pub struct Runtime {
     pub hist_generation: u64,
     pub exporting: Option<Arc<crate::engine::Job>>,
     pub preview_saving: bool,
+    pub balancing_print: bool,
     pub block_helper_render: bool,
     pub close_confirmed: bool,
     pub cached_restoring: bool,
@@ -75,7 +76,7 @@ impl Editor {
                             );
                         }
                         crate::catalog::install(&catalog)?;
-                        parameters::validate(&catalog["defaults"])?;
+                        parameters::validate(&catalog)?;
                         if catalog["capabilities"]["save_options"] != true || catalog["capabilities"]["crop_after_post"] != true {
                             return Err("The installed image helper is older than this Linux editor. Reinstall the matching Negs package.".into());
                         }
@@ -117,6 +118,72 @@ impl Editor {
             crate::inspector::build(self);
             self.sync_state();
         }
+    }
+    pub fn can_balance_print(&self, state: &crate::model::State) -> bool {
+        let r = self.runtime.borrow();
+        !ui_only()
+            && r.ready
+            && r.client.is_some()
+            && !r.closing
+            && !r.balancing_print
+            && !self.canvas.cropping()
+            && !crate::inspector::flag(state, "Scan film directly", false)
+    }
+    /// Solves the enlarger's magenta and yellow shifts so a mid-grey prints
+    /// neutral with the current settings (upstream's print balance), and
+    /// sets them as one undoable edit. Doesn't depend on the photograph.
+    pub fn balance_print(self: &Rc<Self>) {
+        let state = self.history.borrow().state.clone();
+        if !self.can_balance_print(&state) {
+            return;
+        }
+        let mut r = self.runtime.borrow_mut();
+        let Some(client) = r.client.clone() else {
+            return;
+        };
+        let command = json!({"command":"balance_print",
+            "film":crate::catalog::selected(&state,false).id,
+            "paper":crate::catalog::selected(&state,true).id,
+            "params":parameters::runtime(&state,&r.defaults)});
+        r.balancing_print = true;
+        drop(r);
+        self.status.set_text("Balancing print…");
+        self.sync_history();
+        let ui = self.clone();
+        glib::MainContext::default().spawn_local(async move {
+            let result =
+                gio::spawn_blocking(move || client.request(command, Duration::from_secs(20 * 60)))
+                    .await;
+            ui.runtime.borrow_mut().balancing_print = false;
+            if ui.runtime.borrow().closing {
+                return;
+            }
+            match result {
+                Ok(Ok((_, reply))) => match (
+                    reply["m_filter_shift"].as_f64().filter(|v| v.is_finite()),
+                    reply["y_filter_shift"].as_f64().filter(|v| v.is_finite()),
+                ) {
+                    (Some(m), Some(y)) => {
+                        let mut h = ui.history.borrow_mut();
+                        h.commit();
+                        h.begin("Balance Print");
+                        h.state.values.insert("Enlarger.Magenta shift".into(), m);
+                        h.state.values.insert("Enlarger.Yellow shift".into(), y);
+                        h.commit();
+                        drop(h);
+                        ui.status
+                            .set_text(&format!("Print balanced: magenta {m:.2}, yellow {y:.2}"));
+                        ui.sync_state();
+                    }
+                    _ => ui.engine_error("The print balance returned no filter shifts."),
+                },
+                Ok(Err(error)) => ui.engine_error(&error),
+                Err(_) => ui.engine_error(
+                    "The image worker stopped unexpectedly. Open the photograph again to retry.",
+                ),
+            }
+            ui.sync_history();
+        });
     }
     pub fn engine_error(&self, message: &str) {
         eprintln!("Engine: {message}");

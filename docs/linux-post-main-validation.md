@@ -10,9 +10,13 @@ under ignored `target/`.
 The experimental engine and macOS/Windows controls had landed on main. The
 separate GTK client still bound removed grain fields and failed its live
 helper schema check. Linux now binds the current scalar grain controls and
-uses the Arctic Beta identifier. Per-stock grain arrays, film/print bases,
-camera colour filters and Balance Print remain separate Linux UI additions;
-unexposed parameters keep the engine's defaults.
+uses the Arctic Beta identifier. Per-stock grain arrays, film/print bases and
+Balance Print remained separate Linux UI additions at the time; unexposed
+parameters keep the engine's defaults. They have since landed on branch
+`linux-experimental-parity` (see [linux-release.md](linux-release.md)). An
+earlier version of this list also named camera colour filters, but neither
+`Inspector.swift` nor the Windows inspector has such a control: the only
+camera filter is Lens Diffusion, which Linux already exposes.
 
 Numerical validation found a second, independent problem: the first fresh
 matrix completed 484 renders, but only 1/76 GPU-versus-f64 quality comparisons
