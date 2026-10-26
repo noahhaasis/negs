@@ -17,7 +17,8 @@ use spektrafilm_io::{
     crop::Crop,
     resize::{self, Fit},
 };
-use spektrafilm_math::image::ImageBuf;
+use spektrafilm_core::stages::scanning::convert_output;
+use spektrafilm_math::{colorspace::RgbColourspace, image::ImageBuf};
 use std::{
     io::{BufRead, Write},
     path::{Path, PathBuf},
@@ -26,7 +27,8 @@ use std::{
 
 /// EditorModel.readPreview rejects larger preview buffers.
 const DISPLAY_MAX_DIM: usize = 8192;
-/// The only output colour space the helper renders.
+/// The only output colour space the helper renders. A save converts the
+/// render to the colour space it asks for.
 const OUTPUT_SPACE: &str = "sRGB";
 
 #[derive(Deserialize)]
@@ -171,7 +173,7 @@ fn catalog(data: &Path) -> Result<Value> {
         "No profiles found in {}",
         data.display()
     );
-    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true}, "profiles": profiles, "defaults": RuntimeParams::default()}))
+    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true}, "profiles": profiles, "defaults": RuntimeParams::default()}))
 }
 
 impl Session {
@@ -249,6 +251,7 @@ impl Session {
                 if let Some(crop) = &crop {
                     crop.validate()?;
                 }
+                save_options.check(&output)?;
                 let metadata = spektrafilm_io::read_metadata(source);
                 // The render is the unclipped scan; Post, crop, border and resize
                 // work on it as the file will hold it. Clipping in place keeps
@@ -282,7 +285,17 @@ impl Session {
                 let image = bordered.as_ref().unwrap_or(image);
                 let resized = fit.and_then(|fit| resize::fit(image, fit, *encoded));
                 let image = resized.as_ref().unwrap_or(image);
-                spektrafilm_io::save::save_image_with_options(image, &output, metadata.as_ref(),save_options)?;
+                // The render is sRGB; another space gets sRGB's colours in its encoding.
+                let space = RgbColourspace::find(&save_options.color_space)
+                    .with_context(|| format!("Unknown colour space: {}", save_options.color_space))?;
+                let converted = (space.name != OUTPUT_SPACE).then(|| {
+                    let mut converted = image.clone();
+                    convert_output(&mut converted, OUTPUT_SPACE, space.name, *encoded);
+                    converted
+                });
+                let image = converted.as_ref().unwrap_or(image);
+                let save_options = spektrafilm_io::save::SaveOptions { linear: !*encoded, ..save_options };
+                spektrafilm_io::save::save_image_with_options(image, &output, metadata.as_ref(), &save_options)?;
                 Ok(json!({"saved": output}))
             }
             Command::Render {
@@ -594,6 +607,24 @@ mod tests {
             crop: None, rotate_cw: 0, fit: None,
         } }, Path::new(".")).unwrap();
         assert_eq!(std::fs::read(input).unwrap(), std::fs::read(saved).unwrap());
+        // Another colour space converts the sRGB render and carries its profile.
+        let wide = dir.join("wide.png");
+        let save_options = spektrafilm_io::save::SaveOptions {
+            bit_depth: Some(16), color_space: "Display P3".into(), ..Default::default()
+        };
+        session.handle(Request { id: 10, command: Command::Save {
+            render_id: 7, output: wide.clone(), save_options, crop_after_post: false, border: None,
+            border_options: BorderOptions::default(), instagram: false,
+            crop: None, rotate_cw: 0, fit: None,
+        } }, Path::new(".")).unwrap();
+        let mut decoder = image::ImageReader::open(&wide).unwrap().into_decoder().unwrap();
+        let icc = image::ImageDecoder::icc_profile(&mut decoder).unwrap().unwrap();
+        let p3 = RgbColourspace::find("Display P3").unwrap();
+        assert_eq!(icc, spektrafilm_io::icc::profile(p3, false));
+        let pixels = image::DynamicImage::from_decoder(decoder).unwrap().to_rgb16().into_raw();
+        // sRGB's (0, 0.5, 1) and (1, 0.5, 0) lie inside Display P3's primaries.
+        assert!(pixels[0] > 0 && pixels[2] < 65535, "{pixels:?}");
+        assert!(pixels[3] < 65535 && pixels[5] > 0, "{pixels:?}");
         std::fs::remove_dir_all(dir).unwrap();
     }
     fn render(input: &Path, preview: &Path, target: Option<u32>, crop: Option<Crop>, interactive_scale: Option<f32>) -> Command {
@@ -714,6 +745,8 @@ mod tests {
         assert!(instagram);
         assert_eq!(save_options.jpeg_quality, 95);
         assert!(save_options.copy_metadata);
+        assert_eq!(save_options.bit_depth, None);
+        assert_eq!(save_options.color_space, "sRGB");
         assert!(!crop_after_post, "existing clients retain their original Post/crop order");
         assert_eq!(
             border_options,

@@ -22,6 +22,10 @@ pub struct Preferences {
     pub export_pixels: u32,
     pub metadata: bool,
     pub jpeg_quality: u32,
+    /// The colour space chosen for saves, as colour names it.
+    pub color_space: String,
+    pub png_bit_depth: u32,
+    pub tiff_bit_depth: u32,
     pub last_save_folder: Option<PathBuf>,
 }
 impl Default for Preferences {
@@ -42,10 +46,51 @@ impl Default for Preferences {
             export_pixels: 2048,
             metadata: true,
             jpeg_quality: 95,
+            color_space: "sRGB".into(),
+            png_bit_depth: 8,
+            tiff_bit_depth: 16,
             last_save_folder: None,
         }
     }
 }
+/// The colour spaces a save offers, as colour names them.
+pub const COLOR_SPACES: [&str; 4] = ["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB"];
+/// ProPhoto RGB bands at 8 bits, so it needs 16.
+pub const PROPHOTO: &str = "ProPhoto RGB";
+const PROPHOTO_FALLBACK: &str = "Adobe RGB (1998)";
+
+impl Preferences {
+    /// Bits per channel for `format` (PNG 0, JPEG 1, TIFF 2).
+    pub fn bit_depth(&self, format: u32) -> u32 {
+        match format {
+            1 => 8,
+            2 => self.tiff_bit_depth,
+            _ => self.png_bit_depth,
+        }
+    }
+    pub fn set_bit_depth(&mut self, format: u32, depth: u32) {
+        match format {
+            1 => {}
+            2 => self.tiff_bit_depth = depth,
+            _ => self.png_bit_depth = depth,
+        }
+    }
+    /// The colour space a save in `format` uses: the chosen one, except
+    /// ProPhoto RGB at 8 bits, which falls back to Adobe RGB. Switching back
+    /// to 16 bits restores ProPhoto.
+    pub fn color_space(&self, format: u32) -> &str {
+        let chosen = COLOR_SPACES
+            .into_iter()
+            .find(|cs| *cs == self.color_space)
+            .unwrap_or(COLOR_SPACES[0]);
+        if chosen == PROPHOTO && self.bit_depth(format) == 8 {
+            PROPHOTO_FALLBACK
+        } else {
+            chosen
+        }
+    }
+}
+
 impl Editor {
     pub fn refresh_recent(&self) {
         self.recent_menu.remove_all();

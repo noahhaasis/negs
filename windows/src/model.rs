@@ -93,9 +93,9 @@ impl OutputFormat {
     }
     pub fn title(self) -> &'static str {
         match self {
-            Self::Png => "PNG (lossless, 8-bit)",
-            Self::Jpeg => "JPEG (smaller, 8-bit)",
-            Self::Tiff => "TIFF (16-bit)",
+            Self::Png => "PNG (lossless)",
+            Self::Jpeg => "JPEG (smaller)",
+            Self::Tiff => "TIFF (lossless)",
         }
     }
     pub fn pattern(self) -> &'static str {
@@ -104,6 +104,56 @@ impl OutputFormat {
             Self::Jpeg => "*.jpg;*.jpeg",
             Self::Tiff => "*.tif;*.tiff",
         }
+    }
+}
+
+/// The colour spaces a save offers, as colour names them.
+pub const COLOR_SPACES: [&str; 4] = ["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB"];
+/// ProPhoto RGB bands at 8 bits, so it needs 16; Adobe RGB stands in.
+pub const PROPHOTO: usize = 3;
+pub const PROPHOTO_FALLBACK: usize = 2;
+pub const QUALITY_RANGE: (u32, u32) = (1, 100);
+
+/// How a save encodes the file: bits per channel, colour space and JPEG
+/// quality. The colour space is the one the file is in; ProPhoto RGB at
+/// 8 bits is already replaced by Adobe RGB (`effective_space`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SaveSettings {
+    pub bit_depth: u32,
+    pub color_space: usize,
+    pub jpeg_quality: u32,
+}
+
+impl SaveSettings {
+    /// The colour space a save with `bit_depth` uses when `chosen` was picked.
+    pub fn effective_space(chosen: usize, bit_depth: u32) -> usize {
+        let chosen = chosen.min(COLOR_SPACES.len() - 1);
+        if chosen == PROPHOTO && bit_depth == 8 { PROPHOTO_FALLBACK } else { chosen }
+    }
+    pub fn space_name(self) -> &'static str {
+        COLOR_SPACES[self.color_space.min(COLOR_SPACES.len() - 1)]
+    }
+    pub fn is_srgb(self) -> bool {
+        self.color_space == 0
+    }
+    /// The `save_options` of a save command.
+    pub fn json(self) -> Value {
+        json!({"jpeg_quality": self.jpeg_quality, "bit_depth": self.bit_depth, "color_space": self.space_name()})
+    }
+    pub fn arguments(self) -> Vec<String> {
+        vec![
+            "--jpeg-quality".into(), self.jpeg_quality.to_string(),
+            "--bit-depth".into(), self.bit_depth.to_string(),
+            "--color-space".into(), self.space_name().into(),
+        ]
+    }
+    /// For the save dialog's message; None for sRGB.
+    pub fn summary(self, export: bool) -> Option<String> {
+        (!self.is_srgb()).then(|| if export {
+            format!("Develops in {} and embeds its profile", self.space_name())
+        } else {
+            format!("Converts to {}; the preview's colours stay within sRGB", self.space_name())
+        })
     }
 }
 
@@ -1374,8 +1424,9 @@ impl Model {
     }
 
     /// Saves the current preview with the crop, rotation, border, and size.
-    fn save_command(&self, output: &Path, size: ExportSize) -> Value {
-        let mut command = json!({"command": "save", "render_id": self.render_id, "output": output, "rotate_cw": self.rotation()});
+    fn save_command(&self, output: &Path, size: ExportSize, save: SaveSettings) -> Value {
+        let mut command = json!({"command": "save", "render_id": self.render_id, "output": output, "rotate_cw": self.rotation(),
+            "save_options": save.json()});
         if self.state.crop.cropped() {
             let r = self.state.crop.rect;
             command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": self.state.crop.angle});
@@ -1461,14 +1512,14 @@ impl Model {
         });
     }
 
-    pub fn save_preview(&mut self, destination: PathBuf, size: ExportSize) {
+    pub fn save_preview(&mut self, destination: PathBuf, size: ExportSize, save: SaveSettings) {
         if !self.can_save() || !self.check_destination(&destination) {
             return;
         }
         let Some(engine) = self.engine.clone() else { return };
         self.saving = true;
         self.mark(dirty::CHROME);
-        let command = self.save_command(&destination, size);
+        let command = self.save_command(&destination, size, save);
         engine.request(command, engine::timeout_for("save"), move |result| {
             ui::post(move |app: &mut App| {
                 let model = &mut app.model;
@@ -1485,17 +1536,18 @@ impl Model {
     /// Exports at full resolution. A current preview at export size is what
     /// a Fast export would render, so it is saved instead, through a hidden
     /// sibling renamed into place; if that save fails (an edit arrived
-    /// meanwhile), the exporter runs.
-    pub fn export(&mut self, destination: PathBuf, engine_choice: ExportEngine, size: ExportSize) {
+    /// meanwhile), the exporter runs. The preview is sRGB, so an export in
+    /// another colour space always develops again in it.
+    pub fn export(&mut self, destination: PathBuf, engine_choice: ExportEngine, size: ExportSize, save: SaveSettings) {
         if !self.check_destination(&destination) || self.exporting || self.saving {
             return;
         }
-        if engine_choice == ExportEngine::Fast && self.can_save() && self.render_at_export_size {
+        if engine_choice == ExportEngine::Fast && save.is_srgb() && self.can_save() && self.render_at_export_size {
             if let Some(engine) = self.engine.clone() {
                 self.saving = true;
                 self.mark(dirty::CHROME);
                 let staging = engine::staging_path(&destination);
-                let command = self.save_command(&staging, size);
+                let command = self.save_command(&staging, size, save);
                 engine.request(command, engine::timeout_for("save"), move |result| {
                     let moved = result.map(|_| {
                         crate::platform::replace_file(&staging, &destination)
@@ -1515,17 +1567,17 @@ impl Model {
                                 app.export_finished();
                             }
                             Ok(Err(error)) => model.report(&error),
-                            Err(_) => model.run_export(destination, engine_choice, size),
+                            Err(_) => model.run_export(destination, engine_choice, size, save),
                         }
                     });
                 });
                 return;
             }
         }
-        self.run_export(destination, engine_choice, size);
+        self.run_export(destination, engine_choice, size, save);
     }
 
-    fn run_export(&mut self, destination: PathBuf, engine_choice: ExportEngine, size: ExportSize) {
+    fn run_export(&mut self, destination: PathBuf, engine_choice: ExportEngine, size: ExportSize, save: SaveSettings) {
         let (Some(source), Some(engine), Some(paths)) = (self.source.clone(), self.engine.clone(), self.paths.clone()) else { return };
         let executable = match engine_choice.executable(&paths) {
             Ok(executable) => executable,
@@ -1546,6 +1598,7 @@ impl Model {
             crop: self.state.crop.cropped().then_some(self.state.crop),
             border: self.state.border.exported(photo.width as u32, photo.height as u32),
             size_arguments: size.arguments(),
+            save_arguments: save.arguments(),
         };
         let handle = ExportHandle::default();
         self.export = Some(handle.clone());
@@ -1625,5 +1678,27 @@ impl BorderWidth {
             BorderWidth::Line => b.line = value,
             BorderWidth::Film => b.film_width = value,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prophoto_needs_sixteen_bits() {
+        assert_eq!(SaveSettings::effective_space(PROPHOTO, 16), PROPHOTO);
+        assert_eq!(SaveSettings::effective_space(PROPHOTO, 8), PROPHOTO_FALLBACK);
+        assert_eq!(SaveSettings::effective_space(1, 8), 1);
+        assert_eq!(SaveSettings::effective_space(99, 16), PROPHOTO);
+    }
+
+    #[test]
+    fn save_settings_reach_the_engine() {
+        let save = SaveSettings { bit_depth: 16, color_space: 1, jpeg_quality: 80 };
+        assert_eq!(save.json(), json!({"jpeg_quality": 80, "bit_depth": 16, "color_space": "Display P3"}));
+        assert_eq!(save.arguments(), ["--jpeg-quality", "80", "--bit-depth", "16", "--color-space", "Display P3"]);
+        assert!(!save.is_srgb());
+        assert_eq!(SaveSettings { color_space: 0, ..save }.summary(true), None);
     }
 }

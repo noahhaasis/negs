@@ -1,24 +1,26 @@
 //! Writing rendered images to disk, shared by the CLI and the GUI.
 //!
-//! - TIFF: 16-bit RGB, uncompressed.
-//! - PNG: 8-bit RGB.
-//! - JPEG: 8-bit RGB, quality 95.
+//! - TIFF: RGB, uncompressed, 16-bit by default or 8-bit.
+//! - PNG: RGB, 8-bit by default or 16-bit.
+//! - JPEG: 8-bit RGB, quality 95 by default.
 //!
 //! Values are clamped to [0, 1] and quantised with round-half-to-even,
 //! which matches numpy's `np.round` (the Python reference). If
 //! [`ImageMetadata`] is given, it is embedded as EXIF: in an `APP1`
 //! segment (JPEG), an `eXIf` chunk (PNG), or IFD0 plus an Exif sub-IFD
-//! (TIFF).
+//! (TIFF). Every file carries the ICC profile of its colour space
+//! ([`crate::icc`]).
 
 use std::fs::File;
 use std::io::{BufWriter, Seek, Write};
 use std::path::Path;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use image::ImageEncoder;
-use rawler::formats::tiff::{DirectoryWriter, Rational, TiffWriter};
+use rawler::formats::tiff::{DirectoryWriter, Rational, TiffWriter, Value};
 use rawler::tags::{ExifTag, TiffCommonTag};
 use rayon::prelude::*;
+use spektrafilm_math::colorspace::RgbColourspace;
 use spektrafilm_math::image::ImageBuf;
 
 use crate::extension;
@@ -28,17 +30,34 @@ use crate::metadata::ImageMetadata;
 /// `image`'s default of 75 would defeat the point.
 const JPEG_QUALITY: u8 = 95;
 
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+/// TIFF's `InterColorProfile` tag.
+const TIFF_ICC_PROFILE: u16 = 34675;
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct SaveOptions {
     pub jpeg_quality: u8,
     pub copy_metadata: bool,
+    /// Bits per channel, 8 or 16; `None` is the format's default: 16 for
+    /// TIFF, 8 for PNG. JPEG is always 8-bit.
+    pub bit_depth: Option<u8>,
+    /// The colour space the pixels are encoded in, as colour names it (see
+    /// `io.output_color_space`). Only its profile is written: the caller
+    /// renders or converts the image into it.
+    pub color_space: String,
+    /// The pixels are linear (`io.output_cctf_encoding` off), so the
+    /// profile gets a linear tone curve.
+    #[serde(skip)]
+    pub linear: bool,
 }
 impl Default for SaveOptions {
     fn default() -> Self {
         Self {
             jpeg_quality: JPEG_QUALITY,
             copy_metadata: true,
+            bit_depth: None,
+            color_space: "sRGB".into(),
+            linear: false,
         }
     }
 }
@@ -46,31 +65,63 @@ impl Default for SaveOptions {
 /// Save `img` as TIFF, PNG or JPEG, chosen by the extension of `path`,
 /// embedding `metadata` as EXIF if given.
 pub fn save_image(img: &ImageBuf, path: &Path, metadata: Option<&ImageMetadata>) -> Result<()> {
-    save_image_with_options(img, path, metadata, SaveOptions::default())
+    save_image_with_options(img, path, metadata, &SaveOptions::default())
 }
 
 pub fn save_image_with_options(
     img: &ImageBuf,
     path: &Path,
     metadata: Option<&ImageMetadata>,
-    options: SaveOptions,
+    options: &SaveOptions,
 ) -> Result<()> {
-    anyhow::ensure!(
-        (1..=100).contains(&options.jpeg_quality),
-        "JPEG quality must be between 1 and 100"
-    );
+    let (format, depth, space) = options.plan(path)?;
+    let icc = crate::icc::profile(space, options.linear);
     let metadata = if options.copy_metadata {
         metadata
     } else {
         None
     };
-    let ext = extension(path);
-    match ext.as_str() {
-        "tif" | "tiff" => save_tiff(img, path, metadata),
-        "png" => save_png(img, path, metadata),
-        "jpg" | "jpeg" => save_jpeg(img, path, metadata, options.jpeg_quality),
-        _ => bail!("unsupported output format: .{ext} (supported: tiff, png, jpg)"),
+    match format {
+        Format::Tiff => save_tiff(img, path, metadata, depth, icc),
+        Format::Png => save_png(img, path, metadata, depth, icc),
+        Format::Jpeg(quality) => save_jpeg(img, path, metadata, quality, icc),
     }
+}
+
+impl SaveOptions {
+    /// Fails if these options can't save to `path`, before anything renders.
+    pub fn check(&self, path: &Path) -> Result<()> {
+        self.plan(path).map(|_| ())
+    }
+
+    fn plan(&self, path: &Path) -> Result<(Format, u8, &'static RgbColourspace)> {
+        ensure!(
+            (1..=100).contains(&self.jpeg_quality),
+            "JPEG quality must be between 1 and 100"
+        );
+        let space = RgbColourspace::find(&self.color_space)
+            .with_context(|| format!("unknown colour space: {}", self.color_space))?;
+        let ext = extension(path);
+        let (format, default_depth) = match ext.as_str() {
+            "tif" | "tiff" => (Format::Tiff, 16),
+            "png" => (Format::Png, 8),
+            "jpg" | "jpeg" => (Format::Jpeg(self.jpeg_quality), 8),
+            _ => bail!("unsupported output format: .{ext} (supported: tiff, png, jpg)"),
+        };
+        let depth = self.bit_depth.unwrap_or(default_depth);
+        ensure!(depth == 8 || depth == 16, "bit depth must be 8 or 16, not {depth}");
+        ensure!(
+            depth == 8 || !matches!(format, Format::Jpeg(_)),
+            "JPEG is 8-bit only; save 16 bits as PNG or TIFF"
+        );
+        Ok((format, depth, space))
+    }
+}
+
+enum Format {
+    Tiff,
+    Png,
+    Jpeg(u8),
 }
 
 fn quantize_u8(img: &ImageBuf) -> Vec<u8> {
@@ -102,13 +153,27 @@ fn exif_blob(img: &ImageBuf, metadata: Option<&ImageMetadata>) -> Result<Vec<u8>
         .to_exif_blob(img.width, img.height)
 }
 
-fn save_png(img: &ImageBuf, path: &Path, metadata: Option<&ImageMetadata>) -> Result<()> {
-    let data = quantize_u8(img);
+fn save_png(
+    img: &ImageBuf,
+    path: &Path,
+    metadata: Option<&ImageMetadata>,
+    depth: u8,
+    icc: Vec<u8>,
+) -> Result<()> {
+    // The encoder takes 16-bit samples in native byte order.
+    let (data, color) = if depth == 16 {
+        let data = quantize_u16(img).iter().flat_map(|v| v.to_ne_bytes()).collect();
+        (data, image::ExtendedColorType::Rgb16)
+    } else {
+        (quantize_u8(img), image::ExtendedColorType::Rgb8)
+    };
     let mut file = create(path)?;
     let mut enc = image::codecs::png::PngEncoder::new(&mut file);
     enc.set_exif_metadata(exif_blob(img, metadata)?)
         .map_err(|e| anyhow!("PNG EXIF: {e}"))?;
-    enc.write_image(&data, img.width, img.height, image::ExtendedColorType::Rgb8)
+    enc.set_icc_profile(icc)
+        .map_err(|e| anyhow!("PNG ICC profile: {e}"))?;
+    enc.write_image(&data, img.width, img.height, color)
         .with_context(|| format!("saving PNG: {}", path.display()))?;
     file.flush()
         .with_context(|| format!("saving PNG: {}", path.display()))?;
@@ -120,12 +185,15 @@ fn save_jpeg(
     path: &Path,
     metadata: Option<&ImageMetadata>,
     quality: u8,
+    icc: Vec<u8>,
 ) -> Result<()> {
     let data = quantize_u8(img);
     let mut file = create(path)?;
     let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, quality);
     enc.set_exif_metadata(exif_blob(img, metadata)?)
         .map_err(|e| anyhow!("JPEG EXIF: {e}"))?;
+    enc.set_icc_profile(icc)
+        .map_err(|e| anyhow!("JPEG ICC profile: {e}"))?;
     enc.write_image(&data, img.width, img.height, image::ExtendedColorType::Rgb8)
         .with_context(|| format!("saving JPEG: {}", path.display()))?;
     file.flush()
@@ -133,25 +201,53 @@ fn save_jpeg(
     Ok(())
 }
 
-/// 16-bit RGB baseline TIFF, uncompressed, in strips. Written with
-/// rawler's TIFF writer rather than the `image` crate's, which can't add
-/// an Exif sub-IFD.
-fn save_tiff(img: &ImageBuf, path: &Path, metadata: Option<&ImageMetadata>) -> Result<()> {
-    let data = quantize_u16(img);
+/// Baseline RGB TIFF, uncompressed, in strips. Written with rawler's TIFF
+/// writer rather than the `image` crate's, which can't add an Exif sub-IFD.
+fn save_tiff(
+    img: &ImageBuf,
+    path: &Path,
+    metadata: Option<&ImageMetadata>,
+    depth: u8,
+    icc: Vec<u8>,
+) -> Result<()> {
     let mut file = create(path)?;
     let tiff = TiffWriter::new(&mut file).map_err(tiff_err)?;
-    write_tiff_image(tiff, &data, img.width, img.height, metadata)
+    let written = if depth == 16 {
+        write_tiff_image(tiff, &quantize_u16(img), img.width, img.height, metadata, icc)
+    } else {
+        write_tiff_image(tiff, &quantize_u8(img), img.width, img.height, metadata, icc)
+    };
+    written
         .and_then(|()| Ok(file.flush()?))
         .with_context(|| format!("saving TIFF: {}", path.display()))?;
     Ok(())
 }
 
-fn write_tiff_image<W: Write + Seek>(
+/// A TIFF sample, in native byte order: TiffWriter writes the header in it.
+trait Sample: Copy {
+    const BYTES: usize;
+    fn push(self, out: &mut Vec<u8>);
+}
+impl Sample for u8 {
+    const BYTES: usize = 1;
+    fn push(self, out: &mut Vec<u8>) {
+        out.push(self);
+    }
+}
+impl Sample for u16 {
+    const BYTES: usize = 2;
+    fn push(self, out: &mut Vec<u8>) {
+        out.extend(self.to_ne_bytes());
+    }
+}
+
+fn write_tiff_image<W: Write + Seek, S: Sample>(
     mut tiff: TiffWriter<W>,
-    data: &[u16],
+    data: &[S],
     width: u32,
     height: u32,
     metadata: Option<&ImageMetadata>,
+    icc: Vec<u8>,
 ) -> Result<()> {
     let row_len = width as usize * 3;
     if row_len == 0 || height == 0 {
@@ -159,14 +255,13 @@ fn write_tiff_image<W: Write + Seek>(
     }
     // ~256 KiB strips: small enough for streaming readers, few enough
     // offsets for big images.
-    let rows_per_strip = (256 * 1024 / (row_len * 2)).clamp(1, height as usize);
+    let rows_per_strip = (256 * 1024 / (row_len * S::BYTES)).clamp(1, height as usize);
     let mut offsets = Vec::new();
     let mut counts = Vec::new();
-    let mut bytes = Vec::with_capacity(rows_per_strip * row_len * 2);
+    let mut bytes = Vec::with_capacity(rows_per_strip * row_len * S::BYTES);
     for strip in data.chunks(rows_per_strip * row_len) {
         bytes.clear();
-        // TiffWriter writes the header in native byte order.
-        bytes.extend(strip.iter().flat_map(|v| v.to_ne_bytes()));
+        strip.iter().for_each(|v| v.push(&mut bytes));
         offsets.push(tiff.write_data(&bytes).map_err(tiff_err)?);
         counts.push(u32::try_from(bytes.len())?);
     }
@@ -174,7 +269,7 @@ fn write_tiff_image<W: Write + Seek>(
     let mut root = DirectoryWriter::new();
     root.add_tag(TiffCommonTag::ImageWidth, width);
     root.add_tag(TiffCommonTag::ImageLength, height);
-    root.add_tag(TiffCommonTag::BitsPerSample, [16u16; 3]);
+    root.add_tag(TiffCommonTag::BitsPerSample, [8 * S::BYTES as u16; 3]);
     root.add_tag(TiffCommonTag::Compression, 1u16);
     root.add_tag(TiffCommonTag::PhotometricInt, 2u16);
     root.add_tag(TiffCommonTag::StripOffsets, &offsets);
@@ -185,6 +280,7 @@ fn write_tiff_image<W: Write + Seek>(
     root.add_tag(TiffCommonTag::XResolution, Rational::new(72, 1));
     root.add_tag(TiffCommonTag::YResolution, Rational::new(72, 1));
     root.add_tag(TiffCommonTag::ResolutionUnit, 2u16);
+    root.add_untyped_tag(TIFF_ICC_PROFILE, Value::Undefined(icc));
     metadata
         .cloned()
         .unwrap_or_default()
@@ -441,7 +537,7 @@ mod tests {
         let image = test_image();
         let metadata = sample_metadata();
         save_image(&image, &original, Some(&metadata)).unwrap();
-        save_image_with_options(&image, &explicit, Some(&metadata), SaveOptions::default())
+        save_image_with_options(&image, &explicit, Some(&metadata), &SaveOptions::default())
             .unwrap();
         assert_eq!(
             std::fs::read(&original).unwrap(),
@@ -451,9 +547,10 @@ mod tests {
             &image,
             &low,
             Some(&metadata),
-            SaveOptions {
+            &SaveOptions {
                 jpeg_quality: 35,
                 copy_metadata: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -469,7 +566,7 @@ mod tests {
                 &image,
                 &invalid,
                 None,
-                SaveOptions {
+                &SaveOptions {
                     jpeg_quality: 0,
                     ..Default::default()
                 }
@@ -478,6 +575,53 @@ mod tests {
         );
         assert!(!invalid.exists());
     }
+    #[test]
+    fn bit_depths_and_colour_profiles() {
+        let dir = Scratch::new("depth-icc");
+        let img = test_image();
+        let p3 = SaveOptions { color_space: "Display P3".into(), ..Default::default() };
+        let cases = [
+            ("default.png", SaveOptions::default(), 8, "sRGB"),
+            ("deep.png", SaveOptions { bit_depth: Some(16), ..p3.clone() }, 16, "Display P3"),
+            ("default.tif", p3.clone(), 16, "Display P3"),
+            ("shallow.tif", SaveOptions { bit_depth: Some(8), ..Default::default() }, 8, "sRGB"),
+            ("photo.jpg", p3.clone(), 8, "Display P3"),
+        ];
+        for (name, options, depth, space) in cases {
+            let out = dir.path(name);
+            save_image_with_options(&img, &out, None, &options).unwrap();
+            let mut dec = image::ImageReader::open(&out)
+                .unwrap()
+                .with_guessed_format()
+                .unwrap()
+                .into_decoder()
+                .unwrap();
+            // `image` misses a small TIFF's profile; libtiff reads it, as rawler does.
+            let icc = if name.ends_with(".tif") {
+                match &exif_ifd0(&out).entries().get(&TIFF_ICC_PROFILE).unwrap().value {
+                    Value::Undefined(icc) => Some(icc.clone()),
+                    other => panic!("{name}: {other:?}"),
+                }
+            } else {
+                image::ImageDecoder::icc_profile(&mut dec).unwrap()
+            };
+            let space = RgbColourspace::find(space).unwrap();
+            assert_eq!(icc, Some(crate::icc::profile(space, false)), "{name}");
+            let back = image::DynamicImage::from_decoder(dec).unwrap();
+            assert_eq!(back.color().bits_per_pixel() / 3, depth, "{name}");
+            if depth == 16 {
+                assert_eq!(back.to_rgb16().into_raw(), quantize_u16(&img), "{name}");
+            } else if !name.ends_with(".jpg") {
+                assert_eq!(back.to_rgb8().into_raw(), quantize_u8(&img), "{name}");
+            }
+        }
+        let jpeg16 = SaveOptions { bit_depth: Some(16), ..Default::default() };
+        assert!(jpeg16.check(Path::new("x.jpg")).is_err());
+        assert!(SaveOptions { bit_depth: Some(12), ..Default::default() }.check(Path::new("x.png")).is_err());
+        let unknown = SaveOptions { color_space: "Nope".into(), ..Default::default() };
+        assert!(unknown.check(Path::new("x.png")).is_err());
+    }
+
     #[test]
     fn without_metadata_only_software_is_written() {
         let dir = Scratch::new("no-meta");

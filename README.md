@@ -28,7 +28,7 @@ Pick a film, pick a paper, drag a slider, and watch the picture change as you mo
 - Crop, straighten, and add borders with each stock's real edge print
 - Image Size enlarges a photo *before* the film, so grain and halation form at print size instead of being stretched afterwards
 - Undo, keyboard shortcuts, pinch to zoom: it behaves like a Mac app
-- Exports PNG, TIFF or JPEG and keeps your camera's EXIF
+- Exports PNG, TIFF or JPEG and keeps your camera's EXIF, at 8 or 16 bits per channel (JPEG with a quality slider), in sRGB, Display P3, Adobe RGB or ProPhoto RGB (16-bit only) with an embedded ICC profile
 - Export the current film and paper colors as a 33³ sRGB `.cube` LUT from File → Export LUT… on macOS and Windows. No photograph is needed; spatial effects and Post edits are excluded.
 - Live preview while you drag a slider, and what you see in the preview is what you export
 

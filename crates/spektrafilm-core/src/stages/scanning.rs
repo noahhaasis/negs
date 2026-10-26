@@ -415,6 +415,31 @@ pub fn encode_output(rgb: &mut ImageBuf, output_color_space: &str) {
     });
 }
 
+/// Re-encode a finished `from` image in `to`, clipped to [0, 1]: decode,
+/// convert through XYZ with CAT02 between the whitepoints (as the scan's
+/// own output matrix does), encode. `encoded` false means the image is
+/// linear and stays linear. Converting doesn't widen the gamut: an sRGB
+/// render saved as Display P3 keeps sRGB's colours.
+pub fn convert_output(rgb: &mut ImageBuf, from: &str, to: &str, encoded: bool) {
+    let (from, to) = (RgbColourspace::output(from), RgbColourspace::output(to));
+    if from == to {
+        return;
+    }
+    let adapt = colorspace::chromatic_adaptation_matrix_f64(from.whitepoint_xyz, to.whitepoint_xyz);
+    let m = colorspace::mat3_mul3_f64(&to.xyz_to_rgb, &colorspace::mat3_mul3_f64(&adapt, &from.rgb_to_xyz));
+    let (decode, encode) = (from.cctf, to.cctf);
+    rgb.data.par_chunks_exact_mut(3).for_each(|px| {
+        let lin = [0, 1, 2].map(|i| {
+            let v = px[i] as f64;
+            if encoded { decode.decode(v.clamp(0.0, 1.0)) } else { v }
+        });
+        for (i, row) in m.iter().enumerate() {
+            let v = (row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2]).clamp(0.0, 1.0);
+            px[i] = from_f64(if encoded { encode.encode(v) } else { v });
+        }
+    });
+}
+
 pub fn process(
     density_cmy: ImageBuf,
     profile: &Profile,
@@ -424,4 +449,30 @@ pub fn process(
     gamut: &crate::gamut_compression::OutputGamutCompress,
 ) -> ImageBuf {
     scan(density_cmy, profile, params, backend, color_ref, gamut)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn converted(rgb: [f64; 3], to: &str) -> [f64; 3] {
+        let mut img = ImageBuf::from_data(1, 1, rgb.map(from_f64).to_vec());
+        convert_output(&mut img, "sRGB", to, true);
+        [0, 1, 2].map(|i| img.data[i] as f64)
+    }
+
+    #[test]
+    fn convert_output_keeps_white_and_moves_primaries_inside() {
+        for to in ["Display P3", "Adobe RGB (1998)", "ProPhoto RGB"] {
+            for (a, b) in converted([1.0; 3], to).iter().zip([1.0; 3]) {
+                assert!((a - b).abs() < 1e-3, "{to}: white");
+            }
+        }
+        // sRGB red in Display P3, as Apple's ColorSync gives it.
+        let red = converted([1.0, 0.0, 0.0], "Display P3");
+        for (a, b) in red.iter().zip([0.9175, 0.2003, 0.1386]) {
+            assert!((a - b).abs() < 1e-3, "{red:?}");
+        }
+        assert_eq!(converted([0.25, 0.5, 0.75], "sRGB"), [0.25, 0.5, 0.75].map(|v| from_f64(v) as f64));
+    }
 }
