@@ -28,11 +28,26 @@ export MACOSX_DEPLOYMENT_TARGET=14.0
 # here can't run AVX2) and switch if it is faster and renders the same.
 rust_targets=(--target aarch64-apple-darwin --target x86_64-apple-darwin)
 swift_archs=(--arch arm64 --arch x86_64)
-cargo build --locked --release -p spektrafilm-native "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+# CI builds each architecture's Rust executables in parallel jobs and places
+# them under $BUILD_TARGET_DIR/<target>/release before calling this script.
+if [[ "${NEGS_PREBUILT_RUST:-}" == 1 ]]; then
+    for target in aarch64-apple-darwin x86_64-apple-darwin; do
+        for binary in spektrafilm-native spektrafilm spektrafilm-f64; do
+            test -f "$BUILD_TARGET_DIR/$target/release/$binary" || {
+                echo "Missing prebuilt $target $binary" >&2
+                exit 1
+            }
+        done
+    done
+else
+    cargo build --locked --release -p spektrafilm-native "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+fi
 swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions "${swift_archs[@]}"
 swift_bin_dir="$(swift build --package-path macos --scratch-path "$BUILD_TARGET_DIR/swift-native" -c release --force-resolved-versions "${swift_archs[@]}" --show-bin-path)"
-cargo build --locked --release -p spektrafilm-cli --bin spektrafilm "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
-cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+if [[ "${NEGS_PREBUILT_RUST:-}" != 1 ]]; then
+    cargo build --locked --release -p spektrafilm-cli --bin spektrafilm "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+    cargo build --locked --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64 "${rust_targets[@]}" --target-dir "$BUILD_TARGET_DIR"
+fi
 universal_dir="$BUILD_TARGET_DIR/universal-apple-darwin/release"
 mkdir -p "$universal_dir"
 for binary in spektrafilm-native spektrafilm spektrafilm-f64; do
