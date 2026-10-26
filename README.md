@@ -124,7 +124,7 @@ Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it ru
 No. Presets and LUTs remap colours. Negs simulates the film, the paper and the light, which is why halation, grain and edge effects come out right.
 
 **Windows or Linux?**
-An [experimental native Windows version](#windows-experimental) is available in this repository, with installer and portable packaging. Linux is not available yet.
+An [experimental native Windows version](#windows-experimental) is available in this repository, with installer and portable packaging. The native GTK4 Linux app can be [built from source](#linux-arch--omarchy); public Linux packages are being prepared.
 
 **Found a bug or have an idea?**
 [Open an issue](https://github.com/noahhaasis/negs/issues).
@@ -153,3 +153,28 @@ Third-party components keep their own licenses. Sparkle, the update framework bu
 ## For developers
 
 Building from source, the command-line tools, accuracy against the original Python project, and how the code is laid out: see [docs/development.md](docs/development.md).
+
+### Linux (Arch / Omarchy)
+
+The native Linux editor uses GTK4/libadwaita and the same Rust film engine, with
+GPU previews and separate Fast and Reference exporters. Build with Rust
+**1.93.1**, GTK **4.16+** and libadwaita **1.6+**. On Arch or Omarchy:
+
+```sh
+sudo pacman -S --needed base-devel rustup pkgconf python gtk4 libadwaita openblas vulkan-icd-loader hicolor-icon-theme desktop-file-utils
+rustup toolchain install 1.93.1 --profile minimal
+
+# From the repository root:
+bash linux/build.sh
+bash linux/run.sh /absolute/path/to/photo.NEF
+```
+
+Install the Vulkan driver appropriate for your GPU to enable hardware
+acceleration; the engine also supports CPU fallback. Running without a photo
+path restores the previous session.
+
+To build an Arch package from committed source, run `bash linux/package.sh`.
+Artifacts are written to `target/linux-package/<short-commit>/assets/`.
+See [Linux build and installation details](docs/linux-app.md) and the
+[AUR/Omarchy release checklist](docs/linux-release.md). Repository publication
+is still pending.

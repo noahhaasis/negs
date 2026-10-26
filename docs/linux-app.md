@@ -5,7 +5,9 @@ Spektrafilm engine. The UI runs in its own Cargo workspace, `linux/`, and
 uses a persistent, serial `spektrafilm-native` helper for GPU preview and
 retained Save Preview. Fast export uses the f32 engine; Reference export
 uses the separately built f64 binary. macOS and Windows UI sources are unchanged.
-The unrelated Python experimental engine migration is outside this port.
+The experimental engine migration has since merged from main. Linux inspector
+schema parity and fresh installed-app validation are required before releasing
+that combined revision; see [the release checklist](linux-release.md).
 
 ## Build and run
 
@@ -45,7 +47,9 @@ bash linux/package.sh
 ```
 
 This generates a source archive and checksum-pinned local PKGBUILD, then runs
-`makepkg`. The recipe builds both workspaces and installs the launcher, helper,
+`makepkg`. Outputs are under `target/linux-package/<short-commit>/assets/`, with
+AUR/Omarchy recipes alongside in `recipes/`. Use an empty `NEGS_PACKAGE_OUT`
+directory for a retry. The recipe builds both workspaces and installs the launcher, helper,
 f32/f64 exporters, profile/LUT/border data and licenses, icon, desktop entry,
 documentation and source archive. The app ID/window class is `dev.negs.app`.
 Open With MIME declarations do not change file-association defaults. Install a
@@ -56,7 +60,7 @@ For a per-user local bundle on a compatible GTK/Arch system:
 
 ```sh
 bash linux/package.sh --bundle
-# Unpack target/linux-package/negs-0.7.0-linux-x86_64.tar.gz into a directory.
+# Unpack the generated negs-VERSION-linux-x86_64.tar.gz into a directory.
 python3 /path/to/unpacked/share/negs/install.py --from /path/to/unpacked
 ~/.local/bin/negs
 ```
@@ -143,6 +147,8 @@ The tested app is installed at `~/.local/bin/negs`. The local Arch package is
 See `docs/linux-core-validation.md` for numerical gates, real desktop evidence,
 performance and installation results, and `docs/linux-ui-validation.md` for the
 preceding UI-only measurements. These are separate experiments.
+The current main-merge checks and Vulkan correction are recorded separately in
+[linux-post-main-validation.md](linux-post-main-validation.md).
 
 The transferred historical Mac reference predates the DIR-gamma correction;
 it cannot establish same-revision Mac/Linux parity. CPU shared-stream grain

@@ -143,9 +143,14 @@ impl Scratch {
             .read(true)
             .write(true)
             .create_new(true)
-            .open(directory.join("lock"))
+            .open(directory.join(".lock.pending"))
             .map_err(|e| e.to_string())?;
         lock.try_lock().map_err(|e| e.to_string())?;
+        // Publish the lock only after acquiring it. Cleanup skips directories
+        // without this name, so a concurrent constructor cannot mistake a
+        // just-created, not-yet-locked file for an abandoned session.
+        fs::rename(directory.join(".lock.pending"), directory.join("lock"))
+            .map_err(|e| e.to_string())?;
         Ok(Self {
             directory,
             _lock: lock,
@@ -619,6 +624,30 @@ mod tests {
         assert!(same_file(&source, &alias));
         assert!(!same_file(&source, &scratch.directory.join("different")));
     }
+    #[test]
+    fn concurrent_scratch_creation_keeps_live_directories() {
+        let barrier = std::sync::Barrier::new(16);
+        let scratches = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..16)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        Scratch::new().unwrap()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(
+            scratches
+                .iter()
+                .all(|scratch| scratch.directory.join("lock").is_file())
+        );
+    }
+
     #[test]
     fn helper_survives_the_thread_that_submitted_its_first_request() {
         use std::os::unix::fs::PermissionsExt;

@@ -51,9 +51,12 @@ pub fn path(key: &str) -> Option<String> {
         ("Camera", "Lens blur") => "camera.lens_blur_um",
         ("RAW", "Temperature") => "io.raw_white_balance.temperature",
         ("RAW", "Tint") => "io.raw_white_balance.tint",
-        ("Grain", "Particle area") => "film_render.grain.agx_particle_area_um2",
+        ("Grain", "Dye clouds") => "film_render.grain.blur_dye_clouds_um",
         ("Grain", "Post blur") => "film_render.grain.blur",
-        ("Grain", "Sublayer count") => "film_render.grain.n_sub_layers",
+        ("Grain", "Sharpen amount") => "film_render.grain.mult_usm_amount",
+        ("Grain", "Sharpen radius") => "film_render.grain.mult_usm_sigma",
+        ("Grain", "Clump blur") => "film_render.grain.micro_structure.0",
+        ("Grain", "Clump size") => "film_render.grain.micro_structure.1",
         ("Halation", "Amount") => "film_render.halation.halation_amount",
         ("Halation", "Spatial scale") => "film_render.halation.halation_spatial_scale",
         ("Halation", "Scatter amount") => "film_render.halation.scatter_amount",
@@ -131,7 +134,6 @@ pub const TOGGLES: &[(&str, &str)] = &[
         "print_render.density_curves_morph.active",
     ),
     ("Glare enabled", "print_render.glare.active"),
-    ("Sublayers", "film_render.grain.sublayers_active"),
     (
         "Exposure compensation",
         "enlarger.print_exposure_compensation",
@@ -179,7 +181,7 @@ pub const CHOICES: &[(&str, &str, &[&str])] = &[
     (
         "Spectral upsampling",
         "settings.rgb_to_raw_method",
-        &["hanatos2025", "arctic2026alpha02", "mallett2019"],
+        &["hanatos2025", "arctic2026beta04", "mallett2019"],
     ),
 ];
 
@@ -353,4 +355,42 @@ pub fn merge(defaults: &Value, saved: &Value) -> Value {
 pub fn crop(state: &State) -> Value {
     let [x, y, width, height] = state.crop.unwrap_or([0., 0., 1., 1.]);
     json!({"x":x,"y":y,"width":width,"height":height,"angle":state.straighten})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    #[test]
+    #[ignore = "Requires a built native helper; the release recipe runs this integration gate"]
+    fn live_helper_schema() {
+        let helper = std::env::var_os("NEGS_SCHEMA_HELPER")
+            .expect("Set NEGS_SCHEMA_HELPER to the built spektrafilm-native executable");
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data");
+        let mut child = Command::new(helper)
+            .arg("--data-dir")
+            .arg(data)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Start the native helper");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"{\"id\":1,\"command\":\"catalog\"}\n")
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "The helper must exit cleanly on EOF"
+        );
+        let reply: Value = serde_json::from_slice(&output.stdout).expect("Read the helper catalog");
+        assert_eq!(reply["id"], 1);
+        assert_eq!(reply["result"]["protocol"], 1);
+        validate(&reply["result"]["defaults"])
+            .expect("The Linux controls must accept the shipped helper's defaults");
+    }
 }
