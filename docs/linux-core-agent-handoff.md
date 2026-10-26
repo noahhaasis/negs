@@ -1,6 +1,7 @@
 > Integration has now proceeded beyond this pre-core handoff. For the current
 > connected app, build/package commands and evidence, read [linux-app.md](linux-app.md)
-> and [linux-core-validation.md](linux-core-validation.md).
+> and [linux-core-validation.md](linux-core-validation.md). For remaining release
+> work, use [linux-release.md](linux-release.md). This file is historical.
 
 # Linux core bring-up and GTK integration handoff
 
@@ -15,9 +16,8 @@ asked to build and review the UI before connecting Spektrafilm. That interface
 exists and runs in the real desktop. This handoff is for the subsequent agent
 to bring up the existing Rust core and connect it to that interface.
 
-Read **all** of [linux-agent-handoff.md](linux-agent-handoff.md) first; its
-feature, correctness, startup and packaging requirements remain authoritative.
-That supplied file is currently untracked; preserve it. Also read:
+The original `linux-agent-handoff.md` is an untracked machine-transfer brief,
+not a current prerequisite. For the historical bring-up context, also read:
 
 1. [linux-app.md](linux-app.md), [linux-ui-parity.md](linux-ui-parity.md) and
    [linux-ui-validation.md](linux-ui-validation.md).

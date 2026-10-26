@@ -1,0 +1,63 @@
+name: Linux
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/linux.yml'
+      - '.github/workflows/release.yml'
+      - 'Cargo.*'
+      - 'crates/**'
+      - 'data/**'
+      - 'linux/**'
+      - 'scripts/check_native_macos.py'
+      - 'docs/linux-*.md'
+      - 'assets/negs-icon.*'
+
+permissions:
+  contents: read
+
+jobs:
+  arch:
+    name: Arch Linux x86_64
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 90
+    env:
+      RELEASE_REPOSITORY: ${{ github.repository }}
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+      AUR_MAINTAINER: ${{ vars.AUR_MAINTAINER }}
+      # Bound BLAS threads on shared runners; CI verifies CPU fallback.
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - name: Install Arch build and runtime dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git python rustup pkgconf gtk4 libadwaita openblas vulkan-icd-loader hicolor-icon-theme desktop-file-utils
+          useradd --create-home builder
+      - uses: actions/checkout@v4
+      - name: Give the build user ownership of the checkout
+        run: chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Test release metadata and recipe generation
+        run: runuser -u builder -- python3 -I -m unittest discover -s linux -p 'test_release.py'
+      - name: Archive this commit and prepare local recipe
+        run: runuser -u builder -- python3 linux/release.py prepare
+      - name: Build and test both workspaces as an unprivileged user
+        run: |
+          cd target/linux-release/build
+          runuser -u builder -- makepkg --cleanbuild --force --noconfirm
+      - name: Verify the packaged engine and desktop integration files
+        run: runuser -u builder -- python3 linux/verify_package.py target/linux-release/build/negs-*.pkg.tar.zst
+      - name: Generate checksummed assets, AUR recipes and Omarchy submission
+        run: runuser -u builder -- python3 linux/release.py finish --package target/linux-release/build/negs-*.pkg.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: negs-linux
+          path: target/linux-release/assets/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: negs-linux-recipes
+          path: target/linux-release/recipes/
+          include-hidden-files: true
+          if-no-files-found: error

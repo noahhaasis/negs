@@ -5,16 +5,31 @@ pkgdesc='Native GTK4 photographic film simulation editor'
 arch=('x86_64')
 url='https://github.com/noahhaasis/negs'
 license=('GPL-3.0-only')
-depends=('gtk4>=4.16' 'libadwaita>=1.6' 'openblas' 'vulkan-icd-loader' 'python' 'hicolor-icon-theme' 'desktop-file-utils')
+depends=('glibc' 'gcc-libs' 'gtk4>=4.16' 'libadwaita>=1.6' 'openblas' 'vulkan-icd-loader' 'python' 'hicolor-icon-theme' 'desktop-file-utils')
 makedepends=('rustup' 'pkgconf')
 optdepends=('vulkan-driver: hardware accelerated preview and Fast export')
-options=('!lto')
+options=('!lto' '!debug')
 source=("negs-$pkgver.tar.gz")
 sha256sums=('SKIP') # package.sh replaces this with the local source SHA-256.
 
+prepare() {
+    cd "$srcdir/negs-$pkgver"
+    rustup toolchain install 1.93.1 --profile minimal
+    cargo +1.93.1 fetch --locked
+    cargo +1.93.1 fetch --locked --manifest-path linux/Cargo.toml
+}
+
 build() {
     cd "$srcdir/negs-$pkgver"
-    bash linux/build.sh
+    NEGS_CARGO_OFFLINE=1 bash linux/build.sh
+}
+
+check() {
+    cd "$srcdir/negs-$pkgver"
+    cargo +1.93.1 test --locked --offline -p spektrafilm-native
+    bash linux/cargo.sh test --locked --offline
+    NEGS_SCHEMA_HELPER="$PWD/target/release/spektrafilm-native" \
+        bash linux/cargo.sh test --locked --offline parameters::tests::live_helper_schema -- --ignored --exact
 }
 
 package() {

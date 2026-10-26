@@ -264,6 +264,10 @@ as documented in the
 
 ### Still pending
 
+This was the UI-only stage's remaining-work list. Subsequent engine integration
+and package validation are recorded in [linux-core-validation.md](linux-core-validation.md).
+Use [linux-release.md](linux-release.md) for the current release work queue.
+
 Engine integration, numerical parity, real exports, border/35mm export parity,
 straighten semantics, developed-preview caching, large watched folders, RAW
 development, color management on wide-gamut/mixed displays, different monitor

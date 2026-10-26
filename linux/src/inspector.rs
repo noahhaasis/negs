@@ -612,7 +612,7 @@ pub fn build(ui: &Rc<Editor>) {
         ui,
         &color,
         "Spectral upsampling",
-        &["Hanatos 2025", "Arctic 2026 (Alpha)", "Mallett 2019"],
+        &["Hanatos 2025", "Arctic 2026 (Beta)", "Mallett 2019"],
     );
     toggle(ui, &color, "Limit preview to 12 MP", true);
     toggle(ui, &color, "Encode output as sRGB", true);
@@ -710,9 +710,6 @@ fn group_controls(ui: &Rc<Editor>, expander: &adw::ExpanderRow, group: &'static 
                 &["Black Pro-Mist", "Glimmerglass", "Pro-Mist", "CineBloom"],
             );
         }
-        "Grain" => {
-            toggle(ui, &content, "Sublayers", true);
-        }
         "Enlarger" => {
             toggle(ui, &content, "Exposure compensation", true);
         }
@@ -724,9 +721,6 @@ fn group_controls(ui: &Rc<Editor>, expander: &adw::ExpanderRow, group: &'static 
     }
     for k in group.knobs {
         let row = knob(ui, group.name, k);
-        if k.0 == "Sublayer count" {
-            sensitive(ui, &row, |s| flag(s, "Sublayers", true));
-        }
         if k.0 == "White level" {
             sensitive(ui, &row, |s| flag(s, "White correction", true));
         }
@@ -1074,7 +1068,10 @@ fn reset_slot(reset: &gtk::Button) -> gtk::Stack {
     let slot = gtk::Stack::new();
     slot.set_valign(gtk::Align::Center);
     slot.add_named(reset, Some("reset"));
-    slot.add_named(&gtk::Box::new(gtk::Orientation::Horizontal, 0), Some("empty"));
+    slot.add_named(
+        &gtk::Box::new(gtk::Orientation::Horizontal, 0),
+        Some("empty"),
+    );
     slot.set_visible_child_name("empty");
     slot
 }
