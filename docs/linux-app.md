@@ -106,6 +106,9 @@ latency, cache limits and validation.
 Interactive renders use a viewport proxy; releasing the slider rebuilds the
 full preview. The last image remains visible while processing. Re-selecting
 the same filmstrip file preserves the texture, edits and history.
+Filmstrip thumbnails and camera previews use the primary RAW orientation for
+TIFF-based containers (including NEF), overriding conflicting embedded JPEG tags.
+Portrait images keep their orientation and aspect ratio in the strip.
 
 Original uses separate pixels and preserves the helper's retained developed
 render. Crop, straighten, rotation, border/keyline/35mm settings and output sizing
