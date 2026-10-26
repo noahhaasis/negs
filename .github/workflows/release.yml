@@ -21,7 +21,7 @@ jobs:
     uses: ./.github/workflows/linux.yml
 
   windows:
-    name: Windows x64 (experimental)
+    name: Windows x64
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -37,11 +37,11 @@ jobs:
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
           if (!(Test-Path -LiteralPath $iscc)) { throw 'Inno Setup 6 compiler is missing from the runner.' }
           ./windows/package.ps1 -Iscc $iscc
-      - name: Verify and name experimental release assets
+      - name: Verify and name release assets
         run: python windows/verify_package.py
       - uses: actions/upload-artifact@v4
         with:
-          name: negs-windows-experimental
+          name: negs-windows
           path: target/windows-release/
           if-no-files-found: error
 
@@ -121,7 +121,7 @@ jobs:
           path: release-assets
       - uses: actions/download-artifact@v4
         with:
-          name: negs-windows-experimental
+          name: negs-windows
           path: release-assets
       - uses: actions/download-artifact@v4
         with:

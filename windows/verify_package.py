@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify committed Windows packages and prepare experimental release assets."""
+"""Verify committed Windows packages and prepare release assets."""
 import hashlib
 import io
 from pathlib import Path
@@ -44,14 +44,14 @@ def main():
             raise ValueError("Installer is missing its executable header")
     output = root / "target/windows-release"
     output.mkdir(parents=True, exist_ok=True)
-    stem = f"Negs-{version}-windows-x64-experimental"
+    stem = f"Negs-{version}-windows-x64"
     checksums = []
     for original, suffix in [("Negs-Setup.exe", "-Setup.exe"), ("Negs-portable.zip", "-portable.zip")]:
         name = stem + suffix
         shutil.copy2(dist / original, output / name)
         checksums.append(f"{sha((output / name).read_bytes())}  {name}\n")
     (output / "SHA256SUMS-windows.txt").write_text("".join(checksums), encoding="utf-8")
-    print(f"Verified Windows {version} experimental packages from {commit}")
+    print(f"Verified Windows {version} packages from {commit}")
 
 
 if __name__ == "__main__":
