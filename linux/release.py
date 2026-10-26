@@ -152,7 +152,7 @@ def finish(out, package, root=ROOT, env=os.environ):
     binary = header + f'''pkgname=negs-bin
 pkgver={meta['version']}
 pkgrel=1
-pkgdesc='Native GTK4 photographic film simulation editor (binary release)'
+pkgdesc='Native GTK4 photographic film simulation editor using spektrafilm (binary release)'
 arch=('x86_64')
 url='https://github.com/{meta['repository']}'
 license=('GPL-3.0-only')
