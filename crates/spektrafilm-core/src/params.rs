@@ -283,10 +283,14 @@ pub struct HalationParams {
     pub boost_range: f32,
     #[serde(default = "default_4")]
     pub protect_ev: f32,
-    #[serde(default = "default_halation_strength_f64")]
-    pub halation_strength: [f64; 3],
-    #[serde(default = "default_halation_sigma_f64")]
-    pub halation_first_sigma_um: [f64; 3],
+    /// Back-reflection baseline per channel, `None` by default: the pipeline
+    /// fills it from the film's `(use, antihalation)` tags (upstream
+    /// `_apply_halation_preset`, see `pipeline::halation_preset`). A value
+    /// set here overrides the preset, as a saved GUI state does upstream.
+    #[serde(default)]
+    pub halation_strength: Option<[f64; 3]>,
+    #[serde(default)]
+    pub halation_first_sigma_um: Option<[f64; 3]>,
     #[serde(default = "default_3i")]
     pub halation_n_bounces: u32,
     #[serde(default = "default_half_f64")]
@@ -310,11 +314,20 @@ fn default_scatter_tail_f64() -> [f64; 3] {
 fn default_scatter_tail_weight_f64() -> [f64; 3] {
     [0.78, 0.65, 0.67]
 }
-fn default_halation_strength_f64() -> [f64; 3] {
-    [0.05, 0.015, 0.0]
-}
-fn default_halation_sigma_f64() -> [f64; 3] {
-    [65.0, 65.0, 65.0]
+/// Upstream's schema values, for a film without a halation preset.
+const SCHEMA_HALATION_STRENGTH: [f64; 3] = [0.05, 0.015, 0.0];
+const SCHEMA_HALATION_FIRST_SIGMA_UM: [f64; 3] = [65.0, 65.0, 65.0];
+
+impl HalationParams {
+    /// The strength in effect: the value set, else the schema's.
+    /// `apply_film_specific_params` fills the film's preset first.
+    pub fn strength(&self) -> [f64; 3] {
+        self.halation_strength.unwrap_or(SCHEMA_HALATION_STRENGTH)
+    }
+
+    pub fn first_sigma_um(&self) -> [f64; 3] {
+        self.halation_first_sigma_um.unwrap_or(SCHEMA_HALATION_FIRST_SIGMA_UM)
+    }
 }
 
 impl Default for HalationParams {
@@ -331,8 +344,8 @@ impl Default for HalationParams {
             boost_ev: 0.0,
             boost_range: 0.3,
             protect_ev: 4.0,
-            halation_strength: [0.05, 0.015, 0.0],
-            halation_first_sigma_um: [65.0, 65.0, 65.0],
+            halation_strength: None,
+            halation_first_sigma_um: None,
             halation_n_bounces: 3,
             halation_bounce_decay: 0.5,
             halation_renormalize: true,
@@ -355,14 +368,18 @@ pub struct DirCouplersParams {
     pub inhibition_samelayer: f64,
     #[serde(default = "default_one_f64")]
     pub inhibition_interlayer: f64,
-    #[serde(default = "default_gamma_same_f64")]
-    pub gamma_samelayer_rgb: [f64; 3],
-    #[serde(default = "default_gamma_r_gb_f64")]
-    pub gamma_interlayer_r_to_gb: [f64; 2],
-    #[serde(default = "default_gamma_g_rb_f64")]
-    pub gamma_interlayer_g_to_rb: [f64; 2],
-    #[serde(default = "default_gamma_b_rg_f64")]
-    pub gamma_interlayer_b_to_rg: [f64; 2],
+    /// The inhibition gammas, `None` by default: the pipeline fills them from
+    /// `data/presets/couplers.toml` (upstream `_apply_couplers_preset`, see
+    /// `couplers_presets.rs`). A value set here overrides the preset, as a
+    /// saved GUI state does upstream.
+    #[serde(default)]
+    pub gamma_samelayer_rgb: Option<[f64; 3]>,
+    #[serde(default)]
+    pub gamma_interlayer_r_to_gb: Option<[f64; 2]>,
+    #[serde(default)]
+    pub gamma_interlayer_g_to_rb: Option<[f64; 2]>,
+    #[serde(default)]
+    pub gamma_interlayer_b_to_rg: Option<[f64; 2]>,
     /// Langmuir knee of the donor saturation (negatives), per channel, as a
     /// fraction of the channel's d_max. Infinity is the linear law; JSON
     /// writes it as `null` and reads `null` back as infinity.
@@ -380,18 +397,32 @@ pub struct DirCouplersParams {
     pub diffusion_tail_weight: f64,
 }
 
-fn default_gamma_same_f64() -> [f64; 3] {
-    [0.341, 0.324, 0.273]
+/// Upstream's schema gammas, for a film no coupler preset covers.
+const SCHEMA_GAMMA_SAMELAYER_RGB: [f64; 3] = [0.341, 0.324, 0.273];
+const SCHEMA_GAMMA_INTERLAYER_R_TO_GB: [f64; 2] = [0.355, 0.305];
+const SCHEMA_GAMMA_INTERLAYER_G_TO_RB: [f64; 2] = [0.154, 0.358];
+const SCHEMA_GAMMA_INTERLAYER_B_TO_RG: [f64; 2] = [0.171, 0.225];
+
+impl DirCouplersParams {
+    /// The gammas in effect: the values set, else the schema's.
+    /// `apply_film_specific_params` fills the film's preset first.
+    pub fn gamma_samelayer(&self) -> [f64; 3] {
+        self.gamma_samelayer_rgb.unwrap_or(SCHEMA_GAMMA_SAMELAYER_RGB)
+    }
+
+    pub fn gamma_r_to_gb(&self) -> [f64; 2] {
+        self.gamma_interlayer_r_to_gb.unwrap_or(SCHEMA_GAMMA_INTERLAYER_R_TO_GB)
+    }
+
+    pub fn gamma_g_to_rb(&self) -> [f64; 2] {
+        self.gamma_interlayer_g_to_rb.unwrap_or(SCHEMA_GAMMA_INTERLAYER_G_TO_RB)
+    }
+
+    pub fn gamma_b_to_rg(&self) -> [f64; 2] {
+        self.gamma_interlayer_b_to_rg.unwrap_or(SCHEMA_GAMMA_INTERLAYER_B_TO_RG)
+    }
 }
-fn default_gamma_r_gb_f64() -> [f64; 2] {
-    [0.355, 0.305]
-}
-fn default_gamma_g_rb_f64() -> [f64; 2] {
-    [0.154, 0.358]
-}
-fn default_gamma_b_rg_f64() -> [f64; 2] {
-    [0.171, 0.225]
-}
+
 fn default_20_f64() -> f64 {
     20.0
 }
@@ -416,10 +447,10 @@ impl Default for DirCouplersParams {
             amount: 1.0,
             inhibition_samelayer: 1.0,
             inhibition_interlayer: 1.0,
-            gamma_samelayer_rgb: [0.341, 0.324, 0.273],
-            gamma_interlayer_r_to_gb: [0.355, 0.305],
-            gamma_interlayer_g_to_rb: [0.154, 0.358],
-            gamma_interlayer_b_to_rg: [0.171, 0.225],
+            gamma_samelayer_rgb: None,
+            gamma_interlayer_r_to_gb: None,
+            gamma_interlayer_g_to_rb: None,
+            gamma_interlayer_b_to_rg: None,
             langmuir_donor_k_rgb: default_langmuir_k(),
             langmuir_receiver_k_rgb: default_langmuir_k(),
             diffusion_size_um: 20.0,
@@ -852,6 +883,43 @@ impl Default for RuntimeParams {
             settings: SettingsParams::default(),
             post: crate::post::PostParams::default(),
         }
+    }
+}
+
+/// Fields that hold `null` but default to a value, so the dotted paths
+/// below don't find them in the default params: a Langmuir knee of `null`
+/// is infinity (the linear law), and `null` lightness compression is off.
+/// `[*]` stands for every element of an array.
+const NULLABLE_WITH_VALUE: [&str; 3] = [
+    "film_render.dir_couplers.langmuir_donor_k_rgb[*]",
+    "film_render.dir_couplers.langmuir_receiver_k_rgb[*]",
+    "io.output_gamut_compress.lightness_compression",
+];
+
+impl RuntimeParams {
+    /// Every path where `null` is a value rather than "missing", as dotted
+    /// paths: the fields that default to `null` (stock presets, development
+    /// times, Image Size) and [`NULLABLE_WITH_VALUE`]. The apps keep a saved
+    /// `null` there when they restore a session over newer defaults.
+    pub fn nullable_paths() -> Vec<String> {
+        fn walk(value: &serde_json::Value, path: &str, out: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Null => out.push(path.to_owned()),
+                serde_json::Value::Object(map) => {
+                    for (key, child) in map {
+                        let path = if path.is_empty() { key.clone() } else { format!("{path}.{key}") };
+                        walk(child, &path, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let defaults = serde_json::to_value(Self::default()).expect("RuntimeParams serializes");
+        let mut paths = Vec::new();
+        walk(&defaults, "", &mut paths);
+        paths.extend(NULLABLE_WITH_VALUE.iter().map(|path| path.to_string()));
+        paths.sort();
+        paths
     }
 }
 

@@ -102,19 +102,19 @@ pub fn apply_film_specific_params(film: &Profile, params: &mut RuntimeParams) {
         // broadcast 3-channel engine numerically identical to the upstream
         // single-channel run.
         let dir = &mut params.film_render.dir_couplers;
-        dir.gamma_samelayer_rgb = [dir.gamma_samelayer_rgb[0]; 3];
-        dir.gamma_interlayer_r_to_gb = [0.0, 0.0];
-        dir.gamma_interlayer_g_to_rb = [0.0, 0.0];
-        dir.gamma_interlayer_b_to_rg = [0.0, 0.0];
+        dir.gamma_samelayer_rgb = Some([dir.gamma_samelayer()[0]; 3]);
+        dir.gamma_interlayer_r_to_gb = Some([0.0, 0.0]);
+        dir.gamma_interlayer_g_to_rb = Some([0.0, 0.0]);
+        dir.gamma_interlayer_b_to_rg = Some([0.0, 0.0]);
         dir.langmuir_donor_k_rgb = [dir.langmuir_donor_k_rgb[0]; 3];
         dir.langmuir_receiver_k_rgb = [dir.langmuir_receiver_k_rgb[0]; 3];
         // Grain broadcasts channel 0 in `crate::grain::grain_settings`.
         let h = &mut params.film_render.halation;
-        h.halation_strength = [h.halation_strength[0]; 3];
+        h.halation_strength = Some([h.strength()[0]; 3]);
         h.scatter_core_um = [h.scatter_core_um[0]; 3];
         h.scatter_tail_um = [h.scatter_tail_um[0]; 3];
         h.scatter_tail_weight = [h.scatter_tail_weight[0]; 3];
-        h.halation_first_sigma_um = [h.halation_first_sigma_um[0]; 3];
+        h.halation_first_sigma_um = Some([h.first_sigma_um()[0]; 3]);
     }
 }
 
@@ -140,15 +140,16 @@ pub fn halation_preset(usage: &str, antihalation: &str) -> Option<([f64; 3], [f6
 }
 
 /// Upstream `_apply_halation_preset`: film profiles take the preset for their
-/// tags, overriding `halation_first_sigma_um` and `halation_strength`.
+/// tags in `halation_first_sigma_um` and `halation_strength`, where those are
+/// unset. A value set in params wins, as a saved GUI state does upstream.
 fn apply_halation_preset(film: &Profile, params: &mut RuntimeParams) {
     if !film.is_film() {
         return;
     }
     if let Some((sigma_um, strength)) = halation_preset(&film.info.usage, &film.info.antihalation) {
         let h = &mut params.film_render.halation;
-        h.halation_first_sigma_um = sigma_um;
-        h.halation_strength = strength;
+        h.halation_first_sigma_um.get_or_insert(sigma_um);
+        h.halation_strength.get_or_insert(strength);
     }
 }
 
@@ -1141,9 +1142,9 @@ impl Pipeline {
                 scatter_tail_px: px(h.scatter_tail_um, h.scatter_spatial_scale),
                 scatter_tail_weight: h.scatter_tail_weight.map(|v| v as f32),
                 halation_amount: h.halation_amount as f32,
-                halation_a_tot: h.halation_strength.map(|v| (v * h.halation_amount) as f32),
+                halation_a_tot: h.strength().map(|v| (v * h.halation_amount) as f32),
                 halation_first_sigma_px: h
-                    .halation_first_sigma_um
+                    .first_sigma_um()
                     .map(|v| v * h.halation_spatial_scale / pix_um),
                 halation_n_bounces: h.halation_n_bounces,
                 halation_bounce_decay: h.halation_bounce_decay as f32,

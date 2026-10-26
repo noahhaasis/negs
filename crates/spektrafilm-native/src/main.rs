@@ -156,6 +156,12 @@ fn catalog(data: &Path) -> Result<Value> {
         // The stock's grain preset, resolved: the apps show it while the
         // edit leaves a value unset (null).
         let grain = spektrafilm_core::grain::grain_settings(&p, &Default::default());
+        // Likewise the DIR gammas and halation baseline the stock's presets
+        // give an edit that leaves them unset.
+        let mut resolved = RuntimeParams::default();
+        spektrafilm_core::pipeline::apply_film_specific_params(&p, &mut resolved);
+        let dir = &resolved.film_render.dir_couplers;
+        let halation = &resolved.film_render.halation;
         profiles.push(json!({
             "id": stock, "name": p.info.name.as_ref().unwrap_or(&stock),
             "paper": p.info.support == "paper" || p.info.stage == "printing",
@@ -165,6 +171,13 @@ fn catalog(data: &Path) -> Result<Value> {
                 "rms_granularity": grain.rms_granularity, "density_min": grain.density_min,
                 "uniformity": grain.uniformity, "particle_scale_sublayers": grain.particle_scale_sublayers,
             },
+            "dir_couplers": {
+                "gamma_samelayer_rgb": dir.gamma_samelayer(), "gamma_interlayer_r_to_gb": dir.gamma_r_to_gb(),
+                "gamma_interlayer_g_to_rb": dir.gamma_g_to_rb(), "gamma_interlayer_b_to_rg": dir.gamma_b_to_rg(),
+            },
+            "halation": {
+                "halation_strength": halation.strength(), "halation_first_sigma_um": halation.first_sigma_um(),
+            },
         }));
     }
     profiles.sort_by_key(|p| p["name"].as_str().unwrap_or_default().to_lowercase());
@@ -173,7 +186,7 @@ fn catalog(data: &Path) -> Result<Value> {
         "No profiles found in {}",
         data.display()
     );
-    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true}, "profiles": profiles, "defaults": RuntimeParams::default()}))
+    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true}, "profiles": profiles, "defaults": RuntimeParams::default(), "nullable_paths": RuntimeParams::nullable_paths()}))
 }
 
 impl Session {
