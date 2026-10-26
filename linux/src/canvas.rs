@@ -82,6 +82,14 @@ mod imp {
             let Some(texture) = self.texture.borrow().clone() else {
                 return;
             };
+            // Clip before applying image transforms, including borders and crop
+            // overlays, so zooming or panning cannot paint over adjacent UI.
+            snapshot.push_clip(&graphene::Rect::new(
+                0.,
+                0.,
+                obj.width() as f32,
+                obj.height() as f32,
+            ));
             let (iw, ih) = obj.image_size();
             let crop = if self.cropping.get() {
                 [0., 0., 1., 1.]
@@ -273,6 +281,7 @@ mod imp {
                 }
             }
             snapshot.restore();
+            snapshot.pop();
         }
     }
 }
@@ -506,6 +515,7 @@ impl Canvas {
         let obj: Self = glib::Object::builder().build();
         obj.set_hexpand(true);
         obj.set_vexpand(true);
+        obj.set_overflow(gtk::Overflow::Hidden);
         obj.set_focusable(true);
         obj.set_cursor_from_name(Some("grab"));
         obj.update_property(&[gtk::accessible::Property::Label("Photograph preview"),

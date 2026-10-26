@@ -135,6 +135,33 @@ pub fn build(ui: &Rc<Editor>) {
         "Photographs in this folder",
     )]);
     ui.strip_scroll.set_child(Some(&view));
+    // A normal mouse wheel scrolls vertically; route it along this horizontal
+    // strip while leaving native horizontal/diagonal touchpad scrolling alone.
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+    scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+    scroll.connect_scroll(glib::clone!(
+        #[weak]
+        ui,
+        #[upgrade_or]
+        glib::Propagation::Proceed,
+        move |event, dx, dy| {
+            if dx != 0. || dy == 0. {
+                return glib::Propagation::Proceed;
+            }
+            let adjustment = ui.strip_scroll.hadjustment();
+            let step = if event.unit() == gdk::ScrollUnit::Surface {
+                1.
+            } else {
+                adjustment.page_size().powf(2. / 3.)
+            };
+            adjustment.set_value((adjustment.value() + dy * step).clamp(
+                adjustment.lower(),
+                (adjustment.upper() - adjustment.page_size()).max(adjustment.lower()),
+            ));
+            glib::Propagation::Stop
+        }
+    ));
+    ui.strip_scroll.add_controller(scroll);
     ui.strip_model.replace(Some(model));
     ui.strip_selection.replace(Some(selection));
     ui.strip_view.replace(Some(view));
