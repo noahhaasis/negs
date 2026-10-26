@@ -3,6 +3,8 @@
 use gtk::gdk;
 use serde::{Deserialize, Serialize};
 
+pub mod asset;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Style {
     #[default]

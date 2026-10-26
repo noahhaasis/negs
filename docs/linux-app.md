@@ -99,6 +99,10 @@ drag are supported.
 The window paints before inspector construction and helper setup. Worker
 threads perform decode, helper requests, cache I/O and exports. Edits coalesce
 behind a single serial render; source/revision guards reject obsolete replies.
+Film and 35mm border textures decode at native resolution on a worker and reuse
+a bounded texture cache. Rapid stock changes coalesce behind one border load.
+See [border performance measurements](linux-border-performance.md) for selection
+latency, cache limits and validation.
 Interactive renders use a viewport proxy; releasing the slider rebuilds the
 full preview. The last image remains visible while processing. Re-selecting
 the same filmstrip file preserves the texture, edits and history.

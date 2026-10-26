@@ -58,7 +58,9 @@ pub fn schedule(ui: &Rc<Editor>) {
                 if let Some(path) = std::env::var_os("NEGS_UI_AUDIT") {
                     control_audit(&ui, path.into());
                 }
-                if std::env::var_os("NEGS_UI_BENCHMARK").is_some() {
+                if std::env::var_os("NEGS_BORDER_BENCHMARK").is_some() {
+                    border_benchmark(&ui);
+                } else if std::env::var_os("NEGS_UI_BENCHMARK").is_some() {
                     benchmark(&ui);
                 }
                 ui.perf.write();
@@ -92,6 +94,36 @@ pub fn schedule(ui: &Rc<Editor>) {
             ),
         );
     }
+}
+
+// Alternate borders without the engine so PNG loading and texture reuse can be
+// measured independently of film simulation. Also exercise disabling/re-enabling.
+fn border_benchmark(ui: &Rc<Editor>) {
+    let initial = ui.history.borrow().state.clone();
+    let ui = Rc::downgrade(ui);
+    glib::MainContext::default().spawn_local(async move {
+        let Some(ui) = ui.upgrade() else { return };
+        let mut samples = Vec::new();
+        for style in [1, 3, 1, 3, 0, 1, 3, 1, 3, 1, 3] {
+            let mut state = initial.clone();
+            state.border.enabled = style != 0;
+            state.border.style = crate::border::Style::from_index(style);
+            let start = glib::monotonic_time();
+            ui.canvas.apply(&state);
+            while !ui.canvas.border_ready() {
+                assert!(glib::monotonic_time() - start < 5_000_000, "Border load timed out");
+                glib::timeout_future(Duration::from_millis(1)).await;
+            }
+            samples.push(serde_json::json!({"style":style,"ready_ms":(glib::monotonic_time()-start) as f64/1000.}));
+            // Allow GPU upload/presentation before changing the border again.
+            glib::timeout_future(Duration::from_millis(100)).await;
+        }
+        ui.canvas.apply(&initial);
+        ui.perf.detail("border_selection_samples", serde_json::json!(samples));
+        ui.perf.detail("border_benchmark_scope", "UI-only border selection to texture ready; includes worker scheduling, excludes compositor presentation");
+        ui.perf.mark("border_benchmark_finished_ms");
+        ui.perf.write();
+    });
 }
 
 fn benchmark(ui: &Rc<Editor>) {
