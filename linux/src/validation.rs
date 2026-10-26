@@ -212,6 +212,99 @@ fn control_audit(ui: &Rc<Editor>, path: std::path::PathBuf) {
     ));
     assert!(!paper.is_visible());
     checks.push("Complete profile menus pair stocks, expose real development times, and apply slide direct-scan visibility");
+    // Film Base, Print Base and Balance Print, as on macOS and Windows.
+    let expander = |title: &str| {
+        widgets(&ui.inspector)
+            .into_iter()
+            .filter_map(|w| w.downcast::<adw::ExpanderRow>().ok())
+            .find(|e| e.title() == title)
+            .unwrap_or_else(|| panic!("missing {title}"))
+    };
+    assert!(expander("Film Base").is_sensitive());
+    assert!(!expander("Print Base").is_sensitive());
+    let balance = widgets(&ui.inspector)
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Button>().ok())
+        .find(|b| b.label().as_deref() == Some("Balance Print"))
+        .unwrap();
+    assert!(
+        !balance.is_sensitive(),
+        "No helper solves Balance Print here"
+    );
+    let adjustment = |key: &str| {
+        ui.adjustments
+            .borrow()
+            .iter()
+            .find(|(k, _)| k == key)
+            .unwrap_or_else(|| panic!("missing {key}"))
+            .1
+            .clone()
+    };
+    let value = |key: &str| ui.history.borrow().state.values.get(key).copied();
+    adjustment("Film Base.Tilt").set_value(-0.3);
+    adjustment("Print Base.Density").set_value(1.5);
+    assert_eq!(value("Film Base.Tilt"), Some(-0.3));
+    activate(ui, "undo");
+    assert_eq!(value("Print Base.Density"), Some(1.));
+    activate(ui, "redo");
+    assert_eq!(value("Print Base.Density"), Some(1.5));
+    checks.push("Film Base and Print Base sliders edit with undo/redo; Print Base and Balance Print follow direct scanning and the helper");
+    // Grain preset lanes show the film's preset and stay unset until edited.
+    let row = |text: &str| {
+        widgets(&ui.inspector)
+            .into_iter()
+            .filter_map(|w| w.downcast::<gtk::Label>().ok())
+            .find(|l| l.text() == text)
+            .and_then(|l| l.ancestor(gtk::ListBoxRow::static_type()))
+            .unwrap_or_else(|| panic!("missing {text}"))
+    };
+    let lanes = || {
+        ui.history
+            .borrow()
+            .state
+            .values
+            .keys()
+            .filter(|k| crate::parameters::grain_lane(k).is_some())
+            .count()
+    };
+    let position = |id: &str| films.iter().position(|s| s.id == id).unwrap() as u32;
+    film.set_selected(position("kodak_vision3_500t"));
+    assert_eq!(adjustment("Grain.Blue granularity").value(), 30.);
+    assert_eq!(adjustment("Grain.Red uniformity").value(), 0.93);
+    assert_eq!(lanes(), 0);
+    adjustment("Grain.Green granularity").set_value(20.);
+    assert_eq!(value("Grain.Green granularity"), Some(20.));
+    activate(ui, "undo");
+    assert_eq!(lanes(), 0);
+    assert_eq!(adjustment("Grain.Green granularity").value(), 13.);
+    activate(ui, "redo");
+    assert_eq!(adjustment("Grain.Green granularity").value(), 20.);
+    adjustment("Grain.Green granularity").set_value(13.);
+    assert_eq!(
+        lanes(),
+        0,
+        "A lane back at the preset leaves the field unset"
+    );
+    adjustment("Grain.Fine grain size").set_value(0.5);
+    film.set_selected(position("kodak_doublex"));
+    assert_eq!(lanes(), 0, "A new film brings its own preset");
+    assert_eq!(adjustment("Grain.Red granularity").value(), 14.);
+    assert_eq!(adjustment("Grain.Fine grain size").value(), 0.25);
+    assert!(row("Granularity").is_visible() && row("Uniformity").is_visible());
+    assert!(!row("Green granularity").is_visible() && !row("Blue uniformity").is_visible());
+    assert!(row("Medium grain size").is_visible());
+    film.set_selected(position("kodak_vision3_500t"));
+    assert!(row("Red granularity").is_visible() && row("Blue uniformity").is_visible());
+    adjustment("Grain.Red granularity").set_value(25.);
+    activate(ui, "reset");
+    assert_eq!(lanes(), 0);
+    assert_eq!(value("Film Base.Tilt"), Some(0.));
+    assert_eq!(value("Print Base.Density"), Some(1.));
+    assert_eq!(adjustment("Grain.Red granularity").value(), 9.);
+    checks.push("Grain preset lanes show and reset to the film's preset, return to unset, clear on a film change, show one emulsion for B&W, and clear on Reset Adjustments");
+    // Collapsed groups have no accessible rows; check_controls.py uses these.
+    expander("Grain").set_expanded(true);
+    expander("Film Base").set_expanded(true);
     combo(ui, "Develop at").set_selected(1);
     let entry = widgets(&ui.inspector)
         .into_iter()
