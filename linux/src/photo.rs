@@ -53,7 +53,7 @@ pub fn decode(path: &Path, max: i32) -> Result<Photo, String> {
                 }
             }
         }
-        found.ok_or("No supported embedded JPEG preview. RAW development will arrive with the engine connection.")?
+        found.ok_or("No supported embedded JPEG preview.")?
     } else {
         gdk_pixbuf::Pixbuf::from_file_at_scale(path, max, max, true).map_err(|e| e.to_string())?
     };

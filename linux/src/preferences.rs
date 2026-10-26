@@ -113,7 +113,7 @@ impl Editor {
         group.add(&appearance);
         let recent = adw::ActionRow::builder()
             .title("Recent photographs")
-            .subtitle("Paths are stored locally in the UI session")
+            .subtitle("Paths are stored locally in your session")
             .build();
         let clear = gtk::Button::with_label("Clear");
         clear.set_valign(gtk::Align::Center);
@@ -121,10 +121,15 @@ impl Editor {
         recent.add_suffix(&clear);
         group.add(&recent);
         b.append(&group);
-        let updates = adw::PreferencesGroup::builder().title("Updates").description("This preview uses distribution or local package updates. Updates are not configured for this build.").build();
+        let updates = adw::PreferencesGroup::builder()
+            .title("Updates")
+            .description(
+                "Updates arrive through your distribution package manager or a local installation.",
+            )
+            .build();
         b.append(&updates);
         let location = gtk::Label::new(Some(&format!(
-            "UI session: {}",
+            "Session: {}",
             Self::session_path().display()
         )));
         location.set_wrap(true);
