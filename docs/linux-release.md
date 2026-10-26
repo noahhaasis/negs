@@ -20,10 +20,15 @@ See [the post-merge validation report](linux-post-main-validation.md).
    added. The release recipe's `parameters::tests::live_helper_schema` now
    also checks every film's grain preset against the lane sliders.
 2. Run fresh numerical gates and installed-app preview/export checks against
-   this engine revision. The earlier 484-render baseline is historical; the
-   main merge intentionally changes output. Establish a new Linux baseline and
-   compare with Mac/Windows references from the same revision. Repeat desktop
-   RAW, crop/Post, border, cancellation, session and startup checks.
+   this engine revision. Numerical part done on `linux-experimental-parity`
+   (`a22437e`): the experimental sweep passes 556/556 against Python
+   `28bf883`, grain statistics match, GPU vs f64 passes 76/76, two runs are
+   484/484 identical, and against the Mac's dd870f0 dumps only the 5 known
+   f32 CPU grain cases fail (see `scripts/golden/README.md` and
+   `scripts/parity/README.md`). The source-tree Wayland checks
+   (`check_controls.py`, `check_ui.py`, `check_borders.py`, `check_engine.py`)
+   pass. Still to repeat on an installed package: RAW, crop/Post, border,
+   cancellation, session and startup checks.
 3. Run the Linux workflow on GitHub and confirm the clean Arch build and
    installed-engine smoke test pass. Local recipe tests do not prove a clean
    container build. Review runtime dependencies on the target Omarchy channel.
