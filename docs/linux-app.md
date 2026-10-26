@@ -98,6 +98,24 @@ collapses with a libadwaita breakpoint at narrow widths. Keyboard commands,
 numeric fields, accessible labels, per-control reset, and one undo step per
 drag are supported.
 
+## Presets
+
+The Presets toggle beside Adjustments (F8) shows the sidebar's Presets page; the
+two are exclusive, and the open page is remembered. Presets are Python
+spektrafilm GUI-state files in `$XDG_DATA_HOME/negs/presets/`
+(`$NEGS_PROFILE_DIR/presets/` when set), ordered by `.order.json` as on macOS.
+Clicking a preset applies its film, paper and Lab settings as one undo step;
+Image Size, crop, rotation, border, output encoding, the preview limit and Post
+stay. New Preset (Ctrl+Shift+S) saves the current settings and starts naming
+them; Import Presets… (Ctrl+Shift+O) and dropped files copy files the engine
+reads; each row's context menu applies, renames, exports or deletes. Writes
+never replace a file, and renames and deletes act only on the file as listed.
+See [the presets design](presets-design.md).
+
+`linux/check_presets.py` exercises the page on the desktop with the real engine
+and its own profile. Local test presets in `~/Work/negs-presets-test` (or
+`NEGS_PRESETS_TEST_DIR`) are copied into that profile only.
+
 ## Rendering, exports and persistence
 
 The window paints before inspector construction and helper setup. Worker

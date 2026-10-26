@@ -18,6 +18,8 @@ mod parameters;
 mod perf;
 mod photo;
 mod preferences;
+mod preset_ui;
+mod presets;
 mod preview_cache;
 mod runtime;
 mod validation;
@@ -41,7 +43,10 @@ pub(crate) struct Editor {
     window: adw::ApplicationWindow,
     canvas: canvas::Canvas,
     split: adw::OverlaySplitView,
+    /// The sidebar's Adjustments and Presets pages.
+    sidebar_pages: gtk::Stack,
     inspector: gtk::Box,
+    presets: preset_ui::Panel,
     history: RefCell<model::History>,
     syncing: Cell<bool>,
     adjustments: RefCell<Vec<(String, gtk::Adjustment)>>,
@@ -146,6 +151,10 @@ impl Editor {
         menu.append(Some("Save Preview…"), Some("win.save-preview"));
         menu.append(Some("Export Photograph…"), Some("win.export"));
         menu.append(Some("Export LUT…"), Some("win.lut"));
+        let presets_menu = gio::Menu::new();
+        presets_menu.append(Some("New Preset"), Some("win.new-preset"));
+        presets_menu.append(Some("Import Presets…"), Some("win.import-presets"));
+        menu.append_section(None, &presets_menu);
         let edit = gio::Menu::new();
         edit.append(Some("Undo"), Some("win.undo"));
         edit.append(Some("Redo"), Some("win.redo"));
@@ -161,6 +170,7 @@ impl Editor {
             ("Rotate Counterclockwise", "rotate-left"),
             ("Toggle Film Strip", "strip"),
             ("Toggle Adjustments", "inspector"),
+            ("Toggle Presets", "presets"),
             ("Previous Photograph", "previous"),
             ("Next Photograph", "next"),
         ] {
@@ -177,11 +187,30 @@ impl Editor {
             .tooltip_text("Menu")
             .build();
         header.pack_end(&menub);
-        header.pack_end(&icon(
-            "sidebar-show-right-symbolic",
-            "Show Adjustments (F7)",
-            "win.inspector",
-        ));
+        // Exclusive, like the macOS toolbar's Adjustments and Presets buttons.
+        let panes = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        panes.add_css_class("linked");
+        for (name, tooltip, action) in [
+            (
+                "view-list-bullet-symbolic",
+                "Show Presets (F8)",
+                "win.presets",
+            ),
+            (
+                "sidebar-show-right-symbolic",
+                "Show Adjustments (F7)",
+                "win.inspector",
+            ),
+        ] {
+            let toggle = gtk::ToggleButton::builder()
+                .icon_name(name)
+                .tooltip_text(tooltip)
+                .action_name(action)
+                .build();
+            toggle.update_property(&[gtk::accessible::Property::Label(tooltip)]);
+            panes.append(&toggle);
+        }
+        header.pack_end(&panes);
         let export = gtk::Button::with_label("Export…");
         export.add_css_class("suggested-action");
         export.set_action_name(Some("win.export"));
@@ -207,8 +236,12 @@ impl Editor {
         ));
         resize.update_property(&[gtk::accessible::Property::Label("Resize Adjustments")]);
         sidebar.append(&resize);
-        sidebar.append(&inspector);
-        inspector.set_hexpand(true);
+        let sidebar_pages = gtk::Stack::new();
+        sidebar_pages.set_hexpand(true);
+        sidebar_pages.add_named(&inspector, Some("adjustments"));
+        let presets = preset_ui::Panel::new();
+        sidebar_pages.add_named(&presets.page, Some("presets"));
+        sidebar.append(&sidebar_pages);
         split.set_sidebar(Some(&sidebar));
         let main = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let tools = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -346,7 +379,9 @@ impl Editor {
             window,
             canvas,
             split,
+            sidebar_pages,
             inspector,
+            presets,
             history: RefCell::new(history),
             syncing: Cell::new(false),
             adjustments: RefCell::new(vec![]),
@@ -460,6 +495,7 @@ impl Editor {
         ));
         crop_ui::build(&ui);
         filmstrip::build(&ui);
+        preset_ui::build(&ui);
         let resize_origin = Rc::new(Cell::new(340.));
         let drag = gtk::GestureDrag::new();
         drag.connect_drag_begin(glib::clone!(
@@ -467,7 +503,7 @@ impl Editor {
             ui,
             #[strong]
             resize_origin,
-            move |_, _, _| resize_origin.set(ui.inspector.width() as f64)
+            move |_, _, _| resize_origin.set(ui.sidebar_pages.width() as f64)
         ));
         drag.connect_drag_update(glib::clone!(
             #[weak]
@@ -487,7 +523,7 @@ impl Editor {
                     gdk::Key::Right => -16.,
                     _ => return glib::Propagation::Proceed,
                 };
-                ui.resize_inspector(ui.inspector.width() as f64 + delta);
+                ui.resize_inspector(ui.sidebar_pages.width() as f64 + delta);
                 glib::Propagation::Stop
             }
         ));
@@ -663,6 +699,20 @@ impl Editor {
         }
         self.strip_scroll.set_sensitive(!cropping);
         self.inspector.set_sensitive(!cropping);
+        self.presets.page.set_sensitive(!cropping);
+        let presets_ready = {
+            let r = self.runtime.borrow();
+            r.ready && r.client.is_some() && !cropping
+        };
+        for key in ["new-preset", "import-presets"] {
+            if let Some(action) = self
+                .window
+                .lookup_action(key)
+                .and_downcast::<gio::SimpleAction>()
+            {
+                action.set_enabled(presets_ready);
+            }
+        }
         self.undo.set_enabled(!cropping && h.can_undo());
         self.redo.set_enabled(!cropping && h.can_redo());
         let syncing = self.syncing.replace(true);
@@ -678,6 +728,11 @@ impl Editor {
         let h = self.history.borrow();
         for (key, a) in self.adjustments.borrow().iter() {
             if let Some(v) = h.state.values.get(key) {
+                // A preset can go past a slider's range: show its value.
+                if let Some((low, high)) = fixtures::range(key) {
+                    a.set_lower(low.min(*v));
+                    a.set_upper(high.max(*v));
+                }
                 a.set_value(*v);
             }
         }
@@ -857,6 +912,10 @@ fn main() -> glib::ExitCode {
             && let Some(session) = session.as_ref()
         {
             ui.restore_preferences(session);
+        }
+        ui.sync_panes();
+        if ui.split.shows_sidebar() && ui.pane() == "presets" {
+            ui.refresh_presets();
         }
         ui.window.present();
         ui.start_engine();

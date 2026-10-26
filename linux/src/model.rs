@@ -39,13 +39,14 @@ impl State {
         for (key, value) in defaults.values {
             self.values.entry(key).or_insert(value);
         }
+        // Lab values outside a slider's range stay: a preset can set them,
+        // and the engine checks its own domains.
         for group in crate::fixtures::GROUPS {
             for knob in group.knobs {
-                if let Some(value) = self.values.get_mut(&format!("{}.{}", group.name, knob.0)) {
-                    *value = value.clamp(knob.1, knob.2);
-                    if knob.3 >= 1. {
-                        *value = value.round();
-                    }
+                if let Some(value) = self.values.get_mut(&format!("{}.{}", group.name, knob.0))
+                    && knob.3 >= 1.
+                {
+                    *value = value.round();
                 }
             }
         }

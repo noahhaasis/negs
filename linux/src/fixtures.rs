@@ -127,6 +127,13 @@ pub const POST: &[Knob] = &[
     Knob("Saturation", -100., 100., 1., 0., ""),
 ];
 
+/// A Lab control's slider range, by its "Group.Name" key.
+pub fn range(key: &str) -> Option<(f64, f64)> {
+    let (group, name) = key.split_once('.')?;
+    let group = GROUPS.iter().find(|g| g.name == group)?;
+    group.knobs.iter().find(|k| k.0 == name).map(|k| (k.1, k.2))
+}
+
 pub fn state() -> crate::model::State {
     let mut state = crate::model::State::default();
     for group in GROUPS {

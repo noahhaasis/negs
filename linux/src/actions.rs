@@ -135,9 +135,23 @@ impl Editor {
             ui.sync_state();
             ui.canvas.fit();
         });
-        self.action("inspector", |ui| {
-            ui.split.set_show_sidebar(!ui.split.shows_sidebar())
-        });
+        for (name, pane) in [("inspector", "adjustments"), ("presets", "presets")] {
+            let action = gio::SimpleAction::new_stateful(name, None, &false.to_variant());
+            action.connect_activate(glib::clone!(
+                #[weak(rename_to=ui)]
+                self,
+                move |_, _| ui.toggle_pane(pane)
+            ));
+            self.window.add_action(&action);
+        }
+        self.split.connect_show_sidebar_notify(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |_| ui.sync_panes()
+        ));
+        self.action("new-preset", |ui| ui.new_preset());
+        self.action("import-presets", |ui| ui.import_presets_dialog());
+        self.action("show-presets-folder", |ui| ui.show_presets_folder());
         self.action("strip", |ui| {
             ui.strip_scroll.set_visible(!ui.strip_scroll.is_visible());
             ui.preferences.borrow_mut().strip = ui.strip_scroll.is_visible();
@@ -245,6 +259,9 @@ impl Editor {
             ("win.actual", vec!["<Control>1"]),
             ("win.rotate", vec!["<Control>r"]),
             ("win.inspector", vec!["F7"]),
+            ("win.presets", vec!["F8"]),
+            ("win.new-preset", vec!["<Control><Shift>s"]),
+            ("win.import-presets", vec!["<Control><Shift>o"]),
             ("win.strip", vec!["F6"]),
             ("win.export", vec!["<Control><Shift>e"]),
             ("win.zoom-in", vec!["<Control>plus", "<Control>equal"]),
@@ -672,7 +689,7 @@ impl Editor {
         }
     }
     fn shortcuts(&self) {
-        let dialog=adw::AlertDialog::builder().heading("Keyboard Shortcuts").body("Ctrl+O  Open photograph\nCtrl+S  Save Preview options\nCtrl+Shift+E  Export options\nCtrl+Z / Ctrl+Shift+Z  Undo / Redo\nCtrl+0 / Ctrl+1  Fit / Actual Size\nCtrl++ / Ctrl+−  Zoom\nCtrl+R / Ctrl+Alt+R  Rotate clockwise / counterclockwise\nCtrl+Shift+R  Reset Adjustments\nC  Crop (canvas focused)\nEnter / Escape  Apply / Cancel crop\nArrow keys  Move crop / Previous and next photo\nAlt+Left / Alt+Right  Previous / Next photograph\nF6 / F7  Film Strip / Adjustments\nCtrl+,  Settings\nCtrl+Q  Quit").build();
+        let dialog=adw::AlertDialog::builder().heading("Keyboard Shortcuts").body("Ctrl+O  Open photograph\nCtrl+S  Save Preview options\nCtrl+Shift+E  Export options\nCtrl+Z / Ctrl+Shift+Z  Undo / Redo\nCtrl+0 / Ctrl+1  Fit / Actual Size\nCtrl++ / Ctrl+−  Zoom\nCtrl+R / Ctrl+Alt+R  Rotate clockwise / counterclockwise\nCtrl+Shift+R  Reset Adjustments\nCtrl+Shift+S  New Preset\nCtrl+Shift+O  Import Presets\nC  Crop (canvas focused)\nEnter / Escape  Apply / Cancel crop\nArrow keys  Move crop / Previous and next photo\nAlt+Left / Alt+Right  Previous / Next photograph\nF6 / F7 / F8  Film Strip / Adjustments / Presets\nCtrl+,  Settings\nCtrl+Q  Quit").build();
         dialog.add_response("close", "Close");
         dialog.present(Some(&self.window));
     }

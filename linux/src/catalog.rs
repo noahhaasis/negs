@@ -122,6 +122,35 @@ pub fn selected(state: &crate::model::State, paper: bool) -> &'static Stock {
         .copied()
         .unwrap_or(stocks[0])
 }
+/// Choosing a film or paper in the inspector: the stock's own development
+/// time, and for a film its grain, DIR and halation presets (as upstream
+/// re-applies them on a stock change), its scan mode and target paper.
+pub fn choose(state: &mut crate::model::State, stock: &Stock) {
+    let paper = stock.paper;
+    state.choices.insert(
+        if paper { "Paper ID" } else { "Film ID" }.into(),
+        stock.id.clone(),
+    );
+    state.choices.remove(if paper {
+        "Print development"
+    } else {
+        "Development"
+    });
+    if !paper {
+        for path in crate::parameters::STOCK_PRESET_PATHS {
+            crate::parameters::set(&mut state.params, path, serde_json::Value::Null);
+        }
+        state
+            .choices
+            .insert("Scan film directly".into(), stock.positive.to_string());
+        if !stock.target.is_empty() {
+            state
+                .choices
+                .insert("Paper ID".into(), stock.target.clone());
+            state.choices.remove("Print development");
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

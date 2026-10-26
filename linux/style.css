@@ -24,3 +24,5 @@
 .inspector-resize { min-width: 0; min-height: 0; padding: 0; border-radius: 0; border-left: 1px solid alpha(currentColor, 0.08); }
 .inspector-resize:hover, .inspector-resize:focus-visible { background: alpha(@accent_color, 0.35); }
 .adjustment .modified { font-weight: 600; }
+.preset-row { padding: 4px 2px; }
+list.presets { background: transparent; padding: 0 8px 12px; }

@@ -102,6 +102,10 @@ impl Editor {
                     ui.perf.mark("engine_catalog_ready_ms");
                     ui.maybe_build_inspector();
                     ui.sync_state();
+                    // Presets listed before the engine started get their verdicts.
+                    if ui.pane() == "presets" {
+                        ui.refresh_presets();
+                    }
                 }
                 Ok(Err(error)) => ui.engine_error(&error),
                 Err(_) => ui.engine_error(

@@ -857,30 +857,7 @@ fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
             };
             let mut h = ui.history.borrow_mut();
             h.begin(if paper { "Change Paper" } else { "Change Film" });
-            h.state.choices.insert(
-                if paper { "Paper ID" } else { "Film ID" }.into(),
-                stock.id.clone(),
-            );
-            h.state.choices.remove(if paper {
-                "Print development"
-            } else {
-                "Development"
-            });
-            if !paper {
-                // A new film brings its own grain, DIR and halation presets, as upstream applies them.
-                for path in crate::parameters::STOCK_PRESET_PATHS {
-                    crate::parameters::set(&mut h.state.params, path, serde_json::Value::Null);
-                }
-                h.state
-                    .choices
-                    .insert("Scan film directly".into(), stock.positive.to_string());
-                if !stock.target.is_empty() {
-                    h.state
-                        .choices
-                        .insert("Paper ID".into(), stock.target.clone());
-                    h.state.choices.remove("Print development");
-                }
-            }
+            crate::catalog::choose(&mut h.state, stock);
             h.commit();
             drop(h);
             ui.sync_state();
