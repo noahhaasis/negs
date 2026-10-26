@@ -503,6 +503,15 @@ around 2. Not compared: Negs-only stocks and settings (`settings.use_cat16`,
 RAW white balance, Image Size, Post), glare, and grain, which
 `grain_compare.py` covers.
 
+Windows on 2026-10-26 (dd870f0, GTX 1660 SUPER on Vulkan, Python on the
+same box): 556/556 within one 8-bit step (ΔE00 ≤ 1.23, at most 0.04% of
+pixels touched). f64 is as on the Mac (≤ 1.4e-6 outside the diffusion
+filter, 8.2e-6 with it), and the largest response gap is 0.0002 ΔE00. Pass
+the `.exe` paths (`--native-binary target\release\spektrafilm-native.exe`,
+`--f64-binary target\release\spektrafilm-f64.exe`) and `--workers 4` on a
+16 GB machine. Ten workers ran out of memory there, and `np.save` failed with
+"requested and 0 written".
+
 ## Grain statistics: `grain_compare.py`
 
 Flat grey tiles at four exposures, auto exposure and glare off, the stock's
@@ -526,6 +535,11 @@ had 3–4× the RMS on Portra, Gold and Provia, about 20% less on 500T, and
 finer grain (0.70 px). At a 1512 px window, Python's 640 px preview shows
 4.4× less grain than a 6048 px Negs render. That is the preview size, not the
 engine: Python's full-size scan matches Negs.
+
+Windows on 2026-10-26 (dd870f0, GTX 1660 SUPER, `--binary
+target\release\spektrafilm.exe`): the same result. RMS is within 0.01 of
+Python for all four stocks at every size, and grain size is 0.86–0.87 px for
+all three engines.
 
 ## Original methodology and surviving probes
 

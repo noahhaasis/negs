@@ -104,6 +104,41 @@ NaN/Inf and size differences always fail. ΔE00 is computed like
 significant digits). Statuses other than PASS/IDENTICAL are printed with their
 counts so a relaxed gate is never silent.
 
+## Results on 2026-10-26: Windows after ticket 16 (dd870f0)
+
+Windows 10, Ryzen 5 3600, GTX 1660 SUPER on Vulkan (driver 610.47), MSVC
+build of dd870f0 (clean tree), reference inputs. `windows-gtx1660s-vulkan.json`
+and `windows-ui.json` are two independent runs. The second followed a release
+build of the Windows app (56/56 tests pass) and the helper (7/7).
+
+**Same machine:** the two runs are 484/484 identical under `compare --exact`
+(`reports/windows-ui-exact.json`).
+
+**GPU vs f64 (`quality`): 76/76 pass.** ΔE00 max 0.0016 (`synth_noise`
+Vision3 → 2383), p99 ≤ 0.0003, p99.9 ≤ 0.0005, at most 2 16-bit codes and 1
+8-bit step, close to the M1 Pro (ΔE00 max 0.0012).
+
+**Windows vs the Mac (tolerance mode, `reports/windows-vs-macos.json`):**
+
+| Engine | Result | Worst |
+|---|---|---|
+| f64 | 180 PASS, 2 PASS-BORDER, 2 PASS-GRAIN | ×0.16 of the gate (35mm border); `det` ΔE00 ≤ 3e-12, no 16-bit code changed |
+| f32 CPU | 26 PASS, 8 PASS-GRAIN, **82 FAIL-GRAIN** | `det` ΔE00 1.3e-4, 1 8-bit step; grain cases as before the port |
+| GPU | 184 PASS | `det` ΔE00 0.0017, 1 8-bit step; grain cases under `gpu_grain` |
+
+- The 82 FAIL-GRAIN f32 CPU cases are the shared-MT19937 stream divergence
+  already known before the port (also 82 then). It is still deferred.
+- `dir_wide` (f64) passes against Windows (×0.16), unlike arm64 vs x86_64.
+- The Mac side is a fresh M1 Pro run of dd870f0, now `macos-arm64.json`. Its
+  484 raw hashes equal the 13e672e run's. Every TIFF hash changed, because
+  saves embed an ICC profile since 06410bd. The other macOS manifests still
+  carry the 13e672e TIFF hashes, so `compare --exact` against them reports
+  TIFF differences only.
+- `windows-gtx1660s-backend-report.json`, `-capacity-guard.json` and
+  `-vulkan-pipeline-cache.json` stay at their pre-port checkpoints
+  (f27722c, 214ed09). They record the features they validated, not the
+  current output.
+
 ## Results on 2026-10-26 (M1 Pro, after ticket 16, 13e672e)
 
 Every macOS manifest was regenerated from 13e672e (clean tree) with the
@@ -234,24 +269,13 @@ release. See `docs/windows-agent-handoff.md`.
 
 ## Watch next
 
-- **The Windows manifests are stale since ticket 16 (2026-10-26).**
-  The engine now follows upstream experimental 28bf883: its profiles and
-  model-derived curves, white balance and neutral print filters, DIR presets
-  with Langmuir saturation, halation presets, gamut defaults, film-raw
-  auto-exposure, multilayer grain, tetrahedral LUTs and reflected blur
-  borders, so every case's hashes changed. The macOS manifests were
-  regenerated from 13e672e (see "Results on 2026-10-26"). The Windows set
-  still predates the port: `windows-gtx1660s-vulkan.json`,
-  `windows-gtx1660s-backend-report.json`,
-  `windows-gtx1660s-capacity-guard.json`,
-  `windows-gtx1660s-vulkan-pipeline-cache.json` and `windows-ui.json`.
-  Regenerate them on the Windows box from 13e672e, re-run `quality` and the
-  `compare` against the new `macos-arm64.json`, and commit the manifests
-  (not the dumps). The presets in `scripts/gpu_cpu_quality/params` use the
-  new grain fields.
+- **Windows after the port: done** at dd870f0 (see "Results on 2026-10-26:
+  Windows"). The macOS manifests other than `macos-arm64.json` keep TIFF
+  hashes from before 06410bd (ICC profiles in saves). Regenerate them at the
+  next engine change.
 - **f32 CPU grain now diverges between arm64 and x86_64 on the Mac too**:
-  4 FAIL-GRAIN cases under Rosetta (see "Results on 2026-10-26"). The
-  Windows count will likely differ from the 82 before the port.
+  4 FAIL-GRAIN cases under Rosetta (see "Results on 2026-10-26"). Windows
+  vs the Mac stays at 82, as before the port.
 - **GPU vs f64 after the port (M1 Pro, `quality`): 76/76 pass**, confirmed on
   the regenerated `macos-arm64.json`. ΔE00 max
   0.0012 (`synth_noise` Velvia scan), p99 ≤ 0.0003, at most 2 16-bit codes
