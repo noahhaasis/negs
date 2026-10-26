@@ -867,6 +867,10 @@ fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
                 "Development"
             });
             if !paper {
+                // A new film brings its own grain, DIR and halation presets, as upstream applies them.
+                for path in crate::parameters::STOCK_PRESET_PATHS {
+                    crate::parameters::set(&mut h.state.params, path, serde_json::Value::Null);
+                }
                 h.state
                     .choices
                     .insert("Scan film directly".into(), stock.positive.to_string());
