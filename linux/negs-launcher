@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+negs_prefix=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
+export NEGS_DATA_DIR="$negs_prefix/share/negs/data"
+if [ -f "$negs_prefix/lib/negs/libopenblas.so.0" ]; then
+    export LD_LIBRARY_PATH="$negs_prefix/lib/negs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+# Omarchy deliberately fades application windows. Apply the packaged exception
+# per user; package installation as root never writes a user's configuration.
+negs_config=${XDG_CONFIG_HOME:-"$HOME/.config"}/hypr
+if [ -f "$negs_config/hyprland.lua" ] && {
+    ! cmp -s "$negs_prefix/share/negs/omarchy/negs-window-rules.lua" "$negs_config/negs-window-rules.lua" ||
+    ! grep -Fqx 'require("hypr.negs-window-rules")' "$negs_config/hyprland.lua"
+}; then
+    python3 "$negs_prefix/share/negs/install_omarchy_rules.py"
+    if command -v hyprctl >/dev/null && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+        hyprctl reload >/dev/null
+        negs_errors=$(hyprctl configerrors)
+        if [ -n "$negs_errors" ]; then
+            printf '%s\n' "$negs_errors" >&2
+            exit 1
+        fi
+    fi
+fi
+exec "$negs_prefix/lib/negs/negs" "$@"

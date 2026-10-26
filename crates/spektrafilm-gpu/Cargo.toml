@@ -36,5 +36,10 @@ cblas = "0.4"
 blas-src = { version = "0.10", features = ["openblas"] }
 openblas-src = "0.10"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Use the distro's portable, maintained BLAS instead of building a native-CPU
+# shared library under target/ that installed executables cannot locate.
+openblas-src = { version = "0.10", features = ["system"] }
+
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
