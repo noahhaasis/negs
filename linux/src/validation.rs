@@ -241,6 +241,65 @@ fn control_audit(ui: &Rc<Editor>, path: std::path::PathBuf) {
     assert!(ui.canvas.cropping());
     assert!(!ui.window.lookup_action("export").unwrap().is_enabled());
     assert!(!ui.window.lookup_action("fit").unwrap().is_enabled());
+    let crop_widgets = widgets(&ui.crop_bar);
+    let aspect = crop_widgets
+        .iter()
+        .find_map(|w| w.clone().downcast::<gtk::DropDown>().ok())
+        .unwrap();
+    let portrait = crop_widgets
+        .iter()
+        .find_map(|w| w.clone().downcast::<gtk::ToggleButton>().ok())
+        .unwrap();
+    let crop_reset = crop_widgets
+        .iter()
+        .filter_map(|w| w.clone().downcast::<gtk::Button>().ok())
+        .find(|b| b.label().as_deref() == Some("Reset"))
+        .unwrap();
+    let source = ui.canvas.source_size();
+    let original = source.0.max(source.1) as f64 / source.0.min(source.1) as f64;
+    assert!(
+        original > 1.,
+        "Use a non-square source to audit crop orientation"
+    );
+    aspect.set_selected(0);
+    for _ in 0..4 {
+        for tall in [true, false] {
+            portrait.set_active(tall);
+            let r = ui.canvas.crop_draft();
+            let ratio = r[2] * source.0 as f64 / (r[3] * source.1 as f64);
+            let shown = if ui.history.borrow().state.rotation % 2 == 1 {
+                1. / ratio
+            } else {
+                ratio
+            };
+            let expected = if tall { 1. / original } else { original };
+            assert!(
+                (shown - expected).abs() < 1e-8,
+                "Original crop must respect the Portrait toggle after rotation"
+            );
+        }
+        activate(ui, "rotate");
+    }
+    crop_reset.emit_clicked();
+    assert_eq!(ui.canvas.crop_draft(), [0., 0., 1., 1.]);
+    let expected_portrait = if ui.history.borrow().state.rotation % 2 == 1 {
+        source.0 > source.1
+    } else {
+        source.1 > source.0
+    };
+    assert_eq!(portrait.is_active(), expected_portrait);
+    portrait.set_active(!expected_portrait);
+    let oriented = ui.canvas.crop_draft();
+    activate(ui, "crop-done");
+    activate(ui, "crop");
+    assert_eq!(aspect.selected(), 0);
+    assert_eq!(portrait.is_active(), !expected_portrait);
+    assert_eq!(ui.canvas.crop_draft(), oriented);
+    activate(ui, "crop-cancel");
+    activate(ui, "undo");
+    assert_eq!(ui.history.borrow().state, retained);
+    checks.push("Original crop orientation toggles at every quarter turn, resets to the source orientation, and survives reopening");
+    activate(ui, "crop");
     ui.canvas.set_angle(17.5);
     ui.canvas.crop_ratio(1.);
     activate(ui, "rotate");
