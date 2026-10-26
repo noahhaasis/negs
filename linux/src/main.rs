@@ -234,12 +234,9 @@ impl Editor {
         ));
         tools.append(&icon("zoom-in-symbolic", "Zoom In (Ctrl++)", "win.zoom-in"));
         tools.append(&gap());
-        let badge = gtk::Label::new(Some(if runtime::ui_only() {
-            "UI preview"
-        } else {
-            "Starting engine…"
-        }));
+        let badge = gtk::Label::new(None);
         badge.add_css_class("preview-badge");
+        badge.set_visible(false);
         tools.append(&badge);
         tools.append(&gap());
         tools.append(&icon(
@@ -400,9 +397,6 @@ impl Editor {
             preferences: RefCell::new(preferences::Preferences::default()),
         });
         ui.owner.replace(Rc::downgrade(&ui));
-        if !runtime::ui_only() {
-            ui.badge.set_visible(false);
-        }
         let hold_original = gtk::GestureClick::new();
         hold_original.set_propagation_phase(gtk::PropagationPhase::Capture);
         hold_original.connect_pressed(glib::clone!(
