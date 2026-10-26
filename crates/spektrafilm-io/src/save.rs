@@ -28,14 +28,47 @@ use crate::metadata::ImageMetadata;
 /// `image`'s default of 75 would defeat the point.
 const JPEG_QUALITY: u8 = 95;
 
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct SaveOptions {
+    pub jpeg_quality: u8,
+    pub copy_metadata: bool,
+}
+impl Default for SaveOptions {
+    fn default() -> Self {
+        Self {
+            jpeg_quality: JPEG_QUALITY,
+            copy_metadata: true,
+        }
+    }
+}
+
 /// Save `img` as TIFF, PNG or JPEG, chosen by the extension of `path`,
 /// embedding `metadata` as EXIF if given.
 pub fn save_image(img: &ImageBuf, path: &Path, metadata: Option<&ImageMetadata>) -> Result<()> {
+    save_image_with_options(img, path, metadata, SaveOptions::default())
+}
+
+pub fn save_image_with_options(
+    img: &ImageBuf,
+    path: &Path,
+    metadata: Option<&ImageMetadata>,
+    options: SaveOptions,
+) -> Result<()> {
+    anyhow::ensure!(
+        (1..=100).contains(&options.jpeg_quality),
+        "JPEG quality must be between 1 and 100"
+    );
+    let metadata = if options.copy_metadata {
+        metadata
+    } else {
+        None
+    };
     let ext = extension(path);
     match ext.as_str() {
         "tif" | "tiff" => save_tiff(img, path, metadata),
         "png" => save_png(img, path, metadata),
-        "jpg" | "jpeg" => save_jpeg(img, path, metadata),
+        "jpg" | "jpeg" => save_jpeg(img, path, metadata, options.jpeg_quality),
         _ => bail!("unsupported output format: .{ext} (supported: tiff, png, jpg)"),
     }
 }
@@ -82,10 +115,15 @@ fn save_png(img: &ImageBuf, path: &Path, metadata: Option<&ImageMetadata>) -> Re
     Ok(())
 }
 
-fn save_jpeg(img: &ImageBuf, path: &Path, metadata: Option<&ImageMetadata>) -> Result<()> {
+fn save_jpeg(
+    img: &ImageBuf,
+    path: &Path,
+    metadata: Option<&ImageMetadata>,
+    quality: u8,
+) -> Result<()> {
     let data = quantize_u8(img);
     let mut file = create(path)?;
-    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, JPEG_QUALITY);
+    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, quality);
     enc.set_exif_metadata(exif_blob(img, metadata)?)
         .map_err(|e| anyhow!("JPEG EXIF: {e}"))?;
     enc.write_image(&data, img.width, img.height, image::ExtendedColorType::Rgb8)
@@ -394,6 +432,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn save_options_keep_defaults_and_control_quality_and_metadata() {
+        let dir = Scratch::new("save-options");
+        let original = dir.path("default.jpg");
+        let explicit = dir.path("explicit.jpg");
+        let low = dir.path("quality35.jpg");
+        let image = test_image();
+        let metadata = sample_metadata();
+        save_image(&image, &original, Some(&metadata)).unwrap();
+        save_image_with_options(&image, &explicit, Some(&metadata), SaveOptions::default())
+            .unwrap();
+        assert_eq!(
+            std::fs::read(&original).unwrap(),
+            std::fs::read(&explicit).unwrap()
+        );
+        save_image_with_options(
+            &image,
+            &low,
+            Some(&metadata),
+            SaveOptions {
+                jpeg_quality: 35,
+                copy_metadata: false,
+            },
+        )
+        .unwrap();
+        assert_ne!(
+            std::fs::read(&original).unwrap(),
+            std::fs::read(&low).unwrap()
+        );
+        assert_eq!(read_metadata(&low), None);
+        assert!(read_metadata(&original).is_some());
+        let invalid = dir.path("invalid.jpg");
+        assert!(
+            save_image_with_options(
+                &image,
+                &invalid,
+                None,
+                SaveOptions {
+                    jpeg_quality: 0,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(!invalid.exists());
+    }
     #[test]
     fn without_metadata_only_software_is_written() {
         let dir = Scratch::new("no-meta");

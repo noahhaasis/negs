@@ -1,9 +1,8 @@
-# Linux engine and integration validation — in progress
+# Linux engine and integration validation
 
 This report records actual Linux bring-up. UI-only evidence is separate in
-[linux-ui-validation.md](linux-ui-validation.md). The full port is still in
-progress; the checks below do not establish completed UI integration or a
-production package.
+[linux-ui-validation.md](linux-ui-validation.md). The connected editor and package work continue below; historical bring-up
+measurements retain their original scope.
 
 ## Toolchain and Linux BLAS bootstrap
 
@@ -100,7 +99,8 @@ lavapipe CPU adapter cannot be reported as hardware acceleration.
 Metal behavior and Windows admission calculations are unchanged.
 
 Three capacity unit tests and the whole-pipeline CPU fallback/rescale test
-pass. Actual forced-budget fallback and final exact matrices remain to run.
+pass. The final helper also passes 21 requests each on real GPU, explicit CPU,
+and forced zero-budget whole-pipeline CPU fallback. Logs: `core-helper-final-{gpu,cpu,fallback}.log`.
 
 First bounded 24 MP hardware smoke: two processes, three in-process iterations
 each, no diagnostic raw dump. All six GPU-resident pipelines complete and both
@@ -112,9 +112,60 @@ performance measurements. The benchmark's watchdog-events query is Windows-only
 and returns null on Linux; no Linux device-reset claim follows from that field.
 Evidence: `target/linux-validation/core-full-resolution/` and its log.
 
-## Pending
+## Final numerical and RAW checks (2026-10-26)
 
-Final exact baseline comparison; forced GPU memory fallback and Linux device-log
-checks; full-resolution/RAW validation; GTK helper
-integration, exports, cache/session/error/shutdown behavior; production package;
-and final real-desktop functional/startup/performance checks.
+The final matrix repeats all **184 cases / 484 renders**, with three jobs and
+four Rayon threads. Zero render failures. Exact comparison against the immutable
+Linux baseline: **184/184 GPU, 184/184 f64, 116/116 f32 CPU IDENTICAL**.
+Artifacts: `target/linux-validation/linux-{final,exact}.{json,log}`.
+The initial attempt lacked device access inside the sandbox; the reported final
+run uses the real NVIDIA device. The golden runner now creates its successful
+GPU-log directory, so the documented fresh-directory command works.
+
+The separate quality report remains **76/76 PASS** (worst ΔE00 max 0.005353,
+maximum 8-bit error 1). Historical Mac mismatch counts above remain unchanged;
+they are not converted into passes by the same-machine exact result.
+
+`decode_raw_gui` decodes the real `DSC_4990.NEF` to 6048×4024 float TIFF.
+SHA-256 `d3aa7348d100d9d0545c9b35a46469e7d167357a3f975e67ade25cd60e98516d`
+is exactly the transferred rawler-decoded TIFF's SHA-256. Inputs stay unchanged.
+Artifacts: `raw-decode.log`, `inputs/linux-raw-decode.tif`.
+
+## Connected GTK behavior
+
+The real Wayland/NVIDIA GTK audit passes **11 checks**, including LUT without a
+photo, native exposure control changing pixels, stale Save disablement,
+Original preserving the retained render, cropped/straightened/rotated keyline
+Save Preview, byte-identical independent Fast output, separate f64 Reference,
+actual JPEG quality, cancellation preserving the previous destination and
+removing staging, real NEF source dimensions, custom RAW WB changing pixels,
+and Nikon source metadata in JPEG. Nonzero Post contrast catches operation-order
+errors around straightening. Evidence: `engine-ui-final/{result.json,startup.json,app.log}`
+and `engine-ui-final.log` under `target/linux-validation/`.
+
+The Linux client opts into Post-before-crop for retained saves. The helper's new
+optional fields preserve legacy save defaults and operation order for existing
+macOS/Windows clients; capabilities detect mismatched installations. Default
+quality and metadata behavior remain byte-identical in IO tests.
+
+The GTK-side Rust suite passes **17 tests**, including source hard-link protection,
+serial EOF/bad-ID/timeout recovery, running exporter cancellation/reaping, queued
+helper cancellation without execution, RGBA validation, lossless cache corruption/
+identity checks, and live-default reset consistency. Clippy passes with warnings
+as errors. IO/native tests and the existing 22-test golden harness are recorded
+in `core-final-tests.log` and `golden-harness-tests.log` (one existing IO test is
+ignored). Unit tests use a private `XDG_RUNTIME_DIR` under the validation directory;
+the sandbox cannot write the real desktop runtime directory.
+
+A restored connected session displayed the cached developed preview at 376 ms
+and rebuilt current saveable GPU output at 1077 ms. This is an initial diagnostic
+launch, not a final quiet-machine median. Evidence:
+`engine-ui-post-cache/{restored.json,restored.png}`. The later cache key also
+includes available GPU/driver identity and Vulkan-selection environment.
+
+## Remaining hardware coverage
+
+Same-revision Mac output has not been transferred. Other GPU vendors, multi-monitor
+mixed scaling, calibrated wide-gamut output and driver device-loss recovery remain
+unverified. This machine's explicit sRGB Wayland path and NVIDIA Vulkan execution
+are the tested configuration. No driver timeouts were altered.

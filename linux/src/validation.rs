@@ -105,6 +105,7 @@ fn benchmark(ui: &Rc<Editor>) {
         return;
     };
     ui.perf.mark("ui_benchmark_started_ms");
+    ui.runtime.borrow_mut().interacting = true;
     ui.history.borrow_mut().begin("Benchmark slider drag");
     let frames = Rc::new(Cell::new(0u32));
     let origin = adjustment.value();
@@ -114,9 +115,9 @@ fn benchmark(ui: &Rc<Editor>) {
         let center=(ui.canvas.width() as f64/2.,ui.canvas.height() as f64/2.);
         ui.canvas.zoom_at(if n.is_multiple_of(2){1.003}else{1./1.003},center);
         if n>=239 {
-            adjustment.set_value(origin);ui.canvas.fit();ui.history.borrow_mut().commit();
+            ui.runtime.borrow_mut().interacting=false;adjustment.set_value(origin);ui.canvas.fit();ui.history.borrow_mut().commit();ui.sync_history();
             ui.perf.mark("ui_benchmark_finished_ms");ui.perf.detail("ui_benchmark_frames",240);
-            ui.perf.detail("ui_benchmark_scope","240 frame-clock-driven GTK value updates plus texture zoom; no engine or physical pointer");
+            ui.perf.detail("ui_benchmark_scope",if crate::runtime::ui_only(){"240 frame-clock-driven GTK value updates plus texture zoom; no engine or physical pointer"}else{"240 frame-clock-driven GTK value updates plus texture zoom with live interactive film rendering; no physical pointer"});
             ui.perf.write();return glib::ControlFlow::Break;
         }
         glib::ControlFlow::Continue

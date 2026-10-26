@@ -120,8 +120,9 @@ pub fn folder(path: &Path) -> Vec<PathBuf> {
 }
 
 pub const RAW_EXTENSIONS: &[&str] = &[
-    "nef", "nrw", "dng", "arw", "srf", "sr2", "cr2", "cr3", "crw", "raf", "rw2", "orf", "pef",
-    "ptx", "rwl", "srw", "3fr", "fff", "iiq", "kdc", "dcr", "mos", "mrw", "erf", "raw",
+    "dng", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "ptx",
+    "srw", "x3f", "iiq", "3fr", "ari", "bay", "crw", "dcr", "drf", "erf", "fff", "k25", "kdc",
+    "mef", "mos", "mrw", "rwl",
 ];
 pub fn is_raw(path: &Path) -> bool {
     path.extension()

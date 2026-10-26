@@ -1,179 +1,142 @@
-# Linux UI preview
+# Native Linux app
 
-The current Linux work is a **UI-only GTK4/libadwaita prototype**, as requested
-on 2026-10-25. The Rust film engine, helper protocol, numerical validation,
-RAW development and real exports are deliberately deferred. No changes have
-been made to the engine or to the macOS/Windows clients.
+Negs has a native GTK4/libadwaita editor connected to the existing Rust
+Spektrafilm engine. The UI runs in its own Cargo workspace, `linux/`, and
+uses a persistent, serial `spektrafilm-native` helper for GPU preview and
+retained Save Preview. Fast export uses the f32 engine; Reference export
+uses the separately built f64 binary. macOS and Windows UI sources are unchanged.
+The unrelated Python experimental engine migration is outside this port.
 
-The client lives in `linux/`, in a separate Cargo workspace and lockfile.
-It uses gtk4-rs 0.10.3 and libadwaita-rs 0.8.1, targeting GTK 4.16 and
-libadwaita 1.6 APIs. The machine used for validation has GTK 4.24.1 and
-libadwaita 1.10.0. The UI builds with Rust 1.93.1.
+## Build and run
 
-## Build and see it
-
-```sh
-bash linux/cargo.sh build --release --locked
-python3 linux/prepare_demo.py
-bash linux/run.sh --demo --fresh
-```
-
-Run these from the worktree in the graphical session. The executable is
-`target/linux-ui/release/negs`. `prepare_demo.py` extracts the real Nikon
-camera JPEG and prepares smaller display copies of the transferred TIFFs
-under ignored `target/linux-validation/ui-demo/`. It requires ImageMagick;
-it does not modify the transferred files. Photos are not compiled into the app.
-
-For a per-user installation of this preview:
+Requirements: Rust **1.93.1**, GTK **4.16+**, libadwaita **1.6+**, pkgconf,
+OpenBLAS, a C toolchain, and Vulkan loader/driver for hardware acceleration.
+On Arch, install the dependencies declared in `linux/arch/PKGBUILD` and
+install the pinned toolchain with `rustup toolchain install 1.93.1 --profile minimal`.
+CPU fallback works when hardware Vulkan is unavailable or a render exceeds
+GPU admission limits. The status bar reports the actual backend.
 
 ```sh
-python3 linux/install_preview.py
+bash linux/build.sh
+bash linux/run.sh /absolute/path/to/photo.NEF
 ```
 
-This copies the executable, border assets/licenses and source archive under
-`$XDG_DATA_HOME/negs-ui-preview`, installs a launcher and a matching desktop
-entry/icon, and offers Open With support without changing defaults. When an
-existing Hyprland Lua configuration is found, it also installs the Negs-only
-opacity exception, reloads the active Hyprland session, and checks for errors.
-The installer is tested with isolated XDG roots; distribution packaging and
-dependency installation remain pending. `--no-reload` is for staging/tests.
+Both workspaces build with `--locked`. Build products are
+`target/linux-ui/release/negs` and `target/release/{spektrafilm-native,spektrafilm,spektrafilm-f64}`.
+The f64 feature is built separately and never enabled for the helper/Fast binary.
+`linux/core-env.sh` also supports this machine's optional development OpenBLAS
+sysroot; production Arch installations use the declared `openblas` dependency.
 
-To open your own JPEG, PNG, TIFF or supported embedded RAW preview:
+Without a path, the app restores its last photograph, adjustments and view.
+`--fresh` skips restoration. `NEGS_PROFILE_DIR=/absolute/test/directory` isolates
+settings and permits independent test windows. `NEGS_APPEARANCE=light|dark|system`
+selects an app-only appearance. Normal launches follow the desktop setting.
+`NEGS_UI_ONLY=1` retains the explicit camera-preview test mode; ordinary launches
+always connect the real engine. The old preview installer remains a separate,
+clearly labeled UI development tool.
+
+## Local packages and installation
+
+Commit the intended source first; package archives are made from that commit,
+never from validation directories or untracked files. No publication occurs.
 
 ```sh
-bash linux/run.sh /absolute/path/to/photograph.jpg
+bash linux/package.sh
 ```
 
-Without an argument, the app restores its last UI session. `--fresh` skips
-restoration. `--demo` explicitly selects the validation photograph.
-`NEGS_APPEARANCE=light|dark|system` selects an appearance for review; the
-default follows the desktop. The in-app Appearance dialog changes only
-this application. Missing toolbar glyphs fall back to installed Adwaita
-icons; no desktop settings are changed.
+This generates a source archive and checksum-pinned local PKGBUILD, then runs
+`makepkg`. The recipe builds both workspaces and installs the launcher, helper,
+f32/f64 exporters, profile/LUT/border data and licenses, icon, desktop entry,
+documentation and source archive. The app ID/window class is `dev.negs.app`.
+Open With MIME declarations do not change file-association defaults. Install a
+reviewed Arch artifact using the normal package manager; updates initially use
+distribution packages. Flatpak and other distribution recipes are unfinished.
 
-`linux/cargo.sh` puts build products in `target/linux-ui`. If Cargo is not
-on PATH it uses the isolated Rust installation in `target/linux-toolchain`.
-On another machine install Rust normally, plus GTK/libadwaita development
-libraries, pkg-config and the Adwaita icon theme. This UI workspace does not
-need OpenBLAS, Fortran, or the film engine's dependencies.
-
-On Omarchy, install the app-specific compositor exception so photographs remain
-fully opaque when the window is focused, unfocused or fullscreen:
+For a per-user local bundle on a compatible GTK/Arch system:
 
 ```sh
-python3 linux/install_omarchy_rules.py
-hyprctl reload
-hyprctl configerrors
+bash linux/package.sh --bundle
+# Unpack target/linux-package/negs-0.7.0-linux-x86_64.tar.gz into a directory.
+python3 /path/to/unpacked/share/negs/install.py --from /path/to/unpacked
+~/.local/bin/negs
 ```
 
-This is installed on the validation machine. The installer backs up changed
-files, writes `~/.config/hypr/negs-window-rules.lua`, and includes it after
-Omarchy's defaults. It exempts only `dev.negs.app` and its UI-preview variant
-from Omarchy's default-opacity tag and sets all three opacity values to an
-absolute 1. Other applications keep their desktop behavior. GTK cannot undo
-compositor opacity through widget styling. The canvas also paints its own
-opaque neutral background, including behind transparent input pixels.
-
-## What can be tried
-
-- Open dialog, file drop, background preview decoding, error messages and a
-  bounded folder strip. The strip opens photos with the current local values.
-  Switching within a folder retains its thumbnail widgets and scroll position;
-  selecting the current photograph preserves its editing state. Thumbnail work
-  has a separate folder generation so rapid photo selections do not cancel it.
-- Native Lab/Post controls, synchronized sliders and number fields, deferred
-  inspector construction, and lazily constructed effect sections. An eager
-  inspection mode creates all 60 sliders, including the three border sliders;
-  the normal first inspector creates 17. The original startup report predates
-  the border controls and counts 57/14 respectively.
-- Local undo/redo/reset. Slider pointer events are observed without taking
-  over GTK's drag gesture, and one drag is committed as one edit.
-- Fit, actual size accounting for fractional surface scaling, pointer-centered
-  Control+scroll zoom, panning, rotation, crop corners and crop ratios.
-- Configurable Solid/Film/Keyline/35mm borders, thickness and opaque sRGB colors,
-  film-specific strip textures, Instagram extension and saved export inclusion;
-  light/dark appearance; export and
-  LUT option dialogs with the saving action visibly disabled.
-- A libadwaita breakpoint changes the inspector into an overlay below 900 sp.
-  F7 opens/closes it; F6 toggles the film strip.
-
-Keyboard commands include Ctrl+O, Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y, Ctrl+0,
-Ctrl+1, Ctrl++/-, Ctrl+R, and Ctrl+Shift+E. With the canvas focused, C opens
-crop; Return accepts it and Escape cancels it. Text-entry widgets own text
-input; the plain-letter shortcut is attached to the canvas.
-
-The photographed image remains a camera/file preview when film controls
-change. The interface states this explicitly. `fixtures.rs` contains sample
-UI values, **not** engine defaults or a second implementation of the parameter
-schema. Replace that fixture with the helper's catalog when wiring the engine.
-
-Settings/session data use `$XDG_CONFIG_HOME/negs/ui-preview` (normally
-`~/.config/negs/ui-preview`). `NEGS_PROFILE_DIR` isolates tests. Session writes
-use a temporary sibling and rename. The preview has its own application ID,
-`dev.negs.app.UiPreview`, and currently allows multiple instances for testing.
-The preview installer provides a per-user desktop entry and optional Open With
-registration. It has not been installed into the validation user's application
-directories; tests use isolated XDG locations. No distro package or updater has
-been published.
-
-## Validation commands
+The default prefix is `~/.local`; `--prefix` supports an isolated installation.
+The bundle can include the official OpenBLAS shared library and license when
+using the development sysroot. It still requires system GTK/libadwaita, Vulkan
+loader, Python, libgfortran/libgomp and their runtime dependencies. It is not a
+universal binary for arbitrary older Linux distributions.
 
 ```sh
-bash linux/cargo.sh test --release --locked
-bash linux/cargo.sh clippy --locked -- -D warnings
-bash linux/cargo.sh fmt --check
-python3 linux/check_ui.py
-python3 linux/check_borders.py
-python3 linux/measure_ui.py --runs 5
-python3 linux/measure_ui.py --runs 3 --benchmark \
-  --out target/linux-validation/ui-interaction
+python3 ~/.local/share/negs/install.py --uninstall
 ```
 
-The UI checks and timing runners require an unlocked Hyprland session. Python's AT-SPI/GObject
-introspection and `wtype` are used for real accessibility/input checks.
-The benchmark understands this machine's Hyprland Lua dispatch API and only
-targets the process it launches. It refuses a locked/asleep desktop. It sends
-a harmless F8 only after verifying window focus.
+The per-user installer records owned files and refuses to overwrite unowned or
+modified files. Uninstall preserves changed files, settings, photos, exports,
+and the harmless app-specific Hyprland rule. Arch packages are removed through
+the package manager instead.
 
-For alternate layouts, use `--size 760,820`, `--appearance light`, and
-`--scene post|crop|export`. Optional floating/resize operations target only the
-test window and do not create persistent window rules. Without `--size`, normal
-Hyprland tiling applies. Captures made by `NEGS_WIDGET_CAPTURE` are GTK widget
-renders; they are distinct from compositor screenshots.
+## Opacity and desktop integration
 
-`NEGS_STARTUP_REPORT=/path/report.json` records separate main-entry, map,
-frame-submission, compositor-presentation, inspector-ready, input-reception,
-input-idle-dispatch, preview-texture, and preview-presentation milestones.
-`measure_ui.py` supplies a monotonic process-launch origin. Without that origin,
-times start at main entry. `NEGS_QUIT_AFTER_MS` bounds automated launches and
-closes an open Adwaita dialog before the window.
+Canvas and image backing are opaque; output RGB is presented as explicitly
+sRGB RGBA with alpha 255. Omarchy also applies compositor opacity to entire
+application windows. On an existing Hyprland **Lua** setup, installation/first
+launch copies the packaged Negs-only rule, adds its include with backups, and
+reloads/checks the active compositor. This removes the default opacity tag and
+sets absolute focused/inactive/fullscreen opacity to 1. No global opacity,
+theme or unrelated application rule is changed. Package installation as root
+never edits user configuration. Other compositors use the normal opaque GTK
+surface. Older Hyprland `.conf` setups require their own equivalent rule.
 
-The interaction benchmark drives the real GTK frame clock for 240 updates,
-changing a slider and zooming the existing texture. It measures UI callback
-cost and frame cadence; it does not simulate physical pointer input or the
-film-processing workload. `developed_image_ms` is explicitly null.
+GApplication forwards file-open activation to the running editor. GTK native
+file dialogs and GIO folder notifications are used directly. The inspector
+collapses with a libadwaita breakpoint at narrow widths. Keyboard commands,
+numeric fields, accessible labels, per-control reset, and one undo step per
+drag are supported.
 
-See [linux-ui-validation.md](linux-ui-validation.md) for machine evidence,
-measurements, screenshots, and remaining limits.
-See [linux-ui-parity.md](linux-ui-parity.md) for the explicit control-by-control
-UI gaps; this prototype does not yet provide the full original interface.
+## Rendering, exports and persistence
 
-## Deferred work
+The window paints before inspector construction and helper setup. Worker
+threads perform decode, helper requests, cache I/O and exports. Edits coalesce
+behind a single serial render; source/revision guards reject obsolete replies.
+Interactive renders use a viewport proxy; releasing the slider rebuilds the
+full preview. The last image remains visible while processing. Re-selecting
+the same filmstrip file preserves the texture, edits and history.
 
-Connect the persistent helper and its real catalog/defaults; coalesce renders
-and reject stale replies; build the developed-preview cache; implement both
-export paths and cancellation; validate border/35mm parity with exports and
-carry over the full crop/straighten and Image Size semantics; complete profile
-grouping, RAW WB/B&W behavior and
-recent files; virtualize and watch folders; implement single-instance file-open
-activation and packaging. Then execute the numerical, color, capacity and
-full application checks from `linux-agent-handoff.md`.
+Original uses separate pixels and preserves the helper's retained developed
+render. Crop, straighten, rotation, border/keyline/35mm settings and output sizing
+are shared with export. Image Size resizes before simulation. Save Preview is
+enabled only for the current retained float render; a restored cached preview
+is rebuilt before becoming saveable. Fast/Reference exports capture immutable
+settings while the editor remains available. They publish through a same-folder
+staging file only after success. Cancellation preserves existing destinations,
+and source-file identity checks reject overwrites through aliases. JPEG quality
+and metadata choices affect actual output. LUT export needs no photograph.
 
-The current histogram describes the decoded preview rather than a developed,
-crop-limited output. RAW support only extracts an embedded JPEG with a bounded
-scan; it is not rawler development or a validated RAW orientation/framing path.
-The display preview is capped at 2400 pixels and its source-size layout is
-retained for zoom; it is not a full-resolution export buffer. Wide-gamut/ICC
-and mixed-monitor color correctness are not established by this UI preview.
-The folder strip is capped at 24 cells, uses a bounded scan of 200 candidates,
-and has no watcher, natural sorting or reusable thumbnail cache yet.
+Settings/session use `$XDG_CONFIG_HOME/negs/session.json`; the single bounded,
+lossless developed preview uses `$XDG_CACHE_HOME/negs/rendered-preview.cache`.
+The key includes source identity, full processing settings, profiles/data/helper,
+BLAS and available GPU/driver identities. Framing is applied separately. Cache
+corruption/mismatch falls back to decoding. Session writes are atomic. Temporary
+helper/output files live under `$XDG_RUNTIME_DIR/negs`, with a private `/tmp`
+fallback. Quit cancels/reaps child processes and flushes the cache off GTK.
+
+The native helper protocol remains version 1. Optional save-quality/metadata
+options retain old defaults; the Linux client's opt-in `crop_after_post` makes
+straightened Post output match CLI/canvas order while old clients retain their
+existing behavior. Capability checks reject mismatched installed components.
+No stochastic or portable numerical algorithm was rewritten for this port.
+
+## Validation and limits
+
+See `docs/linux-core-validation.md` for numerical gates, real desktop evidence,
+performance and installation results, and `docs/linux-ui-validation.md` for the
+preceding UI-only measurements. These are separate experiments.
+
+The transferred historical Mac reference predates the DIR-gamma correction;
+it cannot establish same-revision Mac/Linux parity. CPU shared-stream grain
+differences remain deferred. Device-loss/watchdog recovery is unresolved;
+no driver timeout settings were changed. This machine provides one NVIDIA GPU
+and one 1.25-scale display: other vendors, mixed-monitor scaling and wide-gamut
+end-to-end color still need hardware validation. GTK receives explicit sRGB
+pixels; this is not proof of calibrated wide-gamut output on every compositor.

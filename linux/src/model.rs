@@ -4,6 +4,9 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct State {
+    /// Full helper schema; controls only override fields they expose.
+    #[serde(default)]
+    pub params: serde_json::Value,
     pub values: BTreeMap<String, f64>,
     pub choices: BTreeMap<String, String>,
     pub rotation: u8,
@@ -35,6 +38,26 @@ impl State {
         self.values.retain(|_, v| v.is_finite());
         for (key, value) in defaults.values {
             self.values.entry(key).or_insert(value);
+        }
+        for group in crate::fixtures::GROUPS {
+            for knob in group.knobs {
+                if let Some(value) = self.values.get_mut(&format!("{}.{}", group.name, knob.0)) {
+                    *value = value.clamp(knob.1, knob.2);
+                    if knob.3 >= 1. {
+                        *value = value.round();
+                    }
+                }
+            }
+        }
+        for knob in crate::fixtures::POST {
+            if let Some(value) = self.values.get_mut(&format!("Post.{}", knob.0)) {
+                *value = value.clamp(knob.1, knob.2);
+            }
+        }
+        for (key, low, high) in [("RAW.Temperature", 1667., 25000.), ("RAW.Tint", 0.01, 4.)] {
+            if let Some(value) = self.values.get_mut(key) {
+                *value = value.clamp(low, high);
+            }
         }
     }
 }

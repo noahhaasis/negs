@@ -1,3 +1,7 @@
+> Integration has now proceeded beyond this pre-core handoff. For the current
+> connected app, build/package commands and evidence, read [linux-app.md](linux-app.md)
+> and [linux-core-validation.md](linux-core-validation.md).
+
 # Linux core bring-up and GTK integration handoff
 
 Prepared 2026-10-25. Work in `/home/noah/Work/Negs/.worktrees/linux-omarchy-port`

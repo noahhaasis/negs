@@ -1,4 +1,4 @@
-# UI-only workspace: keep GTK's dependency graph separate from engine precision features.
+# Native UI workspace: keep GTK's dependency graph separate from engine precision features.
 [workspace]
 resolver = "2"
 

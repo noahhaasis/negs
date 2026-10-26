@@ -19,6 +19,8 @@ parser.add_argument("--inspector-mode",choices=["both","lazy","eager"],default="
 parser.add_argument("--size", help="Optional floating window size WIDTH,HEIGHT; default uses normal tiling")
 parser.add_argument("--appearance", choices=["system", "light", "dark"], default="system")
 parser.add_argument("--scene", choices=["lab", "post", "crop", "export"], default="lab")
+parser.add_argument("--binary", type=Path, default=root / "target/linux-ui/release/negs")
+parser.add_argument("--photo", type=Path, help="Real source to open instead of the UI demo")
 parser.add_argument("--out", type=Path, default=root / "target/linux-validation/ui-performance")
 args = parser.parse_args()
 args.out.mkdir(parents=True, exist_ok=True)
@@ -41,7 +43,7 @@ for mode in variants:
         env = dict(os.environ, NEGS_PROFILE_DIR=str(args.out / "profile"),
                    NEGS_STARTUP_REPORT=str(output), NEGS_APPEARANCE=args.appearance,
                    NEGS_INSPECTOR_MODE=mode, NEGS_UI_SCENE=args.scene,
-                   NEGS_QUIT_AFTER_MS="7500" if args.benchmark else "2300")
+                   NEGS_QUIT_AFTER_MS="12000" if args.benchmark else "5000")
         if args.benchmark:
             env["NEGS_UI_BENCHMARK"] = "1"
         if run == 0 and not args.benchmark:
@@ -49,10 +51,10 @@ for mode in variants:
         env["NEGS_LAUNCH_MONOTONIC_US"] = str(time.monotonic_ns() // 1000)
         log_path = args.out / f"{name}.log"
         with log_path.open("w") as log:
-            cmd = [str(root / "target/linux-ui/release/negs")]
+            cmd = [str(args.binary.resolve())]
             # First explicit photo launch, then restore the same isolated UI session.
             if run == 0:
-                cmd += ["--demo", "--fresh"]
+                cmd += ["--fresh", str(args.photo.resolve())] if args.photo else ["--demo", "--fresh"]
             p = subprocess.Popen(cmd, env=env, stdout=log, stderr=log)
             before_input = None
             deadline = time.monotonic() + 8
@@ -76,7 +78,7 @@ for mode in variants:
                     subprocess.run(["wtype", "-k", "F8"], check=True, timeout=2)
             peak_rss_kib = 0
             maximum_threads = 0
-            deadline = time.monotonic() + 12
+            deadline = time.monotonic() + 18
             while p.poll() is None and time.monotonic() < deadline:
                 try:
                     fields = dict(line.split(":", 1) for line in Path(f"/proc/{p.pid}/status").read_text().splitlines() if ":" in line)
@@ -92,12 +94,14 @@ for mode in variants:
         if p.returncode or not output.exists():
             raise RuntimeError(f"{name}: process failed, see {log_path}")
         report = json.loads(output.read_text())
+        if args.benchmark and "ui_benchmark_finished_ms" not in report["milestones_ms"]:
+            raise RuntimeError(f"{name}: benchmark did not finish; inspect {output}")
         report["run"] = name
         report["restored_session"] = run > 0
         report["peak_rss_kib"] = peak_rss_kib
         report["maximum_threads"] = maximum_threads
         report["monitor_evidence"] = monitors
-        report["cache_state"] = "Existing OS/driver caches; fresh process. No engine cache exists."
+        report["cache_state"] = "Existing OS/driver caches; fresh process. Rendered preview cache may be restored after the first run."
         if before_input is not None:
             sent_ms = (before_input - int(env["NEGS_LAUNCH_MONOTONIC_US"])) / 1000
             report["input_sent_ms"] = sent_ms
@@ -108,7 +112,7 @@ for mode in variants:
         reports.append(report)
         print(name, report["milestones_ms"], flush=True)
 
-summary = {"scope": "Native GTK UI only, real unlocked Hyprland session; no film rendering.", "runs": len(reports), "variants": {}}
+summary = {"scope": "Native GTK real unlocked Hyprland session; connected engine unless NEGS_UI_ONLY=1.", "runs": len(reports), "variants": {}}
 for mode in variants:
     group = [r for r in reports if r["run"].startswith(mode)]
     metrics = {}

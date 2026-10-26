@@ -5,15 +5,21 @@ mod canvas;
 mod catalog;
 mod crop_geometry;
 mod crop_ui;
+mod engine;
+mod engine_validation;
 mod export_ui;
+mod exports;
 mod filmstrip;
 mod fixtures;
 mod image_size;
 mod inspector;
 mod model;
+mod parameters;
 mod perf;
 mod photo;
 mod preferences;
+mod preview_cache;
+mod runtime;
 mod validation;
 
 use adw::prelude::*;
@@ -27,6 +33,11 @@ use std::{
 type StateRule = Box<dyn Fn(&model::State)>;
 
 pub(crate) struct Editor {
+    owner: RefCell<std::rc::Weak<Editor>>,
+    runtime: RefCell<runtime::Runtime>,
+    shell_painted: Cell<bool>,
+    cache: std::sync::Arc<preview_cache::Cache>,
+    pending_view: RefCell<Option<serde_json::Value>>,
     window: adw::ApplicationWindow,
     canvas: canvas::Canvas,
     split: adw::OverlaySplitView,
@@ -42,6 +53,10 @@ pub(crate) struct Editor {
     title: adw::WindowTitle,
     dimensions: gtk::Label,
     status: gtk::Label,
+    badge: gtk::Label,
+    export_progress: gtk::Box,
+    export_elapsed: gtk::Label,
+    export_cancel: gtk::Button,
     strip_scroll: gtk::ScrolledWindow,
     strip_folder: RefCell<Option<PathBuf>>,
     strip_generation: Cell<u64>,
@@ -70,6 +85,7 @@ pub(crate) struct Editor {
     crop_before: RefCell<Option<model::State>>,
     recent: RefCell<Vec<PathBuf>>,
     recent_menu: gio::Menu,
+    empty_recent: gtk::Box,
     history_menu: gio::Menu,
     folder_monitor: RefCell<Option<gio::FileMonitor>>,
     folder_debounce: RefCell<Option<glib::SourceId>>,
@@ -93,7 +109,11 @@ impl Editor {
     fn new(app: &adw::Application, perf: perf::Perf) -> Rc<Self> {
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("Negs — UI Preview")
+            .title(if runtime::ui_only() {
+                "Negs — UI Preview"
+            } else {
+                "Negs"
+            })
             .default_width(1320)
             .default_height(900)
             .width_request(360)
@@ -214,7 +234,11 @@ impl Editor {
         ));
         tools.append(&icon("zoom-in-symbolic", "Zoom In (Ctrl++)", "win.zoom-in"));
         tools.append(&gap());
-        let badge = gtk::Label::new(Some("UI preview"));
+        let badge = gtk::Label::new(Some(if runtime::ui_only() {
+            "UI preview"
+        } else {
+            "Starting engine…"
+        }));
         badge.add_css_class("preview-badge");
         tools.append(&badge);
         tools.append(&gap());
@@ -228,14 +252,23 @@ impl Editor {
         let canvas = canvas::Canvas::new();
         let stage = gtk::Stack::new();
         stage.set_vexpand(true);
-        let empty=adw::StatusPage::builder().icon_name("camera-photo-symbolic").title("Open a Photograph")
-            .description("Your photograph, a little chemistry.\nOpen a RAW preview, TIFF, PNG, or JPEG to explore the editor.").build();
+        let empty = adw::StatusPage::builder()
+            .icon_name("camera-photo-symbolic")
+            .title("Open a Photograph")
+            .description(
+                "Your photograph, a little chemistry.\nOpen a RAW, TIFF, PNG, or JPEG to begin.",
+            )
+            .build();
         let emptyopen = gtk::Button::with_label("Open Photograph…");
         emptyopen.set_halign(gtk::Align::Center);
         emptyopen.add_css_class("suggested-action");
         emptyopen.add_css_class("pill");
         emptyopen.set_action_name(Some("win.open"));
-        empty.set_child(Some(&emptyopen));
+        let empty_content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        empty_content.append(&emptyopen);
+        let empty_recent = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        empty_content.append(&empty_recent);
+        empty.set_child(Some(&empty_content));
         stage.add_named(&empty, Some("empty"));
         let well = gtk::Box::new(gtk::Orientation::Vertical, 0);
         well.add_css_class("photo-well");
@@ -263,21 +296,34 @@ impl Editor {
         dimensions.add_css_class("dim-label");
         statusbar.append(&dimensions);
         statusbar.append(&gap());
-        let status = gtk::Label::new(Some("Camera preview · engine not connected"));
+        let status = gtk::Label::new(Some(if runtime::ui_only() {
+            "Camera preview · engine not connected"
+        } else {
+            "Preparing image engine…"
+        }));
         status.add_css_class("dim-label");
         status.set_selectable(true);
         dimensions.set_selectable(true);
         statusbar.append(&status);
         status.set_ellipsize(gtk::pango::EllipsizeMode::End);
         status.set_max_width_chars(36);
+        let export_progress = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let spinner = gtk::Spinner::new();
+        spinner.start();
+        export_progress.append(&spinner);
+        let export_elapsed = gtk::Label::new(None);
+        export_progress.append(&export_elapsed);
+        let export_cancel = gtk::Button::with_label("Cancel");
+        export_cancel.set_action_name(Some("win.cancel-export"));
+        export_progress.append(&export_cancel);
+        export_progress.set_visible(false);
+        statusbar.append(&export_progress);
         dimensions.set_ellipsize(gtk::pango::EllipsizeMode::End);
         dimensions.set_max_width_chars(22);
         let original = gtk::Button::with_label("Original");
         original.add_css_class("flat");
         original.set_action_name(Some("win.original"));
-        original.set_tooltip_text(Some(
-            "This UI preview displays the camera original; film processing is not connected.",
-        ));
+        original.set_tooltip_text(Some("Show Original (hold \\); click to toggle"));
         statusbar.append(&original);
         main.append(&statusbar);
         split.set_content(Some(&main));
@@ -296,6 +342,11 @@ impl Editor {
         window.add_breakpoint(breakpoint);
         let history = model::History::new(fixtures::state());
         let ui = Rc::new(Self {
+            owner: RefCell::new(std::rc::Weak::new()),
+            runtime: RefCell::new(runtime::Runtime::default()),
+            shell_painted: Cell::new(false),
+            cache: std::sync::Arc::new(preview_cache::Cache::new(preview_cache::location())),
+            pending_view: RefCell::new(None),
             window,
             canvas,
             split,
@@ -311,6 +362,10 @@ impl Editor {
             title,
             dimensions,
             status,
+            badge,
+            export_progress,
+            export_elapsed,
+            export_cancel,
             strip_scroll,
             strip_folder: RefCell::new(None),
             strip_generation: Cell::new(0),
@@ -339,11 +394,39 @@ impl Editor {
             crop_before: RefCell::new(None),
             recent: RefCell::new(Vec::new()),
             recent_menu,
+            empty_recent,
             history_menu: edit,
             folder_monitor: RefCell::new(None),
             folder_debounce: RefCell::new(None),
             preferences: RefCell::new(preferences::Preferences::default()),
         });
+        ui.owner.replace(Rc::downgrade(&ui));
+        if !runtime::ui_only() {
+            ui.badge.set_visible(false);
+        }
+        let hold_original = gtk::GestureClick::new();
+        hold_original.set_propagation_phase(gtk::PropagationPhase::Capture);
+        hold_original.connect_pressed(glib::clone!(
+            #[weak]
+            ui,
+            move |gesture, _, _, _| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                ui.show_original(true);
+            }
+        ));
+        hold_original.connect_released(glib::clone!(
+            #[weak]
+            ui,
+            move |_, _, _, _| ui.show_original(false)
+        ));
+        original.add_controller(hold_original);
+        ui.window.connect_is_active_notify(glib::clone!(
+            #[weak]
+            ui,
+            move |w| if !w.is_active() {
+                ui.show_original(false);
+            }
+        ));
         crop_ui::build(&ui);
         filmstrip::build(&ui);
         let resize_origin = Rc::new(Cell::new(340.));
@@ -421,6 +504,17 @@ impl Editor {
         ui.stage.add_controller(drop);
         let hold = Rc::new(RefCell::new(Some(ui.clone())));
         ui.window.connect_close_request(move |_| {
+            if let Some(ui)=hold.borrow().clone() {
+                if ui.runtime.borrow().preview_saving {ui.toast.add_toast(adw::Toast::new("Wait for Save Preview to finish before quitting."));return glib::Propagation::Stop;}
+                if ui.runtime.borrow().exporting.is_some() && !ui.runtime.borrow().close_confirmed {
+                    let dialog=adw::AlertDialog::builder().heading("An export is still in progress.")
+                        .body("Quitting cancels it. Any existing file at the destination is left unchanged.").build();
+                    dialog.add_response("continue","Continue Exporting");dialog.add_response("quit","Quit");
+                    dialog.set_default_response(Some("continue"));dialog.set_close_response("continue");
+                    dialog.connect_response(None,glib::clone!(#[weak] ui,move |_,response|if response=="quit" {ui.runtime.borrow_mut().close_confirmed=true;ui.window.close();}));
+                    dialog.present(Some(&ui.window));return glib::Propagation::Stop;
+                }
+            }
             let ui = hold.borrow_mut().take();
             if let Some(ui) = ui {
                 if let Err(error) = ui.save_session() {
@@ -431,6 +525,19 @@ impl Editor {
                     return glib::Propagation::Stop;
                 }
                 ui.perf.write();
+                let mut runtime = ui.runtime.borrow_mut();
+                runtime.closing = true;
+                if let Some(job)=&runtime.exporting {job.cancel();}
+                if let Some(client) = &runtime.client { client.stop(); }
+                std::mem::drop(runtime);
+                ui.window.set_sensitive(false);
+                let cache=ui.cache.clone();
+                glib::MainContext::default().spawn_local(async move {
+                    let _=gio::spawn_blocking(move ||cache.flush()).await;
+                    let app=ui.window.application();ui.window.destroy();
+                    if let Some(app)=app{app.quit();}
+                });
+                return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed
         });
@@ -492,6 +599,29 @@ impl Editor {
                 a.set_enabled(has_photo);
             }
         }
+        if !runtime::ui_only() {
+            let r = self.runtime.borrow();
+            for (key, enabled) in [
+                (
+                    "export",
+                    has_photo && r.ready && !cropping && r.exporting.is_none(),
+                ),
+                (
+                    "save-preview",
+                    has_photo && r.retained_id.is_some() && !cropping && r.exporting.is_none(),
+                ),
+                ("lut", r.ready && !cropping && r.exporting.is_none()),
+                ("original", r.developed.is_some() && !cropping),
+            ] {
+                if let Some(action) = self
+                    .window
+                    .lookup_action(key)
+                    .and_downcast::<gio::SimpleAction>()
+                {
+                    action.set_enabled(enabled);
+                }
+            }
+        }
         self.strip_scroll.set_sensitive(!cropping);
         self.inspector.set_sensitive(!cropping);
         self.undo.set_enabled(!cropping && h.can_undo());
@@ -501,6 +631,8 @@ impl Editor {
             rule(&h.state);
         }
         self.syncing.set(syncing);
+        drop(h);
+        self.observe_edit();
     }
     fn sync_state(&self) {
         self.syncing.set(true);
@@ -539,7 +671,13 @@ impl Editor {
     fn session_path() -> PathBuf {
         std::env::var_os("NEGS_PROFILE_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| glib::user_config_dir().join("negs/ui-preview"))
+            .unwrap_or_else(|| {
+                glib::user_config_dir().join(if runtime::ui_only() {
+                    "negs/ui-preview"
+                } else {
+                    "negs"
+                })
+            })
             .join("session.json")
     }
     fn save_session(&self) -> Result<(), String> {
@@ -555,7 +693,7 @@ impl Editor {
             state.crop = Some(self.canvas.crop_draft());
             state.straighten = self.canvas.draft_angle();
         }
-        let value = serde_json::json!({"ui_only":true,"photo":*self.current_path.borrow(),"state":state,"preferences":*prefs,"recent":*self.recent.borrow()});
+        let value = serde_json::json!({"schema":1,"ui_only":runtime::ui_only(),"photo":*self.current_path.borrow(),"state":state,"preferences":*prefs,"recent":*self.recent.borrow(),"view":self.canvas.view()});
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -566,15 +704,22 @@ impl Editor {
 }
 
 fn data_root() -> PathBuf {
-    if let Some(path) = std::env::var_os("NEGS_DATA_DIR") {
+    if let Some(path) =
+        std::env::var_os("SPEKTRAFILM_DATA_DIR").or_else(|| std::env::var_os("NEGS_DATA_DIR"))
+    {
         return PathBuf::from(path);
     }
-    if let Some(root) = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.join("data")))
-        && root.is_dir()
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(directory) = executable.parent()
     {
-        return root;
+        for root in [
+            directory.join("../share/negs/data"),
+            directory.join("../data"),
+        ] {
+            if root.is_dir() {
+                return root;
+            }
+        }
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data")
 }
@@ -584,7 +729,11 @@ fn main() -> glib::ExitCode {
     perf.mark("main_entered_ms");
     let args: Vec<_> = std::env::args().skip(1).collect();
     let app = adw::Application::builder()
-        .application_id("dev.negs.app.UiPreview")
+        .application_id(if runtime::ui_only() {
+            "dev.negs.app.UiPreview"
+        } else {
+            "dev.negs.app"
+        })
         .flags(
             if std::env::var_os("NEGS_PROFILE_DIR").is_some()
                 || args.iter().any(|a| a == "--fresh" || a == "--demo")
@@ -658,6 +807,8 @@ fn main() -> glib::ExitCode {
         {
             ui.history.borrow_mut().state = state;
             ui.history.borrow_mut().state.sanitize();
+            ui.pending_view
+                .replace(session.as_ref().and_then(|s| s.get("view")).cloned());
         }
         if !args.iter().any(|s| s == "--fresh")
             && let Some(session) = session.as_ref()
@@ -665,6 +816,7 @@ fn main() -> glib::ExitCode {
             ui.restore_preferences(session);
         }
         ui.window.present();
+        ui.start_engine();
         ui.perf.mark("present_called_ms");
         let deferred = Rc::new(Cell::new(false));
         if let Some(clock) = ui.window.frame_clock() {
@@ -674,8 +826,8 @@ fn main() -> glib::ExitCode {
                 move |_| {
                     if !deferred.replace(true) {
                         glib::idle_add_local_once(move || {
-                            inspector::build(&ui);
-                            ui.sync_state();
+                            ui.shell_painted.set(true);
+                            ui.maybe_build_inspector();
                         });
                     }
                 }
@@ -710,6 +862,9 @@ fn main() -> glib::ExitCode {
             ui.open(path);
         }
         validation::schedule(&ui);
+        if let Some(report) = std::env::var_os("NEGS_ENGINE_AUDIT") {
+            engine_validation::schedule(&ui, report.into());
+        }
         if let Ok(ms) = std::env::var("NEGS_QUIT_AFTER_MS")
             .unwrap_or_default()
             .parse::<u64>()

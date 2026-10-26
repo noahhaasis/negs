@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 import gi
+from desktop_test import prepare_window
 
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi
@@ -13,7 +14,7 @@ from gi.repository import Atspi
 root = Path(__file__).resolve().parent.parent
 out = root / "target/linux-validation/ui-accessibility"
 out.mkdir(parents=True, exist_ok=True)
-env = dict(os.environ, GTK_A11Y="atspi", NEGS_PROFILE_DIR=str(out / "profile"), NEGS_QUIT_AFTER_MS="16000")
+env = dict(os.environ, NEGS_UI_ONLY="1", GTK_A11Y="atspi", NEGS_PROFILE_DIR=str(out / "profile"), NEGS_QUIT_AFTER_MS="16000")
 results = []
 
 def wait_for(fn, description, seconds=5):
@@ -40,6 +41,7 @@ def tree(node, limit=1500):
 with (out / "app.log").open("w") as log:
     p = subprocess.Popen([str(root / "target/linux-ui/release/negs"), "--demo", "--fresh"], env=env, stdout=log, stderr=log)
     try:
+        prepare_window(p)
         Atspi.init()
         desktop = Atspi.get_desktop(0)
         def application():
