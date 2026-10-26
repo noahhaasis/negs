@@ -2,7 +2,9 @@ param(
     [string]$WinSparkleDll,
     [string]$AppcastUrl,
     [string]$EdPublicKey,
-    [string]$Iscc
+    [string]$Iscc,
+    # CI builds the engine and app in parallel jobs and places them first.
+    [switch]$Prebuilt
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -20,11 +22,17 @@ function Build([string[]]$Arguments) {
     & cargo @Arguments
     if ($LASTEXITCODE -ne 0) { throw 'Cargo build failed.' }
 }
-# Separate invocations prevent f64 feature unification changing the preview.
-Build @('build', '--release', '--locked', '-p', 'spektrafilm-native')
-Build @('build', '--release', '--locked', '-p', 'spektrafilm-cli', '--bin', 'spektrafilm')
-Build @('build', '--release', '--locked', '-p', 'spektrafilm-cli', '--features', 'precision-f64', '--bin', 'spektrafilm-f64')
-Build @('build', '--release', '--locked', '--manifest-path', 'windows/Cargo.toml')
+if ($Prebuilt) {
+    foreach ($path in @('windows/target/release/Negs.exe', 'target/release/spektrafilm-native.exe', 'target/release/spektrafilm.exe', 'target/release/spektrafilm-f64.exe')) {
+        if (-not (Test-Path -LiteralPath $path)) { throw "Missing prebuilt $path" }
+    }
+} else {
+    # Separate invocations prevent f64 feature unification changing the preview.
+    Build @('build', '--release', '--locked', '-p', 'spektrafilm-native')
+    Build @('build', '--release', '--locked', '-p', 'spektrafilm-cli', '--bin', 'spektrafilm')
+    Build @('build', '--release', '--locked', '-p', 'spektrafilm-cli', '--features', 'precision-f64', '--bin', 'spektrafilm-f64')
+    Build @('build', '--release', '--locked', '--manifest-path', 'windows/Cargo.toml')
+}
 # A fresh staging directory makes repeated packaging safe and reproducible.
 $stage = Join-Path $root ('target/windows-package-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stage | Out-Null
