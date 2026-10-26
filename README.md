@@ -11,9 +11,9 @@ Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https:
 > [!TIP]
 > **Film simulation that keeps up with you.** Every slider updates live. Faster than spektrafilm-rs; dramatically faster than Python spektrafilm.
 
-**[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [install steps](#macos)
+**[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.9.0/Negs-0.9.0-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [install steps](#macos)
 
-**[Download for Windows](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-Setup.exe)** · Windows x64 · [portable version](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-portable.zip) · [install steps](#windows)
+**[Download for Windows](https://github.com/noahhaasis/negs/releases/download/v0.9.0/Negs-0.9.0-windows-x64-Setup.exe)** · Windows x64 · [portable version](https://github.com/noahhaasis/negs/releases/download/v0.9.0/Negs-0.9.0-windows-x64-portable.zip) · [install steps](#windows)
 
 **Linux** · Arch and Omarchy, x86_64 · [one-command install](#linux-arch--omarchy)
 
@@ -93,10 +93,10 @@ Negs updates itself: use **Negs → Check for Updates…**, or turn automatic ch
 
 Native Windows app with the same film engine as the Mac app: GPU previews, crop and straighten tools, borders, and Fast or Reference exports.
 
-1. **Download** [`Negs-0.8.0-windows-x64-experimental-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-Setup.exe) and run it. It installs for your Windows account and adds Negs to **Open with**, without changing your default photo app.
+1. **Download** [`Negs-0.9.0-windows-x64-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.9.0/Negs-0.9.0-windows-x64-Setup.exe) and run it. It installs for your Windows account and adds Negs to **Open with**, without changing your default photo app.
 2. **If Windows SmartScreen warns you**, click **More info → Run anyway**. Negs isn't code-signed, which needs a paid certificate.
 
-Prefer no installer? Extract [`Negs-0.8.0-windows-x64-experimental-portable.zip`](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-portable.zip) and run `Negs.exe`. Keep the included helper executables and `data` folder beside it.
+Prefer no installer? Extract [`Negs-0.9.0-windows-x64-portable.zip`](https://github.com/noahhaasis/negs/releases/download/v0.9.0/Negs-0.9.0-windows-x64-portable.zip) and run `Negs.exe`. Keep the included helper executables and `data` folder beside it.
 
 Windows doesn't update itself yet: download the newer installer from the [releases page](https://github.com/noahhaasis/negs/releases) and run it over the old one. The editing panel and film strip start enabled, and F7/F6 toggle them during use.
 
