@@ -1,5 +1,5 @@
 pkgname=negs
-pkgver=0.7.0
+pkgver=0.8.0
 pkgrel=1
 pkgdesc='Native GTK4 photographic film simulation editor'
 arch=('x86_64')
