@@ -452,6 +452,81 @@ Exceptions that remain:
 - **Grain** is gated statistically (`tests/grain_statistics.rs`, CPU and
   GPU), not per pixel.
 
+## Catalog and controls: `sweep_experimental.py`
+
+`check_parity.py` proves the f64 engine stage by stage on five routes. The
+sweep covers the whole catalog and the inspector, and compares what the app
+shows. Each case renders one 384 × 766 input (two golden photographs above
+the `scene` fixture) with Python, the f64 CLI (float for float) and the app's
+own engine, `spektrafilm-native` on the GPU, driven over its JSON-lines
+protocol as the app drives it (the 8-bit sRGB preview buffer it hands the
+app). Both engines keep their defaults; grain and glare are off.
+
+The plan (556 cases) is fixed in `build_plan`:
+
+- every film in both catalogs on the paper the app pairs it with, every
+  colour negative on Supra Endura (the Python app's default paper), and every
+  paper with Portra 400 (Double-X for B&W papers);
+- on Portra 400 → Endura, Vision3 500T → 2383, Provia 100F scanned and
+  Double-X → 2302: every Lab slider once below and once above its default,
+  and every toggle and picker once. `response` records how far each setting
+  moves the picture from the route's defaults (mean and max ΔE00) in Python
+  and in the app.
+
+Python runs in warm worker processes, once per case and to `rgb_out` only;
+the f64 renders and metrics run in parallel. A full run takes about 4
+minutes on an M1 Pro. `--reuse-python` checks another build, such as a
+released app, against an earlier run's references in about 20 s. Inputs are
+the golden harness's TIFFs (`NEGS_GOLDEN_INPUTS`, default
+`target/golden/inputs`).
+
+```bash
+NEGS_GOLDEN_INPUTS=target/golden/inputs ../spektrafilm-env/bin/python -I \
+  scripts/parity/sweep_experimental.py --python-source /path/to/exp \
+  --output-dir /tmp/negs-sweep
+
+# A released app against the same references:
+../spektrafilm-env/bin/python -I scripts/parity/sweep_experimental.py \
+  --python-source /path/to/exp --output-dir /tmp/negs-sweep-release \
+  --reuse-python /tmp/negs-sweep --skip-f64 \
+  --native-binary /Applications/Negs.app/Contents/MacOS/spektrafilm-native \
+  --rust-data /Applications/Negs.app/Contents/Resources/data --group films --group papers
+```
+
+Result on 2026-10-26 (main `84129ee`): 556/556 within one 8-bit step of
+Python (at most 0.04% of pixels touched, ΔE00 ≤ 1.23); f64 ≤ 2.8e-7,
+except the diffusion filter (7.8e-6, Python's float32 FFT). Every setting
+moves the picture by the same amount in both (largest gap 0.02 ΔE00).
+Release 0.7.0 (`a5c360f`, before ticket 16) was far off: Vision3 500T and
+200T mean ΔE00 about 16 (much too blue: `T` fell back to D55), daylight films
+around 2. Not compared: Negs-only stocks and settings (`settings.use_cat16`,
+RAW white balance, Image Size, Post), glare, and grain, which
+`grain_compare.py` covers.
+
+## Grain statistics: `grain_compare.py`
+
+Flat grey tiles at four exposures, auto exposure and glare off, the stock's
+grain preset on. In the middle of each tile it measures the sRGB output's RMS
+in 8-bit steps and the grain's autocorrelation half width, plus the radially
+averaged power spectrum, for Python, the GPU CLI and the f64 CLI. Sizes:
+640 px (the Python app's preview), 2016 px, and 1008 px enlarged 2× before
+the simulation (Python `io.upscale_factor`, Negs `io.photo_long_side_px`).
+`--release APP` adds a released app; `--view` compares Negs' full-size render
+shown at window size with Python's 640 px preview enlarged to it.
+
+```bash
+../spektrafilm-env/bin/python -I scripts/parity/grain_compare.py \
+  --python-source /path/to/exp --output-dir /tmp/negs-grain --release /Applications/Negs.app
+```
+
+Result on 2026-10-26 (main `84129ee`), Portra 400, Vision3 500T, Provia 100F
+and Gold 200: RMS and grain size match Python at every size and with
+enlargement (RMS within 0.01, size 0.86–0.87 px for both). Release 0.7.0
+had 3–4× the RMS on Portra, Gold and Provia, about 20% less on 500T, and
+finer grain (0.70 px). At a 1512 px window, Python's 640 px preview shows
+4.4× less grain than a 6048 px Negs render. That is the preview size, not the
+engine: Python's full-size scan matches Negs.
+
 ## Original methodology and surviving probes
 
 The initial release (`b97a682`) records Python v0.3.2 measurements: decode
