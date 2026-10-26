@@ -3,6 +3,33 @@ use adw::prelude::*;
 use gtk::glib;
 use std::{cell::Cell, rc::Rc};
 
+fn source_portrait(state: &crate::model::State, source: (i32, i32)) -> bool {
+    if state.rotation % 2 == 1 {
+        source.0 > source.1
+    } else {
+        source.1 > source.0
+    }
+}
+
+fn aspect_ratio(index: u32, source: (i32, i32), portrait: bool, custom: (f64, f64)) -> f64 {
+    let ratio = match index {
+        0 => source.0.max(source.1).max(1) as f64 / source.0.min(source.1).max(1) as f64,
+        1 => 0.,
+        2 => 1.,
+        3 => 16. / 9.,
+        4 => 1.5,
+        5 => 4. / 3.,
+        6 => 1.25,
+        7 => 1.4,
+        _ => return custom.0 / custom.1,
+    };
+    if portrait && ratio > 0. {
+        1. / ratio
+    } else {
+        ratio
+    }
+}
+
 pub fn build(ui: &Rc<Editor>) {
     ui.crop_bar.set_orientation(gtk::Orientation::Vertical);
     ui.crop_bar.set_halign(gtk::Align::Fill);
@@ -47,22 +74,6 @@ pub fn build(ui: &Rc<Editor>) {
     let reset = gtk::Button::with_label("Reset");
     reset.set_tooltip_text(Some("Reset crop and straighten"));
     let a = gtk::Adjustment::new(0., -45., 45., 0.1, 0.5, 0.);
-    reset.connect_clicked(glib::clone!(
-        #[weak]
-        ui,
-        #[weak]
-        ratios,
-        #[weak]
-        portrait,
-        #[weak]
-        a,
-        move |_| {
-            ui.canvas.reset_crop();
-            a.set_value(0.);
-            ratios.set_selected(0);
-            portrait.set_active(false);
-        }
-    ));
     line.insert(&reset, -1);
     for (title, action) in [("Cancel", "win.crop-cancel"), ("Done", "win.crop-done")] {
         let button = gtk::Button::with_label(title);
@@ -114,35 +125,14 @@ pub fn build(ui: &Rc<Editor>) {
             if ui.syncing.get() || !ui.canvas.cropping() {
                 return;
             }
-            let (sw, sh) = ui.canvas.source_size();
-            let turned = ui.history.borrow().state.rotation % 2 == 1;
-            let (sw, sh) = if turned { (sh, sw) } else { (sw, sh) };
-            let original = sw.max(sh).max(1) as f64 / sw.min(sh).max(1) as f64;
             let index = ratios.selected();
             custom.set_visible(index == 8);
-            let ratio = match index {
-                0 => original,
-                1 => 0.,
-                2 => 1.,
-                3 => 16. / 9.,
-                4 => 1.5,
-                5 => 4. / 3.,
-                6 => 1.25,
-                7 => 1.4,
-                _ => width.value() / height.value(),
-            };
-            let tall = if index == 0 {
-                sh > sw
-            } else if index == 8 {
-                false
-            } else {
-                portrait.is_active()
-            };
-            ui.canvas.crop_ratio(if tall && ratio > 0. {
-                1. / ratio
-            } else {
-                ratio
-            });
+            ui.canvas.crop_ratio(aspect_ratio(
+                index,
+                ui.canvas.source_size(),
+                portrait.is_active(),
+                (width.value(), height.value()),
+            ));
             let mut h = ui.history.borrow_mut();
             h.state
                 .choices
@@ -154,10 +144,52 @@ pub fn build(ui: &Rc<Editor>) {
             h.state.values.insert("Crop height".into(), height.value());
         }
     ));
-    ratios.connect_selected_notify(glib::clone!(
+    reset.connect_clicked(glib::clone!(
+        #[weak]
+        ui,
+        #[weak]
+        ratios,
+        #[weak]
+        portrait,
+        #[weak]
+        a,
         #[strong]
         apply,
-        move |_| apply()
+        move |_| {
+            ui.syncing.set(true);
+            a.set_value(0.);
+            ratios.set_selected(0);
+            portrait.set_active(source_portrait(
+                &ui.history.borrow().state,
+                ui.canvas.source_size(),
+            ));
+            ui.syncing.set(false);
+            apply();
+            // Keep Reset's full frame exact, without aspect-fit rounding.
+            ui.canvas.reset_crop();
+            let source = ui.canvas.source_size();
+            ui.canvas
+                .lock_ratio(source.0.max(1) as f64 / source.1.max(1) as f64);
+        }
+    ));
+    ratios.connect_selected_notify(glib::clone!(
+        #[weak]
+        ui,
+        #[weak]
+        portrait,
+        #[strong]
+        apply,
+        move |ratios| {
+            if !ui.syncing.get() && ratios.selected() == 0 {
+                ui.syncing.set(true);
+                portrait.set_active(source_portrait(
+                    &ui.history.borrow().state,
+                    ui.canvas.source_size(),
+                ));
+                ui.syncing.set(false);
+            }
+            apply();
+        }
     ));
     portrait.connect_toggled(glib::clone!(
         #[weak]
@@ -198,13 +230,19 @@ pub fn build(ui: &Rc<Editor>) {
     ));
     ui.rules.borrow_mut().push(Box::new(glib::clone!(
         #[weak]
+        ui,
+        #[weak]
         portrait,
         #[weak]
         width,
         #[weak]
         height,
         move |s| {
-            portrait.set_active(crate::inspector::flag(s, "Crop portrait", false));
+            portrait.set_active(crate::inspector::flag(
+                s,
+                "Crop portrait",
+                source_portrait(s, ui.canvas.source_size()),
+            ));
             width.set_value(s.values.get("Crop width").copied().unwrap_or(5.));
             height.set_value(s.values.get("Crop height").copied().unwrap_or(4.));
         }
@@ -233,31 +271,22 @@ pub fn build(ui: &Rc<Editor>) {
             ui.syncing.set(true);
             a.set_value(state.straighten);
             ratios.set_selected(crate::inspector::choice(&state, "Crop aspect"));
-            portrait.set_active(crate::inspector::flag(&state, "Crop portrait", false));
+            portrait.set_active(crate::inspector::flag(
+                &state,
+                "Crop portrait",
+                source_portrait(&state, ui.canvas.source_size()),
+            ));
             width.set_value(state.values.get("Crop width").copied().unwrap_or(5.));
             height.set_value(state.values.get("Crop height").copied().unwrap_or(4.));
             custom.set_visible(ratios.selected() == 8);
             let source = ui.canvas.source_size();
-            let original = source.0.max(1) as f64 / source.1.max(1) as f64;
-            let ratio = match ratios.selected() {
-                0 => original,
-                1 => 0.,
-                2 => 1.,
-                3 => 16. / 9.,
-                4 => 1.5,
-                5 => 4. / 3.,
-                6 => 1.25,
-                7 => 1.4,
-                _ => width.value() / height.value(),
-            };
-            let shown = if ratios.selected() == 0 {
-                original
-            } else if ratios.selected() != 8 && portrait.is_active() && ratio > 0. {
-                1. / ratio
-            } else {
-                ratio
-            };
-            let source_ratio = if ratios.selected() != 0 && state.rotation % 2 == 1 && shown > 0. {
+            let shown = aspect_ratio(
+                ratios.selected(),
+                source,
+                portrait.is_active(),
+                (width.value(), height.value()),
+            );
+            let source_ratio = if state.rotation % 2 == 1 && shown > 0. {
                 1. / shown
             } else {
                 shown
