@@ -4,17 +4,17 @@
 
 **Your photos, developed on film.**
 
-Negs is a **free** photo app for Mac and Windows that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
+Negs is a **free** photo app for Mac, Windows and Linux that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
 
-Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in a native macOS app.
+Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in native apps for macOS, Windows and Linux.
 
-**[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [getnegs.com](https://getnegs.com)
+**[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [install steps](#macos)
 
 **[Download for Windows](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-Setup.exe)** · Windows x64 · [portable version](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-portable.zip) · [install steps](#windows)
 
-**Linux (Arch / Omarchy):** one command, see the [install steps](#linux-arch--omarchy)
+**Linux** · Arch and Omarchy, x86_64 · [one-command install](#linux-arch--omarchy)
 
-The first time you open Negs, macOS asks you to allow it in System Settings: see the [install steps](#install).
+[getnegs.com](https://getnegs.com)
 
 | RAW · Apple default | Negs · Kodak Ektar 100 |
 |---|---|
@@ -26,12 +26,12 @@ The first time you open Negs, macOS asks you to allow it in System Settings: see
 
 Pick a film, pick a paper, drag a slider, and watch the picture change as you move.
 
-- Opens RAW files from most cameras, including Nikon HE★ and 60 MP medium format, plus JPEG, TIFF and PNG
+- Opens RAW files from most cameras, including Nikon HE★ (Mac only) and 60 MP medium format, plus JPEG, TIFF and PNG
 - Crop, straighten, and add borders with each stock's real edge print
 - Image Size enlarges a photo *before* the film, so grain and halation form at print size instead of being stretched afterwards
-- Undo, keyboard shortcuts, pinch to zoom: it behaves like a Mac app
+- Undo, keyboard shortcuts, pinch to zoom: it feels at home on Mac, Windows and Linux
 - Exports PNG, TIFF or JPEG and keeps your camera's EXIF, at 8 or 16 bits per channel (JPEG with a quality slider), in sRGB, Display P3, Adobe RGB or ProPhoto RGB (16-bit only) with an embedded ICC profile
-- Export the current film and paper colors as a 33³ sRGB `.cube` LUT from File → Export LUT… on macOS and Windows. No photograph is needed; spatial effects and Post edits are excluded.
+- Export the current film and paper colors as a 33³ sRGB `.cube` LUT from File → Export LUT… on every platform. No photograph is needed; spatial effects and Post edits are excluded.
 - Live preview while you drag a slider, and what you see in the preview is what you export
 
 https://github.com/user-attachments/assets/b1b50860-9160-4a6c-b939-42ceaa9e82cd
@@ -75,6 +75,8 @@ Kodak, Fujifilm and Ilford stock names are trademarks of their owners. Negs is n
 
 ### macOS
 
+The first time you open Negs, macOS asks you to allow it in System Settings:
+
 1. **Download** the `.dmg` from the [latest release](https://github.com/noahhaasis/negs/releases).
 2. **Drag to Applications.** Open the `.dmg` and drag **Negs** into the **Applications** folder.
 3. **Open it once.** Double-click Negs. macOS says it can't verify the app and won't open it. Click **Done** (not *Move to Trash*).
@@ -105,17 +107,17 @@ Native GTK4 app on the same film engine, for x86_64 Arch Linux and Omarchy. Inst
 curl -fsSL https://raw.githubusercontent.com/noahhaasis/negs/main/linux/get-negs.sh | sh
 ```
 
-It downloads the latest release, checks its SHA-256 checksum and installs under `~/.local`. If you'd rather read it first, [the script](linux/get-negs.sh) is short. Negs needs GTK 4.16+, libadwaita 1.6+, OpenBLAS and a Vulkan driver for your GPU (the engine falls back to the CPU without one). On Omarchy these are normally present; elsewhere:
+It downloads the latest release, checks its SHA-256 checksum and installs under `~/.local`. It's built for rolling-release distributions: the release needs a very recent glibc (2.44), so it won't run on Ubuntu LTS, Debian stable or Fedora releases that ship older versions; there, [build from source](docs/linux-app.md). If you'd rather read it first, [the script](linux/get-negs.sh) is short. Negs needs GTK 4.16+, libadwaita 1.6+, OpenBLAS and a Vulkan driver for your GPU (the engine falls back to the CPU without one). On Omarchy these are normally present; elsewhere:
 
 ```sh
 sudo pacman -S --needed gtk4 libadwaita openblas vulkan-icd-loader
 ```
 
-Run `negs` or open it from your launcher. To update, run the command again; to remove it, run `python3 ~/.local/share/negs/install.py --uninstall`. Your settings and photos are kept.
+Run `negs` (or `~/.local/bin/negs` if `~/.local/bin` isn't on your `PATH`) or open it from your launcher. To update, run the command again; to remove it, run `python3 ~/.local/share/negs/install.py --uninstall`. Your settings and photos are kept.
 
 ### Handy shortcuts
 
-| | Mac | Windows |
+| | Mac | Windows & Linux |
 |---|---|---|
 | Open a photo | ⌘O | Ctrl+O |
 | Export | ⇧⌘E | Ctrl+Shift+E |
@@ -133,7 +135,7 @@ Pinch to zoom, scroll or drag to pan, double-click to fit.
 Yes. It's free to download and open source under the GPL-3.0 (see [License](#license)).
 
 **macOS says Negs can't be opened. Is it safe?**
-macOS shows that warning for every app that isn't notarized by Apple. Negs isn't, because notarizing needs a paid developer account. All of the source code is in this repository for anyone to check. Follow the [install steps](#install): you only need to allow it once.
+macOS shows that warning for every app that isn't notarized by Apple. Negs isn't, because notarizing needs a paid developer account. All of the source code is in this repository for anyone to check. Follow the [install steps](#macos): you only need to allow it once.
 
 **Which files can I open?**
 RAW files from most cameras, plus JPEG, TIFF and PNG. The Mac app uses Apple's RAW support with a rawler fallback; the Windows and Linux apps use rawler for RAW files.
@@ -144,15 +146,15 @@ Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it ru
 **Is this a preset pack?**
 No. Presets and LUTs remap colours. Negs simulates the film, the paper and the light, which is why halation, grain and edge effects come out right.
 
-**Windows or Linux?**
-Both. There is a [native Windows app](#windows) with an installer and a portable build, and a native GTK4 app for [Arch and Omarchy Linux](#linux-arch--omarchy).
+**Which platforms does it run on?**
+macOS 14 or later (Apple silicon and Intel), Windows x64, and x86_64 Arch and Omarchy Linux. There is a [Mac app](#macos), a [Windows app](#windows) with an installer and a portable build, and a native GTK4 app for [Linux](#linux-arch--omarchy).
 
 **Found a bug or have an idea?**
 [Open an issue](https://github.com/noahhaasis/negs/issues).
 
 ## Credits
 
-The film model at the heart of Negs comes from two open-source projects. Negs builds a fast, native Mac app on top of them.
+The film model at the heart of Negs comes from two open-source projects. Negs builds fast, native apps for Mac, Windows and Linux on top of them.
 
 - **[spektrafilm](https://github.com/andreavolpato/spektrafilm)** by Andrea Volpato: the spectral simulation of film and print. The physics and the stock data come from here.
 - **[spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs)** by turbasvin: the Rust port of spektrafilm that Negs started from.
@@ -167,7 +169,7 @@ That means you can use Negs for anything, including commercial work. The photos 
 
 - Copyright © Andrea Volpato (spektrafilm)
 - Copyright © turbasvin (spektrafilm-rs)
-- Copyright © 2026 Noah Haasis (Negs: the Mac app and the changes to the engine)
+- Copyright © 2026 Noah Haasis (Negs: the apps and the changes to the engine)
 
 Third-party components keep their own licenses. Sparkle, the update framework bundled in the Mac app, is under the MIT license.
 
@@ -177,24 +179,4 @@ Building from source, the command-line tools, accuracy against the original Pyth
 
 ### Building the Linux app
 
-The native Linux editor uses GTK4/libadwaita and the same Rust film engine, with
-GPU previews and separate Fast and Reference exporters. Build with Rust
-**1.93.1**, GTK **4.16+** and libadwaita **1.6+**. On Arch or Omarchy:
-
-```sh
-sudo pacman -S --needed base-devel rustup pkgconf python gtk4 libadwaita openblas vulkan-icd-loader hicolor-icon-theme desktop-file-utils
-rustup toolchain install 1.93.1 --profile minimal
-
-# From the repository root:
-bash linux/build.sh
-bash linux/run.sh /absolute/path/to/photo.NEF
-```
-
-Install the Vulkan driver appropriate for your GPU to enable hardware
-acceleration; the engine also supports CPU fallback. Running without a photo
-path restores the previous session.
-
-To build an Arch package from committed source, run `bash linux/package.sh`.
-Artifacts are written to `target/linux-package/<short-commit>/assets/`.
-See [Linux build and installation details](docs/linux-app.md) and the
-[AUR/Omarchy release checklist](docs/linux-release.md).
+The Linux app is a GTK4/libadwaita editor on the same Rust film engine. To build and run it, or to build an Arch package, see the [Linux build and installation details](docs/linux-app.md) and the [AUR/Omarchy release checklist](docs/linux-release.md).
