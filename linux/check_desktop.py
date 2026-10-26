@@ -78,13 +78,14 @@ with (out / 'app.log').open('w') as log:
             return any('Developed in' in n.get_name() and 'wgpu (GPU)' in n.get_name() for n in nodes())
         wait(developed, 'JPEG did not develop on hardware Vulkan')
         for source in [root / 'target/linux-validation/inputs/photo_DSC_4990.tif', root / 'target/linux-validation/engine-ui-final/source.png']:
-            result = subprocess.run([binary, source], env=env, cwd=out, capture_output=True, timeout=5)
+            command = ['gio', 'launch', str(Path.home() / '.local/share/applications/dev.negs.app.desktop'), str(source)] if source.suffix == '.png' else [str(binary), str(source)]
+            result = subprocess.run(command, env=env, cwd=out, capture_output=True, timeout=5)
             assert result.returncode == 0
             wait(lambda: any(n.get_role() == Atspi.Role.FRAME and n.get_name().startswith(source.name + ' —') for n in nodes()), 'File-open activation did not reach the existing window')
             wait(developed, 'Activated photo did not develop')
             clients = json.loads(hypr('-j', 'clients'))
             assert [c['pid'] for c in clients if c.get('class') == 'dev.negs.app'] == [process.pid]
-        checks.append('Installed JPEG, float TIFF and PNG open; GApplication forwards activation to one window')
+        checks.append('Installed JPEG, float TIFF and PNG open; desktop-entry and GApplication activation forward to one window')
         send('-M', 'ctrl', 's', '-m', 'ctrl')
         save = wait(lambda: named('Save Preview', Atspi.Role.PUSH_BUTTON), 'No native Save Preview options')
         assert save.get_action_iface().do_action(0)

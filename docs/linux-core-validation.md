@@ -187,3 +187,117 @@ waiting for exit.
 The desktop check uses the actual GTK portal process for saving, with target
 PID/address verification before keyboard input. In-process audit exports are
 separate evidence from this native picker flow.
+
+## Final installed startup and interaction (41ed8c6)
+
+These runs use the **installed** `~/.local/bin/negs`, its own helpers/data/BLAS,
+real unlocked Hyprland/Wayland, GskVulkanRenderer on NVIDIA, 1320×900 logical
+pixels at scale 1.25, Rust 1.93.1. Builds and golden rendering were stopped.
+The first RAW launch has an empty application pipeline-cache directory and no
+rendered-preview cache; OS/driver caches were already populated. This is not a
+cold OS/driver-cache measurement. Four subsequent launches restore the same
+isolated session. The source is the unchanged 24 MP NEF.
+
+| Milestone | Median | Range | Runs |
+|---|---:|---:|---:|
+| First frame actually presented | 428 ms | 427–451 ms | 5 |
+| First injected input received | 503 ms | 453–563 ms | 5 |
+| Cached developed preview presented | 624 ms | 611–660 ms | 4 restored |
+| Current saveable float render ready | 2.271 s | 2.213–2.621 s | 5 |
+| Newly developed frame presented | 2.421 s | 2.344–2.752 s | 5 |
+
+Input delivery after injection ranges 15–117 ms; this includes the startup
+workload and compositor/GTK dispatch. These timings supersede the earlier
+cached-frame reporting bug. Evidence: `installed-startup-final/{summary.json,lazy-*.json}`.
+
+Three connected interaction runs drive a native exposure adjustment and zoom
+through 240 frame-clock updates: 4.099/4.138/4.163 s, approximately 58 GTK updates/s.
+The engine presents 66/70/70 interactive proxy frames, separately from those GTK
+updates. Callback p95 is 1.423/1.926/1.649 ms. Full saveable pixels arrive
+917/967/921 ms after release. These are programmatic native-control updates,
+not physical pointer input or a claim of 60 film renders/s.
+Evidence: `installed-interaction-final/live-summary.json` and per-launch JSON.
+
+A separate 760×900 light-theme RAW launch works with the collapsed inspector;
+artifacts are under `installed-narrow-final/`. The earlier dark/narrow/crop/border
+visual checks remain in the UI report. One real display at fractional scale is
+covered; mixed-display hardware was unavailable.
+
+## Final 24 MP performance and GPU logs
+
+Quiet installed f32 exporter, three processes with three in-process iterations
+each, no raw diagnostics and normal TIFF output enabled:
+
+| Process | Pipeline iterations | Wall time including load/save |
+|---|---|---:|
+| 1 | 880 / 779 / 782 ms | 3.171 s |
+| 2 | 867 / 791 / 786 ms | 3.075 s |
+| 3 | 858 / 788 / 780 ms | 3.069 s |
+
+Every run uses the resident hardware GPU path and produces the same TIFF SHA-256,
+`bd80cee24e9dc7f9c9d2523a0a8e700eaa2af5947fd053513a796815d4f19d7e`.
+Whole-device memory peaks at 1854 MiB from a 691 MiB baseline, sampled at 100 ms;
+this includes the desktop and is not process-only VRAM. Report:
+`core-performance-quiet/report.json`. The earlier `core-performance-final` run
+overlapped an app audit and is superseded for performance claims.
+
+The Linux kernel journal covering validation from 07:00 UTC through the final
+benchmark has no matching NVRM/Xid/GPU-reset messages (`kernel-validation-window.log`).
+The benchmark's Windows watchdog field is null on Linux and is not used as
+Linux device-health evidence. Device-loss recovery remains unfinished.
+
+## Packaging and actual installation
+
+App/package source revision: **41ed8c6**, with the pinned Rust toolchain and
+locked workspaces. Later documentation/test-only commits do not change those
+product binaries. Full source-archive makepkg build succeeds; incremental final
+UI fixes were rebuilt through the same recipe. `--nodeps` was necessary locally
+because OpenBLAS is an unpacked official package rather than registered in
+pacman. The recipe declares its real GTK/OpenBLAS/Vulkan/Python dependencies;
+normal installations retain dependency checking. No root package installation
+was performed on this password-protected machine.
+
+- Arch artifact: `target/linux-package/negs-0.7.0-1-x86_64.pkg.tar.zst` (73 MiB).
+- Per-user bundle: `target/linux-package/negs-0.7.0-linux-x86_64.tar.gz` (88 MiB).
+- Linux source archive: `target/linux-package/negs-0.7.0.tar.gz` (30 MiB).
+- Checksums/byte counts: `target/linux-validation/package-provenance.json`.
+
+The source archive contains the Linux client, Rust crates, data, build/validation
+scripts, relevant docs and licenses. It excludes transferred photos, caches,
+dumps, the untracked machine handoff and unrelated historical review images.
+Desktop entry validation succeeds and installed binaries have no development
+RPATH. The bundle includes the official OpenBLAS library/license; it uses the
+machine's GTK/libadwaita and Fortran/OpenMP runtimes.
+
+The manifest installer passes idempotency, unique/backed-up Hyprland include,
+modified-file refusal, and uninstall preservation of modified/unowned files and
+settings (`package-install.json`). Actual installation under `~/.local` succeeds.
+No global MIME defaults are changed. The per-user entry and GApplication both
+forward JPEG/TIFF/PNG opens to one existing window; Ctrl+S saves real pixels
+through **xdg-desktop-portal-gtk**; graceful quit saves the session and reaps the
+helper (`installed-desktop/result.json`).
+
+Both the installed bundle and extracted final Arch application pass all 11
+RAW/preview/export/cancellation integration checks. Arch validation supplies its
+declared OpenBLAS dependency from the local official-package sysroot. Checkout
+helper fallback is disabled during installed checks. Evidence:
+`installed-engine-final/` and `arch-engine-audit/`.
+
+The exporters extracted from the package repeat all 484 golden renders with
+zero failures and exact baseline hashes: 184 GPU, 184 f64, 116 f32 CPU.
+Final package exporter SHA-256 values match this run's binary provenance.
+Evidence: `linux-packaged{,-exact}.{json,log}`.
+
+Focused/inactive compositor captures of the installed **dev.negs.app** preserve
+all 209,308 configured border pixels at RGB (35,52,69), plus 10,050 visible
+photo samples, exactly. No default-opacity tag remains. The focus probe covers
+a different part of the canvas; comparison samples exclude it. Evidence:
+`installed-opacity/{result.json,focused.png,inactive.png}`. The initial UI-only
+alpha-zero input test is separately documented in the UI report.
+
+The installed editor is left open on DSC_5003.jpg with the earlier review
+adjustments and white border restored. The prior empty installed session was
+backed up to `target/linux-validation/installed-session-before-review.json`.
+Final screenshot: `target/linux-validation/installed-review.png`; startup/backend
+and window records use the `installed-review-*` prefix. The process remained
+responsive after helper worker-thread retirement.
