@@ -1,3 +1,7 @@
+> Historical UI-only inventory at commit 693223d. The engine connection, exports,
+> cache, RAW development and packaging were subsequently implemented; see
+> [linux-app.md](linux-app.md) and [linux-core-validation.md](linux-core-validation.md).
+
 # Linux UI parity audit
 
 Audited against the current macOS sources (`Inspector.swift`, `Border.swift`,

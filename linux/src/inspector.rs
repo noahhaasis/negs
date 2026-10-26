@@ -8,6 +8,10 @@ use std::{cell::Cell, rc::Rc};
 
 pub fn knob(ui: &Rc<Editor>, group: &str, knob: &Knob) -> gtk::ListBoxRow {
     let key = format!("{group}.{}", knob.0);
+    let engine_default = crate::parameters::path(&key)
+        .and_then(|p| crate::parameters::get(&ui.runtime.borrow().defaults, &p).as_f64())
+        .unwrap_or(knob.4);
+    let knob = &Knob(knob.0, knob.1, knob.2, knob.3, engine_default, knob.5);
     let value = ui
         .history
         .borrow()
@@ -73,6 +77,15 @@ pub fn number(
         move |_| adjustment.set_value(knob_default)
     ));
     line.append(&reset);
+    let double = gtk::GestureClick::new();
+    double.connect_pressed(glib::clone!(
+        #[weak]
+        reset,
+        move |_, count, _, _| if count == 2 {
+            reset.emit_clicked();
+        }
+    ));
+    label.add_controller(double);
     line.append(&spin);
     if !knob.5.is_empty() {
         let unit = gtk::Label::new(Some(knob.5));
@@ -93,7 +106,7 @@ pub fn number(
         #[weak]
         label,
         move |a: &gtk::Adjustment| {
-            let modified = (a.value() - knob_default).abs() > 1e-9;
+            let modified = (a.value() - knob_default).abs() > 1e-6 * (1. + knob_default.abs());
             reset.set_visible(modified);
             if modified {
                 label.add_css_class("modified");
@@ -152,6 +165,7 @@ pub fn number(
             match event.event_type() {
                 gtk::gdk::EventType::ButtonPress | gtk::gdk::EventType::TouchBegin => {
                     dragging.set(true);
+                    ui.runtime.borrow_mut().interacting = true;
                     ui.history.borrow_mut().begin(&title);
                 }
                 gtk::gdk::EventType::ButtonRelease
@@ -161,6 +175,7 @@ pub fn number(
                     let ui = ui.clone();
                     glib::idle_add_local_once(move || {
                         dragging.set(false);
+                        ui.runtime.borrow_mut().interacting = false;
                         ui.history.borrow_mut().commit();
                         ui.sync_history();
                     });
@@ -179,7 +194,9 @@ pub fn number(
                 return;
             }
             let started = glib::monotonic_time();
-            let value = (a.value() / step).round() * step;
+            let decimal_scale = 10f64.powi(digits as i32);
+            let value =
+                (((a.value() / step).round() * step) * decimal_scale).round() / decimal_scale;
             let mut h = ui.history.borrow_mut();
             h.begin(&title);
             change(&mut h.state, value);
@@ -243,12 +260,18 @@ pub fn combo(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, options: &[&str]
             ui.sync_history();
         }
     ));
-    choice_reset(ui, &row, title, "0");
+    let default = choice_default(&ui.runtime.borrow().defaults, title, "0");
+    choice_reset(ui, &row, title, &default);
     ui.choices.borrow_mut().push((title.into(), row.clone()));
     list.append(&row);
     row
 }
 pub fn toggle(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, active: bool) -> adw::SwitchRow {
+    let active = choice_default(
+        &ui.runtime.borrow().defaults,
+        title,
+        if active { "true" } else { "false" },
+    ) == "true";
     let row = adw::SwitchRow::builder()
         .title(title)
         .active(active)
@@ -394,9 +417,7 @@ pub fn build(ui: &Rc<Editor>) {
         visible(ui, &row, |s| choice(s, "White balance") == 3);
         raw.append(&row);
     }
-    let raw_caption = gtk::Label::new(Some(
-        "RAW white balance · re-decoding waits for the engine connection",
-    ));
+    let raw_caption = gtk::Label::new(Some("RAW white balance · changes re-decode the photograph"));
     raw_caption.set_wrap(true);
     raw_caption.add_css_class("caption");
     lab.append(&raw_caption);
@@ -443,10 +464,7 @@ pub fn build(ui: &Rc<Editor>) {
             let switch = gtk::Switch::new();
             switch.set_valign(gtk::Align::Center);
             let key = format!("{} enabled", group.name);
-            let default = !matches!(
-                group.name,
-                "Lens Diffusion" | "Film Curves" | "Print Curves"
-            );
+            let default = effect_default(ui, group.name);
             switch.set_active(flag(&ui.history.borrow().state, &key, default));
             switch.update_property(&[gtk::accessible::Property::Label(&format!(
                 "Enable {}",
@@ -470,7 +488,7 @@ pub fn build(ui: &Rc<Editor>) {
                 move |_| {
                     let mut h = ui.history.borrow_mut();
                     h.begin(&format!("Reset {key}"));
-                    h.state.choices.remove(&key);
+                    reset_choice(&mut h.state, &key, if default { "true" } else { "false" });
                     h.commit();
                     drop(h);
                     ui.sync_state();
@@ -587,7 +605,11 @@ pub fn build(ui: &Rc<Editor>) {
     let reset = gtk::Button::with_label("Reset Adjustments");
     reset.set_action_name(Some("win.reset"));
     footer.append(&reset);
-    let hint = gtk::Label::new(Some("UI preview · film processing is not connected"));
+    let hint = gtk::Label::new(Some(if crate::runtime::ui_only() {
+        "UI preview · film processing is not connected"
+    } else {
+        "Film processing · Spektrafilm"
+    }));
     hint.add_css_class("dim-label");
     hint.add_css_class("caption");
     footer.append(&hint);
@@ -638,10 +660,7 @@ fn sensitive(
 fn group_controls(ui: &Rc<Editor>, expander: &adw::ExpanderRow, group: &'static fixtures::Group) {
     let content = list();
     let key = format!("{} enabled", group.name);
-    let default = !matches!(
-        group.name,
-        "Lens Diffusion" | "Film Curves" | "Print Curves"
-    );
+    let default = effect_default(ui, group.name);
     sensitive(ui, &content, move |s| flag(s, &key, default));
     match group.name {
         "Lens Diffusion" => {
@@ -970,10 +989,17 @@ fn image_size(ui: &Rc<Editor>, body: &gtk::Box) {
             (choice(s, "Develop at") == 1).then_some(target),
         );
         let source = ui.canvas.source_size();
+        let r=ui.runtime.borrow();
+        let note=if crate::runtime::ui_only(){"This preview still displays the camera image.".to_string()}
+            else if let Some(frame)=r.developed.as_ref().filter(|_|r.current_revision==Some(r.revision)){
+                let full=frame.result["working_width"].as_f64().unwrap_or(frame.width as f64);
+                let percent=(frame.width as f64/full*100.).min(100.);
+                if percent<99.9 {format!("Preview shown at {percent:.0}%. Exports develop all pixels; inspect grain in an export.")}else{String::new()}
+            }else{"Developing the current adjustments…".into()};
         readout.set_text(&format!(
             "Source {} × {} px
 Working {} × {} px · Photograph {} × {} px
-Resizes before film simulation. This preview still displays the camera image.",
+Resizes before film simulation. {note}",
             source.0, source.1, working.0, working.1, photo.0, photo.1
         ));
     }));
@@ -1025,10 +1051,12 @@ fn choice_reset(ui: &Rc<Editor>, row: &impl IsA<adw::ActionRow>, key: &str, defa
         ui,
         #[strong]
         key,
+        #[strong]
+        default,
         move |_| {
             let mut h = ui.history.borrow_mut();
             h.begin(&format!("Reset {key}"));
-            h.state.choices.remove(&key);
+            reset_choice(&mut h.state, &key, &default);
             h.commit();
             drop(h);
             ui.sync_state();
@@ -1045,4 +1073,88 @@ fn choice_reset(ui: &Rc<Editor>, row: &impl IsA<adw::ActionRow>, key: &str, defa
             widget.remove_css_class("modified");
         }
     }));
+}
+
+/// Resolve the same value for reset, display and runtime translation. Keeping an
+/// explicit choice matters when a restored full RuntimeParams has another value.
+fn choice_default(defaults: &serde_json::Value, key: &str, fallback: &str) -> String {
+    if key == "Limit preview to 12 MP" && defaults.is_object() {
+        return "false".into();
+    }
+    if let Some(value) = crate::parameters::TOGGLES
+        .iter()
+        .find(|(name, _)| *name == key)
+        .and_then(|(_, path)| crate::parameters::get(defaults, path).as_bool())
+    {
+        return value.to_string();
+    }
+    crate::parameters::CHOICES
+        .iter()
+        .find(|(name, _, _)| *name == key)
+        .and_then(|(_, path, options)| {
+            options
+                .iter()
+                .position(|&option| crate::parameters::get(defaults, path).as_str() == Some(option))
+        })
+        .map(|index| index.to_string())
+        .unwrap_or_else(|| fallback.into())
+}
+fn reset_choice(state: &mut crate::model::State, key: &str, value: &str) {
+    state.choices.insert(key.into(), value.into());
+}
+fn effect_default(ui: &Editor, group: &str) -> bool {
+    let fallback = if matches!(group, "Lens Diffusion" | "Film Curves" | "Print Curves") {
+        "false"
+    } else {
+        "true"
+    };
+    choice_default(
+        &ui.runtime.borrow().defaults,
+        &format!("{group} enabled"),
+        fallback,
+    ) == "true"
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::{choice_default, reset_choice};
+    use serde_json::json;
+
+    #[test]
+    fn reset_choice_overrides_restored_params_and_keeps_display_in_sync() {
+        let defaults = json!({"camera":{"auto_exposure_method":"center_weighted"},"scanner":{"white_correction":false},"settings":{"use_cat16":true}});
+        let mut state = crate::model::State {
+            params: json!({"camera":{"auto_exposure_method":"median"},"scanner":{"white_correction":true},"settings":{"use_cat16":false}}),
+            ..Default::default()
+        };
+        for (key, fallback) in [
+            ("Metering", "0"),
+            ("White correction", "true"),
+            ("CAT16 adaptation", "false"),
+        ] {
+            let value = choice_default(&defaults, key, fallback);
+            reset_choice(&mut state, key, &value);
+        }
+        let params = crate::parameters::runtime(&state, &defaults);
+        assert_eq!(state.choices["Metering"], "2");
+        assert_eq!(params["camera"]["auto_exposure_method"], "center_weighted");
+        assert_eq!(state.choices["White correction"], "false");
+        assert_eq!(params["scanner"]["white_correction"], false);
+        assert_eq!(state.choices["CAT16 adaptation"], "true");
+        assert_eq!(params["settings"]["use_cat16"], true);
+    }
+
+    #[test]
+    fn preview_limit_and_effect_reset_follow_connected_defaults() {
+        let defaults = json!({"film_render":{"grain":{"active":false}}});
+        assert_eq!(
+            choice_default(&defaults, "Limit preview to 12 MP", "true"),
+            "false"
+        );
+        assert_eq!(choice_default(&defaults, "Grain enabled", "true"), "false");
+        assert_eq!(
+            choice_default(&serde_json::Value::Null, "Limit preview to 12 MP", "true"),
+            "true"
+        );
+    }
 }

@@ -1,4 +1,4 @@
-//! Complete local export-option/destination UI; intentionally performs no writes.
+//! Native options followed by a portal-compatible save picker.
 use crate::Editor;
 use adw::prelude::*;
 use gtk::{gio, glib};
@@ -138,9 +138,7 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
     destination.add_css_class("caption");
     body.append(&destination);
     let choose = gtk::Button::with_label("Choose Destination…");
-    choose.set_tooltip_text(Some(
-        "Selects a path only. No file is written in this UI preview.",
-    ));
+    choose.set_tooltip_text(Some("Choose the output folder and suggested filename"));
     body.append(&choose);
     let hint = gtk::Label::new(None);
     hint.set_wrap(true);
@@ -220,9 +218,11 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
                     ));
                 }
             }
-            message.push_str(
-                "\nEngine processing and file writing are not connected in this UI preview.",
-            );
+            if crate::runtime::ui_only() {
+                message.push_str(
+                    "\nEngine processing and file writing are not connected in this UI preview.",
+                );
+            }
             hint.set_text(&message);
         }
     ));
@@ -299,7 +299,7 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         }
     ));
     choose.connect_clicked(glib::clone!(#[weak] ui,#[weak] filename,#[weak] destination,move |_| {
-        let picker=gtk::FileDialog::builder().title("Choose Output Destination · no file will be written").initial_name(filename.text()).build();
+        let picker=gtk::FileDialog::builder().title("Choose Output Destination").initial_name(filename.text()).build();
         if let Some(folder)=ui.preferences.borrow().last_save_folder.as_ref().filter(|p|p.is_dir()) {picker.set_initial_folder(Some(&gio::File::for_path(folder)));}
         picker.save(Some(&ui.window),None::<&gio::Cancellable>,glib::clone!(#[weak] ui,#[weak] filename,#[weak] destination,move |result| {
             if let Ok(file)=result && let Some(path)=file.path() {
@@ -317,8 +317,32 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         "Export Photograph"
     });
     save.add_css_class("suggested-action");
-    save.set_sensitive(false);
-    save.set_tooltip_text(Some("Requires the film engine connection"));
+    save.set_sensitive(
+        !crate::runtime::ui_only()
+            && ui.runtime.borrow().ready
+            && ui.runtime.borrow().exporting.is_none(),
+    );
+    save.set_tooltip_text(Some(if crate::runtime::ui_only() {
+        "Requires the film engine connection"
+    } else {
+        "Choose a filename and save atomically"
+    }));
+    save.connect_clicked(glib::clone!(#[weak] ui,#[weak] dialog,#[weak] filename,#[weak] format,#[weak] engine,move |_|{
+        if preview && ui.runtime.borrow().retained_id.is_none() {ui.toast.add_toast(adw::Toast::new("Wait for the current preview to finish developing."));return;}
+        let picker=gtk::FileDialog::builder().title(title).initial_name(filename.text()).build();
+        if let Some(folder)=ui.preferences.borrow().last_save_folder.as_ref().filter(|p|p.is_dir()){picker.set_initial_folder(Some(&gio::File::for_path(folder)));}
+        let kind=if lut {crate::exports::Kind::Lut}else if preview {crate::exports::Kind::Preview}else if engine.selected()==1 {crate::exports::Kind::Reference}else{crate::exports::Kind::Fast};
+        let expected=if lut {"cube"}else{extension(format.selected())};
+        picker.save(Some(&ui.window),None::<&gio::Cancellable>,glib::clone!(#[weak] ui,#[weak] dialog,move |result|{
+            if let Ok(file)=result && let Some(path)=file.path(){
+                let ext=path.extension().and_then(|s|s.to_str()).unwrap_or("").to_ascii_lowercase();
+                if ext!=expected && !(expected=="jpg" && ext=="jpeg") && !(expected=="tif" && ext=="tiff") {ui.engine_error(&format!("Use a .{expected} filename for the selected output format."));return;}
+                if ui.current_path.borrow().as_ref().is_some_and(|source|same_file(source,&path)){ui.engine_error("Choose a different filename to preserve the original photograph.");return;}
+                ui.preferences.borrow_mut().last_save_folder=path.parent().map(std::path::Path::to_path_buf);
+                dialog.close();ui.begin_export(path,kind);
+            }
+        }));
+    }));
     body.append(&save);
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)

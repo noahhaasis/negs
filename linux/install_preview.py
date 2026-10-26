@@ -40,7 +40,7 @@ with tarfile.open(app / "source.tar.gz", "w:gz") as archive:
         archive.add(item, arcname=str(item.relative_to(root)), filter=lambda entry: None if "__pycache__" in Path(entry.name).parts else entry)
 bin_dir.mkdir(parents=True, exist_ok=True)
 launcher = bin_dir / "negs-ui-preview"
-launcher.write_text('#!/bin/sh\nexec ' + shlex.quote(str(app / "bin/negs")) + ' "$@"\n')
+launcher.write_text('#!/bin/sh\nexport NEGS_UI_ONLY=1\nexec ' + shlex.quote(str(app / "bin/negs")) + ' "$@"\n')
 launcher.chmod(0o755)
 icon = data / "icons/hicolor/256x256/apps/dev.negs.app.UiPreview.png"
 icon.parent.mkdir(parents=True, exist_ok=True)

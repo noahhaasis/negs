@@ -2,6 +2,23 @@ use crate::border::{Layout, Settings, Style};
 use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
 
+pub fn srgb_texture(
+    width: i32,
+    height: i32,
+    format: gdk::MemoryFormat,
+    bytes: &glib::Bytes,
+    stride: usize,
+) -> gdk::Texture {
+    gdk::MemoryTextureBuilder::new()
+        .set_width(width)
+        .set_height(height)
+        .set_format(format)
+        .set_color_state(&gdk::ColorState::srgb())
+        .set_bytes(Some(bytes))
+        .set_stride(stride)
+        .build()
+}
+
 #[derive(Clone)]
 struct Asset {
     texture: gdk::Texture,
@@ -16,6 +33,7 @@ mod imp {
     pub struct Canvas {
         pub texture: RefCell<Option<gdk::Texture>>,
         pub source_size: Cell<(i32, i32)>,
+        pub photo_size: Cell<(i32, i32)>,
         pub zoom: Cell<f64>,
         pub fitting: Cell<bool>,
         pub pan: Cell<(f64, f64)>,
@@ -336,7 +354,7 @@ impl Canvas {
         )
     }
     fn image_size(&self) -> (f64, f64) {
-        let (w, h) = self.imp().source_size.get();
+        let (w, h) = self.imp().photo_size.get();
         (w.max(1) as f64, h.max(1) as f64)
     }
     pub fn new() -> Self {
@@ -566,11 +584,55 @@ impl Canvas {
     pub fn set_texture(&self, t: &gdk::Texture, source: (i32, i32)) {
         self.imp().texture.replace(Some(t.clone()));
         self.imp().source_size.set(source);
+        self.imp().photo_size.set(source);
         self.fit();
+    }
+    pub fn update_texture(&self, t: &gdk::Texture, source: (i32, i32), photo: (i32, i32)) {
+        let old = self.image_size();
+        self.imp().texture.replace(Some(t.clone()));
+        self.imp().source_size.set(source);
+        self.imp().photo_size.set(photo);
+        if !self.imp().fitting.get() && photo.0 > 0 {
+            self.imp()
+                .zoom
+                .set(self.imp().zoom.get() * old.0 / photo.0 as f64);
+        }
+        self.queue_draw();
+    }
+    pub fn interactive_scale(&self) -> f64 {
+        let scale = self
+            .native()
+            .and_then(|n| n.surface())
+            .map(|s| s.scale())
+            .unwrap_or(1.);
+        self.display_scale() * scale
     }
     pub fn fit(&self) {
         self.imp().fitting.set(true);
         self.imp().pan.set((0., 0.));
+        self.queue_draw();
+    }
+    pub fn view(&self) -> serde_json::Value {
+        serde_json::json!({"fit":self.imp().fitting.get(),"zoom":self.imp().zoom.get(),"pan":self.imp().pan.get()})
+    }
+    pub fn restore_view(&self, value: &serde_json::Value) {
+        self.imp()
+            .fitting
+            .set(value["fit"].as_bool().unwrap_or(true));
+        self.imp().zoom.set(
+            value["zoom"]
+                .as_f64()
+                .filter(|v| v.is_finite())
+                .unwrap_or(1.)
+                .clamp(0.005, 16.),
+        );
+        let side = |i: usize| {
+            value["pan"][i]
+                .as_f64()
+                .filter(|v| v.is_finite() && v.abs() < 1e6)
+                .unwrap_or(0.)
+        };
+        self.imp().pan.set((side(0), side(1)));
         self.queue_draw();
     }
     pub fn actual_size(&self) {
@@ -585,6 +647,9 @@ impl Canvas {
         self.queue_draw();
     }
     pub fn zoom_at(&self, factor: f64, point: (f64, f64)) {
+        if self.imp().cropping.get() {
+            return;
+        }
         let old = self.display_scale();
         let new = (old * factor).clamp(0.005, 16.);
         let (px, py) = self.imp().pan.get();

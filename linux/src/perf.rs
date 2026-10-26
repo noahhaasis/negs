@@ -133,7 +133,7 @@ impl Perf {
             return;
         };
         let report = json!({
-            "kind": "gtk-ui-only", "pid": std::process::id(),
+            "kind": if crate::runtime::ui_only() {"gtk-ui-only"} else {"gtk-spektrafilm"}, "pid": std::process::id(),
             "gtk": format!("{}.{}.{}", gtk::major_version(), gtk::minor_version(), gtk::micro_version()),
             "libadwaita": format!("{}.{}.{}", adw::major_version(), adw::minor_version(), adw::micro_version()),
             "session": std::env::var("XDG_SESSION_TYPE").ok(),
@@ -143,8 +143,8 @@ impl Perf {
             "frame_clock_times_us": *self.0.frames.borrow(),
             "slider_callback_ms": *self.0.slider_samples.borrow(),
             "details": *self.0.details.borrow(),
-            "developed_image_ms": null,
-            "note": "No engine. Presentation feedback, when provided by the compositor, is separate from frame submission."
+            "developed_image_ms": self.0.marks.borrow().get("developed_image_ms").copied(),
+            "note": "Compositor presentation feedback is separate from frame submission. Cache and engine state are recorded separately."
         });
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);

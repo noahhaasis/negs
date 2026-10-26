@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import time
 import gi
+from desktop_test import prepare_window
 
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
@@ -20,7 +21,7 @@ for path in (root / 'target/linux-validation/ui-demo').glob('*.jpg'):
     shutil.copyfile(path, photos / path.name)
 report = out / 'native-controls.json'
 report.unlink(missing_ok=True)
-env = dict(os.environ, GTK_A11Y='atspi', NEGS_PROFILE_DIR=str(out / 'profile'),
+env = dict(os.environ, NEGS_UI_ONLY="1", GTK_A11Y='atspi', NEGS_PROFILE_DIR=str(out / 'profile'),
            NEGS_UI_AUDIT=str(report), NEGS_INSPECTOR_MODE='eager', NEGS_QUIT_AFTER_MS='22000')
 
 def wait_for(fn, description, seconds=6):
@@ -41,6 +42,7 @@ def tree(node):
 
 with (out / 'app.log').open('w') as log:
     p = subprocess.Popen([str(root / 'target/linux-ui/release/negs'), '--fresh', str(photos / 'DSC_4990.jpg')], env=env, stdout=log, stderr=log)
+    prepare_window(p)
     try:
         wait_for(report.exists, 'Native GTK control audit failed; see app.log')
         assert json.loads(report.read_text())['status'] == 'PASS'

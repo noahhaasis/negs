@@ -49,6 +49,18 @@ impl Default for Preferences {
 impl Editor {
     pub fn refresh_recent(&self) {
         self.recent_menu.remove_all();
+        while let Some(child) = self.empty_recent.first_child() {
+            self.empty_recent.remove(&child);
+        }
+        for path in self.recent.borrow().iter().take(5) {
+            let button =
+                gtk::Button::with_label(&path.file_name().unwrap_or_default().to_string_lossy());
+            button.add_css_class("flat");
+            button.set_tooltip_text(Some(&path.to_string_lossy()));
+            button.set_action_name(Some("win.open-recent"));
+            button.set_action_target_value(Some(&path.to_string_lossy().to_string().to_variant()));
+            self.empty_recent.append(&button);
+        }
         for path in self.recent.borrow().iter() {
             let item = gio::MenuItem::new(
                 Some(&path.file_name().unwrap_or_default().to_string_lossy()),
@@ -68,7 +80,7 @@ impl Editor {
         let mut recent = self.recent.borrow_mut();
         recent.retain(|p| p != &path);
         recent.insert(0, path);
-        recent.truncate(12);
+        recent.truncate(10);
         drop(recent);
         self.refresh_recent();
     }
@@ -131,6 +143,10 @@ impl Editor {
             p.width = p.width.clamp(360, 7680);
             p.height = p.height.clamp(480, 4320);
             p.appearance = p.appearance.min(2);
+            if !crate::runtime::ui_only() {
+                p.inspector = true;
+                p.strip = true;
+            }
             self.window.set_default_size(p.width, p.height);
             self.resize_inspector(p.sidebar_width);
             self.window.set_maximized(p.maximized);
@@ -144,7 +160,7 @@ impl Editor {
         if let Some(values) = session.get("recent")
             && let Ok(mut recent) = serde_json::from_value::<Vec<PathBuf>>(values.clone())
         {
-            recent.truncate(12);
+            recent.truncate(10);
             self.recent.replace(recent);
         }
         self.refresh_recent();

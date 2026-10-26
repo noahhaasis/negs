@@ -3,6 +3,12 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use std::{path::PathBuf, rc::Rc};
 
+enum Opened {
+    Camera(crate::photo::Photo),
+    Cached(std::sync::Arc<crate::engine::Frame>),
+    EngineOnly,
+}
+
 impl Editor {
     fn action(self: &Rc<Self>, name: &str, callback: impl Fn(&Rc<Self>) + 'static) {
         let action = gio::SimpleAction::new(name, None);
@@ -76,7 +82,10 @@ impl Editor {
         self.action("shortcuts", |ui| ui.shortcuts());
         self.action("previous", |ui| ui.navigate(-1));
         self.action("next", |ui| ui.navigate(1));
-        self.action("original", |ui| ui.toast.add_toast(adw::Toast::new("The camera original is already displayed. Developed comparison will be available when the engine is connected.")));
+        self.action("original", |ui| {
+            let show = !ui.runtime.borrow().showing_original;
+            ui.show_original(show);
+        });
         self.refresh_recent();
         self.action("fit", |ui| ui.canvas.fit());
         self.action("actual", |ui| ui.canvas.actual_size());
@@ -165,6 +174,11 @@ impl Editor {
             h.state.values = s.values;
             h.state.values.extend(kept_values);
             h.state.choices = kept_choices.into_iter().collect();
+            if !crate::runtime::ui_only() {
+                let defaults = ui.runtime.borrow().defaults.clone();
+                crate::parameters::install_defaults(&mut h.state, &defaults, true);
+                h.state.params = defaults;
+            }
             let positive = crate::catalog::selected(&h.state, false).positive;
             h.state
                 .choices
@@ -183,6 +197,7 @@ impl Editor {
                 ui.crop_before
                     .replace(Some(ui.history.borrow().state.clone()));
                 ui.history.borrow_mut().begin("Crop");
+                ui.show_original(false);
                 ui.canvas.begin_crop();
                 ui.crop_bar.set_visible(true);
                 ui.canvas.grab_focus();
@@ -199,9 +214,17 @@ impl Editor {
         self.action("crop-square", |ui| ui.canvas.crop_ratio(1.));
         self.action("export", |ui| ui.export_dialog("photo"));
         self.action("save-preview", |ui| ui.export_dialog("preview"));
+        self.action("cancel-export", |ui| ui.cancel_export());
         self.action("lut", |ui| ui.export_dialog("lut"));
         self.action("appearance", |ui| ui.settings());
-        self.action("about",|ui|{let d=adw::AboutDialog::builder().application_name("Negs").application_icon("camera-photo-symbolic").version("0.7.0 · Linux UI preview").developer_name("Negs contributors").comments("A native GTK4/libadwaita editor.\nFilm processing is not connected in this preview.").license_type(gtk::License::Gpl30).build();d.present(Some(&ui.window));});
+        self.action("about", |ui| {
+            let d = adw::AboutDialog::builder().application_name("Negs")
+                .application_icon("dev.negs.app").version(if crate::runtime::ui_only() { "0.7.0 · Linux UI preview" } else { "0.7.0 · Linux" })
+                .developer_name("Negs contributors")
+                .comments("Film simulation with a native GTK4/libadwaita editor and the Spektrafilm engine.")
+                .license_type(gtk::License::Gpl30).build();
+            d.present(Some(&ui.window));
+        });
         for (action, keys) in [
             ("win.open", vec!["<Control>o"]),
             ("win.quit", vec!["<Control>q"]),
@@ -233,6 +256,10 @@ impl Editor {
             #[upgrade_or]
             glib::Propagation::Proceed,
             move |_, key, _, mods| {
+                if key == gdk::Key::backslash {
+                    ui.show_original(true);
+                    return glib::Propagation::Stop;
+                }
                 if !mods.is_empty() {
                     return glib::Propagation::Proceed;
                 }
@@ -261,13 +288,54 @@ impl Editor {
                 glib::Propagation::Stop
             }
         ));
+        keys.connect_key_released(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |_, key, _, _| if key == gdk::Key::backslash {
+                ui.show_original(false);
+            }
+        ));
         self.canvas.add_controller(keys);
+        let release = gtk::EventControllerFocus::new();
+        release.connect_leave(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |_| ui.show_original(false)
+        ));
+        self.canvas.add_controller(release);
     }
     fn finish_crop(&self, apply: bool) {
         if !self.canvas.cropping() {
             return;
         }
         let angle = self.canvas.draft_angle();
+        if apply
+            && self
+                .history
+                .borrow()
+                .state
+                .choices
+                .get("Develop at")
+                .map(String::as_str)
+                == Some("1")
+        {
+            let target = self
+                .history
+                .borrow()
+                .state
+                .values
+                .get("Image Size.Longest side")
+                .copied()
+                .unwrap_or(2048.);
+            if let Err(error) = crate::image_size::validate(
+                &format!("{target:.0}"),
+                self.canvas.source_size(),
+                Some(self.canvas.crop_draft()),
+            ) {
+                self.toast.add_toast(adw::Toast::new(&error));
+                return;
+            }
+        }
         let crop = self.canvas.end_crop();
         self.crop_bar.set_visible(false);
         if apply {
@@ -323,20 +391,35 @@ impl Editor {
         );
     }
     pub fn open(self: &Rc<Self>, path: PathBuf) {
+        if self.runtime.borrow().closing {
+            return;
+        }
         let path = gio::File::for_path(&path).path().unwrap_or(path);
         if self.pending_path.borrow().as_ref() == Some(&path) {
             return;
         }
-        let generation = self.generation.get() + 1;
-        self.generation.set(generation);
+        self.generation.set(self.generation.get() + 1);
+        let generation = self.generation.get();
         if self.current_path.borrow().as_ref() == Some(&path)
             && self.current_stamp.get() == Some(crate::filmstrip::stamp(&path))
         {
-            // Also cancel a different in-flight open if the displayed photo is chosen again.
             self.pending_path.take();
             self.select_strip(&path);
-            self.status
-                .set_text("Camera preview · engine not connected");
+            if crate::runtime::ui_only() {
+                self.status
+                    .set_text("Camera preview · engine not connected");
+            }
+            if !crate::runtime::ui_only()
+                && self.runtime.borrow().retained_id.is_none()
+                && !self.runtime.borrow().rendering
+            {
+                self.runtime.borrow_mut().requested_revision = 0;
+                if self.runtime.borrow().ready {
+                    self.render_next();
+                } else {
+                    self.start_engine();
+                }
+            }
             return;
         }
         if self.canvas.cropping() {
@@ -351,35 +434,62 @@ impl Editor {
                 self,
                 move || {
                     if ui.generation.get() == generation && ui.pending_path.borrow().is_some() {
-                        ui.status.set_text("Loading camera preview…");
+                        ui.status.set_text("Loading photograph…");
                     }
                 }
             ),
         );
+        let mut requested = self.history.borrow().state.clone();
+        if self
+            .current_path
+            .borrow()
+            .as_ref()
+            .is_some_and(|p| p != &path)
+        {
+            requested.crop = None;
+            requested.rotation = 0;
+            requested.straighten = 0.;
+        }
+        let requested_identity =
+            crate::preview_cache::identity(&requested, &self.runtime.borrow().defaults);
+        let defaults = self.runtime.borrow().defaults.clone();
+        let cache = self.cache.file.clone();
         let ui = self.clone();
         glib::MainContext::default().spawn_local(async move {
             let path2 = path.clone();
-            let result = gio::spawn_blocking(move || crate::photo::decode(&path2, 2400)).await;
-            if ui.generation.get() != generation {
+            let result = gio::spawn_blocking(move || {
+                if !crate::runtime::ui_only()
+                    && let Ok(paths) = crate::engine::Paths::locate()
+                    && let Some(key) =
+                        crate::preview_cache::key(&path2, &requested, &defaults, &paths)
+                    && let Some(frame) = crate::preview_cache::read(&cache, &key)
+                {
+                    return Ok(Opened::Cached(frame));
+                }
+                match crate::photo::decode(&path2, 2400) {
+                    Ok(photo) => Ok(Opened::Camera(photo)),
+                    Err(_)
+                        if !crate::runtime::ui_only()
+                            && path2.is_file()
+                            && crate::photo::supported(&path2) =>
+                    {
+                        Ok(Opened::EngineOnly)
+                    }
+                    Err(error) => Err(error),
+                }
+            })
+            .await;
+            if ui.generation.get() != generation || ui.runtime.borrow().closing {
                 return;
             }
             ui.pending_path.take();
             match result {
-                Ok(Ok(photo)) => {
-                    let format = if photo.alpha {
-                        gdk::MemoryFormat::R8g8b8a8
-                    } else {
-                        gdk::MemoryFormat::R8g8b8
-                    };
-                    let texture = gdk::MemoryTexture::new(
-                        photo.width,
-                        photo.height,
-                        format,
-                        &glib::Bytes::from_owned(photo.bytes),
-                        photo.stride,
-                    );
-                    if ui.current_path.borrow().is_some()
-                        && ui.current_path.borrow().as_ref() != Some(&path)
+                Ok(Ok(opened)) => {
+                    if ui
+                        .current_path
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|p| p != &path)
                     {
                         let mut state = ui.history.borrow().state.clone();
                         state.crop = None;
@@ -387,54 +497,146 @@ impl Editor {
                         state.straighten = 0.;
                         ui.history.replace(crate::model::History::new(state));
                     }
-                    ui.canvas.set_texture(texture.upcast_ref(), photo.source);
+                    if matches!(opened, Opened::Cached(_))
+                        && crate::preview_cache::identity(
+                            &ui.history.borrow().state,
+                            &ui.runtime.borrow().defaults,
+                        ) != requested_identity
+                    {
+                        ui.open(path);
+                        return;
+                    }
+                    let mut cached = None;
+                    let has_pixels = !matches!(opened, Opened::EngineOnly);
+                    match opened {
+                        Opened::Camera(photo) => {
+                            let format = if photo.alpha {
+                                gdk::MemoryFormat::R8g8b8a8
+                            } else {
+                                gdk::MemoryFormat::R8g8b8
+                            };
+                            let texture = crate::canvas::srgb_texture(
+                                photo.width,
+                                photo.height,
+                                format,
+                                &glib::Bytes::from_owned(photo.bytes),
+                                photo.stride,
+                            );
+                            ui.canvas.set_texture(texture.upcast_ref(), photo.source);
+                            ui.hist.replace(Some(photo.histogram));
+                            ui.dimensions
+                                .set_text(&format!("{} × {} px", photo.source.0, photo.source.1));
+                        }
+                        Opened::Cached(frame) => {
+                            let texture = crate::canvas::srgb_texture(
+                                frame.width,
+                                frame.height,
+                                gdk::MemoryFormat::R8g8b8a8,
+                                &glib::Bytes::from_owned(frame.pixels.clone()),
+                                frame.width as usize * 4,
+                            );
+                            let source = (
+                                frame.result["source_width"]
+                                    .as_i64()
+                                    .unwrap_or(frame.width as i64)
+                                    as i32,
+                                frame.result["source_height"]
+                                    .as_i64()
+                                    .unwrap_or(frame.height as i64)
+                                    as i32,
+                            );
+                            let photo = (
+                                frame.result["photo_width"]
+                                    .as_i64()
+                                    .unwrap_or(frame.width as i64)
+                                    as i32,
+                                frame.result["photo_height"]
+                                    .as_i64()
+                                    .unwrap_or(frame.height as i64)
+                                    as i32,
+                            );
+                            ui.canvas.set_texture(texture.upcast_ref(), source);
+                            ui.canvas
+                                .update_texture(texture.upcast_ref(), source, photo);
+                            ui.runtime.borrow_mut().cached_restoring = true;
+                            cached = Some(frame);
+                            ui.perf.mark("cached_texture_ready_ms");
+                        }
+                        Opened::EngineOnly => {
+                            ui.canvas.fit();
+                            ui.hist.take();
+                        }
+                    }
                     ui.current_path.replace(Some(path.clone()));
+                    if has_pixels && let Some(view) = ui.pending_view.take() {
+                        ui.canvas.restore_view(&view);
+                    }
                     ui.current_stamp.set(Some(crate::filmstrip::stamp(&path)));
                     ui.sync_state();
-                    ui.hist.replace(Some(photo.histogram));
+                    let restored = cached.is_some();
+                    if let Some(frame) = cached {
+                        ui.runtime.borrow_mut().developed = Some(frame);
+                        ui.update_engine_histogram();
+                    }
                     if let Some(hist) = ui.histogram.borrow().as_ref() {
                         hist.queue_draw();
                     }
-                    ui.dimensions
-                        .set_text(&format!("{} × {} px", photo.source.0, photo.source.1));
                     let name = path.file_name().unwrap_or_default().to_string_lossy();
                     ui.title.set_title(&name);
-                    ui.title.set_subtitle("Camera preview · Negs");
-                    ui.window
-                        .set_title(Some(&format!("{name} — Negs UI Preview")));
-                    ui.status.set_text("Camera preview · engine not connected");
+                    ui.title.set_subtitle(if restored {
+                        "Restored developed preview"
+                    } else {
+                        "Camera preview · Negs"
+                    });
+                    ui.window.set_title(Some(&format!(
+                        "{name} — Negs{}",
+                        if crate::runtime::ui_only() {
+                            " UI Preview"
+                        } else {
+                            ""
+                        }
+                    )));
+                    ui.status.set_text(if restored {
+                        "Restored preview · preparing saveable pixels…"
+                    } else if crate::runtime::ui_only() {
+                        "Camera preview · engine not connected"
+                    } else {
+                        "Developing…"
+                    });
                     ui.stage.set_visible_child_name("photo");
                     ui.strip_scroll.set_visible(ui.preferences.borrow().strip);
-                    ui.current_path.replace(Some(path.clone()));
                     ui.perf.mark("preview_texture_ready_ms");
-                    let p = ui.perf.clone();
+                    let perf = ui.perf.clone();
                     ui.canvas.add_tick_callback(move |widget, clock| {
-                        p.mark("preview_frame_requested_ms");
-                        p.watch_presentation(
+                        perf.mark("preview_frame_requested_ms");
+                        perf.watch_presentation(
                             clock,
                             clock.frame_counter(),
-                            "preview_frame_presented_ms",
+                            if restored {
+                                "cached_frame_presented_ms"
+                            } else {
+                                "preview_frame_presented_ms"
+                            },
                         );
-                        p.detail("preview_surface_mapped", widget.is_mapped());
-                        p.write();
+                        perf.detail("preview_surface_mapped", widget.is_mapped());
+                        perf.write();
                         glib::ControlFlow::Break
                     });
                     ui.remember(path.clone());
                     ui.load_strip(path);
                     ui.perf.write();
                 }
-                Ok(Err(e)) => {
+                Ok(Err(error)) => {
                     ui.status.set_text("Could not open photograph");
-                    ui.toast.add_toast(adw::Toast::new(&e));
+                    ui.recent.borrow_mut().retain(|p| p != &path);
+                    ui.refresh_recent();
+                    ui.toast.add_toast(adw::Toast::new(&error));
                     if let Some(path) = ui.current_path.borrow().as_ref() {
                         ui.select_strip(path);
                     }
                 }
                 Err(_) => {
                     ui.status.set_text("Image decoder stopped");
-                    if let Some(path) = ui.current_path.borrow().as_ref() {
-                        ui.select_strip(path);
-                    }
                 }
             }
         });

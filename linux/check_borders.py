@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import time
 import gi
+from desktop_test import prepare_window
 gi.require_version("Atspi", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Atspi, GdkPixbuf
@@ -13,7 +14,7 @@ from gi.repository import Atspi, GdkPixbuf
 root=Path(__file__).resolve().parent.parent
 out=root/"target/linux-validation/border-controls"
 out.mkdir(parents=True,exist_ok=True)
-env=dict(os.environ,GTK_A11Y="atspi",NEGS_PROFILE_DIR=str(out/"profile"),NEGS_UI_SCENE="post",NEGS_QUIT_AFTER_MS="18000")
+env=dict(os.environ, NEGS_UI_ONLY="1",GTK_A11Y="atspi",NEGS_PROFILE_DIR=str(out/"profile"),NEGS_UI_SCENE="post",NEGS_QUIT_AFTER_MS="18000")
 Atspi.init()
 def wait(fn,label):
     deadline=time.monotonic()+6
@@ -30,6 +31,7 @@ def tree(node):
 def launch(fresh):
     log=(out/"app.log").open("a")
     p=subprocess.Popen([str(root/"target/linux-ui/release/negs")]+(["--demo","--fresh"] if fresh else []),env=env,stdout=log,stderr=log)
+    prepare_window(p)
     desktop=Atspi.get_desktop(0)
     def find():
         return next((desktop.get_child_at_index(i) for i in range(desktop.get_child_count()) if desktop.get_child_at_index(i).get_process_id()==p.pid),None)
