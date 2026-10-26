@@ -694,6 +694,153 @@ mod tests {
         assert_eq!(crate::catalog::selected(&old, false).id, "kodak_portra_400");
     }
 
+    /// The helper's own defaults, from its `catalog` reply.
+    fn live_catalog() -> Value {
+        let helper = std::env::var_os("NEGS_SCHEMA_HELPER")
+            .expect("Set NEGS_SCHEMA_HELPER to the built spektrafilm-native executable");
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../data");
+        let mut child = Command::new(helper)
+            .arg("--data-dir")
+            .arg(data)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Start the native helper");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"{\"id\":1,\"command\":\"catalog\"}\n")
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        let reply: Value = serde_json::from_slice(&output.stdout).expect("Read the helper catalog");
+        reply["result"].clone()
+    }
+
+    /// Every case of `scripts/parity/sweep_experimental.py`, rebuilt through
+    /// the inspector's own bindings, sends the helper the same parameters as
+    /// the sweep. Run after a sweep, with NEGS_SWEEP_DIR set to its output.
+    #[test]
+    #[ignore = "Requires a built native helper and a finished experimental sweep"]
+    fn sweep_cases_match_the_inspector() {
+        let sweep = std::path::PathBuf::from(
+            std::env::var_os("NEGS_SWEEP_DIR").expect("Set NEGS_SWEEP_DIR to the sweep output"),
+        );
+        let defaults = live_catalog()["defaults"].clone();
+        let results: Value =
+            serde_json::from_str(&std::fs::read_to_string(sweep.join("results.json")).unwrap())
+                .unwrap();
+        let knobs: Vec<String> = crate::fixtures::GROUPS
+            .iter()
+            .flat_map(|g| g.knobs.iter().map(move |k| format!("{}.{}", g.name, k.0)))
+            .chain(
+                crate::fixtures::POST
+                    .iter()
+                    .map(|k| format!("Post.{}", k.0)),
+            )
+            .collect();
+        fn leaves(value: &Value, prefix: String, out: &mut Vec<(String, Value)>) {
+            match value {
+                Value::Object(map) => {
+                    for (k, v) in map {
+                        leaves(v, format!("{prefix}{k}."), out);
+                    }
+                }
+                Value::Array(items) => {
+                    for (i, v) in items.iter().enumerate() {
+                        leaves(v, format!("{prefix}{i}."), out);
+                    }
+                }
+                _ => out.push((prefix.trim_end_matches('.').into(), value.clone())),
+            }
+        }
+        let (mut compared, mut failures) = (0, Vec::new());
+        for case in results["cases"].as_array().unwrap() {
+            let id = case["id"].as_str().unwrap();
+            let Ok(text) =
+                std::fs::read_to_string(sweep.join("cases").join(id).join("params.json"))
+            else {
+                failures.push(format!("{id}: no params.json"));
+                continue;
+            };
+            let sent: Value = serde_json::from_str(&text).unwrap();
+            // A fresh connected edit, as Reset Adjustments leaves it.
+            let mut state = crate::fixtures::state();
+            install_defaults(&mut state, &defaults, true);
+            state.params = defaults.clone();
+            // No inspector has film-stage glare; like grain, the sweep turns
+            // it off because its random stream differs per engine.
+            set(&mut state.params, "film_render.glare.active", json!(false));
+            let choices = &mut state.choices;
+            choices.insert("Film ID".into(), case["film"].as_str().unwrap().into());
+            choices.insert("Paper ID".into(), case["paper"].as_str().unwrap().into());
+            let scan = case["scan_film"].as_bool().unwrap().to_string();
+            choices.insert("Scan film directly".into(), scan);
+            choices.insert("Grain enabled".into(), "false".into());
+            choices.insert("Glare enabled".into(), "false".into());
+            for (field, value) in case["set"].as_object().unwrap() {
+                if let Some(key) = knobs.iter().find(|k| path(k).as_deref() == Some(field)) {
+                    let knob = crate::fixtures::GROUPS
+                        .iter()
+                        .flat_map(|g| {
+                            g.knobs
+                                .iter()
+                                .map(move |k| (format!("{}.{}", g.name, k.0), k))
+                        })
+                        .find(|(k, _)| k == key)
+                        .map(|(_, k)| k);
+                    let v = value.as_f64().unwrap();
+                    if let Some(knob) = knob {
+                        // The slider can produce the value: in range, on its step.
+                        let steps = (v - knob.1) / knob.3;
+                        assert!(
+                            (knob.1..=knob.2).contains(&v) && (steps - steps.round()).abs() < 1e-6,
+                            "{id}: {key} cannot show {v}"
+                        );
+                    }
+                    state.values.insert(key.clone(), v);
+                } else if let Some((title, _)) = TOGGLES.iter().find(|(_, p)| p == field) {
+                    let on = value.as_bool().unwrap().to_string();
+                    state.choices.insert((*title).into(), on);
+                } else if let Some((title, _, options)) =
+                    CHOICES.iter().find(|(_, p, _)| p == field)
+                {
+                    let index = options.iter().position(|o| value.as_str() == Some(o));
+                    let index = index.unwrap_or_else(|| panic!("{id}: no {title} option {value}"));
+                    state.choices.insert((*title).into(), index.to_string());
+                } else {
+                    failures.push(format!("{id}: the inspector has no control for {field}"));
+                }
+            }
+            let linux = runtime(&state, &defaults);
+            let expected = merge(&defaults, &sent);
+            let (mut a, mut b) = (Vec::new(), Vec::new());
+            leaves(&expected, String::new(), &mut a);
+            leaves(&linux, String::new(), &mut b);
+            let b: std::collections::BTreeMap<_, _> = b.into_iter().collect();
+            for (field, want) in a {
+                let got = b.get(&field).cloned().unwrap_or(Value::Null);
+                // Exact, except that a lane the inspector leaves at the helper's
+                // default (an f32 widened to f64) may equal the sweep's
+                // Python decimal default at f32 precision: same engine input.
+                let same = match (want.as_f64(), got.as_f64()) {
+                    (Some(x), Some(y)) => {
+                        x == y
+                            || (get(&defaults, &field).as_f64() == Some(y) && x as f32 == y as f32)
+                    }
+                    _ => want == got,
+                };
+                if !same {
+                    failures.push(format!("{id}: {field} sweep {want} inspector {got}"));
+                }
+            }
+            compared += 1;
+        }
+        eprintln!("{compared} sweep cases compared");
+        assert!(compared > 0);
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
     #[test]
     #[ignore = "Requires a built native helper; the release recipe runs this integration gate"]
     fn live_helper_schema() {
