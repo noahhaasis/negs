@@ -161,6 +161,9 @@ impl Drop for Scratch {
 struct Connection {
     stdin: ChildStdin,
     lines: mpsc::Receiver<Result<String>>,
+    // Linux PDEATHSIG follows the thread that forks, not just its process.
+    // Keep a dedicated spawn thread alive for this persistent connection.
+    _spawn_thread: mpsc::Sender<()>,
 }
 #[derive(Default)]
 struct Worker {
@@ -206,8 +209,16 @@ impl Engine {
         if self.stopped.load(Ordering::Acquire) {
             return Err(STOPPED.into());
         }
-        let mut child = command
-            .spawn()
+        let (spawned, receiver) = mpsc::sync_channel(1);
+        let (spawn_thread, lifetime) = mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            if spawned.send(command.spawn()).is_ok() {
+                let _ = lifetime.recv();
+            }
+        });
+        let mut child = receiver
+            .recv()
+            .map_err(|e| e.to_string())?
             .map_err(|e| format!("Cannot start {}: {e}", self.paths.helper.display()))?;
         let stdin = child.stdin.take().ok_or("Missing helper input")?;
         let stdout = child.stdout.take().ok_or("Missing helper output")?;
@@ -239,7 +250,11 @@ impl Engine {
                 }
             }
         });
-        Ok(Connection { stdin, lines })
+        Ok(Connection {
+            stdin,
+            lines,
+            _spawn_thread: spawn_thread,
+        })
     }
     /// Serial request, bounded by timeout. An engine/protocol failure resets the
     /// connection; a valid engine error preserves it and its retained output.
@@ -603,6 +618,37 @@ mod tests {
         fs::hard_link(&source, &alias).unwrap();
         assert!(same_file(&source, &alias));
         assert!(!same_file(&source, &scratch.directory.join("different")));
+    }
+    #[test]
+    fn helper_survives_the_thread_that_submitted_its_first_request() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = Scratch::new().unwrap();
+        let helper = scratch.directory.join("mock-helper");
+        fs::write(&helper, "#!/usr/bin/python3\nimport json,sys\nfor line in sys.stdin:\n r=json.loads(line)\n print(json.dumps({'id':r['id'],'result':{'protocol':1}}),flush=True)\n").unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+        let engine = Engine::with_paths(Paths {
+            helper: helper.clone(),
+            fast: helper.clone(),
+            reference: helper,
+            data: scratch.directory.clone(),
+        })
+        .unwrap();
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    engine
+                        .request(json!({"command":"catalog"}), Duration::from_secs(2))
+                        .unwrap()
+                })
+                .join()
+                .unwrap();
+        });
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(
+            engine
+                .request(json!({"command":"catalog"}), Duration::from_secs(2))
+                .is_ok()
+        );
     }
     #[test]
     fn cancelled_queued_request_never_connects_or_interrupts_the_worker() {

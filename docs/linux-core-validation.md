@@ -148,9 +148,10 @@ optional fields preserve legacy save defaults and operation order for existing
 macOS/Windows clients; capabilities detect mismatched installations. Default
 quality and metadata behavior remain byte-identical in IO tests.
 
-The GTK-side Rust suite passes **17 tests**, including source hard-link protection,
+The GTK-side Rust suite passes **18 tests**, including source hard-link protection,
 serial EOF/bad-ID/timeout recovery, running exporter cancellation/reaping, queued
-helper cancellation without execution, RGBA validation, lossless cache corruption/
+helper cancellation without execution, persistent helper lifetime across submitting
+thread exit, RGBA validation, lossless cache corruption/
 identity checks, and live-default reset consistency. Clippy passes with warnings
 as errors. IO/native tests and the existing 22-test golden harness are recorded
 in `core-final-tests.log` and `golden-harness-tests.log` (one existing IO test is
@@ -171,3 +172,18 @@ Same-revision Mac output has not been transferred. Other GPU vendors, multi-moni
 mixed scaling, calibrated wide-gamut output and driver device-loss recovery remain
 unverified. This machine's explicit sRGB Wayland path and NVIDIA Vulkan execution
 are the tested configuration. No driver timeouts were altered.
+
+## Installed desktop and helper lifetime
+
+Normal single-instance startup exposed Linux's thread-specific parent-death
+signal semantics: a persistent helper forked from a retiring GIO worker could
+be killed even while the GUI process was alive. The helper now forks on a
+dedicated thread held for the connection's lifetime; parent-process death
+protection remains enabled. A regression test fails before this change and
+passes after it (`helper-thread-regression-before.log`, `core-ui-tests.log`).
+Independent export children already keep their creating worker alive while
+waiting for exit.
+
+The desktop check uses the actual GTK portal process for saving, with target
+PID/address verification before keyboard input. In-process audit exports are
+separate evidence from this native picker flow.
