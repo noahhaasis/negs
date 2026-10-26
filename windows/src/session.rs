@@ -126,6 +126,11 @@ pub struct Preferences {
     pub output_format: String,
     pub export_edge: String,
     pub export_edge_pixels: u32,
+    /// The colour space chosen for saves, as colour names it.
+    pub color_space: String,
+    pub png_bit_depth: u32,
+    pub tiff_bit_depth: u32,
+    pub jpeg_quality: u32,
     pub last_save_folder: Option<PathBuf>,
     /// `WINDOWPLACEMENT` of the editor: show command and normal rectangle in
     /// workspace coordinates.
@@ -149,6 +154,10 @@ impl Default for Preferences {
             output_format: "png".into(),
             export_edge: "full".into(),
             export_edge_pixels: 2048,
+            color_space: "sRGB".into(),
+            png_bit_depth: 8,
+            tiff_bit_depth: 16,
+            jpeg_quality: 95,
             last_save_folder: None,
             window: None,
             inspector_width: 340.0,

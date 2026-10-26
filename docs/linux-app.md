@@ -121,8 +121,11 @@ enabled only for the current retained float render; a restored cached preview
 is rebuilt before becoming saveable. Fast/Reference exports capture immutable
 settings while the editor remains available. They publish through a same-folder
 staging file only after success. Cancellation preserves existing destinations,
-and source-file identity checks reject overwrites through aliases. JPEG quality
-and metadata choices affect actual output. LUT export needs no photograph.
+and source-file identity checks reject overwrites through aliases. JPEG quality,
+bit depth (8/16 per format; JPEG 8), colour space (sRGB, Display P3, Adobe RGB,
+ProPhoto RGB at 16-bit only) and metadata choices affect actual output; files
+embed the colour space's ICC profile. A Fast export outside sRGB develops again
+in that space; Save Preview converts the sRGB render. LUT export needs no photograph.
 
 Settings/session use `$XDG_CONFIG_HOME/negs/session.json`; the single bounded,
 lossless developed preview uses `$XDG_CACHE_HOME/negs/rendered-preview.cache`.

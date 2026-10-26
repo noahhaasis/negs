@@ -408,6 +408,7 @@ pub struct ExportRequest {
     pub crop: Option<crate::crop::CropSettings>,
     pub border: Option<crate::border::BorderSettings>,
     pub size_arguments: Vec<String>,
+    pub save_arguments: Vec<String>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -494,6 +495,7 @@ pub fn run_export(request: &ExportRequest, handle: &ExportHandle) -> Result<Expo
             command.args(border.arguments());
         }
         command.args(&request.size_arguments);
+        command.args(&request.save_arguments);
         command
             .env("SPEKTRAFILM_BACKEND", request.engine.backend())
             .stdin(Stdio::null())

@@ -150,6 +150,25 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                             assert_eq!(image.width().max(image.height()), 128);
                             assert_eq!(&image.read_pixel_bytes().as_ref()[..3], &[35, 52, 69]);
                             a.checks.push("Save Preview writes matching cropped/straightened/rotated keyline geometry and pixels".into());
+                            {
+                                let mut p = ui.preferences.borrow_mut();
+                                p.color_space = "Display P3".into();
+                                p.png_bit_depth = 16;
+                            }
+                            ui.begin_export(out.join("wide-preview.png"), Kind::Preview);
+                            a.step = 21;
+                        }
+                        21 if idle && out.join("wide-preview.png").exists() => {
+                            let (depth, icc) = png_depth_and_icc(&out.join("wide-preview.png"));
+                            assert_eq!((depth, icc), (16, true));
+                            a.checks.push(
+                                "Save Preview converts the retained render to Display P3".into(),
+                            );
+                            {
+                                let mut p = ui.preferences.borrow_mut();
+                                p.color_space = "sRGB".into();
+                                p.png_bit_depth = 8;
+                            }
                             ui.runtime.borrow_mut().retained_id = None;
                             ui.begin_export(out.join("fast.png"), Kind::Fast);
                             a.step = 6;
@@ -195,6 +214,26 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                             a.checks.push(
                                 "Remembered JPEG quality changes the actual encoded output".into(),
                             );
+                            {
+                                let mut p = ui.preferences.borrow_mut();
+                                p.color_space = "Display P3".into();
+                                p.png_bit_depth = 16;
+                            }
+                            ui.begin_export(out.join("wide.png"), Kind::Reference);
+                            a.step = 20;
+                        }
+                        20 if idle && out.join("wide.png").exists() => {
+                            let (depth, icc) = png_depth_and_icc(&out.join("wide.png"));
+                            assert_eq!((depth, icc), (16, true));
+                            a.checks.push(
+                                "16-bit Display P3 export writes 16-bit PNG with an ICC profile"
+                                    .into(),
+                            );
+                            {
+                                let mut p = ui.preferences.borrow_mut();
+                                p.color_space = "sRGB".into();
+                                p.png_bit_depth = 8;
+                            }
                             std::fs::write(out.join("cancelled.png"), b"existing destination")
                                 .unwrap();
                             ui.begin_export(out.join("cancelled.png"), Kind::Reference);
@@ -303,4 +342,16 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
             }
         ),
     );
+}
+
+/// A PNG's bit depth and whether it carries an ICC profile (`iCCP`).
+fn png_depth_and_icc(path: &std::path::Path) -> (u8, bool) {
+    let bytes = std::fs::read(path).unwrap();
+    let (mut at, mut icc) = (8, false);
+    while at + 8 <= bytes.len() {
+        let len = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        icc |= &bytes[at + 4..at + 8] == b"iCCP";
+        at += 12 + len;
+    }
+    (bytes[24], icc)
 }

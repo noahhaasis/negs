@@ -33,6 +33,8 @@ struct Snapshot {
     fit: Value,
     quality: u32,
     metadata: bool,
+    bit_depth: u32,
+    color_space: String,
     retained: Option<u64>,
     kind: Kind,
     backend: String,
@@ -71,13 +73,22 @@ impl Editor {
         }
         let state = self.history.borrow().state.clone();
         let p = self.preferences.borrow();
+        let format = match output.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+            Some("jpg" | "jpeg") => 1,
+            Some("tif" | "tiff") => 2,
+            _ => 0,
+        };
+        let color_space = p.color_space(format).to_string();
         let fit = match p.export_edge {
             1 => json!({"long_edge":p.export_pixels}),
             2 => json!({"short_edge":p.export_pixels}),
             _ => Value::Null,
         };
+        // The retained render is sRGB: a Fast export in a wider space develops
+        // again in that space, where Save Preview converts what it shows.
         let retained = if kind == Kind::Preview
             || (kind == Kind::Fast
+                && color_space == "sRGB"
                 && r.current_revision == Some(r.revision)
                 && r.developed
                     .as_ref()
@@ -98,6 +109,8 @@ impl Editor {
             fit,
             quality: p.jpeg_quality,
             metadata: p.metadata,
+            bit_depth: p.bit_depth(format),
+            color_space,
             retained,
             kind,
             backend: r
@@ -267,7 +280,8 @@ fn write_export(client: &Engine, job: &Job, mut snapshot: Snapshot) -> engine::R
         let border = &snapshot.state.border;
         let mut command = json!({"command":"save","render_id":render_id,"output":staging.path,"rotate_cw":snapshot.state.rotation,
             "crop":parameters::crop(&snapshot.state),"fit":snapshot.fit,
-            "save_options":{"jpeg_quality":snapshot.quality,"copy_metadata":snapshot.metadata},"crop_after_post":true});
+            "save_options":{"jpeg_quality":snapshot.quality,"copy_metadata":snapshot.metadata,
+                "bit_depth":snapshot.bit_depth,"color_space":snapshot.color_space},"crop_after_post":true});
         if border.enabled && border.export {
             let (style, width) = match border.style {
                 crate::border::Style::Solid => ("white", border.width),
@@ -325,7 +339,11 @@ fn write_export(client: &Engine, job: &Job, mut snapshot: Snapshot) -> engine::R
             .arg("--data-dir")
             .arg(&client.paths.data)
             .arg("--jpeg-quality")
-            .arg(snapshot.quality.to_string());
+            .arg(snapshot.quality.to_string())
+            .arg("--bit-depth")
+            .arg(snapshot.bit_depth.to_string())
+            .arg("--color-space")
+            .arg(&snapshot.color_space);
         command.env(
             "SPEKTRAFILM_BACKEND",
             if snapshot.kind == Kind::Reference {

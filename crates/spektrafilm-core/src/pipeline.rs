@@ -29,11 +29,14 @@ pub fn display_range(encoded: bool) -> (Scalar, Scalar) {
 /// the scan unclipped: highlights may exceed 1 and the scanner's unsharp
 /// mask undershoots below 0. Negs' finishing (Post, crop, border, resize,
 /// the preview) works on the photograph as an integer file holds it, so it
-/// clips first; the writers clip again when they quantise.
+/// clips first; the writers clip again when they quantise. NaN, which the
+/// pure-gamma output encodings (Adobe RGB, DCI-P3) give below 0 as colour
+/// does, clips to black, as the writers quantise it; otherwise resizing
+/// would spread it to the neighbouring pixels.
 pub fn clip_to_display(image: &mut ImageBuf, encoded: bool) {
     use rayon::prelude::*;
     let (lo, hi) = display_range(encoded);
-    image.data.par_iter_mut().for_each(|v| *v = v.clamp(lo, hi));
+    image.data.par_iter_mut().for_each(|v| *v = if v.is_nan() { lo } else { v.clamp(lo, hi) });
 }
 
 /// Diagnostic helper: when env var `$var` is set, dump the image's f64
