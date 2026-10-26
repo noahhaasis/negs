@@ -756,10 +756,24 @@ fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
         .map(|s| format!("{} · {}", s.group, s.name))
         .collect();
     let names: Vec<_> = labels.iter().map(String::as_str).collect();
+    let model = gtk::SortListModel::new(Some(gtk::StringList::new(&names)), None::<gtk::Sorter>);
+    model.set_section_sorter(Some(&gtk::CustomSorter::new(|a, b| {
+        let rank = |item: &glib::Object| {
+            let text = item.downcast_ref::<gtk::StringObject>().unwrap().string();
+            crate::catalog::group_order(text.split_once(" · ").unwrap().0)
+        };
+        rank(a).cmp(&rank(b)).into()
+    })));
     let row = adw::ComboRow::builder()
         .title(if paper { "Paper" } else { "Film" })
-        .model(&gtk::StringList::new(&names))
+        .model(&model)
+        .expression(gtk::PropertyExpression::new(
+            gtk::StringObject::static_type(),
+            None::<gtk::Expression>,
+            "string",
+        ))
         .enable_search(true)
+        .search_match_mode(gtk::StringFilterMatchMode::Substring)
         .build();
     row.set_selected(
         stocks
@@ -775,58 +789,68 @@ fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
         label.set_max_width_chars(23);
         item.set_child(Some(&label));
     });
-    selected_factory.connect_bind(move |_, o| {
+    selected_factory.connect_bind(|_, o| {
         let item = o.downcast_ref::<gtk::ListItem>().unwrap();
-        if let Some(stock) = crate::catalog::stocks(paper).into_iter().find(|s| {
-            item.item()
-                .and_downcast::<gtk::StringObject>()
-                .is_some_and(|v| v.string() == format!("{} · {}", s.group, s.name))
-        }) {
-            item.child()
-                .and_downcast::<gtk::Label>()
-                .unwrap()
-                .set_text(&stock.name);
-        }
+        let text = item
+            .item()
+            .and_downcast::<gtk::StringObject>()
+            .unwrap()
+            .string();
+        item.child()
+            .and_downcast::<gtk::Label>()
+            .unwrap()
+            .set_text(text.split_once(" · ").unwrap().1);
     });
     row.set_factory(Some(&selected_factory));
     let popup_factory = gtk::SignalListItemFactory::new();
     popup_factory.connect_setup(|_, o| {
         let item = o.downcast_ref::<gtk::ListItem>().unwrap();
-        let b = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let group = gtk::Label::new(None);
-        group.set_xalign(0.);
-        group.add_css_class("caption");
-        group.add_css_class("dim-label");
         let name = gtk::Label::new(None);
         name.set_xalign(0.);
         name.set_wrap(true);
-        b.append(&group);
-        b.append(&name);
-        item.set_child(Some(&b));
+        item.set_child(Some(&name));
     });
-    popup_factory.connect_bind(move |_, o| {
+    popup_factory.connect_bind(|_, o| {
         let item = o.downcast_ref::<gtk::ListItem>().unwrap();
-        let stocks = crate::catalog::stocks(paper);
-        let index = stocks
-            .iter()
-            .position(|s| {
-                item.item()
-                    .and_downcast::<gtk::StringObject>()
-                    .is_some_and(|v| v.string() == format!("{} · {}", s.group, s.name))
-            })
-            .unwrap_or(0);
-        if let Some(stock) = stocks.get(index) {
-            let b = item.child().and_downcast::<gtk::Box>().unwrap();
-            let group = b.first_child().and_downcast::<gtk::Label>().unwrap();
-            group.set_text(&stock.group);
-            group.set_visible(index == 0 || stocks[index - 1].group != stock.group);
-            b.last_child()
-                .and_downcast::<gtk::Label>()
-                .unwrap()
-                .set_text(&stock.name);
-        }
+        let text = item
+            .item()
+            .and_downcast::<gtk::StringObject>()
+            .unwrap()
+            .string();
+        item.child()
+            .and_downcast::<gtk::Label>()
+            .unwrap()
+            .set_text(text.split_once(" · ").unwrap().1);
     });
     row.set_list_factory(Some(&popup_factory));
+    // Real section headers stay outside selectable rows, including during search.
+    let header_factory = gtk::SignalListItemFactory::new();
+    header_factory.connect_setup(|_, o| {
+        let header = o.downcast_ref::<gtk::ListHeader>().unwrap();
+        let label = gtk::Label::new(None);
+        label.set_xalign(0.);
+        label.add_css_class("heading");
+        label.add_css_class("dim-label");
+        label.set_margin_start(12);
+        label.set_margin_end(12);
+        label.set_margin_top(8);
+        label.set_margin_bottom(4);
+        header.set_child(Some(&label));
+    });
+    header_factory.connect_bind(|_, o| {
+        let header = o.downcast_ref::<gtk::ListHeader>().unwrap();
+        let text = header
+            .item()
+            .and_downcast::<gtk::StringObject>()
+            .unwrap()
+            .string();
+        header
+            .child()
+            .and_downcast::<gtk::Label>()
+            .unwrap()
+            .set_text(text.split_once(" · ").unwrap().0);
+    });
+    row.set_header_factory(Some(&header_factory));
     row.connect_selected_notify(glib::clone!(
         #[weak]
         ui,
