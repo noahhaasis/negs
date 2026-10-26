@@ -85,6 +85,12 @@ enum Command {
         render_id: u64,
         output: PathBuf,
         #[serde(default)]
+        save_options: spektrafilm_io::save::SaveOptions,
+        /// Match the displayed preview and CLI: adjust before interpolating a
+        /// straightened crop. Older clients retain their existing save order.
+        #[serde(default)]
+        crop_after_post: bool,
+        #[serde(default)]
         border: Option<BorderStyle>,
         #[serde(default)]
         border_options: BorderOptions,
@@ -165,7 +171,7 @@ fn catalog(data: &Path) -> Result<Value> {
         "No profiles found in {}",
         data.display()
     );
-    Ok(json!({"protocol": 1, "profiles": profiles, "defaults": RuntimeParams::default()}))
+    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true}, "profiles": profiles, "defaults": RuntimeParams::default()}))
 }
 
 impl Session {
@@ -214,6 +220,8 @@ impl Session {
             Command::Save {
                 render_id,
                 output,
+                save_options,
+                crop_after_post,
                 border,
                 border_options,
                 instagram,
@@ -247,10 +255,13 @@ impl Session {
                 // memory flat, and the display clips the same way.
                 spektrafilm_core::pipeline::clip_to_display(image, *encoded);
                 let image = &*image;
+                let adjusted_before = (crop_after_post && !post.is_identity())
+                    .then(|| PostProcess::new(post, *encoded, OUTPUT_SPACE).applied(image));
+                let image = adjusted_before.as_ref().unwrap_or(image);
                 // Crop in the unrotated orientation, then rotate, then add the border.
                 let cropped = crop.map(|crop| crop.apply(image));
                 let image = cropped.as_ref().unwrap_or(image);
-                let adjusted = (!post.is_identity())
+                let adjusted = (!crop_after_post && !post.is_identity())
                     .then(|| PostProcess::new(post, *encoded, OUTPUT_SPACE).applied(image));
                 let image = adjusted.as_ref().unwrap_or(image);
                 let rotated =
@@ -271,7 +282,7 @@ impl Session {
                 let image = bordered.as_ref().unwrap_or(image);
                 let resized = fit.and_then(|fit| resize::fit(image, fit, *encoded));
                 let image = resized.as_ref().unwrap_or(image);
-                spektrafilm_io::save_image(image, &output, metadata.as_ref())?;
+                spektrafilm_io::save::save_image_with_options(image, &output, metadata.as_ref(),save_options)?;
                 Ok(json!({"saved": output}))
             }
             Command::Render {
@@ -578,7 +589,7 @@ mod tests {
         assert_eq!(retained.image.data, source.data);
         let saved = dir.join("saved.png");
         session.handle(Request { id: 9, command: Command::Save {
-            render_id: 7, output: saved.clone(), border: None,
+            render_id: 7, output: saved.clone(), save_options: Default::default(), crop_after_post: false, border: None,
             border_options: BorderOptions::default(), instagram: false,
             crop: None, rotate_cw: 0, fit: None,
         } }, Path::new(".")).unwrap();
@@ -692,6 +703,8 @@ mod tests {
             border,
             border_options,
             instagram,
+            save_options,
+            crop_after_post,
             ..
         } = request.command
         else {
@@ -699,6 +712,9 @@ mod tests {
         };
         assert_eq!(border, Some(BorderStyle::Solid));
         assert!(instagram);
+        assert_eq!(save_options.jpeg_quality, 95);
+        assert!(save_options.copy_metadata);
+        assert!(!crop_after_post, "existing clients retain their original Post/crop order");
         assert_eq!(
             border_options,
             BorderOptions {
@@ -729,6 +745,8 @@ mod tests {
             command: Command::Save {
                 render_id: 1,
                 output: "unused.png".into(),
+                save_options: Default::default(),
+                crop_after_post: false,
                 border: None,
                 border_options: BorderOptions::default(),
                 instagram: false,

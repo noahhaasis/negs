@@ -282,7 +282,7 @@ pub struct WgpuBackend {
     pipeline_cache: std::sync::Mutex<std::collections::HashMap<usize, CachedPipeline>>,
     /// Vulkan driver binaries reused between processes (Metal has its own cache).
     disk_pipeline_cache: Option<crate::pipeline_cache::DiskPipelineCache>,
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     capacity: crate::capacity::CapacityLimits,
     /// Upper bound for `WORKGROUP_SIZE` overrides: the adapter's limit, or
     /// lower with `SPEKTRAFILM_WGPU_WORKGROUP_SIZE` (a diagnostic to exercise
@@ -333,8 +333,13 @@ impl WgpuBackend {
         // adapter's hardware ceiling so we can render arbitrary
         // megapixel counts (within RAM).
         let adapter_info = adapter.get_info();
-        #[cfg(target_os = "windows")]
-        let capacity = crate::capacity::windows_limits(&adapter);
+        #[cfg(target_os = "linux")]
+        if adapter_info.device_type == wgpu::DeviceType::Cpu {
+            tracing::warn!(adapter = adapter_info.name, "software Vulkan adapter; using the CPU engine");
+            return None;
+        }
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        let capacity = crate::capacity::vulkan_limits(&adapter);
         let adapter_limits = adapter.limits();
         let mut limits = wgpu::Limits::default();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
@@ -415,7 +420,7 @@ impl WgpuBackend {
             queue,
             pipeline_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             disk_pipeline_cache,
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             capacity,
             max_workgroup_size,
             #[cfg(target_os = "macos")]
@@ -2179,12 +2184,12 @@ impl ComputeBackend for WgpuBackend {
         Some(self.run_film_chain(params))
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn image_capacity(&self, width: u32, height: u32) -> Result<(), String> {
         self.capacity.image(width, height).map(|_| ())
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn film_chain_capacity(&self, params: &crate::FilmChainParams<'_>) -> Result<(), String> {
         let mut bytes = self.capacity.image(params.image.width, params.image.height)?;
         // Camera and enlarger FFT states are prepared together and remain

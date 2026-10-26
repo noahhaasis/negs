@@ -311,6 +311,7 @@ def cmd_run(args):
             sys.exit(f"missing input {path}; make it with golden_inputs (see README.md)")
         inputs[name] = sha256(path)
     Path(args.dump_dir).mkdir(parents=True, exist_ok=True)
+    (Path(args.dump_dir) / "logs").mkdir(exist_ok=True)
     presets = {p: effective_params(p) for p in sorted({c["preset"] for c in cases})}
     manifest = {"meta": provenance(args, engines), "inputs": inputs, "presets": presets,
                 "cases": {}}

@@ -1,4 +1,4 @@
-//! Admission checks for Windows Vulkan, before any full-image GPU allocation.
+//! Admission checks for Windows/Linux Vulkan, before full-image GPU allocation.
 //! This is a conservative memory estimate, not device-loss recovery or a
 //! guarantee against long-running shaders. Metal keeps its existing path.
 
@@ -54,8 +54,8 @@ impl CapacityLimits {
     }
 }
 
-#[cfg(target_os = "windows")]
-pub(crate) fn windows_limits(adapter: &wgpu::Adapter) -> CapacityLimits {
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) fn vulkan_limits(adapter: &wgpu::Adapter) -> CapacityLimits {
     let limits = adapter.limits();
     // A static heap-size estimate deliberately leaves 20% for the desktop,
     // other applications and driver allocations. It is not a live VRAM budget.

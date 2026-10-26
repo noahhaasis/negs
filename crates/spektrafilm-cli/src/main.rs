@@ -27,6 +27,12 @@ enum Commands {
         /// Output image path.
         #[arg(short, long)]
         output: PathBuf,
+        /// JPEG encoder quality; PNG/TIFF remain lossless.
+        #[arg(long, default_value_t = 95, value_parser = clap::value_parser!(u8).range(1..=100))]
+        jpeg_quality: u8,
+        /// Omit the source photograph's camera metadata.
+        #[arg(long)]
+        no_metadata: bool,
         /// Film stock name (e.g. kodak_portra_400).
         #[arg(long)]
         film: String,
@@ -143,6 +149,8 @@ fn main() -> Result<()> {
         Commands::Process {
             input,
             output,
+            jpeg_quality,
+            no_metadata,
             film,
             paper,
             scan_film,
@@ -178,6 +186,7 @@ fn main() -> Result<()> {
             cmd_process(
                 &input,
                 &output,
+                spektrafilm_io::save::SaveOptions { jpeg_quality, copy_metadata: !no_metadata },
                 &film,
                 paper.as_deref(),
                 scan_film,
@@ -218,6 +227,7 @@ fn main() -> Result<()> {
 fn cmd_process(
     input: &Path,
     output: &Path,
+    save_options: spektrafilm_io::save::SaveOptions,
     film_name: &str,
     paper_name: Option<&str>,
     scan_film: bool,
@@ -405,7 +415,7 @@ fn cmd_process(
     // Save output, carrying over the input's camera metadata (EXIF).
     let t = Instant::now();
     let metadata = spektrafilm_io::read_metadata(input);
-    spektrafilm_io::save_image(&result, output, metadata.as_ref())?;
+    spektrafilm_io::save::save_image_with_options(&result, output, metadata.as_ref(),save_options)?;
     eprintln!(
         "Saved: {} ({}x{}), {} ms",
         output.display(),
