@@ -12,6 +12,7 @@ root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--out', type=Path, default=root / 'target/linux-validation/engine-ui-audit')
 parser.add_argument('--raw', type=Path, help='Also develop a real RAW, change WB, and export with metadata')
+parser.add_argument('--binary', type=Path, default=root / 'target/linux-ui/release/negs')
 args = parser.parse_args()
 out = args.out.resolve()
 if not out.is_relative_to(root / 'target'):
@@ -39,7 +40,7 @@ env.pop('NEGS_UI_ONLY', None)
 if args.raw:
     env['NEGS_RAW_AUDIT'] = str(args.raw.resolve())
 with (out / 'app.log').open('w') as log:
-    process = subprocess.Popen([root / 'target/linux-ui/release/negs', '--fresh'], cwd=root,
+    process = subprocess.Popen([args.binary.resolve(), '--fresh'], cwd=out,
                                env=env, stdout=log, stderr=log)
     try:
         code = process.wait(timeout=105)

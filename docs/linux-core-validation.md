@@ -157,10 +157,12 @@ in `core-final-tests.log` and `golden-harness-tests.log` (one existing IO test i
 ignored). Unit tests use a private `XDG_RUNTIME_DIR` under the validation directory;
 the sandbox cannot write the real desktop runtime directory.
 
-A restored connected session displayed the cached developed preview at 376 ms
-and rebuilt current saveable GPU output at 1077 ms. This is an initial diagnostic
-launch, not a final quiet-machine median. Evidence:
-`engine-ui-post-cache/{restored.json,restored.png}`. The later cache key also
+Earlier cache diagnostic timings are retained under `engine-ui-post-cache/`,
+but its developed-image timing is superseded: installed testing exposed an
+Original-release focus handler that could mark cached pixels as newly developed.
+The fixed handler does nothing when Original is already off, and a separate
+`saveable_render_ready_ms` milestone records actual current float output.
+Final repeated installed-app results are recorded below. The cache key also
 includes available GPU/driver identity and Vulkan-selection environment.
 
 ## Remaining hardware coverage

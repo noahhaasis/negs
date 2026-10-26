@@ -37,6 +37,7 @@ pub struct Runtime {
     pub cached_restoring: bool,
     pub original_key: Value,
     pub histogram_crop: Value,
+    pub interactive_frames: u64,
 }
 pub fn ui_only() -> bool {
     std::env::var_os("NEGS_UI_ONLY").is_some()
@@ -169,7 +170,6 @@ impl Editor {
             r.original_key = original_key;
             r.original = None;
             r.original_loading = false;
-            r.showing_original = false;
         }
         let histogram_crop = json!([state.crop, state.straighten]);
         let histogram_changed = r.histogram_crop != histogram_crop;
@@ -281,7 +281,8 @@ impl Editor {
             match result {
                 Ok(Ok((id,frame,cache_key))) if current => {
                     r.developed = Some(frame.clone());
-                    if interactive.is_none() && revision == r.revision { r.retained_id = Some(id); r.current_revision = Some(revision); r.cached_restoring=false;if let Some(key)=cache_key {ui.cache.save(key,frame.clone());} }
+                    if interactive.is_none() && revision == r.revision { r.retained_id = Some(id); r.current_revision = Some(revision); r.cached_restoring=false;ui.perf.mark("saveable_render_ready_ms");if let Some(key)=cache_key {ui.cache.save(key,frame.clone());} }
+                    if interactive.is_some() { r.interactive_frames += 1; ui.perf.detail("interactive_frames_presented", r.interactive_frames); }
                     let show = !r.showing_original;
                     drop(r);
                     if show { ui.present_engine_frame(&frame,true); }
@@ -378,6 +379,9 @@ impl Editor {
             return;
         }
         let mut r = self.runtime.borrow_mut();
+        if !show && !r.showing_original {
+            return;
+        }
         if r.developed.is_none() || self.canvas.cropping() {
             return;
         }
@@ -449,8 +453,8 @@ impl Editor {
             r.original_loading = false;
             match result {
                 Ok(Ok(frame)) => {r.original = Some(frame);let show=r.showing_original;drop(r);if show {ui.show_original(true);}}
-                Ok(Err(error)) => {r.showing_original=false;drop(r);ui.show_original(false);ui.engine_error(&error);}
-                Err(_) => {r.showing_original=false;drop(r);ui.show_original(false);ui.engine_error("Could not load the original photograph.");}
+                Ok(Err(error)) => {drop(r);ui.show_original(false);ui.engine_error(&error);}
+                Err(_) => {drop(r);ui.show_original(false);ui.engine_error("Could not load the original photograph.");}
             }
         });
     }

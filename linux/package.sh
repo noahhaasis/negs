@@ -11,7 +11,11 @@ if ! git diff --quiet HEAD -- linux crates docs/linux-app.md docs/linux-core-val
     printf '%s\n' 'Commit the release source before packaging.' >&2
     exit 1
 fi
-git archive --format=tar --prefix=negs-0.7.0/ HEAD | gzip -n > "$out/negs-0.7.0.tar.gz"
+git archive --format=tar --prefix=negs-0.7.0/ HEAD \
+    .gitattributes Cargo.toml Cargo.lock LICENSE crates data linux scripts \
+    assets/negs-icon.png assets/negs-icon.svg \
+    docs/linux-app.md docs/linux-core-validation.md docs/linux-core-agent-handoff.md \
+    docs/linux-ui-parity.md docs/linux-ui-validation.md | gzip -n > "$out/negs-0.7.0.tar.gz"
 source_hash=$(sha256sum "$out/negs-0.7.0.tar.gz" | cut -d ' ' -f 1)
 sed "s/sha256sums=('SKIP')/sha256sums=('$source_hash')/" linux/arch/PKGBUILD > "$out/PKGBUILD"
 if [ "${1:-}" = --bundle ]; then
