@@ -36,12 +36,12 @@ fn reflect_index(i: i32, n: i32) -> u32 {
     if i >= 0 && i < n {
         return u32(i);
     }
-    let period = 2 * n;
-    var m = i % period;
-    if m < 0 {
-        m += period;
-    }
-    return u32(select(m, period - 1 - m, m >= n));
+    // Fold the negative half first, then use unsigned remainder. Signed
+    // remainder on negative coordinates is not portable across GPU drivers.
+    let positive = select(i, -1 - i, i < 0);
+    let period = u32(2 * n);
+    let m = u32(positive) % period;
+    return select(m, period - 1u - m, m >= u32(n));
 }
 
 fn load_pixel(x: u32, y: u32) -> vec4<f32> {
