@@ -70,7 +70,8 @@ pub fn install(value: &serde_json::Value) -> Result<(), String> {
 }
 pub fn stocks(paper: bool) -> Vec<&'static Stock> {
     static CATALOG: OnceLock<Catalog> = OnceLock::new();
-    LIVE.get()
+    let mut stocks: Vec<_> = LIVE
+        .get()
         .unwrap_or_else(|| {
             CATALOG.get_or_init(|| {
                 serde_json::from_str(include_str!("../catalog.json"))
@@ -80,7 +81,19 @@ pub fn stocks(paper: bool) -> Vec<&'static Stock> {
         .profiles
         .iter()
         .filter(|s| s.paper == paper)
-        .collect()
+        .collect();
+    // Match the macOS menu sections while retaining catalog order within each.
+    stocks.sort_by_key(|stock| group_order(&stock.group));
+    stocks
+}
+pub fn group_order(group: &str) -> usize {
+    match group {
+        "Color Negative" | "Color Paper" => 0,
+        "Color Slide" | "Motion Picture Print" => 1,
+        "Motion Picture" => 2,
+        "Black & White" => 3,
+        _ => 4,
+    }
 }
 pub fn selected(state: &crate::model::State, paper: bool) -> &'static Stock {
     let key = if paper { "Paper" } else { "Film" };
