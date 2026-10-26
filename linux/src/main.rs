@@ -322,8 +322,7 @@ impl Editor {
         dimensions.set_max_width_chars(22);
         let original = gtk::Button::with_label("Original");
         original.add_css_class("flat");
-        original.set_action_name(Some("win.original"));
-        original.set_tooltip_text(Some("Show Original (hold \\); click to toggle"));
+        original.set_tooltip_text(Some("Hold to show Original (or hold \\)"));
         statusbar.append(&original);
         main.append(&statusbar);
         split.set_content(Some(&main));
@@ -419,7 +418,45 @@ impl Editor {
             ui,
             move |_, _, _, _| ui.show_original(false)
         ));
+        hold_original.connect_cancel(glib::clone!(
+            #[weak]
+            ui,
+            move |_, _| ui.show_original(false)
+        ));
         original.add_controller(hold_original);
+        let original_keys = gtk::EventControllerKey::new();
+        original_keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        original_keys.connect_key_pressed(glib::clone!(
+            #[weak]
+            ui,
+            #[upgrade_or]
+            glib::Propagation::Proceed,
+            move |_, key, _, _| {
+                if matches!(key, gdk::Key::space | gdk::Key::Return | gdk::Key::KP_Enter) {
+                    ui.show_original(true);
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            }
+        ));
+        original_keys.connect_key_released(glib::clone!(
+            #[weak]
+            ui,
+            move |_, key, _, _| {
+                if matches!(key, gdk::Key::space | gdk::Key::Return | gdk::Key::KP_Enter) {
+                    ui.show_original(false);
+                }
+            }
+        ));
+        original.add_controller(original_keys);
+        let original_focus = gtk::EventControllerFocus::new();
+        original_focus.connect_leave(glib::clone!(
+            #[weak]
+            ui,
+            move |_| ui.show_original(false)
+        ));
+        original.add_controller(original_focus);
         ui.window.connect_is_active_notify(glib::clone!(
             #[weak]
             ui,
@@ -462,6 +499,14 @@ impl Editor {
         ));
         resize.add_controller(keys);
         ui.actions(app);
+        // Keep availability in sync without activating the menu's toggle action
+        // after the hold gesture releases.
+        ui.window
+            .lookup_action("original")
+            .unwrap()
+            .bind_property("enabled", &original, "sensitive")
+            .sync_create()
+            .build();
         ui.sync_history();
         ui.perf.watch(&ui.window);
         let keys = gtk::EventControllerKey::new();
