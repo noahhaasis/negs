@@ -8,6 +8,9 @@ Negs is a **free** photo app for Mac, Windows and Linux that runs your pictures 
 
 Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in native apps for macOS, Windows and Linux.
 
+> [!TIP]
+> **Film simulation that keeps up with you.** Every slider updates live. Faster than spektrafilm-rs; dramatically faster than Python spektrafilm.
+
 **[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [install steps](#macos)
 
 **[Download for Windows](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-Setup.exe)** · Windows x64 · [portable version](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-portable.zip) · [install steps](#windows)
