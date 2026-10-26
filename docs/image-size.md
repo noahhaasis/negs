@@ -117,15 +117,18 @@ claimed.
 
 ### Exposure
 
-Auto exposure meters the working image. Measured on four photographs reduced
-to 12 MP (Leica Q3, three Nikon Z f), for all seven metering methods, at 2×,
-3× and at a fixed target with crops of 0.9, 0.75 and 0.5 extent, the largest
-drift from Original was 0.0095 EV (highlight-weighted); the default
-centre-weighted metering moved at most 0.0021 EV. That is inside the plan's
-0.01 EV bound, so metering is unchanged.
-`NEGS_IMAGE_SIZE_FIXTURES=a.NEF:b.DNG cargo test --release -p spektrafilm-core --test image_size -- --ignored --nocapture`
-repeats it. Rust meters after resizing and Python before, so their exposures
-are not claimed to match.
+Auto exposure meters the full source frame before any resize, as upstream
+experimental does (ticket 16.5): the film raw of a ≤256 px metering preview
+of the source (`stages::filming::metering_preview`). The CLI and the native
+helper compute that preview once from the loaded source and hand it to the
+pipeline (`Pipeline::with_metering_preview`), so Original, every Image Size
+target, the 12 MP preview cap and the interactive frames all get the same EV,
+and the live preview has the export's exposure. The crop is applied after the
+pipeline, so it never changes the exposure either. Metering the working image
+instead used to drift by up to 0.0095 EV between sizes (highlight-weighted;
+0.0021 EV centre-weighted) on four 12 MP photographs. The
+`auto_exposure_is_the_sources_at_every_size` test in `tests/image_size.rs`
+checks both.
 
 ## Validation
 

@@ -68,6 +68,31 @@ pub fn bicubic_2d_f64(
     x: f64,
     y: f64,
 ) -> Vec<f64> {
+    bicubic_2d_widened(data, first_dim, second_dim, channels, x, y)
+}
+
+/// [`bicubic_2d_f64`] on an f32 table (e.g. a float16 spectra LUT), with
+/// every value widened to f64 exactly as numpy's `np.double(lut)` does, so
+/// the result is bit-identical to sampling the widened table.
+pub fn bicubic_2d_f32_as_f64(
+    data: &[f32],
+    first_dim: usize,
+    second_dim: usize,
+    channels: usize,
+    x: f64,
+    y: f64,
+) -> Vec<f64> {
+    bicubic_2d_widened(data, first_dim, second_dim, channels, x, y)
+}
+
+fn bicubic_2d_widened<T: Copy + Into<f64>>(
+    data: &[T],
+    first_dim: usize,
+    second_dim: usize,
+    channels: usize,
+    x: f64,
+    y: f64,
+) -> Vec<f64> {
     let max_x = (first_dim - 1) as f64;
     let max_y = (second_dim - 1) as f64;
     let xf = x.clamp(0.0, max_x);
@@ -106,7 +131,7 @@ pub fn bicubic_2d_f64(
             weight_sum += weight;
             let base = (xi_idx * second_dim + yj_idx) * channels;
             for c in 0..channels {
-                result[c] += weight * data[base + c];
+                result[c] += weight * data[base + c].into();
             }
         }
     }

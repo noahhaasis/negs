@@ -39,6 +39,13 @@ struct Request {
 #[derive(Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 enum Command {
+    /// The enlarger M/Y filter shifts that print a mid-grey neutral with
+    /// these settings (upstream's print balance); image-independent.
+    BalancePrint {
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+    },
     Catalog,
     ExportLut {
         film: String,
@@ -113,6 +120,10 @@ struct Session {
     /// The same for interactive renders, kept beside `scaled` so a drag
     /// after a full-size render doesn't resample the source again.
     interactive: Option<((u32, u32), ImageBuf)>,
+    /// The source's auto-exposure metering frame. Every render of the source,
+    /// at any preview or working size, meters it, as the exporter does, so
+    /// the preview's exposure is the export's.
+    metering: Option<ImageBuf>,
     pipeline: Option<(String, Pipeline)>,
     output: Option<Rendered>,
 }
@@ -140,11 +151,18 @@ fn catalog(data: &Path) -> Result<Value> {
         }
         let stock = path.file_stem().unwrap().to_string_lossy().into_owned();
         let p = profile::load_profile_by_name(data, &stock)?;
+        // The stock's grain preset, resolved: the apps show it while the
+        // edit leaves a value unset (null).
+        let grain = spektrafilm_core::grain::grain_settings(&p, &Default::default());
         profiles.push(json!({
             "id": stock, "name": p.info.name.as_ref().unwrap_or(&stock),
             "paper": p.info.support == "paper" || p.info.stage == "printing",
             "positive": p.is_positive(), "bw": p.is_bw(),
             "target_print": p.info.target_print, "development_times": p.data.development_time,
+            "grain": {
+                "rms_granularity": grain.rms_granularity, "density_min": grain.density_min,
+                "uniformity": grain.uniformity, "particle_scale_sublayers": grain.particle_scale_sublayers,
+            },
         }));
     }
     profiles.sort_by_key(|p| p["name"].as_str().unwrap_or_default().to_lowercase());
@@ -160,6 +178,19 @@ impl Session {
     fn handle(&mut self, request: Request, data: &Path) -> Result<Value> {
         match request.command {
             Command::Catalog => catalog(data),
+            Command::BalancePrint { film, paper, params } => {
+                let started = Instant::now();
+                let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
+                    profile::load_profile_by_name(data, &film)?,
+                    profile::load_profile_by_name(data, &paper)?,
+                    &params,
+                    data,
+                    spektrafilm_core::print_balance::MIDGRAY,
+                )
+                .map_err(anyhow::Error::msg)?;
+                Ok(json!({"m_filter_shift": m, "y_filter_shift": y,
+                          "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0}))
+            }
             Command::ExportLut { film, paper, params, size, output } => {
                 let started = Instant::now();
                 let cube = spektrafilm_core::lut_export::cube(data, &film, &paper, *params, size)
@@ -206,7 +237,7 @@ impl Session {
                     post,
                     image,
                     ..
-                } = self.output.as_ref().context("No preview to save")?;
+                } = self.output.as_mut().context("No preview to save")?;
                 ensure!(
                     *id == render_id,
                     "The preview changed; wait for the current render and try again"
@@ -219,6 +250,11 @@ impl Session {
                     crop.validate()?;
                 }
                 let metadata = spektrafilm_io::read_metadata(source);
+                // The render is the unclipped scan; Post, crop, border and resize
+                // work on it as the file will hold it. Clipping in place keeps
+                // memory flat, and the display clips the same way.
+                spektrafilm_core::pipeline::clip_to_display(image, *encoded);
+                let image = &*image;
                 let adjusted_before = (crop_after_post && !post.is_identity())
                     .then(|| PostProcess::new(post, *encoded, OUTPUT_SPACE).applied(image));
                 let image = adjusted_before.as_ref().unwrap_or(image);
@@ -293,6 +329,7 @@ impl Session {
                     self.source = None;
                     self.scaled = None;
                     self.interactive = None;
+                    self.metering = None;
                     let image = spektrafilm_io::load_image_with_wb(
                         &input,
                         spektrafilm_io::Formats::Any,
@@ -300,6 +337,10 @@ impl Session {
                     )?;
                     self.source = Some((input.clone(), wb, image));
                     self.source_generation = source_generation;
+                }
+                if params.camera.auto_exposure && self.metering.is_none() {
+                    let source = &self.source.as_ref().unwrap().2;
+                    self.metering = Some(spektrafilm_core::stages::filming::metering_preview(source));
                 }
                 let source = &self.source.as_ref().unwrap().2;
                 let (source_width, source_height) = (source.width, source.height);
@@ -354,13 +395,16 @@ impl Session {
                     .map_err(anyhow::Error::msg)?;
                     self.pipeline = Some((key, pipeline));
                 }
-                let pipeline = self
+                let mut pipeline = self
                     .pipeline
                     .as_ref()
                     .unwrap()
                     .1
                     .clone()
                     .with_params((*params).clone());
+                if let Some(metering) = &self.metering {
+                    pipeline = pipeline.with_metering_preview(metering.clone());
+                }
                 let working = if dimensions == photo_dimensions {
                     working_source(
                         source,

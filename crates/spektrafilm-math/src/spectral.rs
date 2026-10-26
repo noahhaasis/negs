@@ -289,6 +289,24 @@ pub const CMF_Z_F64: [f64; N_WAVELENGTHS] = [
     0.0,
 ];
 
+/// The exact CMFs (`CMF_*_F64`) rounded to f32, for the GPU scan. The f32
+/// `CMF_*` tables are an older 4–5 digit dataset (x̄(485 nm) is 0.05801 there
+/// and 0.05795001 in colour), up to 1.2 % off per sample: integrated X moved
+/// by 3e-6 to 2e-5, which the output gamut compressor amplified to ΔE00 0.045.
+pub const CMF_X_F32: [f32; N_WAVELENGTHS] = round_to_f32(&CMF_X_F64);
+pub const CMF_Y_F32: [f32; N_WAVELENGTHS] = round_to_f32(&CMF_Y_F64);
+pub const CMF_Z_F32: [f32; N_WAVELENGTHS] = round_to_f32(&CMF_Z_F64);
+
+const fn round_to_f32(values: &[f64; N_WAVELENGTHS]) -> [f32; N_WAVELENGTHS] {
+    let mut out = [0.0f32; N_WAVELENGTHS];
+    let mut i = 0;
+    while i < N_WAVELENGTHS {
+        out[i] = values[i] as f32;
+        i += 1;
+    }
+    out
+}
+
 pub const CMF_Z: [f32; N_WAVELENGTHS] = [
     0.006450, 0.010550, 0.020050, 0.036210, 0.067850, 0.110200, 0.207400, 0.371300, 0.645600,
     1.039050, 1.385600, 1.622960, 1.747060, 1.782600, 1.772110, 1.744100, 1.669200, 1.528100,
@@ -598,6 +616,211 @@ pub const ILLUMINANT_D65_F64: [f64; N_WAVELENGTHS] = [
     0.723841394971077,
 ];
 
+/// Light sources from colour-science's `SDS_LIGHT_SOURCES` (BSD-3-Clause),
+/// aligned to 380-780 nm / 5 nm and normalised to mean 1 exactly as Python
+/// `standard_illuminant()` does. Baked from Python (colour-science 0.4.7) by
+/// `scripts/parity/freeze_illuminants_reference.py`; the f32 tables are the
+/// f32 roundings of the f64 ones.
+///
+/// `T` is `'Incandescent'` (NIST CQS simulation 7.4, Ohno and Davis 2008), the
+/// tungsten balance of Vision3 200T/500T. Its source table restarts at 765 nm;
+/// the repeated tail is upstream data, kept as is.
+pub const ILLUMINANT_T: [f32; N_WAVELENGTHS] = [
+    0.04429086, 0.05158575, 0.060695365, 0.08052636, 0.10060222, 0.119432725, 0.13728859, 0.15467112,
+    0.16866507, 0.18290828, 0.19976734, 0.21730779, 0.23267987, 0.25104445, 0.26977953, 0.29052055,
+    0.31179467, 0.33372205, 0.35451978, 0.3785838, 0.3995834, 0.42212027, 0.44670746, 0.47049907,
+    0.49632114, 0.5229778, 0.5479191, 0.5755374, 0.6023865, 0.6305289, 0.65821916, 0.68688107,
+    0.7173724, 0.7476042, 0.7778257, 0.80916184, 0.8419707, 0.8743154, 0.905941, 0.93795043,
+    0.9697294, 1.0022161, 1.0343503, 1.0666487, 1.0992624, 1.1310902, 1.1632144, 1.1951538,
+    1.2256472, 1.2570868, 1.2868689, 1.3175467, 1.3486075, 1.3785499, 1.4081914, 1.4385009,
+    1.4684603, 1.4978645, 1.5304445, 1.5643994, 1.5988495, 1.627893, 1.6581353, 1.6838038,
+    1.7081754, 1.7329232, 1.7641983, 1.7869933, 1.8125967, 1.8416206, 1.8635213, 1.8791814,
+    1.9067868, 1.936818, 1.9561762, 1.9737054, 2.0029397, 1.936818, 1.9561762, 1.9737054,
+    2.0029397,
+];
+/// `K75P` is `'Kinoton 75P'` (a xenon cinema projector, measured by T. Borer,
+/// 2017), the viewing light of the 2383/2393 print films. The 2 nm source data
+/// is linearly interpolated to 5 nm.
+pub const ILLUMINANT_K75P: [f32; N_WAVELENGTHS] = [
+    0.20035535, 0.30265853, 0.4125533, 0.55894816, 0.6999985, 0.8502194, 0.9967964, 1.103017,
+    1.1483839, 1.1664516, 1.2179829, 1.3062873, 1.4153622, 1.4761248, 1.5818291, 1.6374598,
+    1.7417974, 1.9191353, 1.9968724, 1.8180163, 1.7032933, 1.7146198, 1.6657609, 1.679213,
+    1.5991377, 1.5689235, 1.5505519, 1.5371605, 1.5314213, 1.5209147, 1.5209148, 1.5106814,
+    1.5102866, 1.501693, 1.4861759, 1.4739991, 1.4651626, 1.4620045, 1.4789487, 1.4839592,
+    1.479131, 1.4717218, 1.4357682, 1.3853606, 1.3387791, 1.3225636, 1.322928, 1.3416638,
+    1.3486784, 1.3267845, 1.275982, 1.2031642, 1.124759, 1.0824592, 1.0677315, 1.0412827,
+    1.0496334, 1.0495423, 0.98574317, 0.8214324, 0.6165526, 0.42885986, 0.26509574, 0.15523133,
+    0.08982282, 0.06249336, 0.045713075, 0.038470767, 0.027147261, 0.02576257, 0.023503333, 0.0213853,
+    0.020952584, 0.022410156, 0.021790689, 0.018028332, 0.015905745, 0.026810199, 0.027329458, 0.03086407,
+    0.025689691,
+];
+pub const ILLUMINANT_T_F64: [f64; N_WAVELENGTHS] = [
+    0.04429086048707871,
+    0.051585750595832355,
+    0.06069536577621067,
+    0.08052635711823716,
+    0.10060221565179168,
+    0.11943272418540037,
+    0.13728858562967097,
+    0.15467112077302433,
+    0.16866507309404713,
+    0.1829082842522153,
+    0.19976734369038093,
+    0.2173077944063887,
+    0.2326798663933696,
+    0.2510444390730186,
+    0.2697795471874511,
+    0.2905205523565897,
+    0.31179466156241625,
+    0.3337220581980729,
+    0.35451979503226494,
+    0.37858377973780444,
+    0.39958340688637045,
+    0.422120260822385,
+    0.44670745384066046,
+    0.47049908200856416,
+    0.49632114404384897,
+    0.522977799611895,
+    0.5479190721125559,
+    0.5755373919150063,
+    0.6023864883284424,
+    0.6305289345911937,
+    0.6582191651370278,
+    0.686881056389086,
+    0.7173724325758171,
+    0.747604209548834,
+    0.7778256884073104,
+    0.809161816636445,
+    0.8419707046347984,
+    0.8743153620820648,
+    0.9059410302689376,
+    0.937950444880361,
+    0.9697294044529698,
+    1.0022160761344994,
+    1.0343503119459732,
+    1.0666486964784918,
+    1.0992623234923373,
+    1.1310901666113176,
+    1.1632143989406825,
+    1.1951538308384908,
+    1.2256472448160873,
+    1.2570867339479983,
+    1.2868689599150938,
+    1.3175466878101896,
+    1.3486075872861383,
+    1.3785499410728028,
+    1.4081914316826425,
+    1.4385009133027542,
+    1.4684603699913443,
+    1.4978645194556324,
+    1.5304444840631708,
+    1.5643993702428256,
+    1.5988494848691726,
+    1.6278929583694202,
+    1.6581353118655981,
+    1.6838037962950616,
+    1.7081754309383532,
+    1.732923209247628,
+    1.7641983427548216,
+    1.7869933057174028,
+    1.8125966948064482,
+    1.8416205709436502,
+    1.8635213785546003,
+    1.8791814272048726,
+    1.9067867621494494,
+    1.9368180338409047,
+    1.9561762040234099,
+    1.973705424857322,
+    2.0029397142179697,
+    1.9368180338409047,
+    1.9561762040234099,
+    1.973705424857322,
+    2.0029397142179697,
+];
+pub const ILLUMINANT_K75P_F64: [f64; N_WAVELENGTHS] = [
+    0.2003553567372573,
+    0.3026585381824508,
+    0.41255329657700374,
+    0.5589481864082568,
+    0.6999985273583207,
+    0.8502194502648629,
+    0.996796445387135,
+    1.1030169402986139,
+    1.1483838412127785,
+    1.1664516194437204,
+    1.217982861892341,
+    1.3062873481650925,
+    1.4153622228081846,
+    1.4761248097090862,
+    1.5818290511517283,
+    1.6374597123576529,
+    1.7417974808811936,
+    1.9191353300817453,
+    1.9968724257801131,
+    1.8180163340682451,
+    1.7032933713595342,
+    1.7146197920913813,
+    1.6657609151815502,
+    1.6792130211863516,
+    1.5991377081270122,
+    1.568923443216373,
+    1.550551943604612,
+    1.5371605089974187,
+    1.531421322737193,
+    1.520914694658612,
+    1.5209147857568066,
+    1.510681361163851,
+    1.5102865415884255,
+    1.5016929755965862,
+    1.4861759468146336,
+    1.4739991244361321,
+    1.4651626906574713,
+    1.4620045895450389,
+    1.478948762643701,
+    1.4839592544452673,
+    1.4791309590329145,
+    1.4717217606691577,
+    1.4357682184000984,
+    1.3853605810837575,
+    1.3387790679409006,
+    1.322563589300898,
+    1.322927982079325,
+    1.3416637833713183,
+    1.3486783443560384,
+    1.326784441951613,
+    1.2759819850598466,
+    1.2031641918702434,
+    1.1247589820126298,
+    1.0824591751144852,
+    1.0677315121888,
+    1.0412827000540363,
+    1.049633398259054,
+    1.0495423000644473,
+    0.9857431370427188,
+    0.8214324207691277,
+    0.6165525810985313,
+    0.4288598734116133,
+    0.26509574630566285,
+    0.15523132360991393,
+    0.08982281988226239,
+    0.062493361500235295,
+    0.04571307405367065,
+    0.03847076758243348,
+    0.02714726199281358,
+    0.025762569434790876,
+    0.0235033342085433,
+    0.021385301183936205,
+    0.020952584759554107,
+    0.02241015587326222,
+    0.021790688149936274,
+    0.018028332712677207,
+    0.01590574477833977,
+    0.02681019867276858,
+    0.0273294583820271,
+    0.03086406833276927,
+    0.02568969087910547,
+];
+
 pub struct HanatosLut {
     pub width: usize,
     pub height: usize,
@@ -680,59 +903,50 @@ const D50_ILLUMINANT_XYZ: [f32; 3] = [0.964220, 1.0, 0.825210]; // from colour-s
 const D55_ILLUMINANT_XYZ: [f32; 3] = [0.956791, 1.0, 0.921367]; // exact Python value
 const D65_ILLUMINANT_XYZ: [f32; 3] = [0.950456, 1.0, 1.089058]; // from sRGB whitepoint
 
-/// f64 pre-computed illuminant XYZ. Exactly matches Python's `_illuminant_to_xy`
-/// → `(x/y, 1, (1-x-y)/y)` chain, computed at full f64 precision.
-const D50_ILLUMINANT_XYZ_F64: [f64; 3] = [0.96419686124892201, 1.0, 0.82512259200404314];
-const D55_ILLUMINANT_XYZ_F64: [f64; 3] = [0.9567908993343901, 1.0, 0.92136745658606822];
-const D65_ILLUMINANT_XYZ_F64: [f64; 3] = [0.95042966940215057, 1.0, 1.0888005470297513];
+/// f64 pre-computed illuminant XYZ: Python's `_illuminant_to_xy` followed by
+/// colour's `xyY_to_XYZ(xy_to_xyY(xy))`, as `RGB_to_XYZ` adapts to it.
+/// Checked bit for bit against `tests/fixtures/colorspaces_python_28bf883.json`
+/// (`scripts/parity/freeze_colorspaces_reference.py`).
+const D50_ILLUMINANT_XYZ_F64: [f64; 3] = [0.9641968612489219, 1.0, 0.8251225920040428];
+const D55_ILLUMINANT_XYZ_F64: [f64; 3] = [0.9567908993343899, 1.0, 0.9213674565860677];
+const D65_ILLUMINANT_XYZ_F64: [f64; 3] = [0.9504296694021502, 1.0, 1.0888005470297515];
+const T_ILLUMINANT_XYZ_F64: [f64; 3] = [1.1046024645024972, 1.0, 0.34607998084525843];
+const K75P_ILLUMINANT_XYZ_F64: [f64; 3] = [0.947089788128642, 1.0, 1.0571900691589706];
 
-/// Get the native white point XYZ for a named colorspace.
-/// Uses xy chromaticity → XYZ conversion to match Python colour-science exactly.
+/// The pre-computed white of a baked illuminant table. Compares the whole
+/// table: a blackbody (`BB<temperature>`) can share any single sample with one.
+fn known_illuminant_xyz_f64(illuminant: &[f32]) -> Option<[f64; 3]> {
+    [
+        (&ILLUMINANT_D55, D55_ILLUMINANT_XYZ_F64),
+        (&ILLUMINANT_D65, D65_ILLUMINANT_XYZ_F64),
+        (&ILLUMINANT_D50, D50_ILLUMINANT_XYZ_F64),
+        (&ILLUMINANT_T, T_ILLUMINANT_XYZ_F64),
+        (&ILLUMINANT_K75P, K75P_ILLUMINANT_XYZ_F64),
+    ]
+    .into_iter()
+    .find(|(table, _)| illuminant == &table[..])
+    .map(|(_, xyz)| xyz)
+}
+
+/// Native white point XYZ of a named input colorspace (unknown names: ProPhoto).
 pub fn colorspace_white_xyz(name: &str) -> [f32; 3] {
-    match name {
-        // sRGB: whitepoint xy = (0.3127, 0.329) per colour-science
-        "sRGB" => colorspace::xy_to_xyz(0.3127, 0.329),
-        // ProPhoto: whitepoint = D50 xy = (0.3457, 0.3585)
-        "ProPhoto RGB" => colorspace::xy_to_xyz(0.3457, 0.3585),
-        // Rec.2020: whitepoint = D65 xy = (0.3127, 0.329)
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::xy_to_xyz(0.3127, 0.329),
-        // ACES: whitepoint xy = (0.32168, 0.33767)
-        "ACES2065-1" => colorspace::xy_to_xyz(0.32168, 0.33767),
-        _ => colorspace::xy_to_xyz(0.3457, 0.3585), // ProPhoto default
-    }
+    colorspace_white_xyz_f64(name).map(|v| v as f32)
 }
 
-/// f64 variant: native white point XYZ for a named colorspace.
+/// f64 variant: colour's `xy_to_XYZ(colourspace.whitepoint)`, the white the
+/// CAT in `RGB_to_XYZ` adapts from.
 pub fn colorspace_white_xyz_f64(name: &str) -> [f64; 3] {
-    match name {
-        "sRGB" => colorspace::xy_to_xyz_f64(0.3127, 0.329),
-        "ProPhoto RGB" => colorspace::xy_to_xyz_f64(0.3457, 0.3585),
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::xy_to_xyz_f64(0.3127, 0.329),
-        "ACES2065-1" => colorspace::xy_to_xyz_f64(0.32168, 0.33767),
-        _ => colorspace::xy_to_xyz_f64(0.3457, 0.3585),
-    }
+    colorspace::RgbColourspace::input(name).whitepoint_xyz
 }
 
-/// Get the RGB→XYZ matrix for a named colorspace.
+/// RGB→XYZ matrix of a named input colorspace (unknown names: ProPhoto).
 pub fn colorspace_to_xyz(name: &str) -> [[f32; 3]; 3] {
-    match name {
-        "sRGB" => colorspace::SRGB_TO_XYZ,
-        "ProPhoto RGB" => colorspace::PROPHOTO_TO_XYZ,
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::REC2020_TO_XYZ,
-        "ACES2065-1" => colorspace::ACES_TO_XYZ,
-        _ => colorspace::PROPHOTO_TO_XYZ,
-    }
+    colorspace::mat_f32(colorspace_to_xyz_f64(name))
 }
 
-/// f64 variant: RGB→XYZ matrix for a named colorspace.
+/// f64 variant: colour's `matrix_RGB_to_XYZ`.
 pub fn colorspace_to_xyz_f64(name: &str) -> [[f64; 3]; 3] {
-    match name {
-        "sRGB" => colorspace::SRGB_TO_XYZ_F64,
-        "ProPhoto RGB" => colorspace::PROPHOTO_TO_XYZ_F64,
-        "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" => colorspace::REC2020_TO_XYZ_F64,
-        "ACES2065-1" => colorspace::ACES_TO_XYZ_F64,
-        _ => colorspace::PROPHOTO_TO_XYZ_F64,
-    }
+    colorspace::RgbColourspace::input(name).rgb_to_xyz
 }
 
 /// Compute the reference illuminant's XYZ (for CAT02 target white).
@@ -741,26 +955,27 @@ pub fn colorspace_to_xyz_f64(name: &str) -> [[f64; 3]; 3] {
 /// Python f64 precision — our f32 constants lose ~1e-7 per value which
 /// accumulates to ~3e-6 in the final XYZ after 81 wavelengths.
 pub fn illuminant_xyz(illuminant: &[f32]) -> [f32; 3] {
-    // Match known illuminants by first value to use pre-computed XYZ
-    if illuminant.len() == N_WAVELENGTHS {
-        if (illuminant[0] - ILLUMINANT_D55[0]).abs() < 1e-6 {
-            return D55_ILLUMINANT_XYZ;
-        }
-        if (illuminant[0] - ILLUMINANT_D65[0]).abs() < 1e-6 {
-            return D65_ILLUMINANT_XYZ;
-        }
-        if (illuminant[0] - ILLUMINANT_D50[0]).abs() < 1e-6 {
-            return D50_ILLUMINANT_XYZ;
-        }
+    // Known illuminants use pre-computed XYZ.
+    if illuminant == &ILLUMINANT_D55[..] {
+        return D55_ILLUMINANT_XYZ;
+    }
+    if illuminant == &ILLUMINANT_D65[..] {
+        return D65_ILLUMINANT_XYZ;
+    }
+    if illuminant == &ILLUMINANT_D50[..] {
+        return D50_ILLUMINANT_XYZ;
+    }
+    if let Some(xyz) = known_illuminant_xyz_f64(illuminant) {
+        return xyz.map(|v| v as f32);
     }
 
     // Fallback: compute from SPD (f64 accumulation)
     let n = illuminant.len().min(N_WAVELENGTHS);
     let mut xyz = [0.0f64; 3];
     for i in 0..n {
-        xyz[0] += illuminant[i] as f64 * CMF_X[i] as f64;
-        xyz[1] += illuminant[i] as f64 * CMF_Y[i] as f64;
-        xyz[2] += illuminant[i] as f64 * CMF_Z[i] as f64;
+        xyz[0] += illuminant[i] as f64 * CMF_X_F64[i];
+        xyz[1] += illuminant[i] as f64 * CMF_Y_F64[i];
+        xyz[2] += illuminant[i] as f64 * CMF_Z_F64[i];
     }
     if xyz[1] > 0.0 {
         let s = 1.0 / xyz[1];
@@ -779,28 +994,21 @@ pub fn illuminant_to_xy(illuminant: &[f32]) -> (f64, f64) {
 
 /// f64 illuminant XYZ — matches Python's `_illuminant_to_xy` → xy_to_XYZ chain exactly.
 ///
-/// Uses pre-computed full-precision XYZ values for standard illuminants (D50/D55/D65),
-/// or falls back to live SPD integration in f64.
+/// Uses pre-computed full-precision XYZ values for the baked illuminants
+/// (D50/D55/D65/T/K75P), or falls back to live SPD integration in f64.
 pub fn illuminant_xyz_f64(illuminant: &[f32]) -> [f64; 3] {
-    if illuminant.len() == N_WAVELENGTHS {
-        if (illuminant[0] - ILLUMINANT_D55[0]).abs() < 1e-6 {
-            return D55_ILLUMINANT_XYZ_F64;
-        }
-        if (illuminant[0] - ILLUMINANT_D65[0]).abs() < 1e-6 {
-            return D65_ILLUMINANT_XYZ_F64;
-        }
-        if (illuminant[0] - ILLUMINANT_D50[0]).abs() < 1e-6 {
-            return D50_ILLUMINANT_XYZ_F64;
-        }
+    if let Some(xyz) = known_illuminant_xyz_f64(illuminant) {
+        return xyz;
     }
 
-    // Fallback: live computation in f64 — sum(illu * CMF), then xy → XYZ.
+    // Fallback: live computation in f64 — sum(illu * CMF), then xy → XYZ,
+    // with the f64 CMFs (blackbodies and the enlarger lamps land here).
     let n = illuminant.len().min(N_WAVELENGTHS);
     let mut xyz_unnorm = [0.0f64; 3];
     for i in 0..n {
-        xyz_unnorm[0] += illuminant[i] as f64 * CMF_X[i] as f64;
-        xyz_unnorm[1] += illuminant[i] as f64 * CMF_Y[i] as f64;
-        xyz_unnorm[2] += illuminant[i] as f64 * CMF_Z[i] as f64;
+        xyz_unnorm[0] += illuminant[i] as f64 * CMF_X_F64[i];
+        xyz_unnorm[1] += illuminant[i] as f64 * CMF_Y_F64[i];
+        xyz_unnorm[2] += illuminant[i] as f64 * CMF_Z_F64[i];
     }
     let sum = xyz_unnorm[0] + xyz_unnorm[1] + xyz_unnorm[2];
     if sum <= 0.0 {
@@ -811,7 +1019,7 @@ pub fn illuminant_xyz_f64(illuminant: &[f32]) -> [f64; 3] {
     if y <= 0.0 {
         return [1.0, 1.0, 1.0];
     }
-    [x / y, 1.0, (1.0 - x - y) / y]
+    colorspace::xy_to_xyz_f64(x, y)
 }
 
 /// f64 variant of XYZ → CIE xy.
@@ -1039,6 +1247,19 @@ pub fn hanatos2025_rgb_to_raw_prepared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_cmfs_are_the_exact_cmfs_in_f32() {
+        for (f32s, f64s) in [
+            (&CMF_X_F32, &CMF_X_F64),
+            (&CMF_Y_F32, &CMF_Y_F64),
+            (&CMF_Z_F32, &CMF_Z_F64),
+        ] {
+            for (a, b) in f32s.iter().zip(f64s) {
+                assert_eq!(*a, *b as f32);
+            }
+        }
+    }
 
     #[test]
     fn test_tc_xy_roundtrip() {

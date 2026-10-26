@@ -367,7 +367,7 @@ skipped while scanning film directly.")
   (checkbox); Black level 0…0.5
 - *Color Management*: Output gamut (Off, OKLCh, OKLrab, CAM16-UCS, ACES RGC);
   Input gamut (Off, xy Chromaticity); CAT16 adaptation (checkbox); Spectral
-  upsampling (Hanatos 2025, Arctic 2026 (Alpha), Mallett 2019)
+  upsampling (Hanatos 2025, Arctic 2026 (Beta 04), Mallett 2019)
 - *Output*: Limit preview to 12 MP (app setting, preview only; exports keep
   the full Image Size); Encode output as sRGB →
   `io.output_cctf_encoding`; Use less memory for export →
@@ -537,10 +537,11 @@ Behaviour:
   rotation, border and size. Only when the preview is current.
 - **Export LUT…**, directly below Export Photograph in File on both platforms,
   exports a 33³ `.cube` with sRGB encoded input/output. It snapshots the current
-  film/paper settings, including manual exposure, development, print filters and
-  color controls. No photo is required. The dialog and file comments explain
-  the exclusions: auto exposure, grain, halation/scatter, highlight boost,
-  glare, diffusion, blur, sharpening, RAW development, resizing and Post edits.
+  film/paper settings, including manual exposure, development, the neutral print
+  filters and color controls. No photo is required. The dialog and file comments
+  explain the exclusions: auto exposure, print filter shifts, preflash, grain,
+  halation/scatter, highlight boost, glare, diffusion, blur, sharpening, RAW
+  development, resizing and Post edits.
   DIR color inhibition remains active without spatial diffusion. Export uses
   the same calibrated spectral pipeline as the preview, in one grid render,
   and preserves the active preview. `spektrafilm export-lut --params` shares

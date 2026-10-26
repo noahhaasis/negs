@@ -52,7 +52,9 @@ def main():
         require((args.python_source / f"src/spektrafilm/data/profiles/{n}.json").read_bytes() == (ROOT / f"data/profiles/{n}.json").read_bytes(), f"Profile mismatch: {n}")
     report = json.loads((args.parity_dir / "report.json").read_text())
     require(report["passed"] and report["atol"] == 1e-6 and report["rtol"] == 0, "Invalid comparison report")
-    require(len(report["cases"]) == 10, "Incomplete comparison matrix")
+    matrix = {f"{fixture}-lut-{lut}" for fixture in ["midgray", "gradient4", "ramp16", "gamut-stress4", "adversarial32"]
+              for lut in ["off", "on"]}
+    require(matrix <= {case["id"] for case in report["cases"]}, "Incomplete comparison matrix")
     for case in report["cases"]:
         require(set(case["stages"]) == {"log_e_film", "cmy_film", "cmy_print", "rgb_out"}, "Missing stage")
         for stage in case["stages"]:

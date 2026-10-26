@@ -35,7 +35,7 @@ use spektrafilm_math::spectral::{self, CMF_Y_F64};
 use crate::params::RuntimeParams;
 use crate::profile::Profile;
 use crate::stages::printing::compute_single_pixel_raw;
-use crate::stages::scanning::select_illuminant_f64;
+use crate::illuminants::select_illuminant_f64;
 
 /// Pre-computed scanner exposure correction for the active stocks/params.
 #[derive(Clone, Copy, Debug)]
@@ -135,7 +135,7 @@ impl ColorReference {
     ) -> Self {
         // Scan spectral inputs come from the film (scan_film scans the film).
         let channel_density = profile_channel_density(film);
-        let base_density = film.data.base_density.clone();
+        let base_density = crate::bases::film_base_density(film, params);
         let illuminant: Vec<f64> = select_illuminant_f64(&film.info.viewing_illuminant).to_vec();
         let normalization = scan_normalization(&illuminant, &channel_density);
 
@@ -164,7 +164,8 @@ impl ColorReference {
         let density_midgray = -(0.184f64.log10());
         let density_midgray_corrected = -(midgray_corrected.log10());
         let density_curve_av = nanmean_per_step(&curves);
-        let density_min_av = nanmean(&base_density);
+        // Upstream averages the profile's base here, not the tuned one.
+        let density_min_av = nanmean(&film.data.base_density);
         let log_exposure = film.log_exposure_f64();
         // Positive film: density falls with exposure, so Python negates both
         // axes to feed np.interp an ascending x.
@@ -205,7 +206,7 @@ impl ColorReference {
     ) -> Self {
         // Reference film densities, mirroring `PrintingStage.expose`:
         //   black = -grain.density_min, white = nanmax(film.density_curves).
-        let gmin = params.film_render.grain.density_min;
+        let gmin = crate::grain::density_min(film, params);
         let cmy_film_black = [-gmin[0], -gmin[1], -gmin[2]];
         let film_curves = film.density_curves_f64();
         let cmy_film_white = nanmax_per_channel(&film_curves);
@@ -213,7 +214,7 @@ impl ColorReference {
         // Enlarger spectral exposure of those references
         // (`_film_cmy_to_print_log_raw`, sans the unported preflash term).
         let film_channel_density = profile_channel_density(film);
-        let film_base_density = film.data.base_density.clone();
+        let film_base_density = crate::bases::film_base_density(film, params);
         let print_sensitivity = profile_sensitivity(print);
         let n_wl = print_illuminant
             .len()
@@ -241,10 +242,7 @@ impl ColorReference {
         let log_raw_white = to_print_log_raw(cmy_film_white);
 
         // Develop the references through the paper emulsion (raw —
-        // un-normalized — curves). Upstream (>=v0.3.3) fixes the reference
-        // develop to gamma_factor=1.0, decoupling it from the user's print
-        // density_curve_gamma (the main image develop in `printing::develop`
-        // still honours that gamma; only these black/white references don't).
+        // un-normalized — curves) at unit gamma, as upstream does.
         let log_exposure = print.log_exposure_f64();
         let print_curves = print.density_curves_f64();
         let cmy_black = develop_single(log_raw_black, &log_exposure, &print_curves, 1.0);
@@ -252,7 +250,7 @@ impl ColorReference {
 
         // Scan those densities through the print profile → reference luminances.
         let print_channel_density = profile_channel_density(print);
-        let print_base_density = print.data.base_density.clone();
+        let print_base_density = crate::bases::print_base_density(print, params);
         let illuminant: Vec<f64> = select_illuminant_f64(&print.info.viewing_illuminant).to_vec();
         let normalization = scan_normalization(&illuminant, &print_channel_density);
         let scan_y = |cmy: [f64; 3]| -> f64 {
@@ -277,7 +275,8 @@ impl ColorReference {
         let density_midgray = -(0.184f64.log10());
         let density_midgray_corrected = -(midgray_corrected.log10());
         let density_curve_av = nanmean_per_step(&print_curves);
-        let density_min_av = nanmean(&print_base_density);
+        // Upstream averages the profile's base here, not the tuned one.
+        let density_min_av = nanmean(&print.data.base_density);
         let le_corrected = interp(
             density_midgray_corrected - density_min_av,
             &density_curve_av,
@@ -510,10 +509,11 @@ mod parity_tests {
     }
 
     /// Print-path B&W correction regression guard. The luminance remap
-    /// `(m, q)` and the printing-exposure correction were cross-checked
-    /// against a faithful transcription of Python's `color_reference.py`
-    /// (kodak_portra_400 → kodak_portra_endura); they agree to ~1e-7, the
-    /// residual being the f32 storage of the scanner white/black levels.
+    /// `(m, q)` and the printing-exposure correction come from upstream
+    /// experimental 28bf883's `ColorReferenceService`
+    /// (kodak_portra_400 → kodak_portra_endura, with the 28bf883 profiles);
+    /// they agree to ~1e-7, the residual being the f32 storage of the scanner
+    /// white/black levels.
     #[test]
     fn print_bw_correction_matches_python() {
         let dir = data_dir();
@@ -538,15 +538,12 @@ mod parity_tests {
 
         assert!(cref.has_remap(), "print path must build a luminance remap");
         let (m, q) = cref.xyz_remap.unwrap();
-        // Reference values from upstream 0.3.4's color_reference.py print
-        // path (SimulationPipeline at default params, corrections on):
-        //   m = 1.1805080822518117
-        //   q = -3.99466139952556459e-3
-        //   printing_exposure_correction = 1.0644087236240962
-        assert!((m - 1.1805080822518117).abs() < 1e-6, "m = {m}");
-        assert!((q - -3.99466139952556459e-3).abs() < 1e-7, "q = {q}");
+        // Reference values from experimental 28bf883's print path
+        // (SimulationPipeline at default params, corrections on).
+        assert!((m - 1.1797488764714492).abs() < 1e-6, "m = {m}");
+        assert!((q - -0.004027927281174061).abs() < 1e-7, "q = {q}");
         assert!(
-            (cref.printing_exposure_correction - 1.0644087236240962).abs() < 1e-6,
+            (cref.printing_exposure_correction - 1.0637192613949775).abs() < 1e-6,
             "printing_exposure_correction = {}",
             cref.printing_exposure_correction
         );

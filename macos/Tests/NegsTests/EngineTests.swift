@@ -26,17 +26,30 @@ final class EngineTests: XCTestCase {
         let (_, catalog) = try await client.request(["command": .string("catalog")])
         XCTAssertEqual(catalog["protocol"], .number(1))
         let defaults = catalog["defaults"]
+        let stocks = catalog["profiles"].array.map(Stock.init)
         for group in adjustmentGroups {
             for control in group.controls {
+                if case .balancePrint = control { continue }
+                if case .stockSlider(_, let path, let index, let range, _, _) = control {
+                    // Null until edited; every film's preset fills the lane.
+                    XCTAssertEqual(defaults[path], .null, path)
+                    let field = String(path.split(separator: ".").last!)
+                    for stock in stocks where !stock.paper {
+                        let preset = stock.grain[field].array.map(\.double)
+                        XCTAssertEqual(preset.count, 3, "\(stock.id) \(field)")
+                        XCTAssertTrue(preset.indices.contains(index) && range.contains(preset[index]), "\(stock.id) \(control.id)")
+                    }
+                    continue
+                }
                 XCTAssertNotEqual(defaults[control.id], .null, "Missing Rust parameter: \(control.id)")
                 switch control {
                 case .slider(_, _, let range, _): XCTAssertTrue(range.contains(defaults[control.id].double), control.id)
                 case .toggle: if case .bool = defaults[control.id] {} else { XCTFail(control.id) }
                 case .choice(_, _, let options): XCTAssertTrue(options.contains(defaults[control.id].string), control.id)
+                case .stockSlider, .balancePrint: break
                 }
             }
         }
-        let stocks = catalog["profiles"].array.map(Stock.init)
         XCTAssertEqual(stocks.first { $0.id == "kodak_gold_200" }?.target, "kodak_portra_endura")
         XCTAssertTrue(stocks.first { $0.id == "kodak_trix" }?.positive ?? false)
         XCTAssertGreaterThan(stocks.first { $0.id == "kodak_doublex" }?.times.count ?? 0, 1)
@@ -48,6 +61,32 @@ final class EngineTests: XCTestCase {
         let (id, next) = try await client.request(["command": .string("catalog")])
         XCTAssertEqual(id, 3)
         XCTAssertEqual(next["profiles"], catalog["profiles"])
+    }
+
+    /// Balance Print solves the enlarger's M/Y shifts on the helper; a tuned
+    /// film base moves them.
+    func testBalancePrintSolvesFilterShifts() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let helper = root.appendingPathComponent("target/release/spektrafilm-native")
+        guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+            throw XCTSkip("Build spektrafilm-native in release mode before the integration test")
+        }
+        let client = try EngineClient(paths: EnginePaths(helper: helper, exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: root.appendingPathComponent("data")))
+        defer { client.stop() }
+        let (_, catalog) = try await client.request(["command": .string("catalog")])
+        func balance(_ params: JSONValue) async throws -> (Double, Double) {
+            let (_, result) = try await client.request(["command": .string("balance_print"), "film": .string("kodak_portra_400"),
+                                                        "paper": .string("kodak_portra_endura"), "params": params])
+            return (result["m_filter_shift"].double, result["y_filter_shift"].double)
+        }
+        // The database's filters already balance the native base, within a few hundredths.
+        let native = try await balance(catalog["defaults"])
+        XCTAssertLessThan(max(abs(native.0), abs(native.1)), 0.1)
+        var tuned = catalog["defaults"]
+        tuned["film_render.base.tilt"] = .number(0.3)
+        tuned["film_render.base.yellow"] = .number(1.1)
+        let shifted = try await balance(tuned)
+        XCTAssertGreaterThan(max(abs(shifted.0), abs(shifted.1)), 1)
     }
 
     /// A rebuilt helper or another data folder makes the cached catalog stale.

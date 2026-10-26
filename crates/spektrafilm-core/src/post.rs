@@ -1,7 +1,8 @@
 //! Post adjustments: finishing edits on the scanned photograph, as an editor
-//! would make them to a lab scan. They run after the scan's clip to [0, 1],
-//! so they shape the tones the film produced but cannot recover a clipped
-//! highlight; that belongs to camera and print exposure.
+//! would make them to a lab scan. They run on the scan clipped to [0, 1]
+//! (`pipeline::clip_to_display`), as an integer file holds it, so they shape
+//! the tones the film produced but cannot recover a clipped highlight; that
+//! belongs to camera and print exposure.
 //!
 //! Tones are shaped on luminance in sRGB-encoded (perceptual) space, and each
 //! pixel keeps its colour ratios, so contrast doesn't shift the film's hues.
@@ -11,10 +12,9 @@
 //! build's purpose, parity with the Python reference, doesn't cover Post.
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use spektrafilm_math::colorspace::SRGB_TO_XYZ;
+use spektrafilm_math::colorspace::RgbColourspace;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f32, to_f32};
-use spektrafilm_math::spectral::colorspace_to_xyz;
 
 /// Each control runs from -100 to 100; 0 leaves the photograph unchanged.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -51,12 +51,7 @@ const LUT_SIZE: usize = 4096;
 /// Luminance weights of an output colour space: the Y row of its RGB → XYZ
 /// matrix. Unknown names fall back to sRGB, as the scan's output does.
 fn luminance_weights(color_space: &str) -> [f32; 3] {
-    match color_space {
-        "ProPhoto RGB" | "Rec. 2020" | "Rec2020" | "ITU-R BT.2020" | "ACES2065-1" => {
-            colorspace_to_xyz(color_space)[1]
-        }
-        _ => SRGB_TO_XYZ[1],
-    }
+    RgbColourspace::output(color_space).rgb_to_xyz[1].map(|v| v as f32)
 }
 
 fn srgb_encode(x: f64) -> f64 {
@@ -141,8 +136,8 @@ impl PostProcess {
         }
     }
 
-    /// Adjusts one pixel. Input channels are expected in [0, 1], as the scan
-    /// leaves them; so is the result.
+    /// Adjusts one pixel. Input channels are expected in [0, 1], clipped like
+    /// a display; so is the result.
     pub fn apply_rgb(&self, rgb: [f32; 3]) -> [f32; 3] {
         let mut c = if self.encoded {
             rgb.map(|v| lookup(&self.decode, v))
@@ -288,7 +283,7 @@ mod tests {
 
     #[test]
     fn luminance_follows_the_output_space() {
-        let prophoto = colorspace_to_xyz("ProPhoto RGB")[1];
+        let prophoto = RgbColourspace::output("ProPhoto RGB").rgb_to_xyz[1].map(|v| v as f32);
         let mono = PostProcess::new(&params(|p| p.saturation = -100.0), false, "ProPhoto RGB");
         for (rgb, y) in [
             ([1.0, 0.0, 0.0], prophoto[0]),

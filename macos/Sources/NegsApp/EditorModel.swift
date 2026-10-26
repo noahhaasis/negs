@@ -275,6 +275,45 @@ import UniformTypeIdentifiers
     func number(_ path: String, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
         Binding(get: { self.value(path).double }, set: { self.set(path, .number(Self.snap($0, to: range, step: step))) })
     }
+    /// Grain arrays (`film_render.grain.<field>`) are null until edited: the
+    /// engine then uses the film's preset, which the catalog resolves.
+    var filmIsBW: Bool { films.first { $0.id == film }?.bw ?? false }
+    func stockDefaults(_ path: String) -> [Double] {
+        let field = path.split(separator: ".").last.map(String.init) ?? path
+        return films.first { $0.id == film }?.grain[field].array.map(\.double) ?? []
+    }
+    func stockDefault(_ path: String, _ index: Int) -> Double {
+        let preset = stockDefaults(path)
+        return preset.indices.contains(index) ? preset[index] : 0
+    }
+    private func stockValues(_ path: String) -> [Double] {
+        let saved = value(path).array.map(\.double)
+        return saved.isEmpty ? stockDefaults(path) : saved
+    }
+    func stockNumber(_ path: String, _ index: Int, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
+        Binding(get: {
+            let values = self.stockValues(path)
+            return values.indices.contains(index) ? values[index] : 0
+        }, set: { self.setStock(path, index, Self.snap($0, to: range, step: step)) })
+    }
+    func isStockModified(_ path: String, _ index: Int) -> Bool {
+        let values = stockValues(path)
+        guard values.indices.contains(index) else { return false }
+        let preset = stockDefault(path, index)
+        return abs(values[index] - preset) > 1e-6 * max(1, abs(preset))
+    }
+    func resetStock(_ path: String, _ index: Int) { setStock(path, index, stockDefault(path, index)) }
+    /// Back at the preset in every lane, the array returns to null so a
+    /// later film change applies that film's preset.
+    private func setStock(_ path: String, _ index: Int, _ newValue: Double) {
+        var values = stockValues(path)
+        guard values.indices.contains(index) else { return }
+        values[index] = newValue
+        let preset = stockDefaults(path)
+        let atPreset = values.count == preset.count
+            && zip(values, preset).allSatisfy { abs($0 - $1) <= 1e-6 * max(1, abs($1)) }
+        set(path, atPreset ? .null : .array(values.map(JSONValue.number)))
+    }
     func toggle(_ path: String) -> Binding<Bool> {
         Binding(get: { self.value(path).bool }, set: { self.set(path, .bool($0)) })
     }
@@ -307,6 +346,8 @@ import UniformTypeIdentifiers
     func chooseFilm(_ stock: String) {
         var next = state; next.film = stock
         next.params["film_render.development_time"] = .null
+        // A new film brings its own grain preset, as upstream applies it.
+        for field in Stock.grainFields { next.params["film_render.grain.\(field)"] = .null }
         pairFilm(in: &next); apply(next, action: "Change Film")
     }
     func choosePaper(_ stock: String) {
@@ -800,6 +841,34 @@ import UniformTypeIdentifiers
 
     var canExportLUT: Bool { hasCatalog && engine != nil && !saving && !exporting && !cropping }
 
+    // MARK: Print balance
+
+    private(set) var balancingPrint = false
+    var canBalancePrint: Bool { hasCatalog && engine != nil && !balancingPrint && !cropping && !state.params["io.scan_film"].bool }
+
+    /// Solves the enlarger's magenta and yellow shifts so a mid-grey prints
+    /// neutral with the current settings (upstream's print balance), and
+    /// sets them as one undoable edit. Doesn't depend on the photograph.
+    func balancePrint() {
+        guard canBalancePrint, let engine else { return }
+        let snapshot = state
+        balancingPrint = true
+        status = "Balancing print…"
+        Task {
+            defer { balancingPrint = false }
+            do {
+                let (_, result) = try await engine.request(["command": .string("balance_print"), "film": .string(snapshot.film),
+                                                            "paper": .string(snapshot.paper), "params": snapshot.params])
+                let m = result["m_filter_shift"].double, y = result["y_filter_shift"].double
+                var next = state
+                next.params["enlarger.m_filter_shift"] = .number(m)
+                next.params["enlarger.y_filter_shift"] = .number(y)
+                apply(next, action: "Balance Print")
+                status = "Print balanced: magenta \(m.formatted(.number.precision(.fractionLength(2)))), yellow \(y.formatted(.number.precision(.fractionLength(2))))"
+            } catch { report(error) }
+        }
+    }
+
     func exportLUTPanel() {
         guard canExportLUT else { return }
         let panel = NSSavePanel()
@@ -807,7 +876,7 @@ import UniformTypeIdentifiers
         panel.canCreateDirectories = true
         panel.allowedContentTypes = [UTType(filenameExtension: "cube") ?? .data]
         panel.nameFieldStringValue = "\(state.film)_\(state.params["io.scan_film"].bool ? "direct_scan" : state.paper).cube"
-        panel.message = "33 × 33 × 33 CUBE · sRGB input and output. Uses the current film and paper color settings. Auto exposure, grain, halation, glare, diffusion, blur, sharpening, RAW development, and Post edits are excluded."
+        panel.message = "33 × 33 × 33 CUBE · sRGB input and output. Uses the current film and paper color settings. Auto exposure, print filter shifts, preflash, grain, halation, glare, diffusion, blur, sharpening, RAW development, and Post edits are excluded."
         if let path = UserDefaults.standard.string(forKey: "lastLUTFolder") {
             panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
         }

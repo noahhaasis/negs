@@ -1,5 +1,10 @@
 # Handoff: experimental gamut port
 
+**Update (ticket 16.8):** these settings are now the defaults, as in
+experimental. The `data/presets/experimental-gamut.json` preset and the
+`check_parity.py --experimental-gamut` flag were removed; run the commands
+below without them. The text below describes the original opt-in port.
+
 Continues [the B&W stock handoff](handoff-bw-stocks.md). The new smooth
 input-gamut boundary and fixed D65 compression center match Python
 experimental `28bf883e1672e884307edc75852549376e13644e`. They are available

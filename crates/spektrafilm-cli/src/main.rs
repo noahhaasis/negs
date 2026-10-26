@@ -308,6 +308,13 @@ fn cmd_process(
         t.elapsed().as_millis()
     );
 
+    // Auto exposure meters the full source, before any resize, as the native
+    // preview does, so an export has the preview's exposure.
+    let metering = params
+        .camera
+        .auto_exposure
+        .then(|| spektrafilm_core::stages::filming::metering_preview(&image));
+
     // Image Size: resize the source before the film, so grain and halation
     // form at the working size. A Longest side target in the params describes
     // the cropped photograph, so it is resolved with --crop; the crop itself
@@ -333,9 +340,12 @@ fn cmd_process(
     let t = Instant::now();
     // A missing LUT or invalid configuration must fail the export. Falling
     // back used to silently discard the user's parameters and spectral model.
-    let pipeline = Pipeline::new_with_spectral(film, print, params, data_dir)
+    let mut pipeline = Pipeline::new_with_spectral(film, print, params, data_dir)
         .map_err(anyhow::Error::msg)
         .context("building spectral pipeline")?;
+    if let Some(metering) = metering {
+        pipeline = pipeline.with_metering_preview(metering);
+    }
     let (result, used_backend) = if iters > 1 {
         // Warm-cache bench: process the image `iters` times in the same backend
         // instance. The first iteration pays shader-compile cost; subsequent ones
@@ -359,6 +369,14 @@ fn cmd_process(
         r
     };
     eprintln!("Backend: {used_backend}");
+
+    // The scan is unclipped, like Python's. Crop, border and resize work on the
+    // photograph as the file will hold it, so clip first when one applies;
+    // otherwise `--raw-out` keeps the unclipped values and the writer clips.
+    let mut result = result;
+    if crop.is_some() || border.is_some() || fit.is_some() {
+        spektrafilm_core::pipeline::clip_to_display(&mut result, encoded);
+    }
 
     // User crop and rotation from the GUI (post-pipeline, matches the preview).
     let result = match crop {

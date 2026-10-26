@@ -9,6 +9,12 @@ use crate::{params::RuntimeParams, pipeline::Pipeline, profile};
 /// Keep color and tone controls, removing operations that depend on an image's
 /// dimensions, other pixels, or random noise. DIR's color inhibition is retained;
 /// only its spatial diffusion is removed. Post-tab edits are outside the film look.
+///
+/// Mirrors Python's `digest_params(lut_mode)` (experimental 28bf883,
+/// `runtime/params_builder.py:103-138`) with one deliberate difference: the
+/// manual exposure controls (camera exposure, print exposure and its
+/// compensation) are kept, so the LUT matches the preview's tone. Upstream
+/// resets them and re-adds exposure only as its LUT creator's input gain.
 pub fn per_pixel_params(mut params: RuntimeParams) -> RuntimeParams {
     params.camera.auto_exposure = false;
     params.camera.lens_blur_um = 0.0;
@@ -24,9 +30,22 @@ pub fn per_pixel_params(mut params: RuntimeParams) -> RuntimeParams {
     params.print_render.glare.active = false;
     params.scanner.lens_blur = 0.0;
     params.scanner.unsharp_mask = [0.0, 0.0];
+    params.scanner.white_correction = false;
+    params.scanner.black_correction = false;
+    // Per-image trims: representable in a LUT, but corrections for one
+    // negative. A LUT is image-agnostic, so upstream bakes them neutral.
+    params.enlarger.y_filter_shift = 0.0;
+    params.enlarger.m_filter_shift = 0.0;
+    params.enlarger.preflash_exposure = 0.0;
+    params.enlarger.preflash_y_filter_shift = 0.0;
+    params.enlarger.preflash_m_filter_shift = 0.0;
+    // Exact spectral compute: the acceleration LUTs would bake their
+    // interpolation error into the sampled transform.
+    params.settings.use_enlarger_lut = false;
+    params.settings.use_scanner_lut = false;
     params.io.input_color_space = "sRGB".into();
-    // Like the PNG loader, cube() decodes sRGB before calling the pipeline.
-    // The engine's input_cctf_decoding field does not perform that conversion.
+    // Like the PNG loader, cube() decodes sRGB before calling the pipeline,
+    // so the engine mustn't decode it again.
     params.io.input_cctf_decoding = false;
     params.io.output_color_space = "sRGB".into();
     params.io.output_cctf_encoding = true;
@@ -89,6 +108,7 @@ pub fn cube(
          # Uses the current film/paper color and tone settings, including manual exposure.\n\
          # Excludes auto exposure, grain, halation, scatter, highlight boost, glare,\n\
          # diffusion, lens blur, sharpening, RAW development, resizing and Post-tab edits.\n\
+         # Print filter shifts, preflash and scanner white/black correction are neutral.\n\
          # DIR color inhibition is retained without spatial diffusion.\n\
          TITLE \"{title}\"\nLUT_3D_SIZE {size}\n\
          DOMAIN_MIN 0.0 0.0 0.0\nDOMAIN_MAX 1.0 1.0 1.0\n\n"
@@ -97,7 +117,11 @@ pub fn cube(
         if pixel.iter().any(|v| !v.is_finite()) {
             return Err("The selected settings produced non-finite LUT values".into());
         }
-        writeln!(text, "{:.8} {:.8} {:.8}", pixel[0], pixel[1], pixel[2]).unwrap();
+        // The scan is unclipped; like upstream's LUT creator (`np.clip(code,
+        // 0, 1)` in `_bake_sublut`), the table holds [0, 1], which is what
+        // applications expect within DOMAIN_MIN..DOMAIN_MAX.
+        let [r, g, b] = [pixel[0], pixel[1], pixel[2]].map(|v| v.clamp(from_f64(0.0), from_f64(1.0)));
+        writeln!(text, "{r:.8} {g:.8} {b:.8}").unwrap();
     }
     Ok(text)
 }

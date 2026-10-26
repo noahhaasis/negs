@@ -4,10 +4,18 @@ enum Adjustment: Identifiable {
     case slider(String, String, ClosedRange<Double>, Double)
     case toggle(String, String)
     case choice(String, String, [String])
+    /// One lane (index) of an engine array that stays null until edited, so
+    /// the film's grain preset from the catalog applies. B&W films have one
+    /// emulsion: they show the lane under `bw`, or hide it when that is nil.
+    case stockSlider(String, String, Int, ClosedRange<Double>, Double, bw: String?)
+    /// A button that solves for parameters: title, help.
+    case balancePrint(String, String)
 
     var id: String {
         switch self {
         case .slider(_, let path, _, _), .toggle(_, let path), .choice(_, let path, _): return path
+        case .stockSlider(_, let path, let index, _, _, _): return "\(path).\(index)"
+        case .balancePrint(let title, _): return title
         }
     }
 }
@@ -53,10 +61,21 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Developer exhaustion", "film_render.density_curves_morph.developer_exhaustion", 0...1, 0.01)
     ]),
     .init(title: "Grain", symbol: "circle.dotted", section: .film, enable: "film_render.grain.active", controls: [
-        .slider("Particle area (µm²)", "film_render.grain.agx_particle_area_um2", 0.05...1, 0.01),
-        .slider("Post blur", "film_render.grain.blur", 0...3, 0.01),
-        .toggle("Sublayers", "film_render.grain.sublayers_active"),
-        .slider("Sublayer count", "film_render.grain.n_sub_layers", 1...4, 1)
+        .stockSlider("Red granularity", "film_render.grain.rms_granularity", 0, 0...80, 0.1, bw: "Granularity"),
+        .stockSlider("Green granularity", "film_render.grain.rms_granularity", 1, 0...80, 0.1, bw: nil),
+        .stockSlider("Blue granularity", "film_render.grain.rms_granularity", 2, 0...80, 0.1, bw: nil),
+        .stockSlider("Red uniformity", "film_render.grain.uniformity", 0, 0...1, 0.01, bw: "Uniformity"),
+        .stockSlider("Green uniformity", "film_render.grain.uniformity", 1, 0...1, 0.01, bw: nil),
+        .stockSlider("Blue uniformity", "film_render.grain.uniformity", 2, 0...1, 0.01, bw: nil),
+        .stockSlider("Coarse grain size", "film_render.grain.particle_scale_sublayers", 0, 0.05...2, 0.01, bw: "Coarse grain size"),
+        .stockSlider("Medium grain size", "film_render.grain.particle_scale_sublayers", 1, 0.05...2, 0.01, bw: "Medium grain size"),
+        .stockSlider("Fine grain size", "film_render.grain.particle_scale_sublayers", 2, 0.05...2, 0.01, bw: "Fine grain size"),
+        .slider("Dye clouds (µm)", "film_render.grain.blur_dye_clouds_um", 0...5, 0.01),
+        .slider("Blur (px)", "film_render.grain.blur", 0...3, 0.01),
+        .slider("Sharpen amount", "film_render.grain.mult_usm_amount", 0...3, 0.01),
+        .slider("Sharpen radius (px)", "film_render.grain.mult_usm_sigma", 0...3, 0.01),
+        .slider("Clump blur (µm)", "film_render.grain.micro_structure.0", 0...1, 0.01),
+        .slider("Clump size (nm)", "film_render.grain.micro_structure.1", 0...100, 1)
     ]),
     .init(title: "Halation", symbol: "sun.haze", section: .film, enable: "film_render.halation.active", controls: [
         .slider("Amount", "film_render.halation.halation_amount", 0...3, 0.01),
@@ -72,6 +91,13 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Tail (µm)", "film_render.dir_couplers.diffusion_tail_um", 0...400, 1),
         .slider("Tail weight", "film_render.dir_couplers.diffusion_tail_weight", 0...1, 0.01)
     ]),
+    .init(title: "Film Base", symbol: "square.stack.3d.down.right", section: .film, enable: "film_render.base.active", controls: [
+        .slider("Density", "film_render.base.scale", 0...2, 0.01),
+        .slider("Tilt", "film_render.base.tilt", -1...1, 0.01),
+        .slider("Cyan", "film_render.base.cyan", 0...2, 0.01),
+        .slider("Magenta", "film_render.base.magenta", 0...2, 0.01),
+        .slider("Yellow", "film_render.base.yellow", 0...2, 0.01)
+    ]),
     .init(title: "Enlarger", symbol: "light.overhead.left", section: .print, controls: [
         .slider("Print exposure", "enlarger.print_exposure", 0.1...5, 0.01),
         .toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
@@ -79,7 +105,8 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Yellow shift", "enlarger.y_filter_shift", -50...50, 0.1),
         .slider("Preflash exposure", "enlarger.preflash_exposure", 0...0.5, 0.01),
         .slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50...50, 0.1),
-        .slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50...50, 0.1)
+        .slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50...50, 0.1),
+        .balancePrint("Balance Print", "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.")
     ]),
     .init(title: "Print Curves", symbol: "chart.xyaxis.line", section: .print, enable: "print_render.density_curves_morph.active", controls: [
         .slider("Gamma", "print_render.density_curves_morph.gamma_factor", 0.5...2, 0.01),
@@ -89,6 +116,12 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Green gamma", "print_render.density_curves_morph.gamma_factor_green", 0.5...2, 0.01),
         .slider("Blue gamma", "print_render.density_curves_morph.gamma_factor_blue", 0.5...2, 0.01),
         .slider("Developer exhaustion", "print_render.density_curves_morph.developer_exhaustion", 0...1, 0.01)
+    ]),
+    .init(title: "Print Base", symbol: "square.stack.3d.down.right", section: .print, enable: "print_render.base.active", controls: [
+        .slider("Density", "print_render.base.scale", 0...2, 0.01),
+        .slider("Cyan", "print_render.base.cyan", 0...2, 0.01),
+        .slider("Magenta", "print_render.base.magenta", 0...2, 0.01),
+        .slider("Yellow", "print_render.base.yellow", 0...2, 0.01)
     ]),
     .init(title: "Glare", symbol: "light.max", section: .print, enable: "print_render.glare.active", controls: [
         .slider("Amount", "print_render.glare.percent", 0...0.2, 0.001),
@@ -108,7 +141,7 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .choice("Output gamut", "io.output_gamut_compress.algorithm", ["off", "oklch", "oklrab", "cam16ucs", "aces_rgc"]),
         .choice("Input gamut", "io.input_gamut_compress.algorithm", ["off", "xy"]),
         .toggle("CAT16 adaptation", "settings.use_cat16"),
-        .choice("Spectral upsampling", "settings.rgb_to_raw_method", ["hanatos2025", "arctic2026alpha02", "mallett2019"])
+        .choice("Spectral upsampling", "settings.rgb_to_raw_method", ["hanatos2025", "arctic2026beta04", "mallett2019"])
     ])
 ]
 
@@ -126,6 +159,21 @@ struct AdjustmentControl: View {
             }.resettable(model, path)
         case .slider(let title, let path, let range, let step):
             SliderRow(model: model, title: title, path: path, range: range, step: step)
+        case .stockSlider(let title, let path, let index, let range, let step, let bwTitle):
+            if !model.filmIsBW || bwTitle != nil {
+                LabeledSlider(title: model.filmIsBW ? bwTitle ?? title : title,
+                              value: model.stockNumber(path, index, range: range, step: step), range: range, step: step,
+                              defaultValue: model.stockDefault(path, index), modified: model.isStockModified(path, index),
+                              reset: { model.resetStock(path, index) },
+                              editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+            }
+        case .balancePrint(let title, let help):
+            HStack {
+                Spacer()
+                Button(model.balancingPrint ? "Balancing…" : title) { model.balancePrint() }
+                    .disabled(!model.canBalancePrint)
+                    .help(help)
+            }
         }
     }
 }

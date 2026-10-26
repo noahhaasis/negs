@@ -136,7 +136,7 @@ The film model at the heart of Negs comes from two open-source projects. Negs bu
 - **[spektrafilm](https://github.com/andreavolpato/spektrafilm)** by Andrea Volpato: the spectral simulation of film and print. The physics and the stock data come from here.
 - **[spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs)** by turbasvin: the Rust port of spektrafilm that Negs started from.
 
-The spectral-upsampling tables are by [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt). Parts of the maths are ported from numpy, scipy, scikit-image and colour-science. RAW files Apple can't read are decoded with [rawler](https://github.com/dnglab/dnglab), and updates are delivered with [Sparkle](https://sparkle-project.org).
+The default spectral-upsampling table is by [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt). The optional Arctic 2026 table is by Andrea Volpato, from spektrafilm, and the Mallett 2019 table is spektrafilm's tabulation of the spectral primary decomposition by Ian Mallett and Cem Yuksel (2019). The profiles and tables from spektrafilm are under CC BY-SA 4.0 ([license](data/SPEKTRAFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). Parts of the maths are ported from numpy, scipy, scikit-image and colour-science. RAW files Apple can't read are decoded with [rawler](https://github.com/dnglab/dnglab), and updates are delivered with [Sparkle](https://sparkle-project.org).
 
 ## License
 
