@@ -104,6 +104,40 @@ NaN/Inf and size differences always fail. ΔE00 is computed like
 significant digits). Statuses other than PASS/IDENTICAL are printed with their
 counts so a relaxed gate is never silent.
 
+## Results on 2026-10-26: Linux after ticket 16 (a22437e)
+
+Omarchy (Arch), Linux 7.2.8, Ryzen 5 3600, GTX 1660 SUPER on Vulkan (NVIDIA
+615.78.08), rustc 1.93.1, clean tree at `a22437e` on `linux-experimental-parity`
+(`windows-parity` plus the Linux inspector work; no engine changes), the
+reference inputs. `linux-gtx1660s-vulkan.json` and `linux-ui.json` are two
+independent runs, about 7 minutes each. The second followed a release build
+of the GTK app and its tests (26/26, the live-helper schema gate, and the
+helper's 7/7).
+
+**Same machine:** the two runs are 484/484 identical under `compare --exact`
+(`reports/linux-ui-exact.json`).
+
+**GPU vs f64 (`quality`): 76/76 pass.** ΔE00 max 0.0016 (`synth_noise`
+Vision3 → 2383), p99 ≤ 0.0003, p99.9 ≤ 0.0005, at most 2 16-bit codes and 1
+8-bit step: the Windows numbers. On the same GPU, Linux's GPU raw output is
+bit-identical to Windows in 182/184 cases; the other two are the CPU-side
+`border_35mm` and `resize` layouts.
+
+**Linux vs the Mac (tolerance mode, `reports/linux-vs-macos.json`, against the
+M1 Pro's dd870f0 dumps):**
+
+| Engine | Result | Worst |
+|---|---|---|
+| f64 | 180 PASS, 2 PASS-BORDER, 2 PASS-GRAIN | ×0.16 of the gate (35mm border); `det` ΔE00 ≤ 3e-12, no 16-bit code changed |
+| f32 CPU | 110 PASS, 1 PASS-GRAIN, **5 FAIL-GRAIN** | `det` ΔE00 9e-6, no 8-bit step |
+| GPU | 184 PASS | `det` ΔE00 0.0017, 1 8-bit step; grain cases under `gpu_grain` |
+
+- The 5 FAIL-GRAIN f32 CPU cases are the deferred shared-MT19937 stream
+  divergence. They are a subset of Windows' 82; glibc's libm keeps far more
+  grain cases in step with the Mac than MSVC's does. The f64 and GPU statuses
+  equal Windows' case for case.
+- `compare` exits non-zero because of those 5 cases; nothing else fails.
+
 ## Results on 2026-10-26: Windows after ticket 16 (dd870f0)
 
 Windows 10, Ryzen 5 3600, GTX 1660 SUPER on Vulkan (driver 610.47), MSVC
@@ -269,6 +303,9 @@ release. See `docs/windows-agent-handoff.md`.
 
 ## Watch next
 
+- **Linux after the port: done** at a22437e (see "Results on 2026-10-26:
+  Linux"): 76/76 quality, 484/484 exact, and against the Mac only the 5
+  known f32 CPU grain cases fail.
 - **Windows after the port: done** at dd870f0 (see "Results on 2026-10-26:
   Windows"). The macOS manifests other than `macos-arm64.json` keep TIFF
   hashes from before 06410bd (ICC profiles in saves). Regenerate them at the

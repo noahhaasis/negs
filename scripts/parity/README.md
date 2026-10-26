@@ -512,6 +512,19 @@ the `.exe` paths (`--native-binary target\release\spektrafilm-native.exe`,
 16 GB machine. Ten workers ran out of memory there, and `np.save` failed with
 "requested and 0 written".
 
+Linux on 2026-10-26 (`a22437e` on `linux-experimental-parity`, Omarchy, GTX
+1660 SUPER on Vulkan, Python 3.13 in a `uv` environment with the Mac's
+package versions): 556/556 with no errors, every app render on `wgpu (GPU)`,
+within one 8-bit step (ΔE00 ≤ 1.23, at most 0.038% of pixels touched). f64 is
+≤ 1.4e-6 outside the diffusion filter (8.2e-6 with it), and the largest
+response gap is 0.00015 ΔE00 (mean). `--workers 4` took 14.6 minutes.
+`parameters::tests::sweep_cases_match_the_inspector` (ignored; set
+`NEGS_SWEEP_DIR` and `NEGS_SCHEMA_HELPER`) then rebuilds all 556 cases
+through the GTK inspector's own bindings and gets the same RuntimeParams the
+sweep sent, so the sweep covers the Linux controls too. The helper's grain
+presets, which the Linux grain lanes show, equal Python's resolved presets
+for every shared film.
+
 ## Grain statistics: `grain_compare.py`
 
 Flat grey tiles at four exposures, auto exposure and glare off, the stock's
@@ -540,6 +553,10 @@ Windows on 2026-10-26 (dd870f0, GTX 1660 SUPER, `--binary
 target\release\spektrafilm.exe`): the same result. RMS is within 0.01 of
 Python for all four stocks at every size, and grain size is 0.86–0.87 px for
 all three engines.
+
+Linux on 2026-10-26 (`a22437e`, GTX 1660 SUPER): the same result. Mean RMS
+is within 0.0022 of Python for all four stocks at 640 px, 2016 px and 1008 px
+×2, and grain size is 0.86–0.87 px for all three engines.
 
 ## Original methodology and surviving probes
 
