@@ -148,6 +148,13 @@ import SwiftUI
                 : symbol("crop", "Crop")
         }
         setEnabled(.export, photo && model.ready && !model.exporting && !model.saving)
+        // The accent color marks the panel the inspector column shows.
+        for (id, pane, name, label) in [(NSToolbarItem.Identifier.adjustments, InspectorPane.adjustments, "slider.horizontal.3", "Adjustments"),
+                                        (.presets, .presets, "square.stack", "Presets")] {
+            let icon = symbol(name, label)
+            items[id]?.image = model.inspectorVisible && model.inspectorPane == pane
+                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+        }
         // A ratio field being edited keeps its own Return and Escape.
         if let session = model.cropSession {
             cancelButton.keyEquivalent = session.typing ? "" : "\u{1b}"
@@ -180,7 +187,7 @@ import SwiftUI
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.open, .filmstrip, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .export, .adjustments]
+        [.open, .filmstrip, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .export, .presets, .adjustments]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -210,6 +217,8 @@ import SwiftUI
             item = group
         case .export:
             item = button(id, "Export", "square.and.arrow.down", "Export photograph (⇧⌘E)", #selector(export))
+        case .presets:
+            item = button(id, "Presets", "square.stack", "Show or hide presets (⌥⌘P)", #selector(togglePresets))
         case .adjustments:
             item = button(id, "Adjustments", "slider.horizontal.3", "Show or hide adjustments (⌥⌘I)", #selector(toggleAdjustments))
         case .cancelCrop:
@@ -261,11 +270,12 @@ import SwiftUI
     @objc private func applyCrop() { model.endCrop(apply: true) }
     @objc private func export() { model.savePanel(export: true) }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
-    @objc private func toggleAdjustments() { model.inspectorVisible.toggle() }
+    @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
+    @objc private func togglePresets() { model.togglePane(.presets) }
 }
 
 private extension NSToolbarItem.Identifier {
     static let filmstrip = Self("filmstrip")
     static let open = Self("open"), zoom = Self("zoom"), edit = Self("edit")
-    static let export = Self("export"), adjustments = Self("adjustments"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
+    static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
 }

@@ -49,6 +49,9 @@ import SwiftUI
         command(file, "Save Preview…", #selector(savePreview), "s")
         command(file, "Export Photograph…", #selector(exportPhotograph), "e", [.command, .shift])
         command(file, "Export LUT…", #selector(exportLUT), "l", [.command, .shift])
+        file.addItem(.separator())
+        command(file, "New Preset", #selector(newPreset), "s", [.command, .shift])
+        command(file, "Import Presets…", #selector(importPresets), "o", [.command, .shift])
 
         let edit = submenu("Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -63,6 +66,7 @@ import SwiftUI
         let view = submenu("View")
         command(view, "Hide Film Strip", #selector(toggleFilmstrip), "f", [.command, .option])
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
+        command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
         command(view, "Actual Size", #selector(actualSize), "1")
@@ -116,7 +120,10 @@ import SwiftUI
     @objc private func exportPhotograph() { model.savePanel(export: true) }
     @objc private func exportLUT() { model.exportLUTPanel() }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
-    @objc private func toggleAdjustments() { model.inspectorVisible.toggle() }
+    @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
+    @objc private func togglePresets() { model.togglePane(.presets) }
+    @objc private func newPreset() { model.newPreset() }
+    @objc private func importPresets() { model.importPresetsPanel() }
     @objc private func fitPhotograph() { model.zoom(fit: true) }
     @objc private func actualSize() { model.zoom(fit: false) }
     @objc private func rotate() { model.rotate() }
@@ -135,7 +142,11 @@ import SwiftUI
         case #selector(toggleFilmstrip):
             item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
             return true
-        case #selector(toggleAdjustments): item.state = model.inspectorVisible ? .on : .off; return true
+        case #selector(toggleAdjustments):
+            item.state = model.inspectorVisible && model.inspectorPane == .adjustments ? .on : .off; return true
+        case #selector(togglePresets):
+            item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return true
+        case #selector(newPreset), #selector(importPresets): return model.canChangePresets
         case #selector(fitPhotograph), #selector(actualSize): return photo && !model.cropping
         case #selector(rotate): return photo
         case #selector(crop):
