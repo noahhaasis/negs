@@ -36,9 +36,12 @@ pub const GROUPS: &[Group] = &[
     Group {
         name: "Grain",
         knobs: &[
-            Knob("Particle area", 0.05, 1., 0.01, 0.2, "µm²"),
+            Knob("Dye clouds", 0., 5., 0.01, 2., "µm"),
             Knob("Post blur", 0., 3., 0.01, 0., "px"),
-            Knob("Sublayer count", 1., 4., 1., 3., ""),
+            Knob("Sharpen amount", 0., 3., 0.01, 1.5, ""),
+            Knob("Sharpen radius", 0., 3., 0.01, 0.3, "px"),
+            Knob("Clump blur", 0., 1., 0.01, 0.2, "µm"),
+            Knob("Clump size", 0., 100., 1., 30., "nm"),
         ],
     },
     Group {
