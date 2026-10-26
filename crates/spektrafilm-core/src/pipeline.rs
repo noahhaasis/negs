@@ -799,6 +799,7 @@ impl Pipeline {
             &self.params,
             &self.print_illuminant,
             self.print_exposure_factor,
+            self.preflash_raw,
         );
         print_stage_timing(stage_timings, "color_reference", t);
 
@@ -914,6 +915,7 @@ impl Pipeline {
             &self.params,
             &self.print_illuminant,
             self.print_exposure_factor,
+            self.preflash_raw,
         );
         let autoexposure_ev = self.frame_autoexposure_ev(image);
         let out = self.try_gpu_resident(image, backend, &color_ref, autoexposure_ev).ok()??;
