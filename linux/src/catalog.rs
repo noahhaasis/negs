@@ -15,6 +15,9 @@ pub struct Stock {
     pub target: String,
     #[serde(alias = "development_times")]
     pub times: Vec<f64>,
+    /// The resolved grain preset, per field of `GRAIN_STOCK_FIELDS`.
+    #[serde(default)]
+    pub grain: serde_json::Value,
 }
 #[derive(Deserialize)]
 struct Catalog {
@@ -99,22 +102,20 @@ pub fn selected(state: &crate::model::State, paper: bool) -> &'static Stock {
     let key = if paper { "Paper" } else { "Film" };
     let stocks = stocks(paper);
     let id = state.choices.get(&format!("{key} ID"));
-    let legacy = state
-        .choices
-        .get(key)
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0);
-    let old = if paper {
-        [
+    // Old sessions stored a menu index; new edits start on `EditState`'s
+    // stocks in `Parameters.swift`.
+    let old = match state.choices.get(key).and_then(|s| s.parse::<usize>().ok()) {
+        Some(legacy) if paper => [
             "kodak_portra_endura",
             "kodak_ultra_endura",
             "fujifilm_crystal_archive_typeii",
             "ilford_mgrc_deluxe_grade2",
         ]
         .get(legacy)
-        .copied()
-    } else {
-        crate::border::FILM_IDS.get(legacy).copied()
+        .copied(),
+        Some(legacy) => crate::border::FILM_IDS.get(legacy).copied(),
+        None if paper => Some("kodak_portra_endura"),
+        None => Some("kodak_gold_200"),
     };
     stocks
         .iter()

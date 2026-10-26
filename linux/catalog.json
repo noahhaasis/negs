@@ -9,7 +9,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "fujifilm_crystal_archive_typeii",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "fujifilm_pro_400h",
@@ -19,7 +41,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "fujifilm_crystal_archive_typeii",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "fujifilm_xtra_400",
@@ -29,7 +73,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "fujifilm_crystal_archive_typeii",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_ektar_100",
@@ -39,7 +105,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "kodak_portra_endura",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_gold_200",
@@ -49,7 +137,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "kodak_portra_endura",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          5.0,
+          5.0,
+          5.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_portra_160",
@@ -59,7 +169,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "kodak_portra_endura",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          3.5,
+          3.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_portra_400",
@@ -69,7 +201,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "kodak_portra_endura",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.5,
+          4.5,
+          4.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_portra_800",
@@ -79,7 +233,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "kodak_portra_endura",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_portra_800_push1",
@@ -89,7 +265,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "kodak_portra_endura",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          7.0,
+          7.0,
+          7.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_portra_800_push2",
@@ -99,7 +297,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "kodak_portra_endura",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          9.0,
+          9.0,
+          9.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_ultramax_400",
@@ -109,7 +329,29 @@
       "bw": false,
       "group": "Color Negative",
       "target": "kodak_portra_endura",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "fujifilm_provia_100f",
@@ -119,7 +361,29 @@
       "bw": false,
       "group": "Color Slide",
       "target": "",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          8.0,
+          8.0,
+          8.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "fujifilm_velvia_100",
@@ -129,7 +393,29 @@
       "bw": false,
       "group": "Color Slide",
       "target": "",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          8.0,
+          8.0,
+          8.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_ektachrome_100",
@@ -139,7 +425,29 @@
       "bw": false,
       "group": "Color Slide",
       "target": "",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          8.0,
+          8.0,
+          8.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_kodachrome_64",
@@ -149,7 +457,29 @@
       "bw": false,
       "group": "Color Slide",
       "target": "",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          10.0,
+          10.0,
+          10.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_verita_200d",
@@ -159,7 +489,29 @@
       "bw": false,
       "group": "Motion Picture",
       "target": "kodak_2383",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.5,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          8.0,
+          10.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_vision3_200t",
@@ -169,7 +521,29 @@
       "bw": false,
       "group": "Motion Picture",
       "target": "kodak_2383",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.12
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          7.0,
+          8.0,
+          17.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_vision3_250d",
@@ -179,7 +553,29 @@
       "bw": false,
       "group": "Motion Picture",
       "target": "kodak_2383",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.1,
+          0.11,
+          0.12
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          10.0,
+          11.0,
+          18.0
+        ],
+        "uniformity": [
+          0.97,
+          0.94,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_vision3_500t",
@@ -189,7 +585,29 @@
       "bw": false,
       "group": "Motion Picture",
       "target": "kodak_2383",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.12,
+          0.1,
+          0.35
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.3,
+          0.25
+        ],
+        "rms_granularity": [
+          9.0,
+          13.0,
+          30.0
+        ],
+        "uniformity": [
+          0.93,
+          0.97,
+          0.99
+        ]
+      }
     },
     {
       "id": "kodak_vision3_50d",
@@ -199,7 +617,29 @@
       "bw": false,
       "group": "Motion Picture",
       "target": "kodak_2383",
-      "times": []
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          7.0,
+          7.0,
+          12.0
+        ],
+        "uniformity": [
+          0.97,
+          0.95,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_doublex",
@@ -215,7 +655,29 @@
         6.5,
         9.0,
         12.0
-      ]
+      ],
+      "grain": {
+        "density_min": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          14.0,
+          14.0,
+          14.0
+        ],
+        "uniformity": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      }
     },
     {
       "id": "kodak_trix400_d76_8min",
@@ -227,7 +689,29 @@
       "target": "ilford_mgrc_deluxe_grade2",
       "times": [
         8
-      ]
+      ],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.5,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
     },
     {
       "id": "kodak_trix",
@@ -239,7 +723,29 @@
       "target": "",
       "times": [
         1.0
-      ]
+      ],
+      "grain": {
+        "density_min": [
+          0.003,
+          0.003,
+          0.003
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          44.0,
+          44.0,
+          44.0
+        ],
+        "uniformity": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      }
     },
     {
       "id": "fujifilm_crystal_archive_typeii",

@@ -503,6 +503,28 @@ around 2. Not compared: Negs-only stocks and settings (`settings.use_cat16`,
 RAW white balance, Image Size, Post), glare, and grain, which
 `grain_compare.py` covers.
 
+Windows on 2026-10-26 (dd870f0, GTX 1660 SUPER on Vulkan, Python on the
+same box): 556/556 within one 8-bit step (ΔE00 ≤ 1.23, at most 0.04% of
+pixels touched). f64 is as on the Mac (≤ 1.4e-6 outside the diffusion
+filter, 8.2e-6 with it), and the largest response gap is 0.0002 ΔE00. Pass
+the `.exe` paths (`--native-binary target\release\spektrafilm-native.exe`,
+`--f64-binary target\release\spektrafilm-f64.exe`) and `--workers 4` on a
+16 GB machine. Ten workers ran out of memory there, and `np.save` failed with
+"requested and 0 written".
+
+Linux on 2026-10-26 (`a22437e` on `linux-experimental-parity`, Omarchy, GTX
+1660 SUPER on Vulkan, Python 3.13 in a `uv` environment with the Mac's
+package versions): 556/556 with no errors, every app render on `wgpu (GPU)`,
+within one 8-bit step (ΔE00 ≤ 1.23, at most 0.038% of pixels touched). f64 is
+≤ 1.4e-6 outside the diffusion filter (8.2e-6 with it), and the largest
+response gap is 0.00015 ΔE00 (mean). `--workers 4` took 14.6 minutes.
+`parameters::tests::sweep_cases_match_the_inspector` (ignored; set
+`NEGS_SWEEP_DIR` and `NEGS_SCHEMA_HELPER`) then rebuilds all 556 cases
+through the GTK inspector's own bindings and gets the same RuntimeParams the
+sweep sent, so the sweep covers the Linux controls too. The helper's grain
+presets, which the Linux grain lanes show, equal Python's resolved presets
+for every shared film.
+
 ## Grain statistics: `grain_compare.py`
 
 Flat grey tiles at four exposures, auto exposure and glare off, the stock's
@@ -526,6 +548,15 @@ had 3–4× the RMS on Portra, Gold and Provia, about 20% less on 500T, and
 finer grain (0.70 px). At a 1512 px window, Python's 640 px preview shows
 4.4× less grain than a 6048 px Negs render. That is the preview size, not the
 engine: Python's full-size scan matches Negs.
+
+Windows on 2026-10-26 (dd870f0, GTX 1660 SUPER, `--binary
+target\release\spektrafilm.exe`): the same result. RMS is within 0.01 of
+Python for all four stocks at every size, and grain size is 0.86–0.87 px for
+all three engines.
+
+Linux on 2026-10-26 (`a22437e`, GTX 1660 SUPER): the same result. Mean RMS
+is within 0.0022 of Python for all four stocks at 640 px, 2016 px and 1008 px
+×2, and grain size is 0.86–0.87 px for all three engines.
 
 ## Original methodology and surviving probes
 

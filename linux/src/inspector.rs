@@ -8,6 +8,9 @@ use std::{cell::Cell, rc::Rc};
 
 pub fn knob(ui: &Rc<Editor>, group: &str, knob: &Knob) -> gtk::ListBoxRow {
     let key = format!("{group}.{}", knob.0);
+    if crate::parameters::grain_lane(&key).is_some() {
+        return grain_knob(ui, key, knob);
+    }
     let engine_default = crate::parameters::path(&key)
         .and_then(|p| crate::parameters::get(&ui.runtime.borrow().defaults, &p).as_f64())
         .unwrap_or(knob.4);
@@ -29,6 +32,58 @@ pub fn knob(ui: &Rc<Editor>, group: &str, knob: &Knob) -> gtk::ListBoxRow {
     row
 }
 
+/// A per-stock grain preset lane. It shows the selected film's preset while
+/// unset, resets to it, and follows the film's emulsion count.
+fn grain_knob(ui: &Rc<Editor>, key: String, knob: &Knob) -> gtk::ListBoxRow {
+    let (field, index) = crate::parameters::grain_lane(&key).unwrap();
+    let state = ui.history.borrow().state.clone();
+    let preset = crate::parameters::grain_preset(&state, field, index).unwrap_or(knob.4);
+    let value = state.values.get(&key).copied().unwrap_or(preset);
+    let default = Rc::new(Cell::new(preset));
+    let edit = key.clone();
+    let n = number_row(
+        ui,
+        knob,
+        value,
+        false,
+        default.clone(),
+        move |state, value| {
+            crate::parameters::set_grain_lane(state, &edit, value);
+        },
+    );
+    ui.adjustments
+        .borrow_mut()
+        .push((key.clone(), n.adjustment.clone()));
+    let (title, fallback) = (knob.0, knob.4);
+    let bw_title = crate::parameters::bw_title(&key);
+    let color_only = crate::parameters::color_only(&key);
+    let Number {
+        row,
+        adjustment,
+        label,
+        spin,
+        refresh,
+    } = n;
+    ui.rules.borrow_mut().push(Box::new(glib::clone!(
+        #[strong]
+        row,
+        move |s| {
+            let preset = crate::parameters::grain_preset(s, field, index).unwrap_or(fallback);
+            default.set(preset);
+            if !s.values.contains_key(&key) {
+                adjustment.set_value(preset);
+            }
+            refresh();
+            let bw = crate::catalog::selected(s, false).bw;
+            row.set_visible(!(bw && color_only));
+            let shown = if bw { bw_title.unwrap_or(title) } else { title };
+            label.set_text(shown);
+            spin.update_property(&[gtk::accessible::Property::Label(&format!("{shown} value"))]);
+        }
+    )));
+    row
+}
+
 pub fn number(
     ui: &Rc<Editor>,
     knob: &Knob,
@@ -36,6 +91,34 @@ pub fn number(
     presentation: bool,
     change: impl Fn(&mut crate::model::State, f64) + 'static,
 ) -> (gtk::ListBoxRow, gtk::Adjustment) {
+    let n = number_row(
+        ui,
+        knob,
+        value,
+        presentation,
+        Rc::new(Cell::new(knob.4)),
+        change,
+    );
+    (n.row, n.adjustment)
+}
+
+struct Number {
+    row: gtk::ListBoxRow,
+    adjustment: gtk::Adjustment,
+    label: gtk::Label,
+    spin: gtk::SpinButton,
+    /// Re-evaluates the reset button and modified state after `default` changes.
+    refresh: Rc<dyn Fn()>,
+}
+
+fn number_row(
+    ui: &Rc<Editor>,
+    knob: &Knob,
+    value: f64,
+    presentation: bool,
+    default: Rc<Cell<f64>>,
+    change: impl Fn(&mut crate::model::State, f64) + 'static,
+) -> Number {
     let adjustment = gtk::Adjustment::new(value, knob.1, knob.2, knob.3, knob.3 * 10., 0.);
     let row = gtk::ListBoxRow::new();
     row.set_activatable(false);
@@ -64,10 +147,8 @@ pub fn number(
         "{} value",
         knob.0
     ))]);
-    let knob_default = knob.4;
     let reset = gtk::Button::from_icon_name("edit-undo-symbolic");
     reset.add_css_class("flat");
-    reset.set_tooltip_text(Some(&format!("Reset {} to {}{}", knob.0, knob.4, knob.5)));
     reset.update_property(&[gtk::accessible::Property::Label(&format!(
         "Reset {}",
         knob.0
@@ -75,7 +156,9 @@ pub fn number(
     reset.connect_clicked(glib::clone!(
         #[weak]
         adjustment,
-        move |_| adjustment.set_value(knob_default)
+        #[strong]
+        default,
+        move |_| adjustment.set_value(default.get())
     ));
     let reset_slot = reset_slot(&reset);
     line.append(&reset_slot);
@@ -103,12 +186,22 @@ pub fn number(
     outer.append(&scale);
     row.set_child(Some(&outer));
     reset_menu(&row, &reset);
+    let (name, unit) = (knob.0, knob.5);
     let update_modified = glib::clone!(
         #[weak]
         reset_slot,
         #[weak]
+        reset,
+        #[weak]
         label,
+        #[strong]
+        default,
         move |a: &gtk::Adjustment| {
+            let knob_default = default.get();
+            reset.set_tooltip_text(Some(&format!(
+                "Reset {name} to {}{unit}",
+                (knob_default * 1e4).round() / 1e4
+            )));
             let modified = (a.value() - knob_default).abs() > 1e-6 * (1. + knob_default.abs());
             reset_slot.set_visible_child_name(if modified { "reset" } else { "empty" });
             if modified {
@@ -119,6 +212,13 @@ pub fn number(
         }
     );
     update_modified(&adjustment);
+    let refresh: Rc<dyn Fn()> = Rc::new(glib::clone!(
+        #[weak]
+        adjustment,
+        #[strong]
+        update_modified,
+        move || update_modified(&adjustment)
+    ));
     adjustment.connect_value_changed(update_modified);
     // Escape discards a typed value; Return/focus loss use GtkSpinButton's native commit.
     let typing_value = Rc::new(Cell::new(value));
@@ -198,8 +298,12 @@ pub fn number(
             }
             let started = glib::monotonic_time();
             let decimal_scale = 10f64.powi(digits as i32);
-            let value =
-                (((a.value() / step).round() * step) * decimal_scale).round() / decimal_scale;
+            // A reset stores the default exactly, even off the step grid.
+            let value = if a.value() == default.get() {
+                a.value()
+            } else {
+                (((a.value() / step).round() * step) * decimal_scale).round() / decimal_scale
+            };
             let mut h = ui.history.borrow_mut();
             h.begin(&title);
             change(&mut h.state, value);
@@ -215,7 +319,13 @@ pub fn number(
                 .slider_sample((glib::monotonic_time() - started) as f64 / 1000.);
         }
     ));
-    (row, adjustment)
+    Number {
+        row,
+        adjustment,
+        label,
+        spin,
+        refresh,
+    }
 }
 
 // Disable only the native wheel controllers while unfocused, letting events
@@ -491,8 +601,10 @@ pub fn build(ui: &Rc<Editor>) {
                 | "Grain"
                 | "Halation"
                 | "DIR Couplers"
+                | "Film Base"
                 | "Lens Diffusion"
                 | "Print Curves"
+                | "Print Base"
                 | "Glare"
         ) {
             let switch = gtk::Switch::new();
@@ -592,7 +704,10 @@ pub fn build(ui: &Rc<Editor>) {
         if expander.is_expanded() && !built.replace(true) {
             group_controls(ui, &expander, group);
         }
-        if matches!(group.name, "Enlarger" | "Print Curves" | "Glare") {
+        if matches!(
+            group.name,
+            "Enlarger" | "Print Curves" | "Print Base" | "Glare"
+        ) {
             sensitive(ui, &expander, |s| !flag(s, "Scan film directly", false));
         }
         rows.append(&expander);
@@ -741,7 +856,34 @@ fn group_controls(ui: &Rc<Editor>, expander: &adw::ExpanderRow, group: &'static 
         }
         content.append(&row);
     }
+    if group.name == "Enlarger" {
+        content.append(&balance_print(ui));
+    }
     expander.add_row(&content);
+}
+fn balance_print(ui: &Rc<Editor>) -> gtk::ListBoxRow {
+    let button = gtk::Button::with_label("Balance Print");
+    button.set_tooltip_text(Some(
+        "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.",
+    ));
+    button.set_halign(gtk::Align::Start);
+    button.connect_clicked(glib::clone!(
+        #[weak]
+        ui,
+        move |_| ui.balance_print()
+    ));
+    let row = gtk::ListBoxRow::new();
+    row.set_activatable(false);
+    row.set_focusable(false);
+    row.add_css_class("adjustment");
+    row.set_child(Some(&button));
+    let owner = Rc::downgrade(ui);
+    ui.rules.borrow_mut().push(Box::new(move |s| {
+        if let Some(ui) = owner.upgrade() {
+            button.set_sensitive(ui.can_balance_print(s));
+        }
+    }));
+    row
 }
 fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
     let stocks = crate::catalog::stocks(paper);
@@ -867,6 +1009,7 @@ fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
                 "Development"
             });
             if !paper {
+                crate::parameters::clear_grain_lanes(&mut h.state);
                 h.state
                     .choices
                     .insert("Scan film directly".into(), stock.positive.to_string());
