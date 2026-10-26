@@ -1,5 +1,9 @@
 # Linux engine and integration validation
 
+For the current engine after merging main and correcting Vulkan border
+indexing, see [linux-post-main-validation.md](linux-post-main-validation.md).
+The measurements below preserve the earlier engine bring-up history.
+
 This report records actual Linux bring-up. UI-only evidence is separate in
 [linux-ui-validation.md](linux-ui-validation.md). The connected editor and package work continue below; historical bring-up
 measurements retain their original scope.
