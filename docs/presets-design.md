@@ -229,13 +229,13 @@ override.
 | | macOS | Windows | Linux (GTK 4) |
 |---|---|---|---|
 | Toolbar | "Presets" button beside Adjustments (`NSToolbarItem`, selected state) | toolbar button beside Adjustments, checked state | header-bar toggle beside the Adjustments toggle |
-| Panel | SwiftUI list in the inspector column, replacing `AdjustmentInspector` | Win32 ListView (report, `LVS_EDITLABELS`) in the adjustments column | `gtk::Stack` page in the sidebar, `ListBox` rows with `EditableLabel` |
+| Panel | SwiftUI list in the inspector column, replacing `AdjustmentInspector` | Win32 ListView (report, `LVS_EDITLABELS`) in the adjustments column | `gtk::Stack` page in the sidebar, `ListBox` rows with a label and an entry |
 | Show/hide | View ▸ Show Presets ⌥⌘P | View ▸ Presets F8 | F8 |
 | New Preset | ⇧⌘S | Ctrl+Shift+S | Ctrl+Shift+S |
 | Import Preset… | ⇧⌘O | Ctrl+Shift+O | Ctrl+Shift+O |
 | Drag and drop | `onDrop` of file URLs on the panel | `WM_DROPFILES` on the panel | `DropTarget` for `gio::File` lists |
 | Apply | click a row; double-click or Return applies it again | the same | the same |
-| Rename | context menu, inline; New Preset starts it | F2 or slow click, inline label edit | `EditableLabel` |
+| Rename | context menu, inline; New Preset starts it | F2 or slow click, inline label edit | context menu or F2, inline entry |
 | Delete | Delete key or menu, confirmation alert | Del or menu, confirmation | Delete or menu, confirmation |
 | Reveal | Show Presets Folder (Finder) | Show Presets Folder (Explorer) | Show Presets Folder (`gio::AppInfo::launch_default_for_uri`) |
 
@@ -304,7 +304,39 @@ without Noah's go-ahead.
    and re-export. Open: the uninstaller test with Inno Setup on a disposable profile.
 6. **Linux app:** the adapter and the same UI; tests for apply, film A → B → A, undo, redo and
    restart through `parameters::runtime`; `check_controls.py`/`check_ui.py`; the Keyboard
-   Shortcuts window.
+   Shortcuts window. **Done** (`linux/src/presets.rs`: names, storage, order, import and the
+   adapter; `linux/src/preset_ui.rs`: the sidebar page), built and tested on Noah's Omarchy
+   machine:
+   - unit tests (34 pass): the `PresetNameTests` cases, writes that never replace (including a
+     file created after listing, through `renameat2(RENAME_NOREPLACE)`, and another case of a
+     name, which Linux keeps as a separate file), the identity check, the order file, and imports
+     placed between rows. NFC and case folding come from GLib (`g_utf8_normalize`,
+     `g_utf8_casefold`), so no crate was added;
+   - live helper tests (`NEGS_SCHEMA_HELPER=target/release/spektrafilm-native bash linux/cargo.sh
+     test live -- --ignored`): for the 19 forum files, the 5 Python ones and one written in the
+     test, `parameters::runtime` of the applied state equals the helper's params; Image Size,
+     rotation, crop, border, Post, CAT16, output encoding, low-memory export and the preview limit
+     stay; film A → preset → B → A equals choosing A after the preset (the film's stock presets,
+     development time, scan mode and paper; the preset's other values stay); one undo step,
+     redo; a session saved and restored gives the same params; New Preset's text imports back;
+     refusals name the reason;
+   - the restart test found that restoring a session clamped Lab values to the slider ranges, so
+     `02 P800push2_EXTRAhalation` (halation amount 6, preflash yellow 78) changed after a
+     restart. Restoring now keeps them, as macOS does, still rounding integer controls; a slider
+     widens its range to show such a value;
+   - `check_ui.py` and `check_controls.py` pass; `linux/check_presets.py` (new) passes 10 desktop
+     checks with the real engine, with screenshots in `target/linux-validation/presets/`: empty
+     state, New Preset renaming, the full list with a refused file, an applied preset, an invalid
+     name, delete confirmation, the Import picker;
+   - not automated: dragging rows and dropping files (no pointer injection on this machine; the
+     order and drop placement are unit-tested), importing through the GTK portal's picker (it
+     doesn't accept a typed path; the check opens and cancels it, and the import is unit-tested),
+     and Show Presets Folder (it opens the file manager);
+   - wtype sends Ctrl+Shift+S as keyval `s`, which GTK 4 doesn't match to `<Shift>s`, so the
+     check sends Ctrl+Shift shortcuts with Hyprland's `send_shortcut`. The existing Ctrl+Shift+E
+     and Ctrl+Shift+R were never exercised by the checks for the same reason;
+   - rows are a label and an entry rather than `EditableLabel`, whose own click and Enter handling
+     would conflict with click-to-apply. F2 also renames the selected preset, Delete deletes it.
 7. **Local testing for Noah:** a macOS preview bundle with its own data root, the 19 forum files
    copied into its presets folder (outside the repo). Screenshots on each platform.
 8. **Docs:** README feature line; `docs/features-vs-upstream.md`.

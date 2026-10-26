@@ -10,6 +10,8 @@ pub struct Preferences {
     pub tab: String,
     pub expanded: Vec<String>,
     pub inspector: bool,
+    /// The sidebar's page: "adjustments" or "presets".
+    pub pane: String,
     pub strip: bool,
     pub appearance: u32,
     pub width: i32,
@@ -34,6 +36,7 @@ impl Default for Preferences {
             tab: "lab".into(),
             expanded: vec!["Enlarger".into()],
             inspector: true,
+            pane: "adjustments".into(),
             strip: true,
             appearance: 0,
             width: 1320,
@@ -219,6 +222,10 @@ impl Editor {
             self.resize_inspector(p.sidebar_width);
             self.window.set_maximized(p.maximized);
             self.split.set_show_sidebar(p.inspector);
+            if p.pane != "presets" {
+                p.pane = "adjustments".into();
+            }
+            self.sidebar_pages.set_visible_child_name(&p.pane);
             self.strip_scroll.set_visible(p.strip);
             if std::env::var_os("NEGS_APPEARANCE").is_none() {
                 apply_appearance(p.appearance);

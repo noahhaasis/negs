@@ -408,6 +408,10 @@ pub fn runtime(state: &State, defaults: &Value) -> Value {
     // An edited preset field materializes whole from the film's preset.
     let preset = &crate::catalog::selected(state, false).grain;
     for field in GRAIN_STOCK_FIELDS {
+        // Density minimum has no lane controls; keep the imported/saved array.
+        if field == "density_min" {
+            continue;
+        }
         let mut lanes: Option<Vec<Value>> = None;
         for (key, value) in &state.values {
             if let Some((f, index)) = grain_lane(key)
