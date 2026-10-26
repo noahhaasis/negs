@@ -4,13 +4,15 @@
 
 **Your photos, developed on film.**
 
-Negs is a **free** photo app for Mac, with an **experimental Windows version**, that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
+Negs is a **free** photo app for Mac and Windows that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
 
 Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in a native macOS app.
 
-**[Download for Mac](https://github.com/noahhaasis/negs/releases)** · macOS 14 or later · Apple silicon and Intel · [getnegs.com](https://getnegs.com)
+**[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [getnegs.com](https://getnegs.com)
 
-**[Windows (experimental)](#windows-experimental)** · Native Windows x64 app · Installer and portable builds
+**[Download for Windows](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-Setup.exe)** · Windows x64 · [portable version](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-portable.zip) · [install steps](#windows)
+
+**Linux (Arch / Omarchy):** one command, see the [install steps](#linux-arch--omarchy)
 
 The first time you open Negs, macOS asks you to allow it in System Settings: see the [install steps](#install).
 
@@ -82,15 +84,34 @@ Why the extra step? Negs isn't notarized by Apple, which needs a paid developer 
 
 Negs updates itself: use **Negs → Check for Updates…**, or turn automatic checks on or off in Settings.
 
-### Windows (experimental)
+### Windows
 
-The native Windows app uses the same film engine, with GPU previews, crop and straighten tools, borders, and Fast or Reference exports. It is experimental: visual, export-dialog, accessibility, and multi-monitor testing is still in progress. See the [validation status](docs/windows-ui-validation.md) for the remaining checks.
+Native Windows app with the same film engine as the Mac app: GPU previews, crop and straighten tools, borders, and Fast or Reference exports.
 
-- **Installer:** run `Negs-Setup.exe`. It installs for your Windows account and adds Negs to **Open with**, without changing your default photo app.
-- **Portable:** extract `Negs-portable.zip` and run `Negs.exe`. Keep the included helper executables and `data` folder beside it.
-- **Updates:** install a newer test build manually; automatic updates are not configured for the experimental Windows build.
+1. **Download** [`Negs-0.8.0-windows-x64-experimental-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-Setup.exe) and run it. It installs for your Windows account and adds Negs to **Open with**, without changing your default photo app.
+2. **If Windows SmartScreen warns you**, click **More info → Run anyway**. Negs isn't code-signed, which needs a paid certificate.
 
-Windows packages can be built from source with [`windows/package.ps1`](windows/package.ps1); see the [Windows build instructions](docs/windows-app.md). The editing panel and film strip start enabled, and F7/F6 toggle them during use.
+Prefer no installer? Extract [`Negs-0.8.0-windows-x64-experimental-portable.zip`](https://github.com/noahhaasis/negs/releases/download/v0.8.0/Negs-0.8.0-windows-x64-experimental-portable.zip) and run `Negs.exe`. Keep the included helper executables and `data` folder beside it.
+
+Windows doesn't update itself yet: download the newer installer from the [releases page](https://github.com/noahhaasis/negs/releases) and run it over the old one. The editing panel and film strip start enabled, and F7/F6 toggle them during use.
+
+Windows packages can be built from source with [`windows/package.ps1`](windows/package.ps1); see the [Windows build instructions](docs/windows-app.md) and the [validation status](docs/windows-ui-validation.md).
+
+### Linux (Arch / Omarchy)
+
+Native GTK4 app on the same film engine, for x86_64 Arch Linux and Omarchy. Install it for your user (no root needed) with one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/noahhaasis/negs/main/linux/get-negs.sh | sh
+```
+
+It downloads the latest release, checks its SHA-256 checksum and installs under `~/.local`. If you'd rather read it first, [the script](linux/get-negs.sh) is short. Negs needs GTK 4.16+, libadwaita 1.6+, OpenBLAS and a Vulkan driver for your GPU (the engine falls back to the CPU without one). On Omarchy these are normally present; elsewhere:
+
+```sh
+sudo pacman -S --needed gtk4 libadwaita openblas vulkan-icd-loader
+```
+
+Run `negs` or open it from your launcher. To update, run the command again; to remove it, run `python3 ~/.local/share/negs/install.py --uninstall`. Your settings and photos are kept.
 
 ### Handy shortcuts
 
@@ -115,7 +136,7 @@ Yes. It's free to download and open source under the GPL-3.0 (see [License](#lic
 macOS shows that warning for every app that isn't notarized by Apple. Negs isn't, because notarizing needs a paid developer account. All of the source code is in this repository for anyone to check. Follow the [install steps](#install): you only need to allow it once.
 
 **Which files can I open?**
-RAW files from most cameras, plus JPEG, TIFF and PNG. The Mac app uses Apple's RAW support with a rawler fallback; the experimental Windows app uses rawler for RAW files.
+RAW files from most cameras, plus JPEG, TIFF and PNG. The Mac app uses Apple's RAW support with a rawler fallback; the Windows and Linux apps use rawler for RAW files.
 
 **Does it run on Intel Macs?**
 Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it runs natively on both Intel and Apple silicon. It is developed and tested mainly on Apple silicon, so if something looks wrong on an Intel Mac, please [open an issue](https://github.com/noahhaasis/negs/issues).
@@ -124,7 +145,7 @@ Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it ru
 No. Presets and LUTs remap colours. Negs simulates the film, the paper and the light, which is why halation, grain and edge effects come out right.
 
 **Windows or Linux?**
-An [experimental native Windows version](#windows-experimental) is available in this repository, with installer and portable packaging. The native GTK4 Linux app can be [built from source](#linux-arch--omarchy); public Linux packages are being prepared.
+Both. There is a [native Windows app](#windows) with an installer and a portable build, and a native GTK4 app for [Arch and Omarchy Linux](#linux-arch--omarchy).
 
 **Found a bug or have an idea?**
 [Open an issue](https://github.com/noahhaasis/negs/issues).
@@ -154,7 +175,7 @@ Third-party components keep their own licenses. Sparkle, the update framework bu
 
 Building from source, the command-line tools, accuracy against the original Python project, and how the code is laid out: see [docs/development.md](docs/development.md).
 
-### Linux (Arch / Omarchy)
+### Building the Linux app
 
 The native Linux editor uses GTK4/libadwaita and the same Rust film engine, with
 GPU previews and separate Fast and Reference exporters. Build with Rust
@@ -176,5 +197,4 @@ path restores the previous session.
 To build an Arch package from committed source, run `bash linux/package.sh`.
 Artifacts are written to `target/linux-package/<short-commit>/assets/`.
 See [Linux build and installation details](docs/linux-app.md) and the
-[AUR/Omarchy release checklist](docs/linux-release.md). Repository publication
-is still pending.
+[AUR/Omarchy release checklist](docs/linux-release.md).
