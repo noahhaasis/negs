@@ -15,6 +15,8 @@ root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--runs", type=int, default=5)
 parser.add_argument("--benchmark", action="store_true")
+parser.add_argument("--border-benchmark", action="store_true", help="Measure Film/35mm texture selection and reuse")
+parser.add_argument("--border-style", type=int, choices=range(4), help="Border for the post scene: Solid=0, Film=1, Keyline=2, 35mm=3")
 parser.add_argument("--inspector-mode",choices=["both","lazy","eager"],default="both")
 parser.add_argument("--size", help="Optional floating window size WIDTH,HEIGHT; default uses normal tiling")
 parser.add_argument("--appearance", choices=["system", "light", "dark"], default="system")
@@ -43,9 +45,13 @@ for mode in variants:
         env = dict(os.environ, NEGS_PROFILE_DIR=str(args.out / "profile"),
                    NEGS_STARTUP_REPORT=str(output), NEGS_APPEARANCE=args.appearance,
                    NEGS_INSPECTOR_MODE=mode, NEGS_UI_SCENE=args.scene,
-                   NEGS_QUIT_AFTER_MS="12000" if args.benchmark else "5000")
+                   NEGS_QUIT_AFTER_MS="12000" if args.benchmark or args.border_benchmark else "5000")
         if args.benchmark:
             env["NEGS_UI_BENCHMARK"] = "1"
+        if args.border_benchmark:
+            env["NEGS_BORDER_BENCHMARK"] = "1"
+        if args.border_style is not None:
+            env["NEGS_BORDER_STYLE"] = str(args.border_style)
         if run == 0 and not args.benchmark:
             env["NEGS_WIDGET_CAPTURE"] = str(args.out / f"{mode}-widget.png")
         env["NEGS_LAUNCH_MONOTONIC_US"] = str(time.monotonic_ns() // 1000)
@@ -96,6 +102,8 @@ for mode in variants:
         report = json.loads(output.read_text())
         if args.benchmark and "ui_benchmark_finished_ms" not in report["milestones_ms"]:
             raise RuntimeError(f"{name}: benchmark did not finish; inspect {output}")
+        if args.border_benchmark and "border_benchmark_finished_ms" not in report["milestones_ms"]:
+            raise RuntimeError(f"{name}: border benchmark did not finish; inspect {output}")
         report["run"] = name
         report["restored_session"] = run > 0
         report["peak_rss_kib"] = peak_rss_kib

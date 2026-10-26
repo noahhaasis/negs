@@ -41,6 +41,8 @@ mod imp {
         pub border: RefCell<Settings>,
         pub(super) asset: RefCell<Option<Asset>>,
         pub asset_key: RefCell<Option<String>>,
+        pub(super) asset_cache: RefCell<crate::border::asset::Cache<Asset>>,
+        pub asset_loading: Cell<bool>,
         pub crop: Cell<Option<[f64; 4]>>,
         pub angle: Cell<f64>,
         pub draft_angle: Cell<f64>,
@@ -333,7 +335,150 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
+#[cfg(test)]
+mod border_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "Requires the real desktop and system PNG loader; run explicitly with --ignored"]
+    fn border_texture_reuse_and_latest_selection() {
+        gtk::init().unwrap();
+        let data = crate::data_root();
+        for key in ["film", "full/kodak_portra_400", "half/generic"] {
+            let decoded = crate::border::asset::load(&data, key).unwrap();
+            let path = if key == "film" {
+                data.join("borders/film.png")
+            } else {
+                data.join("borders/35mm").join(format!("{key}.png"))
+            };
+            let reference = gtk::gdk_pixbuf::Pixbuf::from_file(path).unwrap();
+            assert_eq!(
+                decoded.bytes.as_slice(),
+                reference.read_pixel_bytes().as_ref(),
+                "PNG pixel parity: {key}"
+            );
+        }
+        let canvas = Canvas::new();
+        let texture = srgb_texture(
+            3,
+            2,
+            gdk::MemoryFormat::R8g8b8,
+            &glib::Bytes::from_owned(vec![128; 18]),
+            9,
+        );
+        canvas.set_texture(&texture, (1200, 800));
+        let mut state = crate::fixtures::state();
+        state.border.enabled = true;
+        state.border.style = Style::Film;
+        let wait = || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while canvas.imp().asset_loading.get() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "Border load timed out"
+                );
+                glib::MainContext::default().iteration(false);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        };
+        canvas.apply(&state);
+        wait();
+        let film = canvas.imp().asset.borrow().clone().unwrap().texture;
+        state.border.enabled = false;
+        canvas.apply(&state);
+        assert!(canvas.imp().asset.borrow().is_none());
+        state.border.enabled = true;
+        canvas.apply(&state);
+        assert!(!canvas.imp().asset_loading.get());
+        assert_eq!(canvas.imp().asset.borrow().as_ref().unwrap().texture, film);
+
+        state.border.style = Style::Film35;
+        canvas.apply(&state);
+        assert!(canvas.imp().asset_loading.get());
+        for id in ["kodak_ektar_100", "kodak_gold_200", "kodak_portra_400"] {
+            state.choices.insert("Film ID".into(), id.into());
+            canvas.apply(&state);
+        }
+        wait();
+        assert_eq!(
+            canvas.imp().asset_key.borrow().as_deref(),
+            Some("full/kodak_portra_400")
+        );
+        let full = canvas.imp().asset.borrow().clone().unwrap();
+        assert_eq!(full.source, (3800., 3500.));
+        canvas.apply(&state);
+        assert_eq!(
+            canvas.imp().asset.borrow().as_ref().unwrap().texture,
+            full.texture
+        );
+
+        // A stale completion must start the latest uncached request, skipping
+        // intermediate stock selections rather than publishing the old frame.
+        for id in ["kodak_gold_200", "kodak_portra_800", "kodak_ektar_100"] {
+            state.choices.insert("Film ID".into(), id.into());
+            canvas.apply(&state);
+        }
+        wait();
+        assert_eq!(
+            canvas.imp().asset_key.borrow().as_deref(),
+            Some("full/kodak_ektar_100")
+        );
+        let latest = canvas.imp().asset.borrow().clone().unwrap();
+        let expected = crate::border::asset::load(&data, "full/kodak_ektar_100").unwrap();
+        let reference = srgb_texture(
+            expected.width,
+            expected.height,
+            gdk::MemoryFormat::R8g8b8a8,
+            &glib::Bytes::from_owned(expected.bytes),
+            expected.stride,
+        );
+        let mut actual_bytes =
+            vec![0; latest.texture.width() as usize * latest.texture.height() as usize * 4];
+        let mut expected_bytes = actual_bytes.clone();
+        latest
+            .texture
+            .download(&mut actual_bytes, latest.texture.width() as usize * 4);
+        reference.download(&mut expected_bytes, reference.width() as usize * 4);
+        assert_eq!(
+            actual_bytes, expected_bytes,
+            "Stale stock texture was published"
+        );
+
+        canvas.set_texture(&texture, (800, 600));
+        state.rotation = 1;
+        canvas.apply(&state);
+        wait();
+        assert_eq!(
+            canvas.imp().asset.borrow().as_ref().unwrap().source,
+            (1900., 3500.)
+        );
+        canvas.set_texture(&texture, (1200, 800));
+        state
+            .choices
+            .insert("Film ID".into(), "kodak_portra_800".into());
+        canvas.apply(&state);
+        state.border.enabled = false;
+        canvas.apply(&state);
+        wait();
+        assert!(
+            canvas.imp().asset.borrow().is_none(),
+            "Stale border appeared after disabling"
+        );
+        canvas.set_texture(&texture, (1000, 1000));
+        state.border.enabled = true;
+        canvas.apply(&state);
+        assert!(
+            canvas.imp().asset.borrow().is_none(),
+            "35mm appeared on an unsupported crop"
+        );
+    }
+}
+
 impl Canvas {
+    pub fn border_ready(&self) -> bool {
+        self.imp().asset_key.borrow().is_none() || self.imp().asset.borrow().is_some()
+    }
+
     fn border_layout(&self, w: f64, h: f64) -> Layout {
         let s = self.imp().border.borrow();
         if self.imp().cropping.get() || !s.visible(w, h) {
@@ -687,63 +832,74 @@ impl Canvas {
         if *self.imp().asset_key.borrow() == key {
             return;
         }
-        self.imp().asset_key.replace(key.clone());
+        self.imp().asset_key.replace(key);
         self.imp().asset.take();
-        let Some(key) = key else {
+        self.ensure_border_asset();
+    }
+    fn ensure_border_asset(&self) {
+        let Some(key) = self.imp().asset_key.borrow().clone() else {
             return;
         };
-        let canvas = self.clone();
+        if self.imp().asset.borrow().is_some() {
+            return;
+        }
+        if let Some(asset) = self.imp().asset_cache.borrow_mut().get(&key) {
+            self.imp().asset.replace(Some(asset));
+            self.queue_draw();
+            return;
+        }
+        // Only one decode at a time. Its completion picks up the latest desired
+        // key, so scrubbing through stocks cannot flood the worker pool.
+        if self.imp().asset_loading.replace(true) {
+            return;
+        }
+        let canvas = self.downgrade();
         let data = crate::data_root();
         let worker_key = key.clone();
         gtk::glib::MainContext::default().spawn_local(async move {
-            let decoded = gtk::gio::spawn_blocking(move || -> Result<_, String> {
-                let (mut path, mut window) = (data.join("borders/film.png"), [0., 0., 1., 1.]);
-                if worker_key != "film" {
-                    let (format, film) = worker_key.split_once('/').unwrap();
-                    let root = data.join("borders/35mm");
-                    let frames: serde_json::Value = serde_json::from_slice(
-                        &std::fs::read(root.join("frames.json")).map_err(|e| e.to_string())?,
-                    )
-                    .map_err(|e| e.to_string())?;
-                    for (i, v) in window.iter_mut().enumerate() {
-                        *v = frames[format]["window"][i]
-                            .as_f64()
-                            .ok_or("Invalid film gate")?;
-                    }
-                    path = root.join(format).join(format!("{film}.png"));
-                    if !path.is_file() {
-                        path = root.join(format).join("generic.png");
-                    }
-                }
-                Ok((crate::photo::decode(&path, 4096)?, window))
-            })
-            .await;
-            if canvas.imp().asset_key.borrow().as_ref() != Some(&key) {
+            let decoded =
+                gtk::gio::spawn_blocking(move || crate::border::asset::load(&data, &worker_key))
+                    .await;
+            let Some(canvas) = canvas.upgrade() else {
                 return;
-            }
+            };
+            canvas.imp().asset_loading.set(false);
+            let current = canvas.imp().asset_key.borrow().as_ref() == Some(&key);
             match decoded {
-                Ok(Ok((photo, window))) => {
+                Ok(Ok(photo)) => {
                     let format = if photo.alpha {
                         gdk::MemoryFormat::R8g8b8a8
                     } else {
                         gdk::MemoryFormat::R8g8b8
                     };
-                    let texture = gdk::MemoryTexture::new(
+                    let bytes = photo.bytes.len();
+                    let texture = srgb_texture(
                         photo.width,
                         photo.height,
                         format,
                         &glib::Bytes::from_owned(photo.bytes),
                         photo.stride,
                     );
-                    canvas.imp().asset.replace(Some(Asset {
-                        texture: texture.upcast(),
-                        source: (photo.source.0 as f64, photo.source.1 as f64),
-                        window,
-                    }));
-                    canvas.queue_draw();
+                    let asset = Asset {
+                        texture,
+                        source: (photo.width as f64, photo.height as f64),
+                        window: photo.window,
+                    };
+                    canvas
+                        .imp()
+                        .asset_cache
+                        .borrow_mut()
+                        .insert(key, bytes, asset.clone());
+                    if current {
+                        canvas.imp().asset.replace(Some(asset));
+                        canvas.queue_draw();
+                    }
                 }
                 Ok(Err(e)) => eprintln!("Border asset could not load: {e}"),
                 Err(_) => eprintln!("Border loader stopped before completing"),
+            }
+            if !current {
+                canvas.ensure_border_asset();
             }
         });
     }
