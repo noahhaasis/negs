@@ -97,11 +97,42 @@ only after acquisition. A 16-thread regression test passes. The final package
 is being rebuilt with that independent lifecycle correction. The initial
 package failure remains in `post-main/makepkg.log`.
 
-The installed-app audit and longer startup/session measurements will use the
-final package. The measurement tool now supports a longer launch lifetime so
-a 24 MP image can develop before the test closes the window.
+The final source package is from `4d5bd0d`, using the locked workspaces and
+separate f32/f64 builds. Its checks pass: seven native tests, 22 Linux tests,
+and the explicitly invoked live-helper schema gate. The three normally ignored
+desktop tests also pass when run in the real Wayland session: border texture
+reuse, live schema, and RAW container orientation. Build log:
+`post-main/makepkg-final.log`; desktop tests: `post-main/desktop-ignored.log`.
+
+The extracted package passes all 21 CPU engine smoke requests, desktop-entry
+validation and missing-library checks. Its installed launcher passes all 11
+Wayland/RAW integration checks with checkout-helper fallback disabled.
+Evidence: `post-main/package-smoke.log` and
+`post-main/installed-desktop/result.json`. The package's included source archive
+matches the generated committed archive, SHA-256
+`d2ee66d50882e66d0a764cf22afc4a8f9a434e730ff5d50c5e62da1c86057fb0`.
+
+Three 15-second installed launches use the original 24 MP linear TIFF and an
+isolated profile, with the latter two restoring that session:
+
+| Launch | First paint | First input | Cached developed image | Newly developed image |
+|---|---:|---:|---:|---:|
+| Explicit open | 405 ms | 453 ms | — | 6.107 s |
+| Restore 1 | 459 ms | 498 ms | 676 ms | 2.977 s |
+| Restore 2 | 398 ms | 531 ms | 598 ms | 2.816 s |
+
+These are process launches with warm OS/driver caches, not reboot-cold numbers.
+The cached image is replaced by a newly saveable float render in the background.
+Evidence: `post-main/installed-startup/{summary,lazy-00,lazy-01,lazy-02}.json`.
+The measurement tool now supports a longer lifetime so full-resolution
+development finishes before the test closes the window.
+
+Artifacts are in `target/linux-validation/post-main/package-final/assets/`;
+generated Omarchy files are in `package-final/recipes/omarchy/pkgbuilds/negs/`.
+The local development launcher resolves helper/data paths from its current
+checkout, so retained build caches also work after removing this worktree.
 
 No release or repository package has been published. A clean GitHub CI build
-requires uploading this source branch; that approval is pending. Local
+requires uploading the source; upload approval is still pending. Local
 `makepkg` validation uses the existing development OpenBLAS/toolchain cache and
 does not establish the clean container result.

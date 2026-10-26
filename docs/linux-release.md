@@ -47,7 +47,11 @@ requests. The initial live helper schema failure on the removed
 now passes. The new real Wayland/RAW audit passes all 11 checks. The initial
 GPU quality result was only 1/76; the corrected FIR shaders now pass 76/76,
 with a worst Delta E00 of 0.001555. All 19 GPU unit tests pass. Final exact
-repeatability is 484/484 identical; final package checks are in progress.
+repeatability is 484/484 identical. The final source package builds and passes
+seven native tests, 22 Linux tests, the schema gate, 21 packaged CPU smoke
+requests and 11 installed Wayland/RAW checks. All three desktop-dependent tests
+also pass. Startup and session restoration measurements are in the
+[validation report](linux-post-main-validation.md).
 Package validation also found and fixed a concurrent scratch-lock publication
 race, covered by a 16-thread regression test. Initial failing evidence is
 preserved under `target/linux-validation/post-main/`. The clean GitHub runner
@@ -130,6 +134,10 @@ credentials are established. Follow the
 [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines).
 
 ## Omarchy package repository
+
+An AUR account is not required. A local Omarchy recipe can fetch this project's
+GitHub release assets directly, so closed AUR registration does not block an
+Omarchy submission. AUR publication can follow later when registration reopens.
 
 Target [omacom/omarchy-pkgs](https://github.com/omacom/omarchy-pkgs), not the
 desktop configuration repository. Copy `recipes/omarchy/pkgbuilds/negs/` into
