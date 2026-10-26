@@ -8,7 +8,7 @@ use spektrafilm_math::spectral::{self, N_WAVELENGTHS};
 /// at full f64 precision. Baked from Python's
 /// `standard_illuminant('TH-KG3')`. The f32 fallback drops ~7 digits
 /// per sample and accumulates ~3e-8 in the filtered illuminant.
-const ILLUMINANT_TH_KG3_F64: [f64; N_WAVELENGTHS] = [
+pub(crate) const ILLUMINANT_TH_KG3_F64: [f64; N_WAVELENGTHS] = [
     0.27115487737678473,
     0.2933630241983439,
     0.31540886133985474,
@@ -94,7 +94,7 @@ const ILLUMINANT_TH_KG3_F64: [f64; N_WAVELENGTHS] = [
 
 /// TH-KG3 illuminant SPD (tungsten-halogen + Schott KG3 heat filter).
 /// Baked from Python's `standard_illuminant('TH-KG3')`.
-const ILLUMINANT_TH_KG3: [f32; N_WAVELENGTHS] = [
+pub(crate) const ILLUMINANT_TH_KG3: [f32; N_WAVELENGTHS] = [
     0.271155, 0.293363, 0.315409, 0.336981, 0.358678, 0.380520, 0.403013, 0.426787, 0.451652,
     0.478065, 0.506671, 0.536658, 0.568077, 0.599922, 0.630515, 0.661222, 0.692091, 0.723665,
     0.757601, 0.793069, 0.829085, 0.865485, 0.902213, 0.938990, 0.974700, 1.008742, 1.040917,
@@ -105,6 +105,109 @@ const ILLUMINANT_TH_KG3: [f32; N_WAVELENGTHS] = [
     1.180212, 1.136868, 1.092653, 1.045243, 1.000479, 0.948058, 0.902381, 0.854665, 0.792226,
     0.734521, 0.689229, 0.652250, 0.607482, 0.571755, 0.526940, 0.486676, 0.449540, 0.414553,
 ];
+
+/// TH-KG3-L: TH-KG3 times the generic lens transmittance (Canon 24 mm f/2.8 IS).
+/// Baked from Python's `standard_illuminant('TH-KG3-L')` by
+/// `scripts/parity/freeze_illuminants_reference.py`.
+pub(crate) const ILLUMINANT_TH_KG3_L_F64: [f64; N_WAVELENGTHS] = [
+    0.09456970290598739,
+    0.1358223126707035,
+    0.18067928085342475,
+    0.2259785007417468,
+    0.2677351393678483,
+    0.30492220983936275,
+    0.3404115534894003,
+    0.3725452187996161,
+    0.40207481582863175,
+    0.43144620857294336,
+    0.46257922241084165,
+    0.49512511929127734,
+    0.5289219800537478,
+    0.5626679850892985,
+    0.5958260010917935,
+    0.6299593886971075,
+    0.6644097398593504,
+    0.700554052742682,
+    0.7408873075661121,
+    0.7818238319378953,
+    0.8222884814131736,
+    0.8625802756777197,
+    0.9030662159717104,
+    0.9436349150547809,
+    0.9830168583481824,
+    1.0205556844981798,
+    1.0564491305809889,
+    1.0903341528774033,
+    1.1219168901687966,
+    1.1552754643901004,
+    1.18957077142463,
+    1.224385079368606,
+    1.2608110664687997,
+    1.3017320113172588,
+    1.3454684726941972,
+    1.3859275667105297,
+    1.4213335202694428,
+    1.4514983451100734,
+    1.4793862774441284,
+    1.506950815002019,
+    1.5335196656859138,
+    1.554810667188734,
+    1.5759275295354451,
+    1.594335896239912,
+    1.607142418951325,
+    1.6178330856868541,
+    1.6264112869522358,
+    1.6318859951354185,
+    1.6324648760560658,
+    1.6295535378804413,
+    1.6210239391887935,
+    1.612877388213371,
+    1.5996095071678285,
+    1.5806584699460842,
+    1.5560501956617274,
+    1.5336590858122428,
+    1.5058658931227298,
+    1.4662994867298649,
+    1.428579312658189,
+    1.390812091273809,
+    1.3452831165124508,
+    1.2992635156028105,
+    1.2522330269883137,
+    1.2009204344497504,
+    1.148659982040946,
+    1.0954695988974383,
+    1.03926723560586,
+    0.9844711396581393,
+    0.9236646594179271,
+    0.8705698517734068,
+    0.8139325853073219,
+    0.7456552858076373,
+    0.6831551422932013,
+    0.630258990076302,
+    0.5900955284329665,
+    0.5422665143829449,
+    0.5029095765733292,
+    0.4567257035827689,
+    0.4130914600721322,
+    0.37567089330813325,
+    0.3419938635287332,
+];
+
+/// f32 rounding of [`ILLUMINANT_TH_KG3_L_F64`].
+pub(crate) const ILLUMINANT_TH_KG3_L: [f32; N_WAVELENGTHS] = [
+    0.094569705, 0.13582231, 0.18067928, 0.2259785, 0.26773515, 0.30492222, 0.34041154, 0.3725452,
+    0.4020748, 0.4314462, 0.46257922, 0.49512511, 0.52892196, 0.56266797, 0.595826, 0.6299594,
+    0.66440976, 0.7005541, 0.7408873, 0.7818238, 0.82228845, 0.8625803, 0.9030662, 0.9436349,
+    0.98301685, 1.0205557, 1.0564492, 1.0903342, 1.1219169, 1.1552755, 1.1895708, 1.224385,
+    1.2608111, 1.3017321, 1.3454685, 1.3859276, 1.4213336, 1.4514984, 1.4793863, 1.5069509,
+    1.5335196, 1.5548106, 1.5759275, 1.5943359, 1.6071424, 1.6178331, 1.6264113, 1.631886,
+    1.6324649, 1.6295536, 1.6210239, 1.6128774, 1.5996095, 1.5806584, 1.5560502, 1.5336591,
+    1.5058659, 1.4662995, 1.4285793, 1.390812, 1.3452832, 1.2992635, 1.252233, 1.2009205,
+    1.14866, 1.0954696, 1.0392672, 0.98447114, 0.9236647, 0.8705698, 0.8139326, 0.7456553,
+    0.6831551, 0.630259, 0.5900955, 0.5422665, 0.5029096, 0.45672572, 0.41309145, 0.37567088,
+    0.34199387,
+];
+
 
 /// TH-KG3 + default CMY dichroic filters (C=0, M=65, Y=55) at full f64 precision.
 /// Baked from Python's `color_enlarger(standard_illuminant('TH-KG3'), (0, 65, 55))`.
@@ -235,6 +338,13 @@ pub fn enlarger_filtered_illuminant(
 /// ~5-7 digit precision drop from `as f32` propagates through
 /// `10^(-cc/100)` to a ~4e-8 shift in the filtered illuminant, which
 /// is the seed of the print stage's parity drift.
+///
+/// The lamp is resolved with [`crate::illuminants::standard_illuminant_f64`].
+///
+/// # Panics
+///
+/// On a name that function rejects. `Pipeline::new_with_spectral` checks the
+/// name first (`illuminants::check_names`) and returns an error instead.
 pub fn enlarger_filtered_illuminant_f64(
     illuminant_name: &str,
     c_filter: f64,
@@ -250,13 +360,7 @@ pub fn enlarger_filtered_illuminant_f64(
         return ILLUMINANT_TH_KG3_DEFAULT_FILTERS_F64.to_vec();
     }
 
-    let light_source: Vec<f64> = match illuminant_name {
-        "TH-KG3" => ILLUMINANT_TH_KG3_F64.to_vec(),
-        "D50" => spectral::ILLUMINANT_D50_F64.to_vec(),
-        "D55" => spectral::ILLUMINANT_D55_F64.to_vec(),
-        "D65" => spectral::ILLUMINANT_D65_F64.to_vec(),
-        _ => ILLUMINANT_TH_KG3.iter().map(|&v| v as f64).collect(),
-    };
+    let light_source = crate::illuminants::select_illuminant_f64(illuminant_name);
 
     let dichroics = dichroic_filters_f64();
     let filter_cc = [c_filter, m_filter, y_filter];
@@ -376,8 +480,8 @@ pub fn midgray_raw_hanatos(
 ///   raw → log10(raw + 1e-10) → develop_simple (RAW curves, no normalization)
 ///   → compute_density_spectral (einsum + base_density).
 ///
-/// The raw is computed by the configured upsampler (`midgray_raw_hanatos` or
-/// the Mallett core matrix). Python's `_rgb_to_film_raw(rgb)` defaults to
+/// The raw is computed from the upsampler's TC LUT (`midgray_raw_hanatos`).
+/// Python's `_rgb_to_film_raw(rgb)` defaults to
 /// `color_space="sRGB"`, so midgray calibration is always done in sRGB
 /// regardless of the runtime input color space — otherwise the print exposure
 /// normalization would shift with the working space. Callers must honour that.
@@ -397,26 +501,27 @@ pub fn midgray_density_spectral_from_raw(
         (raw[2] + 1e-10).log10(),
     ];
 
-    // Python: density_cmy = interpolate_exposure_to_density(log_raw, density_curves, log_exposure, gamma_factor)
+    // Python: density_cmy = develop_simple(log_raw, log_exposure, density_curves)
     // - density_curves is used RAW (not normalized) in the midgray path
-    // - gamma_factor scalar → broadcast to [gamma, gamma, gamma] per channel
-    // - x-axis per channel = log_exposure / gamma_factor[c]
+    // - experimental removed density_curve_gamma: the Film Curves morph is
+    //   baked into the curves, which are interpolated at unit gamma
     let log_exposure = film.log_exposure_f64();
     let density_curves = film.density_curves_f64();
-    let g = params.film_render.density_curve_gamma as f64;
-    let gamma = [g, g, g];
+    let gamma = [1.0f64; 3];
 
     let density_cmy =
         interp_density_curve_at_log_raw(&log_raw, &log_exposure, &density_curves, &gamma);
 
-    // Python: compute_density_spectral — einsum + base_density. NaN propagates per wavelength.
+    // Python: compute_density_spectral — einsum + the tuned film base. NaN
+    // propagates per wavelength.
+    let base_density = crate::bases::film_base_density(film, params);
     let n_wl = film.data.channel_density.len();
     let mut spectral = vec![0.0f64; n_wl];
     for wl in 0..n_wl {
         let cd = &film.data.channel_density[wl];
         let s = density_cmy[0] * cd[0] + density_cmy[1] * cd[1] + density_cmy[2] * cd[2];
-        let bd = if wl < film.data.base_density.len() {
-            film.data.base_density[wl]
+        let bd = if wl < base_density.len() {
+            base_density[wl]
         } else {
             0.0
         };
@@ -535,9 +640,9 @@ mod parity_tests {
     /// Enlarger preflash regression guard. The constant preflash raw vector is
     /// the film base density lit by the preflash-filtered illuminant, integrated
     /// against the print sensitivity and scaled by `preflash_exposure` — Python
-    /// `PrintingStage._compute_raw_preflash`. Reference values were computed from
-    /// a faithful numpy transcription (`density_to_light` + `einsum`) on the real
-    /// kodak_portra_400 base density and kodak_portra_endura sensitivity, with the
+    /// `PrintingStage._compute_raw_preflash`. Reference values come from
+    /// experimental 28bf883's `_compute_raw_preflash` on the kodak_portra_400
+    /// base density and kodak_portra_endura sensitivity, with the
     /// baked TH-KG3 (C0 M65 Y55) default-filter illuminant and exposure 0.0625
     /// (an f32-exact value, so the f32→f64 widening of `preflash_exposure` is
     /// not part of the comparison).
@@ -557,7 +662,7 @@ mod parity_tests {
         let pipeline = Pipeline::new_with_spectral(film, print, params, &dir).unwrap();
         let p = pipeline.preflash_raw();
 
-        let expect = [0.4567086334477163, 0.3959958805787103, 0.5172324967476551];
+        let expect = [0.4567088038449616, 0.39599598403601427, 0.5172322808628251];
         for c in 0..3 {
             assert!(
                 (p[c] - expect[c]).abs() < 1e-12,

@@ -53,10 +53,13 @@ def main():
     controlled = json.loads((OUT / "controlled.json").read_text())
     balanced = copy.deepcopy(controlled)
     balanced["scanner"].update(white_correction=True, black_correction=False)
-    balanced["film_render"]["grain"].update(active=True, agx_particle_area_um2=0.12, blur=0.0)
+    # The stock's grain preset (upstream grain.toml), without the pixel blur.
+    balanced["film_render"]["grain"].update(active=True, blur=0.0)
     punchy = copy.deepcopy(balanced)
     punchy["scanner"]["black_correction"] = True
-    punchy["print_render"]["density_curve_gamma"] = 1.12
+    # density_curve_gamma is gone (upstream experimental); the print curves
+    # morph is its replacement.
+    punchy["print_render"]["density_curves_morph"] = {"active": True, "gamma_factor": 1.12}
     variants = {
         "doublex-paper": ("kodak_doublex", PAPER, controlled),
         "trix-paper": (FILM, PAPER, controlled),
@@ -67,7 +70,7 @@ def main():
     (OUT / "renders").mkdir(exist_ok=True)
     (OUT / "recipes").mkdir(exist_ok=True)
     manifest = {"binary_sha256": sha(binary), "backend": "CPU/f64", "auto_exposure": False,
-                "notes": "No per-image exposure changes. Grain in creative variants is generic, not measured Tri-X granularity. Source PNGs are encoded sRGB.", "renders": []}
+                "notes": "No per-image exposure changes. Grain in creative variants is the stock preset without pixel blur. Source PNGs are encoded sRGB.", "renders": []}
     for key, (film, paper, params) in variants.items():
         recipe = OUT / "recipes" / (key+".json")
         recipe.write_text(json.dumps(params, indent=2)+"\n")

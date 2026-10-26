@@ -1513,16 +1513,10 @@ impl App {
                 let mut changed = false;
                 changed |= ui.checkbox(&mut g.active, "Active").changed();
                 changed |= ui
-                    .add(
-                        egui::Slider::new(&mut g.agx_particle_area_um2, 0.05..=1.0)
-                            .text("Particle area (µm²)"),
-                    )
+                    .add(egui::Slider::new(&mut g.blur, 0.0..=3.0).text("Blur σ (px)"))
                     .changed();
                 changed |= ui
-                    .add(egui::Slider::new(&mut g.blur, 0.0..=3.0).text("Post-blur σ"))
-                    .changed();
-                changed |= ui
-                    .add(egui::Slider::new(&mut g.n_sub_layers, 1..=4).text("Sub-layers"))
+                    .add(egui::Slider::new(&mut g.mult_usm_amount, 0.0..=3.0).text("Sharpen amount"))
                     .changed();
                 if changed {
                     self.mark_dirty();
@@ -1678,13 +1672,13 @@ impl App {
                     )
                     .changed();
                 // RGB → film raw spectral upsampler. hanatos2025 is the default
-                // spectral LUT; arctic2026alpha02 is the new memory-color
-                // reflectance LUT; mallett2019 is a faster matrix basis.
+                // irradiance LUT; arctic2026beta04 and mallett2019 are
+                // reflectance LUTs.
                 let method = &mut self.params.settings.rgb_to_raw_method;
                 egui::ComboBox::from_label("RGB→raw upsampling")
                     .selected_text(method.clone())
                     .show_ui(ui, |ui| {
-                        for opt in ["hanatos2025", "arctic2026alpha02", "mallett2019"] {
+                        for opt in ["hanatos2025", "arctic2026beta04", "mallett2019"] {
                             changed |= ui.selectable_value(method, opt.to_string(), opt).changed();
                         }
                     });

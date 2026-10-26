@@ -120,8 +120,8 @@ __device__ __forceinline__ float exp10_fast(float x) {
     return exp2f(x * 3.32192809488736234787f);
 }
 
+// Unclipped, like the CPU scan: linear below 0, the power law above 1.
 __device__ __forceinline__ float srgb_encode_fast(float x) {
-    x = fminf(fmaxf(x, 0.0f), 1.0f);
     return x <= 0.0031308f ? 12.92f * x : 1.055f * powf(x, 0.4166666666666667f) - 0.055f;
 }
 
@@ -237,23 +237,6 @@ extern "C" __global__ void hanatos_front_kernel(
     raw_out[base] = lr * brightness;
     raw_out[base + 1u] = lg * brightness;
     raw_out[base + 2u] = lb * brightness;
-}
-
-extern "C" __global__ void mallett_front_kernel(
-    const float* __restrict__ rgb_in,
-    unsigned int n_pixels,
-    const float* __restrict__ matrix,
-    float* __restrict__ raw_out
-) {
-    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (gid >= n_pixels) return;
-    unsigned int base = gid * 3u;
-    float r = rgb_in[base];
-    float g = rgb_in[base + 1u];
-    float b = rgb_in[base + 2u];
-    raw_out[base] = matrix[0] * r + matrix[1] * g + matrix[2] * b;
-    raw_out[base + 1u] = matrix[3] * r + matrix[4] * g + matrix[5] * b;
-    raw_out[base + 2u] = matrix[6] * r + matrix[7] * g + matrix[8] * b;
 }
 
 extern "C" __global__ void log10_inplace_kernel(
@@ -472,22 +455,24 @@ extern "C" __global__ void scan_spectral_kernel(
     }
 }
 
+// Like the CPU scan's `encode_output`: Python's near-identity RGB_to_RGB
+// matrix, added as rgb + delta · rgb (delta = matrix - identity, rows of
+// four), then the OETF.
 extern "C" __global__ void post_scan_kernel(
     float* __restrict__ rgb,
     unsigned int n_pixels,
-    unsigned int output_cctf_encoding
+    unsigned int output_cctf_encoding,
+    const float* __restrict__ delta
 ) {
     unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid >= n_pixels) return;
     unsigned int base = gid * 3u;
     if (output_cctf_encoding != 0u) {
-        rgb[base] = srgb_encode_fast(rgb[base]);
-        rgb[base + 1u] = srgb_encode_fast(rgb[base + 1u]);
-        rgb[base + 2u] = srgb_encode_fast(rgb[base + 2u]);
-    } else {
-        rgb[base] = fminf(fmaxf(rgb[base], 0.0f), 1.0f);
-        rgb[base + 1u] = fminf(fmaxf(rgb[base + 1u], 0.0f), 1.0f);
-        rgb[base + 2u] = fminf(fmaxf(rgb[base + 2u], 0.0f), 1.0f);
+        float c[3] = {rgb[base], rgb[base + 1u], rgb[base + 2u]};
+        for (int i = 0; i < 3; ++i) {
+            float v = c[i] + delta[4 * i] * c[0] + delta[4 * i + 1] * c[1] + delta[4 * i + 2] * c[2];
+            rgb[base + i] = srgb_encode_fast(v);
+        }
     }
 }
 
@@ -538,11 +523,25 @@ extern "C" __global__ void print_spectral_kernel(
     output[base + 2u] = log10f(fmaxf(raw_b, 0.0f) + 1e-10f);
 }
 
+// Border of the FIR blur. With `reflect` set, Python's `_reflect` (scipy
+// `mode='reflect'`: d c b a | a b c d, period 2n), which its FIR uses below
+// sigma 3; otherwise the edge sample is repeated, the closest a FIR gets to
+// the sample-replicating IIR Python uses from sigma 3 on.
+__device__ int blur_border_index(int i, int n, unsigned int reflect) {
+    if (i >= 0 && i < n) return i;
+    if (!reflect) return i < 0 ? 0 : n - 1;
+    int period = 2 * n;
+    int m = i % period;
+    if (m < 0) m += period;
+    return m < n ? m : period - 1 - m;
+}
+
 extern "C" __global__ void gaussian_blur_h_kernel(
     const float* __restrict__ input,
     unsigned int width,
     unsigned int height,
     unsigned int radius,
+    unsigned int reflect,
     const float* __restrict__ kernel,
     float* __restrict__ output
 ) {
@@ -553,9 +552,7 @@ extern "C" __global__ void gaussian_blur_h_kernel(
     int w_i = (int)width;
     unsigned int ksize = radius * 2u + 1u;
     for (unsigned int k = 0u; k < ksize; k++) {
-        int sx_i = (int)x + (int)k - (int)radius;
-        if (sx_i < 0) sx_i = 0;
-        if (sx_i >= w_i) sx_i = w_i - 1;
+        int sx_i = blur_border_index((int)x + (int)k - (int)radius, w_i, reflect);
         unsigned int base = (y * width + (unsigned int)sx_i) * 3u;
         float kw = kernel[k];
         sr += kw * input[base];
@@ -573,6 +570,7 @@ extern "C" __global__ void gaussian_blur_v_kernel(
     unsigned int width,
     unsigned int height,
     unsigned int radius,
+    unsigned int reflect,
     const float* __restrict__ kernel,
     float* __restrict__ output
 ) {
@@ -583,9 +581,7 @@ extern "C" __global__ void gaussian_blur_v_kernel(
     int h_i = (int)height;
     unsigned int ksize = radius * 2u + 1u;
     for (unsigned int k = 0u; k < ksize; k++) {
-        int sy_i = (int)y + (int)k - (int)radius;
-        if (sy_i < 0) sy_i = 0;
-        if (sy_i >= h_i) sy_i = h_i - 1;
+        int sy_i = blur_border_index((int)y + (int)k - (int)radius, h_i, reflect);
         unsigned int base = ((unsigned int)sy_i * width + x) * 3u;
         float kw = kernel[k];
         sr += kw * input[base];
@@ -820,56 +816,367 @@ extern "C" __global__ void unsharp_combine_kernel(
     output[base + 2u] = k1 * original[base + 2u] - amount * blurred[base + 2u];
 }
 
-extern "C" __global__ void grain_kernel(
+// One emulsion sub-layer of upstream experimental's multilayer grain; a port
+// of `grain.wgsl` (see there and `spektrafilm_model::grain::apply_grain`).
+// Exact numpy Poisson (multiplication / PTRS) and binomial (inversion / BTPE)
+// algorithms on a per-pixel PCG32 stream. `layer_params` holds, per
+// sub-layer, the floor, the absolute maximum and the grains per pixel (9
+// floats; 0 grains is the noise-free limit). `curves` is
+// [x (n_samples × 3)] [1/dx (n_samples × 3)] [layers (n_samples × n_layers × 3)].
+struct GrainRng {
+    unsigned int state;
+    unsigned int inc;
+};
+
+__device__ unsigned int grain_next_u32(GrainRng* rng) {
+    unsigned int s = rng->state;
+    rng->state = s * 747796405u + rng->inc;
+    unsigned int word = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+__device__ float grain_uniform01(GrainRng* rng) {
+    return ((float)(grain_next_u32(rng) >> 8u) + 0.5f) * (1.0f / 16777216.0f);
+}
+
+__device__ float grain_log_factorial(float k) {
+    if (k < 8.0f) {
+        float r = 1.0f;
+        for (float i = 2.0f; i <= k; i += 1.0f) r *= i;
+        return logf(r);
+    }
+    float x = k + 1.0f;
+    return (x - 0.5f) * logf(x) - x + 0.91893853320467274f + 1.0f / (12.0f * x)
+        - 1.0f / (360.0f * x * x * x);
+}
+
+__device__ float grain_poisson(float lam, GrainRng* rng) {
+    if (lam <= 0.0f) return 0.0f;
+    if (lam < 10.0f) {
+        float enlam = expf(-lam);
+        float x = 0.0f;
+        float prod = 1.0f;
+        while (true) {
+            prod *= grain_uniform01(rng);
+            if (prod > enlam) x += 1.0f; else return x;
+        }
+    }
+    float slam = sqrtf(lam);
+    float loglam = logf(lam);
+    float b = 0.931f + 2.53f * slam;
+    float a = -0.059f + 0.02483f * b;
+    float invalpha = 1.1239f + 1.1328f / (b - 3.4f);
+    float vr = 0.9277f - 3.6224f / (b - 2.0f);
+    while (true) {
+        float u = grain_uniform01(rng) - 0.5f;
+        float v = grain_uniform01(rng);
+        float us = 0.5f - fabsf(u);
+        float k = floorf((2.0f * a / us + b) * u + lam + 0.43f);
+        if (us >= 0.07f && v <= vr) return k;
+        if (k < 0.0f || (us < 0.013f && v > us)) continue;
+        float lhs = logf(v) + logf(invalpha) - logf(a / (us * us) + b);
+        float rhs = -lam + k * loglam - grain_log_factorial(k);
+        if (lhs <= rhs) return k;
+    }
+}
+
+__device__ float grain_binomial_inversion(float n, float p, GrainRng* rng) {
+    float q = 1.0f - p;
+    float qn = expf(n * logf(q));
+    float np = n * p;
+    float bound = floorf(fminf(n, np + 10.0f * sqrtf(np * q + 1.0f)));
+    float x = 0.0f;
+    float px = qn;
+    float u = grain_uniform01(rng);
+    while (u > px) {
+        x += 1.0f;
+        if (x > bound) {
+            x = 0.0f;
+            px = qn;
+            u = grain_uniform01(rng);
+        } else {
+            u -= px;
+            px = ((n - x + 1.0f) * p * px) / (x * q);
+        }
+    }
+    return x;
+}
+
+__device__ float grain_stirling(float x) {
+    float x2 = x * x;
+    return (13680.0f - (462.0f - (132.0f - (99.0f - 140.0f / x2) / x2) / x2) / x2) / x / 166320.0f;
+}
+
+__device__ float grain_binomial_btpe(float n, float p, GrainRng* rng) {
+    float r = p;
+    float q = 1.0f - r;
+    float fm = n * r + r;
+    float m = floorf(fm);
+    float p1 = floorf(2.195f * sqrtf(n * r * q) - 4.6f * q) + 0.5f;
+    float xm = m + 0.5f;
+    float xl = xm - p1;
+    float xr = xm + p1;
+    float c = 0.134f + 20.5f / (15.3f + m);
+    float a1 = (fm - xl) / (fm - xl * r);
+    float laml = a1 * (1.0f + a1 / 2.0f);
+    float a2 = (xr - fm) / (xr * q);
+    float lamr = a2 * (1.0f + a2 / 2.0f);
+    float p2 = p1 * (1.0f + 2.0f * c);
+    float p3 = p2 + c / laml;
+    float p4 = p3 + c / lamr;
+    float nrq = n * r * q;
+    while (true) {
+        float u = grain_uniform01(rng) * p4;
+        float v = grain_uniform01(rng);
+        float y;
+        if (u <= p1) {
+            return floorf(xm - p1 * v + u);
+        } else if (u <= p2) {
+            float x = xl + (u - p1) / c;
+            v = v * c + 1.0f - fabsf(m - x + 0.5f) / p1;
+            if (v > 1.0f) continue;
+            y = floorf(x);
+        } else if (u <= p3) {
+            y = floorf(xl + logf(v) / laml);
+            if (y < 0.0f) continue;
+            v *= (u - p2) * laml;
+        } else {
+            y = floorf(xr - logf(v) / lamr);
+            if (y > n) continue;
+            v *= (u - p3) * lamr;
+        }
+        float k = fabsf(y - m);
+        if (k <= 20.0f || k >= nrq / 2.0f - 1.0f) {
+            float s = r / q;
+            float a = s * (n + 1.0f);
+            float f = 1.0f;
+            if (m < y) {
+                for (float i = m + 1.0f; i <= y; i += 1.0f) f *= a / i - s;
+            } else if (m > y) {
+                for (float i = y + 1.0f; i <= m; i += 1.0f) f /= a / i - s;
+            }
+            if (v > f) continue;
+            return y;
+        }
+        float rho = (k / nrq) * ((k * (k / 3.0f + 0.625f) + 0.16666666666666666f) / nrq + 0.5f);
+        float t = -k * k / (2.0f * nrq);
+        float a_log = logf(v);
+        if (a_log < t - rho) return y;
+        if (a_log > t + rho) continue;
+        float x1 = y + 1.0f;
+        float f1 = m + 1.0f;
+        float z = n - m + 1.0f;
+        float w = n - y + 1.0f;
+        float bound = xm * logf(f1 / x1) + (n - m + 0.5f) * logf(z / w) + (y - m) * logf(w * r / (x1 * q))
+            + grain_stirling(f1) + grain_stirling(z) + grain_stirling(x1) + grain_stirling(w);
+        if (a_log > bound) continue;
+        return y;
+    }
+}
+
+__device__ float grain_binomial(float n, float p, GrainRng* rng) {
+    if (n <= 0.0f) return 0.0f;
+    if (p <= 0.5f) {
+        if (p * n <= 30.0f) return grain_binomial_inversion(n, p, rng);
+        return grain_binomial_btpe(n, p, rng);
+    }
+    float q = 1.0f - p;
+    if (q * n <= 30.0f) return n - grain_binomial_inversion(n, q, rng);
+    return n - grain_binomial_btpe(n, q, rng);
+}
+
+__device__ float grain_layer_density(
+    const float* curves, unsigned int k, unsigned int n_layers, unsigned int layer,
+    float x, unsigned int ch
+) {
+    unsigned int layers_base = 6u * k;
+    unsigned int stride = n_layers * 3u;
+    unsigned int off = layer * 3u + ch;
+    if (x <= curves[ch]) return curves[layers_base + off];
+    if (x >= curves[(k - 1u) * 3u + ch]) return curves[layers_base + (k - 1u) * stride + off];
+    unsigned int lo = 0u;
+    unsigned int hi = k - 1u;
+    while (hi - lo > 1u) {
+        unsigned int mid = (lo + hi) / 2u;
+        if (curves[mid * 3u + ch] <= x) lo = mid; else hi = mid;
+    }
+    float t = (x - curves[lo * 3u + ch]) * curves[3u * k + lo * 3u + ch];
+    float y0 = curves[layers_base + lo * stride + off];
+    float y1 = curves[layers_base + (lo + 1u) * stride + off];
+    return y0 + t * (y1 - y0);
+}
+
+extern "C" __global__ void grain_layer_kernel(
     unsigned int n_pixels,
+    unsigned int n_samples,
+    unsigned int n_layers,
+    unsigned int layer,
     unsigned int base_seed,
-    unsigned int n_sub_layers,
     unsigned int monochrome,
-    float dmin_r,
-    float dmin_g,
-    float dmin_b,
-    float dmax_r,
-    float dmax_g,
-    float dmax_b,
-    float npp_r,
-    float npp_g,
-    float npp_b,
+    unsigned int accumulate,
+    unsigned int positive,
     float gu_r,
     float gu_g,
     float gu_b,
-    float* __restrict__ density
+    const float* __restrict__ layer_params,
+    const float* __restrict__ curves,
+    const float* __restrict__ density,
+    float* __restrict__ out
 ) {
     unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n_pixels) return;
     unsigned int base = idx * 3u;
-    float dmin[3] = {dmin_r, dmin_g, dmin_b};
-    float dmax[3] = {dmax_r, dmax_g, dmax_b};
-    float npp[3] = {npp_r, npp_g, npp_b};
+    float sign = positive != 0u ? -1.0f : 1.0f;
     float gu[3] = {gu_r, gu_g, gu_b};
-    float n_sl_f = (float)n_sub_layers;
+    const float* lp = layer_params + layer * 9u;
     for (unsigned int ch = 0u; ch < 3u; ch++) {
-        float od_particle = dmax[ch] / npp[ch];
-        float d_in = density[base + ch] + dmin[ch];
-        float p = fminf(fmaxf(d_in / dmax[ch], 1e-6f), 1.0f - 1e-6f);
-        float saturation = 1.0f - p * gu[ch] * (1.0f - 1e-6f);
-        float lambda = npp[ch] / saturation;
-        float sum = 0.0f;
-        for (unsigned int sl = 0u; sl < n_sub_layers; sl++) {
+        float dmin = lp[ch];
+        float dmax = lp[3u + ch];
+        float npp = lp[6u + ch];
+        float d_in = grain_layer_density(curves, n_samples, n_layers, layer, sign * density[base + ch], ch) + dmin;
+        float p = fminf(fmaxf(d_in / dmax, 1e-6f), 1.0f - 1e-6f);
+        float value;
+        if (npp <= 0.0f) {
+            value = p * dmax;
+        } else {
+            float od_particle = dmax / npp;
+            float saturation = 1.0f - p * gu[ch] * (1.0f - 1e-6f);
+            float lambda = npp / saturation;
             unsigned int seed_ch = monochrome != 0u ? 0u : ch;
-            unsigned int layer_seed = seed_ch + sl * 10u + base_seed;
-            unsigned int rng = splitmix32_hash(layer_seed) ^ splitmix32_hash(idx);
-            float z1 = standard_normal(&rng);
-            float n_seeds = fmaxf(0.0f, roundf(lambda + sqrtf(lambda) * z1));
-            float mean = n_seeds * p;
-            float variance = n_seeds * p * (1.0f - p);
-            float developed = mean;
-            if (variance > 0.0f) {
-                developed = fminf(fmaxf(roundf(mean + sqrtf(variance) * standard_normal(&rng)), 0.0f), n_seeds);
-            }
-            sum += developed * od_particle * saturation;
+            unsigned int layer_seed = seed_ch + layer * 10u + base_seed;
+            GrainRng rng;
+            rng.state = splitmix32_hash(layer_seed) ^ splitmix32_hash(idx);
+            rng.inc = (splitmix32_hash(idx ^ 0x9e3779b9u) << 1u) | 1u;
+            float n_seeds = grain_poisson(lambda, &rng);
+            float developed = grain_binomial(n_seeds, p, &rng);
+            value = developed * od_particle * saturation;
         }
-        density[base + ch] = sum / n_sl_f - dmin[ch];
+        out[base + ch] = accumulate != 0u ? out[base + ch] + value : value;
     }
+}
+
+// Langmuir `x (k + x_ref) / (k + x)` for channel `c`; `l` is
+// [k0, k1, k2, ref0, ref1, ref2, on0, on1, on2], linear where `on` is 0.
+__device__ float langmuir_g(float x, const float* l, int c) {
+    return l[6 + c] != 0.0f ? x * (l[c] + l[3 + c]) / (l[c] + x) : x;
+}
+
+// DIR receiver saturation of the diffused correction, in place (positives).
+extern "C" __global__ void dir_receiver_kernel(
+    float* __restrict__ correction,
+    unsigned int n_pixels,
+    const float* __restrict__ receiver
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_pixels) return;
+    unsigned int base = idx * 3u;
+    for (int c = 0; c < 3; ++c) {
+        correction[base + c] = langmuir_g(correction[base + c], receiver, c);
+    }
+}
+
+__device__ float grain_hash_uniform(unsigned int a, unsigned int b) {
+    return ((float)(splitmix32_hash(a ^ splitmix32_hash(b)) >> 8u) + 0.5f) * (1.0f / 16777216.0f);
+}
+
+// Micro-structure (`grain_micro.wgsl`): mode 0 writes the lognormal clumping
+// to `noise`, 1 multiplies `acc` by `noise`, 2 multiplies by fresh clumping.
+extern "C" __global__ void grain_micro_kernel(
+    unsigned int n_pixels,
+    unsigned int base_seed,
+    unsigned int mode,
+    unsigned int monochrome,
+    float sigma2,
+    float* __restrict__ acc,
+    float* __restrict__ noise
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_pixels) return;
+    for (unsigned int ch = 0u; ch < 3u; ch++) {
+        unsigned int i = idx * 3u + ch;
+        if (mode == 1u) {
+            acc[i] *= noise[i];
+            continue;
+        }
+        unsigned int lane = monochrome != 0u ? 0u : ch;
+        unsigned int key = base_seed + 1000u + lane * 2u;
+        float u1 = grain_hash_uniform(idx, key);
+        float u2 = grain_hash_uniform(idx, key + 1u);
+        float z = sqrtf(-2.0f * logf(u1)) * cosf(6.283185307179586f * u2);
+        float clump = expf(z * sqrtf(sigma2) - 0.5f * sigma2);
+        if (mode == 0u) noise[i] = clump; else acc[i] *= clump;
+    }
+}
+
+// Multiplicative unsharp mask (`grain_usm.wgsl`): mode 0 clamps `d` at 0,
+// mode 1 replaces the blur `g` with D · (D / G)^amount.
+extern "C" __global__ void grain_usm_kernel(
+    unsigned int n_pixels,
+    unsigned int mode,
+    float amount,
+    float* __restrict__ d,
+    float* __restrict__ g
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_pixels * 3u) return;
+    if (mode == 0u) {
+        d[idx] = fmaxf(d[idx], 0.0f);
+    } else {
+        float dv = d[idx];
+        g[idx] = dv <= 0.0f ? 0.0f
+            : powf(fmaxf(dv, 1e-6f), 1.0f + amount) / powf(fmaxf(g[idx], 1e-6f), amount);
+    }
+}
+
+// Per-channel sums of `a` and `b` in double, one partial (6 values) per block
+// of 256 threads; the host adds the partials.
+extern "C" __global__ void grain_sum_kernel(
+    unsigned int n_pixels,
+    const float* __restrict__ a,
+    const float* __restrict__ b,
+    double* __restrict__ partials
+) {
+    __shared__ double sums[256][6];
+    unsigned int t = threadIdx.x;
+    double s[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    for (unsigned int i = blockIdx.x * blockDim.x + t; i < n_pixels; i += gridDim.x * blockDim.x) {
+        for (unsigned int ch = 0u; ch < 3u; ch++) {
+            s[ch] += (double)a[i * 3u + ch];
+            s[3u + ch] += (double)b[i * 3u + ch];
+        }
+    }
+    for (unsigned int j = 0u; j < 6u; j++) sums[t][j] = s[j];
+    __syncthreads();
+    for (unsigned int stride = 128u; stride > 0u; stride >>= 1u) {
+        if (t < stride) {
+            for (unsigned int j = 0u; j < 6u; j++) sums[t][j] += sums[t + stride][j];
+        }
+        __syncthreads();
+    }
+    if (t == 0u) {
+        for (unsigned int j = 0u; j < 6u; j++) partials[blockIdx.x * 6u + j] = sums[0][j];
+    }
+}
+
+// Grain's last pass (`grain_finalize.wgsl`): the unsharp mask's mass ratio
+// and the removal of the density floor, into the density buffer.
+extern "C" __global__ void grain_finalize_kernel(
+    unsigned int n_pixels,
+    float ratio_r,
+    float ratio_g,
+    float ratio_b,
+    float dmin_r,
+    float dmin_g,
+    float dmin_b,
+    const float* __restrict__ src,
+    float* __restrict__ dst
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_pixels) return;
+    unsigned int base = idx * 3u;
+    dst[base] = src[base] * ratio_r - dmin_r;
+    dst[base + 1u] = src[base + 1u] * ratio_g - dmin_g;
+    dst[base + 2u] = src[base + 2u] * ratio_b - dmin_b;
 }
 
 extern "C" __global__ void dir_matmul_kernel(
@@ -880,6 +1187,7 @@ extern "C" __global__ void dir_matmul_kernel(
     float dmax_g,
     float dmax_b,
     const float* __restrict__ matrix,
+    const float* __restrict__ donor,
     float* __restrict__ correction
 ) {
     unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -893,6 +1201,9 @@ extern "C" __global__ void dir_matmul_kernel(
         s1 = dmax_g - s1;
         s2 = dmax_b - s2;
     }
+    s0 = langmuir_g(s0, donor, 0);
+    s1 = langmuir_g(s1, donor, 1);
+    s2 = langmuir_g(s2, donor, 2);
     correction[base] = s0 * matrix[0] + s1 * matrix[3] + s2 * matrix[6];
     correction[base + 1u] = s0 * matrix[1] + s1 * matrix[4] + s2 * matrix[7];
     correction[base + 2u] = s0 * matrix[2] + s1 * matrix[5] + s2 * matrix[8];
@@ -983,20 +1294,20 @@ __device__ float3 cam16_padc_inverse_g(float3 rgb) {
         sign_g(d.z) * 100.0f / fl * powf(bz, 1.0f / 0.42f));
 }
 
-__device__ float3 xyz_to_cam16ucs_g(float3 xyz) {
+__device__ float3 xyz_to_cam16ucs_g(float3 xyz, float3 white_d, float a_w) {
     float3 rgb = mv3_g(
         make_float3(0.401288f, 0.650173f, -0.051461f),
         make_float3(-0.250268f, 1.204414f, 0.045854f),
         make_float3(-0.002079f, 0.048952f, 0.953127f),
         make_float3(xyz.x * 100.0f, xyz.y * 100.0f, xyz.z * 100.0f));
-    float3 d_rgb = make_float3(rgb.x * 1.0228770275f, rgb.y * 0.9852074783f, rgb.z * 0.9285450587f);
+    float3 d_rgb = make_float3(rgb.x * white_d.x, rgb.y * white_d.y, rgb.z * white_d.z);
     float3 p = cam16_padc_forward_g(d_rgb);
     float a = p.x - 12.0f * p.y / 11.0f + p.z / 11.0f;
     float b = (p.x + p.y - 2.0f * p.z) / 9.0f;
     float h = atan2_deg_g(b, a);
     float e_t = 0.25f * (cosf(2.0f + radians_g(h)) + 3.8f);
     float a_resp = (2.0f * p.x + p.y + p.z / 20.0f - 0.305f) * 1.0003040046f;
-    float jj = 100.0f * powf(a_resp / 37.1690753022f, 0.69f * 1.9272135955f);
+    float jj = 100.0f * powf(a_resp / a_w, 0.69f * 1.9272135955f);
     float denom = p.x + p.y + 21.0f * p.z / 20.0f;
     float t = denom != 0.0f ? 3846.1538461538f * 1.0003040046f * (e_t * sqrtf(a*a + b*b)) / denom : 0.0f;
     float cc = powf(t, 0.9f) * sqrtf(jj / 100.0f) * powf(1.64f - powf(0.29f, 0.2f), 0.73f);
@@ -1007,7 +1318,7 @@ __device__ float3 xyz_to_cam16ucs_g(float3 xyz) {
     return make_float3(jp, mp * cosf(hr), mp * sinf(hr));
 }
 
-__device__ float3 cam16ucs_to_xyz_g(float3 jab) {
+__device__ float3 cam16ucs_to_xyz_g(float3 jab, float3 white_d, float a_w) {
     float jp = jab.x;
     float mp = len2_g(jab.y, jab.z);
     float h = atan2_deg_g(jab.z, jab.y);
@@ -1017,7 +1328,7 @@ __device__ float3 cam16ucs_to_xyz_g(float3 jab) {
     float j_prime = fmaxf(jj, 1.1920929e-7f);
     float t = powf(cc / (sqrtf(j_prime / 100.0f) * powf(1.64f - powf(0.29f, 0.2f), 0.73f)), 1.0f / 0.9f);
     float e_t = 0.25f * (cosf(2.0f + radians_g(h)) + 3.8f);
-    float a_resp = 37.1690753022f * powf(jj / 100.0f, 1.0f / (0.69f * 1.9272135955f));
+    float a_resp = a_w * powf(jj / 100.0f, 1.0f / (0.69f * 1.9272135955f));
     float p1 = t != 0.0f ? 3846.1538461538f * 1.0003040046f * e_t / t : 0.0f;
     float p2 = a_resp / 1.0003040046f + 0.305f;
     float hr = radians_g(h);
@@ -1039,7 +1350,7 @@ __device__ float3 cam16ucs_to_xyz_g(float3 jab) {
     float ga = (460.0f * p2 - 891.0f * a - 261.0f * b) / 1403.0f;
     float ba = (460.0f * p2 - 220.0f * a - 6300.0f * b) / 1403.0f;
     float3 inv = cam16_padc_inverse_g(make_float3(ra, ga, ba));
-    float3 rgb = make_float3(inv.x / 1.0228770275f, inv.y / 0.9852074783f, inv.z / 0.9285450587f);
+    float3 rgb = make_float3(inv.x / white_d.x, inv.y / white_d.y, inv.z / white_d.z);
     return make_float3(
         dot3_g(make_float3(1.8620678551f, -1.0112546305f, 0.1491867754f), rgb) / 100.0f,
         dot3_g(make_float3(0.3875265432f, 0.6214474419f, -0.0089739852f), rgb) / 100.0f,
@@ -1086,7 +1397,9 @@ extern "C" __global__ void gamut_compress_kernel(
     float l_white,
     float l_min,
     float l_max,
-    const float* __restrict__ cmax
+    const float* __restrict__ cmax,
+    // Output colourspace: RGB->XYZ (9), XYZ->RGB (9), CAM16 D_RGB (3), A_w.
+    const float* __restrict__ colour
 ) {
     unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n_pixels) return;
@@ -1106,12 +1419,14 @@ extern "C" __global__ void gamut_compress_kernel(
             out = make_float3(ach * (1.0f - dc.x), ach * (1.0f - dc.y), ach * (1.0f - dc.z));
         }
     } else {
+        float3 white_d = make_float3(colour[18], colour[19], colour[20]);
+        float a_w = colour[21];
         float3 xyz = mv3_g(
-            make_float3(0.4124f, 0.3576f, 0.1805f),
-            make_float3(0.2126f, 0.7152f, 0.0722f),
-            make_float3(0.0193f, 0.1192f, 0.9505f),
+            make_float3(colour[0], colour[1], colour[2]),
+            make_float3(colour[3], colour[4], colour[5]),
+            make_float3(colour[6], colour[7], colour[8]),
             rgb);
-        float3 lab = mode == 3u ? xyz_to_cam16ucs_g(xyz) : xyz_to_oklab_g(xyz);
+        float3 lab = mode == 3u ? xyz_to_cam16ucs_g(xyz, white_d, a_w) : xyz_to_oklab_g(xyz);
         float l = lab.x;
         if (light_enable != 0u) {
             l = reinhard_knee_g(l / l_white, light_t, light_l, light_p) * l_white;
@@ -1123,11 +1438,11 @@ extern "C" __global__ void gamut_compress_kernel(
         float d_comp = reinhard_knee_g(c / safe, knee_t, knee_l, knee_p);
         float c_new = d_comp * safe;
         float3 lab_new = make_float3(l, c_new * cosf(h), c_new * sinf(h));
-        float3 xyz_new = mode == 3u ? cam16ucs_to_xyz_g(lab_new) : oklab_to_xyz_g(lab_new);
+        float3 xyz_new = mode == 3u ? cam16ucs_to_xyz_g(lab_new, white_d, a_w) : oklab_to_xyz_g(lab_new);
         out = mv3_g(
-            make_float3(3.2406f, -1.5372f, -0.4986f),
-            make_float3(-0.9689f, 1.8758f, 0.0415f),
-            make_float3(0.0557f, -0.204f, 1.057f),
+            make_float3(colour[9], colour[10], colour[11]),
+            make_float3(colour[12], colour[13], colour[14]),
+            make_float3(colour[15], colour[16], colour[17]),
             xyz_new);
     }
     img[base] = out.x;
@@ -1141,7 +1456,6 @@ pub struct CudaBackend {
     stream: Arc<CudaStream>,
     _module: Arc<CudaModule>,
     hanatos_kernel: CudaFunction,
-    mallett_kernel: CudaFunction,
     log10_kernel: CudaFunction,
     max_reduce_kernel: CudaFunction,
     highlight_boost_kernel: CudaFunction,
@@ -1161,8 +1475,13 @@ pub struct CudaBackend {
     glare_gen_kernel: CudaFunction,
     glare_apply_kernel: CudaFunction,
     unsharp_kernel: CudaFunction,
-    grain_kernel: CudaFunction,
+    grain_layer_kernel: CudaFunction,
+    grain_micro_kernel: CudaFunction,
+    grain_usm_kernel: CudaFunction,
+    grain_sum_kernel: CudaFunction,
+    grain_finalize_kernel: CudaFunction,
     dir_matmul_kernel: CudaFunction,
+    dir_receiver_kernel: CudaFunction,
     gamut_kernel: CudaFunction,
     post_scan_kernel: CudaFunction,
     device_name: String,
@@ -1180,7 +1499,6 @@ impl CudaBackend {
         let ptx = compile_ptx(CUDA_SRC).ok()?;
         let module = ctx.load_module(ptx).ok()?;
         let hanatos_kernel = module.load_function("hanatos_front_kernel").ok()?;
-        let mallett_kernel = module.load_function("mallett_front_kernel").ok()?;
         let log10_kernel = module.load_function("log10_inplace_kernel").ok()?;
         let max_reduce_kernel = module.load_function("max_reduce_kernel").ok()?;
         let highlight_boost_kernel = module.load_function("highlight_boost_kernel").ok()?;
@@ -1202,8 +1520,13 @@ impl CudaBackend {
         let glare_gen_kernel = module.load_function("glare_gen_kernel").ok()?;
         let glare_apply_kernel = module.load_function("glare_apply_kernel").ok()?;
         let unsharp_kernel = module.load_function("unsharp_combine_kernel").ok()?;
-        let grain_kernel = module.load_function("grain_kernel").ok()?;
+        let grain_layer_kernel = module.load_function("grain_layer_kernel").ok()?;
+        let grain_micro_kernel = module.load_function("grain_micro_kernel").ok()?;
+        let grain_usm_kernel = module.load_function("grain_usm_kernel").ok()?;
+        let grain_sum_kernel = module.load_function("grain_sum_kernel").ok()?;
+        let grain_finalize_kernel = module.load_function("grain_finalize_kernel").ok()?;
         let dir_matmul_kernel = module.load_function("dir_matmul_kernel").ok()?;
+        let dir_receiver_kernel = module.load_function("dir_receiver_kernel").ok()?;
         let gamut_kernel = module.load_function("gamut_compress_kernel").ok()?;
         let post_scan_kernel = module.load_function("post_scan_kernel").ok()?;
         let device_name = ctx
@@ -1215,7 +1538,6 @@ impl CudaBackend {
             stream,
             _module: module,
             hanatos_kernel,
-            mallett_kernel,
             log10_kernel,
             max_reduce_kernel,
             highlight_boost_kernel,
@@ -1235,8 +1557,13 @@ impl CudaBackend {
             glare_gen_kernel,
             glare_apply_kernel,
             unsharp_kernel,
-            grain_kernel,
+            grain_layer_kernel,
+            grain_micro_kernel,
+            grain_usm_kernel,
+            grain_sum_kernel,
+            grain_finalize_kernel,
             dir_matmul_kernel,
+            dir_receiver_kernel,
             gamut_kernel,
             post_scan_kernel,
             device_name,
@@ -1262,6 +1589,7 @@ impl CudaBackend {
         sigma: f32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (radius, kernel) = gaussian_kernel_f32(sigma);
+        let reflect = u32::from(sigma < 3.0);
         let kernel_dev = self.stream.clone_htod(&kernel)?;
         {
             let mut launch = self.stream.launch_builder(&self.blur_h_kernel);
@@ -1270,6 +1598,7 @@ impl CudaBackend {
                 .arg(&width)
                 .arg(&height)
                 .arg(&radius)
+                .arg(&reflect)
                 .arg(&kernel_dev)
                 .arg(&mut *mid);
             unsafe { launch.launch(launch_2d(width, height)) }?;
@@ -1281,6 +1610,7 @@ impl CudaBackend {
                 .arg(&width)
                 .arg(&height)
                 .arg(&radius)
+                .arg(&reflect)
                 .arg(&kernel_dev)
                 .arg(dst);
             unsafe { launch.launch(launch_2d(width, height)) }?;
@@ -1483,9 +1813,9 @@ impl CudaBackend {
 
         // TODO(cuda): match the CPU reference like the wgpu backend did on
         // 2026-10-19. Still channel-averaged scatter/halation sizes and a
-        // single-Gaussian scatter tail; the DIR tail and the grain sampler
-        // (normal approximation) have the same gaps. See `RefBlur`, `grain.wgsl`
-        // and docs/gpu-vs-cpu-quality.md; untested here (no NVIDIA GPU).
+        // single-Gaussian scatter tail; the DIR tail has the same gap. See
+        // `RefBlur` and docs/gpu-vs-cpu-quality.md; untested here (no NVIDIA
+        // GPU).
         let avg = |v: [f32; 3]| (v[0] + v[1] + v[2]) / 3.0;
         self.blur_device(img, scratch, &mut core, width, height, avg(hp.scatter_core_px))?;
         self.blur_device(img, scratch, &mut tail, width, height, avg(hp.scatter_tail_px))?;
@@ -1550,6 +1880,12 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Upstream experimental's multilayer grain, pass for pass like the wgpu
+    /// backend's `build_grain_state`: each sub-layer (dye-cloud blurred and
+    /// accumulated), the micro-structure, the pixel blur, the multiplicative
+    /// unsharp mask with its mass renormalization, and the floor removal.
+    /// TODO(cuda): untested (no NVIDIA GPU); `blur_device` is this backend's
+    /// own FIR, not the wgpu `RefBlur`.
     fn run_grain_device(
         &self,
         density: &mut CudaSlice<f32>,
@@ -1559,34 +1895,164 @@ impl CudaBackend {
         gp: &crate::GrainGpuParams,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let n_pixels = width * height;
-        let mono = if gp.monochrome { 1u32 } else { 0u32 };
-        {
-            let mut launch = self.stream.launch_builder(&self.grain_kernel);
-            launch
-                .arg(&n_pixels)
-                .arg(&gp.base_seed)
-                .arg(&gp.n_sub_layers)
-                .arg(&mono)
-                .arg(&gp.density_min[0])
-                .arg(&gp.density_min[1])
-                .arg(&gp.density_min[2])
-                .arg(&gp.density_max[0])
-                .arg(&gp.density_max[1])
-                .arg(&gp.density_max[2])
-                .arg(&gp.n_particles_per_pixel[0])
-                .arg(&gp.n_particles_per_pixel[1])
-                .arg(&gp.n_particles_per_pixel[2])
-                .arg(&gp.grain_uniformity[0])
-                .arg(&gp.grain_uniformity[1])
-                .arg(&gp.grain_uniformity[2])
-                .arg(&mut *density);
-            unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
+        let len = n_pixels as usize * 3;
+        let n_layers = gp.n_layers() as u32;
+        let n_samples = gp.interp_x.len() as u32;
+        let mono = gp.monochrome as u32;
+        let positive = gp.positive as u32;
+        let mut curves: Vec<f32> = Vec::with_capacity(gp.interp_x.len() * (6 + 3 * n_layers as usize));
+        curves.extend(gp.interp_x.iter().flatten());
+        curves.extend(gp.interp_inv_dx.iter().flatten());
+        curves.extend(gp.curves_layers.iter().flatten());
+        let curves_dev = self.stream.clone_htod(&curves)?;
+        let layer_params: Vec<f32> = (0..n_layers as usize)
+            .flat_map(|l| {
+                let mut v = Vec::with_capacity(9);
+                v.extend(gp.density_min_layers[l]);
+                v.extend(gp.density_max_layers[l]);
+                v.extend(gp.n_particles_per_pixel[l]);
+                v
+            })
+            .collect();
+        let layer_params_dev = self.stream.clone_htod(&layer_params)?;
+        let mut acc = self.alloc_f32(len)?;
+        let mut layer = self.alloc_f32(len)?;
+        let mut tmp = self.alloc_f32(len)?;
+
+        // 1. Sub-layers.
+        for l in 0..n_layers {
+            let sigma = gp.dye_cloud_sigma_px[l as usize];
+            let blurred = sigma.iter().any(|&s| s > 0.0);
+            let accumulate = (!blurred && l > 0) as u32;
+            {
+                let out = if blurred { &mut layer } else { &mut acc };
+                let mut launch = self.stream.launch_builder(&self.grain_layer_kernel);
+                launch
+                    .arg(&n_pixels)
+                    .arg(&n_samples)
+                    .arg(&n_layers)
+                    .arg(&l)
+                    .arg(&gp.base_seed)
+                    .arg(&mono)
+                    .arg(&accumulate)
+                    .arg(&positive)
+                    .arg(&gp.grain_uniformity[0])
+                    .arg(&gp.grain_uniformity[1])
+                    .arg(&gp.grain_uniformity[2])
+                    .arg(&layer_params_dev)
+                    .arg(&curves_dev)
+                    .arg(&*density)
+                    .arg(out);
+                unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
+            }
+            if blurred {
+                // The dye-cloud σ differs per channel (it follows the grain's
+                // optical density): blur once per distinct σ and add the
+                // channels that use it.
+                if l == 0 {
+                    self.add_scaled(&layer, n_pixels, 0.0, true, &mut acc)?;
+                }
+                let mut done = [false; 3];
+                for ch in 0..3 {
+                    if done[ch] {
+                        continue;
+                    }
+                    let mut mask = [0.0f32; 3];
+                    for (other, m) in mask.iter_mut().enumerate() {
+                        if sigma[other] == sigma[ch] {
+                            *m = 1.0;
+                            done[other] = true;
+                        }
+                    }
+                    if sigma[ch] > 0.0 {
+                        self.blur_device(&layer, scratch, &mut tmp, width, height, sigma[ch])?;
+                        self.add_scaled_per_channel(&tmp, n_pixels, mask, &mut acc)?;
+                    } else {
+                        self.add_scaled_per_channel(&layer, n_pixels, mask, &mut acc)?;
+                    }
+                }
+            }
         }
-        if gp.grain_blur > 0.4 {
-            let mut out = self.alloc_f32(n_pixels as usize * 3)?;
-            self.blur_device(density, scratch, &mut out, width, height, gp.grain_blur)?;
-            std::mem::swap(density, &mut out);
+
+        // 2. Micro-structure.
+        if let Some([sigma2, blur_px]) = gp.micro_structure {
+            let micro = |mode: u32, acc: &mut CudaSlice<f32>, noise: &mut CudaSlice<f32>| {
+                let mut launch = self.stream.launch_builder(&self.grain_micro_kernel);
+                launch
+                    .arg(&n_pixels)
+                    .arg(&gp.base_seed)
+                    .arg(&mode)
+                    .arg(&mono)
+                    .arg(&sigma2)
+                    .arg(acc)
+                    .arg(noise);
+                unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }.map(|_| ())
+            };
+            if blur_px > 0.0 {
+                micro(0, &mut acc, &mut layer)?;
+                self.blur_device(&layer, scratch, &mut tmp, width, height, blur_px)?;
+                micro(1, &mut acc, &mut tmp)?;
+            } else {
+                micro(2, &mut acc, &mut tmp)?;
+            }
         }
+
+        // 3. Pixel blur.
+        let (mut cur, mut other) = (acc, layer);
+        if gp.blur_px > 0.0 {
+            self.blur_device(&cur, scratch, &mut other, width, height, gp.blur_px)?;
+            std::mem::swap(&mut cur, &mut other);
+        }
+
+        // 4. Multiplicative unsharp mask and its per-channel mass ratio.
+        let mut ratio = [1.0f32; 3];
+        let mut src = &cur;
+        if let Some([sigma, amount]) = gp.mult_usm {
+            let usm = |mode: u32, d: &mut CudaSlice<f32>, g: &mut CudaSlice<f32>| {
+                let mut launch = self.stream.launch_builder(&self.grain_usm_kernel);
+                launch.arg(&n_pixels).arg(&mode).arg(&amount).arg(d).arg(g);
+                unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels * 3)) }.map(|_| ())
+            };
+            usm(0, &mut cur, &mut other)?;
+            self.blur_device(&cur, scratch, &mut other, width, height, sigma)?;
+            usm(1, &mut cur, &mut other)?;
+            const SUM_BLOCKS: u32 = 1024;
+            let mut partials = unsafe { self.stream.alloc::<f64>(SUM_BLOCKS as usize * 6)? };
+            {
+                let mut launch = self.stream.launch_builder(&self.grain_sum_kernel);
+                launch.arg(&n_pixels).arg(&cur).arg(&other).arg(&mut partials);
+                let cfg = LaunchConfig { grid_dim: (SUM_BLOCKS, 1, 1), block_dim: (256, 1, 1), shared_mem_bytes: 0 };
+                unsafe { launch.launch(cfg) }?;
+            }
+            let partials = self.stream.clone_dtoh(&partials)?;
+            let mut sums = [0.0f64; 6];
+            for block in partials.chunks_exact(6) {
+                for (s, v) in sums.iter_mut().zip(block) {
+                    *s += v;
+                }
+            }
+            for ch in 0..3 {
+                if sums[3 + ch] > 0.0 {
+                    ratio[ch] = (sums[ch] / sums[3 + ch]) as f32;
+                }
+            }
+            src = &other;
+        }
+
+        // 5. Mass ratio and floor removal, into the density buffer.
+        let mut launch = self.stream.launch_builder(&self.grain_finalize_kernel);
+        launch
+            .arg(&n_pixels)
+            .arg(&ratio[0])
+            .arg(&ratio[1])
+            .arg(&ratio[2])
+            .arg(&gp.density_min[0])
+            .arg(&gp.density_min[1])
+            .arg(&gp.density_min[2])
+            .arg(src)
+            .arg(&mut *density);
+        unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
+        drop(tmp);
         Ok(())
     }
 
@@ -1668,6 +2134,16 @@ impl CudaBackend {
             gp.cmax.iter().map(|&v| v as f32).collect()
         };
         let cmax_dev = self.stream.clone_htod(&cmax_f32)?;
+        let colour: Vec<f32> = gp
+            .rgb_to_xyz
+            .iter()
+            .chain(&gp.xyz_to_rgb)
+            .flatten()
+            .copied()
+            .chain(gp.cam16_d_rgb)
+            .chain([gp.cam16_a_w])
+            .collect();
+        let colour_dev = self.stream.clone_htod(&colour)?;
         let light = gp.lightness.unwrap_or([0.0, 1.0, 1.0]);
         let light_enable = if gp.lightness.is_some() { 1u32 } else { 0u32 };
         let mut launch = self.stream.launch_builder(&self.gamut_kernel);
@@ -1687,7 +2163,8 @@ impl CudaBackend {
             .arg(&gp.l_white)
             .arg(&gp.l_min)
             .arg(&gp.l_max)
-            .arg(&cmax_dev);
+            .arg(&cmax_dev)
+            .arg(&colour_dev);
         unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         Ok(())
     }
@@ -1697,10 +2174,12 @@ impl CudaBackend {
         img: &mut CudaSlice<f32>,
         n_pixels: u32,
         output_cctf_encoding: bool,
+        delta: [[f32; 4]; 3],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let encode = if output_cctf_encoding { 1u32 } else { 0u32 };
+        let delta_dev = self.stream.clone_htod(delta.as_flattened())?;
         let mut launch = self.stream.launch_builder(&self.post_scan_kernel);
-        launch.arg(img).arg(&n_pixels).arg(&encode);
+        launch.arg(img).arg(&n_pixels).arg(&encode).arg(&delta_dev);
         unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         Ok(())
     }
@@ -1721,6 +2200,19 @@ impl CudaBackend {
             .flat_map(|r| r.iter().copied())
             .collect();
         let matrix_dev = self.stream.clone_htod(&matrix)?;
+        // [k; 3], [x_ref; 3], [on; 3]; linear channels get k = 1.
+        let langmuir = |l: Option<&crate::LangmuirGpuParams>| -> Vec<f32> {
+            let mut v = vec![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            for c in 0..3 {
+                if let Some(l) = l.filter(|l| l.saturating[c]) {
+                    v[c] = l.k[c];
+                    v[3 + c] = l.x_ref[c];
+                    v[6 + c] = 1.0;
+                }
+            }
+            v
+        };
+        let donor_dev = self.stream.clone_htod(&langmuir(dp.donor.as_ref()))?;
         let mut correction = self.alloc_f32(n_pixels as usize * 3)?;
         {
             let positive = if dp.is_positive { 1u32 } else { 0u32 };
@@ -1733,6 +2225,7 @@ impl CudaBackend {
                 .arg(&dp.density_max[1])
                 .arg(&dp.density_max[2])
                 .arg(&matrix_dev)
+                .arg(&donor_dev)
                 .arg(&mut correction);
             unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
         }
@@ -1759,6 +2252,12 @@ impl CudaBackend {
         let w = dp.diffusion_tail_weight;
         self.add_scaled(&gaussian, n_pixels, 1.0 - w, true, &mut mix)?;
         self.add_scaled(&tail, n_pixels, w, false, &mut mix)?;
+        if let Some(receiver) = dp.receiver.as_ref() {
+            let receiver_dev = self.stream.clone_htod(&langmuir(Some(receiver)))?;
+            let mut launch = self.stream.launch_builder(&self.dir_receiver_kernel);
+            launch.arg(&mut mix).arg(&n_pixels).arg(&receiver_dev);
+            unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
+        }
         self.add_scaled(&mix, n_pixels, -1.0, false, log_raw)?;
 
         let log_exp_f32: Vec<f32> = dp.log_exposure.iter().map(|&v| v as f32).collect();
@@ -1771,7 +2270,7 @@ impl CudaBackend {
         } else {
             0u32
         };
-        let gamma_inv = (1.0 / dp.gamma_factor) as f32;
+        let gamma_inv = 1.0f32;
         let mut launch = self.stream.launch_builder(&self.density_kernel);
         launch
             .arg(log_raw)
@@ -1820,9 +2319,9 @@ impl CudaBackend {
         let cd_dev = self.stream.clone_htod(&cd_flat)?;
         let bd_dev = self.stream.clone_htod(&bd)?;
         let illu_dev = self.stream.clone_htod(&illu_f32)?;
-        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X)?;
-        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y)?;
-        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z)?;
+        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
+        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
+        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
         let mut out_dev = self.alloc_f32(n_pixels as usize * 3)?;
 
         let n_wl_u32 = n_wl as u32;
@@ -1938,17 +2437,6 @@ impl CudaBackend {
                     .arg(&mut buf_b);
                 unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
             }
-            FrontPass::Mallett2019 { matrix } => {
-                let matrix = matrix_f32(matrix);
-                let matrix_dev = self.stream.clone_htod(&matrix)?;
-                let mut launch = self.stream.launch_builder(&self.mallett_kernel);
-                launch
-                    .arg(&buf_a)
-                    .arg(&n_pixels)
-                    .arg(&matrix_dev)
-                    .arg(&mut buf_b);
-                unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
-            }
         }
 
         if let Some(hp) = p.highlight_boost.as_ref() {
@@ -1995,7 +2483,8 @@ impl CudaBackend {
         } else {
             0u32
         };
-        let film_gamma_inv = (1.0 / p.film_gamma) as f32;
+        // Unit gamma: Film Curves is baked into the curves.
+        let film_gamma_inv = 1.0f32;
         {
             let mut launch = self.stream.launch_builder(&self.density_kernel);
             launch
@@ -2081,7 +2570,7 @@ impl CudaBackend {
             } else {
                 0u32
             };
-            let print_gamma_inv = (1.0 / p.print_gamma) as f32;
+            let print_gamma_inv = 1.0f32;
             {
                 let mut launch = self.stream.launch_builder(&self.density_kernel);
                 launch
@@ -2112,16 +2601,18 @@ impl CudaBackend {
         let scan_bd_dev = self.stream.clone_htod(&scan_bd)?;
         let view_illu_dev = self.stream.clone_htod(&view_illu_f32)?;
         let scan_matrix_dev = self.stream.clone_htod(&scan_matrix)?;
-        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X)?;
-        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y)?;
-        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z)?;
+        let cmf_x_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_X_F32)?;
+        let cmf_y_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Y_F32)?;
+        let cmf_z_dev = self.stream.clone_htod(&spektrafilm_math::spectral::CMF_Z_F32)?;
         let scan_n_wl = scan_cd_src.len() as u32;
         let scan_norm = p.scan_normalization as f32;
         let (bw_m, bw_q, bw_enable) = match p.bw_xyz_remap {
             Some((m, q)) => (m as f32, q as f32, 1u32),
             None => (1.0f32, 0.0f32, 0u32),
         };
-        let skip_clamp = 0u32;
+        // Unclamped scan RGB for glare, gamut compression and the unsharp
+        // mask, as on the CPU; the output stays unclamped like the CPU's.
+        let skip_clamp = 1u32;
         {
             let mut launch = self.stream.launch_builder(&self.scan_kernel);
             launch
@@ -2171,7 +2662,14 @@ impl CudaBackend {
             self.run_unsharp_device(&mut buf_b, &mut buf_a, image.width, image.height, up)?;
         }
 
-        self.run_post_scan_device(&mut buf_b, n_pixels, p.output_cctf_encoding)?;
+        if p.output_cctf_encoding {
+            self.run_post_scan_device(
+                &mut buf_b,
+                n_pixels,
+                p.output_cctf_encoding,
+                p.output_encode_delta(),
+            )?;
+        }
 
         let out = self.stream.clone_dtoh(&buf_b)?;
         Ok(Some(ImageBuf::from_data(

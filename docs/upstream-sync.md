@@ -1,11 +1,17 @@
 # Python parity audit — 2026-10-16
 
 > **Decision, 2026-10-25: Negs targets upstream `experimental`, not main.** Noah decided that
-> Negs should behave like Python spektrafilm's experimental branch (pinned `28bf883`). The audit
-> below is still accurate: the engine matches main `3bb2c2d` today. The port is planned in
-> `tickets/16-match-upstream-experimental.md` (an untracked folder on the Mac). Until it lands,
-> anything newly ported from upstream should follow experimental's behaviour, and the
-> differences from main should be documented.
+> Negs should behave like Python spektrafilm's experimental branch (pinned `28bf883`). The port
+> is planned in [the experimental port plan](experimental-port-plan.md) (ticket 16).
+>
+> **Status, 2026-10-26: ported on branch `experimental-port`, not yet on main.** There the f64
+> engine matches 28bf883 at every stage within 4.4e-8, over the whole image, on Portra 400 →
+> Endura, Gold 200 → Crystal Archive II, Provia 100F scan, Double-X → 2302 and Vision3 500T →
+> 2383, LUTs off and on, at experimental's defaults (grain and glare off) and per effect.
+> Exceptions: the diffusion filter stays f64, and grain is gated statistically. Results:
+> `scripts/parity/README.md`, "Result after integration". Until the branch is merged, main
+> still matches upstream main `3bb2c2d` as audited below; after it, this audit is
+> historical.
 
 This records the audit **before** the subsequent B&W stock port. The
 [B&W handoff](handoff-bw-stocks.md) documents the updated three profiles,
@@ -121,7 +127,8 @@ that every upstream difference has been classified.
    Follow-up: the [experimental gamut port](handoff-experimental-gamut.md)
    now provides an explicit preset, smooth input boundary, and fixed D65
    center. B&W routes pass with compression enabled, including saturated
-   inputs. The main-compatible runtime defaults are preserved.
+   inputs. Since ticket 16.8 these settings are the defaults, and the
+   preset is gone.
 3. **Additional spectral recovery.** Reflectance LUT methods, including
    Arctic 2026, Otsu 2018, and Jakob 2019, add data/descriptor handling and
    normalization rules. Although experimental's GUI history changes its

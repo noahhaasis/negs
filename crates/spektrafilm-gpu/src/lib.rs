@@ -155,8 +155,8 @@ pub trait ComputeBackend: Send + Sync {
     }
 
     /// True when `try_run_film_chain` returns the same post-scan output that
-    /// `Pipeline::apply_post_scan` would produce (final clamp and optional
-    /// sRGB encoding). Backends default to returning linear RGB and letting
+    /// `Pipeline::apply_post_scan` would produce (the optional sRGB
+    /// encoding, unclipped). Backends default to returning linear RGB and letting
     /// the pipeline apply the final CPU pass.
     fn resident_chain_applies_post_scan(&self) -> bool {
         false
@@ -181,7 +181,6 @@ pub struct FilmChainParams<'a> {
     pub front: FrontPass<'a>,
     pub film_log_exposure: &'a [f64],
     pub film_density_curves_normalized: &'a [[f64; 3]],
-    pub film_gamma: f64,
     pub film_channel_density: &'a [[f64; 3]],
     pub film_base_density: &'a [f64],
     pub print_illuminant: &'a [f64],
@@ -189,7 +188,6 @@ pub struct FilmChainParams<'a> {
     pub print_normalization_factor: f64,
     pub print_log_exposure: &'a [f64],
     pub print_density_curves: &'a [[f64; 3]],
-    pub print_gamma: f64,
     pub print_channel_density: &'a [[f64; 3]],
     pub print_base_density: &'a [f64],
     /// Constant enlarger preflash raw 3-vector, added to the print exposure
@@ -217,8 +215,8 @@ pub struct FilmChainParams<'a> {
     /// `Some`, inserted on the film density buffer between filming and
     /// printing. Re-interpolates density curves using `density_curves_0`.
     pub dir_couplers: Option<DirCouplersGpuParams<'a>>,
-    /// Optional grain pass — Poisson-binomial particle model on the film
-    /// density buffer, after DIR couplers and before print spectral.
+    /// Optional grain pass — the multilayer Poisson-binomial model on the
+    /// film density buffer, after DIR couplers and before print spectral.
     /// Draws Poisson and binomial counts with the same exact algorithms as
     /// the CPU (numpy's), from a per-pixel random stream.
     pub grain: Option<GrainGpuParams>,
@@ -256,25 +254,46 @@ pub struct FilmChainParams<'a> {
     /// when `enlarger_diffusion` is active so it can preserve the CPU
     /// print-stage ordering around preflash.
     pub print_exposure_scale: f64,
-    /// Whether the final output should be sRGB-encoded after clamping. Mirrors
-    /// `RuntimeParams::io.output_cctf_encoding`.
+    /// Whether the final output should be sRGB-encoded (unclipped). The
+    /// pipeline sets it only when the output space's curve is sRGB's and
+    /// encodes other curves on the CPU.
     pub output_cctf_encoding: bool,
+    /// Applied before the encoding: Python's `RGB_to_RGB` from the output
+    /// space to itself, the identity up to ~1e-5 because colour's sRGB
+    /// matrices are rounded (`RgbColourspace::rgb_to_rgb_self`).
+    pub output_encode_matrix: [[f64; 3]; 3],
 }
 
-/// RGB → film-raw front pass of the GPU-resident chain. Both variants are
-/// homogeneous in the input RGB, so the caller folds the exposure scale
-/// (auto-exposure × EV compensation × B&W filming correction) into the
-/// matrix — no separate scale pass.
+impl FilmChainParams<'_> {
+    /// `output_encode_matrix` minus the identity, rows padded to four, for
+    /// the post-scan pass: it adds `delta · rgb` in f32, which keeps the
+    /// ~1e-5 entries exact where the full matrix would round them.
+    pub fn output_encode_delta(&self) -> [[f32; 4]; 3] {
+        let m = self.output_encode_matrix;
+        std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                if j < 3 {
+                    (m[i][j] - if i == j { 1.0 } else { 0.0 }) as f32
+                } else {
+                    0.0
+                }
+            })
+        })
+    }
+}
+
+/// RGB → film-raw front pass of the GPU-resident chain. It is homogeneous in
+/// the input RGB, so the caller folds the exposure scale (auto-exposure × EV
+/// compensation × B&W filming correction) into the matrix — no separate
+/// scale pass. Every upsampling method builds a tc LUT, the reflectance ones
+/// included.
 pub enum FrontPass<'a> {
-    /// Hanatos2025 spectral upsampling: per-pixel chromaticity LUT lookup.
+    /// Spectral upsampling: per-pixel chromaticity LUT lookup.
     Hanatos2025 {
         tc_lut: &'a spektrafilm_math::spectral::TcLut,
         /// Combined input-RGB → CAT-adapted-XYZ matrix (row-major).
         rgb_to_adapted_xyz: [[f64; 3]; 3],
     },
-    /// Mallett2019 reflectance-basis upsampling: one rgb → raw 3×3 matmul
-    /// (`core · M_cs`, see `spektrafilm-core/src/mallett.rs`).
-    Mallett2019 { matrix: [[f64; 3]; 3] },
 }
 
 /// Pre-computed plan for the GPU-resident diffusion filter. The per-channel
@@ -315,6 +334,16 @@ pub struct HighlightBoostGpuParams {
     pub protect_ev: f32,
 }
 
+/// Per-channel Langmuir saturation `x (k + x_ref) / (k + x)`; a channel with
+/// `saturating == false` (an infinite `k`) stays linear. CPU equivalent:
+/// `spektrafilm_model::couplers::Langmuir`.
+#[derive(Debug, Clone, Copy)]
+pub struct LangmuirGpuParams {
+    pub k: [f32; 3],
+    pub x_ref: [f32; 3],
+    pub saturating: [bool; 3],
+}
+
 /// DIR couplers parameters for the GPU-resident matmul + diffusion + final
 /// density-curve re-interpolation pass. Mirrors the CPU
 /// `apply_density_correction`.
@@ -326,6 +355,10 @@ pub struct DirCouplersGpuParams<'a> {
     /// `is_positive` is true; ignored otherwise).
     pub density_max: [f32; 3],
     pub is_positive: bool,
+    /// Donor saturation before the matmul (negatives).
+    pub donor: Option<LangmuirGpuParams>,
+    /// Receiver saturation after the diffusion (positives).
+    pub receiver: Option<LangmuirGpuParams>,
     pub diffusion_size_px: f32,
     pub diffusion_tail_px: f32,
     pub diffusion_tail_weight: f32,
@@ -333,25 +366,51 @@ pub struct DirCouplersGpuParams<'a> {
     /// pass with the corrected log-exposure.
     pub density_curves_0: &'a [[f64; 3]],
     pub log_exposure: &'a [f64],
-    pub gamma_factor: f64,
 }
 
-/// Grain parameters for the GPU-resident Poisson-binomial particle model.
-/// Mirrors `apply_grain_to_density`: per-channel n_particles_per_pixel
-/// already divided by `n_sub_layers`, density_max already includes
-/// `density_min`, etc.
-#[derive(Debug, Clone, Copy)]
+/// Grain parameters for the GPU-resident pass: upstream experimental's
+/// multilayer model (CPU: `spektrafilm_model::grain::apply_grain`), built by
+/// `spektrafilm_model::grain::gpu_params`. Per (sub-layer, channel) values
+/// are `[sub-layer][channel]`.
+#[derive(Debug, Clone)]
 pub struct GrainGpuParams {
-    pub density_min: [f32; 3],
-    pub density_max: [f32; 3],
-    pub n_particles_per_pixel: [f32; 3],
+    /// The normalized total curve the density is located on, negated for
+    /// positives so it rises, `[sample][channel]`.
+    pub interp_x: Vec<[f32; 3]>,
+    /// Positive film: densities are negated before they are located.
+    pub positive: bool,
+    /// `1 / (x[k+1] - x[k])` (0 for a repeated sample); the last row is
+    /// padding.
+    pub interp_inv_dx: Vec<[f32; 3]>,
+    /// Per-sub-layer curves, `[sample][sub-layer][channel]` flattened.
+    pub curves_layers: Vec<[f32; 3]>,
+    pub density_min_layers: Vec<[f32; 3]>,
+    /// Absolute (floor-inclusive) maximum per sub-layer.
+    pub density_max_layers: Vec<[f32; 3]>,
+    /// Grains per pixel; 0 for the noise-free limit (RMS granularity 0).
+    pub n_particles_per_pixel: Vec<[f32; 3]>,
+    /// Dye-cloud blur σ in pixels per sub-layer; 0 is no blur.
+    pub dye_cloud_sigma_px: Vec<[f32; 3]>,
     pub grain_uniformity: [f32; 3],
-    pub n_sub_layers: u32,
+    /// The floor removed at the end.
+    pub density_min: [f32; 3],
+    /// Lognormal micro-structure `(ln(1 + σ²), blur σ px)` when it is on;
+    /// a blur of 0 is none.
+    pub micro_structure: Option<[f32; 2]>,
+    /// Pixel blur σ in pixels; 0 is off.
+    pub blur_px: f32,
+    /// Multiplicative unsharp mask `(σ px, amount)` when it is on.
+    pub mult_usm: Option<[f32; 2]>,
     pub base_seed: u32,
-    pub grain_blur: f32,
     /// One shared noise field across all channels (B&W single emulsion)
     /// instead of independent per-channel RNG streams.
     pub monochrome: bool,
+}
+
+impl GrainGpuParams {
+    pub fn n_layers(&self) -> usize {
+        self.density_max_layers.len()
+    }
 }
 
 /// Output gamut compression parameters for the GPU-resident per-pixel pass.
@@ -377,6 +436,12 @@ pub struct GamutGpuParams<'a> {
     pub cmax: &'a [f64],
     pub n_l: u32,
     pub n_h: u32,
+    /// The output colourspace's linear RGB ↔ XYZ matrices.
+    pub rgb_to_xyz: [[f32; 3]; 3],
+    pub xyz_to_rgb: [[f32; 3]; 3],
+    /// CAM16 `D_RGB` and `A_w` for the output whitepoint (cam16ucs only).
+    pub cam16_d_rgb: [f32; 3],
+    pub cam16_a_w: f32,
 }
 
 /// Unsharp mask parameters: blur sigma in pixels and amount.

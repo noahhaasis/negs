@@ -151,6 +151,11 @@ pub struct DensityCurvesModel {
     pub amplitudes: Vec<Vec<f64>>,
     #[serde(default)]
     pub sigmas: Vec<Vec<f64>>,
+    /// Per-layer skew of upstream's `sept_norm_cdfs` model, `[n_channels][n_layers]`.
+    /// `null` (every shipped profile) means no skew. The Gaussian `norm_cdfs`
+    /// model ignores it, as upstream does; the skewed model isn't ported.
+    #[serde(default)]
+    pub alphas: Option<Vec<Vec<f64>>>,
 }
 
 impl DensityCurvesModel {
@@ -290,6 +295,35 @@ impl Profile {
             .collect()
     }
 
+    /// Per-sub-layer density curves as `[n_le][n_layers][3]`, the emulsion
+    /// sub-layer breakdown of [`Self::density_curves_f64`] (upstream's
+    /// `density_curves_layers`; for the film, the Film Curves morph is baked
+    /// in). `None` for a single-layer model. Read it from a resolved profile
+    /// (`Pipeline::film`), where B&W stocks are broadcast to three lanes.
+    pub fn density_curves_layers_f64(&self) -> Option<Vec<Vec<[f64; 3]>>> {
+        if self.data.density_curves_layers.is_empty() {
+            return None;
+        }
+        Some(
+            self.data
+                .density_curves_layers
+                .iter()
+                .map(|layers| {
+                    layers
+                        .iter()
+                        .map(|row| {
+                            [
+                                row.first().copied().unwrap_or(0.0),
+                                row.get(1).copied().unwrap_or(0.0),
+                                row.get(2).copied().unwrap_or(0.0),
+                            ]
+                        })
+                        .collect()
+                })
+                .collect(),
+        )
+    }
+
     /// Get log_exposure as f64 slice.
     pub fn log_exposure_f64(&self) -> Vec<f64> {
         self.data.log_exposure.clone()
@@ -353,7 +387,7 @@ pub fn load_profile(path: &Path) -> Result<Profile, ProfileError> {
     let reader = std::io::BufReader::new(file);
     let mut profile: Profile = serde_json::from_reader(reader)
         .map_err(|e| ProfileError::Parse(path.display().to_string(), e))?;
-    refresh_bw_density_curves(&mut profile)?;
+    refresh_density_curves_from_model(&mut profile)?;
     validate_profile(&profile)?;
     // Resolve the default base+fog column so the field is usable straight
     // after load. `resolve_for_render` re-selects it for B&W development-time
@@ -363,51 +397,61 @@ pub fn load_profile(path: &Path) -> Result<Profile, ProfileError> {
     Ok(profile)
 }
 
-/// Upstream's fitted model is authoritative for the updated B&W profiles.
-/// Rebuild the whole development-time family before choosing a member; the
-/// JSON sample curves are rounded and differ from the model by ~1e-5.
-/// Keep legacy colour profiles on their existing calibration path.
-fn refresh_bw_density_curves(profile: &mut Profile) -> Result<(), ProfileError> {
-    if !profile.is_bw() {
-        return Ok(());
-    }
+/// The fitted `density_curves_model` is the source of truth, as in upstream
+/// experimental's `refresh_density_curves_from_model` (run on film and print
+/// at pipeline construction): sample it onto the profile's own
+/// `log_exposure` grid so every consumer (develop, couplers, D-max probes,
+/// the print stage) reads model-derived curves. The stored JSON curves are
+/// rounded and differ from the model by up to ~1e-5. A missing model is an
+/// error, as upstream raises. On a B&W development-time family the model's
+/// rows index development times; the whole family is rebuilt before
+/// `resolve_for_render` chooses a member.
+///
+/// `density_curves_layers` (`[n_le][n_layers][n_channels]`) holds the
+/// per-sub-layer curves for multi-layer models and is empty for a
+/// single-layer model (upstream's `None`).
+fn refresh_density_curves_from_model(profile: &mut Profile) -> Result<(), ProfileError> {
     let positive = profile.is_positive();
+    let stock = profile.info.stock.clone().unwrap_or_default();
     let d = &mut profile.data;
     let Some(model) = &d.density_curves_model else {
-        return Ok(());
+        return Err(ProfileError::Validation(format!(
+            "profile {stock:?} has no density_curves_model; density curves are derived from it"
+        )));
     };
-    let n_times = d.development_time.len().max(1);
+    let n_ch = model.n_channels();
     let n_layers = model.n_layers();
     if !matches!(model.model_type.as_str(), "cdfs" | "norm_cdfs")
+        || n_ch == 0
         || n_layers == 0
         || [&model.centers, &model.amplitudes, &model.sigmas]
             .iter()
             .any(|m| {
-                m.len() != n_times
+                m.len() != n_ch
                     || m.iter()
                         .any(|row| row.len() != n_layers || row.iter().any(|v| !v.is_finite()))
             })
         || model.sigmas.iter().flatten().any(|&v| v <= 0.0)
     {
-        return Err(ProfileError::Validation(
-            "invalid B&W density curve model".into(),
-        ));
+        return Err(ProfileError::Validation(format!(
+            "invalid density curve model in profile {stock:?}"
+        )));
     }
     let sign = if positive { -1.0 } else { 1.0 };
-    d.density_curves = vec![vec![0.0; n_times]; d.log_exposure.len()];
+    d.density_curves = vec![vec![0.0; n_ch]; d.log_exposure.len()];
     d.density_curves_layers = if n_layers > 1 {
-        vec![vec![vec![0.0; n_times]; n_layers]; d.log_exposure.len()]
+        vec![vec![vec![0.0; n_ch]; n_layers]; d.log_exposure.len()]
     } else {
         Vec::new()
     };
     for (i, &x) in d.log_exposure.iter().enumerate() {
-        for time in 0..n_times {
+        for ch in 0..n_ch {
             for layer in 0..n_layers {
-                let z = sign * (x - model.centers[time][layer]) / model.sigmas[time][layer];
-                let density = model.amplitudes[time][layer] * crate::print_morph::norm_cdf(z);
-                d.density_curves[i][time] += density;
+                let z = sign * (x - model.centers[ch][layer]) / model.sigmas[ch][layer];
+                let density = model.amplitudes[ch][layer] * crate::print_morph::norm_cdf(z);
+                d.density_curves[i][ch] += density;
                 if n_layers > 1 {
-                    d.density_curves_layers[i][layer][time] = density;
+                    d.density_curves_layers[i][layer][ch] = density;
                 }
             }
         }
@@ -491,10 +535,10 @@ pub fn resolve_for_render(mut profile: Profile, development_time: Option<f64>) -
         model.centers = pick(&model.centers);
         model.amplitudes = pick(&model.amplitudes);
         model.sigmas = pick(&model.sigmas);
+        model.alphas = model.alphas.as_deref().map(pick);
     }
     // Layers are n_le × n_layers × n_times on B&W families (upstream slices
-    // `[:, :, idx]`). Unconsumed by the runtime today, but collapse anyway so
-    // no future consumer reads the stale family.
+    // `[:, :, idx]`).
     for layer_row in &mut d.density_curves_layers {
         for layer in layer_row.iter_mut() {
             let i = idx.min(layer.len().saturating_sub(1));
@@ -528,6 +572,15 @@ pub fn resolve_for_render(mut profile: Profile, development_time: Option<f64>) -
         bcast(&mut model.centers);
         bcast(&mut model.amplitudes);
         bcast(&mut model.sigmas);
+        if let Some(alphas) = &mut model.alphas {
+            bcast(alphas);
+        }
+    }
+    for layer_row in &mut d.density_curves_layers {
+        for layer in layer_row.iter_mut() {
+            let v = layer.first().copied().unwrap_or(0.0);
+            *layer = vec![v, v, v];
+        }
     }
     profile
 }

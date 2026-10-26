@@ -184,8 +184,7 @@ begin
     begin
       Choice := TaskDialogMsgBox('Choose what to keep after uninstalling Negs',
         'Caches, logs, and temporary files will be removed either way. Original photographs and exported images are kept.',
-        mbConfirmation, MB_YESNOCANCEL,
-        ['Remove all app data', 'Keep settings and editing session', 'Cancel'], 0);
+        mbConfirmation, MB_YESNOCANCEL, ['Remove all app data', 'Keep settings and editing session', 'Cancel'], 0);
       if (Choice <> IDYES) and (Choice <> IDNO) then Abort;
       KeepSettings := Choice = IDNO;
     end;

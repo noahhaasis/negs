@@ -269,7 +269,7 @@ fn spectral_to_proj_tiled(
 /// Same spectral-integration core as `scan_spectral_cpu`, but stops at
 /// `log_xyz = log10(max(xyz / normalization, 0) + 1e-10)` — i.e. it
 /// mirrors Python's `cmy_to_log_xyz` *exactly*. Used to build the
-/// scanner LUT so the PCHIP-interpolated function is the same one
+/// scanner LUT (tetrahedral) so the interpolated function is the same one
 /// Python interpolates (not the post-`10^x`-CAT-matrix surface, which
 /// would diverge sub-LSB from Python's output).
 ///

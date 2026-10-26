@@ -112,6 +112,34 @@ pub struct Stock {
     pub bw: bool,
     pub target: String,
     pub times: Vec<f64>,
+    /// The resolved grain preset, per field of `GRAIN_STOCK_FIELDS`.
+    pub grain: Value,
+}
+
+/// Grain arrays that stay null until edited, so the film's preset from the
+/// catalog applies (`Stock.grainFields` in `Parameters.swift`).
+pub const GRAIN_STOCK_FIELDS: [&str; 4] = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"];
+
+/// A slider on one lane of a grain preset array:
+/// `film_render.grain.<field>.<index>`.
+pub fn grain_lane(path: &str) -> Option<(&str, usize)> {
+    let (field, index) = path.strip_prefix("film_render.grain.")?.split_once('.')?;
+    GRAIN_STOCK_FIELDS.contains(&field).then_some(())?;
+    Some((field, index.parse().ok()?))
+}
+
+/// B&W films have one emulsion: per-channel lanes past the first are hidden.
+pub fn color_only(path: &str) -> bool {
+    grain_lane(path).is_some_and(|(field, index)| field != "particle_scale_sublayers" && index > 0)
+}
+
+/// The first lane's title on a B&W film, without its colour.
+pub fn bw_title(path: &str) -> Option<&'static str> {
+    match path {
+        "film_render.grain.rms_granularity.0" => Some("Granularity"),
+        "film_render.grain.uniformity.0" => Some("Uniformity"),
+        _ => None,
+    }
 }
 
 impl Stock {
@@ -124,6 +152,7 @@ impl Stock {
             bw: json::boolean(&value["bw"]),
             target: json::string(&value["target_print"]).into(),
             times: value["development_times"].as_array().map(|a| a.iter().map(json::number).collect()).unwrap_or_default(),
+            grain: value["grain"].clone(),
         }
     }
 
@@ -200,7 +229,7 @@ pub fn option_title(option: &str) -> String {
         "aces_rgc" => "ACES RGC",
         "xy" => "xy Chromaticity",
         "hanatos2025" => "Hanatos 2025",
-        "arctic2026alpha02" => "Arctic 2026 (Alpha)",
+        "arctic2026beta04" => "Arctic 2026 (Beta 04)",
         "mallett2019" => "Mallett 2019",
         _ => {
             return option
@@ -248,12 +277,16 @@ pub enum Adjustment {
     Slider { title: &'static str, path: &'static str, low: f64, high: f64, step: f64 },
     Toggle { title: &'static str, path: &'static str },
     Choice { title: &'static str, path: &'static str, options: &'static [&'static str] },
+    /// Solves the enlarger's M/Y filter shifts so a mid-grey prints neutral.
+    BalancePrint { title: &'static str, help: &'static str },
 }
 
 impl Adjustment {
+    /// The parameter a control edits; empty for the Balance Print button.
     pub fn path(&self) -> &'static str {
         match *self {
             Adjustment::Slider { path, .. } | Adjustment::Toggle { path, .. } | Adjustment::Choice { path, .. } => path,
+            Adjustment::BalancePrint { .. } => "",
         }
     }
 }
@@ -323,10 +356,21 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         section: Section::Film,
         enable: Some("film_render.grain.active"),
         controls: &[
-            slider("Particle area (µm²)", "film_render.grain.agx_particle_area_um2", 0.05, 1.0, 0.01),
-            slider("Post blur", "film_render.grain.blur", 0.0, 3.0, 0.01),
-            toggle("Sublayers", "film_render.grain.sublayers_active"),
-            slider("Sublayer count", "film_render.grain.n_sub_layers", 1.0, 4.0, 1.0),
+            slider("Red granularity", "film_render.grain.rms_granularity.0", 0.0, 80.0, 0.1),
+            slider("Green granularity", "film_render.grain.rms_granularity.1", 0.0, 80.0, 0.1),
+            slider("Blue granularity", "film_render.grain.rms_granularity.2", 0.0, 80.0, 0.1),
+            slider("Red uniformity", "film_render.grain.uniformity.0", 0.0, 1.0, 0.01),
+            slider("Green uniformity", "film_render.grain.uniformity.1", 0.0, 1.0, 0.01),
+            slider("Blue uniformity", "film_render.grain.uniformity.2", 0.0, 1.0, 0.01),
+            slider("Coarse grain size", "film_render.grain.particle_scale_sublayers.0", 0.05, 2.0, 0.01),
+            slider("Medium grain size", "film_render.grain.particle_scale_sublayers.1", 0.05, 2.0, 0.01),
+            slider("Fine grain size", "film_render.grain.particle_scale_sublayers.2", 0.05, 2.0, 0.01),
+            slider("Dye clouds (µm)", "film_render.grain.blur_dye_clouds_um", 0.0, 5.0, 0.01),
+            slider("Blur (px)", "film_render.grain.blur", 0.0, 3.0, 0.01),
+            slider("Sharpen amount", "film_render.grain.mult_usm_amount", 0.0, 3.0, 0.01),
+            slider("Sharpen radius (px)", "film_render.grain.mult_usm_sigma", 0.0, 3.0, 0.01),
+            slider("Clump blur (µm)", "film_render.grain.micro_structure.0", 0.0, 1.0, 0.01),
+            slider("Clump size (nm)", "film_render.grain.micro_structure.1", 0.0, 100.0, 1.0),
         ],
     },
     AdjustmentGroup {
@@ -354,6 +398,18 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         ],
     },
     AdjustmentGroup {
+        title: "Film Base",
+        section: Section::Film,
+        enable: Some("film_render.base.active"),
+        controls: &[
+            slider("Density", "film_render.base.scale", 0.0, 2.0, 0.01),
+            slider("Tilt", "film_render.base.tilt", -1.0, 1.0, 0.01),
+            slider("Cyan", "film_render.base.cyan", 0.0, 2.0, 0.01),
+            slider("Magenta", "film_render.base.magenta", 0.0, 2.0, 0.01),
+            slider("Yellow", "film_render.base.yellow", 0.0, 2.0, 0.01),
+        ],
+    },
+    AdjustmentGroup {
         title: "Enlarger",
         section: Section::Print,
         enable: None,
@@ -365,6 +421,21 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
             slider("Preflash exposure", "enlarger.preflash_exposure", 0.0, 0.5, 0.01),
             slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50.0, 50.0, 0.1),
             slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50.0, 50.0, 0.1),
+            Adjustment::BalancePrint {
+                title: "Balance Print",
+                help: "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.",
+            },
+        ],
+    },
+    AdjustmentGroup {
+        title: "Print Base",
+        section: Section::Print,
+        enable: Some("print_render.base.active"),
+        controls: &[
+            slider("Density", "print_render.base.scale", 0.0, 2.0, 0.01),
+            slider("Cyan", "print_render.base.cyan", 0.0, 2.0, 0.01),
+            slider("Magenta", "print_render.base.magenta", 0.0, 2.0, 0.01),
+            slider("Yellow", "print_render.base.yellow", 0.0, 2.0, 0.01),
         ],
     },
     AdjustmentGroup {
@@ -413,7 +484,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
             choice("Output gamut", "io.output_gamut_compress.algorithm", &["off", "oklch", "oklrab", "cam16ucs", "aces_rgc"]),
             choice("Input gamut", "io.input_gamut_compress.algorithm", &["off", "xy"]),
             toggle("CAT16 adaptation", "settings.use_cat16"),
-            choice("Spectral upsampling", "settings.rgb_to_raw_method", &["hanatos2025", "arctic2026alpha02", "mallett2019"]),
+            choice("Spectral upsampling", "settings.rgb_to_raw_method", &["hanatos2025", "arctic2026beta04", "mallett2019"]),
         ],
     },
 ];
@@ -511,9 +582,21 @@ mod tests {
     }
 
     #[test]
+    fn grain_lanes_follow_the_stock_preset() {
+        assert_eq!(grain_lane("film_render.grain.rms_granularity.2"), Some(("rms_granularity", 2)));
+        assert_eq!(grain_lane("film_render.grain.micro_structure.0"), None);
+        assert_eq!(grain_lane("film_render.grain.blur"), None);
+        assert!(color_only("film_render.grain.uniformity.1"));
+        assert!(!color_only("film_render.grain.uniformity.0"));
+        assert!(!color_only("film_render.grain.particle_scale_sublayers.2"));
+        let lanes: Vec<_> = ADJUSTMENT_GROUPS.iter().flat_map(|g| g.controls).filter_map(|c| grain_lane(c.path())).collect();
+        assert_eq!(lanes.len(), 9);
+    }
+
+    #[test]
     fn stocks_group_like_the_mac() {
         let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool, target: &str| Stock {
-            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![],
+            id: id.into(), name: name.into(), paper, positive, bw, target: target.into(), times: vec![], grain: Value::Null,
         };
         let films = [
             stock("gold", "Gold", false, false, false, "endura"),

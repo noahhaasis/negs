@@ -215,7 +215,7 @@ fn bilinear_mix(v00: f64, v10: f64, v01: f64, v11: f64, tx: f64, ty: f64) -> f64
 /// `coord` is the input value in [0, size-1]; returns (base_index,
 /// fractional). Matches Python `cubic_coordinate_base_fraction`.
 #[inline]
-fn cubic_base_fraction(coord: f64, size: usize) -> (usize, f64) {
+pub(crate) fn cubic_base_fraction(coord: f64, size: usize) -> (usize, f64) {
     let c = if coord <= 0.0 {
         0.0
     } else {

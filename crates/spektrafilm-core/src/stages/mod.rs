@@ -95,13 +95,13 @@ mod integration_tests {
         }
     }
 
-    /// Full default chain vs upstream 0.3.4 `simulate()` — the post-defaults
-    /// baseline (CAT16, input gamut `xy`, output gamut `cam16ucs`, and the
-    /// model-evaluated print curves are all active here). Reference values
-    /// dumped from upstream `origin/main` (= 0.3.4) with the stochastic /
-    /// spatial effects off and linear sRGB in/out.
+    /// Full default chain vs upstream experimental 28bf883 (CAT16, input
+    /// gamut `xy`, output gamut `cam16ucs`, model-derived curves). Reference
+    /// values from `scripts/parity/exp_data_unit_references.py`: 28bf883's
+    /// pipeline with the stochastic / spatial effects off and linear sRGB
+    /// in/out.
     #[test]
-    fn full_chain_matches_python_0_3_4_defaults() {
+    fn full_chain_matches_python_experimental() {
         let dir = data_dir();
         let film = profile::load_profile_by_name(&dir, "kodak_portra_400").unwrap();
         let print = profile::load_profile_by_name(&dir, "kodak_portra_endura").unwrap();
@@ -132,9 +132,9 @@ mod integration_tests {
         let img = ImageBuf::from_data(1, 1, vec![from_f64(0.184); 3]);
         let out = pipeline.process(img, &backend);
         let want = [
-            0.17518024973220059,
-            0.17883059767931708,
-            0.18934288118407094,
+            0.18168434872454148,
+            0.1816510949027062,
+            0.18153344933652843,
         ];
         for c in 0..3 {
             let got = out.get(0, 0)[c] as f64;
@@ -155,22 +155,22 @@ mod integration_tests {
         let out = pipeline.process(img, &backend);
         #[rustfmt::skip]
         let want: [[f64; 3]; 16] = [
-            [0.030140578894842104, 0.10482173080681569, 0.16323263024872359],
-            [0.28284244086494625, 0.36230193922267084, 0.42928148064834676],
-            [0.3353451807767468, 0.076427614378209482, 0.13647407034435774],
-            [0.20879086264247579, 0.29459368653984946, 0.36196826709735686],
-            [0.40612358537107524, 0.34267145956453349, 0.098468693348025937],
-            [0.13020451874838482, 0.21646938505071839, 0.28562089684501552],
-            [0.36393816309250704, 0.43921581264848525, 0.49969437202741285],
-            [0.048658768968400892, 0.12737590764642162, 0.19018617795337284],
-            [0.30145661667996704, 0.37870527708934137, 0.44581696264428788],
-            [0.35937910731344802, 0.09909092393180377, 0.16141353541124179],
-            [0.22780229482543857, 0.31345554394629804, 0.37969407564677998],
-            [0.42292203106495652, 0.36564847210885171, 0.12172785269499363],
-            [0.15476048038036888, 0.23926341868289583, 0.30831655353252529],
-            [0.37946779125297414, 0.45406130948472612, 0.51171040229547315],
-            [0.068514332830799163, 0.1501539662811362, 0.21561362102769013],
-            [0.31940096432374643, 0.39473020737167158, 0.46156726106459162],
+            [0.02896626542906261, 0.10730365049408322, 0.16239691028015119],
+            [0.2952306874358674, 0.36942803237279653, 0.4237362249208574],
+            [0.34915625510221604, 0.0772947821905051, 0.1299852240191852],
+            [0.22094665161100227, 0.2988944007530242, 0.3569270008528037],
+            [0.422391926807704, 0.3459468622882615, 0.0853800424293393],
+            [0.13867031835439564, 0.21872960876759817, 0.27842878636582796],
+            [0.3779000724153239, 0.44498408860715744, 0.49262937276482033],
+            [0.050805056174104773, 0.13102005420344773, 0.18801807047448987],
+            [0.3135697569791069, 0.38642535463721744, 0.43923794064930444],
+            [0.3715355019902659, 0.10009393040729274, 0.1537728436197984],
+            [0.24156304469653594, 0.31846479395665417, 0.37582526616836887],
+            [0.4375016246607823, 0.3682434497541976, 0.11034326928226869],
+            [0.1611968989343505, 0.2409491062772523, 0.30041956414399024],
+            [0.39318106799768354, 0.4588403618216505, 0.5047055189155656],
+            [0.07393795333436211, 0.15474647221406923, 0.21304132680462232],
+            [0.331292510042576, 0.40277791799251283, 0.45454849341234627],
         ];
         let mut max_diff = 0.0f64;
         for (i, want_px) in want.iter().enumerate() {
@@ -186,7 +186,7 @@ mod integration_tests {
                 );
             }
         }
-        eprintln!("full-chain 0.3.4 defaults: max diff vs Python {max_diff:.3e}");
+        eprintln!("full chain: max diff vs Python experimental {max_diff:.3e}");
     }
 
     #[test]
@@ -237,7 +237,8 @@ mod integration_tests {
             let mut params = RuntimeParams::default();
             params.camera.exposure_compensation_ev = ev;
             params.enlarger.print_exposure_compensation = compensation;
-            params.film_render.density_curve_gamma = gamma;
+            params.film_render.density_curves_morph.active = gamma != 1.0;
+            params.film_render.density_curves_morph.gamma_factor = gamma;
             let fresh =
                 Pipeline::new_with_spectral(film.clone(), print.clone(), params.clone(), &dir)
                     .unwrap();
@@ -280,7 +281,7 @@ mod integration_tests {
             .with_params(params);
         assert_eq!(
             pipeline.params.film_render.dir_couplers.gamma_samelayer_rgb,
-            [0.12, 0.08, 0.06],
+            [0.2291, 0.1029, 0.2651],
             "GUI-style with_params must preserve positive-film DIR parameters"
         );
         let result = pipeline.process(img, &backend);
@@ -352,16 +353,16 @@ mod debug_tests {
         let img = ImageBuf::from_data(1, 1, vec![gray, gray, gray]);
         eprintln!("Input: {:?}", img.get(0, 0));
 
-        let ref_illuminant = stages::filming::select_illuminant(&film.info.reference_illuminant);
+        let ref_illuminant = crate::illuminants::select_illuminant(&film.info.reference_illuminant);
         let log_raw = stages::filming::expose(
             img,
             &film,
             &params,
             &backend,
             None,
-            None,
-            ref_illuminant,
+            &ref_illuminant,
             1.0,
+            0.0,
         );
         eprintln!("log_raw: {:?}", log_raw.get(0, 0));
 

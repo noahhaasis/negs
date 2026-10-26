@@ -388,7 +388,7 @@ pub fn export_lut(app: &mut App) {
             dialog.SetFileName(pcwstr(&filename))?;
             dialog.SetOptions(dialog.GetOptions()? | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_NOREADONLYRETURN)?;
             let customize: IFileDialogCustomize = dialog.cast()?;
-            let message = wide("33 × 33 × 33 CUBE · sRGB input and output. Uses the current film and paper color settings. Auto exposure, grain, halation, glare, diffusion, blur, sharpening, RAW development, and Post edits are excluded.");
+            let message = wide("33 × 33 × 33 CUBE · sRGB input and output. Uses the current film and paper color settings. Auto exposure, print filter shifts, preflash, grain, halation, glare, diffusion, blur, sharpening, RAW development, and Post edits are excluded.");
             customize.AddText(MESSAGE, pcwstr(&message))?;
             dialog.Show(app.main)?;
             result_path(&dialog.cast()?).ok_or_else(windows::core::Error::from_win32)

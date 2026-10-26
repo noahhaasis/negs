@@ -79,10 +79,12 @@ pub struct CameraParams {
     pub lens_blur_um: f32,
     #[serde(default = "default_35")]
     pub film_format_mm: f32,
-    #[serde(default = "default_filter_uv")]
-    pub filter_uv: [f32; 3],
-    #[serde(default = "default_filter_ir")]
-    pub filter_ir: [f32; 3],
+    /// Camera taking filter, a key of
+    /// [`crate::color_filters::COLOR_FILTER_LIBRARY`] or `"none"`. Older
+    /// params files' `filter_uv`/`filter_ir`, which nothing used and upstream
+    /// removed, are ignored.
+    #[serde(default = "default_no_color_filter")]
+    pub color_filter: String,
     #[serde(default)]
     pub diffusion_filter: DiffusionFilterParams,
 }
@@ -95,8 +97,7 @@ impl Default for CameraParams {
             auto_exposure_method: "center_weighted".into(),
             lens_blur_um: 0.0,
             film_format_mm: 35.0,
-            filter_uv: [0.0, 410.0, 8.0],
-            filter_ir: [0.0, 675.0, 15.0],
+            color_filter: default_no_color_filter(),
             diffusion_filter: DiffusionFilterParams::default(),
         }
     }
@@ -184,33 +185,36 @@ impl Default for ScannerParams {
     }
 }
 
+/// Upstream experimental's `GrainParams` (`runtime/params_schema.py`). The
+/// per-stock fields are `None` by default: the pipeline fills them from the
+/// film's entry in `data/presets/grain.toml` (upstream `_apply_grain_preset`,
+/// see `grain_presets.rs`). A value set here overrides the preset.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrainParams {
     #[serde(default = "default_true")]
     pub active: bool,
-    #[serde(default = "default_true")]
-    pub sublayers_active: bool,
-    // f64 to preserve Python JSON precision through the Poisson/Binomial
-    // RNG pipeline — the f32 truncation of these values shifts the
-    // Poisson lambda by ~5e-8 and produces a different RNG stream.
-    #[serde(default = "default_02_f64")]
-    pub agx_particle_area_um2: f64,
-    #[serde(default = "default_particle_scale_f64")]
-    pub agx_particle_scale: [f64; 3],
-    #[serde(default = "default_particle_scale_layers_f64")]
-    pub agx_particle_scale_layers: [f64; 3],
-    #[serde(default = "default_density_min_f64")]
-    pub density_min: [f64; 3],
-    #[serde(default = "default_uniformity_f64")]
-    pub uniformity: [f64; 3],
-    #[serde(default = "default_065")]
-    pub blur: f32,
-    #[serde(default = "default_one")]
-    pub blur_dye_clouds_um: f32,
+    /// Per channel, σ_D × 1000 at a 48 µm aperture and net density 1.0.
+    #[serde(default)]
+    pub rms_granularity: Option<[f64; 3]>,
+    #[serde(default)]
+    pub density_min: Option<[f64; 3]>,
+    #[serde(default)]
+    pub uniformity: Option<[f64; 3]>,
+    /// Relative particle area per emulsion sub-layer, coarsest = 1.
+    #[serde(default)]
+    pub particle_scale_sublayers: Option<[f64; 3]>,
+    /// Pixel blur σ in pixels.
+    #[serde(default = "default_grain_blur")]
+    pub blur: f64,
+    #[serde(default = "default_mult_usm_sigma")]
+    pub mult_usm_sigma: f64,
+    #[serde(default = "default_mult_usm_amount")]
+    pub mult_usm_amount: f64,
+    #[serde(default = "default_blur_dye_clouds_um")]
+    pub blur_dye_clouds_um: f64,
+    /// (blur in µm, clump size in nm).
     #[serde(default = "default_micro_structure")]
-    pub micro_structure: [f32; 2],
-    #[serde(default = "default_1i")]
-    pub n_sub_layers: u32,
+    pub micro_structure: [f64; 2],
     /// One shared noise field across all channels instead of independent
     /// per-channel RNG streams. Set by the pipeline for B&W films
     /// (upstream n_channels==1 has a single emulsion); not user-facing.
@@ -218,36 +222,35 @@ pub struct GrainParams {
     pub monochrome: bool,
 }
 
-fn default_02_f64() -> f64 {
-    0.2
+fn default_grain_blur() -> f64 {
+    0.89
 }
-fn default_particle_scale_f64() -> [f64; 3] {
-    [1.6, 1.6, 3.2]
+fn default_mult_usm_sigma() -> f64 {
+    0.7
 }
-fn default_particle_scale_layers_f64() -> [f64; 3] {
-    [2.0, 1.0, 0.5]
+fn default_mult_usm_amount() -> f64 {
+    1.5
 }
-fn default_density_min_f64() -> [f64; 3] {
-    [0.03, 0.03, 0.03]
+fn default_blur_dye_clouds_um() -> f64 {
+    2.0
 }
-fn default_uniformity_f64() -> [f64; 3] {
-    [0.97, 0.99, 0.97]
+fn default_micro_structure() -> [f64; 2] {
+    [0.2, 30.0]
 }
 
 impl Default for GrainParams {
     fn default() -> Self {
         Self {
             active: true,
-            sublayers_active: true,
-            agx_particle_area_um2: 0.2,
-            agx_particle_scale: [1.6, 1.6, 3.2],
-            agx_particle_scale_layers: [2.0, 1.0, 0.5],
-            density_min: [0.03, 0.03, 0.03],
-            uniformity: [0.97, 0.99, 0.97],
-            blur: 0.65,
-            blur_dye_clouds_um: 1.0,
-            micro_structure: [0.2, 30.0],
-            n_sub_layers: 1,
+            rms_granularity: None,
+            density_min: None,
+            uniformity: None,
+            particle_scale_sublayers: None,
+            blur: default_grain_blur(),
+            mult_usm_sigma: default_mult_usm_sigma(),
+            mult_usm_amount: default_mult_usm_amount(),
+            blur_dye_clouds_um: default_blur_dye_clouds_um(),
+            micro_structure: default_micro_structure(),
             monochrome: false,
         }
     }
@@ -360,11 +363,20 @@ pub struct DirCouplersParams {
     pub gamma_interlayer_g_to_rb: [f64; 2],
     #[serde(default = "default_gamma_b_rg_f64")]
     pub gamma_interlayer_b_to_rg: [f64; 2],
+    /// Langmuir knee of the donor saturation (negatives), per channel, as a
+    /// fraction of the channel's d_max. Infinity is the linear law; JSON
+    /// writes it as `null` and reads `null` back as infinity.
+    #[serde(default = "default_langmuir_k", deserialize_with = "langmuir_k_rgb")]
+    pub langmuir_donor_k_rgb: [f64; 3],
+    /// Langmuir knee of the receiver saturation (positives), per channel, as
+    /// a fraction of the arrived-inhibitor ceiling. Infinity is linear.
+    #[serde(default = "default_langmuir_k", deserialize_with = "langmuir_k_rgb")]
+    pub langmuir_receiver_k_rgb: [f64; 3],
     #[serde(default = "default_20_f64")]
     pub diffusion_size_um: f64,
     #[serde(default = "default_200_f64")]
     pub diffusion_tail_um: f64,
-    #[serde(default = "default_006_f64")]
+    #[serde(default = "default_003_f64")]
     pub diffusion_tail_weight: f64,
 }
 
@@ -386,8 +398,15 @@ fn default_20_f64() -> f64 {
 fn default_200_f64() -> f64 {
     200.0
 }
-fn default_006_f64() -> f64 {
-    0.06
+fn default_003_f64() -> f64 {
+    0.03
+}
+fn default_langmuir_k() -> [f64; 3] {
+    [1.0; 3]
+}
+fn langmuir_k_rgb<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<[f64; 3], D::Error> {
+    let k = <[Option<f64>; 3]>::deserialize(deserializer)?;
+    Ok(k.map(|v| v.unwrap_or(f64::INFINITY)))
 }
 
 impl Default for DirCouplersParams {
@@ -401,9 +420,11 @@ impl Default for DirCouplersParams {
             gamma_interlayer_r_to_gb: [0.355, 0.305],
             gamma_interlayer_g_to_rb: [0.154, 0.358],
             gamma_interlayer_b_to_rg: [0.171, 0.225],
+            langmuir_donor_k_rgb: default_langmuir_k(),
+            langmuir_receiver_k_rgb: default_langmuir_k(),
             diffusion_size_um: 20.0,
             diffusion_tail_um: 200.0,
-            diffusion_tail_weight: 0.06,
+            diffusion_tail_weight: 0.03,
         }
     }
 }
@@ -431,10 +452,60 @@ impl Default for GlareParams {
     }
 }
 
+/// Film base tuning — upstream experimental's `FilmBaseParams`
+/// (`runtime/params_schema.py`, `model/develop.py`): a tilt and per-channel
+/// density scales of the film base + fog (the orange mask), around the
+/// status-M peaks. Applied wherever the film is lit: the print exposure, its
+/// mid-grey reference and the film scan. Neutral values (scale 1, tilt 0,
+/// C/M/Y 1) are the identity. See `crate::bases`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FilmBaseParams {
+    #[serde(default = "default_true")]
+    pub active: bool,
+    #[serde(default = "default_one_f64")]
+    pub scale: f64,
+    #[serde(default)]
+    pub tilt: f64,
+    #[serde(default = "default_one_f64")]
+    pub cyan: f64,
+    #[serde(default = "default_one_f64")]
+    pub magenta: f64,
+    #[serde(default = "default_one_f64")]
+    pub yellow: f64,
+}
+
+impl Default for FilmBaseParams {
+    fn default() -> Self {
+        Self { active: true, scale: 1.0, tilt: 0.0, cyan: 1.0, magenta: 1.0, yellow: 1.0 }
+    }
+}
+
+/// Print base tuning — upstream experimental's `PrintBaseParams`: an overall
+/// scale and per-channel scales of the paper base around the status-A peaks,
+/// applied when the print is scanned. Neutral values are the identity. See
+/// `crate::bases`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrintBaseParams {
+    #[serde(default = "default_true")]
+    pub active: bool,
+    #[serde(default = "default_one_f64")]
+    pub scale: f64,
+    #[serde(default = "default_one_f64")]
+    pub cyan: f64,
+    #[serde(default = "default_one_f64")]
+    pub magenta: f64,
+    #[serde(default = "default_one_f64")]
+    pub yellow: f64,
+}
+
+impl Default for PrintBaseParams {
+    fn default() -> Self {
+        Self { active: true, scale: 1.0, cyan: 1.0, magenta: 1.0, yellow: 1.0 }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilmRenderingParams {
-    #[serde(default = "default_one")]
-    pub density_curve_gamma: f32,
     /// Development time (minutes) for B&W development-time families —
     /// forward-port of upstream dev's `chemistry.development_time`. Selects
     /// the nearest entry of the profile's family; `None` picks the
@@ -451,31 +522,31 @@ pub struct FilmRenderingParams {
     pub glare: GlareParams,
     /// Film counterpart of the print-curve morph — forward-port of upstream
     /// experimental's `film_render.chemistry` (minus `development_time`,
-    /// above). Unlike upstream, the inactive morph keeps the profile's stored
-    /// curves rather than re-evaluating the fitted model, so default renders
-    /// are unchanged; see `Pipeline::apply_film_curves_morph`.
+    /// above), which replaced the old `density_curve_gamma`. The curves are
+    /// always re-evaluated from the fitted model; inactive or identity
+    /// settings reproduce it. See `Pipeline::apply_film_curves_morph`.
     #[serde(default)]
     pub density_curves_morph: CurvesMorphParams,
+    #[serde(default)]
+    pub base: FilmBaseParams,
 }
 
 impl Default for FilmRenderingParams {
     fn default() -> Self {
         Self {
-            density_curve_gamma: 1.0,
             development_time: None,
             grain: GrainParams::default(),
             halation: HalationParams::default(),
             dir_couplers: DirCouplersParams::default(),
             glare: GlareParams::default(),
             density_curves_morph: CurvesMorphParams::default(),
+            base: FilmBaseParams::default(),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrintRenderingParams {
-    #[serde(default = "default_one")]
-    pub density_curve_gamma: f32,
     /// Development time (minutes) for B&W print stocks (e.g. kodak_2302) —
     /// same semantics as `FilmRenderingParams::development_time`.
     #[serde(default)]
@@ -484,15 +555,17 @@ pub struct PrintRenderingParams {
     pub glare: GlareParams,
     #[serde(default)]
     pub density_curves_morph: CurvesMorphParams,
+    #[serde(default)]
+    pub base: PrintBaseParams,
 }
 
 impl Default for PrintRenderingParams {
     fn default() -> Self {
         Self {
-            density_curve_gamma: 1.0,
             development_time: None,
             glare: GlareParams::default(),
             density_curves_morph: CurvesMorphParams::default(),
+            base: PrintBaseParams::default(),
         }
     }
 }
@@ -605,24 +678,25 @@ impl Default for IoParams {
 
 /// Input gamut compression config — mirrors upstream `InputGamutCompressSpec`.
 /// Baked into the tc_lut at build time, so the per-pixel path stays
-/// compression-agnostic. `"xy"` (the default, matching upstream main 3bb2c2d) applies
-/// the ACES-RGC-style radial compression toward the spectral locus;
-/// `algorithm = "off"` passes input chromaticities through unchanged.
+/// compression-agnostic. `"xy"` applies the ACES-RGC-style radial compression
+/// toward the boundary; `algorithm = "off"` passes input chromaticities
+/// through unchanged. The defaults are experimental 28bf883's: the inscribed
+/// hull at detail 5, a D65 center and the ACES RGC knee `(0.815, 1, 1.2)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InputGamutCompressParams {
     #[serde(default = "default_xy")]
     pub algorithm: String,
-    #[serde(default = "default_gamut_knee")]
+    #[serde(default = "default_input_gamut_knee")]
     pub knee: [f32; 3],
-    /// `"locus"` preserves the main baseline; `"inscribed_hull"` opts into the
-    /// smooth boundary introduced in experimental 28bf883.
+    /// `"inscribed_hull"`, a smooth hull inside the spectral locus, or
+    /// `"locus"`, the raw locus polygon (upstream main's boundary).
     #[serde(default = "default_gamut_boundary")]
     pub boundary: String,
     /// Gaussian Fourier width (modes kept) for the inscribed hull.
     #[serde(default = "default_hull_detail")]
     pub hull_detail: f64,
-    /// `"reference"` uses the upsampler's reference white (legacy behavior);
-    /// `"D65"` uses experimental's fixed compression center.
+    /// `"D65"`, experimental's fixed compression center, or `"reference"`,
+    /// the upsampler's reference white (upstream main).
     #[serde(default = "default_gamut_center")]
     pub center: String,
 }
@@ -631,7 +705,7 @@ impl Default for InputGamutCompressParams {
     fn default() -> Self {
         Self {
             algorithm: "xy".into(),
-            knee: [0.0, 1.0, 6.0],
+            knee: default_input_gamut_knee(),
             boundary: default_gamut_boundary(),
             hull_detail: default_hull_detail(),
             center: default_gamut_center(),
@@ -640,14 +714,14 @@ impl Default for InputGamutCompressParams {
 }
 
 /// Output gamut compression config — mirrors upstream `OutputGamutCompressSpec`.
-/// `"cam16ucs"` (the default, matching upstream main 3bb2c2d) applies the CAM16-UCS
+/// `"oklch"` (the default, as in experimental 28bf883) applies the OkLCh
 /// chroma knee + one-sided lightness roll-off; `"off"` passes RGB through
 /// unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputGamutCompressParams {
-    #[serde(default = "default_cam16ucs")]
+    #[serde(default = "default_oklch")]
     pub algorithm: String,
-    #[serde(default = "default_gamut_knee")]
+    #[serde(default = "default_output_gamut_knee")]
     pub knee: [f32; 3],
     #[serde(default = "default_gamut_lightness")]
     pub lightness_compression: Option<[f32; 3]>,
@@ -656,9 +730,9 @@ pub struct OutputGamutCompressParams {
 impl Default for OutputGamutCompressParams {
     fn default() -> Self {
         Self {
-            algorithm: "cam16ucs".into(),
-            knee: [0.0, 1.0, 6.0],
-            lightness_compression: Some([0.7, 1.0, 2.2]),
+            algorithm: default_oklch(),
+            knee: default_output_gamut_knee(),
+            lightness_compression: default_gamut_lightness(),
         }
     }
 }
@@ -667,22 +741,25 @@ fn default_xy() -> String {
     "xy".into()
 }
 fn default_gamut_boundary() -> String {
-    "locus".into()
+    "inscribed_hull".into()
 }
 fn default_hull_detail() -> f64 {
     5.0
 }
 fn default_gamut_center() -> String {
-    "reference".into()
+    "D65".into()
 }
-fn default_cam16ucs() -> String {
-    "cam16ucs".into()
+fn default_oklch() -> String {
+    "oklch".into()
 }
-fn default_gamut_knee() -> [f32; 3] {
-    [0.0, 1.0, 6.0]
+fn default_input_gamut_knee() -> [f32; 3] {
+    [0.815, 1.0, 1.2]
+}
+fn default_output_gamut_knee() -> [f32; 3] {
+    [0.95, 1.0, 1.6]
 }
 fn default_gamut_lightness() -> Option<[f32; 3]> {
-    Some([0.7, 1.0, 2.2])
+    Some([0.95, 1.0, 1.6])
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -797,11 +874,8 @@ fn default_center_weighted() -> String {
 fn default_35() -> f32 {
     35.0
 }
-fn default_filter_uv() -> [f32; 3] {
-    [0.0, 410.0, 8.0]
-}
-fn default_filter_ir() -> [f32; 3] {
-    [0.0, 675.0, 15.0]
+fn default_no_color_filter() -> String {
+    crate::color_filters::NO_COLOR_FILTER.into()
 }
 fn default_th_kg3() -> String {
     "TH-KG3".into()
@@ -820,15 +894,6 @@ fn default_001() -> f32 {
 }
 fn default_unsharp() -> [f32; 2] {
     [0.7, 0.7]
-}
-fn default_065() -> f32 {
-    0.65
-}
-fn default_micro_structure() -> [f32; 2] {
-    [0.2, 30.0]
-}
-fn default_1i() -> u32 {
-    1
 }
 fn default_03() -> f32 {
     0.3
@@ -866,3 +931,4 @@ fn default_17() -> u32 {
 fn default_640() -> u32 {
     640
 }
+

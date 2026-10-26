@@ -30,7 +30,8 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
     ] {
         let mut params = RuntimeParams::default();
         params.camera.exposure_compensation_ev = 0.7;
-        params.film_render.density_curve_gamma = 1.1;
+        params.film_render.density_curves_morph.active = true;
+        params.film_render.density_curves_morph.gamma_factor = 1.1;
         params.film_render.development_time = Some(9.0);
         params.print_render.development_time = Some(4.0);
         params.enlarger.y_filter_shift = 8.0;
@@ -50,7 +51,22 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
         assert!(text.contains("DOMAIN_MIN 0.0 0.0 0.0\nDOMAIN_MAX 1.0 1.0 1.0"));
         let values = rows(&text);
         assert_eq!(values.len(), 33_usize.pow(3));
+        params.enlarger.preflash_exposure = 0.02;
+        params.scanner.white_correction = true;
+        params.settings.use_enlarger_lut = true;
+        params.settings.use_scanner_lut = true;
         let clean = lut_export::per_pixel_params(params.clone());
+        // Python's lut_mode bakes the per-image trims neutral and computes
+        // exactly; manual exposure stays (see per_pixel_params).
+        assert_eq!(
+            (clean.enlarger.y_filter_shift, clean.enlarger.m_filter_shift),
+            (0.0, 0.0)
+        );
+        assert_eq!(clean.enlarger.preflash_exposure, 0.0);
+        assert!(!clean.scanner.white_correction);
+        assert!(!clean.settings.use_enlarger_lut && !clean.settings.use_scanner_lut);
+        assert_eq!(clean.camera.exposure_compensation_ev, 0.7);
+        assert_eq!(clean.enlarger.print_exposure, 1.2);
         let pipeline = Pipeline::new_with_spectral(
             profile::load_profile_by_name(&data, film).unwrap(),
             profile::load_profile_by_name(&data, if scan { film } else { paper }).unwrap(),

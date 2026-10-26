@@ -319,7 +319,6 @@ Run spektrafilm-gui-aio.exe.
 
 This single exe embeds:
 - application data/profiles/LUTs
-- arctic2026alpha02 assets
 - spektrafilm-f64.exe for CPU f64 Export
 
 On first launch it extracts the embedded payload to:
