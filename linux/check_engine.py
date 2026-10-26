@@ -21,7 +21,7 @@ if not os.environ.get('WAYLAND_DISPLAY'):
     raise SystemExit('Run from the logged-in Wayland session.')
 out.mkdir(parents=True, exist_ok=True)
 for name in ['result.json', 'look.cube', 'preview.png', 'fast.png', 'reference.png',
-             'quality35.jpg', 'quality95.jpg', 'cancelled.png']:
+             'quality35.jpg', 'quality95.jpg', 'cancelled.png', 'raw-metadata.jpg']:
     (out / name).unlink(missing_ok=True)
 
 def chunk(name, data):

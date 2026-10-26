@@ -129,6 +129,10 @@ No stochastic or portable numerical algorithm was rewritten for this port.
 
 ## Validation and limits
 
+The tested app is installed at `~/.local/bin/negs`. The local Arch package is
+`target/linux-package/negs-0.7.0-1-x86_64.pkg.tar.zst`; the per-user bundle is
+`target/linux-package/negs-0.7.0-linux-x86_64.tar.gz` (product source 41ed8c6).
+
 See `docs/linux-core-validation.md` for numerical gates, real desktop evidence,
 performance and installation results, and `docs/linux-ui-validation.md` for the
 preceding UI-only measurements. These are separate experiments.
