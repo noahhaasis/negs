@@ -62,6 +62,41 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                     match a.step {
                         0 if ready => {
                             assert!(ui.current_path.borrow().is_none());
+                            let before = ui.history.borrow().state.clone();
+                            assert!(ui.can_balance_print(&before));
+                            ui.balance_print();
+                            assert!(!ui.can_balance_print(&before));
+                            a.step = 30;
+                        }
+                        30 if !ui.runtime.borrow().balancing_print => {
+                            let h = ui.history.borrow();
+                            let shift = |key: &str| h.state.values[key];
+                            let (m, y) = (
+                                shift("Enlarger.Magenta shift"),
+                                shift("Enlarger.Yellow shift"),
+                            );
+                            assert!(m.is_finite() && y.is_finite() && (m, y) != (0., 0.));
+                            assert_eq!(h.undo_name(), Some("Balance Print"));
+                            assert_eq!(
+                                ui.status.text(),
+                                format!("Print balanced: magenta {m:.2}, yellow {y:.2}")
+                            );
+                            drop(h);
+                            activate(&ui, "undo");
+                            assert_eq!(
+                                ui.history.borrow().state.values["Enlarger.Magenta shift"],
+                                0.
+                            );
+                            assert_eq!(
+                                ui.history.borrow().state.values["Enlarger.Yellow shift"],
+                                0.
+                            );
+                            activate(&ui, "redo");
+                            assert_eq!(
+                                ui.history.borrow().state.values["Enlarger.Yellow shift"],
+                                y
+                            );
+                            a.checks.push(format!("Balance Print solves magenta {m:.3}, yellow {y:.3} with the helper and sets both as one undo step"));
                             ui.begin_export(out.join("look.cube"), Kind::Lut);
                             a.step = 1;
                         }
@@ -354,4 +389,7 @@ fn png_depth_and_icc(path: &std::path::Path) -> (u8, bool) {
         at += 12 + len;
     }
     (bytes[24], icc)
+}
+fn activate(ui: &Editor, name: &str) {
+    gtk::prelude::WidgetExt::activate_action(&ui.window, &format!("win.{name}"), None).unwrap();
 }

@@ -10,19 +10,25 @@ See [the post-merge validation report](linux-post-main-validation.md).
 
 ## Work before the first public Linux release
 
-1. Finish the Linux inspector's optional control inventory: per-stock grain
-   arrays, film/print bases, camera colour filters and Balance Print. Those
-   controls landed in the macOS/Windows interfaces on main; Linux has its own
-   interface. Existing Linux controls now accept the merged engine, preserve
-   its unexposed defaults and use the current Arctic Beta identifier. The
-   release recipe runs `parameters::tests::live_helper_schema` to catch future
-   binding mismatches. Include defaults, reset and session restoration when
-   adding the remaining controls.
+1. ~~Finish the Linux inspector's optional control inventory.~~ Done on
+   `linux-experimental-parity`: Film Base, Print Base, Balance Print and the
+   nine per-stock grain preset lanes, with defaults, per-control reset, Reset
+   Adjustments, undo/redo and session restoration. New edits start on Gold
+   200 and Portra Endura, as `EditState` does. The earlier list also named
+   camera colour filters; neither macOS nor Windows has such a control (Lens
+   Diffusion is the only camera filter, and Linux has it), so nothing was
+   added. The release recipe's `parameters::tests::live_helper_schema` now
+   also checks every film's grain preset against the lane sliders.
 2. Run fresh numerical gates and installed-app preview/export checks against
-   this engine revision. The earlier 484-render baseline is historical; the
-   main merge intentionally changes output. Establish a new Linux baseline and
-   compare with Mac/Windows references from the same revision. Repeat desktop
-   RAW, crop/Post, border, cancellation, session and startup checks.
+   this engine revision. Numerical part done on `linux-experimental-parity`
+   (`a22437e`): the experimental sweep passes 556/556 against Python
+   `28bf883`, grain statistics match, GPU vs f64 passes 76/76, two runs are
+   484/484 identical, and against the Mac's dd870f0 dumps only the 5 known
+   f32 CPU grain cases fail (see `scripts/golden/README.md` and
+   `scripts/parity/README.md`). The source-tree Wayland checks
+   (`check_controls.py`, `check_ui.py`, `check_borders.py`, `check_engine.py`)
+   pass. Still to repeat on an installed package: RAW, crop/Post, border,
+   cancellation, session and startup checks.
 3. Run the Linux workflow on GitHub and confirm the clean Arch build and
    installed-engine smoke test pass. Local recipe tests do not prove a clean
    container build. Review runtime dependencies on the target Omarchy channel.

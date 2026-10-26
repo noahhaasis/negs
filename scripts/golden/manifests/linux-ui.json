@@ -1,0 +1,6661 @@
+{
+ "meta": {
+  "label": "linux-ui",
+  "platform": "Linux-7.2.8-9-omarchy-x86_64-with-glibc2.44",
+  "python": "3.14.8",
+  "cpu": "AMD Ryzen 5 3600 6-Core Processor",
+  "cpu_count": 12,
+  "threads": "all",
+  "git_rev": "a22437e9312d3bc77c4ae9a9ccddc11a32fb72b5",
+  "git_dirty_hash": null,
+  "cargo_lock": "31cff7c11e12238dbf6b7eb1504b483b39fa43abc1c5bcd374ce2d91d9d506b0",
+  "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: x86_64-unknown-linux-gnu\nrelease: 1.93.1\nLLVM version: 21.1.8",
+  "binaries": {
+   "f64": {
+    "sha256": "53ec56e3e4128bb27eccaccc63c6a648eac38aac911f975fc7cc2b6fda7873a7",
+    "arch": "x86_64"
+   },
+   "f32cpu": {
+    "sha256": "12702f167c6e45f170bc58ebb26cc1967074f37844ef3fd133758f921cdfe0bc",
+    "arch": "x86_64"
+   },
+   "gpu": {
+    "sha256": "12702f167c6e45f170bc58ebb26cc1967074f37844ef3fd133758f921cdfe0bc",
+    "arch": "x86_64"
+   }
+  },
+  "data_dir": "6400e4b53a5841585677dd25d5d56bdedce29ede2302f77ef8e4cdde1b65fc5e",
+  "presets_dir": "4c9fa55e767c217b46fbb34d26ed1409229c2dc4cf2e78c77dc66e938ce831b6"
+ },
+ "inputs": {
+  "photo_7858115920": "7a2fdb5a5ea112f2e379957e581b9c0f7d91b97b4fae25c8f14944e628094873",
+  "photo_DSC_4985": "3d8583be77dc25d89246ef294c514d0171380874a95b5cc5abc7dd64f4be8b7c",
+  "photo_DSC_4990": "2c557fd848bd43a10fd3cef811485c922be56c742b7b2dc8c6378222958972c7",
+  "photo_DSC_4997": "e9c57ff94f9f459bc7ddccf0692d20f45dd00086c1c31386190317b8468f563c",
+  "photo_DSC_5003": "36463c26944a81b62181cb39f6935bfdc08807d4226e27fbce02f55e33214365",
+  "photo_DSC_5009": "dab56be9624532b44eaf3505bcdd5df66a0e5150d4c0b1d21135982c2e61dbc0",
+  "synth_edges": "44413d95af4ae18cb4147ad0d9124a237bd2f5dc89f6a0dcfd6e89fa7986e70f",
+  "synth_gamut": "86dabdb3058aab0751852db1d12c0cb01c86a40e0fe22cc803d17c1ce6006e05",
+  "synth_noise": "28698e3f8e8c4b3b606547bcd3f596f4346ef54385f81c1ca9510bbe4504aae4",
+  "synth_ramp": "69fefa3b0123178d3550e14ec5bcfb399487808df4934a0b4ee12a09c45ebe57"
+ },
+ "presets": {
+  "boost": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "halation": {
+     "boost_ev": 1.0,
+     "boost_range": 0.3,
+     "protect_ev": 3.0
+    }
+   }
+  },
+  "colour": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false
+    },
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "default": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   }
+  },
+  "det": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "diff_bpm": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "diffusion_filter": {
+     "active": true,
+     "filter_family": "black_pro_mist",
+     "strength": 0.5
+    }
+   }
+  },
+  "diff_cinebloom": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "diffusion_filter": {
+     "active": true,
+     "filter_family": "cinebloom",
+     "strength": 1.5,
+     "spatial_scale": 2.0,
+     "bloom_size": 2.0
+    }
+   }
+  },
+  "diff_enlarger": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "enlarger": {
+    "diffusion_filter": {
+     "active": true,
+     "filter_family": "pro_mist",
+     "strength": 0.7
+    }
+   }
+  },
+  "diff_glimmer": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "diffusion_filter": {
+     "active": true,
+     "filter_family": "glimmerglass",
+     "strength": 1.0,
+     "halo_warmth": 0.5
+    }
+   }
+  },
+  "dir_wide": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "dir_couplers": {
+     "amount": 1.5,
+     "diffusion_size_um": 60.0,
+     "diffusion_tail_um": 400.0,
+     "diffusion_tail_weight": 0.4
+    }
+   }
+  },
+  "grain_off": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false
+    },
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "grain_off_coarse": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false,
+     "rms_granularity": [
+      20.0,
+      20.0,
+      30.0
+     ]
+    },
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "grain_on": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "grain_on_coarse": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "halation": {
+     "active": false
+    },
+    "dir_couplers": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    },
+    "grain": {
+     "rms_granularity": [
+      20.0,
+      20.0,
+      30.0
+     ]
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   }
+  },
+  "halation_big": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "halation": {
+     "halation_amount": 2.0,
+     "halation_spatial_scale": 3.0,
+     "scatter_amount": 1.5,
+     "scatter_spatial_scale": 2.5,
+     "halation_n_bounces": 5,
+     "halation_bounce_decay": 0.7,
+     "halation_first_sigma_um": [
+      50.0,
+      65.0,
+      90.0
+     ],
+     "halation_strength": [
+      0.05,
+      0.03,
+      0.01
+     ]
+    }
+   }
+  },
+  "lens_cam_large": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "lens_blur_um": 40.0
+   }
+  },
+  "lens_cam_small": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "camera": {
+    "lens_blur_um": 10.0
+   }
+  },
+  "lens_scan_large": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "scanner": {
+    "lens_blur": 4.0
+   }
+  },
+  "lens_scan_small": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "scanner": {
+    "lens_blur": 1.5
+   }
+  },
+  "morph": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "print_render": {
+    "density_curves_morph": {
+     "active": true,
+     "gamma_factor": 1.2,
+     "gamma_factor_fast": 0.9,
+     "gamma_factor_red": 0.9,
+     "gamma_factor_blue": 1.1,
+     "developer_exhaustion": 0.3
+    }
+   }
+  },
+  "preflash": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "enlarger": {
+    "preflash_exposure": 0.2,
+    "preflash_m_filter_shift": 10.0,
+    "preflash_y_filter_shift": -5.0
+   }
+  },
+  "unsharp_iir": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "scanner": {
+    "unsharp_mask": [
+     3.0,
+     1.0
+    ]
+   }
+  },
+  "unsharp_strong": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "scanner": {
+    "unsharp_mask": [
+     2.5,
+     1.2
+    ]
+   }
+  }
+ },
+ "cases": {
+  "photo_7858115920__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_7858115920",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "75035cc4fc24bad0643c252b9e1ad90b7bb6635a8b0c9724100bbbbc2a3f8d66",
+     "tiff": "7055c1cd3845be4dc47a525234d56da8e015c69735fc62a6a018336310b6a733",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "8d89496193a2f64bb2d5272787ac9bfdd529096e7c34af28bdc26001130eb5ab",
+     "tiff": "f9ac76ed163744e49518a0ea2ed0d3e24ccd8853818f21e5e8fd365e027c8881",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "5499d9dae0fa57dda34efa344f2198dff6b4b63b8bf3fb1cd28eb2ac4aaee6d6",
+     "tiff": "44728c20521f23c9fe8169ec765162e80887ab77a1cd910644f7d51389e649bc",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_7858115920",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "1865770846c0fbd46c29c9f6226e7418255bbaa3c13ceb36b8a1780fbd88d1fa",
+     "tiff": "9d686a4f83df84395126d05ce75f380cfc2cec425060f6c361d6bf0c5fc046d2",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "17ea6e791d7a0d39a4cc3155801eaed9e2f859cd43df523bae69f35d331c586f",
+     "tiff": "af95f19bacd8bbfc235bfd1a8a788208d0866ebaff40792d4d990ad2136eca8c",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__fujifilm_velvia_100__scan__default": {
+   "input": "photo_7858115920",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "80ad2df9d50660a8597466d67e673dc250c5f9c81f641e095b675b1f8b1fe08e",
+     "tiff": "78d3b985dc3bb8ce725d0b9b2a2080df7e8a07535a131e10dd94022b4657a1a4",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "39a5332704241b6d5db716dde635b8156d079776a051eae22332eed92ffe33bb",
+     "tiff": "48b464f724a39509111240ddb10d4fe2467f529ec9a6c66b6766c343cbcce8d8",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "e8100e6f0d257ed5bf2ea4c89b1b321374b965d655c4f955cbb89d5bb531c4cc",
+     "tiff": "d5854447c13275a13aa54278804b782a23f28818ea72ff0d986e31b59d5accd6",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__fujifilm_velvia_100__scan__det": {
+   "input": "photo_7858115920",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "c2ec9121de174aaaef41712aa5eff7d163d98ed1fa04e8a321c8ade6f0d4a0a3",
+     "tiff": "f5266c8825bea4c580915110a96958092158f3483c4b0cb0154643fb9e276c3a",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "9df75166621a1897194878f63b2f1106434d49466643a4b809d7589350daf29c",
+     "tiff": "6a3df670ab6a89f200aaa4f73afe2119161725bd8301cb4c6194128c5a7491b1",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_doublex__kodak_2302__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "233483639c9f3c2e30538e418037279fbc38da5f414f41b359e619f066e2efdf",
+     "tiff": "56a9559a34c76a1b2473fb4f26f193ea785f693c4de5c1c29813af74ec4c9b57",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "8428a79813b2c3d05e99526c09a287b6492c4ee319684c1557dcb2a37446fce0",
+     "tiff": "3c4540cd84df4530022c5ecb5f9ac4d5686c70622325eb2072c72229fe1c2330",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "1d76eac3ea05a62e9eb3010949d119db1a2afc9a0b42f71728f495927a9073ef",
+     "tiff": "df2cc48397b9d015befea8ac9ef5c072f8ef70f3cbdb9c7840e672090d1ffe2e",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_doublex__kodak_2302__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "fbb2a1dc9d61db7cd4ca813e082b5e4374e8ec06a799509e9cebdb139f17311d",
+     "tiff": "74fe42ac764ccf25307cddcfb38637a1455d6fafecf4ecfe6ca1c1922b6bf8e0",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "3dd00eeb1135afdc8763e3cdb4d524c1d81fc648ed5b054d28a5ead1b7838981",
+     "tiff": "e9885f72d6d5856d36f1cbb2b5e70f38d3703951a71bec9b5fcbb1bd1bd656e8",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "477e740c8503ca42c201f4c4ffc50808c34b0432893308f7b1bb16a6de5bc424",
+     "tiff": "039469b0a0fa282a0eb60f9b56ca29b2638e72346b323f92dd1d6fcf7ad03bb5",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "66809a54d7a0b788b72a5ca3e13712a992370d235a2e23ea0890134c824f3dec",
+     "tiff": "507bff60a2c3b8fbabb8bfb79f6adae121b2b2ddac8ea2b59cb2a4c04794cfaf",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "643ba5d4457555c7cd68e5cbb0d28723ef4e9225700f93534e65fdf03fa1fb4e",
+     "tiff": "0c701455d4bbd95ff75595ee1b95c54027f12ddd4ca18dd51cdd4b5fb7a24cc7",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "212cbd8e93880ce400ffb1d75b49768f06f006360fa76d643e9ddf9d822364e1",
+     "tiff": "dcd68d2e101188a749b40ed3cb9a44ffa5a85e0fcc200a6847e98f942ee5ea43",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "351fb886324371d87fe1637c2e0529df73138a1b3070418c9c6e119ae406dd83",
+     "tiff": "6af0eef756819d0817acdf0b3dd2373a3af259eedfcf00143c6f21b37f3008b8",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__boost": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "boost",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "583926b251313e70a890ac024a497c08ede5e5d562de10a226bef899e48406b7",
+     "tiff": "f00726fca9e71d76141412492c7bcff92fdbaad393862b55d8631d8de37d590e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "6b9132341ca7abb9fde3343961b7f642206c7d72a0b3dcf97f37b56250888a2e",
+     "tiff": "3d237bcd087ddf45b2bbeedf5c333210b9efc3f2257d9564b3c0bbf36f4d8a22",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "6d73422d03b1de94725f3f0d9942a9e446c12d1df9ad1856a211be9dcac09689",
+     "tiff": "4b9a3d3c887793eb5dc906ab8ed967d0f6d35414628067ebb0a4b44252e81a71",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__colour": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "colour",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "08c73c59f3bfa6c6eb6ae9d98b2cd148327e67d8bc9fccc069941c0ec7e410bb",
+     "tiff": "8677bc45503b847d4d0ac6fd7b64f4534061ee12058780a12a8425933a9ff9d3",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "1ec94c288c0ee92b960a1a21cb8a610a54c8a05d243da5c6c498d424ed40d2bb",
+     "tiff": "2d794199f942ac58550ce7648e29488faf6408c96a963521748f7b2a67cbc48e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "aa5131efbf12f40de6089dadc8cce7b09722d3710b2ff351888d29ba801ad2fe",
+     "tiff": "75bccd600b30fb0328fdd934e84a23a83f7df05ab6f35b4d429cc3752114be55",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "ddc444170a1efaaf8be877fecb54c4a666a764d71f0ca53a8097712bb162316c",
+     "tiff": "caf37c5dea2a9db9275509eef5ba2cd5f6e9299edef61c80ab248bf78bc7c979",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "3964244de8473c636095fb67469a75045e779ffba11609f3b601edf3216b6ca5",
+     "tiff": "a4140607bbffde970df1b7e0fcea9ee543ffd06eec3fa6e7350213dad3cff892",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "022f89ced4bd640d7446268616439fa7335829fd846350a7a82e62a716c9a21f",
+     "tiff": "26ff706c3dbe6ca377a5a4f0d1697acb28d234063655b864431c9bcf966db0c2",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__border_35mm": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": "border_35mm",
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "afebffafc7a908d0704644000b067543738a5ea26632b0b3e3d3c8a48c45eb40",
+     "tiff": "e55d71a1496bc19770abc267da1a2dcf5f6e988dc2a827b35eb59b3a17a19bd1",
+     "size": [
+      1005,
+      926
+     ]
+    },
+    "f32cpu": {
+     "f64": "f08d35499057e06d68ed25b2f9ca083abe31d49a03affe336a3371051d4843a0",
+     "tiff": "4d00134ab986c82dc54c5fc99b1ea882b2e128993c23bf328e611433ba3b4ba1",
+     "size": [
+      1005,
+      926
+     ]
+    },
+    "gpu": {
+     "f64": "db7014fd335f2446954c2896bc2f0d02909cb427ecc1433b7c6b5d4f64053210",
+     "tiff": "9eb6b3c90ff2a91f0e84d5c001d8d3bf9de830a363f3ba762042d27bf83b8944",
+     "size": [
+      1005,
+      926
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__border_keyline": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": "border_keyline",
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d0a064543545a6351274ac38b4c9cafc348174d142fe07b9c1b94dee7d0c1ce7",
+     "tiff": "a0b9b47fb00e6620be18b4147a46b748fd01150b8b5dea67076534359c6c4032",
+     "size": [
+      1016,
+      1355
+     ]
+    },
+    "f32cpu": {
+     "f64": "5946f9737baa4237028c5ed846d6610af2b52a0ce2d1aa1203affa9fa15c49d1",
+     "tiff": "6e7c4b29079dab8c517227ac573ac383b689295993ae91a909438de1c4493bae",
+     "size": [
+      1016,
+      1355
+     ]
+    },
+    "gpu": {
+     "f64": "166a208156b19996a3154a143fedee5429bb0140f3b759ad08726e6b87379eba",
+     "tiff": "667d5d7290f15afe930e81e5dab9af7dee04524407a40de9818f400bf03a1955",
+     "size": [
+      1016,
+      1355
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__crop_rotate": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": "crop_rotate",
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4352241ea1de2aa489fc571ff04c7783883023c0c8243ea00bd597db15d6fd30",
+     "tiff": "89bb8d020d91fa0648242b939d233700b0e42dca8d00f341d8c61b90dccd71ae",
+     "size": [
+      762,
+      538
+     ]
+    },
+    "f32cpu": {
+     "f64": "e6ccfa87fe8a5e79734380025692ff77e4d15782bf94055675f558dc57fa2d17",
+     "tiff": "dd53798d7922af4cecbe6a33bf63eac7e6a195993d94ec3c9c293a7aa43273ae",
+     "size": [
+      762,
+      538
+     ]
+    },
+    "gpu": {
+     "f64": "1391498bcd8b1273649c30f59401f5c44dacde77ca498d4e553abd5ffe9a6047",
+     "tiff": "c7d98059f00341e04477503faf15897894a7e82a9d4288cb07b4e01e8680d1ea",
+     "size": [
+      762,
+      538
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__default__resize": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": "resize",
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4ac79dc996cbee92109ccc6f436831a23839e112ce923ac65986b25f1ad32ac8",
+     "tiff": "7945543c7e4b5df11fdc70188d78c7bcd283025c47abd42cfdb8b28d8b3eca74",
+     "size": [
+      600,
+      399
+     ]
+    },
+    "f32cpu": {
+     "f64": "be70ca1db40c4b064cb18f700d79fc2f9827aa9e3107a813894e06c70918115b",
+     "tiff": "2c3ed04ac356cade84702d0a06f600d0c343a9b37107dfd1dfd24f5aa2ce0abf",
+     "size": [
+      600,
+      399
+     ]
+    },
+    "gpu": {
+     "f64": "4f6d6c435171696c013d115146e0a82c2e976c4de5507da02c0f751add9e66ad",
+     "tiff": "315243998ed51da0d0316ab38d99143e5575010c711e2104b174330326cf5b37",
+     "size": [
+      600,
+      399
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "2c3b35785bd35fca9d2c4655811ebdae32c6dbc1e9d8f0d83bc8091a9b3041da",
+     "tiff": "541badce3a8602956087103fe382a94186b3e8143d4f4d1a5ace108d0a71ab0e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "82c44286d340d51a2a9190b094e7d71b04c431e98f84b7278d7df554015ec8e0",
+     "tiff": "f129373128278c7db99b99419c2389c8dc8c36c568da284d9fe748eb321075f1",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "1744cc753468e8a3a48bc84967080498926996cd653fa5f94dd198ac5dd891de",
+     "tiff": "4ddb83969a4a0e21937cfa657e27550a08dc1a437d73df34c6e57da726c3e859",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_bpm": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_bpm",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "be71c7db7a527b1597ef4952e5380630086a75c68bbf72933623cac5acb89b32",
+     "tiff": "b2533703c7a98961aff85932354bb66df8450d343247670d931859c7ecd04699",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "030055de7d05e60137b683c45a66555f6cddedf1a6faa005d9c387872f9e1a20",
+     "tiff": "f2afbf5774311651fc61438531c5d11b219ad1765d41e8e16a44c36e6ea0ac03",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "893b4038ba124976416e11e3c17d348142bcef3a06904769e8dc9d9d0d2e3fed",
+     "tiff": "4033865fd9e096785bfec2e74a2920102fb8b12157ca81c05cadd8852a61ed7f",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_cinebloom": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_cinebloom",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "cf772aedada746ab2de78ae420cdfbe35009ad948171c880511050985b65a45a",
+     "tiff": "293fce4093b2b693359d18510b0b049b36befa400078c9c7be5f17329d4fad30",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "db4c22d7297b32cb9cc7704a90a8195113e61c2df10e1a1a90f3e9f696091e20",
+     "tiff": "38d130ef5450b458d4a8321ea4ec9661015704b6f2cc6925ec61e8deb88a354b",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "d27fdf39cf72f55af2fb4b2f6bf3a7add04a00398e192da75f4580bcfcbc81e1",
+     "tiff": "899aef3df10fe61cf858d5c9ae2d540187f2d08bb70c4ec80c909d7754f3ea50",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_enlarger": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_enlarger",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "19e3d709dc6c4ea0ca7617adf174a52193a1baebabd17bb5f018f084fb15f4f4",
+     "tiff": "41664f176e3e3856d0504fac9471f231319e5f99ac04281bd391b4a2179f210a",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "739cb7caa1a74b821d7fac72096f0b27822b53ba4325cd86064d3b2689f4501b",
+     "tiff": "0cbcc4fabcf8d3eb02dcd51b6594e00b04c24bc2d5ae6d5cb2c0e4fc7dba5ae3",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "746d677b799ad5dbb244a35ba71f2642421e827f5139511e1182f0fdceae284c",
+     "tiff": "d6dbb28c0bb1757d73e902fbab5fd4d79b531ceb78ff24ceb7a799052f05eae0",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__diff_glimmer": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_glimmer",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "6c18d3478bae7d2525316e09907495c749046f8a64f9aa3026548c7bb405bbd3",
+     "tiff": "b5f187edf7cecdf7e6a10fef8d7a8c142fae328716de6321b12a859ad090cc3e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "5ea43abc1c0952477e9eb2accf20344902b9237f664214903da8ee20f999e899",
+     "tiff": "8910b2759a196673b209436d947f5add2641966913124bcaab4b6eb7a3856e00",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "a55c0b913ff731ab9b6d7f33f481f6752e8afeae3e2bd758b2e0e5ca5112fd9d",
+     "tiff": "43bedcb79bb64b654d47f7f598865e3f286b80910c3bfc2f67ad98559c654ec9",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__dir_wide": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "dir_wide",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "bca5b132e3117003af7d824d75e3ee4fac91e755cd58a4314a40425860f8f009",
+     "tiff": "f9218753cc566e5c1e004673be8254bf1af54d9e2f0696dd1a1692cf86e5fc4b",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "c38c084a2fe8837c6980ea614c7a66c9aac7b7827f6c171c640e6197e36d6298",
+     "tiff": "f3e8a3cd32ce7d8cd09e444effcac5bc41f8b8a4f9559242abaa9c1b56d9900e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "a35eab98242e22eb1cb101c3e97bb219bd85b54e655776b1b921d16cdaff3f21",
+     "tiff": "5ef9bf8a6708788d14a2b77001358ffd9081f76b8ed0b2b85e17e019e5f60510",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_off": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_off",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "08c73c59f3bfa6c6eb6ae9d98b2cd148327e67d8bc9fccc069941c0ec7e410bb",
+     "tiff": "8677bc45503b847d4d0ac6fd7b64f4534061ee12058780a12a8425933a9ff9d3",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "1ec94c288c0ee92b960a1a21cb8a610a54c8a05d243da5c6c498d424ed40d2bb",
+     "tiff": "2d794199f942ac58550ce7648e29488faf6408c96a963521748f7b2a67cbc48e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "aa5131efbf12f40de6089dadc8cce7b09722d3710b2ff351888d29ba801ad2fe",
+     "tiff": "75bccd600b30fb0328fdd934e84a23a83f7df05ab6f35b4d429cc3752114be55",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_off_coarse": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_off_coarse",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "08c73c59f3bfa6c6eb6ae9d98b2cd148327e67d8bc9fccc069941c0ec7e410bb",
+     "tiff": "8677bc45503b847d4d0ac6fd7b64f4534061ee12058780a12a8425933a9ff9d3",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "1ec94c288c0ee92b960a1a21cb8a610a54c8a05d243da5c6c498d424ed40d2bb",
+     "tiff": "2d794199f942ac58550ce7648e29488faf6408c96a963521748f7b2a67cbc48e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "aa5131efbf12f40de6089dadc8cce7b09722d3710b2ff351888d29ba801ad2fe",
+     "tiff": "75bccd600b30fb0328fdd934e84a23a83f7df05ab6f35b4d429cc3752114be55",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_on": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_on",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "2607b75a0689dbf3d02030fb619e0b6cf520086a23225039c8dc3c43febe34c9",
+     "tiff": "e9e775043e6b56f5ff21274178a42b68c149a2bc26507814f2d567b6e12fd401",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "7139faa51bb3b20c02fcad5af250be45c2571c8091e0616332bf5f556ce7e422",
+     "tiff": "5895216b149c5e129357ef396334a9ebcd7174e2d7f9a4b23a06311142eb47b6",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "f9c55e2814b8c90289395dbec83238a3e974f9d0e6bed35a360e0a95cdcb8b29",
+     "tiff": "e972146f651963ec93f14fbb7a268cc9ec2bdc071f0de3cfcea203f04075ecf3",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__grain_on_coarse": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_on_coarse",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "26739ec24e32791d91b664a4b86d3f40f811b2e1a59312e3cec8304412b2a058",
+     "tiff": "dd078788702eed290a9d0f27bfe16c084bf51d9ad9bd8a3d1170acbf724b16fd",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "842d53c8b6ee13c8e6af3fe1cbad79a5eb7d473a5e7b50773ed31a90bc87d0a5",
+     "tiff": "c481e36ed0e2221c92fa00dd5e6fe8cef30c1a77536ff6eff545c71bf558c06b",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "55b4921301f5211a34c1864a514d6f1106997abe8f53b5f346c34c14bb89d71e",
+     "tiff": "80b75b35d898e656dfdb3e657d510f2c20b987d91836491153808904a7f6641c",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__halation_big": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "halation_big",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "20ab4bb5638c64d6107acd669f017d5f44801031ecfba68148d9db72a0f31e55",
+     "tiff": "4f2baa8738bfe24f957c06328a560e1a0b34e836dcccf15f11ecf4fb1de67e53",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "0fa348672842622fd5b2ee2309f5963e6d9b83623ce4e880145f644382b8edc4",
+     "tiff": "f22229876798a6b8b843568c714cab25f9ffbd390b0e95dd575ba4881ddd368d",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "8ee4c6de05eb3082cd44706abc550ea065ed39c6f27c86c8d545fc5b8adfadc7",
+     "tiff": "7ded5449d5e61c64be8770b64d38275d95b404210f870470cfb32b28d8585738",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_cam_large": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_cam_large",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d697378cfe5fcdcda23a8ea200e0180c71cfb3d33847485ce1d965e4aacf56c1",
+     "tiff": "7210aa3b52ca1a8f69a46f34beeffa9d67816023130bf219aaed3571ff041c3e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "afd1fecbdc60b4c232495f2e826e660f67a2a97150359418044062776f19c0c3",
+     "tiff": "abe740de7b89381a1e7c4cd0b1d4238c89ecb792d3ba05caf74dc0d6ff62d10e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "5917c1dc65c7408bd9ded49b95f6ec5064ac7a8ac06dea5a4cdc20aa9bc34836",
+     "tiff": "11f47d7fbd25093333a2e6afaa6ce01f47bacfb1454df180289377ebfc4c85f9",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_cam_small": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_cam_small",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "bf4c40df775b69ba6b66625407631050b016ae799066c3f69d0a25140bfe2f29",
+     "tiff": "d186ae8e75467ed547adc816c1d59af1b685d8e706c8b5e9f9399795979ae06e",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "a9388f57dc3becdec7ba367a6b738a89fdc6e333e0b1b29980edb9a8113778ca",
+     "tiff": "0009e5ecacc9fdacbf07c60a03a7e7b6822bb94bca4a3198307271007f23ad04",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "603aa4896a67f3248f192c600cf9f7229611da9543d26d1eb9010482333a16e8",
+     "tiff": "16fdbf5784e8a0cafc2653430c22172ecb34340cb437fc84b7fcf6d94bc6df8a",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_scan_large": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_scan_large",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "110e1218d611eb6afe91af2e08b40bca470e4493d6710211868d770557582e99",
+     "tiff": "e3a6bffac2b28fbdc2aedd83f5ba4ccc022a02a8d493962ed540bfcae1763b17",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "559fbb25d02459adcdd85bd6747816422ad1ac9a19193fdc59edc67ff5537ece",
+     "tiff": "a265cfdfd5408ede56a77203373a4cbc795305c0e1826ad394eaaa630267a564",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "5ce1b0d1ab662f99acf63132d294d4efa2a20eff9f2495225448c2ef19edaea1",
+     "tiff": "8c79deda1fa40f767864f52160e7a0008e9d0bd05410b4b10793b2f1df18bf95",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__lens_scan_small": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_scan_small",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "736481bdb7761ea07ebd4d88ab10b4930fee5e831af49c85d173e2a93814c0be",
+     "tiff": "145172e354c93fb49ddce7973352605b4db408e94f23d6c2ae1fe0218091a201",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "4713b6dfb9fd496d44338feaf56dd97683dc9529807cc839ff4871be046f3b47",
+     "tiff": "fea6dcaa77d125d28596e944b6ae861a95478eec663a2d61f6cbb6e70b114f5c",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "d910fca469726ae45d6cc84957696d1095c53ceaadf981a61bd538cd70ad5d6f",
+     "tiff": "b0c1d46dfa2de153b4c61f1eab9f376b5b735db084c0a3b6b65ad4bd637be6d3",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__morph": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "morph",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "1d5e36ddb33ab6e6158d89fee5fa3a15873300a4713a5cd49e77ef2c3cf3102a",
+     "tiff": "7273229949ffe907aaf246fd3e3c5fa4a47ed989d2bdfdc256d507c2bf6904cd",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "3a2941bb1e801cbf4ee59aeb031159cfe02f4edcf8836e202c3e41d14f311749",
+     "tiff": "ed5553a1749b0b2ca2184441ef9c35a7fb54eccb43d9f1c8e13b992b57c0f5c8",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "e6179eeb1d60ef6fadb2eb5f99a4d1ef298afa3bcfb4156227a94f5f1cd59f87",
+     "tiff": "ef1cd19aaf7e490df0a5e55eb2189c5e4adcc043ffba70d4c2763ac61c03b382",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__preflash": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "preflash",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "63a1270517435559028c2ba7f956b81f0ca81248a1f6f04fb7de361aac765762",
+     "tiff": "ba447a6be0e997e4aacc6838c2efbd81e6efd8c26effe4cd9fd70835099e9ac6",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "725a8942dc6594c78e28193bffd7753b395c5822ddb75c4d70973c018f60ca0f",
+     "tiff": "f596cb56c0058f7b7d1bdde67a2a13f38cab24eb5489bfca5c021dafccca68ad",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "5b873063c5de5c700a3b4aaa59e07c010fade6952e3135b6b5085b4a51346969",
+     "tiff": "4c21c3faa61c6afb9dabc6e6df2990bd9374a516c5dd690e10ebf2f4d8465090",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__unsharp_iir": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "unsharp_iir",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a29870dda60708f643ad64151c5bcae233e06e01a24f1cee0ae0b8910e7a7299",
+     "tiff": "fda0c4e98646f7bb58463083c89c6de4e85632c921187b9875323a1b21c4e792",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "4f062ad340dd9272c6e8e0e0532462255b5390bc7db180a1a4189d5b42511678",
+     "tiff": "28f41ed88bf9762f29da65d56dabda1c644a4e261632c174d0ba189660db1fdb",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "ba596e148f6c5bc79ce58fa78bf7c7df32a0bb099aa03bbf862640a98a9d7816",
+     "tiff": "5433c74f2ae39f725936a94900353a6f6a3c960de1dcf6efeca0a5a6f9d204ec",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__unsharp_strong": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "unsharp_strong",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "22845166b046da305cc3d7be13a562174bd8a9188711692beb4bdc6147b5e5ac",
+     "tiff": "51a9d4052eeb041e2b8d268afb08e33bbc8b23bee6a795630aabe846f04c934f",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "39f20adb44b497d21afbfaf12f0017b561c5d86a9815ead20361fa67c3c3e04f",
+     "tiff": "d8d214386c8234846b015ca7573f86f914483c01db96533561d5e36875db4dbd",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "7f69b1da8d80028889428a0c0fec7333b05b9405a7923660b21e872dcdf0b1d7",
+     "tiff": "2359823b72fa5a21ccfca8f650715050df5a81f086bb5dfecf733bd4901a76b9",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_trix__scan__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f2947eb1a217a97e7b1a263608cf239a3b87e891b7453f80173a941f11edb559",
+     "tiff": "649bd19d80557c7f9fb50f5a80854ec44233c7e70550f21c167e4a042b2dbffd",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "4a6187c798d77a5f8fb4292ff62e6958b57ded6a31f5ecdc4c4ba6ef01382809",
+     "tiff": "40f7aa1cdc8c18374353a3a008c39da6222ea1b950d7b83ff56af3e0e1692039",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "39cf82d2d508b6cb47d46358a349dbf8bdd6383d77499f819e022c4c4be72f0c",
+     "tiff": "bcebb33c099a8e2f74ccc0f5fa3c97f5fd8e19e5ee8cf91f40af683046688d74",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_trix__scan__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "5bb085a098e208326b4a084767e508216a5dd18ca678dcc2a53f01bd7cab74b7",
+     "tiff": "07272549b8b34513ea64a5d8e0ee98e1e7a02ddf1a839fa5043e11ad54f5bbc0",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "35a3099c56fd92866240504aa00319c6574d454d7aa9c9495312b64219515255",
+     "tiff": "fa36815b3480f41e859ca4551c0fedd04288592dd91731f8b29035a832931604",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_7858115920",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4354295c8e396c5e126be5f557b56363218bd5a043a3723d3bba161b48b31885",
+     "tiff": "7974f80bcfcb6bb939c38d36aaf1083b311c6eedb274a9ace1db76c36be4f48b",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "4979734ab5b3e52cd797ad5eb99c8cc408816cc547c92612fd4d114b26cbfecf",
+     "tiff": "70c0fa2a5ed9b3c7bb62fa6ea4557a19af662678c07b9b608f2bde2deb208b1c",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "37e5ae21010886d085fd21a171f4b83ccaf64bd58d16be995df97a7d0b847a95",
+     "tiff": "3c2163bfafc786883512b792e0c75412708ffcca41331b0d7b42d28b2734598a",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_7858115920",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "a1e08452ee18538dc74bbb25c5870b7bc8b352d59a326a9ccded523e4a13040c",
+     "tiff": "0a6f7b1de4e325d4d8700c1b28fa61906fb8ea123d5dd027586c973a12448473",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "12063eb8f04e0ce8ab9654d26b24e1589e4aeff0a64587e0203027b53b502203",
+     "tiff": "a3a95d9083a3339a45d54970e737b34d7d97021ed763fd3e41fee70607d0ce42",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_4985",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "7734620a8c47380cfa37153d5148ccccc45c196508dc14fa18eeef1d6a19507f",
+     "tiff": "2e980837d0ca6d74a6d12cb6bc4257484dba9a713644803a14ac55f507d05088",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "fbfc4ea68ebd1024772d85ca888acf4de74808fed77c7090fd016c9be6864374",
+     "tiff": "a7824aa26d4476063918c83ab209a71e7bbc133f6f6aa1a857eb2d638d5702e8",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "2f83fce4bae17895f9cad83ffd652146e283322dd8f06d72f5b7ab8c16964de6",
+     "tiff": "96dd855f51c4b28c4d78d857d856a111a240e3771c2d67abc0a4b89d702fbd7c",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_4985",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "3e2221e05ae6ea6ceded3843bec94c9d451b9239ec2c37f18b6822929e961c7d",
+     "tiff": "5c8a1d0f15965390596aa74f1003f254a7eb211218a67113b05cf45b08d47d9b",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "aa33f50f4b3a6b7495d9067b49e99a96113bf76e4148ed6e25cf0c1e0c3f343f",
+     "tiff": "6deb732e6e034ef7aea61dbaf28292e8e3be726607d47809f9a708ba8a8a5c22",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_4985",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a5ca798c0284bccee0d753a3d58189c0eb0323a1a1a0aaeecb70d13ce506e58b",
+     "tiff": "0bfd4ff6e950a1e06725ec6c7dbbb1d4280fb80eab8626d2d0ef1b8a74b44ed4",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "fecd40db304be1cfc444dc8fc2ef855ead6f22e5e07c50c17a91c986ed5e7d1a",
+     "tiff": "ec06ddaa5e6a0b68840b82861b7a8234a9c01942e33466aa13be3d5b75f68065",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "2b4fb449187ff9386e01f3eb2e0add992b76ae5b13499201ef73d7688707d0b0",
+     "tiff": "063cafb814c92d7d09dde0e1950773e514a5d68ef28984e46fe8182d66587db6",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_4985",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "8f4b2b4ffdad57fa2d9e03cf446b9bb3afe723e2ffee54c3f35b33b7cc0c6dda",
+     "tiff": "95faaba00cfab9877edd8563b3b65e8f24349703c2cc2f5208505a8bb612cb65",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "38f8a65242b09a62142a3250f3f07311cf7804ba5d0a5eb4a45003e8c9e176a3",
+     "tiff": "2071dee592295fcaa5fb71a48047ad149a6beb17ba171bf28fb936cce7193718",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "8bc4c65b9d327c64096aa85553043cd781d1f441046d1f7f6fc30286b846cba0",
+     "tiff": "514c53dcd15922a5b69f05fc2c4ca444983eec8a06270b73836b2b8f99786c6f",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "ce4c5d414e32798becbf0b3bf7228616c8ae1147a05fa519028f8442170c033d",
+     "tiff": "eab76717e650488d386127af599f160b757d1f98678c2e886388c77a57ea6a27",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "d776f81191c7984ad13d19b918c1ff7e922e2d91796793727e08c152ce69bd23",
+     "tiff": "ac34180b12fff1d3222acbddfb8341339aec708587fa0e6ad49cc9826df55661",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "4c8fda0e3eeb61cb3bef26797c7eedf48da2aafb38d529ffe1d9e8dd05f22b74",
+     "tiff": "c32aa210638765eabe5205ec8b63be996ed8b91d85972eed973eb2d33c5b9140",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "eb7ea8192294ec2af6c49f9d59a0d85fb2eaaeff5d384d66b04d1d84a05a5c31",
+     "tiff": "a06b53eca35f9d68124adb19bc97d2e765924772d0686fd90bba3868db650668",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "84c6ce7627e3d2a7e84f0ea7b5ae46f555456c7486cbbbaacab4778bedad4563",
+     "tiff": "dfc845caf62c6fd081d7d024343745853d7e38909e8a481b313f3a14d04f90fe",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "8b9ff822b2521c072c65b797bd8e65685f08513de8b2e3b193f6f85c9a968209",
+     "tiff": "9cc3982daabef2773c6f913716d595632070a3b443287e92ec2f9c99fcfeef19",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "059f242bf853d51904f89302f52551022a4a6c08c1736f3f60fed1f741a0e148",
+     "tiff": "3fa47708e1dfa28bbcf722f64b6f7433d7d4cd3a12a046ea60b2ca7291c35f10",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "18aede800dde65ea69497f4fa5aba98e8c8ed34a2c479c03da88dbb9566434af",
+     "tiff": "4a419ccddbfc454f4878bc3c228ec80277ba854e5bc4d47d7066535cb89e4ca9",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "387cf68c8aad1b80047b933798f06f929ac26fcd05994413affed58cfc2b7e4d",
+     "tiff": "bc81337d2d454d8ba41090eaf4d62b5c1c11fa35791edd07c947e9b9cac84856",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a6aa6fee7327801c2f1e7855213f26d28f2d7fd203bdd69e892de8c365fcc26b",
+     "tiff": "932e9d01840b04a7607db5bdce03a6b1eed4803b8f1b653b3e29e6ddfc33bc20",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "be87bfdf181668f4dbf07f410a1da59681df381e1469d248b59ddb2d04025c30",
+     "tiff": "7da4bbd0f3ff93eaf00f353d0849b68d5dfbefc71f6c3a66891c581e0a792d7f",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "330687132da737795adc323fd3d7eeffe3c48a68a2f3746c0bd42af835320e8a",
+     "tiff": "5987df6aa8a63e2503c6df2775a92db01af3ce300c51d8b37b124c0a0212fcf1",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "07d5801fca4a5edfc571577a5340d51841f79aa22d2abf365d47d5d895327cd7",
+     "tiff": "fcfd85429968e8ee8875342dde8df7e4628e828c998ad6d9e967201050173af4",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "a04800e5f1740ad39f368655df5bb2b2aa57574bd9e7e7fbcdffae08c7689a20",
+     "tiff": "595d6a586ceb0c34d849b4b9584397f05b03d68de00f5723c40b7e185648e3e0",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_trix__scan__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a3b6b7eabb9ece520ccddeae61769ccbd328df5be4a43c8acb3fe9fc64eeb6dc",
+     "tiff": "cb1b4da6e850b1c4b30d536837d9c845ed8ae398cfbf8657dce752604496d078",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "efc6d5cf2e76b6cd960056012ecf70930a92c74ec2d93fe6cd0ffa7e0f6b548b",
+     "tiff": "09a7ad6b6a6f03304becab243b06dab5a39d54d357bd59babcfd956a90a95ffe",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "ccde50b00230d4781d66ce7b479986ee7051873b78611ed2e93a0499a56dda3c",
+     "tiff": "ec51ab2e30e4bb4952b6b4d78b62df5502d0b9487b6d589c23ffd02a4f67f3c2",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_trix__scan__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "2f19888f4afc2c21edc19a0653c9d319acc5dad258ab35376ef3c7dee57d14cc",
+     "tiff": "e0ca5d8665be86cc71d25fc4406d2228968087e292e2a02016d335ae4b9c8922",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "8742f4e7db1eafd2dafd31dcbde88a2d81e827407adcb1817a0d605f73fa1130",
+     "tiff": "0d0f87774871c4800fb012a88e85debc44efbb46e9c733de01239dfc5dabd398",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "0bf27fd06a02a64b53f6181782e76d293618a003b21e0526c2b520810ff51fb8",
+     "tiff": "56c33f610c09bc819248d8ab14bf3adc0c6db7a84c5ab1f4f8ae3909576f00ae",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "f32cpu": {
+     "f64": "7641fb0187e7e89241fc05b4a2c48cf7c50406d04100fbf177ac5ab3a81bc918",
+     "tiff": "b546a5843dd149370ae0d894292c3d9d2944b6396aa2c1875c73106a16b4872a",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "ce23a6b84d33b623bb39e04b6b6dc2728392e7e44d191977ff142a44ce054403",
+     "tiff": "73e6bf82559dd913e5acc2e411f6badb58e2e71034b8004c659b776c4c89145c",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4985__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_4985",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "21b95ff22ccd463ea0abe0a32286191484eacc042c5fbac69004c0f828c35951",
+     "tiff": "65009f3990b44721e4727c49330c912925e1e5bc981d0604661cd330cbd56f72",
+     "size": [
+      670,
+      1008
+     ]
+    },
+    "gpu": {
+     "f64": "b8e43f81c22630db492a7ab6fe445148f43ee1f74ed00797f344f2f84a555cf4",
+     "tiff": "a96986672d93ac3e28823c8e61ff0d17c4da03cf555a14a4e639672e8c3ddee5",
+     "size": [
+      670,
+      1008
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_4990",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "db0053bfcc4e9ca8cd9cd7024f7c7ddc8f88bd26d153ac1f2b3d0b4b0c51a9f5",
+     "tiff": "4a40600da8908e38958e9f73a437f51caecb8fc36e2436259ae1550a504f574c",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "90e880d0a11510819dc4871b9f0b091232e9a4f40853d98181f6e5b6f9e48d90",
+     "tiff": "a1f70c979dd78d0e3d4254d39253330fb2d954b8502a9f93d04793f7c444b78a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "bba57ab6a37a7150af5cf5fcc8188cee33c9b053fbd7264db493a084d9f26dfc",
+     "tiff": "5714ff81a05aebd4c31c69740e5d3a44db350c5a929baf7f77dbd12f46d6dd90",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_4990",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "a4011c5d26f99c15d2d48cc14b0691384dfe1fb873b3993eb5dd378d9c8558b7",
+     "tiff": "f79aeb05c4ff8e09dfe1415f6c7553daf92140aa7ee61c2292c40fd08007ba0e",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "fa33e7d23975d00e370c17e37d34ce24ab4bec078a9d3879bddcb996ddf1ad5a",
+     "tiff": "06e71a90edc7184a653ecddd65575795f372812803f591b12a25a2ad3c3269b6",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_4990",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "326ebb589a720e5e0ac726dd0c09d5e9e565315dcb2c91abbbf51eaf6e4758ac",
+     "tiff": "af42b748e7c3403d65fc717f02476a49fd5865f39ffbc6ec9c57eaeba49bc634",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "f0286d95ec95f6de078b2d562e08847064db389bc5d9620aba7db8f47f30bd80",
+     "tiff": "bbd198086e00cde42323e7c572568f9abf080cacbbe9fca7bdbc64bd86d874e6",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "23aac8c818b44e4cbd146861bd5941616c57efeb88807e9376976b78bd189adb",
+     "tiff": "053acc08decd0d8b81bc2d7fae8d2e9c3c1e9142f5e06fdc6d7a678aea78f553",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_4990",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "99a31a16b91d3caed82536c82e4c0a3a3463be3e5ead675ed65b851ae2543d21",
+     "tiff": "3c660e82e50d51b9aa34c9d68965f0d7c0f186423eadf692bb099627fbccdb6c",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "6ada352a049241c6e06887a97c6bae3fe539893a0e8ad1725d01619a4e5c65f8",
+     "tiff": "9c9522f119de127b44a8d21f4bdcf1cebd94f2019ab7d9a38482e0e5a2324606",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d713623fe2e7009828d434f3235c4c90f0b34c7937899358945625b388454d8e",
+     "tiff": "bd32909143fcec94077772aa0d36e3330b827e46b2864c3b018542bd256363db",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "ac84a61cfe3f762e93bd846027ddfef7cdecce6e4d9076116b96408eb1dcd9cf",
+     "tiff": "5bd4c265d0bd14466f3d4a33fc5f8de73b2f4918cca68046b9d16d30e78ad2b1",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "2333468eedd65173fb1fd851bb20d7ccdb46ec53505cc776e990e478cdbccb32",
+     "tiff": "668a4c339b25645d4b9811ba3bd1095433ccfe36d7f054e9ed1ad39d5d8b8fd4",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "0fa3ea48673520bd65279c8ca7a6e543e643bb76d1f314ff9892b90e6e1a1da3",
+     "tiff": "d2f392c636607e670e24c649681cf6d17ad96a0d46197df01ccba289a4c22e24",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "56f2b16baf848adaa1a915f63ef2ecdd7577c56705c97ee078e13c385ab4ae3f",
+     "tiff": "57b72013bfc0059f07030264ab2e368e1cc8e7aebc60f0a00d74f03dda08aee5",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4cc3c63d7e4e5379984bff2302cb68b8213233e43423f66d319a7b92e281a8a3",
+     "tiff": "74e166386a26f29a9c3f5660e15ac8b4c32513b96a254476dba3c7519774963c",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "577faff62408834e409f4d0b0b3f8e22e68f07c26de4898d52b617f25ed9ba0e",
+     "tiff": "79c1195ddc18580ff6ac864a01d5b905c7a8ed205beb2a256c969d29902a410e",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "2e7242674ce00ce16c652ecec6ec65f04a425e1ee95c141e5f35963836a59715",
+     "tiff": "cd3f3efa88428b75eabb729cc4e2c389b6a9b78b5e43d7467d7ef9f29b02ca24",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "926d22b721be869edfbd020cc519aa4e6ef61f4639557673e76528bd3f011ac1",
+     "tiff": "29ddfc360d6e02d701cfe48e5bc4d546e1521aa1de3b7bfa45315a25c21867ff",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "af89a172ddd729d2219b283544ad835badd5e1e7fab08f9d0e200fdd9aba925b",
+     "tiff": "546b7ba7fe582e63796a164a285f972eb4b64f4e627f480b2f582806d4eb6140",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "94bdc73ea2846922e0c39f58c9ea6a82f86230d537eec1a59c5a946cbe299315",
+     "tiff": "461c797d6a417ee12f5d9b20b499f2697241063bb92e8e1c8dd9d6d57a7010c5",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "f10756bce50faa93fbc39fecbbc636b0c3b6a4ad1af38504be4c6ab9fdcabb92",
+     "tiff": "1fd2d82d7cfc83616f5c2b34dabe5d14f968dff870238a4732c2efff196ad3a0",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "017902cb3a133144746881851826c864cf2734e884f8536971910202a88362a9",
+     "tiff": "03b8f0fe87a6a58edc4fc860d3ea4d00aa4d0a310c728f59d200a19a66dbb69c",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f3cfba119dd466b99ca3670b5761ada5b30c2532fe49a1d4ef8c36674720500a",
+     "tiff": "cdf648c2b18cf7de7ffac4254d94a38f2034e43a9770eea881e0a89a5ffc5922",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "a0ffe7e4cf44aa9229526bbac3e7c5eb5aa8d4214917e18aacb7eef3e1d7bbe0",
+     "tiff": "86cdf398a77400dec93c986cdc7140b4b5fc02dd23ca63c5fc8387cd96658ba4",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_trix__scan__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "6aa14ea28bf9168c2c972598fb20a20ad695ca57329938095cf1c1330d4c68e4",
+     "tiff": "6b0ce74e1c833b75e90fe785ead3b776feafa273b5488e28527708d19c3d4f13",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "e63cfb745572d4dd5d69e7b5e777ba8255ddbc847b54d98e6bc9d94599f5d191",
+     "tiff": "9552bf103f74369ca0433d15c8ca68f3271dfb7eee6ca7267287faf1d27840b0",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "5af209a97924a9a9a809baafded51bc9270b42cdc61af7d65947dbed78cc1f7e",
+     "tiff": "5348112f7520a8755ce19f860693bf26123fd436d6c5a2c40acb50fcf212ca6f",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_trix__scan__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "ef6b540464e798a74b9609d204b03ed3cc73d0c16dc64e5ee5239ff2587c5a58",
+     "tiff": "19258fdd221f5780c6c459f8f8ab0331feac3f263db9c5a5a3a7d116387bb806",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "a3e25bb1126a8a63fcb8c37371b421796bc4a3b9cf917f1a72f62870a8b0af85",
+     "tiff": "7677df02360e5f7eb32daccbdeba20a42202653bad58414c589c219f87d8dcbc",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f82c0f1127d5a5db3d38da5971e544b132421d6c2f6eee7766863706cfba540e",
+     "tiff": "855f6ad119dc7635afe8bafb83745f4e18efc50fd12b4cf6ad5784cabe40f4f2",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "df32eb68d85a41758792400567a35f3ca13caf4da92547717c216ea7f92e46f7",
+     "tiff": "3fc13b766becd5c541218d0b7878681ca111e372aed2b5d25f2ccd1c67f1d063",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "b3edf59ac7718ad16e78e98eb0dff38f94617c2f92567cde152a564d9399c168",
+     "tiff": "6a08e5e3081f90c2bd203666a5281d9e4d90ca7ec2fd7bcc895b2388b6239880",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4990__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_4990",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "b3087cf9e34f9cd2042927ef70ff28a7f25f0aea2c8212ae37112dad02343403",
+     "tiff": "6beed0719a1819b979e1f99e61891c0f9ae1a348468f2123ce4a2896b8040a8c",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "b5e1097f69727f49261c6d132dfea6b269d95fea4f0358c16c15cd22fa5e988a",
+     "tiff": "f45ba47cac1a3003509af90f1a286c76d0849efe3d25d3d772e9f569f72fe509",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_4997",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "0a79302ecf9a865394d0daaf0a57b7c47facd281d6d72b7b5aec2098a60581da",
+     "tiff": "fdc39755eb1d92dcb5be347682d28da2b1615f4b1e97d678df4604db72e4db1e",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "fa597fa56fa94706e51d06794988469cef4def406cdd5f024bf2ea6a7a8fc6d9",
+     "tiff": "2cff1c022076a424a71bad9c0de2f790812456420b126c3bc3c8ae8703430c29",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "13bd8149b8eb0318ea8e4ff7b1d05c8f65c86961b8157e4b0730b0f5f99b4225",
+     "tiff": "00e0cea2efa7f83099df0f66f17d66af36ca916aa29253cc23f0ddd0fd0d47e5",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_4997",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "0940313e7062cd374be3f457a2f7621602b0c8bef9bb267463d61610fcf27492",
+     "tiff": "b38f133c4ec254eb1a59b6190d8a67c9cd63ec3ca2cc429f1d1336f363c5d714",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "ed134ac4a5af6d73dca97929bf390f95bfe679a8014a713d65189c5dd7422e7c",
+     "tiff": "3f673a11216633d088771ffd8cd3b269da2b41d482af53ac95d260c0d8403f4c",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_4997",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5ebb08d9fb773c1579a09a7a707729715b4a76af702886eb9cd761f9f5681e14",
+     "tiff": "3af09d940bf6e3f84895d1a2ace4f432237cb41b2c447d27955b5c3c38b99451",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "576d83fc0dda4ca528d192e1e79ba687a980c8ecf308e8f80693df1db3553100",
+     "tiff": "6c1a770f3ab24134ad2e35b56e1060398e77ad6e3cf528729a4334ac7c69e9e3",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "7aad1e5f3e4b7f63242e2dbdcc1072701f7b71d558c2998ace6a7c2b2f2cfa84",
+     "tiff": "62ac89c12b02f7dc5039323afebdfb56e0b9608f4bc59c816cf0848c33b94dd7",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_4997",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f0fbe8e71fe33119093077006e4c4240008d7356997a335f295c2f6ba186d020",
+     "tiff": "48611828f18bc8c5cd8ac2e950955519ef60c00f84b02849c7ae24612c0787fc",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "b82e1457991bb90ee46cad3a0f94474e2cf1e32f28445c68f1a2d8cd5f3e3b77",
+     "tiff": "5dea2a690b988a18317a17c249d8e3a1429cc62d3b4a6cc2245ca3faad72ce10",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "1243b05ed4d9a44a87579344bf31da341019e69b3505348d1154e15ecc17d2fb",
+     "tiff": "d91227d2998cd67ae1801e72e0eef939bea4472832cd3575b1484a11bb5d6c9b",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "fbd466c05dcbf4d21ee1e837b5954528d785965596c142028655c54515e38dc1",
+     "tiff": "2e110f02d76cef37a1f2ae159c3d49223dc2cd8f2f6b0dbbf5893f8c789a6573",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "302a23bc62be94e6be178f03908de819a72ba43d9f88c28d26bbcb6a7f7bcdec",
+     "tiff": "8f3a04131d3dd57fea01cd3de01c2f22be5aeb0111b81fe40d723e7c92c95a33",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "4cc97c52606f108dfecc82a3eebde76689a0cdc92f53bc114e8f6faf4a88917b",
+     "tiff": "0e08894bf6c0c6f09bb88c0c1e305ac3ecc1aef5d2eecbfb43949889ca3c6891",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "7fcaba023787f692d7ceb24734b77357a50059d6a619e1eef46dc8a5268a50ed",
+     "tiff": "b3bad1da01ec6cafea1975ace828ada6ae9ca23f2ca057b2ba829fc25ce5e6ab",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "01fb906ccc5114db04a300875e142328cb2ac159fdc5efb90fa9767c7681a9f4",
+     "tiff": "5afb00fa572c3bc17549be506dc79e8a64b2de9e52c07b95ca815bbf8e1cde36",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "6af422dea708ab42dec28909ddba322c3fb05a19336a105164bdfc4e7621775d",
+     "tiff": "c4b87a6588948dd4091f5e8e7936297a5125122609a53a2fd65ae0a27fe23b47",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "c60ac5e9add88bb0c7b26f0026683d39366605d5399bdfd948026edbecb28592",
+     "tiff": "2fcb7c8fd5fd03678408182a462f9b4ce4af5f0eced1aef132db1174f7dba5d1",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "850afa4066f241986d60d82844895858a8687862dc7c982d2f521720a06b700d",
+     "tiff": "4050f74e6b2a15b99b0291e56901220a56cc44441b6a47ad4806f7972f9674fd",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "d7fb227898a23ca0662fec28cbd4ee69fb744ff538bcec5c2a7b37de39a2ab80",
+     "tiff": "66c2d6632acbdc46d578cdb371dda871c5b7282fb1972ee1b7dd12386ae4c3b2",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "2731bebd766f1f573fcbdc4a854fe93d0da84c7868259dae170a4bef0b8c7f8c",
+     "tiff": "ea659c2dffbd0787e143d8754a9eb3c1804ed683f747a5beef1c99d8bce47a00",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "f91824117a0b23f8c38a9a7ca9db4559e2405f1aebc5b79e0fcd4e125b4a6c38",
+     "tiff": "b1dacf6c3908a99036f0f25c7048e1f47d802037b7213051675de02bfaddeb50",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "f5e1c434241067bea2e72e6eda837977ad766033001a9ca22db850bf75f6f761",
+     "tiff": "77983909d86ad17a9879093c90786e23b3296b42eef4a6f024161d527bb24a25",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "7e31683359c0df6aa2a902773ed3f1355df74ace6f36684232cec8c7ed1c1cb5",
+     "tiff": "e24406125c1334a3acc84d703d9468065e08579233a49d67067a85a53c337d8a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "63e30b6b07bf5afc4b80130ef19e7cb17aed4a7b4558e3fe439db66fcc60fca0",
+     "tiff": "1c7d9df9c34a592f65ff14b8815c11f02c4bd4805f429c669324315706a30daf",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_trix__scan__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "74a47b9ebf7d6e713d25a5bd68c460e119b41bdf5bad42d1d23d4b17eda32b20",
+     "tiff": "96cdaa81c744e32b920e12291a034286bc10d30b13d5cbdce1cb483a2be088ce",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "1b5d1c62f7732df58977d05ce5642c94f52ac31a48ae5533107a91e37cdc1cb0",
+     "tiff": "ca4c0949fcb5df24d4719a9730ba45a06fc2d97369593c277f3b56be8d02aca6",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "61e9ea7089de1bb3c05f9c1c781396e6631e774a7079ed9132df227691b7db40",
+     "tiff": "8930dad10fd4fa3a19ae4f4d70e033db0d1cec4f21416fb40d22dcf7de88fbca",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_trix__scan__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "6a99e304ec96171fbef619a75e1fce62b43d7a4beeb497082ea5c823c892ba75",
+     "tiff": "b53b6a6087330cc830a3c51761e4471a727b24a79521181c280420442d6cfd67",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "39aa37188c68523d097ccf45ee9427918b1353df542deb80705f127b9c9655db",
+     "tiff": "e5b55f2588595664171a388d579f876f8de74c93a783bf0de1acaed52a98220c",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "eaef569338201c21f1c9665316baeef07ce3f1402cda241551daf846708135ef",
+     "tiff": "000b27f476abfa5f38c8cd238937bdc9b037b03404ae704856509a12c79d1b70",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "38d26e612fdb1f51c880c8c13b517fc10d17c9938358c6f5028a53560e76e3c1",
+     "tiff": "267132edef784855f6754fcc3f24db4c1b0af5fcf80c97a90bd0e71dd16b8c6a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "40be532db05b2ee0e938e841b28ac3c4b4417b7b3b9725cbefb5ad5993d7511f",
+     "tiff": "409a1c5169887f6ef4aa89156e13e388e27caeb8a79f168099a2b5ef22a74d51",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_4997__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_4997",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "a3cbdf6a3ffd70d702dd15b84c3ce7e383108d91f90d132a3e798524e8174741",
+     "tiff": "fc282291b8ce6aaf8ccca2cba287d6da1419c1d159eb917d8206d9693e0c7ca9",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "2f96976b8b9d34df3bbc6c30f88505b0c8ec1c972ab5fd8322113a54ded456ca",
+     "tiff": "7f5578a202cc854e48f8ca39f854ef7c056124f42d7a4997cefd32708ad3b85b",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_5003",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a7b08dfafda3c1aff1d73f524b58d84c78ad33aba341e79a992667cd6aee5a85",
+     "tiff": "1f54a4c8fb9d664fb1f9f91962c5918c3d3eda65754aa1391bffab300b288b24",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "4586c897d1f6d8310539e72a8a4e7d43968e074e266b04edecad60da47becfa6",
+     "tiff": "425125c82e0427eeb090453c70a26469d4456a5254f69606f0ebe94ca30f2fc9",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "d1e646c5c4940fd7e451468f7ea419fc5aaebfd4c91eb84461a5f4d5a016391f",
+     "tiff": "2057ea6f485e552879d67555ead24604cd945e5801fc8ac1cb33254c6bf3c383",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_5003",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "27d01bbdc33a6d738e832e2f23918b0c9456c30a383ae0f24af29670ade76eac",
+     "tiff": "68ef97d3d2fa1bf4e3a6a360253c1ee33474c2b2f2cf04a3500a9a471c926adb",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "9006a6de2c670a95bce3c01b1dbf2cb7c78b4aea380f415e8623aeea3ec87c1a",
+     "tiff": "ab8c908ca8531875efc46affbfe0d7e71668b667346f02842481ab72f62519b0",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_5003",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d5e0f362ed8a84d4e87440f608e13d39c2dcfa6e425f24e65e9726ae8e5fb810",
+     "tiff": "72098567c9cea9309bc239580b93d595732a8ce38836459c9188c2d83fc8d68c",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "f99351ee844750839d9ff8e6db2dd0e4e482d8499fad2931a7427768751e512d",
+     "tiff": "afe66b7553eae04cae1beab564c5454735b7075e880ccb4e46d456d42229459a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "0381ac26b3cda9d34d8f1f232e13ed14a9344ca2090f1a6f5f00aa3a8646c74d",
+     "tiff": "640c626c38a8e753284e454ba02e7f1a25ca4df7fb04ac74d4b463664fb6b5e3",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_5003",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "9b07436685a33790c15ac527f1c2b7e1a6ce2f125bf124628d460ee6c9defa5e",
+     "tiff": "9cea39c6c802189d8f3ca62e9a09d6bd5f7940827ca15c8fab4afb20b886d937",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "b541475e2af5c6f7d6a006105d0294edfd238a307a999712a17f396c141b9997",
+     "tiff": "15338e9847fd1ec29ec3d7ac459522ebce38dfc6afc7e17f99b8ac502ca1a902",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "8bbde1c8c5290803150c3dd5765d306c7d7c5ebbc1330cfc405c89470ac75437",
+     "tiff": "8c2969cf00b184c61bd7ff72a2ea53901386447e3db41c42913471625c28c04c",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "7c447573d50b68c4bbb469ee92b102f8579524d760a31ab9170fb75d77d5c860",
+     "tiff": "fdcdc92b8f410aa15aecb94eeb962fbbfad28ea13e783abc34ed1998bae01665",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "b6c672379ba686031cdd11f55797f4dca7d158facfb50de926e6151b79785b44",
+     "tiff": "77bac198e966e131f8dc20ed12e8f25c11df59c84eff6d354f272672d673f86d",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "4f3754743dae5c938734696f7face0e0d46f00834b6323d520f929bb61a80520",
+     "tiff": "2e8219c50ef69c69c743f7396d5369f9fc7aafbdabba6f0e5badb331c337d28d",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "e951f7d0096f09000726eaa0bdaf097a7a1b5e1ac451819ee6846409fb254735",
+     "tiff": "4a54f0adceef2b1ea55caa239e07e31fa44a5a92d0a0f6f8f7cdb230ac27695b",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "67d27793d0fbe09c63f6eef1156cddeb53011e01fd07d41016300c255f33b2c7",
+     "tiff": "4dd42761d091b0090efa6e1ec492cae08c7c4a2b1f11519e096405d0d6becaee",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "e41c7959efd90946e136432671b35610a64d887d0e317095ecd82b0c7ab57db3",
+     "tiff": "46e0d4ef882c8f331eabd3cde8b6e46dc886c24b3a81b26a3e83e31712ca7a05",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "4581b16414e1ba0e68b39b51ce05144a0aa69b049a9a1b9734ffc1f688d516e8",
+     "tiff": "d30ade9f98bea63b42b54699bd87eaa4bf988368dfd1e7365e4273bb9d5eef21",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "261b1d9b382ecf5dac493f0cb57400ca3c0cb15f537541e1a5239a9852ab7562",
+     "tiff": "df6e3a034da7c89e68475c95976012d74f5627ed9ac71a1b190719fd93cd523a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "6a752a263ed98256766d75796062312cca8bab19bc36371d29a33af63665b4de",
+     "tiff": "a726157ae9590af8cfb7f0551949b13a77cfac5922f4834524acb5f44b69f348",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5387afd5f718e53c9acf56ddc4c823fc71f840b70d8d5d63d9d18df757ab05cd",
+     "tiff": "2051d3edec5b952fbe6d969fa64bb6b80a9da10714b57e6a254a12b1a4fca5d3",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "1b2846ed7007e35c101dccc2807f0ffa90b9cedc0ea80995cad739d9a3bd1164",
+     "tiff": "4ad793f0d52ed9f2d41bcd4dc86692a7d8440926e280019a9e73c64d74a0dbf8",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "39e0e29533ec48829a529ef38f35e348905a282c7ed84b4694f3673d10b8dd28",
+     "tiff": "d00d396ec19a8f703641ebcf9646e746d8042c0d8178b7d8104d98177df237a9",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "87bba24829aa72a9af81cf0d8553ae52489afa6f8514814f348472a165015912",
+     "tiff": "ed6c2d34e7cb962dc234ad7ca618e4632bd503d8a0163cc1af32bd5dd428b6b6",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "ebfffda22955a9cb583020cd8e5dafdb5a8ffbfde999baf3369ce46fab8729e2",
+     "tiff": "3cd95418408ed6b9ae602ef1a75ed93ad5204971d9a4a89ff092bc7707fa159a",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_trix__scan__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a4cbb267e7f64b3513c38d270965322c3293211caefd73a12face66184487713",
+     "tiff": "78e8387ee2aecc8d76a0d1c8bab40c8f324a92d7ff72a301ecbeebdd263a6a16",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "468f580d887ff0a533ed2a266bcd29a2755c4d0cb13b5b00e3c1c464e2a008b6",
+     "tiff": "a6fd415c7611e2a51fda339c1073813391f7f67b4360aae8a1e908478ba0736a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "84a76b12feb676876f38505d12652fc75f051b6c5bc1e954ccbf309c4543f4fd",
+     "tiff": "a5e0f46b32430207fd7c766fd460919cb61d139fff891ec296b07f53c0cc3660",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_trix__scan__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "1677370729413fb79e2295c88b1b9ca3718bdfa1610bae07539fd737c1fc9aae",
+     "tiff": "c74c6d3242795baebedb46c470e68c64dc5b8ebabbd4ce92b8f8fd028cbd3359",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "ef68c11f76d138cd1ed934ef3bac8b98c731e99166c20652f5f59dd885bec0a7",
+     "tiff": "ac560453d4cadd10264c412cb3b4c978d948d34646e64bf1a4c2a6c63d9baf69",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "ffc96e5d8cfe23591ee64e78fa74a770195faaec541842384a1fdb13fe098d63",
+     "tiff": "699df8344e1455cfdfde61e753ce1650a535ec2faeae8a2ceee74ea75014f2d4",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "719ec35ea5e8a20b309c797e774d82d300cfe0a9e50c94b9fa566bc919d2f4ec",
+     "tiff": "8686da86222308e6ea3809cf2e675f808c929df392ad0d34608c4e5bf655be30",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "0f032b31457884590bb66af23f63083b7786cccd8f063febc30b3b4f5d4abf4c",
+     "tiff": "e9795511b9b17a73ed2d4a4c6be048e8d8118e8a9290c9321481b7bd1184a4c9",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5003__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_5003",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "b5934ec0b7d5d9501bda85842e2d27f9b177933ad4b842db3b04e5b2a8db257a",
+     "tiff": "352a1bab6eafff84cc8a44bc38578455f8ef2aaa9e320a998938fb61256bc3f9",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "ff4557eef8ab2f38d1beb1ac201243ada598894e988c431b5541c5258c296c68",
+     "tiff": "3396be5814eaa6aaae28e841e5fbe65773f551ac79d4593b4e18b858464f61d6",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "photo_DSC_5009",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e3821a5c815000bc3c4c7058efeafb1a81877e1d8ba96c6b7f58a784ed1549e6",
+     "tiff": "51dd9e97bc632299623556c39fefc087c21c0a8fedff370fc857a38c6a562968",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "86a65b135b5b84ee1a459adad63d3932c2f82c41b143fc098f7b4af686fb5406",
+     "tiff": "a43f7eb8185005d2d207a6ebc2b6f6a52f6a6bed5a83a08654220496549eab07",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "8f1325b91fd478e47192b514d83e252aedfab1276abcb0762ef69c4a939399c2",
+     "tiff": "4b0893f5394c3a321469536ae408333f8bb17cda80f19206b6363d341a690206",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "photo_DSC_5009",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "3340ce96e9598c6c401a3628c03126cf52b474cf4f440605b949b35f3f759e38",
+     "tiff": "109f82b90ec190bf185123c74612c8352910cf9759ce24342eedb6076486d142",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "3636d228e404a2ed1480c3dd0d957718de5ac195364a21caa22231fc28e49a89",
+     "tiff": "8cf14905351f45e7d521bb5dbe79afa0137230b8a54b81d7fb129c0935240ca0",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__fujifilm_velvia_100__scan__default": {
+   "input": "photo_DSC_5009",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4d0d0933449189e0663748d4d381642b6b714d455f9a7380ed1e74c9261e07ef",
+     "tiff": "43a2add29cefc777b55231993ee797b1e8c591af0d4286e29475166abbee7e20",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "e6221e2268dc575afd638916da4684fbc2ab9c8b849407e578337e562d8790b7",
+     "tiff": "5ec196b7adbb507ed20b8e0ee77d2ab5f54256decd98ba5a1bd0df9fe9e9f8b8",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "da7d51814df182f3004457344c77badb6f1aa314170ecbfddf20e54c21c415ad",
+     "tiff": "716baf8da22cfaa780f8e56cac46e606db07ee8f92fa81cfea2871726edb7aee",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__fujifilm_velvia_100__scan__det": {
+   "input": "photo_DSC_5009",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "66d82e8f6f555a8fe702803dcfec38eb0808d8254e26f215ede446ec5765b2a1",
+     "tiff": "4f4480604c08342ab5a3129eccc7c44360d63ad08c83156f760bab5c4ff6c672",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "40a700f1ab965edf223a9b4bd4e40e6ba29fee115bbd72cb73eaa1b17d8cc3ec",
+     "tiff": "991911aee6869006c1ed3c29e3fb0ede55ce425d25a470e26df24b76eb44c4e7",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_doublex__kodak_2302__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e7bce394d3b8737df60e2fff67f4f78bd510d0443a19b5722fc6ae9aa88934fe",
+     "tiff": "cf3e4ba78e166de191988f53bcbf1a1c25a9d05726b8b3b230889944745cff01",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "b566680516724180aa9f0c29830a6b4146d4cd05a3fd0453e15f59d47c5bbd6e",
+     "tiff": "2623dc92d89aa8a1a5b6a22f4fe9abbbd4c645afef75b2f25ce630099556b3af",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "320ab13e7f361bb472f665990abe3a3ce9fb48ad9f094062b32876ad35d1488f",
+     "tiff": "a86cf95e84e35540b9af38206229d98b9e10da48ad8d4013ded1a29a31f8925b",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_doublex__kodak_2302__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "b8434db612155fd9fdec065a7d1b2eb2c5a51120d1e0e8ff4d0279b535b17c80",
+     "tiff": "c40347dbbd933fea01e0d93c5f7edef460b5c1f432325cf6f68ec9c3dd3f7d5f",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "f91279e8824e50ab666db068456f2c4a0965d544d38e396557216ed3100b5960",
+     "tiff": "72f6e60d697fb7226086598701f54e7e8fedad4795e78839b2774f2ef429fe6a",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "260fb057bbdce6d11ced82b0450e95a1320d2d7bd7ff845a3e07413aa60632fc",
+     "tiff": "d2a977472ec011d0b655ddd16197bc02a3b45727f7259883658897714f9ee7e6",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "2c69fe3eb9398a15e552b76b1adda54591ecc2922d751bec087c187ace198780",
+     "tiff": "2daf81858eb9102259385552581c88f3dd184653de881d4e2ce54fd835f12a8d",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "6c70294474f2f5457bb26f6564673146697eb2ea2ba4b7e80a604251d5fc5d43",
+     "tiff": "59049a911c5e26e1b672f3d853dccf2ecd11603fe085ebd1c03b6193afb16d7a",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "caea4b20d7ed9e4877ca3226a1c2a90cc0b704f1d3eed32e2eb16282a87ce4b0",
+     "tiff": "28fe3cd1528064418b271ce3e663794d035f7805feb90749ca6b81f0656977a4",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "dea7e9c4f02d5d95255831ddf7cc45f4a2cda26fe9ff8bb0d9ee5922b96ab9ed",
+     "tiff": "c89f6199b1a816dcbd1a50d039f012902058c5541541a680ecaac9aac8f4f059",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4807310820940d8cebbd8ce9e53102528bf7c3db06f3ccc508c119822815e0e9",
+     "tiff": "9c102756b9692a5f27cc489bec60be5297e274d7a252eb5fbf0bbb342e234c42",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "ef914f4a4d40489b853c11b8e7a2ee21a465ae4e351e5972be1c99b5adc4e9ed",
+     "tiff": "4fdb61924d4467c0f2407512d60e4ae72500154220f87e178252196934262b5b",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "2c8130290db981e3756264782bdf0d5d35b4053b50ac9070c51f661736c8d67f",
+     "tiff": "6eaee302e5d910427adb366fe920fdaa9d9876f074c72350a4e59b6f4617e54a",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "0d63681523954f71cc7ec950107c34c43fc9f9a86b1fa75a91c47ff62d5130d6",
+     "tiff": "a89cecdff327df4ce9aa91014480f3df109b55eec5ca546ba7d0cd6f5d346e9f",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "8f7c5ddb09efde580641c08cb1ccbbc7cfba6f5a1b93ee6a81e82b7d3d2a8824",
+     "tiff": "54c6430df1bdeaacf9f2ab345a0f55a010280e77914a83d6ec4d8327212cd48e",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_trix__scan__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a1aa7ccc9e00fc5e79a865d7834deb2f22a4fc83d7606911395d722fa9413c8b",
+     "tiff": "bebdecc9d9e350ad24f3fc66fd7a4bd67f5ffa1e4748f595c487d1ee55de17b6",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "31a0f036b212cf00ea02313388ecea2b51ff328568bd8cb91eaf74a7a607d63b",
+     "tiff": "7794d39b5db5983cf749855d15a53a321401e19445245afa168ed521b3cf0e3a",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "eb64f15e615fe7992088e3d3d7c2c9db6cfd37a701712b43a0dc0e83e273b28f",
+     "tiff": "026a191700908a308b4f189eeb5d42c1866d11184ac91502c0839acad0043b0f",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_trix__scan__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "e38f01d49901415f0a15bfe2c2b9856dea596c123b0effa412e68c19dac95032",
+     "tiff": "11497d1e0b349682b7b05d265632fcb5dc8dac6a64867e6a8309f739a6cc11f2",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "a91eef536ff4154d22e706cce400f628342727f59ceac776ab7083afa93efd86",
+     "tiff": "ac5de62bff1065984c661e08e43e1f8467a98a9a827481b56247044c6df8328e",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_vision3_500t__kodak_2383__default": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "0f2d151d08249c3b4bca25fa1433300d61ea3b2eac1cf6363a4aa02e8c420c51",
+     "tiff": "fbc83d5b24f4de6a01365728494cce3f4d27f12caaacc3b186c1b0aa03b2e39f",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "f32cpu": {
+     "f64": "ce5d65c8f26d6f5601af556e5c77713eb21c452d78b95dfdf87bae3d079a766e",
+     "tiff": "09e7471d8bcf4faaff037975d5b9396ff8a960458efa527eb89c1001852c77b0",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "ce9bedcd1dd98d6482b251db6678032c300cb119eb62bb0774efc61b249ae54e",
+     "tiff": "070dedb1db78482e6cce40f0a4394f81fba6600321edaae4d7fae89e4d260ea6",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "photo_DSC_5009__kodak_vision3_500t__kodak_2383__det": {
+   "input": "photo_DSC_5009",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "2f75d3f7aec9473071a01c5402036a442ce9e5b6990eea449503ffda5ff12640",
+     "tiff": "0a750c936e05e8f99a7df8028973754520113fa2d173bd8370b04377fa097261",
+     "size": [
+      1008,
+      670
+     ]
+    },
+    "gpu": {
+     "f64": "c26774a379c68ef45ece0d92ba5ac0ff50c3908f945562fa14ad7f5b55fff21e",
+     "tiff": "5067d149db4065126636f92a79c403596ee45d9632bfd9ab2d7f1d64fe776d30",
+     "size": [
+      1008,
+      670
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "synth_edges",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4b968183db27e55cf47ff4cdfa2988eae03b5b9b2c1dc07bbd608995c4801d4b",
+     "tiff": "655ebe6dfb3e2a29f792555f5b6317b1835ae3b5824eb077cbd6827f093f1be9",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "d2ff31162932c357d8d6ce19e427aeddff0006cb36ae7d1a71f4e6dddc7ea5bb",
+     "tiff": "db6634e35201a987557e6e7dc569437d07a5bf833b8bc11ea85487b3a4645442",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "8381fdf41a12b23e77992c196d351cdb34e394f785b5cfae1114e9bea71e0bb3",
+     "tiff": "3422c1f021676619b2ce2bc8d7013582e2c892287fb2c59b354f28719b766f11",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "synth_edges",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "662a92b5e6358af18d382023ef179c38e72eedff5460e9875a8526d2fb031ec5",
+     "tiff": "b3aa13c1cc9014902afb195478f50f80490c148b941955f1521a7a8cfb004423",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "d1fbecf8e871735436d64333bd4ebd02c0831f76f846a2150054b0ddf1ad2735",
+     "tiff": "81f9ea3c09cd0a21e9205327431e03f2fd3de45b972d9d74b05430c2ae889769",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__fujifilm_velvia_100__scan__default": {
+   "input": "synth_edges",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "028b92a4688cbecf2bd45d5eb064dcf20e8107583a03ded68207a5a8760f22cd",
+     "tiff": "baf7243962342fcaa98e5bf0abd5ad76f4f366d68536f57b8aa2078e89690758",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "03b22b11bf717e97df52f520eaf62c87b1be12a79b55a3a1414bcd3b913b42fc",
+     "tiff": "ff9a686778b1749639cf3f9f4094aa8aef6cdd3ba38929767950c5bec32d935c",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "a82564d1fdb7f599cb48dfdf252bf88ae12a2945d26bde9ce1b926926221767e",
+     "tiff": "a1e33c136dc0da197cad889ec7c22507467957162b6df5cfb9435c5fd072370d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__fujifilm_velvia_100__scan__det": {
+   "input": "synth_edges",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "34791942270eab6e40fde356545a7d1e5f84c1a8677ca5e5543e311f50a306f7",
+     "tiff": "4cb71eefb6dd926410bba6e494ee025c4fe38a6edfb4b09697456b274bbf68e8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "778408ef7a51a2559399ba505171c334165817461ed0483fd7b83aa5a589065a",
+     "tiff": "9e976c0c9d3d0efad8191e6931be00a675c94e5f526a9e5a69910771fe3de89b",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_doublex__kodak_2302__default": {
+   "input": "synth_edges",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "abcaa6380460bf7d36c9d10744b7ba771977cdb04b70d26efe0f52629cd12961",
+     "tiff": "5b35c4f17a3e5fc985322211f6a0c1c9395124424c724510f7994612fce358b3",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "af8f25f3c749640fd11c6a773f4c09dac5630fa774cb93c9b837c5b4d4cb3ef8",
+     "tiff": "5ad6abdef1e4713a52b3ffe6b6b5750d1f10d97eb2c2a0b34dfa43d9193992f6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "2a0721db65e7c3a22a4104fe5e6ce556c78de1259963a65c892fc9bb0d5167a6",
+     "tiff": "787a0d1daa153c9cd81b7516961c1b3ed99ab713a921cd87fb0995ddaece819f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_doublex__kodak_2302__det": {
+   "input": "synth_edges",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "b364b3ffa6deb67979330eece9fe77865ba8b4c4e8967da1faada2ff6bb32fe8",
+     "tiff": "07ba77cb41828951dfafb665ae9a349e14a34361c38949533d1e00a29f9c6830",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "380094f5ec260dd2f176005151545fe176b143922e908cd7b6b1ff46f50e53af",
+     "tiff": "d2b689c5a55efa5ed95f32ce9ed3b477f67c617297159f5c94d59637e54fd7cc",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "synth_edges",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "bcd25627655d35555376b03ec74cf0816500ae0ac5241a94f6e0d1d64ab719b4",
+     "tiff": "e19d84a7c403d1f1f6bdfec85623201982a7bc0aa2953ca33b5c1056111a4cd9",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "8000326382a6de715d112820da210728fdaaf88fe8a1913b15ca75f2cf64d04f",
+     "tiff": "ee936c1f9d175965ecc6e50e35ebdc3bb9b69664cd6ee69af759ccf1e059e924",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "216d0d6e2c11204e5481f02c97ecc33268491b8bb76b93dca91c6cb91d78221e",
+     "tiff": "1c82a5101a1859bdf10608ab437e31b181f4ea0be9335fad1e5722e9308fd683",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "synth_edges",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "fa682146f93ff84740b51c40432430e46a3fc5c8a7fb22a25e7ab6db8478eca1",
+     "tiff": "ead1a361c882e5c4fd876535c78dc10bc253258053a9de92c27c0da04db2c7e8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "4b2e512733224d1d564e5cb809e6733ab772463fbdfafdcb1e15b5d7709008f2",
+     "tiff": "553024d432c39f947db13c7566b648699d7b0311a727a6bf678402c7e2b1152d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "synth_edges",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "b7aea788b1137991f9371942432a7311ae703080fddd2fe4593ce9b953f76713",
+     "tiff": "8cfb2330fc52c76e59a7873d2e5a725c7ff991cd293d4d5f0b27f0816eacfc03",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "4ae9b085954afa85efab64f8a54e204bdca515a53fe8fcb288066eff7e6ee92b",
+     "tiff": "c3adde0d73f48446e46452e9419e2dc373c69583ac136c558a14a8142ea24ad8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "f70fa69efe66dab951734082b9b2aef3bbccb8f16ce50a890e3af91295c7e27c",
+     "tiff": "caf1362e44f9f24c817716b56b754b0b7d82e9882b9be5c61557ad31b89bb979",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "synth_edges",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "0a8c1750af73ff729eff3aa81fa7591905a1d7ffe54a6fd4c5a5519dba6452a0",
+     "tiff": "b0c7a978b2dba3d58c3287cd1231dfe17cbd0f9f887b6aea306286d9ac9379fe",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "82e38b8623ae30d75036adc170c03f39f5cdf8d02bda5f487039ccaf19aee68e",
+     "tiff": "f3d899d0214d1cc7398d9b11e1ad35cd6859ddf39ce94803ae4b32da919d2118",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_trix__scan__default": {
+   "input": "synth_edges",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "42f0ed683fff04efda859d29ca5a2c22544a65e2ddf513acdadacefc8a866aee",
+     "tiff": "e4391fae92fa52bd166c19f142723fa2c5d954e8bf0e479c27086c6181d12f64",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "59047cf3cc773603e5d3c532acbc6f5da3fc614727124b7841a31a3d6dd58016",
+     "tiff": "2a10aecd65df8b7d60febcaf8625fd8f3a6dd3ba5eb9fa12dc0f9e98cbb1e4b8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "aea1231d148b03172eb3111afa309ccebf8011cb7f60f92838b8a92d7f0d0f55",
+     "tiff": "01f5a501a966c61e2113c9bc98d12689333ad1a732aba8334b79768b5576c058",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_trix__scan__det": {
+   "input": "synth_edges",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "fcf81fd5086cf1d6675b02bbfe3638fdf88586735287c23e169060b4bc8be928",
+     "tiff": "7fbfb795678c5c8124c06337b80a840c935fb24d87576e5b07172d50fb0ee4c2",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "e6b9521a7188cd09ff751bf5c2cd1b0b0de5b586a4ccab929a1a876157107398",
+     "tiff": "b4c8ac5ce5195a3b02d3e79761780290cffdcb28bae9de2d16d7aa6b70b53c88",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_vision3_500t__kodak_2383__default": {
+   "input": "synth_edges",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5c6618959401c8b70cb994256e5d32e6970641e57bca859a6bfcf9ef1fc8082b",
+     "tiff": "5d51c19f525a74d37701669aee9de5933bd7c81dbea52dfd862bf63e60f5c1a9",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "1c418ed83b86c8c01853d112cd098764a760fac967f815db773a76eae58fe5b7",
+     "tiff": "caa0c9df57fad3901197624c921d4ad5198c83cb529206dc5310fca200140ccd",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "ded3836b19251882d2d590d99fad672410251b9fcc603dc2ee81aad0250a5c4c",
+     "tiff": "0c83161e24f98858a74009f6bf0f7143c8d8b4a3daf416382a4dd189d2ddfb82",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_edges__kodak_vision3_500t__kodak_2383__det": {
+   "input": "synth_edges",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "71389987c1390159dcc52efff1db19b6c82b407691abdb573b6c4ced0770eb32",
+     "tiff": "5983085dd8a1de5a63e063cd28dacf8fd7db6438d870c058e48a9771d4694b16",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "9ba7095c096b328ffa5e6c513c7858a5c24d758feb41b87a647d593f36df2a35",
+     "tiff": "e637eca2d6f3aa809db8a6525bf3fa5a5562edc54ceb6012c060bf60bae910f1",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "synth_gamut",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "f7bc1d9230f57d7bca5a036b6d2374fa25e7353d1fd0ba71c76f40c436fa6766",
+     "tiff": "58bc3a2c07a54a91792971a59f0d0e1878b758a147e1988ace9f17cae801142d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "4ff0d1c8537b4f7cb1dd14389c3d805b07adc37496c8ce44047357d8f6b79cc1",
+     "tiff": "bc1c6f91f43abeab20ddfae424782895e2ae96f7d05e27faafdc7c2d5654ecc8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "e5af640d11c834629fabb077c8a8741066708c7045cb44e59ef0ce95ed635290",
+     "tiff": "848fcb04f15838ab46a1957872585dcf3a9d068bf15911ea9cf32b97e6555e63",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "synth_gamut",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f3ef9e6a4ca5a8c98a6dfebdaf1281077934d919fe8a4500a8b8e476ceec40c3",
+     "tiff": "4cc5d84f568b65a74c0cde78e256799cbc483a201e0a1d76185d32d46d9c97f0",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "39a40df3e3dfc19ccad26843f00e5159f713cbe0ed544b934d6216bdcd29a88d",
+     "tiff": "accfaffec3cb317127814e1c6ecffb0c4866068fb6d2d98922a82c6622a23892",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__fujifilm_velvia_100__scan__default": {
+   "input": "synth_gamut",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "8574342434b80834286340e1b308e5dec2170319a1a0c03bcc01facf17f6a77f",
+     "tiff": "801a0185d67d4363e023bb9840a9c631a0eede4ebdc330f56e662f2aafc76350",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "004fe8dae59646f76ffb0b27783bf7a0a74fe6e8c8ae6cc0713f8c15fcf077af",
+     "tiff": "9dc5b6c1b0e0343de375810e72e3122d923661a534121db93192b4a0740ce4d3",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "bc494c6782f858a075d64a4ee0031995cec88400dba12036590ffbf79d055109",
+     "tiff": "6f676182fcb42e8a488c5c4440485da766e20103b82f7abeaadda999f2412f27",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__fujifilm_velvia_100__scan__det": {
+   "input": "synth_gamut",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "34e9e5d8eb3e2d631a73c25d68827c400ad5da20b9a248e5c8e161855649e174",
+     "tiff": "df409370bddad6626dbd7e794129633ff28259020c7a9c780a7548f7addef7a4",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c19282ce75f26465358bb1c16e78bc08009a54d60779525a9b892e467b69e920",
+     "tiff": "86e1887705815e27187aa198e473d97a15567739952c7e29254155540f64957d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_doublex__kodak_2302__default": {
+   "input": "synth_gamut",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "e904a9f48265d6f0d25aba89eff87b103e910f87ac0b8d8a119da249aeade05f",
+     "tiff": "1267455e2945943f21fe33cc8af84ecbe8dfe125e2ea9832e0f2aeb3abea2545",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "72eb5fae7ee6b446e1a101839ff1a098c4936cc248e4684f83e8cc1f4b347a70",
+     "tiff": "c0568116f8e6705da61f7c6e4154829cf74bab05f3ba14d90ff1790958b920d3",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "d64804abea6fc5288fe9ae148efa08253c0aa8f31c1b6eb4edf1cfdb8fc771bc",
+     "tiff": "c0c10e1f9dd69fe31a1f2e3be45f11aa7a90f56202cb4dd66f32ed3c6a0bdcea",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_doublex__kodak_2302__det": {
+   "input": "synth_gamut",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "b73574ec948a8371b5110de724f613240f9806ab39955fb5b06e024fb6304ec5",
+     "tiff": "729ce1cd2bf9a47ea56c23ae10694b4ba2f51afc545e380f38d2b9273b898523",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "d76edac2a84413aa6e31d39549b2ac4b10bf00285efa1144ba2aaff18adbf3a9",
+     "tiff": "4bf3148378f44e2be797b59152800372597b93d8a75c10133ad152ad34b9569d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "synth_gamut",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "fdba576492b93120dd0ef328fe5b92041bbe821310b645915141012ffee55f0c",
+     "tiff": "50793700f20bad3e7a67cc601b589e5ea8d63bbcce61140727a5d1fb506afe5b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "7966552897151659b28892452e16b1651f143fa3e035c1772d60cd9d96e98126",
+     "tiff": "803b317242b80340d328b6758889a3420b6597a8707f21c4ef03944b947a6232",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "94eacf7837ff63b8e390583386cf3928d95a75865dd37b4e2d159d55f2280d63",
+     "tiff": "34b0552d8dfa2533dc1a15ea7e8e62c2f6d374e004ec978eb7d92b538b2b775e",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "synth_gamut",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "37e2597710b4e0d806bd964e9fedcfceb95b363d0aa4874285b0b7c83fa5b395",
+     "tiff": "0987190db9adc389537d65918cc150f63c1ef2b167f40294ef6fb3ea4978a025",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "68c9488bb44fd532dc0ddbf04fe52460bf15945e09446a4ac828e5e1169695d4",
+     "tiff": "4499e7599645eb07bca51b11c2eebd18750d24ed8cc795cbc3e675425a033a28",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "synth_gamut",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d35a4561fbcbb09b50efd8475c93570c66907f22d9d6b45432c4eb8b15e79d0f",
+     "tiff": "02b851741c284ff0a553acf46332ef75826e578a596ad0b4bf09a2ac0014306b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "43540cb3b4302399a7c60d87008e34fe25aaa59d76697571f4d9715d73c13ee1",
+     "tiff": "f59a7f92c8af420e75677dfb12681c089fcb089f9af4a6c2b4c92b5181f3ff9a",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "6081a4c20d690250a8f9fb0f871a420de032a5b892d824cd17ebba63a6e60a72",
+     "tiff": "fcfb07cababcbbb9b231d46ea165a81ef39ff865a61e2b5514502fdb5f2bba2b",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "synth_gamut",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "905b5c5a464a83ce223c2bbf17d9a553b5f240f124a4f94008da0921e9d1a838",
+     "tiff": "f6ee63355585c72dac064690490ebdb59a48b7c319c34abd8352a69d74cbbd6d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "d73d11172884b348d6301034c9e302d67283f3576b21ce9f873b32c47db1eaa6",
+     "tiff": "a804474bbb2e26a57cc080198fdd03b1da8f81ca838e011f8078a80ee8a7984d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_trix__scan__default": {
+   "input": "synth_gamut",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "871b7216e791cdca3ce758e8a7a794476839d2b623e36abe77446e3c5f705636",
+     "tiff": "17bfd78d4b7ff6f93be325008d28b1c907348bab8b1eb8d6e675b8ee8c242909",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "3052b25b6076081d2149f44c243c1f8e6b501eeaaaab601cc8477951287052a2",
+     "tiff": "1c17c08314a22db15debe16da513837d3f3369282d1fa6bb3426db4bfdbf94d4",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "415d63f22fc35e7f3fa05bdaac08c5b7157de9500e09becf6371c88051383f8a",
+     "tiff": "83bc7565f2b7d909720d4e9157572706f9b8598e9112cc611e94d1ea28bc1461",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_trix__scan__det": {
+   "input": "synth_gamut",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "b8d6e26057055443c07251ad4c8b60f0f0da108a63ec3056ad39ed98c9b6086a",
+     "tiff": "47984ae1008ad14fd0378c40b63e8f53a64c9114c0ae1c5b8718152cd785797c",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "9ccfc384d87c89c0c27816622f163e6c230a63c76f8047d1cc7f77bc02d7d7a9",
+     "tiff": "f8ceedecd331a773df52717e678cb26096b5a70e5334a79fe9c825a1389ee4ce",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_vision3_500t__kodak_2383__default": {
+   "input": "synth_gamut",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "00f90aeee6258f73c16b0d4bb461ffd4d89e169a680db77245f26430de07afc4",
+     "tiff": "01588ff2e8e1e4a6f2cb51d614be2e2648106d0d27c492fc128a430aa998cb0e",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "3518a2198a83c7444f79c372b73db97714653a2672d908671abf04be92dc2d27",
+     "tiff": "3e69c8330c37de2b65079892143b6736eabfc2da256de323bbf940a21ec6a144",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "afd121a0b8fdecf11028d1fb94fce23a5a4499ba7cc2db46d082a8d19ea436c0",
+     "tiff": "29fab0770bb9e0a9a909bac1736820af6632b64d81bf13554bad3cfa1e892ce9",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_gamut__kodak_vision3_500t__kodak_2383__det": {
+   "input": "synth_gamut",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "aae9c4e711b800e7c673fc41543574343288aa42b78cbf2619abb74dc54b1410",
+     "tiff": "ebb4ba9599e1e8fe42817f642d22b2700ffb3e004ec98c98897be7451a45d1e7",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "f3362978d2877fa7e1cc11094d6d63514a7ad20326cd4ee171de1a20ffff64a8",
+     "tiff": "d431b4f459af91953f5ed6c648eb12074be10da1d16ee468f626812c164097bb",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "synth_noise",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "2e08cfc4d0a4f22eb905756ede6657e4379a35fe516b122db79f1c4ae0df591a",
+     "tiff": "f437ce03868d5b11ef7212c02d5b26d7da9f1959b3bdc541d21c8848806f369c",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "64fe4f6ca435e61c028e4f89e84d31f6ab65a3542e54433dcc93e2e807f0f9a3",
+     "tiff": "c686050d00b44b2273427ac01871b40ee322356f186869304e960476d49b6393",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "9ce889e0bc1a78ae21336493d5de047964df535d6af9e411f640aaad2ae2b6cf",
+     "tiff": "dd42699119b97f8413eda442517011779267d1bac3c2a1c7b5776f92a7f736f0",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "synth_noise",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "4d6f17ff0eb667f27ad67001d0c41428561635ae40d0e20ee214a554afbf5740",
+     "tiff": "fa0d7a47c4d493a9e8436cb393f685f8d6f7a94f5d5cb2b5734e776f8a9b2ad7",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "8cc3335fc29fe91fab1df4b64292ec5ca397346ee77480e058417df4815c3f79",
+     "tiff": "f75331c105792de9452708096315534952b287f0da29c36f3a843f9643b702cf",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__fujifilm_velvia_100__scan__default": {
+   "input": "synth_noise",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "df3415f08523cb869370430bfb66f416857a4cfc0a7e8c63fd35c26f5faf0f2b",
+     "tiff": "f0f05bda4f378c07d25899093c401ba41cfdf09f4291bc284571f059e4940b75",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "300419d2594a28cc820306561bf3d10a4da5a4faeee2eabc4e87b94427d2728b",
+     "tiff": "f6381b3409f9399bee4a2720945120a5d547e8134bf2a72b020cfd2469704247",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "407fb46dcf3baf721610e252aa67aedfc4cf799b033721ecee0e3b4dddf089c6",
+     "tiff": "e5e4c8721da276895a2e493a11e47db425aa8afc98eccbf25414303913895033",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__fujifilm_velvia_100__scan__det": {
+   "input": "synth_noise",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "3d1924192a4d92cc6d4fb10637389e620fc29c153152f77baeb2ce9463ceff5e",
+     "tiff": "bf0d142c2a8a1633e9a1285a1a916efaa17a28dff0927b7fccc36fbaa38e2da9",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "d137877b2dc0a43ecd2dcf5a2e7854d207ed70289655b567369e95dd490b8261",
+     "tiff": "30289e29e6299cc9ee7ba5a6e1dbd0fc87c47c7616f4ada4a458cdbf8f1b8dc1",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_doublex__kodak_2302__default": {
+   "input": "synth_noise",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4d4c6c3f850802f7557d72a4aa03be848539709056ed8df9facc21440e4ef167",
+     "tiff": "e6c709c12236952978274722311f790a622e959b62244043f5670e6199fd293b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "474ed2d2eac9a3595ad2d486ecc700d48970e53ecd33c0aff076cd28054464c4",
+     "tiff": "e9fc6fb8f90524a63f9ca73335e9a6df7dbdcd73a31ce8a1c9af90d7ee020534",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "255850b2492452f00b8afc8c9e0b8934354a4dbf37d4d42429b484d613f953b1",
+     "tiff": "3403ee68a268cf5b589e7962eaa6d428be3a5d9f47f045eeaba63258bc5c03ae",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_doublex__kodak_2302__det": {
+   "input": "synth_noise",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "21b5f889d7f73699c99f310a65d0f0b4b2a3eb03660f3932915c696e2c59bf14",
+     "tiff": "0fc5b51a76b271fabfb60b97e801bc2c5eba3838d717ec053360a9e1506d4890",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "ebc3e37217b9c6e558456fc62ef66946f6e6f2b3bbbee1dd7f2f0268d4868aab",
+     "tiff": "7ca7ca6f3357c8ca337bad55d900754329cec6f65a5574ec9094d52beef294c7",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "synth_noise",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "85983705ccace348d072b19e03eb36da217136f307d5e34dfab2c49203ded692",
+     "tiff": "74f5f53db902db9984eb7e57add23d23cfdd076efcb742d2c5469fa2be39e61f",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "2f54107012d6dbe2703079705704bd6055d25c0663eb1d0b4b7042c5930f7b18",
+     "tiff": "2509db895d612fa9e138a78e0f71cd76fdd0c462d369a2c75a56b047a4e3d384",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "ae4f3b7f7417824efcae8e034b7df29a1665a2bbc01f93eb6ae726715037fcd3",
+     "tiff": "8f586c105f17d8985359f6380e4efcb168dd6e66df5f34ea18e412d5f9d46844",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "synth_noise",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "a325334ef4ce690b7c0ec522d79ccd2bebd8d8ed731b402b99558e6cfe09cf1c",
+     "tiff": "66602811d57236f8aa514fb345aec9eaabc6e3ed8a97a3bf7f419a980188cee8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "f867b6bdb5d909fe1763437511de9766367698ede09a00d26fd97077cb9350f9",
+     "tiff": "62cbd810e1c0e588d5acc0012339252edcd5b32c91afdf6fdfb9c6b8ef7ef154",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__boost": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "boost",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "69b94821e67b0e2735d7ea89e5ff4607970e962d41cdd2f7a4a7e41a96ce2437",
+     "tiff": "57131b2df4c3d7f139bc5ace43942dc1bf05a22dcf071d1cb506317b2d7be256",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "daf7e0b7a5368db6cf86e9b33f46fa27cfaa3e4021e8fe8a0031d6eef09943fd",
+     "tiff": "c226ee1e1d72ebf05ed885b7c14e4687f84205111793064a1368f94176f462ec",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "aabc62ed30665e5b24777589a447b1eb13d9c9f0b948e02a3dc3b72adaceb318",
+     "tiff": "0ed2c7dffd1b48c6e95ac9ed059412fa2968565f93340980ae513eb107d23e64",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__colour": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "colour",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f2fa19b88fcf0e477b6d63b8d10f842c454ace20ca1c1160be6470d11c9e3b50",
+     "tiff": "c3a02994b6c86ce178a2d21aabd5cda41848d17d63d4709eb204ac7a9751cfd8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "cbde017223f952d9713edbdb79e83d291e51011b287594bf4078a4a298e71e63",
+     "tiff": "006a47b32d68c86a63b04d8e5c3e9649bd889d712c69b6644958e432069bf0c6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "4a6a248ab7d44f6b8a3100ae5e821c106b5c8190020d967ca296fe57e7ee43b4",
+     "tiff": "832ac25b583facf67b0c1f4f5d30b78e1e268215bbffc126d4c7dd970f06aa7f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "416a5df165e3b3c579bdf8f6847ba09a609ac112e3516b119dffcc8267ee2fac",
+     "tiff": "89a902c9e3d88f4f65a97fb1c1f4d3f21bbb6a63e229e34112eb125e9f7693d6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "79bf9155ba0aba8e709107a1bc908829cac20ce4ed277453d2ecd1a8a0cd70f3",
+     "tiff": "386aeee49563eef0646f488d5949cb8affed7b46fb4a5b6b9735611a6ff5f294",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "2f3c20eebe3ee5876e06cde63ac2d182bde01e4681f7307d05bc004edda9c6c9",
+     "tiff": "9735b1ee98b8efd5fa9e2bd49e0e82dd0411c8ac916f5aa382dad2f99c7e4f9c",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "6cf508f222a9410e677d7db65ab60495a2645d968457f9a30ac75fbb953591df",
+     "tiff": "7e2d1cee00e08887fdd8e824ee0e54b033bc3afa73e58fedef4015cd144fb300",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "52118dd2c2dc11e68b39149e539ddd8feed1ac121e5982f1cd7879c06b90ced8",
+     "tiff": "72cbd7dd4b3e551e1c06952607070a29354d0959d7455b1d180c50728247f141",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c5e3ae52cf60d227447fa675e83a8c5098db52850365f4fc7ecf289668e717aa",
+     "tiff": "76f7ef685d1ce2936ab5b38c2a109134607f55a4b7c0a722c5b5aca9a6e25fb7",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_bpm": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_bpm",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5a1abe8e41d19592070fff92b9b82de61088cc30525128bb41ba1e0842f9f178",
+     "tiff": "c21f2668a70fad72c08106edff5621423a6a0572f4c3a819cbfe3f5e960dc812",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "d47d6168f208c438483405335a206a2d568fc3fa92231030f43d3e3d77c5a53c",
+     "tiff": "f8de6fe45fd081c66e24d7976b1871ea0dee3c8b7547983e0ccc0e549185c219",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "04ff08cc5541062401d0f6a2fb172eef4a6bfdfd449d06ac61fefb6ffaf8b7fb",
+     "tiff": "ee671efe9bdae1f02a7f7c1f17d5dd112376db245cccd20fab59472a97fff691",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_cinebloom": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_cinebloom",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "575d4e878eacab437b91215404c853b0364b9d5e912bc075d38160e382a491f5",
+     "tiff": "75f946c5dd0e089460c17d84770af6cb6b0c4408d3c20e2a62b9d88787fa27f4",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "82f4b3c4199d6ac971a8db96ae06884663ebab81b881a430b500cc3ec0bda89c",
+     "tiff": "24afb4ff2cdca99a694ea40b9a2a2a23dd35cf94acd535c2d9687e417105d7a6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "819609c415446801cf4dcf924216570b0399d90a9f1a1087a2e32d953d02b718",
+     "tiff": "861c66867b16fcbb87c46bbb2059976398d8fbc861baf7dd96b2dae73d66756f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_enlarger": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_enlarger",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "9ab58f753449831631e9d70a7128d10272dd3d35ff007b455996476329683463",
+     "tiff": "1ab5f89020b9943becf96ea1aa4b521a51c57019ba57c84c28b69f50c8373c34",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "b2677b42cd7667516b5d276509d95c84d67d2d38ffefd8a8433e6891904b5431",
+     "tiff": "577b95d1106bc2860755fe11d6680b7de72481cc312d1301d5df32675eee9e88",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "656f513d48c41186c5ce9b14ee5ed3f793837cb5fbb45c69aab52d1ee902ee03",
+     "tiff": "6a5dfb4e1ea90a8ca28e6021b425fc59f0fc5133c2d6911f06266f6477205129",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__diff_glimmer": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "diff_glimmer",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "196a9ecded054b113457e09eb26de152d4c10bdfdb449a8d3d365cae15444429",
+     "tiff": "50e55642ba3dfbe9349399073ac8d97d4ccad7cb25fb360cd9e4b88e91051780",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "600d925fd9114718a1b56182ee78bf994b5fc70fb56d33b359229dec274db349",
+     "tiff": "01254c7a4ac682a07aab9c21faaaea2383baaa3109aa21f83a82219cdb262f85",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "1e229c627e381679409b800b72dd028820436382482286aa29c4e77e4eb6b236",
+     "tiff": "2293d991f92504e111e3abc3e088f344eed6111b8f75df3a6914e82f45f518af",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__dir_wide": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "dir_wide",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "8d7f75a9371f0a447ec5fa2b9420afe8b22080e4e600ced5c194e6f8409ff630",
+     "tiff": "286ecd6688c223a4bc539c9afb7ff1399feee7ffaed1b310523b0eb2309d24db",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "1344dbbee9e0f08818fbf02d1d96668ec17c145231cdac6a54b993a3cccf41e4",
+     "tiff": "e23edea6eff9be490ac7e8d05ac8173a6b38b1ebc1ace207b85eac113cac8668",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "cdd7d97acf723d15b3e287b1f4c3cc1d62cd87918ea07d2b4b5bca4c2d8d31a4",
+     "tiff": "d5852434c90c3e10aa94617fe89e6cb264ce1cf05e9db52bd2fafa2e0b69e77d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_off": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_off",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f2fa19b88fcf0e477b6d63b8d10f842c454ace20ca1c1160be6470d11c9e3b50",
+     "tiff": "c3a02994b6c86ce178a2d21aabd5cda41848d17d63d4709eb204ac7a9751cfd8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "cbde017223f952d9713edbdb79e83d291e51011b287594bf4078a4a298e71e63",
+     "tiff": "006a47b32d68c86a63b04d8e5c3e9649bd889d712c69b6644958e432069bf0c6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "4a6a248ab7d44f6b8a3100ae5e821c106b5c8190020d967ca296fe57e7ee43b4",
+     "tiff": "832ac25b583facf67b0c1f4f5d30b78e1e268215bbffc126d4c7dd970f06aa7f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_off_coarse": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_off_coarse",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f2fa19b88fcf0e477b6d63b8d10f842c454ace20ca1c1160be6470d11c9e3b50",
+     "tiff": "c3a02994b6c86ce178a2d21aabd5cda41848d17d63d4709eb204ac7a9751cfd8",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "cbde017223f952d9713edbdb79e83d291e51011b287594bf4078a4a298e71e63",
+     "tiff": "006a47b32d68c86a63b04d8e5c3e9649bd889d712c69b6644958e432069bf0c6",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "4a6a248ab7d44f6b8a3100ae5e821c106b5c8190020d967ca296fe57e7ee43b4",
+     "tiff": "832ac25b583facf67b0c1f4f5d30b78e1e268215bbffc126d4c7dd970f06aa7f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_on": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_on",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5b4b315e446a34f24a2463820a269642736c1d509c25e1fadf3212f159254836",
+     "tiff": "112a5d9180419ef1b4a4a33ef599cd07c9bbf8c86f8cda9ae22d8c094870b426",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "97b1aaff537e51feb9bf17059caa338fd3fd5b004c42e37ffdec9cd325051b4d",
+     "tiff": "f7792937a16196cc99d2bd8fa7b4712719b27e43818119ca0491a25cc8b59a7b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "b99d2aac338a88d962c5351127e3215120154877c7f730a5a269d01ea1dfdb0c",
+     "tiff": "28d2cb546454108785fe2edb9747d428fbdd45e1de24a7b0529f8220c66faca9",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__grain_on_coarse": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "grain_on_coarse",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5a823faa8286a04f16912716b8fdc5bf80366467f4eecde6d8829cf30ce84a71",
+     "tiff": "9e9a5514a15b4cc937391952a899531d983244bc752b23666adad529b96e2884",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "f77c94af20fcff87765a125e6054acd16136e5db24c43c06279406abcda50cf6",
+     "tiff": "c96832d521cc393e5f32e9e368bf32f3bab3f29a748ff6fd64cc029937b3e1ea",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "49db389c08ccb035cf291dc0ae59cc7baf77e40235665cc3e0d3229a110f2d7a",
+     "tiff": "bcdcc1cb565d1387893806f0d8dc7fc81c6c7a1b7df38cf0d1d6eb7c9da18e99",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__halation_big": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "halation_big",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "86712f0b205e4715b00f8b8b8066ec18e14d86a82ef7d9af4f2054003d589e9c",
+     "tiff": "1b8101e79b3cfe5f41b4414403c502c50490fdc87146c531db491938a78f6018",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "1442b0d83c3c826cf27a13e07366dc4e5657efc114cea075321cd6176e3ea6cb",
+     "tiff": "f79d2e51ce38d90adcc2e50af33df23c37173629a6de2b6e2d707f665dd06a71",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "9eaedf2e126489a1aca36700ee98832e55ff1b57977bfc362e5d45955a99b288",
+     "tiff": "8abb7286d834ad9c3431d63c96340e65cb6fc730e5f8ca8f1645160cd9b16c48",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_cam_large": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_cam_large",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "48e18ef0fb143bdc11f7e6135d99c665d2ba3ef2dcf0553328b29abfdb66e3e2",
+     "tiff": "e42dffed9cda4c97061e1b89b9f94b7ccddcb69cf05db8ca72f684c93adc6d4f",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "f8b77b9893e0dbbfa4e0dd3568ec0c21092faf9511d953faa6a072919e342d52",
+     "tiff": "eb1d25d5ad47bca9389165539d422e97b0f758c30415412dc80e2eef8dbfeeef",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "d2e1aeef357164b181154925cd25b44805eaa1ddd8a1df6d15dbf870824b715d",
+     "tiff": "1a3f395686610bc252a462ed6d6d1db2e79b0aa7e698e8ffcc295ea3e7a42628",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_cam_small": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_cam_small",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "ffaf78e8c438e4ba1a575cf3b8cd3f78495015dfe077bb7547d9de46b1a2b058",
+     "tiff": "74dda8a81c5b8d614884b5d1e2c45bb277b7a9dce2ad1a70419f60cfbd27bcde",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "61f8fd675f0037d70b64b4c52e2750b28520af73005b21faaa170a841e5e317a",
+     "tiff": "18bdb970cf3a871423b3872a80203a04a33e9c78d32c4cc585e49d49f4df2989",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "6d8aa726ef75ac9456c714dcf7f0d052b9bb5b4f13758fa5bff303898521f9be",
+     "tiff": "69d1167608a0f3c73a5e05f6e40cb46d52a88755aacee360435c4f797ab16c3f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_scan_large": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_scan_large",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "34ac5226c2e8a1b4220273d47823b4d8ee61275d5bae91d8b5b6c76b6e0abb83",
+     "tiff": "12a5b63f994b2972a9e7ae6d68bb0391d59feab07cf090075ab1382b1c32c71a",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "ce964adcedfbf422e5a43207dadd759b51f7430df2b3a0742eb2dfd5252e579b",
+     "tiff": "47eafab2f9e8a7f7371e22761f9e9b0130669a8b8afe9472a90b1b89d6440e64",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "b0bf240b2199d7162acb16ad6e462a305f11ca3d31508ccc5e7aa2aeee544bf9",
+     "tiff": "48a44fc200d10fb6619d039c6c9daef5bd99f4ccd0dbe59a722939ac166a0ad2",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__lens_scan_small": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "lens_scan_small",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "09601f0a183c71172c483b9915563eccfc0fbeb7d6a3b61770d83be0f3441bee",
+     "tiff": "8ef5c75177267f0d7d501c03b7c3bc2cf25c6653ff008484aeb3ba206f072096",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "33c662e96a97a9db147c292d4973344dae9af79f7f9e3c14b947c3fd293c51f2",
+     "tiff": "3248fe83ffa3144ebb123b2d903d5a1f7af35c0b30f34b6ee1d826f679579f2f",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "aec968d0b7b8bddd2b84dcf6014b0a25c3575d5983577fe31f7be2f63dc055ac",
+     "tiff": "5b42dfc9536c8587addcc2960939151f7b4018827741bbea93207bd7cd908111",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__morph": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "morph",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d7c2fefd2485cf0fbf68582871b56fe605c8e976591f0ff6e5c8e91b76b15ee5",
+     "tiff": "48a19e0da69ecfc748bcf495e40cfff6a1c8b2da517c30085a003ee25fcf42de",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "c861c51e18a9d23e7adf87766cd29c909dfaee6cb750ac5c91759c8a7ecf4bf8",
+     "tiff": "581b5ea3bc13eb1f4e61610290962a921cb1af2e6633cdeb4aa6b5f9d135c4e3",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "02260e51dd05c7362b987dd5811e7f992aed8254adc737f3e5a7fc1ebbc18886",
+     "tiff": "09c51e0c1258d768c179a9b19546500e86ffa978d5c6c42833b6328a81d2b67c",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__preflash": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "preflash",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "d8ccc956617ff92a61ebdfb706cbd53fde5f4ea538ec2de04a8d455afea77820",
+     "tiff": "2678de22b39dc54fbbc596efaf07f7fcb12d653ff768a62b02a5fb2aba2dbf49",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "c8c911d2b08f961dfcb9ffc6f977d55a489d651f421136168bee7315032832c7",
+     "tiff": "892548e7b8a23a0084826c65d73c73d32f5a66eae2f75101d00315afa520a076",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "be114b2b1b183110268b2f6c03edfa1ae4ac3fde30df886a91411ce5d63e4a70",
+     "tiff": "a5cb9387d60de872b6f53acd13bf2c25defc9220dbb16f991e934a491209b601",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__unsharp_iir": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "unsharp_iir",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4b0740de4a8d1e3d5a6a13fc7426196eff8cc757a5791984924aa80696e7bcf4",
+     "tiff": "f5037398ccabb358f3169ed9be61ac5c90ab291836504293961041c82a0e978d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "0bb42e18f4088ee9c4bfe8cd3a3626017b95d2e6aae5e7fdcfec77441057b915",
+     "tiff": "164f0794c4995ca5687b4c7784ff5c60b8d42a9d4b1e44aaa40cb065286700ef",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "a0e1406fa0b2b377761bbfd3783c4192329b69d91baa3b49032f1274d2d63b76",
+     "tiff": "9e7b9c77457a95a023391b5d9b091f6672cf2e687c7c33b05ef4af18753603c7",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__unsharp_strong": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "unsharp_strong",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "a15c861aea83a57041721a347347ce381c7b1ed592066be8a63b1b5c439de03b",
+     "tiff": "8f6955b7f5345fa013c93b2c71f268e79b1c66fb4e62005196f203525f00e05f",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "9c0c6e3f10df34c822bc94bab922ec3bd7cd3a8935d383666d7de24a84112880",
+     "tiff": "73a13d01f4d08b34a54b4980a3b7fb8f530254c79ef5bea1799436757a8981de",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "f8bbfe9e83e68b0deb0d0579371d7072cd8c923cdaa27dd66a1cd7e93c73ddd4",
+     "tiff": "32c9e19040bfbee04f7e7d9e51980426963d66f30a31ac9a5b5dd065cb1f3a02",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_trix__scan__default": {
+   "input": "synth_noise",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "cee4125e81a7ba558880f4e578d0995a2ffa6a2ea64934e6c282a14f0effbc0b",
+     "tiff": "e66f63e16d1fbdaf536444609f0e8f824425abd9a5e5370c8385fb30961fa2c9",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "0140dd319c877577eed3fa5dbe1764efe98cd6276c3e1d26b678da94cb69e2f0",
+     "tiff": "5b54bb6a8e05ec0c7332cda6173ccebb72a70027057e45ee345d5e5ce9e3fda0",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "59f148cfe899211c570fdcfb5b06f37e2944895851b41e715560f3248917a1fe",
+     "tiff": "e82bdc6600f4bd8ed187e6c579b35165f650dbc26340357c4f1788289e93cd04",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_trix__scan__det": {
+   "input": "synth_noise",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "54c784bc6958e70c93a30199e2dadc691943ebba166e501a10f6a18ff7d15b9b",
+     "tiff": "7e8f605466867535999b858e0dfbfdf0fb0b676744e67748a89c9d65f38a6c14",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "8e4c7f5108b9e304e4041e086a3acbda0e76b22458d6eb178e5007bbaebf98e9",
+     "tiff": "bd033833409d39a27a374b08becff1d70c18397dbb7a044eb7b6cba7a45030be",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_vision3_500t__kodak_2383__default": {
+   "input": "synth_noise",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "5070be0e5b8a7399b5fb05b3301a2bd2b94e9d35bac39412b45044d0091fc4dd",
+     "tiff": "b3da0888212bbd5a93b8a9180a1b23cfaa0dba899fb6fe0b9801b83e91c3ac78",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "c9197d78d13df67cdf9bfc7c7a224b3340beca90c9d3ba34f8bb47833843d039",
+     "tiff": "0813336e10ea17b134eba333e4ef0fc607429b465ae7489c0bac42a861b93315",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "a38d2081d35998fa56945ba948c24df084fd519b4dc2c8c62d10530e9c23e7a9",
+     "tiff": "b2c5eb34620b41b08d6de452997115cb4355ab33873acdcc8af66f4a89ecab18",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_vision3_500t__kodak_2383__det": {
+   "input": "synth_noise",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "f78c0d2890d2d906026c99f37767b27f120aad0166d6956199ce1f41f7ca0e7d",
+     "tiff": "573bd5967b47aa0df4d7f74d7cfaced262a37c7dd9d4afa355340d757088eadb",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "2638a3c9de2ffee27043f058efc2d3be5068f428a11305b8771bec9f537e712e",
+     "tiff": "ec725c94d0e1df236f333d4bbaf8b73711451600d952b2deac7c0f53ca26d0a2",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {
+   "input": "synth_ramp",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "93c467f7a8678bc2a3f3d8b1b1ccc1af47dd10e606f7eec01a223f2e732ce820",
+     "tiff": "4d6da07a82107edacaca0593b94d28d2797419ae22a8d7dbd917b312b378776f",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "26bf159e0d9b55c61bbcb6d50754b2a596895de52493ccc65c437cdafa9b179b",
+     "tiff": "2d15da33bc82a881aad14ec9e1408151521c65ffeee450e82a622f55d1676052",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "1c90699165c68ccda6ab717264ed572e868c666f39588d66155793b06be46f0a",
+     "tiff": "f9056129d39d8703571bb2cb9db0169e9c6bedb0605ce15238467b1a0c22dc07",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__det": {
+   "input": "synth_ramp",
+   "film": "fujifilm_pro_400h",
+   "paper": "fujifilm_crystal_archive_typeii",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "d903837a5cb102e711188685c4c160d8738a46cc8fb30b73c4710bf949623278",
+     "tiff": "ba4c706402f0ba9dcfea2a5f50061505115907ff06d33431e8c9683775cbbbd4",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "7f8a707b48cbf531a6e3635525f26ea3bfe74cdb6bbdc310d486618389f2dd50",
+     "tiff": "d4fdcf3d8f659bbdd8103232dbb35f615e5e72882e97d5c404741c009e35f544",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__fujifilm_velvia_100__scan__default": {
+   "input": "synth_ramp",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "cffe8648d80168a5cf2f6a4ffc44766601e5f33de2b97422d22ff2fa8d9837ea",
+     "tiff": "954598107687814eb34443c2e5f749bbb619ec9e92e1e3b5538e6c9810cfe6d4",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "74d8be6907494894f8b2aeacfee2c083415697e09b41282130ebc1dbe5aed78a",
+     "tiff": "9aea7f6e62441c728da128d0d0f910e6a8c5a56a4dae32ac5a990ade05f55085",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "978c6b4408bf84bde3613a04cf3fc37b7cc6dd17bf0655ba2d20a377a5b38a1b",
+     "tiff": "cd59afd360962ed44ba7279e5c26ecf5ddfcb23533aa4b576d5eca323d785a50",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__fujifilm_velvia_100__scan__det": {
+   "input": "synth_ramp",
+   "film": "fujifilm_velvia_100",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "1b59bc43bdd2de3be73871c99e046388822e005ef9b1eaf266cd79a5163b7531",
+     "tiff": "52c2521695cc51e3be9852bddab4cc80501244c6cf7348442f166d4d9394f139",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c9f58193fbccb841fe5eadb637171ffe50e4f21df371708f231c82b047c30999",
+     "tiff": "56f522fb69b1fb5ef97a9ed1ad18dbd85e8c6cf898af5c45b6fe1ce54f7d3e87",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_doublex__kodak_2302__default": {
+   "input": "synth_ramp",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "b85d5b154265d8a084483aa3cb4e0d2e10cfa3a1058b0f13f480e91a2069398a",
+     "tiff": "4901ad6e5ffaee42e4bca9576642240d5f1505f14f6d9d1c77a0d1a9d4214953",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "647eb3e9e7abf192c65fe30f407db8cee4f4088d3940057daa69a11e72f710a1",
+     "tiff": "213d3562eea4154820c4a8e5df22866673406d5a40ef45fa9f6f7aa9034bc067",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "42ae7864da6a1a0fde082659d35bda9a977adc3a971ac42bc26907c513f09c7d",
+     "tiff": "ba2dd731951fb3f41fcfc7139ca9b29e4546bf7c291fb34a91f32c6749b58fc8",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_doublex__kodak_2302__det": {
+   "input": "synth_ramp",
+   "film": "kodak_doublex",
+   "paper": "kodak_2302",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "a36fedd6d3e3d1f34401eed44ef95be30e9a688f55384e0621ad6bb0415e609b",
+     "tiff": "9b3ebf870e3c9c0999fd625e44a95e24764a0d356e5ce7f3231788efa8cd1a82",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "9b49a4ca354049e9c1392644cfcdae41fb373af094cc6d475597a0258e8d934e",
+     "tiff": "86d15bb3c30916dc5a6cf7021900194a4ad2f0774306846cf3550ab77651d8e6",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_gold_200__kodak_portra_endura__default": {
+   "input": "synth_ramp",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "4aed5e528ad638f5dd62d33ae1d5a7ae9dbb705b129f5e169bf31bc944b36c29",
+     "tiff": "e0bb9a2d7b0560eeeb74fb4d695a17dc88318ab83b75eaaaec0b4be0ccae8554",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "eac807b60fdf15b864a1192dadcedc16f355fe17986cf7b0af455bcbe9ea5a83",
+     "tiff": "43f4b0664d54d66e074fef7a556bdcd9b7f365794255570aeeb8ee6988e2e088",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c21c335cd44bada25a92da7ff3f47cd34a6d41cfdf9d697a75538edb5b034a9f",
+     "tiff": "16c4cf0f6ef3fd64a1e4ec07e43997186fae646066a1dea7f5dcae8c974331f1",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_gold_200__kodak_portra_endura__det": {
+   "input": "synth_ramp",
+   "film": "kodak_gold_200",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "c4768928c3e9f84ffac737d8eba79c6d1ad7ecd6f67d86ac901d370d1bc355e1",
+     "tiff": "4a487c8f253c548337d46789e7aa0b593ea704cf90c4d614a2810601c14dfce1",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "c7b6f2e0632051fa82a8db4e54d5119416548c690925afec33c36581e52d9293",
+     "tiff": "639da30b2d53f1141f5626e57f5c896585ea819cf69ab35b705ab37bc2320c7a",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_portra_400__kodak_portra_endura__default": {
+   "input": "synth_ramp",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "0c99dceedb0f3f14b5f4ea6fbf458b23f7f88a2814b60d7f49374445097d109e",
+     "tiff": "5df8c652862dcb4c595a6fc51f3c8b08f00ec3db12fc6bf2b0ce1d9736ad7265",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "a3ab85ec854fc8c0cab16e3b16373eaa22dad6d4430e037cfce0b559ad74a93c",
+     "tiff": "54ee62befbedb6177d78ffb848096c394fa27eaa3558967a3fda66564f52413b",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "645561ac7145b19d8e9b13718e4d29907d051157f47f2db58049c447ecd89332",
+     "tiff": "f9c30f6c2e7f7367a9caae75400335f4e9c5585cd09d3004e90d2e5bdc907690",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_portra_400__kodak_portra_endura__det": {
+   "input": "synth_ramp",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "be92fb7caec10c901e6999ffb52d807c017ff5c8a396047dddbe597484e24834",
+     "tiff": "131d2999b621b27c2edec8e34bbd01e08a69ec20fbf47ab022437c1fe6d07d20",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "3b9df0910678466b6388b576145b9e99a55fa910fcad9d0f16a2be48dfdfb92e",
+     "tiff": "6483de129c2b33d637694c825304ef52ec7a69d7cfdc885e1b4f862236ceb1d2",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_trix__scan__default": {
+   "input": "synth_ramp",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "fc34f443f9e238d8dc88c41b7b4a5cf67fb97dc122c99589852551af61f0766c",
+     "tiff": "8bd2f3d713bd9667b85372894fbad82075521311b72d7dd767e0c61cb99e206d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "50da97949312ea453aa7b0f879373139fc1a8cb0ede411db5d86fd303a0370a1",
+     "tiff": "ead8c40f6f3dc81b1510739658704f46f436769ab8a5d4b51c110531b6558df1",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "5288bd70d107b73ed43efa9ad09751cbfe593dcbe1e1116b4676269fca19ba35",
+     "tiff": "fdca19398fa9fb928c696e2e3ff17c6fac381ede3c9c69e56dda94f4dd2adc61",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_trix__scan__det": {
+   "input": "synth_ramp",
+   "film": "kodak_trix",
+   "paper": "scan",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "02e7d0173203fd8ce576546a172b90038ea4630e59a090d0dcbab08ad96ca919",
+     "tiff": "fc3fd5f995b657e6460d4c885474d945c2461498dfa9e8dbeced0082c9946d7d",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "faaf6522e27fcc4e66ca844e47ec4ba9b3096eab54e84f9c9eb34d5250d32312",
+     "tiff": "6abcccbf5c6bc16e4079a3349068da17f7013e4fc710e5e9f2234681d4252c4f",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_vision3_500t__kodak_2383__default": {
+   "input": "synth_ramp",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "default",
+   "layout": null,
+   "grain": true,
+   "engines": {
+    "f64": {
+     "f64": "108a2e7f1a9128005cdda8fc7db517072928d8d6213d8af428969761611988dd",
+     "tiff": "129c8ccbc01bb9e8ff18ef96d84cbff656ef0a6f65bd533c3c6a820bad18a042",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "dc0e1060cc6aecbfaa4ae92a1ae4470686abf05adc6b1647b71a4ef86876b0bd",
+     "tiff": "2159a6052a9427c01e5f32cd0d16fccb90a74fc1e3f244f2882910b9add2e199",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "15142cf3e7088dbcb29ca0757859e9502b901f6b318106dff0278dcd3bb6bc63",
+     "tiff": "c9d972911fa2e4c774814417ed1febe9314272e4019cb8edd30831d9b000b139",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  },
+  "synth_ramp__kodak_vision3_500t__kodak_2383__det": {
+   "input": "synth_ramp",
+   "film": "kodak_vision3_500t",
+   "paper": "kodak_2383",
+   "preset": "det",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "dfcf5f5d90a4025024d2056dcf570919fad939920d6672b52be289c1dd259932",
+     "tiff": "6f2763c6d0dc62a7be5b9e6e82f4027c8737a2db9ecbdfea69674889bea378f1",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "4abd79771691f9c784c2fe83bd38c12cb77e054d907ffdbf29de9487a7d9a785",
+     "tiff": "699e25f9ca05822ade0413c13bb1c46665a83b26d744e1c34f4440fbe33abc6d",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "NVIDIA GeForce GTX 1660 SUPER",
+     "gpu_backend": "Vulkan",
+     "resident": true
+    }
+   }
+  }
+ }
+}

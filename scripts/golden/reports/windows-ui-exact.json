@@ -1,59 +1,59 @@
 {
  "a": {
-  "label": "windows-backend-report",
+  "label": "windows-gtx1660s-vulkan",
   "platform": "Windows-10-10.0.19041-SP0",
   "python": "3.9.2",
   "cpu": "AMD Ryzen 5 3600 6-Core Processor",
   "cpu_count": 12,
   "threads": "all",
-  "git_rev": "f27722c584bf30ef984262c7c2e69c3d0696d618",
+  "git_rev": "dd870f01539246cc5236dc165e29e93ec0481626",
   "git_dirty_hash": null,
-  "cargo_lock": "2c3e05cad6560cfdb26e019b8362fa2022ece1af2fdc41b521d4d8de5678d766",
+  "cargo_lock": "ca036cfd8ed5a1d7f71e835b4465127f65e27b97b888a630d8ca9fb6fbb158a2",
   "rustc": null,
   "binaries": {
    "f64": {
-    "sha256": "15ba456ad2723c4424b3584012752401ac5d902a9498c4d8c47b54c187bc7ebe",
+    "sha256": "1556baaaa98c4c25ea5de18baefbfaf87901ad1be9ff3ee8967bca4da20c5a05",
     "arch": "x86_64"
    },
    "f32cpu": {
-    "sha256": "68527fa997c8760a21e46a9ffdc07982975468c124162384322df5bca4a9bb03",
+    "sha256": "3a350456c1fd1a29caa77091012cd27852013744d8a4e9346a0ba22b926766b3",
     "arch": "x86_64"
    },
    "gpu": {
-    "sha256": "68527fa997c8760a21e46a9ffdc07982975468c124162384322df5bca4a9bb03",
+    "sha256": "3a350456c1fd1a29caa77091012cd27852013744d8a4e9346a0ba22b926766b3",
     "arch": "x86_64"
    }
   },
-  "data_dir": "cfac1b286e3f34b500dc22ea4fe4520ff1dc2a1e92a30eea2ec93f800407908d",
-  "presets_dir": "4f56a89d88180cc199e72d466e3a8e28c440dc1f820d0c0222bd7d9d02b45b27"
+  "data_dir": "6400e4b53a5841585677dd25d5d56bdedce29ede2302f77ef8e4cdde1b65fc5e",
+  "presets_dir": "4c9fa55e767c217b46fbb34d26ed1409229c2dc4cf2e78c77dc66e938ce831b6"
  },
  "b": {
   "label": "windows-ui",
   "platform": "Windows-10-10.0.19041-SP0",
   "python": "3.9.2",
-  "cpu": "AMD64 Family 23 Model 113 Stepping 0, AuthenticAMD",
+  "cpu": "AMD Ryzen 5 3600 6-Core Processor",
   "cpu_count": 12,
   "threads": "all",
-  "git_rev": "",
+  "git_rev": "dd870f01539246cc5236dc165e29e93ec0481626",
   "git_dirty_hash": null,
-  "cargo_lock": "2c3e05cad6560cfdb26e019b8362fa2022ece1af2fdc41b521d4d8de5678d766",
-  "rustc": null,
+  "cargo_lock": "ca036cfd8ed5a1d7f71e835b4465127f65e27b97b888a630d8ca9fb6fbb158a2",
+  "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: x86_64-pc-windows-msvc\nrelease: 1.93.1\nLLVM version: 21.1.8",
   "binaries": {
    "f64": {
-    "sha256": "15ba456ad2723c4424b3584012752401ac5d902a9498c4d8c47b54c187bc7ebe",
+    "sha256": "1556baaaa98c4c25ea5de18baefbfaf87901ad1be9ff3ee8967bca4da20c5a05",
     "arch": "x86_64"
    },
    "f32cpu": {
-    "sha256": "68527fa997c8760a21e46a9ffdc07982975468c124162384322df5bca4a9bb03",
+    "sha256": "3a350456c1fd1a29caa77091012cd27852013744d8a4e9346a0ba22b926766b3",
     "arch": "x86_64"
    },
    "gpu": {
-    "sha256": "68527fa997c8760a21e46a9ffdc07982975468c124162384322df5bca4a9bb03",
+    "sha256": "3a350456c1fd1a29caa77091012cd27852013744d8a4e9346a0ba22b926766b3",
     "arch": "x86_64"
    }
   },
-  "data_dir": "cfac1b286e3f34b500dc22ea4fe4520ff1dc2a1e92a30eea2ec93f800407908d",
-  "presets_dir": "4f56a89d88180cc199e72d466e3a8e28c440dc1f820d0c0222bd7d9d02b45b27"
+  "data_dir": "6400e4b53a5841585677dd25d5d56bdedce29ede2302f77ef8e4cdde1b65fc5e",
+  "presets_dir": "4c9fa55e767c217b46fbb34d26ed1409229c2dc4cf2e78c77dc66e938ce831b6"
  },
  "cases": {
   "photo_7858115920__fujifilm_pro_400h__fujifilm_crystal_archive_typeii__default": {

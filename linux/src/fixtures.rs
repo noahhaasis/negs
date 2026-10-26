@@ -36,6 +36,16 @@ pub const GROUPS: &[Group] = &[
     Group {
         name: "Grain",
         knobs: &[
+            // Per-stock preset lanes: the catalog's preset is their default.
+            Knob("Red granularity", 0., 80., 0.1, 0., ""),
+            Knob("Green granularity", 0., 80., 0.1, 0., ""),
+            Knob("Blue granularity", 0., 80., 0.1, 0., ""),
+            Knob("Red uniformity", 0., 1., 0.01, 0., ""),
+            Knob("Green uniformity", 0., 1., 0.01, 0., ""),
+            Knob("Blue uniformity", 0., 1., 0.01, 0., ""),
+            Knob("Coarse grain size", 0.05, 2., 0.01, 0.05, ""),
+            Knob("Medium grain size", 0.05, 2., 0.01, 0.05, ""),
+            Knob("Fine grain size", 0.05, 2., 0.01, 0.05, ""),
             Knob("Dye clouds", 0., 5., 0.01, 2., "µm"),
             Knob("Post blur", 0., 3., 0.01, 0., "px"),
             Knob("Sharpen amount", 0., 3., 0.01, 1.5, ""),
@@ -62,6 +72,16 @@ pub const GROUPS: &[Group] = &[
             Knob("Diffusion", 0., 100., 0.1, 10., "µm"),
             Knob("Tail", 0., 400., 1., 0., "µm"),
             Knob("Tail weight", 0., 1., 0.01, 0., ""),
+        ],
+    },
+    Group {
+        name: "Film Base",
+        knobs: &[
+            Knob("Density", 0., 2., 0.01, 1., ""),
+            Knob("Tilt", -1., 1., 0.01, 0., ""),
+            Knob("Cyan", 0., 2., 0.01, 1., ""),
+            Knob("Magenta", 0., 2., 0.01, 1., ""),
+            Knob("Yellow", 0., 2., 0.01, 1., ""),
         ],
     },
     Group {
@@ -101,6 +121,15 @@ pub const GROUPS: &[Group] = &[
         ],
     },
     Group {
+        name: "Print Base",
+        knobs: &[
+            Knob("Density", 0., 2., 0.01, 1., ""),
+            Knob("Cyan", 0., 2., 0.01, 1., ""),
+            Knob("Magenta", 0., 2., 0.01, 1., ""),
+            Knob("Yellow", 0., 2., 0.01, 1., ""),
+        ],
+    },
+    Group {
         name: "Glare",
         knobs: &[
             Knob("Amount", 0., 0.2, 0.001, 0.02, ""),
@@ -131,6 +160,10 @@ pub fn state() -> crate::model::State {
     let mut state = crate::model::State::default();
     for group in GROUPS {
         for k in group.knobs {
+            // Preset lanes stay unset until edited, so the film's preset applies.
+            if crate::parameters::grain_lane(&format!("{}.{}", group.name, k.0)).is_some() {
+                continue;
+            }
             state.values.insert(format!("{}.{}", group.name, k.0), k.4);
         }
     }
