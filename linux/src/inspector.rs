@@ -57,6 +57,7 @@ pub fn number(
         3
     };
     let spin = gtk::SpinButton::new(Some(&adjustment), knob.3, digits);
+    wheel_only_when_focused(&spin);
     spin.set_width_chars(5);
     spin.set_numeric(true);
     spin.update_property(&[gtk::accessible::Property::Label(&format!(
@@ -94,6 +95,7 @@ pub fn number(
     }
     outer.append(&line);
     let scale = gtk::Scale::new(gtk::Orientation::Horizontal, Some(&adjustment));
+    wheel_only_when_focused(&scale);
     scale.set_draw_value(false);
     scale.set_hexpand(true);
     scale.update_property(&[gtk::accessible::Property::Label(knob.0)]);
@@ -213,6 +215,37 @@ pub fn number(
         }
     ));
     (row, adjustment)
+}
+
+// Disable only the native wheel controllers while unfocused, letting events
+// bubble to the scrolled panel. Consuming them would leave dead spots in it.
+fn wheel_only_when_focused(widget: &impl IsA<gtk::Widget>) {
+    let controllers = widget.observe_controllers();
+    let scrolls: Vec<_> = (0..controllers.n_items())
+        .filter_map(|i| {
+            controllers
+                .item(i)?
+                .downcast::<gtk::EventControllerScroll>()
+                .ok()
+        })
+        .map(|scroll| {
+            let phase = scroll.propagation_phase();
+            scroll.set_propagation_phase(gtk::PropagationPhase::None);
+            (scroll, phase)
+        })
+        .collect();
+    let focus = gtk::EventControllerFocus::new();
+    // SpinButton delegates focus to its text child, so track the whole subtree.
+    focus.connect_contains_focus_notify(move |focus| {
+        for (scroll, phase) in &scrolls {
+            scroll.set_propagation_phase(if focus.contains_focus() {
+                *phase
+            } else {
+                gtk::PropagationPhase::None
+            });
+        }
+    });
+    widget.add_controller(focus);
 }
 
 fn list() -> gtk::ListBox {
