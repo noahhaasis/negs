@@ -147,6 +147,8 @@ The tested app is installed at `~/.local/bin/negs`. The local Arch package is
 See `docs/linux-core-validation.md` for numerical gates, real desktop evidence,
 performance and installation results, and `docs/linux-ui-validation.md` for the
 preceding UI-only measurements. These are separate experiments.
+The current main-merge checks and Vulkan correction are recorded separately in
+[linux-post-main-validation.md](linux-post-main-validation.md).
 
 The transferred historical Mac reference predates the DIR-gamma correction;
 it cannot establish same-revision Mac/Linux parity. CPU shared-stream grain

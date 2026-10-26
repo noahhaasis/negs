@@ -22,6 +22,7 @@ SOURCE_PATHS = [
     'docs/linux-ui-parity.md', 'docs/linux-ui-validation.md',
     'docs/linux-border-performance.md',
     'docs/linux-release.md',
+    'docs/linux-post-main-validation.md',
 ]
 
 

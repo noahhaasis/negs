@@ -14,6 +14,7 @@ import time
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--runs", type=int, default=5)
+parser.add_argument("--lifetime-ms", type=int, help="Keep each launch open long enough for a full-resolution developed image")
 parser.add_argument("--benchmark", action="store_true")
 parser.add_argument("--border-benchmark", action="store_true", help="Measure Film/35mm texture selection and reuse")
 parser.add_argument("--border-style", type=int, choices=range(4), help="Border for the post scene: Solid=0, Film=1, Keyline=2, 35mm=3")
@@ -25,6 +26,8 @@ parser.add_argument("--binary", type=Path, default=root / "target/linux-ui/relea
 parser.add_argument("--photo", type=Path, help="Real source to open instead of the UI demo")
 parser.add_argument("--out", type=Path, default=root / "target/linux-validation/ui-performance")
 args = parser.parse_args()
+if args.lifetime_ms is not None and not 1000 <= args.lifetime_ms <= 120000:
+    parser.error('--lifetime-ms must be between 1000 and 120000')
 args.out.mkdir(parents=True, exist_ok=True)
 
 def hypr(*cmd):
@@ -42,10 +45,11 @@ for mode in variants:
     for run in range(args.runs):
         name = f"{mode}-{run:02}"
         output = args.out / f"{name}.json"
+        lifetime_ms = args.lifetime_ms or (12000 if args.benchmark or args.border_benchmark else 5000)
         env = dict(os.environ, NEGS_PROFILE_DIR=str(args.out / "profile"),
                    NEGS_STARTUP_REPORT=str(output), NEGS_APPEARANCE=args.appearance,
                    NEGS_INSPECTOR_MODE=mode, NEGS_UI_SCENE=args.scene,
-                   NEGS_QUIT_AFTER_MS="12000" if args.benchmark or args.border_benchmark else "5000")
+                   NEGS_QUIT_AFTER_MS=str(lifetime_ms))
         if args.benchmark:
             env["NEGS_UI_BENCHMARK"] = "1"
         if args.border_benchmark:
@@ -84,7 +88,7 @@ for mode in variants:
                     subprocess.run(["wtype", "-k", "F8"], check=True, timeout=2)
             peak_rss_kib = 0
             maximum_threads = 0
-            deadline = time.monotonic() + 18
+            deadline = time.monotonic() + max(18, lifetime_ms / 1000 + 6)
             while p.poll() is None and time.monotonic() < deadline:
                 try:
                     fields = dict(line.split(":", 1) for line in Path(f"/proc/{p.pid}/status").read_text().splitlines() if ":" in line)

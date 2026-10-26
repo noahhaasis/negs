@@ -4,8 +4,9 @@ The GTK app, persistent engine, f32 Fast exporter and f64 Reference exporter
 were integrated and validated in local Arch packages and per-user bundles
 before the experimental engine changes merged from main. The subsequent Linux
 compatibility update replaces removed grain fields and passes the live-helper
-schema check. The new desktop audit passes, but numerical GPU-versus-f64
-validation currently fails and blocks release.
+schema check. The desktop audit passes. Numerical validation exposed a Vulkan
+border-indexing bug; the correction passes all 76 GPU-versus-f64 quality cases.
+See [the post-merge validation report](linux-post-main-validation.md).
 
 ## Work before the first public Linux release
 
@@ -43,13 +44,14 @@ Local audit on 2026-10-26: the offline release build passed, all five release
 generator tests passed, and the rebuilt helper/exporters passed 21 CPU smoke
 requests. The initial live helper schema failure on the removed
 `film_render.grain.agx_particle_area_um2` binding was corrected, and the gate
-now passes. The new real Wayland/RAW audit passes all 11 checks. A full new
-matrix completes all 484 renders with no failures; however, only 1/76 of its
-GPU-versus-f64 quality comparisons passes, with the largest errors at image
-borders. This is a release blocker, not a passing numerical result. Reports
-are in `target/linux-validation/post-main/`. The GitHub Arch container job is
-being prepared; Docker access on this machine is unavailable. No package was
-published.
+now passes. The new real Wayland/RAW audit passes all 11 checks. The initial
+GPU quality result was only 1/76; the corrected FIR shaders now pass 76/76,
+with a worst Delta E00 of 0.001555. All 19 GPU unit tests pass. Final exact
+repeatability is 484/484 identical; final package checks are in progress.
+Package validation also found and fixed a concurrent scratch-lock publication
+race, covered by a 16-thread regression test. Initial failing evidence is
+preserved under `target/linux-validation/post-main/`. The clean GitHub runner
+build awaits approval to push the source branch. No package was published.
 
 [Linux workflow](../.github/workflows/linux.yml) runs on relevant pull requests,
 manual dispatch, and as part of [Release](../.github/workflows/release.yml).
