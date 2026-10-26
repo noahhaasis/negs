@@ -77,7 +77,8 @@ pub fn number(
         adjustment,
         move |_| adjustment.set_value(knob_default)
     ));
-    line.append(&reset);
+    let reset_slot = reset_slot(&reset);
+    line.append(&reset_slot);
     let double = gtk::GestureClick::new();
     double.connect_pressed(glib::clone!(
         #[weak]
@@ -104,12 +105,12 @@ pub fn number(
     reset_menu(&row, &reset);
     let update_modified = glib::clone!(
         #[weak]
-        reset,
+        reset_slot,
         #[weak]
         label,
         move |a: &gtk::Adjustment| {
             let modified = (a.value() - knob_default).abs() > 1e-6 * (1. + knob_default.abs());
-            reset.set_visible(modified);
+            reset_slot.set_visible_child_name(if modified { "reset" } else { "empty" });
             if modified {
                 label.add_css_class("modified");
             } else {
@@ -512,7 +513,8 @@ pub fn build(ui: &Rc<Editor>) {
                 "Reset {} switch",
                 group.name
             ))]);
-            expander.add_suffix(&reset);
+            let reset_slot = reset_slot(&reset);
+            expander.add_suffix(&reset_slot);
             reset.connect_clicked(glib::clone!(
                 #[weak]
                 ui,
@@ -531,7 +533,11 @@ pub fn build(ui: &Rc<Editor>) {
             ui.rules.borrow_mut().push(Box::new(glib::clone!(
                 #[strong]
                 key,
-                move |s| reset.set_visible(flag(s, &key, default) != default)
+                move |s| reset_slot.set_visible_child_name(if flag(s, &key, default) != default {
+                    "reset"
+                } else {
+                    "empty"
+                })
             )));
 
             switch.connect_active_notify(glib::clone!(
@@ -1038,6 +1044,17 @@ Resizes before film simulation. {note}",
     }));
 }
 
+// A homogeneous stack measures both children, reserving the reset button's space
+// even at the default value. The empty page has no focus or pointer target.
+fn reset_slot(reset: &gtk::Button) -> gtk::Stack {
+    let slot = gtk::Stack::new();
+    slot.set_valign(gtk::Align::Center);
+    slot.add_named(reset, Some("reset"));
+    slot.add_named(&gtk::Box::new(gtk::Orientation::Horizontal, 0), Some("empty"));
+    slot.set_visible_child_name("empty");
+    slot
+}
+
 pub(crate) fn reset_menu(widget: &impl IsA<gtk::Widget>, reset: &gtk::Button) {
     let widget = widget.as_ref().clone();
     let click = gtk::GestureClick::new();
@@ -1052,7 +1069,7 @@ pub(crate) fn reset_menu(widget: &impl IsA<gtk::Widget>, reset: &gtk::Button) {
             popover.set_parent(&widget);
             popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
             let button = gtk::Button::with_label("Reset to Default");
-            button.set_sensitive(reset.is_visible());
+            button.set_sensitive(reset.is_visible() && reset.is_child_visible());
             button.connect_clicked(glib::clone!(
                 #[weak]
                 reset,
@@ -1076,7 +1093,8 @@ fn choice_reset(ui: &Rc<Editor>, row: &impl IsA<adw::ActionRow>, key: &str, defa
     reset.add_css_class("flat");
     reset.set_tooltip_text(Some("Reset to Default"));
     reset.update_property(&[gtk::accessible::Property::Label(&format!("Reset {key}"))]);
-    row.add_suffix(&reset);
+    let reset_slot = reset_slot(&reset);
+    row.add_suffix(&reset_slot);
     let key = key.to_string();
     let default = default.to_string();
     reset.connect_clicked(glib::clone!(
@@ -1099,7 +1117,7 @@ fn choice_reset(ui: &Rc<Editor>, row: &impl IsA<adw::ActionRow>, key: &str, defa
     reset_menu(&widget, &reset);
     ui.rules.borrow_mut().push(Box::new(move |s| {
         let modified = s.choices.get(&key).is_some_and(|v| v != &default);
-        reset.set_visible(modified);
+        reset_slot.set_visible_child_name(if modified { "reset" } else { "empty" });
         if modified {
             widget.add_css_class("modified");
         } else {
