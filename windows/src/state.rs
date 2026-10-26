@@ -120,6 +120,17 @@ pub struct Stock {
 /// catalog applies (`Stock.grainFields` in `Parameters.swift`).
 pub const GRAIN_STOCK_FIELDS: [&str; 4] = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"];
 
+/// The DIR gammas and halation baseline, null until set so the film's presets
+/// apply (`Stock.dirHalationPaths` in `Parameters.swift`).
+pub const DIR_HALATION_STOCK_PATHS: [&str; 6] = [
+    "film_render.dir_couplers.gamma_samelayer_rgb",
+    "film_render.dir_couplers.gamma_interlayer_r_to_gb",
+    "film_render.dir_couplers.gamma_interlayer_g_to_rb",
+    "film_render.dir_couplers.gamma_interlayer_b_to_rg",
+    "film_render.halation.halation_strength",
+    "film_render.halation.halation_first_sigma_um",
+];
+
 /// A slider on one lane of a grain preset array:
 /// `film_render.grain.<field>.<index>`.
 pub fn grain_lane(path: &str) -> Option<(&str, usize)> {
