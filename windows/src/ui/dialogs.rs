@@ -269,6 +269,8 @@ struct Messages {
 struct Encoding {
     format: Cell<OutputFormat>,
     chosen_space: Cell<usize>,
+    /// The colour space the preview develops in.
+    preview_space: String,
     png_depth: Cell<u32>,
     tiff_depth: Cell<u32>,
     /// Set while the controls are being brought in line, so their
@@ -333,7 +335,7 @@ impl SaveEvents {
                 None => &self.messages.preview,
             };
             let summary = size.summary().map(|s| format!(" {s}.")).unwrap_or_default();
-            let space = self.encoding.settings(customize).summary(self.export).map(|s| format!(" {s}.")).unwrap_or_default();
+            let space = self.encoding.settings(customize).summary(self.export, &self.encoding.preview_space).map(|s| format!(" {s}.")).unwrap_or_default();
             let text = wide(format!("{lead}{}{summary}{space}", self.extras));
             let _ = customize.SetControlLabel(MESSAGE, pcwstr(&text));
             let _ = customize.SetControlState(PIXELS, if size.edge == Edge::Full { CDCS_VISIBLE } else { CDCS_ENABLEDVISIBLE });
@@ -509,6 +511,7 @@ pub fn save(app: &mut App, export: bool) {
     let encoding = Rc::new(Encoding {
         format: Cell::new(format),
         chosen_space: Cell::new(COLOR_SPACES.iter().position(|s| *s == prefs.color_space).unwrap_or(0)),
+        preview_space: model.preview_space().to_string(),
         png_depth: Cell::new(depth(prefs.png_bit_depth)),
         tiff_depth: Cell::new(depth(prefs.tiff_bit_depth)),
         updating: Cell::new(false),
@@ -629,4 +632,5 @@ pub fn save(app: &mut App, export: bool) {
     } else {
         app.model.save_preview(path, size, settings);
     }
+    app.model.follow_preview_space();
 }

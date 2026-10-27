@@ -27,6 +27,9 @@ pub struct Frame {
     pub working_width: f64,
     pub working_height: f64,
     pub raw: bool,
+    /// The helper's `display_color_space`; records from before it are sRGB.
+    #[serde(default)]
+    pub display_space: String,
     #[serde(skip)]
     pub pixels: Vec<u8>,
 }
@@ -178,7 +181,8 @@ mod tests {
         let pixels = vec![1, 2, 3, 255, 30, 40, 50, 255];
         let frame = Frame {
             width: 2, height: 1, photo_width: 4000.0, photo_height: 2000.0, source_width: 2000.0, source_height: 1000.0,
-            working_width: 8000.0, working_height: 4000.0, raw: true, pixels: pixels.clone(),
+            working_width: 8000.0, working_height: 4000.0, raw: true,
+            display_space: crate::picture::WIDE_DISPLAY_SPACE.into(), pixels: pixels.clone(),
         };
         let cache = RenderedPreviewCache::new(file.clone());
         cache.save("settings".into(), frame);
@@ -188,6 +192,7 @@ mod tests {
         assert_eq!(loaded.photo_width, 4000.0);
         assert_eq!((loaded.source_width, loaded.working_width), (2000.0, 8000.0));
         assert!(loaded.raw);
+        assert_eq!(loaded.display_space, crate::picture::WIDE_DISPLAY_SPACE);
         assert!(read(&file, "other settings").is_err());
         let mut bytes = std::fs::read(&file).unwrap();
         *bytes.last_mut().unwrap() ^= 1;

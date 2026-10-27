@@ -215,6 +215,7 @@ pub fn option_title(option: &str) -> String {
         "multi_zone" => "Multi-Zone",
         "highlight_weighted" => "Highlight-Weighted",
         "as_shot" => "As Shot",
+        "auto" => "Automatic",
         "daylight" => "Daylight",
         "tungsten" => "Tungsten",
         "custom" => "Custom",
@@ -490,6 +491,12 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
 ];
 
 pub const METERING: &[&str] = &["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"];
+/// How a non-RAW photograph's values are read (`io.input_interpretation`).
+pub const INPUT_MODES: &[&str] = &["auto", "assume", "manual"];
+/// The colour spaces Assume offers, as `spektrafilm-io::colour::ASSUMABLE`.
+pub const ASSUMED_SPACES: &[&str] = &["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020"];
+/// Manual: the pipeline's own input colour space, as Negs 0.8 used it.
+pub const MANUAL_SPACES: &[&str] = &["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020", "ACES2065-1", "ACEScg"];
 pub const WHITE_BALANCE: &[&str] = &["as_shot", "daylight", "tungsten", "custom"];
 
 pub const CAMERA_SLIDERS: &[Adjustment] = &[

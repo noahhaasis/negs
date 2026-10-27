@@ -151,6 +151,13 @@ impl Raster {
                 uv = [uv[1], 1.0 - uv[0]];
             }
             let mut color = sample(rgba, w, h, uv, &out.decode);
+            if p.extra[1] > 0.5 {
+                let m = crate::gpu::REC2020_TO_SRGB;
+                let rgb = [color[0], color[1], color[2]];
+                for (c, row) in m.iter().enumerate() {
+                    color[c] = row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2];
+                }
+            }
             if p.shown[3] > 0.5
                 && (t[0] < p.clip[0]
                     || t[1] < p.clip[1]
