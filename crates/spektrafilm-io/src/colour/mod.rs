@@ -6,7 +6,7 @@
 //!
 //! Camera RAW files are developed by the RAW decoders into this
 //! representation (scene-referred). For JPEG, PNG and TIFF the loader decides
-//! what the stored values mean ([`InputInterpretation::Auto`]), in this order:
+//! what the stored values mean ([`InputMode::Auto`]), in this order:
 //!
 //! 1. PNG `cICP` (which PNG says takes precedence over everything else);
 //! 2. an embedded ICC profile that matches the pixels (RGB or grey);
@@ -37,20 +37,16 @@ use spektrafilm_math::precision::{Scalar, from_f64};
 
 /// How a non-RAW input's pixel values are read. RAW files always use their
 /// decoder's development.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub enum InputInterpretation {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputMode {
     /// The file's profile and metadata, with the documented fallbacks.
     #[default]
     Auto,
     /// For untagged or wrongly tagged files: read the values as encoded in
-    /// `color_space` (with its transfer function, or as linear light),
-    /// ignoring any embedded profile and metadata.
-    Assume {
-        color_space: String,
-        #[serde(default)]
-        linear: bool,
-    },
+    /// `color_space` (with its transfer function, or as linear light if
+    /// `linear`), ignoring any embedded profile and metadata.
+    Assume,
     /// The 0.8 loader, unchanged: PNG decoded as sRGB, other formats passed
     /// through for the pipeline's `io.input_color_space` and
     /// `io.input_cctf_decoding`. For scripts and reference tests that set
@@ -58,15 +54,39 @@ pub enum InputInterpretation {
     Manual,
 }
 
-/// The colour spaces offered as [`InputInterpretation::Assume`] overrides.
+/// `io.input_interpretation`. Every field is always present (also in the
+/// apps' saved sessions), so an override survives a merge over defaults.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InputInterpretation {
+    pub mode: InputMode,
+    /// [`InputMode::Assume`]'s colour space, one of [`ASSUMABLE`].
+    pub color_space: String,
+    /// [`InputMode::Assume`]: the values are linear light.
+    pub linear: bool,
+}
+
+impl Default for InputInterpretation {
+    fn default() -> Self {
+        Self { mode: InputMode::Auto, color_space: SRGB.name.into(), linear: false }
+    }
+}
+
+/// The colour spaces offered as [`InputMode::Assume`] overrides.
 pub const ASSUMABLE: [&str; 5] = ["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020"];
 
 impl InputInterpretation {
+    pub fn assume(color_space: &str, linear: bool) -> Self {
+        Self { mode: InputMode::Assume, color_space: color_space.into(), linear }
+    }
+
+    pub fn manual() -> Self {
+        Self { mode: InputMode::Manual, ..Self::default() }
+    }
+
     pub fn validate(&self) -> Result<()> {
-        if let Self::Assume { color_space, .. } = self
-            && RgbColourspace::find(color_space).is_none()
-        {
-            bail!("Unknown input colour space: {color_space}");
+        if self.mode == InputMode::Assume && RgbColourspace::find(&self.color_space).is_none() {
+            bail!("Unknown input colour space: {}", self.color_space);
         }
         Ok(())
     }
@@ -362,24 +382,24 @@ pub fn convert(image: image::DynamicImage, info: &FileColour, interpretation: &I
     }
     let auto = automatic(info)?;
     let automatic_summary = summary(auto.source, &auto.encoding);
-    let decision = match interpretation {
-        InputInterpretation::Auto => auto,
-        InputInterpretation::Assume { color_space, linear } => {
-            let cs = space(color_space);
-            let decode = Decode::named(cs, *linear);
+    let decision = match interpretation.mode {
+        InputMode::Auto => auto,
+        InputMode::Assume => {
+            let (cs, linear) = (space(&interpretation.color_space), interpretation.linear);
+            let decode = Decode::named(cs, linear);
             let decode = match (info.gray, decode) {
                 (true, Decode::Rgb { curves: [c, ..], .. }) => Decode::Gray(c),
                 (_, d) => d,
             };
-            Decision { decode, source: InputSource::Override, encoding: display_name(cs, *linear), warning: None }
+            Decision { decode, source: InputSource::Override, encoding: display_name(cs, linear), warning: None }
         }
-        InputInterpretation::Manual if png => Decision {
+        InputMode::Manual if png => Decision {
             decode: Decode::named(&SRGB, false),
             source: InputSource::Manual,
             encoding: "sRGB (0.8 PNG loader)".into(),
             warning: None,
         },
-        InputInterpretation::Manual => Decision {
+        InputMode::Manual => Decision {
             decode: Decode::Passthrough,
             source: InputSource::Manual,
             encoding: "Values as stored, for io.input_color_space".into(),
@@ -387,14 +407,26 @@ pub fn convert(image: image::DynamicImage, info: &FileColour, interpretation: &I
         },
     };
     let linear_srgb = decision.decode != Decode::Passthrough;
-    let image = apply(image, &decision.decode)?;
+    let mut image = apply(image, &decision.decode)?;
+    // Float files can hold NaN or infinity, which no backend can render
+    // consistently (GPU shaders may assume finite maths).
+    let non_finite: usize = image
+        .data
+        .par_iter_mut()
+        .map(|v| if v.is_finite() { 0 } else { *v = from_f64(0.0); 1 })
+        .sum();
+    let mut warning = decision.warning;
+    if non_finite > 0 {
+        let note = format!("{non_finite} samples weren't finite numbers and were set to 0.");
+        warning = Some(warning.map_or(note.clone(), |w| format!("{w} {note}")));
+    }
     let summary = summary(decision.source, &decision.encoding);
     Ok((image, InputColour {
         source: decision.source,
         encoding: decision.encoding,
         automatic: automatic_summary,
         summary,
-        warning: decision.warning,
+        warning,
         scene_referred: false,
         linear_srgb,
     }))

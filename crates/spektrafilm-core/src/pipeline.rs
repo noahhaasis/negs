@@ -994,6 +994,7 @@ impl Pipeline {
             spektrafilm_gpu::FrontPass::Hanatos2025 {
                 tc_lut,
                 rgb_to_adapted_xyz: rgb_to_adapted,
+                guard: self.params.settings.spectral_boundary == crate::params::SpectralBoundary::Guard,
             }
         };
 
@@ -1096,9 +1097,10 @@ impl Pipeline {
         let output = spektrafilm_math::colorspace::RgbColourspace::output(
             &self.params.io.output_color_space,
         );
-        let adapt = spektrafilm_math::colorspace::chromatic_adaptation_matrix_f64(
+        let adapt = stages::scanning::output_adaptation(
             viewing_white,
-            output.whitepoint_xyz,
+            output,
+            self.params.settings.output_adaptation,
         );
         let base_xyz_to_rgb = output.xyz_to_rgb;
         let mut scan_xyz_to_rgb = [[0.0f64; 3]; 3];

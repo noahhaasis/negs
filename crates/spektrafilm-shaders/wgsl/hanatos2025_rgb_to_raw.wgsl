@@ -17,7 +17,8 @@ struct Params {
     width: u32,
     height: u32,
     lut_size: u32,
-    _pad: u32,
+    // 1: the spectral boundary guard; 0: upstream's arithmetic.
+    guard: u32,
     // Combined matrix: source-RGB → CAT-adapted XYZ (in ref-illuminant white).
     rgb_to_xyz_adapted: mat3x3<f32>,
 }
@@ -135,15 +136,37 @@ fn main(
 
     // RGB → CAT-adapted XYZ via the combined matrix (CAT02 + colorspace).
     let xyz = params.rgb_to_xyz_adapted * rgb;
-    let b = xyz.x + xyz.y + xyz.z;
+    var b = xyz.x + xyz.y + xyz.z;
 
     // xy chromaticity + tc transform (Python _tri2quad). No xy clip
     // (upstream 0.3.4 removed it — the input gamut compression baked into
     // the tc_lut handles OOG chromaticities); the tc clamps below keep the
     // LUT lookup coordinates in-bounds.
     // Floor the chromaticity denominator, preserving near-black scene energy.
-    let xc = xyz.x / max(b, 1e-10);
-    let yc = xyz.y / max(b, 1e-10);
+    var xc = xyz.x / max(b, 1e-10);
+    var yc = xyz.y / max(b, 1e-10);
+    // The spectral boundary, as `adapted_xyz_to_tc_b` on the CPU: no
+    // exposure for non-finite input or b <= 0 (b > 0 is false for NaN), and
+    // a negative X, Y or Z moves toward the adapted white onto the xy
+    // triangle instead of folding x > 1 back inside.
+    let white = params.rgb_to_xyz_adapted * vec3<f32>(1.0);
+    let w = white / (white.x + white.y + white.z);
+    let finite = abs(b) <= 3.0e38 && all(abs(xyz) <= vec3<f32>(3.0e38));
+    if params.guard == 0u {
+        // Upstream: no guard.
+    } else if !(b > 0.0) || !finite {
+        b = 0.0;
+        xc = w.x;
+        yc = w.y;
+    } else if any(xyz < vec3<f32>(0.0)) {
+        let c = xyz / b;
+        var t = 1.0;
+        if c.x < 0.0 { t = min(t, w.x / (w.x - c.x)); }
+        if c.y < 0.0 { t = min(t, w.y / (w.y - c.y)); }
+        if c.z < 0.0 { t = min(t, w.z / (w.z - c.z)); }
+        xc = w.x + t * (c.x - w.x);
+        yc = w.y + t * (c.y - w.y);
+    }
     let omx = max(1.0 - xc, 1e-10);
     let tx = clamp((1.0 - xc) * (1.0 - xc), 0.0, 1.0);
     let ty = clamp(yc / omx, 0.0, 1.0);

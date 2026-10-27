@@ -957,22 +957,23 @@ impl WgpuBackend {
             width: u32,
             height: u32,
             lut_size: u32,
-            _pad: u32,
+            guard: u32,
             col0: [f32; 4],
             col1: [f32; 4],
             col2: [f32; 4],
         }
-        let (m, front_lut_size) = match &p.front {
+        let (m, front_lut_size, guard) = match &p.front {
             crate::FrontPass::Hanatos2025 {
                 tc_lut,
                 rgb_to_adapted_xyz,
-            } => (rgb_to_adapted_xyz, tc_lut.size as u32),
+                guard,
+            } => (rgb_to_adapted_xyz, tc_lut.size as u32, *guard),
         };
         let front_params = FrontParams {
             width: image.width,
             height: image.height,
             lut_size: front_lut_size,
-            _pad: 0,
+            guard: guard as u32,
             col0: [m[0][0] as f32, m[1][0] as f32, m[2][0] as f32, 0.0],
             col1: [m[0][1] as f32, m[1][1] as f32, m[2][1] as f32, 0.0],
             col2: [m[0][2] as f32, m[1][2] as f32, m[2][2] as f32, 0.0],
@@ -2059,6 +2060,7 @@ impl ComputeBackend for WgpuBackend {
         color_space: &str,
         ref_illuminant: &[f32],
         cat16: bool,
+        guard: bool,
     ) -> ImageBuf {
         // GPU live-preview path collapses the two-step CAT02 adaptation
         // into a single matmul — small visible-spectrum precision drop
@@ -2082,7 +2084,7 @@ impl ComputeBackend for WgpuBackend {
             width: u32,
             height: u32,
             lut_size: u32,
-            _pad: u32,
+            guard: u32,
             col0: [f32; 4],
             col1: [f32; 4],
             col2: [f32; 4],
@@ -2093,7 +2095,7 @@ impl ComputeBackend for WgpuBackend {
             width: image.width,
             height: image.height,
             lut_size,
-            _pad: 0,
+            guard: guard as u32,
             col0: [m[0][0] as f32, m[1][0] as f32, m[2][0] as f32, 0.0],
             col1: [m[0][1] as f32, m[1][1] as f32, m[2][1] as f32, 0.0],
             col2: [m[0][2] as f32, m[1][2] as f32, m[2][2] as f32, 0.0],
@@ -4997,6 +4999,51 @@ mod grain_tests {
                 count: None,
             })
             .collect()
+    }
+
+    /// The front pass agrees with the CPU at the spectral boundary: negative
+    /// coordinates, x + y > 1, x > 1, no light and above-one values.
+    #[test]
+    fn front_pass_boundary_matches_cpu() {
+        let Some(backend) = WgpuBackend::new() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        use spektrafilm_math::precision::{from_f64, to_f64};
+        // A smooth synthetic table, so the comparison tests the guard and not
+        // the LUT's contents.
+        let size = 33;
+        let mut data = Vec::with_capacity(size * size * 3);
+        for i in 0..size {
+            for j in 0..size {
+                let (u, v) = (i as f64 / 32.0, j as f64 / 32.0);
+                data.extend([0.2 + 0.5 * u, 0.3 + 0.4 * v * u, 0.6 - 0.3 * v]);
+            }
+        }
+        let lut = spektrafilm_math::spectral::TcLut { size, channels: 3, data };
+        let pixels: [[f64; 3]; 9] = [
+            [0.18, 0.18, 0.18],
+            [4.0, 3.5, 2.0],
+            [-0.2247, 1.0420, -0.0786],
+            [1.0, -0.3, -0.4],
+            [-0.05, -0.02, 0.9],
+            [0.0, 0.0, 0.0],
+            [-0.1, -0.1, -0.1],
+            [0.9, 0.0, -0.5],
+            [0.02, -0.01, 0.0],
+        ];
+        let image = ImageBuf::from_data(pixels.len() as u32, 1, pixels.iter().flatten().map(|&v| from_f64(v)).collect());
+        let illuminant = spektrafilm_math::spectral::ILLUMINANT_D55.to_vec();
+        for guard in [true, false] {
+            let cpu = spektrafilm_math::spectral::hanatos2025_rgb_to_raw(&image, &lut, "sRGB", &illuminant, false, guard);
+            let gpu = backend.hanatos2025_rgb_to_raw(&image, &lut, "sRGB", &illuminant, false, guard);
+            for (i, (c, g)) in cpu.data.iter().zip(&gpu.data).enumerate() {
+                let (c, g) = (to_f64(*c), to_f64(*g));
+                assert!(g.is_finite(), "guard {guard}, pixel {}: {g}", i / 3);
+                // f32 maths and the GPU's fused matrix against the CPU's f64.
+                assert!((c - g).abs() <= 2e-4 * c.abs().max(1.0), "guard {guard}, pixel {}: cpu {c} gpu {g}", i / 3);
+            }
+        }
     }
 
     /// Render a cheap flat shader over a grid that is forced to wrap into y

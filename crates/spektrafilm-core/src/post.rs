@@ -4,8 +4,11 @@
 //! the tones the film produced but cannot recover a clipped highlight; that
 //! belongs to camera and print exposure.
 //!
-//! Tones are shaped on luminance in sRGB-encoded (perceptual) space, and each
-//! pixel keeps its colour ratios, so contrast doesn't shift the film's hues.
+//! Pixels are decoded with the output space's own transfer function and
+//! luminance is that space's Y, so the same settings make the same change in
+//! every output space. Tones are shaped on that luminance in sRGB-encoded
+//! (perceptual) space, and each pixel keeps its colour ratios, so contrast
+//! doesn't shift the film's hues.
 //!
 //! The arithmetic is f32 even in the f64 build: the tables already limit
 //! accuracy to about 2e-7, far below a 16-bit output step, and the f64
@@ -70,6 +73,18 @@ fn srgb_decode(x: f64) -> f64 {
     }
 }
 
+/// An output space's transfer function, with sRGB's exactly as before.
+struct Transfer(&'static RgbColourspace);
+
+impl Transfer {
+    fn decode(&self, v: f64) -> f64 {
+        if self.0.name == "sRGB" { srgb_decode(v) } else { self.0.cctf.decode(v) }
+    }
+    fn encode(&self, v: f64) -> f64 {
+        if self.0.name == "sRGB" { srgb_encode(v) } else { self.0.cctf.encode(v) }
+    }
+}
+
 /// The tone curve on encoded luminance, [0, 1] → [0, 1], non-decreasing.
 fn tone(params: &PostParams, mut e: f64) -> f64 {
     // Brightness: a rational curve with finite slope at both ends, so lifting
@@ -107,7 +122,8 @@ pub struct PostProcess {
     saturation: f32,
     /// The output space's luminance weights.
     luma: [f32; 3],
-    /// Whether pixels arrive, and leave, sRGB-encoded rather than linear.
+    /// Whether pixels arrive, and leave, encoded with the output space's
+    /// transfer function rather than linear.
     encoded: bool,
     /// Encoded → linear.
     decode: Vec<f32>,
@@ -121,6 +137,7 @@ impl PostProcess {
     /// `encoded` and `color_space` describe the scan's output, as
     /// `io.output_cctf_encoding` and `io.output_color_space`.
     pub fn new(params: &PostParams, encoded: bool, color_space: &str) -> Self {
+        let space = Transfer(RgbColourspace::output(color_space));
         let samples = |f: &dyn Fn(f64) -> f64| -> Vec<f32> {
             (0..LUT_SIZE)
                 .map(|i| f(i as f64 / (LUT_SIZE - 1) as f64) as f32)
@@ -130,8 +147,8 @@ impl PostProcess {
             saturation: params.saturation / 100.0,
             luma: luminance_weights(color_space),
             encoded,
-            decode: samples(&srgb_decode),
-            encode: samples(&|s| srgb_encode(s * s)),
+            decode: samples(&|v| space.decode(v)),
+            encode: samples(&|s| space.encode(s * s)),
             tone: samples(&|s| srgb_decode(tone(params, srgb_encode(s * s)))),
         }
     }
@@ -296,5 +313,30 @@ mod tests {
             );
         }
         assert_eq!(luminance_weights("unknown"), luminance_weights("sRGB"));
+    }
+
+    /// The same settings change a colour the same way whatever space it is
+    /// encoded in: adjust in sRGB, or in ProPhoto RGB and convert.
+    #[test]
+    fn adjustments_agree_across_output_spaces() {
+        use crate::stages::scanning::convert_output;
+        // Tone only: a saturation boost stops at each space's own gamut
+        // boundary, which is the point of a wider output space.
+        let edit = params(|p| {
+            p.brightness = 30.0;
+            p.contrast = 25.0;
+            p.whites = -10.0;
+        });
+        let colours = [[0.8f32, 0.3, 0.2], [0.2, 0.5, 0.7], [0.46, 0.46, 0.46], [0.9, 0.85, 0.1], [0.05, 0.04, 0.03]];
+        let srgb = ImageBuf::from_data(5, 1, colours.iter().flatten().map(|&v| from_f32(v)).collect());
+        let mut prophoto = srgb.clone();
+        convert_output(&mut prophoto, "sRGB", "ProPhoto RGB", true);
+        let a = PostProcess::new(&edit, true, "sRGB").applied(&srgb);
+        let mut b = PostProcess::new(&edit, true, "ProPhoto RGB").applied(&prophoto);
+        convert_output(&mut b, "ProPhoto RGB", "sRGB", true);
+        for (x, y) in a.data.iter().zip(&b.data) {
+            // f32 tables and arithmetic, and two conversions.
+            assert!((to_f32(*x) - to_f32(*y)).abs() < 2e-3, "{:?} vs {:?}", a.data, b.data);
+        }
     }
 }

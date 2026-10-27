@@ -30,12 +30,12 @@ fn pixels(img: &ImageBuf) -> Vec<[f64; 3]> {
 }
 
 fn auto(img: DynamicImage, info: &FileColour) -> (Vec<[f64; 3]>, InputColour) {
-    let (out, colour) = convert(img, info, &InputInterpretation::Auto, false).unwrap();
+    let (out, colour) = convert(img, info, &InputInterpretation::default(), false).unwrap();
     (pixels(&out), colour)
 }
 
 fn assume(name: &str, linear: bool) -> InputInterpretation {
-    InputInterpretation::Assume { color_space: name.into(), linear }
+    InputInterpretation::assume(name, linear)
 }
 
 fn assert_close(got: &[[f64; 3]], want: &[[f64; 3]], tol: f64, what: &str) {
@@ -200,7 +200,7 @@ fn the_same_colours_in_any_tagged_space_load_alike() {
                     ..Default::default()
                 };
                 crate::save::save_image_with_options(&buf, &path, None, &options).unwrap();
-                let loaded = crate::load_image_colour(&path, crate::Formats::Any, Default::default(), &InputInterpretation::Auto).unwrap();
+                let loaded = crate::load_image_colour(&path, crate::Formats::Any, Default::default(), &InputInterpretation::default()).unwrap();
                 assert_eq!(loaded.colour.source, InputSource::EmbeddedProfile, "{name} {ext}");
                 assert_eq!(loaded.colour.encoding, display_name(cs, linear), "{name} {ext}");
                 let what = format!("{name} linear={linear} {ext}");
@@ -348,14 +348,14 @@ fn unusable_profiles_warn_and_fall_through() {
 #[test]
 fn unsupported_colour_models_are_refused() {
     let cmyk = FileColour { cmyk: true, ..Default::default() };
-    let err = convert(rgb16(&[[0, 0, 0]]), &cmyk, &InputInterpretation::Auto, false).unwrap_err();
+    let err = convert(rgb16(&[[0, 0, 0]]), &cmyk, &InputInterpretation::default(), false).unwrap_err();
     assert!(err.to_string().contains("CMYK"), "{err}");
     // Not even an override reads CMYK as RGB.
     assert!(convert(rgb16(&[[0, 0, 0]]), &cmyk, &assume("sRGB", false), false).is_err());
 
     for transfer in [16, 18] {
         let hdr = FileColour { png: Some(tags::PngChunks { cicp: Some([9, transfer, 0, 1]), ..Default::default() }), ..Default::default() };
-        let err = convert(rgb16(&[[0, 0, 0]]), &hdr, &InputInterpretation::Auto, true).unwrap_err();
+        let err = convert(rgb16(&[[0, 0, 0]]), &hdr, &InputInterpretation::default(), true).unwrap_err();
         assert!(err.to_string().contains("HDR"), "{err}");
     }
 
@@ -366,6 +366,12 @@ fn unsupported_colour_models_are_refused() {
     assert!(colour.warning.is_some());
 
     assert!(assume("Not a space", false).validate().is_err());
+
+    // The serialized form keeps every field, and missing ones default.
+    let json = serde_json::to_value(assume("Display P3", true)).unwrap();
+    assert_eq!(json, serde_json::json!({"mode": "assume", "color_space": "Display P3", "linear": true}));
+    let partial: InputInterpretation = serde_json::from_value(serde_json::json!({"mode": "manual"})).unwrap();
+    assert_eq!(partial, InputInterpretation::manual());
 }
 
 #[test]
@@ -392,12 +398,12 @@ fn manual_mode_keeps_the_08_loader() {
     let img = || rgb16(&[[0, 32768, 65535]]);
     let info = FileColour { icc: Some(crate::icc::profile(space("ProPhoto RGB"), false)), ..Default::default() };
     // PNG: decoded as sRGB whatever it is tagged.
-    let (png, colour) = convert(img(), &info, &InputInterpretation::Manual, true).unwrap();
+    let (png, colour) = convert(img(), &info, &InputInterpretation::manual(), true).unwrap();
     assert!(colour.linear_srgb);
     let want = [[0.0, spektrafilm_math::colorspace::Cctf::Srgb.decode(32768.0 / 65535.0), 1.0]];
     assert_close(&pixels(&png), &want, 1e-6, "manual PNG");
     // Others: the stored values, for the pipeline's input fields.
-    let (tiff, colour) = convert(img(), &info, &InputInterpretation::Manual, false).unwrap();
+    let (tiff, colour) = convert(img(), &info, &InputInterpretation::manual(), false).unwrap();
     assert!(!colour.linear_srgb);
     assert_eq!(colour.source, InputSource::Manual);
     assert_close(&pixels(&tiff), &[[0.0, 32768.0 / 65535.0, 1.0]], 1e-6, "manual TIFF");
@@ -407,7 +413,7 @@ fn manual_mode_keeps_the_08_loader() {
 fn float_values_outside_the_unit_range_are_kept() {
     let input = [[-0.25f32, 0.5, 4.0], [1.5, -0.01, 0.0], [12.0, 12.0, 12.0]];
     let info = FileColour { float: true, ..Default::default() };
-    let (out, colour) = convert(rgbf(&input), &info, &InputInterpretation::Auto, false).unwrap();
+    let (out, colour) = convert(rgbf(&input), &info, &InputInterpretation::default(), false).unwrap();
     assert_eq!(colour.encoding, "Linear sRGB");
     let want: Vec<[f64; 3]> = input.iter().map(|p| p.map(f64::from)).collect();
     assert_close(&pixels(&out), &want, 0.0, "untagged float");
@@ -419,6 +425,11 @@ fn float_values_outside_the_unit_range_are_kept() {
     let want = colorspace::mat3_vec_f64(&m, [0.0, 2.0, 0.0]);
     assert!(want[0] < 0.0 && want[1] > 2.0);
     assert_close(&pixels(&out), &[want], 1e-6, "linear P3");
+
+    // Non-finite samples become 0, with a warning.
+    let (out, colour) = convert(rgbf(&[[f32::NAN, 0.5, f32::INFINITY]]), &info, &InputInterpretation::default(), false).unwrap();
+    assert_eq!(pixels(&out)[0], [0.0, 0.5, 0.0]);
+    assert!(colour.warning.unwrap().contains("2 samples"));
 
     // Transfer functions mirror below zero instead of producing NaN.
     let (out, _) = convert(rgbf(&[[-0.5, 0.5, 1.25]]), &info, &assume("Adobe RGB (1998)", false), false).unwrap();
@@ -439,12 +450,12 @@ fn loader_reads_png_profiles_and_refuses_cmyk_jpeg() {
     encoder.set_icc_profile(std::fs::read(fixture("lut_rgb.icc")).unwrap()).unwrap();
     let bytes: Vec<u8> = rgb.iter().flatten().flat_map(|v| v.to_ne_bytes()).collect();
     encoder.write_image(&bytes, rgb.len() as u32, 1, image::ExtendedColorType::Rgb16).unwrap();
-    let loaded = crate::load_image_colour(&path, crate::Formats::Any, Default::default(), &InputInterpretation::Auto).unwrap();
+    let loaded = crate::load_image_colour(&path, crate::Formats::Any, Default::default(), &InputInterpretation::default()).unwrap();
     assert_eq!(loaded.colour.summary, "Negs test LUT profile (embedded profile)");
     let got: Vec<[f64; 3]> = pixels(&loaded.image).into_iter().map(to_pcs).collect();
     assert_close(&got, &want, LUT_TOLERANCE, "PNG iCCP LUT profile");
 
-    let err = crate::load_image_colour(&fixture("cmyk.jpg"), crate::Formats::Any, Default::default(), &InputInterpretation::Auto)
+    let err = crate::load_image_colour(&fixture("cmyk.jpg"), crate::Formats::Any, Default::default(), &InputInterpretation::default())
         .err()
         .expect("CMYK refused");
     assert!(err.to_string().contains("CMYK"), "{err}");

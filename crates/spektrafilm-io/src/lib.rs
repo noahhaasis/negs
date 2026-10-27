@@ -25,7 +25,7 @@ pub mod resize;
 pub mod save;
 mod white_balance;
 
-pub use colour::{InputColour, InputInterpretation};
+pub use colour::{InputColour, InputInterpretation, InputMode};
 pub use metadata::{ImageMetadata, read_metadata};
 pub use save::save_image;
 pub use white_balance::{RawWhiteBalance, RawWhiteBalanceMode};
@@ -105,7 +105,7 @@ pub fn load_image(path: &Path, formats: Formats) -> Result<ImageBuf> {
 
 /// [`load_image_colour`] with automatic input interpretation, without the report.
 pub fn load_image_with_wb(path: &Path, formats: Formats, wb: RawWhiteBalance) -> Result<ImageBuf> {
-    Ok(load_image_colour(path, formats, wb, &InputInterpretation::Auto)?.image)
+    Ok(load_image_colour(path, formats, wb, &InputInterpretation::default())?.image)
 }
 
 /// An input in the engine's representation, and what it was read as.

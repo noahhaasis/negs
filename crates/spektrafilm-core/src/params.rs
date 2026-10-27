@@ -617,6 +617,15 @@ pub struct IoParams {
     /// Input RAW development only; independent of scanner white correction.
     #[serde(default)]
     pub raw_white_balance: spektrafilm_io::RawWhiteBalance,
+    /// How the loaders read a non-RAW file's values (see
+    /// `spektrafilm_io::colour`). Params JSON without it, but with either
+    /// field below, is read as manual: see [`infer_input_interpretation`].
+    #[serde(default)]
+    pub input_interpretation: spektrafilm_io::InputInterpretation,
+    /// The colour space of the pipeline's input values, and whether they
+    /// still carry its transfer function. A loaded file sets these to the
+    /// engine's representation (linear sRGB) unless the interpretation is
+    /// manual; see [`IoParams::apply_input_colour`].
     #[serde(default = "default_prophoto")]
     pub input_color_space: String,
     #[serde(default)]
@@ -659,6 +668,7 @@ impl Default for IoParams {
     fn default() -> Self {
         Self {
             raw_white_balance: spektrafilm_io::RawWhiteBalance::default(),
+            input_interpretation: spektrafilm_io::InputInterpretation::default(),
             input_color_space: "ProPhoto RGB".into(),
             input_cctf_decoding: false,
             output_color_space: "sRGB".into(),
@@ -673,6 +683,37 @@ impl Default for IoParams {
             input_gamut_compress: InputGamutCompressParams::default(),
             rotate_cw: 0,
         }
+    }
+}
+
+impl IoParams {
+    /// Sets the pipeline's input fields for an image the loader read as
+    /// `colour`: the engine's representation (linear sRGB, unclamped), unless
+    /// the values were passed through for these fields (manual mode).
+    pub fn apply_input_colour(&mut self, colour: &spektrafilm_io::InputColour) {
+        if colour.linear_srgb {
+            self.input_color_space = "sRGB".into();
+            self.input_cctf_decoding = false;
+        }
+    }
+}
+
+/// Params JSON (a whole params object, or one with an `io` object) from
+/// before `io.input_interpretation`: if it sets `io.input_color_space` or
+/// `io.input_cctf_decoding`, those described its input files, so it keeps
+/// that meaning (manual); otherwise files are read automatically. Params
+/// that state an interpretation are left alone. The apps always send one
+/// (the defaults carry it), so their saved sessions read files
+/// automatically.
+pub fn infer_input_interpretation(params: &mut serde_json::Value) {
+    let Some(io) = params.get_mut("io").and_then(|io| io.as_object_mut()) else { return };
+    if !io.contains_key("input_interpretation")
+        && (io.contains_key("input_color_space") || io.contains_key("input_cctf_decoding"))
+    {
+        io.insert(
+            "input_interpretation".into(),
+            serde_json::to_value(spektrafilm_io::InputInterpretation::manual()).expect("serializable"),
+        );
     }
 }
 
@@ -796,6 +837,49 @@ pub struct SettingsParams {
     /// CAT02 0.3.2 behavior.
     #[serde(default = "default_true")]
     pub use_cat16: bool,
+    /// How the scan's white reaches an output colour space whose white is
+    /// not D65 (ProPhoto RGB, DCI-P3, ACES); see [`OutputAdaptation`].
+    #[serde(default)]
+    pub output_adaptation: OutputAdaptation,
+    /// Input values no light can produce, at the spectral model's input; see
+    /// [`SpectralBoundary`].
+    #[serde(default)]
+    pub spectral_boundary: SpectralBoundary,
+}
+
+/// The engine's input is linear and unclamped, so it can hold colours beyond
+/// the xy triangle (wide camera gamuts such as V-Gamut or DaVinci Wide
+/// Gamut, and noise) and no light at all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpectralBoundary {
+    /// No exposure for X + Y + Z <= 0 or non-finite values; a chromaticity
+    /// beyond the triangle moves toward the white onto it (see
+    /// `spektrafilm_math::spectral::adapted_xyz_to_tc_b`). Physical light is
+    /// unaffected.
+    #[default]
+    Guard,
+    /// Upstream's arithmetic, which folds x > 1 back inside the triangle. For
+    /// reference comparisons.
+    Upstream,
+}
+
+/// The scan is adapted from its viewing illuminant's white with CAT02 (as
+/// upstream does), and is then encoded in the output colour space.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputAdaptation {
+    /// CAT02 to D65, the white the photograph is judged in, then Bradford to
+    /// the output space's white, as an ICC-managed viewer undoes it: the same
+    /// edit looks the same in every output space (within each gamut). Outputs
+    /// with a D65 white (sRGB, Display P3, Adobe RGB, Rec. 2020) are
+    /// unaffected.
+    #[default]
+    ViaD65,
+    /// Upstream: CAT02 straight to the output space's white. A ProPhoto RGB
+    /// file then differs from the sRGB one by up to ~1.4 ΔE00 once a viewer
+    /// adapts it back to D65. For reference comparisons.
+    Direct,
 }
 
 impl Default for SettingsParams {
@@ -814,6 +898,8 @@ impl Default for SettingsParams {
             preview_mode: false,
             neutral_print_filters_from_database: true,
             use_cat16: true,
+            output_adaptation: OutputAdaptation::ViaD65,
+            spectral_boundary: SpectralBoundary::Guard,
         }
     }
 }
@@ -932,3 +1018,66 @@ fn default_640() -> u32 {
     640
 }
 
+#[cfg(test)]
+mod input_interpretation_tests {
+    use super::*;
+    use serde_json::json;
+    use spektrafilm_io::InputMode;
+
+    fn parse(mut value: serde_json::Value) -> RuntimeParams {
+        infer_input_interpretation(&mut value);
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn legacy_input_fields_keep_their_meaning() {
+        let p = parse(json!({"io": {"input_color_space": "sRGB", "input_cctf_decoding": false}}));
+        assert_eq!(p.io.input_interpretation.mode, InputMode::Manual);
+        assert_eq!(p.io.input_color_space, "sRGB");
+        assert_eq!(parse(json!({"io": {"input_cctf_decoding": true}})).io.input_interpretation.mode, InputMode::Manual);
+    }
+
+    #[test]
+    fn params_without_input_fields_read_files_automatically() {
+        assert_eq!(parse(json!({})).io.input_interpretation.mode, InputMode::Auto);
+        assert_eq!(parse(json!({"io": {"scan_film": true}})).io.input_interpretation.mode, InputMode::Auto);
+        assert_eq!(RuntimeParams::default().io.input_interpretation.mode, InputMode::Auto);
+    }
+
+    #[test]
+    fn a_stated_interpretation_wins() {
+        // What the apps send: their defaults carry an interpretation, and an
+        // old session's input fields come along without effect.
+        let p = parse(json!({"io": {
+            "input_interpretation": {"mode": "auto", "color_space": "sRGB", "linear": false},
+            "input_color_space": "ProPhoto RGB", "input_cctf_decoding": false,
+        }}));
+        assert_eq!(p.io.input_interpretation.mode, InputMode::Auto);
+        let p = parse(json!({"io": {"input_interpretation": {"mode": "assume", "color_space": "Display P3"}}}));
+        assert_eq!(p.io.input_interpretation, spektrafilm_io::InputInterpretation::assume("Display P3", false));
+    }
+
+    #[test]
+    fn loaded_colour_sets_the_pipeline_input() {
+        let mut io = IoParams::default();
+        io.apply_input_colour(&spektrafilm_io::InputColour::raw("rawler"));
+        assert_eq!((io.input_color_space.as_str(), io.input_cctf_decoding), ("sRGB", false));
+        // Manual pass-through leaves the fields to the params.
+        let dir = std::env::temp_dir().join(format!("negs-io-manual-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("in.tiff");
+        let img = spektrafilm_math::image::ImageBuf::new(2, 2);
+        spektrafilm_io::save::save_image(&img, &path, None).unwrap();
+        let loaded = spektrafilm_io::load_image_colour(
+            &path,
+            spektrafilm_io::Formats::Any,
+            Default::default(),
+            &spektrafilm_io::InputInterpretation::manual(),
+        )
+        .unwrap();
+        let mut io = IoParams { input_color_space: "ACES2065-1".into(), input_cctf_decoding: true, ..IoParams::default() };
+        io.apply_input_colour(&loaded.colour);
+        assert_eq!((io.input_color_space.as_str(), io.input_cctf_decoding), ("ACES2065-1", true));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

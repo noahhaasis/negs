@@ -874,6 +874,58 @@ pub fn xy_to_tc(x: f64, y: f64) -> (f64, f64) {
     (tx.clamp(0.0, 1.0), ty.clamp(0.0, 1.0))
 }
 
+/// The tc coordinates and brightness `b = X + Y + Z` of CAT-adapted XYZ,
+/// guarding the spectral model's input boundary. `white` is the adapted
+/// white (the input matrix applied to RGB 1, 1, 1).
+///
+/// Physical light (no negative tristimulus value) takes upstream's path
+/// unchanged, including its floored denominator near black. The input is
+/// linear and unclamped, so it can also hold values no light produces:
+///
+/// - non-finite values, or `b <= 0` (no light, or less than none): no
+///   exposure;
+/// - a negative X, Y or Z, i.e. a chromaticity outside the xy triangle
+///   (x + y > 1 or a negative coordinate, beyond every real colour): it is
+///   moved toward `white` at the same brightness, just onto the triangle.
+///   Upstream's `(1 - x)²` would otherwise fold x > 1 back inside, a
+///   different hue. The input gamut compression baked into the tc LUT then
+///   maps it as it maps any other out-of-gamut chromaticity.
+///
+/// The GPU front passes (WGSL, CUDA) implement the same rule. `guard`
+/// false is upstream's arithmetic for every input, for reference
+/// comparisons.
+#[inline]
+pub fn adapted_xyz_to_tc_b(xyz: [f64; 3], white: [f64; 3], guard: bool) -> ((f64, f64), f64) {
+    let b = xyz[0] + xyz[1] + xyz[2];
+    if !guard {
+        let d = b.max(1e-10);
+        return (xy_to_tc(xyz[0] / d, xyz[1] / d), b);
+    }
+    if !b.is_finite() || !xyz.iter().all(|v| v.is_finite()) || b <= 0.0 {
+        let ws = white[0] + white[1] + white[2];
+        return (xy_to_tc(white[0] / ws, white[1] / ws), 0.0);
+    }
+    if xyz.iter().all(|&v| v >= 0.0) {
+        // Python floors only the chromaticity denominator, retaining scene
+        // energy even below 1e-10.
+        let d = b.max(1e-10);
+        return (xy_to_tc(xyz[0] / d, xyz[1] / d), b);
+    }
+    let ws = white[0] + white[1] + white[2];
+    let w = white.map(|v| v / ws);
+    let c = xyz.map(|v| v / b);
+    let t = (0..3).filter(|&i| c[i] < 0.0).map(|i| w[i] / (w[i] - c[i])).fold(1.0f64, f64::min);
+    let x = w[0] + t * (c[0] - w[0]);
+    let y = w[1] + t * (c[1] - w[1]);
+    (xy_to_tc(x, y), b)
+}
+
+/// The adapted white of an input matrix: the matrix applied to RGB (1, 1, 1).
+#[inline]
+pub fn matrix_white(m: &[[f64; 3]; 3]) -> [f64; 3] {
+    [m[0].iter().sum(), m[1].iter().sum(), m[2].iter().sum()]
+}
+
 /// Triangular/quad coordinates → CIE xy. Port of Python `_quad2tri`.
 ///
 /// Python: x_out = 1 - sqrt(tx), y_out = ty * sqrt(tx) (no epsilon, no clamp).
@@ -1075,6 +1127,7 @@ pub fn rgb_to_tc_b(
     color_space: &str,
     ref_illuminant: &[f32],
     cat16: bool,
+    guard: bool,
 ) -> ((f64, f64), f64) {
     let rgb_to_xyz = colorspace_to_xyz_f64(color_space);
     let src_white = colorspace_white_xyz_f64(color_space);
@@ -1100,17 +1153,12 @@ pub fn rgb_to_tc_b(
         adapt[2][0] * xyz_native[0] + adapt[2][1] * xyz_native[1] + adapt[2][2] * xyz_native[2],
     ];
 
-    // Step 3: XYZ → xy → tc, b — fully f64 (Python parity).
-    let b = xyz[0] + xyz[1] + xyz[2];
-    // No xy clip (upstream 0.3.4 removed it): the input gamut compression
-    // baked into the tc_lut handles OOG chromaticities; `xy_to_tc` clamps
-    // each tc component to [0, 1] so the LUT lookup stays in-bounds.
-    // Python floors only the chromaticity denominator, retaining scene energy
-    // even below 1e-10. Discarding it shifts near-black log exposure.
-    let x_chrom = xyz[0] / b.max(1e-10);
-    let y_chrom = xyz[1] / b.max(1e-10);
-    let tc = xy_to_tc(x_chrom, y_chrom);
-    (tc, b)
+    // Step 3: XYZ → xy → tc, b — fully f64 (Python parity). No xy clip
+    // (upstream 0.3.4 removed it): the input gamut compression baked into
+    // the tc_lut handles OOG chromaticities; `xy_to_tc` clamps each tc
+    // component to [0, 1] so the LUT lookup stays in-bounds.
+    let white = colorspace::mat3_vec_f64(&adapt, matrix_white(&rgb_to_xyz));
+    adapted_xyz_to_tc_b(xyz, white, guard)
 }
 
 /// Matrix-based Hanatos2025 RGB → raw — avoids per-pixel string lookups for the matrix.
@@ -1121,12 +1169,14 @@ pub fn hanatos2025_rgb_to_raw_with_matrix(
     image: &ImageBuf,
     tc_lut: &TcLut,
     rgb_to_adapted_xyz: &[[f64; 3]; 3],
+    guard: bool,
 ) -> ImageBuf {
     use rayon::prelude::*;
     let size = tc_lut.size;
     let channels = tc_lut.channels;
     assert_eq!(channels, 3);
 
+    let white = matrix_white(rgb_to_adapted_xyz);
     let mut output = ImageBuf::new(image.width, image.height);
     output
         .data
@@ -1146,11 +1196,8 @@ pub fn hanatos2025_rgb_to_raw_with_matrix(
             let xyz2 = rgb_to_adapted_xyz[2][0] * r
                 + rgb_to_adapted_xyz[2][1] * g
                 + rgb_to_adapted_xyz[2][2] * b_in;
-            let b = xyz0 + xyz1 + xyz2;
             // No xy clip (upstream 0.3.4) — `xy_to_tc` clamps the tc output.
-            let xc = xyz0 / b.max(1e-10);
-            let yc = xyz1 / b.max(1e-10);
-            let tc = xy_to_tc(xc, yc);
+            let (tc, b) = adapted_xyz_to_tc_b([xyz0, xyz1, xyz2], white, guard);
 
             // Python: `lut[tc[0]_idx, tc[1]_idx]` — first axis = tc.0.
             let lut_x = tc.0 * (size - 1) as f64;
@@ -1173,6 +1220,7 @@ pub fn hanatos2025_rgb_to_raw(
     color_space: &str,
     ref_illuminant: &[f32],
     cat16: bool,
+    guard: bool,
 ) -> ImageBuf {
     let rgb_to_xyz = colorspace_to_xyz_f64(color_space);
     let src_white = colorspace_white_xyz_f64(color_space);
@@ -1182,7 +1230,7 @@ pub fn hanatos2025_rgb_to_raw(
     } else {
         colorspace::chromatic_adaptation_matrix_f64(src_white, dst_white)
     };
-    hanatos2025_rgb_to_raw_prepared(image, tc_lut, &rgb_to_xyz, &adapt)
+    hanatos2025_rgb_to_raw_prepared(image, tc_lut, &rgb_to_xyz, &adapt, guard)
 }
 
 /// Apply the Hanatos2025 TC LUT with precomputed colour matrices.
@@ -1195,12 +1243,14 @@ pub fn hanatos2025_rgb_to_raw_prepared(
     tc_lut: &TcLut,
     rgb_to_xyz: &[[f64; 3]; 3],
     adapt: &[[f64; 3]; 3],
+    guard: bool,
 ) -> ImageBuf {
     use rayon::prelude::*;
     let size = tc_lut.size;
     let channels = tc_lut.channels;
     assert_eq!(channels, 3);
 
+    let white = colorspace::mat3_vec_f64(adapt, matrix_white(rgb_to_xyz));
     let mut output = ImageBuf::new(image.width, image.height);
 
     output
@@ -1227,9 +1277,7 @@ pub fn hanatos2025_rgb_to_raw_prepared(
                     + adapt[2][1] * xyz_native[1]
                     + adapt[2][2] * xyz_native[2],
             ];
-            let brightness = xyz[0] + xyz[1] + xyz[2];
-            let denominator = brightness.max(1e-10);
-            let tc = xy_to_tc(xyz[0] / denominator, xyz[1] / denominator);
+            let (tc, brightness) = adapted_xyz_to_tc_b(xyz, white, guard);
 
             let lut_x = tc.0 * (size - 1) as f64;
             let lut_y = tc.1 * (size - 1) as f64;
@@ -1247,6 +1295,49 @@ pub fn hanatos2025_rgb_to_raw_prepared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const D65: [f64; 3] = [0.95047, 1.0, 1.08883];
+
+    #[test]
+    fn physical_light_takes_upstreams_path() {
+        for xyz in [[0.2, 0.3, 0.1], [1e-12, 2e-12, 1e-12], [0.0, 0.5, 0.0], [5.0, 4.0, 0.001]] {
+            let b: f64 = xyz.iter().sum();
+            let d = b.max(1e-10);
+            assert_eq!(adapted_xyz_to_tc_b(xyz, D65, true), (xy_to_tc(xyz[0] / d, xyz[1] / d), b));
+            assert_eq!(adapted_xyz_to_tc_b(xyz, D65, false), adapted_xyz_to_tc_b(xyz, D65, true));
+        }
+    }
+
+    #[test]
+    fn nonphysical_chromaticities_move_toward_white_onto_the_triangle() {
+        let ws: f64 = D65.iter().sum();
+        let w = D65.map(|v| v / ws);
+        // x + y > 1 (negative Z), and negative Y with x > 1.
+        for xyz in [[0.8, 0.4, -0.1], [1.2, -0.05, 0.02], [-0.1, 0.6, 0.3]] {
+            let b: f64 = xyz.iter().sum();
+            let ((tx, ty), got_b) = adapted_xyz_to_tc_b(xyz, D65, true);
+            assert_eq!(got_b, b, "brightness kept");
+            let (x, y) = tc_to_xy(tx, ty);
+            let z = 1.0 - x - y;
+            // On the triangle's boundary...
+            assert!(x >= -1e-12 && y >= -1e-12 && z >= -1e-12, "{x} {y}");
+            assert!(x.min(y).min(z).abs() < 1e-9, "{x} {y} {z}");
+            // ...on the line from the white through the original chromaticity.
+            let c = xyz.map(|v| v / b);
+            let cross = (x - w[0]) * (c[1] - w[1]) - (y - w[1]) * (c[0] - w[0]);
+            assert!(cross.abs() < 1e-9, "{xyz:?}");
+            assert!((x - w[0]) * (c[0] - w[0]) >= 0.0, "same side of white");
+        }
+    }
+
+    #[test]
+    fn no_light_gives_no_exposure() {
+        for xyz in [[0.0; 3], [-0.1, -0.2, 0.0], [0.5, -0.6, 0.05], [f64::NAN, 0.1, 0.1], [f64::INFINITY, 0.0, 0.0]] {
+            let ((tx, ty), b) = adapted_xyz_to_tc_b(xyz, D65, true);
+            assert_eq!(b, 0.0, "{xyz:?}");
+            assert!(tx.is_finite() && ty.is_finite());
+        }
+    }
 
     #[test]
     fn gpu_cmfs_are_the_exact_cmfs_in_f32() {
@@ -1308,7 +1399,7 @@ mod tests {
         use crate::precision::from_f64;
         // 18% gray in sRGB with D55 ref should produce balanced tc near center
         let gray = [from_f64(0.184), from_f64(0.184), from_f64(0.184)];
-        let (tc, b) = rgb_to_tc_b(gray, "sRGB", &ILLUMINANT_D55, false);
+        let (tc, b) = rgb_to_tc_b(gray, "sRGB", &ILLUMINANT_D55, false, true);
         assert!(b > 0.0, "brightness should be positive: {b}");
         // tc should be near the D55 chromaticity mapped to tc space
         let d55_xy = illuminant_to_xy(&ILLUMINANT_D55);
@@ -1347,8 +1438,8 @@ mod tests {
                 .collect(),
         );
         for output in [
-            hanatos2025_rgb_to_raw_prepared(&input, &tc_lut, &identity, &identity),
-            hanatos2025_rgb_to_raw_with_matrix(&input, &tc_lut, &identity),
+            hanatos2025_rgb_to_raw_prepared(&input, &tc_lut, &identity, &identity, true),
+            hanatos2025_rgb_to_raw_with_matrix(&input, &tc_lut, &identity, true),
         ] {
             for pixel in 0..3 {
                 for channel in 0..3 {
@@ -1361,7 +1452,7 @@ mod tests {
                 }
             }
         }
-        let (tc, b) = rgb_to_tc_b([from_f64(1e-12); 3], "sRGB", &ILLUMINANT_D55, true);
+        let (tc, b) = rgb_to_tc_b([from_f64(1e-12); 3], "sRGB", &ILLUMINANT_D55, true, true);
         assert!(b > 0.0 && b < 1e-10);
         assert!(tc.0.is_finite() && tc.1.is_finite());
     }
