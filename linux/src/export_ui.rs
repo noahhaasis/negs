@@ -230,12 +230,8 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
                 if border.is_active() && ui.history.borrow().state.border.enabled {
                     message.push_str(" Adds the border.");
                 }
-                if space != "sRGB" {
-                    message.push_str(&if preview {
-                        format!(" Converts to {space}; the preview's colours stay within sRGB.")
-                    } else {
-                        format!(" Develops in {space} and embeds its profile.")
-                    });
+                if let Some(summary) = space_summary(&space, &crate::preferences::preview_space(), !preview) {
+                    message.push_str(&format!(" {summary}."));
                 }
                 if edge.selected() != 0 {
                     message.push_str(&format!(
@@ -432,5 +428,35 @@ fn same_file(a: &PathBuf, b: &PathBuf) -> bool {
     match (std::fs::metadata(a), std::fs::metadata(b)) {
         (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
         _ => false,
+    }
+}
+
+/// For the dialog's message; None for sRGB in an sRGB preview. The preview
+/// develops in `preview_space`; afterwards it follows this save.
+fn space_summary(space: &str, preview_space: &str, export: bool) -> Option<String> {
+    let follows = if space == preview_space { String::new() } else { format!("; the preview then shows {space}") };
+    if export {
+        return (space != "sRGB" || !follows.is_empty()).then(|| format!("Develops in {space} and embeds its profile{follows}"));
+    }
+    if space == preview_space {
+        return (space != "sRGB").then(|| format!("Keeps the preview's {space} colours and embeds its profile"));
+    }
+    Some(format!("Converts the {preview_space} preview to {space}, clipping colours outside the smaller space{follows}"))
+}
+
+#[cfg(test)]
+mod space_tests {
+    use super::space_summary;
+
+    #[test]
+    fn summaries_say_whether_the_save_converts() {
+        assert_eq!(space_summary("sRGB", "sRGB", true), None);
+        assert_eq!(space_summary("sRGB", "sRGB", false), None);
+        assert_eq!(space_summary("Display P3", "Display P3", false).as_deref(), Some("Keeps the preview's Display P3 colours and embeds its profile"));
+        assert_eq!(
+            space_summary("Display P3", "sRGB", false).as_deref(),
+            Some("Converts the sRGB preview to Display P3, clipping colours outside the smaller space; the preview then shows Display P3")
+        );
+        assert_eq!(space_summary("sRGB", "Display P3", true).as_deref(), Some("Develops in sRGB and embeds its profile; the preview then shows sRGB"));
     }
 }
