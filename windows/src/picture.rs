@@ -28,6 +28,9 @@ pub struct Picture {
     pub width: u32,
     pub height: u32,
     pub id: u64,
+    /// The pixels have Rec. 2020 primaries (the helper's proxy of a render
+    /// outside sRGB); otherwise sRGB. Both use the sRGB curve.
+    pub wide: bool,
     inner: Arc<Inner>,
 }
 
@@ -50,10 +53,17 @@ impl Picture {
             width,
             height,
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            wide: false,
             inner: Arc::new(Inner { cpu: Mutex::new(Some(rgba)), texture: OnceLock::new(), small }),
         };
         picture.upload();
         picture
+    }
+
+    /// Marks the pixels as the helper's `display_color_space` names them.
+    pub fn in_display_space(mut self, name: &str) -> Picture {
+        self.wide = is_wide(name);
+        self
     }
 
     /// Uploads the pixels if the GPU is ready; a no-op otherwise or when done.
@@ -89,6 +99,13 @@ impl Picture {
     pub fn same(&self, other: &Picture) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
+}
+
+/// The helper's name for the Rec. 2020 proxy space.
+pub const WIDE_DISPLAY_SPACE: &str = "Rec. 2020 (sRGB transfer)";
+
+pub fn is_wide(display_space: &str) -> bool {
+    display_space == WIDE_DISPLAY_SPACE
 }
 
 /// Nearest-neighbour copy at most `SMALL` pixels on its long side.
@@ -176,6 +193,7 @@ impl Picture {
             width,
             height,
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            wide: false,
             inner: Arc::new(Inner { cpu: Mutex::new(Some(rgba)), texture: OnceLock::new(), small: (vec![], 0, 0) }),
         };
         picture.upload();
@@ -183,6 +201,6 @@ impl Picture {
     }
 
     fn empty() -> Picture {
-        Picture { width: 0, height: 0, id: 0, inner: Arc::new(Inner { cpu: Mutex::new(None), texture: OnceLock::new(), small: (vec![], 0, 0) }) }
+        Picture { width: 0, height: 0, id: 0, wide: false, inner: Arc::new(Inner { cpu: Mutex::new(None), texture: OnceLock::new(), small: (vec![], 0, 0) }) }
     }
 }
