@@ -280,7 +280,7 @@ mod tests {
                 .zip(&tinted.data)
                 .any(|(a, b)| (a - b).abs() > 0.001)
         );
-        assert!(upright.data.iter().all(|v| v.is_finite() && *v >= 0.0));
+        assert!(upright.data.iter().all(|v| v.is_finite()));
         // A fixture with exposure metadata can contain values above 1. Their
         // preservation is also measured by raw_decoder_probe, not asserted for
         // a photograph which may have no saturated scene content.

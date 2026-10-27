@@ -95,8 +95,9 @@ impl RawDecoder for AppleRawDecoder {
             .for_each(|(out, pixel)| out.copy_from_slice(&pixel[..3]));
         let (width, height, monochrome) = (native.width, native.height, native.monochrome != 0);
         drop(native);
+        // Unclamped: colours outside sRGB arrive as negative coordinates and
+        // the spectral model takes them; only non-finite values are refused.
         crate::white_balance::finish_rgb(&mut rgb, options.white_balance, monochrome)?;
-        rgb.par_iter_mut().for_each(|v| *v = v.max(0.0));
         #[cfg(not(feature = "precision-f64"))]
         let data: Vec<Scalar> = rgb;
         #[cfg(feature = "precision-f64")]

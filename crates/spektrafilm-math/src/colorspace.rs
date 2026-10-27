@@ -301,6 +301,51 @@ fn von_kries(
     result
 }
 
+/// The ICC profile connection space white, D50 as ICC.1 rounds it.
+pub const PCS_D50: [f64; 3] = [0.9642, 1.0, 0.8249];
+
+/// Bradford cone response matrix (ICC.1 Annex E).
+pub const BRADFORD: [[f64; 3]; 3] = [
+    [0.8951, 0.2664, -0.1614],
+    [-0.7502, 1.7135, 0.0367],
+    [0.0389, -0.0685, 1.0296],
+];
+
+/// Von Kries adaptation from `src` to `dst` white in Bradford cone space, the
+/// transform ICC profiles use to reach and leave the D50 connection space.
+pub fn bradford_matrix(src: [f64; 3], dst: [f64; 3]) -> [[f64; 3]; 3] {
+    von_kries(src, dst, &BRADFORD, &mat3_inverse(&BRADFORD))
+}
+
+/// The inverse of a 3x3 matrix (transposed cofactors over the determinant).
+pub fn mat3_inverse(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let c = |r: usize, k: usize| {
+        let (r1, r2, k1, k2) = ((r + 1) % 3, (r + 2) % 3, (k + 1) % 3, (k + 2) % 3);
+        m[r1][k1] * m[r2][k2] - m[r1][k2] * m[r2][k1]
+    };
+    let det = m[0][0] * c(0, 0) + m[0][1] * c(0, 1) + m[0][2] * c(0, 2);
+    std::array::from_fn(|i| std::array::from_fn(|j| c(j, i) / det))
+}
+
+/// Linear `from` RGB → linear `to` RGB as a colour-managed application
+/// converts between the two ICC profiles (relative colorimetric): through
+/// XYZ, with Bradford between the whites. Each space's own matrix is inverted
+/// exactly, so converting there and back is the identity, and the same space
+/// gives the identity. Values outside [0, 1] are kept.
+pub fn icc_rgb_to_rgb(from: &RgbColourspace, to: &RgbColourspace) -> [[f64; 3]; 3] {
+    if from.name == to.name {
+        return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    }
+    let adapt = bradford_matrix(from.whitepoint_xyz, to.whitepoint_xyz);
+    mat3_mul3_f64(&mat3_inverse(&to.rgb_to_xyz), &mat3_mul3_f64(&adapt, &from.rgb_to_xyz))
+}
+
+/// `m · v`.
+#[inline]
+pub fn mat3_vec_f64(m: &[[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
+    m.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2])
+}
+
 /// `a · b` for 3x3 matrices.
 pub fn mat3_mul3_f64(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     let mut out = [[0.0f64; 3]; 3];
