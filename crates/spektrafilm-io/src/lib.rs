@@ -16,6 +16,7 @@
 pub mod border;
 pub mod colour;
 pub mod crop;
+pub mod encoding;
 pub mod film35;
 pub mod icc;
 pub mod image_size;

@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::precision::{Scalar, from_f32, from_f64, srgb_decode, srgb_encode, to_f32, to_f64};
+use spektrafilm_math::precision::{Scalar, from_f32, from_f64, to_f32};
 
 /// The edge an export is fitted to, in pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,19 +44,17 @@ impl Fit {
 }
 
 /// `image` fitted to `fit`, or `None` if it already fits. Resamples with a
-/// Lanczos-3 filter in linear light: an `encoded` (sRGB) image is decoded
-/// first and encoded again after, so fine grain averages to the same
-/// brightness it has at full size.
-pub fn fit(image: &ImageBuf, fit: Fit, encoded: bool) -> Option<ImageBuf> {
+/// Lanczos-3 filter in linear light: an encoded image is decoded with its
+/// space's transfer function first and encoded again after, so fine grain
+/// averages to the same brightness it has at full size.
+pub fn fit(image: &ImageBuf, fit: Fit, encoding: impl Into<crate::encoding::Encoding>) -> Option<ImageBuf> {
     let (width, height) = fit.dimensions(image.width, image.height);
     if (width, height) == (image.width, image.height) {
         return None;
     }
-    let decode = |v: Scalar| to_f64(if encoded { srgb_decode(v) } else { v });
-    let encode = |v: f64| {
-        let v = from_f64(v);
-        if encoded { srgb_encode(v) } else { v }
-    };
+    let encoding = encoding.into();
+    let decode = |v: Scalar| encoding.decode(v);
+    let encode = |v: f64| encoding.encode(v);
     let (sw, dw) = (image.width as usize, width as usize);
     let (columns, rows) = (taps(sw, dw), taps(image.height as usize, height as usize));
 
@@ -229,6 +227,21 @@ fn lanczos3(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use spektrafilm_math::precision::{srgb_encode, to_f64};
+
+    /// A flat colour stays put when resampled in another space's linear
+    /// light: ProPhoto RGB's curve decodes and encodes it exactly.
+    #[test]
+    fn fit_resamples_in_the_output_spaces_linear_light() {
+        let encoding = crate::encoding::Encoding::new("ProPhoto RGB", true);
+        let img = ImageBuf::from_data(64, 32, [0.3f32, 0.6, 0.15].repeat(64 * 32).into_iter().map(from_f32).collect());
+        let small = fit(&img, Fit::LongEdge(16), encoding).unwrap();
+        for px in small.data.chunks_exact(3) {
+            for (v, want) in px.iter().zip([0.3, 0.6, 0.15]) {
+                assert!((to_f64(*v) - want).abs() < 1e-5, "{px:?}");
+            }
+        }
+    }
 
     #[test]
     fn dimensions_fit_the_edge_and_never_enlarge() {

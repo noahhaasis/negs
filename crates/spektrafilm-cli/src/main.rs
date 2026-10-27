@@ -358,6 +358,8 @@ fn cmd_process(
     }
     let rotate_cw = params.io.rotate_cw;
     let encoded = params.io.output_cctf_encoding;
+    // Borders, the 35mm strip and resizing work in the output space.
+    let finish = spektrafilm_io::encoding::Encoding::new(&params.io.output_color_space, encoded);
     // The pipeline falls back to sRGB for a name it doesn't know; so does the profile.
     save_options.color_space = RgbColourspace::output(&params.io.output_color_space).name.into();
     save_options.linear = !encoded;
@@ -468,7 +470,7 @@ fn cmd_process(
                 style,
                 border_options,
                 film_name,
-                encoded,
+                finish,
                 data_dir,
             )?;
             if instagram {
@@ -476,7 +478,7 @@ fn cmd_process(
                     &bordered,
                     style,
                     border_options,
-                    encoded,
+                    finish,
                 )
             } else {
                 bordered
@@ -484,7 +486,7 @@ fn cmd_process(
         }
         None => result,
     };
-    let result = match fit.and_then(|fit| spektrafilm_io::resize::fit(&result, fit, encoded)) {
+    let result = match fit.and_then(|fit| spektrafilm_io::resize::fit(&result, fit, finish)) {
         Some(resized) => resized,
         None => result,
     };
