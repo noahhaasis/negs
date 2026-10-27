@@ -164,7 +164,10 @@ impl Editor {
             r.showing_original = false;
             r.desired = Value::Null;
         }
-        let original_key = json!([params["io"]["raw_white_balance"], desired["limit_preview"]]);
+        // The original view follows the decode and the preview space.
+        let original_key = json!([params["io"]["raw_white_balance"], desired["limit_preview"],
+            params["io"]["input_interpretation"], params["io"]["input_color_space"],
+            params["io"]["input_cctf_decoding"], params["io"]["output_color_space"]]);
         let release_original = r.showing_original && r.original_key != original_key;
         if r.original_key != original_key {
             r.original_key = original_key;
@@ -281,6 +284,7 @@ impl Editor {
             match result {
                 Ok(Ok((id,frame,cache_key))) if current => {
                     r.developed = Some(frame.clone());
+                    ui.input_summary.set_text(&input_summary(&frame.result["input_colour"]));
                     if interactive.is_none() && revision == r.revision { r.retained_id = Some(id); r.current_revision = Some(revision); r.cached_restoring=false;ui.perf.mark("saveable_render_ready_ms");if let Some(key)=cache_key {ui.cache.save(key,frame.clone());} }
                     if interactive.is_some() { r.interactive_frames += 1; ui.perf.detail("interactive_frames_presented", r.interactive_frames); }
                     let show = !r.showing_original;
@@ -298,12 +302,13 @@ impl Editor {
         });
     }
     fn present_engine_frame(self: &Rc<Self>, frame: &Frame, developed: bool) {
-        let texture = crate::canvas::srgb_texture(
+        let texture = crate::canvas::texture(
             frame.width,
             frame.height,
             gdk::MemoryFormat::R8g8b8a8,
             &glib::Bytes::from_owned(frame.pixels.clone()),
             frame.width as usize * 4,
+            &crate::canvas::display_color_state(frame.result["display_color_space"].as_str().unwrap_or("")),
         );
         let dimension = |key: &str, fallback: i32| {
             frame.result[key]
@@ -444,6 +449,7 @@ impl Editor {
                     .and_then(|(_,result)|{
                         let mut combined = context;
                         combined["width"] = result["width"].clone(); combined["height"] = result["height"].clone();
+                        combined["display_color_space"] = result["display_color_space"].clone();
                         Frame::read(&buffer,combined).map(Arc::new)
                     });
                 let _ = std::fs::remove_file(buffer); frame
@@ -485,6 +491,21 @@ impl Editor {
         });
     }
 }
+/// How the helper read the photograph's colours, for the inspector: its
+/// summary, the automatic reading an override replaces, and any warning.
+pub(crate) fn input_summary(colour: &Value) -> String {
+    let text = |key: &str| colour[key].as_str().unwrap_or_default();
+    let mut lines = vec![text("summary").to_string()];
+    if text("automatic") != text("summary") {
+        lines.push(format!("Automatic: {}", text("automatic")));
+    }
+    if !text("warning").is_empty() {
+        lines.push(text("warning").to_string());
+    }
+    lines.retain(|l| !l.is_empty());
+    lines.join("\n")
+}
+
 fn histogram(frame: &Frame, state: &crate::model::State) -> [Vec<u32>; 3] {
     let mut bins = [vec![0; 256], vec![0; 256], vec![0; 256]];
     let [x, y, w, h] = state.crop.unwrap_or([0., 0., 1., 1.]);

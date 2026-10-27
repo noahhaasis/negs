@@ -52,6 +52,8 @@ pub(crate) struct Editor {
     histogram: RefCell<Option<gtk::DrawingArea>>,
     title: adw::WindowTitle,
     dimensions: gtk::Label,
+    /// How the photograph's colours were read (Input Colour).
+    input_summary: gtk::Label,
     status: gtk::Label,
     badge: gtk::Label,
     export_progress: gtk::Box,
@@ -357,6 +359,7 @@ impl Editor {
             histogram: RefCell::new(None),
             title,
             dimensions,
+            input_summary: gtk::Label::new(None),
             status,
             badge,
             export_progress,
