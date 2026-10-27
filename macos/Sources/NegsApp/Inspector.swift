@@ -495,6 +495,7 @@ struct AdjustmentInspector: View {
             control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
             control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))
             control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1))
+            if !model.isRaw { inputColour }
             if model.isRaw {
                 disclosure("RAW White Balance", symbol: "thermometer.sun") {
                     control(.choice("White balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
@@ -517,9 +518,47 @@ struct AdjustmentInspector: View {
             disclosure("Output", symbol: "square.and.arrow.down.on.square") {
                 Toggle("Limit preview to 12 MP", isOn: Binding(get: { model.limitsPreview }, set: model.limitPreview))
                     .help("Develops the preview faster on large photographs. Export keeps the full Image Size.")
-                Toggle("Encode output as sRGB", isOn: model.toggle("io.output_cctf_encoding"))
+                Picker("Colour space", selection: Binding(get: { model.previewSpace }, set: model.choosePreviewSpace)) {
+                    ForEach(SaveSettings.colorSpaces, id: \.self) { Text($0).tag($0) }
+                }
+                .help("The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.")
+                Toggle("Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"))
+                    .help("Off writes linear values, for further processing.")
                 Toggle("Use less memory for export", isOn: model.toggle("settings.serial_grain"))
                     .help("Processes grain channels one at a time. Same result, less memory, longer export.")
+            }
+        }
+    }
+
+    /// How a non-RAW photograph's values are read: automatically from its
+    /// profile and tags, as an assumed colour space, or (Manual) by the input
+    /// colour space and curve, as Negs 0.8 read every file.
+    @ViewBuilder private var inputColour: some View {
+        disclosure("Input Colour", symbol: "eyedropper") {
+            Picker("Read as", selection: model.inputInterpretation) {
+                Text("Automatic").tag("auto")
+                Section("Assume") {
+                    ForEach(["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020"], id: \.self) { Text($0).tag("assume:" + $0) }
+                }
+                Text("Manual").tag("manual")
+            }
+            .help("Automatic reads the embedded profile or tags; untagged files are read as sRGB. Assume overrides them. Manual uses the colour space and curve below, as Negs 0.8 did.")
+            switch model.value("io.input_interpretation.mode").string {
+            case "assume":
+                Toggle("Linear values", isOn: model.toggle("io.input_interpretation.linear"))
+            case "manual":
+                control(.choice("Colour space", "io.input_color_space", ["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020", "ACES2065-1", "ACEScg"]))
+                Toggle("Decode the curve", isOn: model.toggle("io.input_cctf_decoding"))
+            default: EmptyView()
+            }
+            let colour = model.inputColour
+            if colour != .null {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(colour["summary"].string)
+                    if colour["automatic"].string != colour["summary"].string { Text("Automatic: \(colour["automatic"].string)") }
+                    if !colour["warning"].string.isEmpty { Text(colour["warning"].string).foregroundStyle(.orange) }
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
