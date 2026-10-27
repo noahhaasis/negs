@@ -299,7 +299,7 @@ mod tests {
     use crate::metadata::{SOFTWARE, read_metadata};
     use rawler::exif::{Exif, ExifGPS};
     use rawler::formats::tiff::{IFD, SRational, Value};
-    use spektrafilm_math::precision::{Scalar, from_f32};
+    use spektrafilm_math::precision::{Scalar, from_f32, to_f32};
     use std::path::PathBuf;
 
     /// Fresh scratch directory per test, removed on drop.
@@ -496,11 +496,17 @@ mod tests {
         save_image(&img, &out, Some(&sample_metadata())).unwrap();
         let back = crate::load_image(&out, crate::Formats::TiffPngRaw).unwrap();
         assert_eq!((back.width, back.height), (3, 2));
+        // The export embeds an sRGB profile, so the loader decodes the
+        // stored codes back to linear light through the profile's
+        // 1024-entry u16 curve table: interpolation and table rounding
+        // stay below 5e-5.
         let want: Vec<Scalar> = quantize_u16(&img)
             .into_iter()
-            .map(|v| from_f32(v as f32 / 65535.0))
+            .map(|v| spektrafilm_math::precision::srgb_decode(from_f32(v as f32 / 65535.0)))
             .collect();
-        assert_eq!(back.data, want);
+        for (got, want) in back.data.iter().zip(&want) {
+            assert!((to_f32(*got) - to_f32(*want)).abs() < 5e-5, "{got:?} vs {want:?}");
+        }
     }
 
     /// Big enough for several TIFF strips, and non-square, to catch
