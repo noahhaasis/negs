@@ -61,6 +61,11 @@ From the Rust repository root:
   --output-color-space "Adobe RGB (1998)" --output-cctf-encoding \
   --output-dir /tmp/spektrafilm-parity-dwg-adobe
 
+# Rust runs with upstream's spectral-boundary and output-adaptation
+# arithmetic (Negs-only settings Python lacks; see docs/colour-management.md).
+# Add --negs-colour-defaults to measure Negs' own defaults instead: they
+# differ only for non-physical input light and non-D65 output whites.
+
 # The same against upstream main, with experimental's morph baked into its
 # film profile:
 ../spektrafilm-env/bin/python -I scripts/parity/check_parity.py \

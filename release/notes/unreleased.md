@@ -1,0 +1,40 @@
+# Negs (unreleased): colour management
+
+- **JPEG, PNG and TIFF files are read in their own colours.** Negs now
+  honours embedded ICC profiles (matrix and LUT profiles, evaluated exactly),
+  PNG colour chunks and EXIF colour space. iPhone Display P3 photos, Adobe RGB
+  camera JPEGs and ProPhoto TIFFs no longer come out flat or oversaturated.
+  Untagged 8/16-bit files are read as sRGB, untagged float TIFFs as linear
+  sRGB. CMYK and HDR (PQ/HLG) files are refused with a message rather than
+  shown wrongly.
+- **Existing edits of JPEG/PNG/TIFF photographs will look different.** Earlier
+  versions read their values as linear ProPhoto RGB, which lifted shadows and
+  distorted saturation. Your saved edits are kept and not rewritten; they are
+  simply applied to correctly read colours now. To get the old reading back,
+  set Input Colour → Read as → Manual (ProPhoto RGB, curve off). RAW files are
+  unaffected by this.
+- **Input Colour** (Lab tab, non-RAW files): Automatic shows what was
+  detected; Assume reads the file as sRGB, Display P3, Adobe RGB, ProPhoto RGB
+  or Rec. 2020 (optionally linear); Manual is the old behaviour. The CLI has
+  `--input-colour auto|manual|SPACE` and `--input-linear`; params files that
+  set `io.input_color_space` keep their old meaning.
+- **RAW colours outside sRGB are kept.** The RAW decoders no longer clip
+  negative channels, and rawler's highlight step no longer clips, so saturated
+  RAW colours reach the film model. Expect small changes in very saturated
+  areas of RAW photographs.
+- **The preview shows the export's colour space.** Scan & Color → Output →
+  Colour space (and every Save/Export) sets the space the preview develops
+  in. On a wide-gamut display you now see Display P3 / Adobe RGB colours while
+  editing, and Fast export reuses the preview in any space, not just sRGB.
+  Save Preview to another space says that it converts.
+- **Wide-gamut exports are finished in their own space.** Borders and the 35mm
+  strip keep their colours in Display P3, Adobe RGB and ProPhoto files, and
+  Post adjustments and resizing use the file's own tone curve.
+- **ProPhoto RGB (and DCI-P3) exports now match the sRGB export** within gamut
+  (they differed by up to about 1.4 ΔE). sRGB, Display P3 and Adobe RGB exports
+  are unchanged. `settings.output_adaptation: "direct"` restores the old
+  behaviour.
+- **Non-physical input colours** (from very wide camera gamuts or noise) are
+  handled safely instead of folding into wrong hues; ordinary colours are
+  unchanged. `settings.spectral_boundary: "upstream"` restores the old
+  arithmetic.
