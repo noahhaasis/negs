@@ -155,7 +155,7 @@ fn input_projection_matches_python() {
         let cs = RgbColourspace::find(&case.color_space).unwrap();
         for (k, rgb) in fixture.tc_b_rgb.iter().enumerate() {
             let rgb = rgb.map(|v| from_f64(if case.decode { cs.cctf.decode(v) } else { v }));
-            let (tc, b) = spectral::rgb_to_tc_b(rgb, cs.name, &spectral::ILLUMINANT_D55, true);
+            let (tc, b) = spectral::rgb_to_tc_b(rgb, cs.name, &spectral::ILLUMINANT_D55, true, false);
             #[cfg(feature = "precision-f64")]
             let tol = 1e-12;
             #[cfg(not(feature = "precision-f64"))]
@@ -249,7 +249,15 @@ fn pipelines_across_colour_spaces_match_python() {
         let film = profile::load_profile_by_name(&data_dir, &case.film).unwrap();
         let paper = if case.scan_film { &case.film } else { &case.paper };
         let print = profile::load_profile_by_name(&data_dir, paper).unwrap();
-        let pipeline = Pipeline::new_with_spectral(film, print, case.params.clone(), &data_dir).unwrap();
+        // Upstream's reference modes: it adapts straight to a non-D65 output
+        // white (aces-prophoto, vlog-acescg, adobe-dcip3), and folds the
+        // V-Gamut and DaVinci Wide Gamut colours beyond the xy triangle
+        // (vlog-acescg, dwg-adobe). Negs' defaults go via D65 and guard the
+        // boundary.
+        let mut params = case.params.clone();
+        params.settings.output_adaptation = spektrafilm_core::params::OutputAdaptation::Direct;
+        params.settings.spectral_boundary = spektrafilm_core::params::SpectralBoundary::Upstream;
+        let pipeline = Pipeline::new_with_spectral(film, print, params, &data_dir).unwrap();
         let input = ImageBuf::from_data(4, 4, case.input.iter().copied().map(from_f32).collect());
         let output = pipeline.process(input, &CpuBackend);
         assert_eq!(output.data.len(), case.expected_rgb.len());

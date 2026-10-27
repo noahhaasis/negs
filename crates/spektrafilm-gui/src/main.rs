@@ -294,6 +294,8 @@ struct App {
     image: Option<Arc<ImageBuf>>,
     /// WB of the currently developed input, which can lag behind a UI edit.
     loaded_raw_wb: spektrafilm_io::RawWhiteBalance,
+    /// What the loaded image was read as; sets the pipeline's input fields.
+    loaded_colour: Option<spektrafilm_io::InputColour>,
     /// Invalidates in-flight results when opening an image or editing RAW WB.
     input_revision: u64,
     /// Last rendered pipeline output (post sRGB encode + clip). Retained
@@ -435,6 +437,7 @@ impl App {
             last_export_dir: None,
             image: None,
             loaded_raw_wb: spektrafilm_io::RawWhiteBalance::default(),
+            loaded_colour: None,
             input_revision: 0,
             output_image: None,
             output_tex: None,
@@ -465,25 +468,25 @@ impl App {
 
     fn load_image_from_path(&mut self, path: &Path) {
         let t = Instant::now();
-        match spektrafilm_io::load_image_with_wb(
+        match spektrafilm_io::load_image_colour(
             path,
             spektrafilm_io::Formats::Any,
             self.params.io.raw_white_balance,
+            &self.params.io.input_interpretation,
         ) {
-            Ok(img) => {
-                // PNG and RAW come out of the loader as linear sRGB.
-                // Tell the pipeline so it doesn't decode the gamma twice.
-                if spektrafilm_io::input_is_linear_srgb(path) {
-                    self.params.io.input_color_space = "sRGB".to_string();
-                    self.params.io.input_cctf_decoding = false;
-                }
+            Ok(spektrafilm_io::LoadedImage { image: img, colour }) => {
+                // The loader decodes to the engine's representation; tell the
+                // pipeline so it doesn't decode the values a second time.
+                self.params.io.apply_input_colour(&colour);
                 self.status = format!(
-                    "Loaded {} × {} ({:.1} MP) in {:.0} ms",
+                    "Loaded {} × {} ({:.1} MP, {}) in {:.0} ms",
                     img.width,
                     img.height,
                     (img.pixel_count() as f64 / 1e6),
+                    colour.summary,
                     t.elapsed().as_secs_f32() * 1000.0
                 );
+                self.loaded_colour = Some(colour);
                 self.image = Some(Arc::new(img));
                 self.loaded_raw_wb = self.params.io.raw_white_balance;
                 self.invalidate_input_preview();
@@ -522,14 +525,9 @@ impl App {
     fn reset_settings(&mut self) {
         let previous_wb = self.params.io.raw_white_balance;
         let mut params = RuntimeParams::default();
-        // Match the defaults chosen when this image and film were loaded.
-        if self
-            .image_path
-            .as_deref()
-            .is_some_and(spektrafilm_io::input_is_linear_srgb)
-        {
-            params.io.input_color_space = "sRGB".into();
-            params.io.input_cctf_decoding = false;
+        // Match the input fields chosen when this image was loaded.
+        if let Some(colour) = &self.loaded_colour {
+            params.io.apply_input_colour(colour);
         }
         params.io.scan_film = profile::load_profile_by_name(&self.data_dir, &self.film_name)
             .is_ok_and(|film| film.is_positive());
@@ -2744,6 +2742,7 @@ mod reset_tests {
         app.film_name = "kodak_ektachrome_100".into();
         app.print_name = "kodak_2302".into();
         app.image_path = Some(PathBuf::from("photo.png"));
+        app.loaded_colour = Some(spektrafilm_io::InputColour::raw("test"));
         app.params.camera.exposure_compensation_ev = 2.0;
         app.params.film_render.development_time = Some(10.0);
         app.params.print_render.development_time = Some(5.0);

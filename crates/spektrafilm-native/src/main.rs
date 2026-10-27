@@ -115,7 +115,7 @@ enum Command {
 struct Session {
     source_generation: u64,
     backend: Option<Box<dyn ComputeBackend>>,
-    source: Option<(PathBuf, spektrafilm_io::RawWhiteBalance, ImageBuf)>,
+    source: Option<Source>,
     /// The source resized to the working/preview dimensions, so edits that
     /// don't change the size skip a full-resolution resample.
     scaled: Option<((u32, u32), ImageBuf)>,
@@ -128,6 +128,23 @@ struct Session {
     metering: Option<ImageBuf>,
     pipeline: Option<(String, Pipeline)>,
     output: Option<Rendered>,
+}
+
+/// The decoded input, and what it was decoded with: a RAW's white balance
+/// and a non-RAW file's interpretation each need a new decode.
+struct Source {
+    path: PathBuf,
+    wb: spektrafilm_io::RawWhiteBalance,
+    interpretation: spektrafilm_io::InputInterpretation,
+    colour: spektrafilm_io::InputColour,
+    image: ImageBuf,
+}
+
+impl Source {
+    fn current(&self, path: &Path, wb: spektrafilm_io::RawWhiteBalance, interpretation: &spektrafilm_io::InputInterpretation) -> bool {
+        self.path == path
+            && if spektrafilm_io::is_raw(path) { self.wb == wb } else { &self.interpretation == interpretation }
+    }
 }
 
 /// The last render. `image` is the scan before the post adjustments, so a
@@ -173,7 +190,7 @@ fn catalog(data: &Path) -> Result<Value> {
         "No profiles found in {}",
         data.display()
     );
-    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true}, "profiles": profiles, "defaults": RuntimeParams::default()}))
+    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true, "input_interpretation": true}, "profiles": profiles, "defaults": RuntimeParams::default()}))
 }
 
 impl Session {
@@ -205,9 +222,12 @@ impl Session {
                 ensure!(params.io.upscale_factor.is_finite()
                     && (0.1..=1.0).contains(&params.io.upscale_factor), "Invalid working resolution");
                 params.io.raw_white_balance.validate()?;
-                let source = spektrafilm_io::load_image_with_wb(
+                params.io.input_interpretation.validate()?;
+                let loaded = spektrafilm_io::load_image_colour(
                     &input, spektrafilm_io::Formats::Any, params.io.raw_white_balance,
+                    &params.io.input_interpretation,
                 )?;
+                let source = loaded.image;
                 // Never enlarged: an Image Size target is ignored, and the
                 // canvas fits the original to the developed photograph.
                 let factor = if params.io.photo_long_side_px.is_some() { 1.0 } else { params.io.upscale_factor };
@@ -215,9 +235,10 @@ impl Session {
                 let resized = (dimensions != (source.width, source.height))
                     .then(|| rescale_preview_input_fast(&source, dimensions));
                 let working = resized.as_ref().unwrap_or(&source);
-                let encoded = !spektrafilm_io::input_is_linear_srgb(&input);
+                // Manual pass-through shows the stored values as they are.
+                let encoded = !loaded.colour.linear_srgb;
                 let (width, height) = write_display(working, encoded, &PostParams::default(), &preview_path)?;
-                Ok(json!({"width": width, "height": height}))
+                Ok(json!({"width": width, "height": height, "input_colour": loaded.colour}))
             }
             Command::Save {
                 render_id,
@@ -324,38 +345,42 @@ impl Session {
                     "Native preview requires sRGB output"
                 );
                 params.io.raw_white_balance.validate()?;
-                // Linear PNG/RAW loader behavior must match the CLI exporter.
-                if spektrafilm_io::input_is_linear_srgb(&input) {
-                    params.io.input_color_space = "sRGB".into();
-                    params.io.input_cctf_decoding = false;
-                }
                 params.settings.serial_grain = false;
                 // Applied to the display and on save, so the pipeline runs without them.
                 let post = std::mem::take(&mut params.post);
                 let wb = params.io.raw_white_balance;
+                let interpretation = params.io.input_interpretation.clone();
+                interpretation.validate()?;
                 let reload = self.source_generation != source_generation
-                    || self.source.as_ref().is_none_or(|(path, old_wb, _)| {
-                        path != &input || (spektrafilm_io::is_raw(&input) && *old_wb != wb)
-                    });
+                    || self.source.as_ref().is_none_or(|source| !source.current(&input, wb, &interpretation));
                 if reload {
                     // Release the last source's caches before decoding the next.
                     self.source = None;
                     self.scaled = None;
                     self.interactive = None;
                     self.metering = None;
-                    let image = spektrafilm_io::load_image_with_wb(
+                    let loaded = spektrafilm_io::load_image_colour(
                         &input,
                         spektrafilm_io::Formats::Any,
                         wb,
+                        &interpretation,
                     )?;
-                    self.source = Some((input.clone(), wb, image));
+                    self.source = Some(Source {
+                        path: input.clone(),
+                        wb,
+                        interpretation,
+                        colour: loaded.colour,
+                        image: loaded.image,
+                    });
                     self.source_generation = source_generation;
                 }
+                let Source { image: source, colour: input_colour, .. } = self.source.as_ref().unwrap();
+                // RAW and decoded files are the engine's linear sRGB; manual
+                // pass-through keeps the params' input fields, as 0.8 did.
+                params.io.apply_input_colour(input_colour);
                 if params.camera.auto_exposure && self.metering.is_none() {
-                    let source = &self.source.as_ref().unwrap().2;
                     self.metering = Some(spektrafilm_core::stages::filming::metering_preview(source));
                 }
-                let source = &self.source.as_ref().unwrap().2;
                 let (source_width, source_height) = (source.width, source.height);
                 // The uncapped frame an export develops, and the photograph the
                 // crop cuts from it; an invalid or too-large request fails here,
@@ -454,6 +479,7 @@ impl Session {
                     "source_width": source_width, "source_height": source_height,
                     "export_resolution": export_resolution,
                     "raw": spektrafilm_io::is_raw(&input), "backend": used_backend,
+                    "input_colour": input_colour,
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 });
                 self.output = Some(Rendered {
@@ -470,6 +496,16 @@ impl Session {
             }
         }
     }
+}
+
+/// A request line. Params from before `io.input_interpretation` keep the
+/// meaning of their input fields; see `infer_input_interpretation`.
+fn parse_request(line: &str) -> Result<Request> {
+    let mut value: Value = serde_json::from_str(line)?;
+    if let Some(params) = value.get_mut("params") {
+        spektrafilm_core::params::infer_input_interpretation(params);
+    }
+    Ok(serde_json::from_value(value)?)
 }
 
 /// Writes the preview for the app as raw RGBA, avoiding PNG compression on
@@ -525,7 +561,7 @@ fn main() -> Result<()> {
             .and_then(|v| v["id"].as_u64())
             .unwrap_or(0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<Value> {
-            session.handle(serde_json::from_str(&line)?, &data)
+            session.handle(parse_request(&line)?, &data)
         }))
         .unwrap_or_else(|_| {
             // A panicked GPU/decoder may have invalidated its cached state.

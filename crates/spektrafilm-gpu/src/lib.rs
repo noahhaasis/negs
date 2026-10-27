@@ -114,6 +114,7 @@ pub trait ComputeBackend: Send + Sync {
         color_space: &str,
         ref_illuminant: &[f32],
         cat16: bool,
+        guard: bool,
     ) -> ImageBuf {
         spektrafilm_math::spectral::hanatos2025_rgb_to_raw(
             image,
@@ -121,6 +122,7 @@ pub trait ComputeBackend: Send + Sync {
             color_space,
             ref_illuminant,
             cat16,
+            guard,
         )
     }
 
@@ -293,6 +295,9 @@ pub enum FrontPass<'a> {
         tc_lut: &'a spektrafilm_math::spectral::TcLut,
         /// Combined input-RGB → CAT-adapted-XYZ matrix (row-major).
         rgb_to_adapted_xyz: [[f64; 3]; 3],
+        /// The spectral boundary guard (`adapted_xyz_to_tc_b`); false is
+        /// upstream's arithmetic.
+        guard: bool,
     },
 }
 

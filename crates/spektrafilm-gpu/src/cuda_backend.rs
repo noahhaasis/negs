@@ -214,7 +214,8 @@ extern "C" __global__ void hanatos_front_kernel(
     unsigned int lut_size,
     const float* __restrict__ matrix,
     const float* __restrict__ tc_lut,
-    float* __restrict__ raw_out
+    float* __restrict__ raw_out,
+    unsigned int guard
 ) {
     unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid >= n_pixels) return;
@@ -228,6 +229,27 @@ extern "C" __global__ void hanatos_front_kernel(
     float brightness = x + y + z;
     float xc = x / fmaxf(brightness, 1e-10f);
     float yc = y / fmaxf(brightness, 1e-10f);
+    // The spectral boundary, as `adapted_xyz_to_tc_b` on the CPU.
+    float wx = matrix[0] + matrix[1] + matrix[2];
+    float wy = matrix[3] + matrix[4] + matrix[5];
+    float wz = matrix[6] + matrix[7] + matrix[8];
+    float ws = wx + wy + wz;
+    wx /= ws; wy /= ws; wz /= ws;
+    if (guard == 0u) {
+        // Upstream: no guard.
+    } else if (!(brightness > 0.0f) || !isfinite(brightness) || !isfinite(x) || !isfinite(y) || !isfinite(z)) {
+        brightness = 0.0f;
+        xc = wx;
+        yc = wy;
+    } else if (x < 0.0f || y < 0.0f || z < 0.0f) {
+        float cx = x / brightness, cy = y / brightness, cz = z / brightness;
+        float t = 1.0f;
+        if (cx < 0.0f) t = fminf(t, wx / (wx - cx));
+        if (cy < 0.0f) t = fminf(t, wy / (wy - cy));
+        if (cz < 0.0f) t = fminf(t, wz / (wz - cz));
+        xc = wx + t * (cx - wx);
+        yc = wy + t * (cy - wy);
+    }
     float omx = fmaxf(1.0f - xc, 1e-10f);
     float tx = fminf(fmaxf((1.0f - xc) * (1.0f - xc), 0.0f), 1.0f);
     float ty = fminf(fmaxf(yc / omx, 0.0f), 1.0f);
@@ -2421,7 +2443,9 @@ impl CudaBackend {
             FrontPass::Hanatos2025 {
                 tc_lut,
                 rgb_to_adapted_xyz,
+                guard,
             } => {
+                let guard = *guard as u32;
                 let matrix = matrix_f32(rgb_to_adapted_xyz);
                 let tc_lut_f32: Vec<f32> = tc_lut.data.iter().map(|&v| v as f32).collect();
                 let matrix_dev = self.stream.clone_htod(&matrix)?;
@@ -2434,7 +2458,8 @@ impl CudaBackend {
                     .arg(&lut_size)
                     .arg(&matrix_dev)
                     .arg(&tc_lut_dev)
-                    .arg(&mut buf_b);
+                    .arg(&mut buf_b)
+                    .arg(&guard);
                 unsafe { launch.launch(LaunchConfig::for_num_elems(n_pixels)) }?;
             }
         }
