@@ -138,6 +138,9 @@ macOS shows that warning for every app that isn't notarized by Apple. Negs isn't
 **Which files can I open?**
 RAW files from most cameras, plus JPEG, TIFF and PNG. The Mac app uses Apple's RAW support with a rawler fallback; the Windows and Linux apps use rawler for RAW files.
 
+**Does Negs respect my photo's colour profile?**
+Yes. JPEG, PNG and TIFF files are read with their embedded ICC profile or colour tags (untagged files as sRGB), and RAW colours outside sRGB are kept. The preview develops in the colour space you export to, so on a wide-gamut display you see Display P3 or Adobe RGB colours while editing. For files with missing or wrong tags, Input Colour in the Lab tab lets you choose how they are read. Details: [colour management](docs/colour-management.md).
+
 **Does it run on Intel Macs?**
 Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it runs natively on both Intel and Apple silicon. It is developed and tested mainly on Apple silicon, so if something looks wrong on an Intel Mac, please [open an issue](https://github.com/noahhaasis/negs/issues).
 

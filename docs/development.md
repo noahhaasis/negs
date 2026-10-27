@@ -129,6 +129,13 @@ echo '{"io": {"photo_long_side_px": 9000}}' > size.json
 ./target/release/spektrafilm process input.ORF -o out.png \
     --film kodak_gold_200 --raw-wb custom --raw-temperature 3200 --raw-tint 0.85
 
+# Input colour: JPEG/PNG/TIFF are read with their ICC profile or tags by
+# default. Assume a space (optionally linear), or pass values through to
+# io.input_color_space / io.input_cctf_decoding as Negs 0.8 did. Params files
+# that set those fields and no io.input_interpretation keep that meaning.
+./target/release/spektrafilm process untagged.tif -o out.png --input-colour "Display P3"
+./target/release/spektrafilm process scan.tif -o out.png --input-colour manual --params old.json
+
 # List available film + paper profiles
 ./target/release/spektrafilm list-profiles --data-dir data
 ```
@@ -141,6 +148,15 @@ the D65 compression center and the OkLCh output compressor
 pass against pinned Python `28bf883`, including saturated inputs, with
 maximum final RGB error `5.313e-10`; colour-profile normalization remains a
 separate port.
+
+Colour management (input profiles, the spectral boundary guard, output
+adaptation, the preview space) is described in [colour management](colour-management.md).
+Two of its defaults deliberately differ from upstream for colours upstream
+handles badly: `settings.spectral_boundary: "guard"` (non-physical input
+light) and `settings.output_adaptation: "via_d65"` (non-D65 output whites).
+Neither changes physical input or D65 outputs, so the standard parity cases
+pass at the defaults. The parity runner gives Rust upstream's arithmetic for
+both; `--negs-colour-defaults` measures Negs' own.
 
 The [repeatable parity runner](../scripts/parity/README.md) checks intermediate f64 arrays and final RGB against an explicitly selected Python checkout. The [October 2026 audit](upstream-sync.md) passes all 12 tested cases against upstream main `3bb2c2d`, with maximum final linear RGB error `3.631e-9`. The sibling Python checkout is on experimental `28bf883`, which changes the model and fails all six tested Portra/Endura cases. Version `0.3.4` alone does not identify a stable reference.
 
