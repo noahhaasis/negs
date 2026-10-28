@@ -257,8 +257,9 @@ pub struct Model {
     /// last render; zero before one finishes.
     pub source_size: (u32, u32),
     pub working_size: Size,
-    /// The shown texture's linear fraction of the working frame, below 1 when
-    /// the preview is limited or larger than the display proxy.
+    /// The settled preview's linear fraction of the working frame, below 1
+    /// when limited or larger than the display proxy. Temporary drag frames
+    /// leave this unchanged so the Image Size notice doesn't move the rows.
     pub preview_scale: f64,
     /// Why the last typed Longest side wasn't used.
     pub size_error: Option<String>,
@@ -1262,7 +1263,9 @@ impl Model {
                 self.image_size = Size::new(json::number(&result["photo_width"]), json::number(&result["photo_height"]));
                 self.source_size = (json::number(&result["source_width"]) as u32, json::number(&result["source_height"]) as u32);
                 self.working_size = Size::new(json::number(&result["working_width"]), json::number(&result["working_height"]));
-                self.preview_scale = if self.working_size.width > 0.0 { (json::number(&result["width"]) / self.working_size.width).min(1.0) } else { 1.0 };
+                if !rendered.interactive {
+                    self.preview_scale = if self.working_size.width > 0.0 { (json::number(&result["width"]) / self.working_size.width).min(1.0) } else { 1.0 };
+                }
                 self.showing_interactive_frame = rendered.interactive;
                 self.image = Some(rendered.picture);
                 self.placeholder = None;
@@ -1700,5 +1703,39 @@ mod tests {
         assert_eq!(save.arguments(), ["--jpeg-quality", "80", "--bit-depth", "16", "--color-space", "Display P3"]);
         assert!(!save.is_srgb());
         assert_eq!(SaveSettings { color_space: 0, ..save }.summary(true), None);
+    }
+
+    /// A finished render of `width` pixels across a 2400 × 1600 working frame.
+    fn rendered(model: &Model, width: u32, interactive: bool) -> Rendered {
+        let height = width * 2 / 3;
+        let result = json!({
+            "width": width, "height": height, "photo_width": 2400, "photo_height": 1600,
+            "source_width": 96, "source_height": 64, "working_width": 2400, "working_height": 1600,
+            "output_width": width, "output_height": height, "elapsed_ms": 10, "backend": "wgpu",
+        });
+        let picture = Picture::new(vec![0; width as usize * height as usize * 4], width, height);
+        Rendered { id: 1, revision: model.revision, generation: model.source_generation, interactive, result, picture, cached: None }
+    }
+
+    /// The Image Size notice describes the settled preview, so reduced drag
+    /// frames don't insert or reword it and move the sliders below it.
+    #[test]
+    fn drag_frames_keep_the_preview_scale() {
+        for settled in [2400, 1200] {
+            let mut model = Model::new(Preferences::default());
+            let (revision, generation) = (model.revision, model.source_generation);
+            model.render_finished(Ok(rendered(&model, settled, false)), revision, generation, false);
+            let scale = model.preview_scale;
+            assert_eq!(scale, settled as f64 / 2400.0);
+
+            model.begin_interaction();
+            model.render_finished(Ok(rendered(&model, 600, true)), revision, generation, true);
+            assert!(model.showing_interactive_frame);
+            assert_eq!(model.preview_scale, scale, "A drag frame must not change the Image Size notice");
+
+            model.end_interaction("Adjust");
+            model.render_finished(Ok(rendered(&model, settled, false)), revision, generation, false);
+            assert_eq!(model.preview_scale, scale);
+        }
     }
 }
