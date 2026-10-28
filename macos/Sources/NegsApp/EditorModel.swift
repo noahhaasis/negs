@@ -52,6 +52,13 @@ import UniformTypeIdentifiers
     private(set) var placeholderSize = CGSize.zero
     private(set) var imageRotation = 0
     private(set) var isRaw = false
+    /// The colour space the preview develops in: the one Save and Export
+    /// last used, so editing shows the export's gamut and Fast export and
+    /// Save Preview can keep the preview's own values.
+    private(set) var previewSpace = SaveSettings.colorSpaces[SaveSettings.chosenSpace]
+    /// How the engine read the photograph's colours: the last render's
+    /// `input_colour` (summary, automatic reading, warning).
+    private(set) var inputColour: JSONValue = .null
     private(set) var ready = false
     private(set) var rendering = false
     private(set) var previewCurrent = false
@@ -329,6 +336,23 @@ import UniformTypeIdentifiers
             && zip(values, preset).allSatisfy { abs($0 - $1) <= 1e-6 * max(1, abs($1)) }
         set(path, atPreset ? .null : .array(values.map(JSONValue.number)))
     }
+    /// The input colour pop-up: "auto", "manual", or "assume:" and the
+    /// colour space (`io.input_interpretation`).
+    var inputInterpretation: Binding<String> {
+        Binding(get: {
+            let mode = self.value("io.input_interpretation.mode").string
+            return mode == "assume" ? "assume:" + self.value("io.input_interpretation.color_space").string : mode.isEmpty ? "auto" : mode
+        }, set: { tag in
+            var next = self.state
+            if tag.hasPrefix("assume:") {
+                next.params["io.input_interpretation.mode"] = .string("assume")
+                next.params["io.input_interpretation.color_space"] = .string(String(tag.dropFirst("assume:".count)))
+            } else {
+                next.params["io.input_interpretation.mode"] = .string(tag)
+            }
+            self.apply(next, action: "Change Input Colour")
+        })
+    }
     func toggle(_ path: String) -> Binding<Bool> {
         Binding(get: { self.value(path).bool }, set: { self.set(path, .bool($0)) })
     }
@@ -579,6 +603,9 @@ import UniformTypeIdentifiers
             inspectorVisible = session.inspectorVisible
         } else {
             state.params["io.rotate_cw"] = .number(0)
+            // How one file's colours are read never carries over to the next.
+            let interpretation = defaults["io.input_interpretation"]
+            if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
             state.crop = CropSettings()
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
@@ -590,12 +617,13 @@ import UniformTypeIdentifiers
         status = ready ? "" : "Starting…"
         // Try the exact developed frame before decoding the raw placeholder,
         // so a cache hit never flashes the unprocessed photograph.
-        let snapshot = state, paths = engine?.paths, cache = previewCache
+        let snapshot = renderState, paths = engine?.paths, cache = previewCache
+        inputColour = .null
         Task { [weak self] in
             if session != nil, let paths,
                let cached = await cache.load(source: url, state: snapshot, paths: paths) {
                 guard let self, generation == self.sourceGeneration, self.image == nil, !self.closing else { return }
-                if self.state.rendered == snapshot.rendered {
+                if self.renderState.rendered == snapshot.rendered {
                     self.image = cached.surface; self.imageSize = cached.photoSize; self.isRaw = cached.raw
                     self.sourceSize = cached.sourceSize; self.workingSize = cached.workingSize
                     self.previewScale = cached.workingSize.width > 0 ? Double(cached.surface.width) / cached.workingSize.width : 1
@@ -699,6 +727,22 @@ import UniformTypeIdentifiers
 
     // MARK: Rendering
 
+    /// The edit as the helper renders it: in the preview space. Sessions
+    /// keep the edit itself; the space is the app's.
+    var renderState: EditState {
+        var rendered = state
+        rendered.params["io.output_color_space"] = .string(previewSpace)
+        return rendered
+    }
+    /// Develops the preview in `name` from now on, and remembers it for the
+    /// next save.
+    func choosePreviewSpace(_ name: String) {
+        guard name != previewSpace, let index = SaveSettings.colorSpaces.firstIndex(of: name) else { return }
+        SaveSettings.chosenSpace = index
+        previewSpace = name
+        changed()
+    }
+
     private func changed(invalidateCache: Bool = true) {
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
@@ -719,7 +763,7 @@ import UniformTypeIdentifiers
     }
     private func render() async {
         guard !rendering, !closing, let source, let engine else { return }
-        let currentRevision = revision, snapshot = state, generation = sourceGeneration
+        let currentRevision = revision, snapshot = renderState, generation = sourceGeneration
         // While a slider moves, render only as many pixels as the canvas
         // shows; the frame on release is the export-size one.
         let interactiveScale = interacting ? canvasScale.screenPixelsPerPhotoPixel.flatMap { $0 < 1 ? $0 : nil } : nil
@@ -746,8 +790,9 @@ import UniformTypeIdentifiers
             let (id, result) = try await engine.request(command)
             guard shouldShow(currentRevision, generation) else { return }
             let width = Int(result["width"].double), height = Int(result["height"].double)
+            let display = result["display_color_space"].string
             let developed = try await Task.detached(priority: .userInitiated) {
-                try Self.readPreview(buffer, width: width, height: height)
+                try Self.readPreview(buffer, width: width, height: height, displaySpace: display)
             }.value
             guard shouldShow(currentRevision, generation) else { return }
             imageSize = CGSize(width: result["photo_width"].double, height: result["photo_height"].double)
@@ -762,6 +807,7 @@ import UniformTypeIdentifiers
             cropSession?.update(photo: shownImageSize, rotation: imageRotation)
             updateFilmStrip()
             isRaw = result["raw"].bool
+            if inputColour != result["input_colour"] { inputColour = result["input_colour"] }
             if revision == currentRevision, interactiveScale == nil {
                 renderID = id; previewCurrent = true; hideActivity()
                 showingCachedPreview = false
@@ -823,13 +869,26 @@ import UniformTypeIdentifiers
         if showsActivity { showsActivity = false }
     }
 
-    /// Reads the engine's RGBA buffer into an sRGB-tagged IOSurface. Core
-    /// Animation composites it directly, with no conversion on the main thread.
-    nonisolated static func readPreview(_ url: URL, width: Int, height: Int) throws -> IOSurface {
-        try previewSurface(Data(contentsOf: url), width: width, height: height)
+    /// Reads the engine's RGBA buffer into an IOSurface tagged with its
+    /// colour space (`display_color_space`). Core Animation composites it
+    /// directly, converting for the display, with nothing on the main thread.
+    nonisolated static func readPreview(_ url: URL, width: Int, height: Int, displaySpace: String = "sRGB") throws -> IOSurface {
+        try previewSurface(Data(contentsOf: url), width: width, height: height, displaySpace: displaySpace)
     }
 
-    nonisolated static func previewSurface(_ data: Data, width: Int, height: Int, bgra: Bool = false) throws -> IOSurface {
+    /// The helper's proxy spaces: sRGB for an sRGB preview, otherwise
+    /// Rec. 2020 primaries with the sRGB curve, which holds the wide spaces.
+    nonisolated static func displayColorSpace(_ name: String) -> CGColorSpace? {
+        CGColorSpace(name: name == "Rec. 2020 (sRGB transfer)" ? CGColorSpace.itur_2020_sRGBGamma : CGColorSpace.sRGB)
+    }
+
+    /// The proxy space a surface from `previewSurface` is tagged with.
+    nonisolated static func displaySpace(of surface: IOSurface) -> String {
+        let tag = IOSurfaceCopyValue(surface, kIOSurfaceColorSpace).flatMap { CGColorSpace(propertyListPlist: $0 as CFPropertyList) }
+        return tag?.name == CGColorSpace.itur_2020_sRGBGamma ? "Rec. 2020 (sRGB transfer)" : "sRGB"
+    }
+
+    nonisolated static func previewSurface(_ data: Data, width: Int, height: Int, bgra: Bool = false, displaySpace: String = "sRGB") throws -> IOSurface {
         let invalid = EngineError(message: "The image engine returned an invalid preview buffer.")
         guard width > 0, height > 0, width <= 8192, height <= 8192 else { throw EngineError(message: "Invalid preview dimensions") }
         guard data.count == width * height * 4,
@@ -838,7 +897,7 @@ import UniformTypeIdentifiers
                   .bytesPerRow: IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, width * 4),
                   .pixelFormat: kCVPixelFormatType_32BGRA
               ]),
-              let sRGB = CGColorSpace(name: CGColorSpace.sRGB)?.copyPropertyList()
+              let colorSpace = displayColorSpace(displaySpace)?.copyPropertyList()
         else { throw invalid }
         surface.lock(options: [], seed: nil)
         defer { surface.unlock(options: [], seed: nil) }
@@ -850,7 +909,7 @@ import UniformTypeIdentifiers
             return error == kvImageNoError ? vImageOverwriteChannelsWithScalar_ARGB8888(255, &destination, &destination, 0x1, vImage_Flags(kvImageNoFlags)) : error
         }
         guard permuted == kvImageNoError else { throw invalid }
-        IOSurfaceSetValue(surface, kIOSurfaceColorSpace, sRGB)
+        IOSurfaceSetValue(surface, kIOSurfaceColorSpace, colorSpace)
         return surface
     }
 
@@ -940,8 +999,9 @@ import UniformTypeIdentifiers
         if let border = state.border.exported(for: photoSize) {
             extras += " Adds the \(border.style.title.lowercased()) border\(border.instagram ? ", extended to 3:4 for Instagram" : "")."
         }
+        let previewSpace = previewSpace
         let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: export ? ExportEngine.selected : nil, size: ExportSize.last) { engine, size, save in
-            let extras = extras + (size.summary.map { " \($0)." } ?? "") + (save.summary(export: export).map { " \($0)." } ?? "")
+            let extras = extras + (size.summary.map { " \($0)." } ?? "") + (save.summary(export: export, previewSpace: previewSpace).map { " \($0)." } ?? "")
             return switch engine {
             case .reference?: "The most precise result. Can take about half a minute for large photos.\(extras)"
             case .fast?: "Looks the same as Reference, in a fraction of the time.\(extras)"
@@ -962,7 +1022,11 @@ import UniformTypeIdentifiers
             let size = picker.size
             let save = picker.settings
             if export { ExportEngine.selected = engine }
-            Task { if export { await self.export(to: url, engine: engine, size: size, save: save) } else { await self.savePreview(to: url, size: size, save: save) } }
+            Task {
+                if export { await self.export(to: url, engine: engine, size: size, save: save) } else { await self.savePreview(to: url, size: size, save: save) }
+                // Then the preview follows the space just saved in.
+                self.choosePreviewSpace(save.spaceName)
+            }
         }
     }
 
@@ -1026,9 +1090,9 @@ import UniformTypeIdentifiers
     /// so save it instead of developing the photograph again. Like ExportJob,
     /// write a sibling temporary file and rename it, so a failure leaves an
     /// existing file untouched. False if the preview could not be saved.
-    /// The preview is sRGB, so another colour space develops again in it.
+    /// Another colour space than the preview's develops again in it.
     private func exportPreview(to url: URL, size: ExportSize, save: SaveSettings) async -> Bool {
-        guard canSave, renderAtExportSize, save.isSRGB, let engine else { return false }
+        guard canSave, renderAtExportSize, save.spaceName == previewSpace, let engine else { return false }
         saving = true
         defer { saving = false }
         let staging = url.deletingLastPathComponent().appendingPathComponent(".negs-\(UUID().uuidString).\(url.pathExtension)")
@@ -1339,10 +1403,13 @@ struct SaveSettings: Equatable {
     var arguments: [String] {
         ["--jpeg-quality", "\(jpegQuality)", "--color-space", spaceName] + (bitDepth.map { ["--bit-depth", "\($0)"] } ?? [])
     }
-    /// For the save panel's message; nil for sRGB.
-    func summary(export: Bool) -> String? {
-        if isSRGB { return nil }
-        return export ? "Develops in \(spaceName) and embeds its profile" : "Converts to \(spaceName); the preview's colours stay within sRGB"
+    /// For the save panel's message; nil for sRGB in an sRGB preview. The
+    /// preview develops in `previewSpace`; afterwards it follows this save.
+    func summary(export: Bool, previewSpace: String) -> String? {
+        let follows = spaceName == previewSpace ? "" : "; the preview then shows \(spaceName)"
+        if export { return isSRGB && follows.isEmpty ? nil : "Develops in \(spaceName) and embeds its profile\(follows)" }
+        if spaceName == previewSpace { return isSRGB ? nil : "Keeps the preview's \(spaceName) colours and embeds its profile" }
+        return "Converts the \(previewSpace) preview to \(spaceName), clipping colours outside the smaller space\(follows)"
     }
 
     /// The colour space last picked, which may be ProPhoto RGB at 8 bits.

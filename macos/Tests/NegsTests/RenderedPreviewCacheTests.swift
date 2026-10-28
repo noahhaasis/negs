@@ -29,6 +29,17 @@ final class RenderedPreviewCacheTests: XCTestCase {
         XCTAssertEqual(frame.sourceSize, CGSize(width: 2000, height: 1500))
         XCTAssertEqual(frame.workingSize, CGSize(width: 8000, height: 6000))
 
+        XCTAssertEqual(colorSpaceName(frame.surface), CGColorSpace.sRGB as String)
+
+        // A wide preview's proxy comes back tagged Rec. 2020, sRGB curve.
+        let wide = try EditorModel.previewSurface(rgba, width: 2, height: 2, displaySpace: "Rec. 2020 (sRGB transfer)")
+        XCTAssertEqual(colorSpaceName(wide), CGColorSpace.itur_2020_sRGBGamma as String)
+        cache.save(wide, photoSize: CGSize(width: 4000, height: 3000), sourceSize: CGSize(width: 2000, height: 1500), workingSize: CGSize(width: 8000, height: 6000), raw: true, key: key)
+        let reloaded = await cache.load(source: photo, state: state, paths: paths)
+        XCTAssertEqual(colorSpaceName(try XCTUnwrap(reloaded).surface), CGColorSpace.itur_2020_sRGBGamma as String)
+        cache.save(surface, photoSize: CGSize(width: 4000, height: 3000), sourceSize: CGSize(width: 2000, height: 1500), workingSize: CGSize(width: 8000, height: 6000), raw: true, key: key)
+        await cache.flush()
+
         // Canvas edits reuse the very same pixels with their restored framing.
         var decorated = state
         decorated.params["io.rotate_cw"] = .number(1)
@@ -166,4 +177,10 @@ final class RenderedPreviewCacheTests: XCTestCase {
         while !predicate(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
         XCTAssertTrue(predicate())
     }
+}
+
+/// The colour space an IOSurface is tagged with.
+private func colorSpaceName(_ surface: IOSurface) -> String? {
+    IOSurfaceCopyValue(surface, kIOSurfaceColorSpace)
+        .flatMap { CGColorSpace(propertyListPlist: $0 as CFPropertyList) }?.name as String?
 }

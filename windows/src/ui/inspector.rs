@@ -50,6 +50,10 @@ pub enum Tab {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum When {
     Always,
+    /// Input colour, for files that aren't RAW.
+    NotRaw,
+    AssumeInput,
+    ManualInput,
     FilmTimes,
     NotScanning,
     PaperTimes,
@@ -76,6 +80,8 @@ enum Kind {
     BorderSlider(&'static str, BorderWidth),
     Toggle(&'static str, &'static str),
     LimitPreview,
+    /// The colour space the preview develops in (a preference).
+    PreviewSpace,
     /// Image Size: Original or Longest side.
     SizeMode,
     LongestSide,
@@ -255,6 +261,12 @@ fn rows() -> Vec<Row> {
     for slider in state::CAMERA_SLIDERS {
         add(&mut rows, Kind::Slider(*slider), lab, None, When::Always);
     }
+    let input = add(&mut rows, Kind::Group { title: "Input Colour", enable: None }, lab, None, When::NotRaw);
+    add(&mut rows, Kind::Choice("Read as", "io.input_interpretation.mode", state::INPUT_MODES), lab, Some(input), When::NotRaw);
+    add(&mut rows, Kind::Choice("Colour space", "io.input_interpretation.color_space", state::ASSUMED_SPACES), lab, Some(input), When::AssumeInput);
+    add(&mut rows, Kind::Toggle("Linear values", "io.input_interpretation.linear"), lab, Some(input), When::AssumeInput);
+    add(&mut rows, Kind::Choice("Colour space", "io.input_color_space", state::MANUAL_SPACES), lab, Some(input), When::ManualInput);
+    add(&mut rows, Kind::Toggle("Decode the curve", "io.input_cctf_decoding"), lab, Some(input), When::ManualInput);
     let wb = add(&mut rows, Kind::Group { title: "RAW White Balance", enable: None }, lab, None, When::Raw);
     add(&mut rows, Kind::Choice("White balance", "io.raw_white_balance.mode", state::WHITE_BALANCE), lab, Some(wb), When::Raw);
     add(&mut rows, Kind::Slider(state::WB_TEMPERATURE), lab, Some(wb), When::CustomWhiteBalance);
@@ -286,7 +298,8 @@ fn rows() -> Vec<Row> {
     groups(&mut rows, Section::Scan);
     let output = add(&mut rows, Kind::Group { title: "Output", enable: None }, lab, None, When::Always);
     add(&mut rows, Kind::LimitPreview, lab, Some(output), When::Always);
-    add(&mut rows, Kind::Toggle("Encode output as sRGB", "io.output_cctf_encoding"), lab, Some(output), When::Always);
+    add(&mut rows, Kind::PreviewSpace, lab, Some(output), When::Always);
+    add(&mut rows, Kind::Toggle("Encode with the colour space’s curve", "io.output_cctf_encoding"), lab, Some(output), When::Always);
     add(&mut rows, Kind::Toggle("Use less memory for export", "settings.serial_grain"), lab, Some(output), When::Always);
 
     let post = Tab::Post;
@@ -385,6 +398,9 @@ fn visible(row: &Row, model: &Model, expanded: &dyn Fn(usize) -> bool) -> bool {
         When::PaperTimes => !scanning && stock_times(model, true).len() > 1,
         When::AutoExposure => json::boolean(model.value("camera.auto_exposure")),
         When::Raw => model.is_raw,
+        When::NotRaw => !model.is_raw,
+        When::AssumeInput => !model.is_raw && json::string(model.value("io.input_interpretation.mode")) == "assume",
+        When::ManualInput => !model.is_raw && json::string(model.value("io.input_interpretation.mode")) == "manual",
         When::CustomWhiteBalance => model.is_raw && json::string(model.value("io.raw_white_balance.mode")) == "custom",
         When::Scanning => scanning,
         When::ColorFilm => !model.film_is_bw(),
@@ -590,6 +606,18 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             super::dialogs::tooltip(c, "Develops the preview faster on large photographs. Export keeps the full Image Size.");
             controls.push(c);
         }
+        Kind::PreviewSpace => {
+            controls.push(label("Colour space", fonts.ui));
+            let c = combo(false);
+            for title in crate::model::COLOR_SPACES {
+                let text = wide(title);
+                unsafe {
+                    SendMessageW(c, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+                }
+            }
+            super::dialogs::tooltip(c, "The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.");
+            controls.push(c);
+        }
         Kind::SizeMode => {
             controls.push(label("Size", fonts.ui));
             let c = combo(false);
@@ -752,7 +780,7 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 positions.push((c[0], right - button, y + ins.px(3.0), button, ins.px(26.0)));
                 ins.px(34.0)
             }
-            Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode => {
+            Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace => {
                 let label = ins.px(108.0).min((right - x) / 2);
                 positions.push((c[0], x, y + ins.px(6.0), label - ins.px(4.0), ins.px(18.0)));
                 positions.push((c[1], x + label, y + ins.px(2.0), right - x - label, ins.px(300.0)));
@@ -944,6 +972,15 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
             Kind::BalancePrint(title, _) => {
                 set_text(c[0], if model.balancing_print { "Balancing…" } else { title });
                 enable(c[0], on && model.can_balance_print());
+            }
+            Kind::PreviewSpace => {
+                let selected = crate::model::COLOR_SPACES.iter().position(|s| *s == model.preview_space()).unwrap_or(0) as isize;
+                unsafe {
+                    if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != selected {
+                        SendMessageW(c[1], CB_SETCURSEL, WPARAM(selected as usize), LPARAM(0));
+                    }
+                }
+                enable_all(c, catalog);
             }
             Kind::SizeMode => {
                 unsafe {
@@ -1165,6 +1202,12 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::LimitPreview, CHECK) if code == BN_CLICKED => app.model.limit_preview(checked()),
         (Kind::BalancePrint(..), ACTION) if code == BN_CLICKED => app.model.balance_print(),
+        (Kind::PreviewSpace, COMBO) if code == CBN_SELCHANGE => {
+            let index = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 };
+            if let Some(space) = usize::try_from(index).ok().and_then(|i| crate::model::COLOR_SPACES.get(i)) {
+                app.model.choose_preview_space(space);
+            }
+        }
         (Kind::SizeMode, COMBO) if code == CBN_SELCHANGE => {
             let longest = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 } == 1;
             app.model.choose_image_size(if longest { state::SizeMode::LongestSide } else { state::SizeMode::Original });

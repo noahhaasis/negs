@@ -9,11 +9,40 @@ pub fn srgb_texture(
     bytes: &glib::Bytes,
     stride: usize,
 ) -> gdk::Texture {
+    texture(width, height, format, bytes, stride, &gdk::ColorState::srgb())
+}
+
+/// The helper's name for its wide proxy: Rec. 2020 primaries, sRGB curve.
+pub const WIDE_DISPLAY_SPACE: &str = "Rec. 2020 (sRGB transfer)";
+
+/// The colour state of a helper frame (`display_color_space`): sRGB, or
+/// BT.2020 primaries with the sRGB transfer (CICP 9/13/0, full range), so
+/// GTK converts a wide-gamut preview for the display.
+pub fn display_color_state(display_space: &str) -> gdk::ColorState {
+    if display_space != WIDE_DISPLAY_SPACE {
+        return gdk::ColorState::srgb();
+    }
+    let cicp = gdk::CicpParams::new();
+    cicp.set_color_primaries(9);
+    cicp.set_transfer_function(13);
+    cicp.set_matrix_coefficients(0);
+    cicp.set_range(gdk::CicpRange::Full);
+    cicp.build_color_state().unwrap_or_else(|_| gdk::ColorState::srgb())
+}
+
+pub fn texture(
+    width: i32,
+    height: i32,
+    format: gdk::MemoryFormat,
+    bytes: &glib::Bytes,
+    stride: usize,
+    color_state: &gdk::ColorState,
+) -> gdk::Texture {
     gdk::MemoryTextureBuilder::new()
         .set_width(width)
         .set_height(height)
         .set_format(format)
-        .set_color_state(&gdk::ColorState::srgb())
+        .set_color_state(color_state)
         .set_bytes(Some(bytes))
         .set_stride(stride)
         .build()

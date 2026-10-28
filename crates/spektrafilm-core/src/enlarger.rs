@@ -469,6 +469,7 @@ pub fn midgray_raw_hanatos(
         "sRGB",
         ref_illuminant,
         use_cat16,
+        true,
     );
     let p = raw.get(0, 0);
     [p[0] as f64, p[1] as f64, p[2] as f64]

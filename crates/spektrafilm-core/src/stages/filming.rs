@@ -350,6 +350,7 @@ pub fn rgb_to_film_raw(
             &params.io.input_color_space,
             front_illuminant,
             params.settings.use_cat16,
+            params.settings.spectral_boundary == crate::params::SpectralBoundary::Guard,
         )
     })
 }

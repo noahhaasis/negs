@@ -1,3 +1,4 @@
+import CoreGraphics
 import CryptoKit
 import Foundation
 import IOSurface
@@ -16,6 +17,8 @@ final class RenderedPreviewCache: @unchecked Sendable {
         var sourceSize: CGSize
         var workingSize: CGSize
         var raw: Bool
+        /// The proxy's colour space; records from before it are sRGB.
+        var displaySpace: String?
         var checksum: String
     }
     struct Frame {
@@ -90,7 +93,8 @@ final class RenderedPreviewCache: @unchecked Sendable {
               [header.sourceSize, header.workingSize].allSatisfy({ $0.width.isFinite && $0.height.isFinite && $0.width >= 1 && $0.height >= 1 }) else { return nil }
         let pixels = Data(data[(newline + 1)...])
         guard pixels.count == header.width * header.height * 4, Self.digest(pixels) == header.checksum,
-              let surface = try? EditorModel.previewSurface(pixels, width: header.width, height: header.height, bgra: true) else { return nil }
+              let surface = try? EditorModel.previewSurface(pixels, width: header.width, height: header.height, bgra: true,
+                                                            displaySpace: header.displaySpace ?? "sRGB") else { return nil }
         return Frame(surface: surface, photoSize: header.photoSize, sourceSize: header.sourceSize, workingSize: header.workingSize, raw: header.raw)
     }
 
@@ -107,7 +111,8 @@ final class RenderedPreviewCache: @unchecked Sendable {
                 }
             }
             surface.unlock(options: .readOnly, seed: nil)
-            let header = Header(key: key, width: width, height: height, photoSize: photoSize, sourceSize: sourceSize, workingSize: workingSize, raw: raw, checksum: Self.digest(pixels))
+            let displaySpace = EditorModel.displaySpace(of: surface)
+            let header = Header(key: key, width: width, height: height, photoSize: photoSize, sourceSize: sourceSize, workingSize: workingSize, raw: raw, displaySpace: displaySpace, checksum: Self.digest(pixels))
             do {
                 var data = try JSONEncoder().encode(header); data.append(10)
                 try FileManager.default.createDirectory(at: self.file.deletingLastPathComponent(), withIntermediateDirectories: true)

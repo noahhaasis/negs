@@ -58,7 +58,7 @@ mod tests {
         );
         eprintln!("Python:   [1.025851130, 0.017941305, -0.033218342]");
 
-        let (tc, b) = spectral::rgb_to_tc_b(gray, "sRGB", ref_illuminant, false);
+        let (tc, b) = spectral::rgb_to_tc_b(gray, "sRGB", ref_illuminant, false, true);
         eprintln!("Rust tc: [{:.12}, {:.12}]", tc.0, tc.1);
         eprintln!("Rust b: {:.12}", b);
         eprintln!("Python tc: [0.445625560000, 0.520476270000]");
@@ -172,6 +172,7 @@ mod tests {
                 "sRGB",
                 ref_illuminant,
                 false,
+                true,
             );
             let rpx = raw_im.get(0, 0);
             let log_raw_dbg: [f64; 3] = [
@@ -243,6 +244,7 @@ mod tests {
             &img,
             &tc_lut,
             &rgb_to_adapted,
+            true,
         );
         eprintln!(
             "CPU raw: [{:.16}, {:.16}, {:.16}]",
@@ -253,7 +255,7 @@ mod tests {
 
         if let Some(gpu) = spektrafilm_gpu::wgpu_backend::WgpuBackend::new() {
             use spektrafilm_gpu::ComputeBackend;
-            let gpu_out = gpu.hanatos2025_rgb_to_raw(&img, &tc_lut, "sRGB", &ILLUMINANT_D55, false);
+            let gpu_out = gpu.hanatos2025_rgb_to_raw(&img, &tc_lut, "sRGB", &ILLUMINANT_D55, false, true);
             eprintln!(
                 "GPU raw: [{:.16}, {:.16}, {:.16}]",
                 gpu_out.get(0, 0)[0] as f64,

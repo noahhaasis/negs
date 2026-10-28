@@ -53,6 +53,24 @@ impl Default for Preferences {
         }
     }
 }
+/// The colour space the preview develops in: the one Save and Export last
+/// used, so editing shows the export's gamut. Shared with the render
+/// threads, which build the helper's params and cache keys.
+static PREVIEW_SPACE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+pub fn preview_space() -> String {
+    let space = PREVIEW_SPACE.lock().unwrap();
+    if COLOR_SPACES.contains(&space.as_str()) { space.clone() } else { COLOR_SPACES[0].into() }
+}
+
+/// Changes the preview space; true if it changed.
+pub fn set_preview_space(space: &str) -> bool {
+    let mut current = PREVIEW_SPACE.lock().unwrap();
+    let changed = *current != space;
+    *current = space.into();
+    changed
+}
+
 /// The colour spaces a save offers, as colour names them.
 pub const COLOR_SPACES: [&str; 4] = ["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB"];
 /// ProPhoto RGB bands at 8 bits, so it needs 16.
@@ -205,6 +223,7 @@ impl Editor {
             if std::env::var_os("NEGS_APPEARANCE").is_none() {
                 apply_appearance(p.appearance);
             }
+            set_preview_space(&p.color_space);
             self.preferences.replace(p);
         }
         if let Some(values) = session.get("recent")

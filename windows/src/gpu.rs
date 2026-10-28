@@ -14,6 +14,12 @@ use raw_window_handle::{RawDisplayHandle, RawWindowHandle, Win32WindowHandle, Wi
 use wgpu::util::DeviceExt;
 
 pub const LUT_SIZE: u32 = 4096;
+/// The shader's `REC2020_TO_SRGB`, row-major, for the software canvas.
+pub const REC2020_TO_SRGB: [[f32; 3]; 3] = [
+    [1.6603176, -0.5875727, -0.0729166],
+    [-0.1244067, 1.1328007, -0.0083489],
+    [-0.0181114, -0.1005965, 1.1187665],
+];
 const PHOTO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 const SHADER: &str = r#"
@@ -57,6 +63,15 @@ fn present(linear: vec3f) -> vec3f {
     );
 }
 
+// Linear Rec. 2020 to linear sRGB (both D65), for wide-gamut previews:
+// the helper's proxy of a render outside sRGB has Rec. 2020 primaries.
+// Unclipped, so the monitor transform still reaches colours outside sRGB.
+const REC2020_TO_SRGB = mat3x3f(
+    vec3f(1.6603176, -0.1244067, -0.0181114),
+    vec3f(-0.5875727, 1.1328007, -0.1005965),
+    vec3f(-0.0729166, -0.0083489, 1.1187665),
+);
+
 fn to_clip(p: vec2f) -> vec4f {
     return vec4f(p.x / globals.viewport.x * 2.0 - 1.0, 1.0 - p.y / globals.viewport.y * 2.0, 0.0, 1.0);
 }
@@ -72,7 +87,7 @@ struct Photo {
     clip: vec4f,
     // the quad drawn, on screen
     quad: vec4f,
-    // x: dimming outside the crop while cropping
+    // x: dimming outside the crop while cropping, y: 1 for a Rec. 2020 proxy
     extra: vec4f,
 };
 @group(2) @binding(0) var<uniform> photo: Photo;
@@ -117,6 +132,9 @@ fn photo_fs(in: PhotoOut) -> @location(0) vec4f {
         f = vec2f(f.y, 1.0 - f.x);
     }
     var rgb = textureSample(image, image_sampler, f).rgb;
+    if (photo.extra.y > 0.5) {
+        rgb = REC2020_TO_SRGB * rgb;
+    }
     if (photo.shown.w > 0.5) {
         let clip = photo.clip;
         let outside = t.x < clip.x || t.y < clip.y || t.x > clip.x + clip.z || t.y > clip.y + clip.w;
@@ -709,6 +727,35 @@ fn half(value: f32) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::half;
+
+    /// The canvas's Rec. 2020 → sRGB matrix is the engine's (Bradford, both
+    /// D65, so plain primaries), to the shader's seven digits.
+    #[test]
+    fn rec2020_matrix_matches_the_engine() {
+        use super::{REC2020_TO_SRGB, SHADER};
+        use spektrafilm_math::colorspace::{RgbColourspace, SRGB, icc_rgb_to_rgb};
+        let m = icc_rgb_to_rgb(RgbColourspace::find("ITU-R BT.2020").unwrap(), &SRGB);
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((REC2020_TO_SRGB[i][j] as f64 - m[i][j]).abs() < 1e-6, "{i},{j}");
+            }
+        }
+        // The WGSL constant is the same matrix, column by column. Compared as
+        // f32: Display of an f32 needn't repeat its literal's digits.
+        let start = SHADER.find("const REC2020_TO_SRGB = mat3x3f(").unwrap();
+        let body = &SHADER[start..start + SHADER[start..].find(");").unwrap()];
+        let values: Vec<f32> = body
+            .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+            .filter(|s| s.contains('.'))
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(values.len(), 9, "{body}");
+        for j in 0..3 {
+            for i in 0..3 {
+                assert_eq!(values[3 * j + i], REC2020_TO_SRGB[i][j], "{i},{j}");
+            }
+        }
+    }
 
     #[test]
     fn halves() {
