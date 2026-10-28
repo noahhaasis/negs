@@ -138,6 +138,8 @@ pub struct Preferences {
     /// Comma-separated titles of the expanded groups.
     pub expanded_adjustments: String,
     pub inspector_tab: String,
+    /// What the adjustments column shows: "Adjustments" or "Presets".
+    pub inspector_pane: String,
     pub export_engine: String,
     pub output_format: String,
     pub export_edge: String,
@@ -166,6 +168,7 @@ impl Default for Preferences {
             filmstrip_visible: true,
             expanded_adjustments: "Enlarger".into(),
             inspector_tab: "Lab".into(),
+            inspector_pane: "Adjustments".into(),
             export_engine: "fast".into(),
             output_format: "png".into(),
             export_edge: "full".into(),

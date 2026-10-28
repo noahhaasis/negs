@@ -14,6 +14,7 @@ mod drop;
 mod empty;
 mod folder_watch;
 pub mod inspector;
+mod presets;
 mod strip;
 
 use std::cell::RefCell;
@@ -70,6 +71,9 @@ pub mod id {
     pub const SETTINGS: u16 = 103;
     pub const EXIT: u16 = 104;
     pub const EXPORT_LUT: u16 = 105;
+    pub const NEW_PRESET: u16 = 106;
+    pub const IMPORT_PRESETS: u16 = 107;
+    pub const PRESETS_FOLDER: u16 = 108;
     pub const RECENT: u16 = 110; // ..119
     pub const UNDO: u16 = 200;
     pub const REDO: u16 = 201;
@@ -86,6 +90,7 @@ pub mod id {
     pub const ZOOM_IN: u16 = 304;
     pub const ZOOM_OUT: u16 = 305;
     pub const FULL_SCREEN: u16 = 306;
+    pub const PRESETS: u16 = 307;
     pub const ROTATE: u16 = 400;
     pub const CROP: u16 = 401;
     pub const CROP_DONE: u16 = 402;
@@ -293,6 +298,8 @@ pub struct App {
     empty: HWND,
     strip: HWND,
     pub inspector: inspector::Inspector,
+    /// Created the first time the Presets panel shows.
+    presets_view: Option<presets::Panel>,
     pub fonts: Fonts,
     pub dpi: u32,
     menu: HMENU,
@@ -329,6 +336,10 @@ impl App {
                 let main = self.main.0 as isize;
                 post(move |_| dialogs::error(HWND(main as *mut _), &error));
             }
+            if let Some((message, explanation)) = self.model.notice.take() {
+                let main = self.main.0 as isize;
+                post(move |_| dialogs::notice(HWND(main as *mut _), &message, &explanation));
+            }
         }
         if flags & (dirty::CHROME | dirty::STATUS) != 0 {
             self.update_chrome();
@@ -344,6 +355,9 @@ impl App {
         if flags & (dirty::STRUCTURE | dirty::INSPECTOR | dirty::CROP | dirty::LAYOUT) != 0 || flags & dirty::HISTOGRAM != 0 {
             let structure = flags & (dirty::STRUCTURE | dirty::CROP | dirty::LAYOUT) != 0;
             inspector::sync(self, structure, flags & dirty::HISTOGRAM != 0);
+        }
+        if flags & (dirty::PRESETS | dirty::CHROME | dirty::LAYOUT) != 0 {
+            presets::sync(self);
         }
         if flags & (dirty::CANVAS | dirty::ZOOM | dirty::CROP) != 0 {
             canvas::update_scene(self);
@@ -383,7 +397,8 @@ impl App {
         enable(id::CROP, model.cropping() || model.image.is_some());
         enable(id::EXPORT, model.can_export());
         check(id::FILMSTRIP, model.prefs.filmstrip_visible);
-        check(id::ADJUSTMENTS, model.inspector_visible);
+        check(id::ADJUSTMENTS, model.inspector_visible && !presets::shown(model));
+        check(id::PRESETS, presets::shown(model));
         check(id::CROP, model.cropping());
         let exporting = model.exporting;
         unsafe {
@@ -481,7 +496,10 @@ impl App {
             let _ = ShowWindow(self.empty, if photo { SW_HIDE } else { SW_SHOWNA });
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
-            self.inspector.layout(column + splitter, top, inspector_width, bottom - top, self.model.inspector_visible);
+            let shows_presets = presets::shown(&self.model);
+            self.inspector.layout(column + splitter, top, inspector_width, bottom - top, self.model.inspector_visible && !shows_presets);
+            let rect = RECT { left: column + splitter, top, right: column + splitter + inspector_width, bottom };
+            presets::layout(self, rect, shows_presets);
             canvas::resized(self.canvas);
             // Their own WM_SIZE arrives while the app is busy here.
             empty::layout(self);
@@ -547,10 +565,17 @@ impl App {
                 model.prefs.save();
                 model.dirty |= dirty::LAYOUT | dirty::CHROME | dirty::STRIP;
             }
-            id::ADJUSTMENTS => {
-                model.inspector_visible = !model.inspector_visible;
-                model.dirty |= dirty::LAYOUT | dirty::CHROME;
+            id::ADJUSTMENTS => model.toggle_pane(crate::model::Pane::Adjustments),
+            id::PRESETS => model.toggle_pane(crate::model::Pane::Presets),
+            id::NEW_PRESET => model.new_preset(),
+            id::IMPORT_PRESETS => {
+                if model.can_change_presets() {
+                    model.show_pane(crate::model::Pane::Presets);
+                    self.refresh();
+                    dialogs::import_presets(self);
+                }
             }
+            id::PRESETS_FOLDER => show_folder(self.main, &self.model.preset_library.folder),
             id::FIT if model.source.is_some() && !model.cropping() => model.zoom(true),
             id::ACTUAL if model.source.is_some() && !model.cropping() => model.zoom(false),
             id::ZOOM_IN if model.source.is_some() && !model.cropping() => canvas::zoom_by(1.25),
@@ -631,7 +656,10 @@ impl App {
         }
         enable(id::RESET_ALL, model.has_catalog() && !model.cropping());
         check(id::FILMSTRIP, model.prefs.filmstrip_visible);
-        check(id::ADJUSTMENTS, model.inspector_visible);
+        check(id::ADJUSTMENTS, model.inspector_visible && !presets::shown(model));
+        check(id::PRESETS, presets::shown(model));
+        enable(id::NEW_PRESET, model.can_change_presets());
+        enable(id::IMPORT_PRESETS, model.can_change_presets());
         check(id::FULL_SCREEN, self.full_screen.is_some());
         for c in [id::FIT, id::ACTUAL, id::ZOOM_IN, id::ZOOM_OUT] {
             enable(c, photo && !model.cropping());
@@ -750,6 +778,18 @@ fn focused_class() -> Option<String> {
     }
 }
 
+/// Opens a folder in Explorer, creating it first.
+fn show_folder(owner: HWND, folder: &Path) {
+    if let Err(error) = std::fs::create_dir_all(folder) {
+        dialogs::error(owner, &format!("Couldn’t create the Presets folder: {error}."));
+        return;
+    }
+    let (verb, path) = (wide("open"), wide(folder));
+    unsafe {
+        ShellExecuteW(owner, pcwstr(&verb), pcwstr(&path), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+    }
+}
+
 /// A text field or a list that types to select has focus.
 fn text_focus() -> bool {
     matches!(focused_class().as_deref(), Some("Edit") | Some("ComboBox"))
@@ -840,6 +880,9 @@ fn build_menu() -> (HMENU, HMENU) {
         add(file, id::EXPORT, "&Export Photograph…\tCtrl+Shift+E");
         add(file, id::EXPORT_LUT, "Export &LUT…\tCtrl+Shift+L");
         separator(file);
+        add(file, id::NEW_PRESET, "&New Preset\tCtrl+Shift+S");
+        add(file, id::IMPORT_PRESETS, "&Import Presets…\tCtrl+Shift+O");
+        separator(file);
         add(file, id::SETTINGS, "Se&ttings…");
         separator(file);
         add(file, id::EXIT, "E&xit\tAlt+F4");
@@ -857,6 +900,7 @@ fn build_menu() -> (HMENU, HMENU) {
         let view = popup("&View");
         add(view, id::FILMSTRIP, "&Film Strip\tF6");
         add(view, id::ADJUSTMENTS, "&Adjustments\tF7");
+        add(view, id::PRESETS, "&Presets\tF8");
         separator(view);
         add(view, id::FIT, "Fi&t Photograph\tCtrl+0");
         add(view, id::ACTUAL, "Actual &Size\tCtrl+1");
@@ -889,6 +933,9 @@ fn accelerators() -> HACCEL {
         (shift_ctrl, 'R' as u16, id::RESET_ALL),
         (FVIRTKEY, VK_F6.0, id::FILMSTRIP),
         (FVIRTKEY, VK_F7.0, id::ADJUSTMENTS),
+        (FVIRTKEY, VK_F8.0, id::PRESETS),
+        (shift_ctrl, 'S' as u16, id::NEW_PRESET),
+        (shift_ctrl, 'O' as u16, id::IMPORT_PRESETS),
         (FVIRTKEY, VK_F11.0, id::FULL_SCREEN),
         (ctrl, '0' as u16, id::FIT),
         (ctrl, VK_NUMPAD0.0, id::FIT),
@@ -908,8 +955,8 @@ fn accelerators() -> HACCEL {
 
 /// Segoe icon glyphs drawn at the window's DPI, for the toolbar.
 fn toolbar_images(dpi: u32) -> HIMAGELIST {
-    // Open, Film Strip, Fit, Actual Size, Rotate, Crop, Export, Adjustments
-    let glyphs = ['\u{E838}', '\u{E8B9}', '\u{E9A6}', '\u{E71E}', '\u{E7AD}', '\u{E7A8}', '\u{E78C}', '\u{E9E9}'];
+    // Open, Film Strip, Fit, Actual Size, Rotate, Crop, Export, Adjustments, Presets
+    let glyphs = ['\u{E838}', '\u{E8B9}', '\u{E9A6}', '\u{E71E}', '\u{E7AD}', '\u{E7A8}', '\u{E78C}', '\u{E9E9}', '\u{E81E}'];
     let size = (20 * dpi / 96) as i32;
     unsafe {
         let list = ImageList_Create(size, size, ILC_COLOR32, glyphs.len() as i32, 0);
@@ -988,6 +1035,7 @@ fn build_toolbar(main: HWND, dpi: u32) -> HWND {
             "Crop the photograph (C)",
             "Export photograph (Ctrl+Shift+E)",
             "Show or hide adjustments (F7)",
+            "Show or hide presets (F8)",
         ]
         .iter()
         .map(wide)
@@ -1013,6 +1061,7 @@ fn build_toolbar(main: HWND, dpi: u32) -> HWND {
             separator,
             button(6, id::EXPORT, BTNS_BUTTON, 6),
             button(7, id::ADJUSTMENTS, BTNS_CHECK, 7),
+            button(8, id::PRESETS, BTNS_CHECK, 8),
         ];
         SendMessageW(toolbar, TB_ADDBUTTONSW, WPARAM(buttons.len()), LPARAM(buttons.as_ptr() as isize));
         SendMessageW(toolbar, TB_AUTOSIZE, WPARAM(0), LPARAM(0));
@@ -1095,6 +1144,7 @@ pub fn run() {
         empty::register();
         strip::register();
         inspector::register();
+        presets::register();
 
         let (menu, recent) = build_menu();
         let main = CreateWindowExW(
@@ -1146,6 +1196,7 @@ pub fn run() {
             empty,
             strip,
             inspector,
+            presets_view: None,
             fonts,
             dpi,
             menu,
@@ -1241,7 +1292,7 @@ fn pre_translate(msg: &MSG) -> bool {
             let skip = match focus.as_deref() {
                 Some("Edit") => true,
                 // Lists type to select: leave them unmodified letters.
-                Some("ComboBox") => !modifier_down() && (b'A' as usize..=b'Z' as usize).contains(&msg.wParam.0),
+                Some("ComboBox") | Some("SysListView32") => !modifier_down() && (b'A' as usize..=b'Z' as usize).contains(&msg.wParam.0),
                 _ => false,
             };
             if !skip {
@@ -1284,6 +1335,10 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                     app.report.stamp("first_frame_done");
                     inspector::build(app);
                     app.report.stamp("inspector_built");
+                    // A remembered Presets panel is built now, like the adjustments.
+                    if presets::shown(&app.model) {
+                        app.model.dirty |= dirty::LAYOUT;
+                    }
                     drop::register(app);
                     canvas::start_gpu(app.canvas);
                     crate::updates::schedule();
@@ -1476,6 +1531,7 @@ impl App {
         }
         canvas::set_dpi(dpi);
         inspector::dpi_changed(self);
+        presets::dpi_changed(self);
         empty::dpi_changed(self);
         self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::CANVAS | dirty::STRIP;
     }
