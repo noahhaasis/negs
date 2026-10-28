@@ -64,7 +64,7 @@ From the Rust repository root:
 # Rust runs with upstream's spectral-boundary and output-adaptation
 # arithmetic (Negs-only settings Python lacks; see docs/colour-management.md).
 # Add --negs-colour-defaults to measure Negs' own defaults instead: they
-# differ only for non-physical input light and non-D65 output whites.
+# differ only for input with a negative X, Y or Z and non-D65 output whites.
 
 # The same against upstream main, with experimental's morph baked into its
 # film profile:

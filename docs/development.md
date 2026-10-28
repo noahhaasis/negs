@@ -152,10 +152,10 @@ separate port.
 Colour management (input profiles, the spectral boundary guard, output
 adaptation, the preview space) is described in [colour management](colour-management.md).
 Two of its defaults deliberately differ from upstream for colours upstream
-handles badly: `settings.spectral_boundary: "guard"` (non-physical input
-light) and `settings.output_adaptation: "via_d65"` (non-D65 output whites).
-Neither changes physical input or D65 outputs, so the standard parity cases
-pass at the defaults. The parity runner gives Rust upstream's arithmetic for
+handles badly: `settings.spectral_boundary: "guard"` (input with a negative
+X, Y or Z) and `settings.output_adaptation: "via_d65"` (non-D65 output
+whites). Neither changes input with non-negative XYZ or D65 outputs, so the
+standard parity cases pass at the defaults. The parity runner gives Rust upstream's arithmetic for
 both; `--negs-colour-defaults` measures Negs' own.
 
 The [repeatable parity runner](../scripts/parity/README.md) checks intermediate f64 arrays and final RGB against an explicitly selected Python checkout. The [October 2026 audit](upstream-sync.md) passes all 12 tested cases against upstream main `3bb2c2d`, with maximum final linear RGB error `3.631e-9`. The sibling Python checkout is on experimental `28bf883`, which changes the model and fails all six tested Portra/Endura cases. Version `0.3.4` alone does not identify a stable reference.

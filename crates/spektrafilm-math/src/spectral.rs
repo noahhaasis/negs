@@ -878,15 +878,18 @@ pub fn xy_to_tc(x: f64, y: f64) -> (f64, f64) {
 /// guarding the spectral model's input boundary. `white` is the adapted
 /// white (the input matrix applied to RGB 1, 1, 1).
 ///
-/// Physical light (no negative tristimulus value) takes upstream's path
-/// unchanged, including its floored denominator near black. The input is
-/// linear and unclamped, so it can also hold values no light produces:
+/// Values with no negative tristimulus value take upstream's path unchanged,
+/// including its floored denominator near black. That is every physical
+/// colour, and also the non-physical chromaticities between the spectral
+/// locus and the triangle, which the input gamut compression handles. The
+/// input is linear and unclamped, so it can also hold:
 ///
 /// - non-finite values, or `b <= 0` (no light, or less than none): no
 ///   exposure;
 /// - a negative X, Y or Z, i.e. a chromaticity outside the xy triangle
 ///   (x + y > 1 or a negative coordinate, beyond every real colour): it is
-///   moved toward `white` at the same brightness, just onto the triangle.
+///   moved toward `white` at the same brightness `b` (so Y changes), just
+///   onto the triangle.
 ///   Upstream's `(1 - x)²` would otherwise fold x > 1 back inside, a
 ///   different hue. The input gamut compression baked into the tc LUT then
 ///   maps it as it maps any other out-of-gamut chromaticity.
