@@ -300,8 +300,8 @@ without Noah's go-ahead.
    `ui/presets.rs`, `// MARK: Presets` in `model.rs`; details and evidence in
    [windows-app.md](windows-app.md#presets)). 73 Windows tests pass, 6 of them through the
    release helper. Writes use `MoveFileExW` without replace instead of a hard link (same
-   guarantee, any file system). Open: the community test presets and the uninstaller test with
-   Inno Setup on a disposable profile.
+   guarantee, any file system). The 24 test presets (19 community, 5 generated) import, apply
+   and re-export. Open: the uninstaller test with Inno Setup on a disposable profile.
 6. **Linux app:** the adapter and the same UI; tests for apply, film A → B → A, undo, redo and
    restart through `parameters::runtime`; `check_controls.py`/`check_ui.py`; the Keyboard
    Shortcuts window.
