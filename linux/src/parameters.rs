@@ -461,21 +461,74 @@ pub fn runtime(state: &State, defaults: &Value) -> Value {
     params
 }
 
+/// Values a film's presets fill while the edit leaves them null. Choosing a
+/// film resets them, as upstream re-applies its presets on a stock change
+/// (`Stock.presetPaths` in `Parameters.swift`).
+pub const STOCK_PRESET_PATHS: [&str; 10] = [
+    "film_render.grain.rms_granularity",
+    "film_render.grain.density_min",
+    "film_render.grain.uniformity",
+    "film_render.grain.particle_scale_sublayers",
+    "film_render.dir_couplers.gamma_samelayer_rgb",
+    "film_render.dir_couplers.gamma_interlayer_r_to_gb",
+    "film_render.dir_couplers.gamma_interlayer_g_to_rb",
+    "film_render.dir_couplers.gamma_interlayer_b_to_rg",
+    "film_render.halation.halation_strength",
+    "film_render.halation.halation_first_sigma_um",
+];
+
+/// Session schema 2: the DIR gammas and halation baseline are null unless
+/// set, and a set value beats the film's preset. Schema 1 stored values for
+/// them that the engine ignored and nothing could set, so restoring drops
+/// them (the last six of `STOCK_PRESET_PATHS`).
+pub const SESSION_SCHEMA: u64 = 2;
+
+pub fn migrate_session(schema: u64, state: &mut State) {
+    if schema < 2 {
+        for path in &STOCK_PRESET_PATHS[4..] {
+            set(&mut state.params, path, Value::Null);
+        }
+    }
+}
+
+/// The catalog's `nullable_paths`: where a null is a value, such as an
+/// infinite Langmuir knee (`[*]` for every element). `merge` keeps a null
+/// there instead of falling back to the default.
+static NULLABLE_PATHS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub fn set_nullable_paths(catalog: &Value) {
+    let paths = catalog["nullable_paths"]
+        .as_array()
+        .map(|paths| paths.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default();
+    *NULLABLE_PATHS.lock().unwrap_or_else(|e| e.into_inner()) = paths;
+}
+
 pub fn merge(defaults: &Value, saved: &Value) -> Value {
+    let nullable = NULLABLE_PATHS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    merge_at(defaults, saved, &nullable, "")
+}
+
+fn merge_at(defaults: &Value, saved: &Value, nullable: &[String], path: &str) -> Value {
+    if saved.is_null() && nullable.iter().any(|p| p == path) {
+        return Value::Null;
+    }
     match (defaults, saved) {
         (Value::Object(d), Value::Object(s)) => {
             let mut out = d.clone();
             for (key, value) in s {
+                let child = if path.is_empty() { key.clone() } else { format!("{path}.{key}") };
                 out.insert(
                     key.clone(),
                     d.get(key)
-                        .map_or_else(|| value.clone(), |old| merge(old, value)),
+                        .map_or_else(|| value.clone(), |old| merge_at(old, value, nullable, &child)),
                 );
             }
             Value::Object(out)
         }
         (Value::Array(d), Value::Array(s)) if d.len() == s.len() => {
-            Value::Array(d.iter().zip(s).map(|(a, b)| merge(a, b)).collect())
+            let element = format!("{path}[*]");
+            Value::Array(d.iter().zip(s).map(|(a, b)| merge_at(a, b, nullable, &element)).collect())
         }
         (Value::Number(_), Value::Number(_))
         | (Value::String(_), Value::String(_))
@@ -839,6 +892,36 @@ mod tests {
         eprintln!("{compared} sweep cases compared");
         assert!(compared > 0);
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn merge_keeps_saved_nulls_where_they_are_values() {
+        let defaults = json!({"dir": {"langmuir": [1, 1, 1], "gamma": null}, "gamut": {"lightness": [0.95, 1, 1.6], "knee": 1}});
+        let saved = json!({"dir": {"langmuir": [null, 0.5, null], "gamma": [0.52, 0.51, 0.26]}, "gamut": {"lightness": null, "knee": null}});
+        let nullable = ["dir.langmuir[*]", "dir.gamma", "gamut.lightness"].map(String::from);
+        assert_eq!(
+            merge_at(&defaults, &saved, &nullable, ""),
+            json!({"dir": {"langmuir": [null, 0.5, null], "gamma": [0.52, 0.51, 0.26]}, "gamut": {"lightness": null, "knee": 1}})
+        );
+        assert_eq!(merge_at(&defaults, &saved, &[], "")["dir"]["langmuir"], json!([1, 0.5, 1]));
+    }
+
+    #[test]
+    fn schema_1_sessions_drop_dir_and_halation_values_that_never_applied() {
+        let params = json!({"film_render": {
+            "dir_couplers": {"gamma_samelayer_rgb": [0.341, 0.324, 0.273], "amount": 0.8},
+            "halation": {"halation_strength": [0.05, 0.015, 0.0]},
+            "grain": {"rms_granularity": [12, 13, 12]}}});
+        let mut old = State { params: params.clone(), ..Default::default() };
+        migrate_session(1, &mut old);
+        let render = &old.params["film_render"];
+        assert!(render["dir_couplers"]["gamma_samelayer_rgb"].is_null());
+        assert!(render["halation"]["halation_strength"].is_null());
+        assert_eq!(render["dir_couplers"]["amount"], json!(0.8));
+        assert_eq!(render["grain"]["rms_granularity"], json!([12, 13, 12]));
+        let mut current = State { params: params.clone(), ..Default::default() };
+        migrate_session(SESSION_SCHEMA, &mut current);
+        assert_eq!(current.params, params);
     }
 
     #[test]

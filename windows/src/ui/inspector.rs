@@ -190,6 +190,10 @@ impl Inspector {
         (dip * self.dpi as f64 / 96.0).round() as i32
     }
 
+    pub fn built(&self) -> bool {
+        self.built
+    }
+
     pub fn layout(&mut self, x: i32, y: i32, width: i32, height: i32, visible: bool) {
         self.rect = RECT { left: x, top: y, right: x + width, bottom: y + height };
         unsafe {

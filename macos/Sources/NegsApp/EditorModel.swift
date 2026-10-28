@@ -68,6 +68,17 @@ import UniformTypeIdentifiers
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
     }
     var inspectorVisible = true
+    /// Which panel the inspector column shows, remembered across launches.
+    var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
+        didSet { UserDefaults.standard.set(inspectorPane.rawValue, forKey: "inspectorPane") }
+    }
+    private(set) var presets: [PresetFile] = []
+    /// What the engine made of each listed file, by the file's identity.
+    private(set) var presetStatus: [PresetFile: PresetStatus] = [:]
+    /// The preset whose name is being edited in the list.
+    var renamingPreset: URL?
+    /// A preset New Preset just made: Escape while naming it removes it.
+    @ObservationIgnored private var unnamedPreset: URL?
     var zoomCommand = UUID()
     var fitImage = true
     var recentFiles: [URL] = []
@@ -142,8 +153,11 @@ import UniformTypeIdentifiers
     /// A slider is being dragged; its edits share one undo step.
     var interacting: Bool { interactionStart != nil }
 
-    init(previewCache: RenderedPreviewCache = RenderedPreviewCache()) {
+    @ObservationIgnored let presetLibrary: PresetLibrary
+
+    init(previewCache: RenderedPreviewCache = RenderedPreviewCache(), presetLibrary: PresetLibrary = PresetLibrary()) {
         self.previewCache = previewCache
+        self.presetLibrary = presetLibrary
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
     }
 
@@ -347,8 +361,8 @@ import UniformTypeIdentifiers
     func chooseFilm(_ stock: String) {
         var next = state; next.film = stock
         next.params["film_render.development_time"] = .null
-        // A new film brings its own grain preset, as upstream applies it.
-        for field in Stock.grainFields { next.params["film_render.grain.\(field)"] = .null }
+        // A new film brings its own grain, DIR and halation presets, as upstream applies them.
+        for path in Stock.presetPaths { next.params[path] = .null }
         pairFilm(in: &next); apply(next, action: "Change Film")
     }
     func choosePaper(_ stock: String) {
@@ -557,7 +571,7 @@ import UniformTypeIdentifiers
         let generation = sourceGeneration
         if let session {
             var restored = session.state
-            restored.params = defaults.restoring(restored.params)
+            restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = defaults[ImageSize.factorPath]
             if factor != .null { restored.params[ImageSize.factorPath] = factor }
@@ -1047,6 +1061,213 @@ import UniformTypeIdentifiers
     }
     func cancelExport() { exportJob?.cancel() }
     func flushPreviewCache() async { await previewCache.flush() }
+    // MARK: Presets
+
+    /// The toolbar's Adjustments and Presets buttons: show that panel, or
+    /// hide the column if it already shows it.
+    func togglePane(_ pane: InspectorPane) {
+        if inspectorVisible && inspectorPane == pane { inspectorVisible = false } else { inspectorPane = pane; inspectorVisible = true }
+    }
+    func showPane(_ pane: InspectorPane) { inspectorPane = pane; inspectorVisible = true }
+    var canChangePresets: Bool { hasCatalog && !cropping && engine != nil }
+
+    /// Lists the folder again, so files copied in by hand appear, and asks
+    /// the engine about files it hasn't seen.
+    func refreshPresets() async {
+        do { presets = try await presetLibrary.list() } catch { presets = []; report(error) }
+        presetStatus = presetStatus.filter { presets.contains($0.key) }
+        guard let engine else { return }
+        for preset in presets where presetStatus[preset] == nil {
+            do {
+                let text = try Self.presetText(try await presetLibrary.read(preset))
+                let (_, result) = try await engine.request(["command": .string("preset_import"), "text": .string(text)])
+                presetStatus[preset] = .valid(film: result["film"].string, paper: result["paper"].string,
+                                              scan: result["params"]["io.scan_film"].bool)
+            } catch {
+                presetStatus[preset] = .invalid(error.localizedDescription)
+            }
+        }
+    }
+
+    /// The film, paper and Lab settings of a preset, as one undo step. The
+    /// photograph's own settings stay: Image Size, rotation, crop, border,
+    /// output encoding, the preview limit and the Post tab.
+    func applyPreset(_ preset: PresetFile) {
+        guard canChangePresets, let engine else { return }
+        Task {
+            do {
+                let text = try Self.presetText(try await presetLibrary.read(preset))
+                // The engine keeps the photograph's settings from the params
+                // it's given; ask again if they changed while it answered.
+                for _ in 0..<3 {
+                    let snapshot = state
+                    let (_, result) = try await engine.request(["command": .string("preset_import"), "text": .string(text),
+                                                                "params": snapshot.params])
+                    guard state == snapshot else { continue }
+                    let (film, paper) = (result["film"].string, result["paper"].string)
+                    guard films.contains(where: { $0.id == film }), papers.contains(where: { $0.id == paper }) else {
+                        throw EngineError(message: "This version of Negs doesn’t have the preset’s film or paper.")
+                    }
+                    var next = state
+                    next.film = film; next.paper = paper; next.params = result["params"]
+                    apply(next, action: "Apply Preset “\(preset.name)”")
+                    status = "Applied preset “\(preset.name)”"
+                    return
+                }
+            } catch {
+                report(error)
+                await refreshPresets()
+            }
+        }
+    }
+
+    /// Saves the film, paper and Lab settings as a new preset, named after
+    /// the film, and starts renaming it.
+    func newPreset() {
+        guard canChangePresets, let engine else { return }
+        showPane(.presets)
+        let snapshot = state, name = PresetName.from(fileName: filmName)
+        Task {
+            do {
+                let (_, result) = try await engine.request(["command": .string("preset_export"), "film": .string(snapshot.film),
+                                                            "paper": .string(snapshot.paper), "params": snapshot.params])
+                let file = try await presetLibrary.add(Data(result["text"].string.utf8), name: name)
+                await refreshPresets()
+                unnamedPreset = file.url
+                renamingPreset = file.url
+            } catch { report(error) }
+        }
+    }
+
+    func importPresetsPanel() {
+        guard canChangePresets else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Import Presets"
+        panel.message = "Choose presets saved by Negs or by spektrafilm (GUI state files)."
+        panel.prompt = "Import"
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.json, .plainText]
+        panel.begin { [weak self] response in
+            guard response == .OK, let self else { return }
+            MainActor.assumeIsolated { self.importPresets(panel.urls) }
+        }
+    }
+
+    /// Copies each file that the engine reads into the Presets folder, under
+    /// its own name, and lists the ones that it refuses. They go to the end,
+    /// or before the preset at `position` (a drop between rows).
+    func importPresets(_ urls: [URL], at position: Int? = nil) {
+        guard canChangePresets, let engine, !urls.isEmpty else { return }
+        showPane(.presets)
+        Task {
+            var failures: [String] = [], added: [URL] = []
+            for url in urls {
+                do {
+                    let data = try await Task.detached(priority: .userInitiated) { try PresetLibrary.read(url) }.value
+                    _ = try await engine.request(["command": .string("preset_import"), "text": .string(try Self.presetText(data))])
+                    added.append(try await presetLibrary.add(data, name: PresetName.from(fileName: url.deletingPathExtension().lastPathComponent)).url)
+                } catch {
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            let imported = added.count
+            if let position, imported > 0, let listed = try? await presetLibrary.list() {
+                let moved = listed.filter { added.contains($0.url) }
+                var order = listed.filter { !added.contains($0.url) }
+                let before = listed.prefix(position).filter { !added.contains($0.url) }.count
+                order.insert(contentsOf: moved, at: min(before, order.count))
+                do { try await presetLibrary.setOrder(order) } catch { report(error) }
+            }
+            await refreshPresets()
+            if imported > 0 { status = imported == 1 ? "Imported 1 preset" : "Imported \(imported) presets" }
+            if !failures.isEmpty {
+                error = (imported == 0 ? "No presets were imported.\n\n" : "Some files weren’t imported.\n\n")
+                    + failures.joined(separator: "\n\n")
+            }
+        }
+    }
+
+    /// Moves presets in the list, as dragged, and remembers the order.
+    func movePresets(from source: IndexSet, to destination: Int) {
+        var order = presets
+        order.move(fromOffsets: source, toOffset: destination)
+        guard order != presets else { return }
+        presets = order
+        Task {
+            do { try await presetLibrary.setOrder(order) } catch { report(error) }
+            await refreshPresets()
+        }
+    }
+
+    /// Escape while naming: keeps the old name, or removes a preset New
+    /// Preset just made.
+    func cancelRename(_ preset: PresetFile) {
+        renamingPreset = nil
+        guard preset.url == unnamedPreset else { return }
+        unnamedPreset = nil
+        Task {
+            do { try await presetLibrary.delete(preset) } catch { report(error) }
+            await refreshPresets()
+        }
+    }
+
+    func renamePreset(_ preset: PresetFile, to name: String) {
+        renamingPreset = nil
+        if preset.url == unnamedPreset { unnamedPreset = nil }
+        guard name != preset.name else { return }
+        Task {
+            do { _ = try await presetLibrary.rename(preset, to: name) } catch { report(error) }
+            await refreshPresets()
+        }
+    }
+
+    func deletePreset(_ preset: PresetFile) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete the preset “\(preset.name)”?"
+        alert.informativeText = "This can’t be undone. Photographs edited with it keep their settings."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task {
+            do { try await presetLibrary.delete(preset) } catch { report(error) }
+            await refreshPresets()
+        }
+    }
+
+    /// Writes a copy wherever the user picks, byte for byte.
+    func exportPresetPanel(_ preset: PresetFile) {
+        let panel = NSSavePanel()
+        panel.title = "Export Preset"
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "\(preset.name).json"
+        panel.message = "spektrafilm’s GUI state format: opens in Negs and in spektrafilm."
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            MainActor.assumeIsolated {
+                Task {
+                    do { try await self.presetLibrary.read(preset).write(to: url, options: .atomic) }
+                    catch { self.report(error); await self.refreshPresets() }
+                }
+            }
+        }
+    }
+
+    func showPresetsFolder() {
+        let folder = presetLibrary.folder
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(folder)
+        } catch { report(error) }
+    }
+
+    nonisolated static func presetText(_ data: Data) throws -> String {
+        guard let text = String(data: data, encoding: .utf8) else { throw EngineError(message: "The file isn’t text.") }
+        return text
+    }
+
     func shutdown() {
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
         exportJob?.cancel(); engine?.stop()

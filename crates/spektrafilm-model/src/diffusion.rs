@@ -240,6 +240,11 @@ const HALO_CHANNEL_WARMTH_AXIS: [f64; 3] = [1.30, 0.15, -1.45];
 const STRENGTH_BREAKPOINTS: [f64; 5] = [0.125, 0.25, 0.5, 1.0, 2.0];
 const STRENGTH_TOTAL_FRACTION: [f64; 5] = [0.10, 0.20, 0.35, 0.55, 0.75];
 
+/// Whether `family` names a diffusion filter; an unknown one does nothing.
+pub fn is_known_family(family: &str) -> bool {
+    family_shape(family).is_some()
+}
+
 fn family_shape(family: &str) -> Option<FamilyShape> {
     let s = match family {
         "glimmerglass" => FamilyShape {

@@ -62,14 +62,21 @@ enum JSONValue: Codable, Equatable, Sendable {
     var array: [JSONValue] { if case .array(let v) = self { return v }; return [] }
 
     /// Keep new engine defaults, restore known fields, and discard removed fields.
-    func restoring(_ saved: JSONValue) -> JSONValue {
+    /// A saved `null` stays where `nullable` (the catalog's `nullable_paths`,
+    /// `[*]` for every element) says it is a value, such as an infinite
+    /// Langmuir knee, rather than falling back to the default.
+    func restoring(_ saved: JSONValue, nullable: Set<String> = [], at path: String = "") -> JSONValue {
         switch (self, saved) {
+        case (_, .null) where nullable.contains(path): return saved
         case (.object(let defaults), .object(let values)):
-            return .object(defaults.merging(values.filter { defaults[$0.key] != nil }) {
-                $0.restoring($1)
-            })
+            var result = defaults
+            for (key, value) in values {
+                guard let fallback = defaults[key] else { continue }
+                result[key] = fallback.restoring(value, nullable: nullable, at: path.isEmpty ? key : "\(path).\(key)")
+            }
+            return .object(result)
         case (.array(let defaults), .array(let values)) where defaults.count == values.count:
-            return .array(zip(defaults, values).map { $0.restoring($1) })
+            return .array(zip(defaults, values).map { $0.restoring($1, nullable: nullable, at: "\(path)[*]") })
         case (.number, .number), (.bool, .bool), (.string, .string), (.null, _): return saved
         default: return self
         }
@@ -87,6 +94,16 @@ struct Stock: Identifiable, Sendable {
     /// The resolved grain preset, per field of `Stock.grainFields`.
     let grain: JSONValue
     static let grainFields = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"]
+    /// The DIR gammas and halation baseline the film's presets fill while the
+    /// edit leaves them unset (`null`).
+    static let dirHalationPaths = [
+        "film_render.dir_couplers.gamma_samelayer_rgb", "film_render.dir_couplers.gamma_interlayer_r_to_gb",
+        "film_render.dir_couplers.gamma_interlayer_g_to_rb", "film_render.dir_couplers.gamma_interlayer_b_to_rg",
+        "film_render.halation.halation_strength", "film_render.halation.halation_first_sigma_um"
+    ]
+    /// Every value a film's presets fill. Choosing a film resets them, as
+    /// upstream re-applies its presets on a stock change.
+    static let presetPaths = grainFields.map { "film_render.grain.\($0)" } + dirHalationPaths
 
     init(_ value: JSONValue) {
         id = value["id"].string; name = value["name"].string
