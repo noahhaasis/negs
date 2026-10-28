@@ -527,6 +527,37 @@ finer grain (0.70 px). At a 1512 px window, Python's 640 px preview shows
 4.4× less grain than a 6048 px Negs render. That is the preview size, not the
 engine: Python's full-size scan matches Negs.
 
+## Presets: `check_presets.py` and `preset_widget_roundtrip.py`
+
+Presets are Python's saved GUI state (`docs/presets-design.md`).
+`check_presets.py` loads each one as Python's GUI does and through the native
+helper's `preset_import`, then checks that every Python runtime value has the
+same value in Negs, and renders both (stock specifics off, as Python renders
+a loaded preset; LUTs, grain and glare off). It generates presets from
+Python's own state for a few stocks plus edits (explicit DIR gammas and
+halation, Langmuir `Infinity`, morphs, B&W development times, the scan route,
+gamut settings, preflash with white correction, diffusion filters, a sparse
+file); `--preset-dir` adds local files. The forum presets are unlicensed:
+keep them outside the repository.
+
+```bash
+../spektrafilm-env/bin/python -I scripts/parity/check_presets.py \
+  --python-source /path/to/exp --output-dir /tmp/negs-presets --preset-dir /path/to/forum-presets
+```
+
+Result on 2026-10-27 (`worktree-presets`): 5 generated presets and the 18
+forum JSON files pass, with no value differences. Renders are within 1e-7,
+or within 1.5e-5 with a diffusion filter on (Python's float32 FFT, above).
+The first run found the print white/black-correction references missing
+the preflash (5e-2 in `cmy_print` with both on), now fixed.
+
+`preset_widget_roundtrip.py` measures what Python's GUI does to a Negs export:
+its spin boxes keep 2 decimals (3 for halation strength), including the stock
+DIR gammas of its own default state, cap an infinite Langmuir knee at 1e6,
+and a bare widget bundle shows development time 1.0 until the controller
+syncs the stock. On 2026-10-27 the forum presets came back unchanged; Negs
+exports with finer values rendered up to 5–9 8-bit levels apart in Python.
+
 ## Original methodology and surviving probes
 
 The initial release (`b97a682`) records Python v0.3.2 measurements: decode

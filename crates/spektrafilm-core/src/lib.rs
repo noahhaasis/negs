@@ -14,6 +14,7 @@ pub mod neutral_filters;
 pub mod params;
 pub mod pipeline;
 pub mod post;
+pub mod presets;
 pub mod print_balance;
 pub mod print_morph;
 pub mod profile;
