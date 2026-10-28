@@ -233,7 +233,10 @@ impl Editor {
             ("win.save-preview", vec!["<Control>s"]),
             ("win.lut", vec!["<Control><Shift>l"]),
             ("win.fullscreen", vec!["F11"]),
-            ("win.rotate-left", vec!["<Control><Shift>r"]),
+            // Ctrl+Shift+R resets, as ⇧⌘R and Ctrl+Shift+R do on macOS and
+            // Windows; counterclockwise takes Photos' ⌥⌘R.
+            ("win.reset", vec!["<Control><Shift>r"]),
+            ("win.rotate-left", vec!["<Control><Alt>r"]),
             ("win.previous", vec!["<Alt>Left"]),
             ("win.next", vec!["<Alt>Right"]),
             ("win.undo", vec!["<Control>z"]),
@@ -669,7 +672,7 @@ impl Editor {
         }
     }
     fn shortcuts(&self) {
-        let dialog=adw::AlertDialog::builder().heading("Keyboard Shortcuts").body("Ctrl+O  Open photograph\nCtrl+S  Save Preview options\nCtrl+Shift+E  Export options\nCtrl+Z / Ctrl+Shift+Z  Undo / Redo\nCtrl+0 / Ctrl+1  Fit / Actual Size\nCtrl++ / Ctrl+−  Zoom\nCtrl+R / Ctrl+Shift+R  Rotate\nC  Crop (canvas focused)\nEnter / Escape  Apply / Cancel crop\nArrow keys  Move crop / Previous and next photo\nAlt+Left / Alt+Right  Previous / Next photograph\nF6 / F7  Film Strip / Adjustments\nCtrl+,  Settings\nCtrl+Q  Quit").build();
+        let dialog=adw::AlertDialog::builder().heading("Keyboard Shortcuts").body("Ctrl+O  Open photograph\nCtrl+S  Save Preview options\nCtrl+Shift+E  Export options\nCtrl+Z / Ctrl+Shift+Z  Undo / Redo\nCtrl+0 / Ctrl+1  Fit / Actual Size\nCtrl++ / Ctrl+−  Zoom\nCtrl+R / Ctrl+Alt+R  Rotate clockwise / counterclockwise\nCtrl+Shift+R  Reset Adjustments\nC  Crop (canvas focused)\nEnter / Escape  Apply / Cancel crop\nArrow keys  Move crop / Previous and next photo\nAlt+Left / Alt+Right  Previous / Next photograph\nF6 / F7  Film Strip / Adjustments\nCtrl+,  Settings\nCtrl+Q  Quit").build();
         dialog.add_response("close", "Close");
         dialog.present(Some(&self.window));
     }
