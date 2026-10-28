@@ -224,16 +224,27 @@ fn load_raw_impl(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Image
 }
 
 fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<ImageBuf> {
-    use rawler::{
-        decoders::RawDecodeParams,
-        imgop::develop::{ProcessingStep, RawDevelop},
-        rawsource::RawSource,
-    };
+    use rawler::rawsource::RawSource;
     wb.validate()?;
     let src =
         RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
+    develop_rawler(&src, orient, wb)
+}
+
+/// [`load_raw_with_wb`] from the file's bytes, with rawler: for browsers,
+/// which have no files.
+pub fn load_raw_bytes(bytes: &[u8], wb: RawWhiteBalance) -> Result<ImageBuf> {
+    wb.validate()?;
+    develop_rawler(&rawler::rawsource::RawSource::new_from_slice(bytes), true, wb)
+}
+
+fn develop_rawler(src: &rawler::rawsource::RawSource, orient: bool, wb: RawWhiteBalance) -> Result<ImageBuf> {
+    use rawler::{
+        decoders::RawDecodeParams,
+        imgop::develop::{ProcessingStep, RawDevelop},
+    };
     let decode_params = RawDecodeParams::default();
-    let mut raw = rawler::decode(&src, &decode_params)
+    let mut raw = rawler::decode(src, &decode_params)
         .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
     let mut dev = RawDevelop::default();
     // Our `calibrate` replaces rawler's, which clips (see there).
@@ -262,7 +273,7 @@ fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Ima
     }
     // rawler 0.8 still always sets `RawImage::orientation` to Normal (an
     // upstream TODO), so read the EXIF tag ourselves.
-    let orientation = raw_exif_orientation(&src, &decode_params);
+    let orientation = raw_exif_orientation(src, &decode_params);
     Ok(img.oriented(orientation))
 }
 

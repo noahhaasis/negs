@@ -382,10 +382,9 @@ impl Profile {
 
 /// Load a profile from a JSON file on disk.
 pub fn load_profile(path: &Path) -> Result<Profile, ProfileError> {
-    let file =
-        std::fs::File::open(path).map_err(|e| ProfileError::Io(path.display().to_string(), e))?;
-    let reader = std::io::BufReader::new(file);
-    let mut profile: Profile = serde_json::from_reader(reader)
+    let bytes =
+        crate::data_fs::read(path).map_err(|e| ProfileError::Io(path.display().to_string(), e))?;
+    let mut profile: Profile = serde_json::from_slice(&bytes)
         .map_err(|e| ProfileError::Parse(path.display().to_string(), e))?;
     refresh_density_curves_from_model(&mut profile)?;
     validate_profile(&profile)?;

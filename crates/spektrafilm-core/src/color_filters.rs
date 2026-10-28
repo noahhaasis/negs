@@ -47,7 +47,7 @@ pub fn transmittance(data_dir: &Path, key: &str) -> Result<Option<Vec<f64>>, Str
         .join("filters/colored")
         .join(spec.brand)
         .join(format!("{}.csv", spec.name));
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = crate::data_fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut rows = Vec::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let parse = |field: Option<&str>| -> Result<f64, String> {

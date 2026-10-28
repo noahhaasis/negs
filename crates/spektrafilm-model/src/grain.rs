@@ -21,7 +21,7 @@ use spektrafilm_math::gaussian;
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::numpy_rng::{GaussRng, rk_binomial, rk_poisson};
 use spektrafilm_math::precision::{Scalar, ZERO, from_f64, to_f64};
-use std::time::Instant;
+use web_time::Instant;
 
 fn stage_timings_enabled() -> bool {
     std::env::var_os("SPEKTRAFILM_STAGE_TIMINGS").is_some()
