@@ -31,8 +31,7 @@ final class RenderedPreviewCache: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.negs.rendered-preview", qos: .userInitiated)
     private static let maxBytes = 8192 * 8192 * 4
 
-    init(file: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("dev.negs.app/rendered-preview.cache")) {
+    init(file: URL = AppDataLocations.cachesDirectory.appendingPathComponent("rendered-preview.cache")) {
         self.file = file
     }
 
