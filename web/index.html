@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Negs</title>
 <style>
   :root {
@@ -12,13 +12,15 @@
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
   button, select, input { font: inherit; color: inherit; }
-  .app { display: grid; grid-template-columns: 1fr 320px; height: 100%; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: 100%; height: 100dvh; }
 
-  /* Viewport */
-  .view { position: relative; display: grid; place-items: center; overflow: hidden; min-height: 0; }
-  .photo { display: block; image-rendering: auto; box-shadow: 0 2px 24px rgb(0 0 0 / .5); }
+  /* Viewport. Pinch and drag on the photograph are the page's, not the
+     browser's (zoom and pan come with the resident scan). */
+  .view { position: relative; display: grid; place-items: center; overflow: hidden; min-height: 0; touch-action: none;
+    padding: env(safe-area-inset-top) 0 0 env(safe-area-inset-left); }
+  .photo { display: block; image-rendering: auto; box-shadow: 0 2px 24px rgb(0 0 0 / .5); -webkit-touch-callout: none; user-select: none; }
   .photo[hidden] { display: none; }
   .empty { text-align: center; color: var(--muted); padding: 24px; max-width: 360px; }
   .empty h1 { font-size: 15px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
@@ -36,10 +38,12 @@
   .hud { position: absolute; left: 12px; bottom: 10px; color: var(--faint); font: 11px ui-monospace, monospace; pointer-events: none; }
 
   /* Sidebar */
-  .side { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0; }
+  .side { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none; padding-right: env(safe-area-inset-right); }
   .top { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
   .top strong { font-size: 14px; letter-spacing: .02em; margin-right: auto; }
-  .scroll { overflow-y: auto; flex: 1; }
+  .scroll { overflow-y: auto; flex: 1; overscroll-behavior: contain; }
+  .grabber, .tabs { display: none; }
   .stock { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
   .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
   .stock label.row { display: flex; }
@@ -71,9 +75,20 @@
   .reset { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 13px; line-height: 1; }
   .reset:hover:not(:disabled) { color: var(--fg); }
   .reset[hidden] { display: none; }
-  .ctl.slider input[type=range] { margin-top: 4px; }
+  .ctl.slider .track { margin-top: 4px; touch-action: pan-y; }
   .row { display: flex; align-items: center; justify-content: space-between; color: var(--muted); }
-  input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); height: 18px; }
+  /* Sliders filled from the minimum to the value (--f, 0 to 1), as on desktop. */
+  input[type=range] { --thumb: 14px; --track: 4px; appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 18px; margin: 0;
+    background: none; cursor: pointer; touch-action: pan-y; }
+  input[type=range]::-webkit-slider-runnable-track { height: var(--track); border-radius: var(--track);
+    background: linear-gradient(to right, var(--accent) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--f, 0)), var(--line) 0); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: var(--thumb); height: var(--thumb); border-radius: 50%;
+    margin-top: calc((var(--track) - var(--thumb)) / 2); background: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / .5); }
+  input[type=range]::-moz-range-track { height: var(--track); border-radius: var(--track); background: var(--line); }
+  input[type=range]::-moz-range-progress { height: var(--track); border-radius: var(--track); background: var(--accent); }
+  input[type=range]::-moz-range-thumb { width: var(--thumb); height: var(--thumb); border: 0; border-radius: 50%; background: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / .5); }
+  input[type=range]:disabled { cursor: default; }
+  input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   .switch { appearance: none; width: 28px; height: 16px; border-radius: 8px; background: var(--line); position: relative; cursor: pointer; flex: none; margin: 0; }
   .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .15s; }
   .switch:checked { background: var(--accent); }
@@ -87,16 +102,58 @@
   .btn:disabled { opacity: .5; cursor: default; }
   .hint { color: var(--faint); font-size: 11px; }
 
-  @media (max-width: 760px) {
-    .app { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; }
-    .side { border-left: 0; border-top: 1px solid var(--line); }
-    .bottom { gap: 4px; padding: 8px 14px; }
-    .bottom .hint:last-child { display: none; }
+  /* Fingers: bigger thumbs, switches and targets, and no hover-only cues.
+     Fields stay at 16px, below which iOS zooms the page on focus. */
+  @media (pointer: coarse) {
+    body { font-size: 15px; }
+    select, .value-field { font-size: 16px; }
+    select { padding: 8px 10px; }
+    .btn { min-height: 40px; padding: 8px 14px; }
+    .stock { gap: 14px; }
+    .stock label, .hint { font-size: 13px; }
+    .section > h2 { font-size: 12px; }
+    summary { min-height: 48px; padding: 4px 14px; }
+    .controls { gap: 10px; padding-left: 28px; }
+    .section > .ctl { margin-bottom: 10px; }
+    .ctl .head, .ctl > label, .row { min-height: 36px; }
+    .value { font-size: 14px; min-width: 56px; min-height: 32px; padding: 4px 8px; background: var(--field); border-radius: 6px; }
+    .value-field { width: 84px; min-height: 32px; padding: 4px 8px; }
+    .reset { min-width: 40px; min-height: 36px; font-size: 18px; }
+    input[type=range] { --thumb: 26px; --track: 6px; height: 34px; pointer-events: none; }
+    .ctl.slider .track { margin-top: -2px; padding: 2px 0; cursor: pointer; }
+    .switch { width: 44px; height: 26px; border-radius: 13px; }
+    .switch::after { width: 22px; height: 22px; }
+    .switch:checked::after { transform: translateX(18px); }
+    .ctl.choice select { max-width: 65%; }
+  }
+
+  /* A bottom sheet with a tab per section, where the screen is too narrow
+     for a sidebar beside the photograph: phones and iPads upright. The same
+     query is in app.js (SHEET). */
+  @media (max-width: 899px) and (orientation: portrait), (max-width: 639px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) var(--sheet, 45%); }
+    .side { border-left: 0; border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; box-shadow: 0 -4px 24px rgb(0 0 0 / .35);
+      padding-right: 0; padding-bottom: env(safe-area-inset-bottom); }
+    .grabber { display: grid; place-items: center; height: 22px; flex: none; cursor: grab; touch-action: none; }
+    .grabber::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--line); }
+    .grabber:hover::before { background: var(--faint); }
+    .top { padding: 0 14px 10px; border-bottom: 0; }
+    .tabs { display: flex; flex: none; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+    .tabs button { flex: 1 0 auto; min-height: 40px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; background: none;
+      color: var(--muted); cursor: pointer; font-weight: 600; white-space: nowrap; }
+    .tabs button[aria-selected=true] { color: var(--fg); border-bottom-color: var(--accent); }
+    .scroll [data-tab]:not(.shown) { display: none; }
+    .section { border-bottom: 0; }
+    .section > h2 { display: none; }
+    .section > .ctl:first-of-type { margin-top: 12px; }
+    .bottom { gap: 4px; padding: 10px 14px 16px; }
+    .app { transition: grid-template-rows .2s ease; }
+    .app.dragging-sheet { transition: none; }
   }
 </style>
 </head>
 <body>
-<div class="app">
+<div class="app" id="app">
   <main class="view" id="view">
     <div class="busy" id="busy"></div>
     <div class="empty" id="empty">
@@ -108,25 +165,27 @@
     <div class="message" id="message" hidden></div>
     <div class="hud" id="hud"></div>
   </main>
-  <aside class="side">
+  <aside class="side" id="side">
+    <div class="grabber" id="grabber" title="Drag to resize, or tap"></div>
     <div class="top">
       <strong>Negs</strong>
       <button class="btn" id="open">Open…</button>
       <button class="btn" id="export" disabled>Export</button>
     </div>
-    <div class="scroll">
-      <div class="stock">
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Inspector"></nav>
+    <div class="scroll" id="scroll">
+      <div class="stock" data-tab="stock">
         <label>Film <select id="film"></select></label>
         <label class="row" title="Skip printing and scan the developed film, as for slides.">Scan film directly <input type="checkbox" class="switch" id="scan-film"></label>
         <label id="paper-row">Paper <select id="paper"></select></label>
       </div>
       <div id="sections"></div>
-      <div class="actions"><button class="btn" id="reset" title="Restore the defaults while keeping the film, paper and rotation.">Reset Adjustments</button></div>
+      <div class="actions" data-tab="stock"><button class="btn" id="reset" title="Restore the defaults while keeping the film, paper and rotation.">Reset Adjustments</button></div>
     </div>
-    <div class="bottom">
+    <div class="bottom" id="bottom" data-tab="stock">
       <div class="row"><span>Engine</span><select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></div>
       <div class="hint" id="engine-info">Starting…</div>
-      <div class="hint">Click a value to type one.</div>
+      <div class="hint" id="value-hint">Click a value to type one.</div>
     </div>
   </aside>
 </div>

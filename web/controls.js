@@ -27,6 +27,7 @@ const curves = (at) => [
 // Sections hold loose controls (`controls`, each shown while its `when`
 // path is true) and then their effect groups. A group's `enable` is the
 // switch in its header; `print` sections are skipped while scanning film.
+// `tab` names a section's tab on phones when its title is too long.
 export const SECTIONS = [
   { title: "Camera", controls: [
     toggle("Auto exposure", "camera.auto_exposure"),
@@ -123,7 +124,7 @@ export const SECTIONS = [
       slider("Blur (px)", "print_render.glare.blur", 0, 5, 0.01),
     ] },
   ] },
-  { title: "Scan & Color", groups: [
+  { title: "Scan & Color", tab: "Scan", groups: [
     { title: "Scanner", controls: [
       slider("Lens blur (px)", "scanner.lens_blur", 0, 5, 0.01),
       slider("Unsharp radius (px)", "scanner.unsharp_mask.0", 0, 3, 0.01),
