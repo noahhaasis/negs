@@ -45,8 +45,11 @@ function Seed {
     $presets = Join-Path $roaming 'Presets'
     New-Item -ItemType Directory -Force -Path $presets | Out-Null
     [IO.File]::WriteAllText((Join-Path $presets 'Portra warm.json'), '{"simulation": {"film_stock": "kodak_portra_400"}}')
-    [IO.File]::WriteAllText((Join-Path $presets '.order.json'), '{"order": ["Portra warm.json"]}')
-    (Get-Item -LiteralPath (Join-Path $presets '.order.json') -Force).Attributes = 'Hidden'
+    $order = Join-Path $presets '.order.json'
+    # Kept hidden by the previous Keep settings run; a hidden file can't be overwritten.
+    if (Test-Path -LiteralPath $order) { (Get-Item -LiteralPath $order -Force).Attributes = 'Normal' }
+    [IO.File]::WriteAllText($order, '{"order": ["Portra warm.json"]}')
+    (Get-Item -LiteralPath $order -Force).Attributes = 'Hidden'
     foreach ($name in @('settings.tmp', 'session.tmp', 'panic.log')) {
         [IO.File]::WriteAllText((Join-Path $roaming $name), 'temporary app data')
     }
