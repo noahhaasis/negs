@@ -61,6 +61,31 @@ benchmark runs.
 Firefox 158 works too, with `dom.webgpu.enabled` set in a profile's
 `user.js`.
 
+### On an iPad or iPhone
+
+WebGPU and `SharedArrayBuffer` need a secure context, and `http://<LAN IP>`
+isn't one. `web/dev-cert.sh` makes a local certificate authority (name
+constraints limit it to localhost, `*.local` and private addresses) and a
+certificate for this machine's names and current LAN addresses, in
+`~/.local/share/negs-dev-certs` (outside `web/`, so nothing serves the
+keys). `node web/serve.mjs --https` then serves on port 8443, COOP/COEP
+included. Once per device:
+
+1. In Safari, open `http://<LAN IP>:8137/ca.crt` (the plain server hands
+   out the authority's certificate) and allow the profile download.
+2. Settings → General → VPN & Device Management: install the "Negs dev
+   server" profile.
+3. Settings → General → About → Certificate Trust Settings: turn on full
+   trust for it.
+4. Open `https://<LAN IP>:8443/`.
+
+Run `web/dev-cert.sh` again when the LAN address changes; the authority
+stays, so the device keeps trusting it. This machine's ufw firewall blocks
+both ports from the network until they're allowed (`sudo ufw allow from
+192.168.178.0/24 to any port 8137,8443 proto tcp`). To test the TLS server
+here, `CHROME_FLAGS=--ignore-certificate-errors node web/cdp.mjs
+https://localhost:8443/ -`.
+
 `web/bench.sh <name> '<query>'` runs that windowed Chrome for you and
 prints first, warm and whole-frame times and the last frame's stages, e.g.
 `web/bench.sh card-1200 'image=results/card.jpg&backend=gpu&max=1200&runs=8'`.

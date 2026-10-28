@@ -4,7 +4,8 @@
 // in the page and prints its result. SHOT=<file.png> also saves a screenshot;
 // VIEW=<w>x<h>[@<dpr>][m] emulates that viewport (m: a touch phone or tablet).
 // The page exposes `negs` for this (web/app.js). Chrome profiles
-// go in $CDP_TMP (default: the system temp dir).
+// go in $CDP_TMP (default: the system temp dir); $CHROME_FLAGS adds flags
+// (for example --ignore-certificate-errors for serve.mjs --https).
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,7 +16,8 @@ const profile = mkdtempSync(join(process.env.CDP_TMP ?? tmpdir(), "cdp-"));
 const port = 9333 + Math.floor(Math.random() * 500);
 const chrome = spawn("/opt/google/chrome/chrome", [
   "--ozone-platform=x11", "--window-size=1440,900", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-  "--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist", `--remote-debugging-port=${port}`, "about:blank",
+  "--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist", `--remote-debugging-port=${port}`,
+  ...(process.env.CHROME_FLAGS?.split(" ").filter(Boolean) ?? []), "about:blank",
 ], { stdio: "ignore" });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let targets;
