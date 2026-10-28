@@ -181,9 +181,16 @@ Rename and delete are serialized and check that the file is still the one listed
 modification time) before acting. Import copies the original bytes, so a re-export gives back
 the imported file; New Preset writes Negs's export.
 
-**Listing.** The panel lists the folder each time it opens, sorted by the name key, so files
-copied in by hand appear without a watcher. Files that don't translate are shown greyed with the
-reason, and can be deleted. The translation is cached by path, size and modification time.
+**Listing.** The panel lists the folder each time it opens, so files copied in by hand appear
+without a watcher. Files that don't translate are shown greyed with the reason, and can be
+deleted. The translation is cached by path, size and modification time.
+
+**Order** (asked for by Noah on 2026-10-27). The user sorts presets by dragging them; the order is
+`.order.json` in the folder, `{"order": ["<file name>.json", …]}`, compared by the name key. A
+new or imported preset goes to the end (files dropped between rows go there); presets the file
+doesn't name, such as files copied in by hand, follow in name-key order. Renaming keeps a
+preset's place, deleting removes its entry. The file is hidden, so Python spektrafilm and the
+listing ignore it, and the three apps share the format.
 
 **Cleanup.**
 
@@ -237,10 +244,11 @@ a "…" menu (Import…, Show Presets Folder). Each row's context menu: Apply, R
 Delete. The open panel is remembered across launches, like the Lab/Post tab. Clicking a preset
 applies it, as in Lightroom and Photos, so double-click and Return apply rather than rename (a
 change from the first design, where they renamed). New Preset names the file after the film and
-starts renaming it. Files the engine refuses are listed greyed, with the reason.
+starts renaming it at the bottom of the list; Escape removes it again, Return or clicking
+elsewhere keeps it. Files the engine refuses are listed greyed, with the reason.
 
 Out of scope: per-film defaults (later, possibly "Use as Default for <film>" on a preset),
-thumbnails, manual ordering, the matching-preset checkmark, darktable `.dtpreset` / `.dtstyle`
+thumbnails, the matching-preset checkmark, darktable `.dtpreset` / `.dtstyle`
 import (later), Finder double-click (Negs can't claim `.json`).
 
 ## Plan

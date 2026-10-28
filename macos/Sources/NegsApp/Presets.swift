@@ -59,8 +59,13 @@ enum PresetName {
 /// The Presets folder. File I/O runs on this actor, away from the main
 /// actor; writes never replace an existing file, and renames and deletes
 /// act only on the file as it was listed.
+///
+/// The user's order is `.order.json` in the folder: `{"order": [file names]}`.
+/// Presets it doesn't name, such as files copied in by hand, follow in name
+/// order; added presets go to the end.
 actor PresetLibrary {
     let folder: URL
+    var orderFile: URL { folder.appendingPathComponent(".order.json") }
     /// Larger files aren't GUI states.
     static let maxFileSize = 1_048_576
 
@@ -71,12 +76,23 @@ actor PresetLibrary {
     func list() throws -> [PresetFile] {
         let fm = FileManager.default
         guard fm.fileExists(atPath: folder.path) else { return [] }
-        return try fm.contentsOfDirectory(atPath: folder.path)
+        let files = try fm.contentsOfDirectory(atPath: folder.path)
             .filter { !$0.hasPrefix(".") && ($0 as NSString).pathExtension.lowercased() == "json" }
             // In the folder's own spelling (not /private/var for /var), so a
             // file added or renamed here is the same URL when listed.
             .compactMap { try? file(at: folder.appendingPathComponent($0)) }
             .sorted { PresetName.key($0.name) < PresetName.key($1.name) }
+        let position = Dictionary(readOrder().enumerated().map { (PresetName.key($1), $0) }) { first, _ in first }
+        // Stable: unordered files keep their name order after the ordered ones.
+        return files.enumerated().sorted { a, b in
+            let (x, y) = (position[PresetName.key(a.element.name)] ?? Int.max, position[PresetName.key(b.element.name)] ?? Int.max)
+            return x != y ? x < y : a.offset < b.offset
+        }.map(\.element)
+    }
+
+    /// Remembers this order of the presets.
+    func setOrder(_ presets: [PresetFile]) throws {
+        try writeOrder(presets.map(\.name))
     }
 
     /// Writes `data` as a new preset named `name`, or "name 2"… if taken.
@@ -91,7 +107,10 @@ actor PresetLibrary {
             let candidate = PresetName.unique(name, taken: taken)
             let url = folder.appendingPathComponent(candidate).appendingPathExtension("json")
             // A hard link never replaces: a file created meanwhile fails it.
-            if link(temporary.path, url.path) == 0 { return try file(at: url) }
+            if link(temporary.path, url.path) == 0 {
+                try writeOrder(try list().map(\.name).filter { PresetName.key($0) != PresetName.key(candidate) } + [candidate])
+                return try file(at: url)
+            }
             guard errno == EEXIST else { throw posixError("Couldn’t save the preset") }
             taken.insert(PresetName.key(candidate))
         }
@@ -114,12 +133,31 @@ actor PresetLibrary {
                 throw posixError("Couldn’t rename the preset")
             }
         }
+        let order = readOrder()
+        if let index = order.firstIndex(where: { PresetName.key($0) == PresetName.key(preset.name) }) {
+            var renamed = order; renamed[index] = name
+            try writeOrder(renamed)
+        }
         return try file(at: url)
     }
 
     func delete(_ preset: PresetFile) throws {
         try verify(preset)
         try FileManager.default.removeItem(at: preset.url)
+        try writeOrder(readOrder().filter { PresetName.key($0) != PresetName.key(preset.name) })
+    }
+
+    /// Preset names in the user's order; none if the file is missing or unreadable.
+    private func readOrder() -> [String] {
+        guard let data = try? Data(contentsOf: orderFile),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let files = object["order"] as? [String] else { return [] }
+        return files.map { ($0 as NSString).deletingPathExtension }
+    }
+
+    private func writeOrder(_ names: [String]) throws {
+        let data = try JSONSerialization.data(withJSONObject: ["order": names.map { "\($0).json" }], options: [.prettyPrinted])
+        try data.write(to: orderFile, options: .atomic)
     }
 
     func read(_ preset: PresetFile) throws -> Data {

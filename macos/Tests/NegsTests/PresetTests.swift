@@ -60,6 +60,28 @@ final class PresetLibraryTests: XCTestCase {
         XCTAssertEqual(bytes, Data("1".utf8))
     }
 
+    func testTheUsersOrderIsRememberedAndAddedPresetsGoLast() async throws {
+        let library = PresetLibrary(folder: folder)
+        for name in ["Zeta", "Alpha", "Mid"] { _ = try await library.add(Data(name.utf8), name: name) }
+        var listed = try await library.list()
+        XCTAssertEqual(listed.map(\.name), ["Zeta", "Alpha", "Mid"])
+        try await library.setOrder([listed[2], listed[0], listed[1]])
+        // Copied in by hand: after the ordered ones, in name order.
+        try Data("x".utf8).write(to: folder.appendingPathComponent("Copied B.json"))
+        try Data("x".utf8).write(to: folder.appendingPathComponent("Copied A.json"))
+        listed = try await library.list()
+        XCTAssertEqual(listed.map(\.name), ["Mid", "Zeta", "Alpha", "Copied A", "Copied B"])
+        // Renaming keeps the place; deleting forgets it; adding goes last.
+        _ = try await library.rename(listed[1], to: "Omega")
+        try await library.delete(listed[0])
+        _ = try await library.add(Data("n".utf8), name: "Newest")
+        listed = try await library.list()
+        XCTAssertEqual(listed.map(\.name), ["Omega", "Alpha", "Copied A", "Copied B", "Newest"])
+        // A fresh library reads the same order from the folder.
+        let reopened = try await PresetLibrary(folder: folder).list()
+        XCTAssertEqual(reopened.map(\.name), listed.map(\.name))
+    }
+
     func testFilesChangedOnDiskAreLeftAlone() async throws {
         let library = PresetLibrary(folder: folder)
         let preset = try await library.add(Data("original".utf8), name: "Gold")
@@ -141,6 +163,34 @@ final class PresetLibraryTests: XCTestCase {
         let saved = try XCTUnwrap(model.presets.first { $0.name == "Kodak Double-X 5222" } ?? model.presets.first { $0.name != "Double-X" })
         XCTAssertEqual(model.renamingPreset, saved.url)
         guard case .valid("kodak_doublex", "kodak_2302", false) = model.presetStatus[saved] else { return XCTFail("\(String(describing: model.presetStatus[saved]))") }
+        // Added at the end; Escape while naming it removes it again.
+        XCTAssertEqual(model.presets.last, saved)
+        model.cancelRename(saved)
+        try await waitUntil { model.presets.count == 1 }
+        XCTAssertEqual(model.presets.map(\.name), ["Double-X"])
+
+        // Escape on an existing preset only stops renaming.
+        model.newPreset()
+        try await waitUntil { model.renamingPreset != nil }
+        let kept = try XCTUnwrap(model.presets.last)
+        model.renamePreset(kept, to: "Mine")
+        try await waitUntil { model.presets.contains { $0.name == "Mine" } }
+        let mine = try XCTUnwrap(model.presets.first { $0.name == "Mine" })
+        model.renamingPreset = mine.url
+        model.cancelRename(mine)
+        XCTAssertNil(model.renamingPreset)
+        // Dragging the last row to the top.
+        model.movePresets(from: [1], to: 0)
+        XCTAssertEqual(model.presets.map(\.name), ["Mine", "Double-X"])
+        let orderFile = folder.appendingPathComponent(".order.json")
+        // Saved in the background; wait for the new order on disk.
+        try await waitUntil {
+            guard let saved = try? String(contentsOf: orderFile, encoding: .utf8),
+                  let mine = saved.range(of: "Mine"), let other = saved.range(of: "Double-X") else { return false }
+            return mine.lowerBound < other.lowerBound
+        }
+        await model.refreshPresets()
+        XCTAssertEqual(model.presets.map(\.name), ["Mine", "Double-X"])
     }
 
     func testFilesTheEngineRefusesAreListedWithTheReason() async throws {
