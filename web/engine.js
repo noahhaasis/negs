@@ -21,12 +21,24 @@ export function client(wasm, kind) {
           return { width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, backend: r.backend, elapsedMs: r.elapsedMs, stages: r.stages,
             memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) };
         }
-        await Promise.all(r.missing.map(async (path) => {
-          const res = await fetch(new URL(`data/${path}`, location.origin));
-          if (!res.ok) throw new Error(`${path}: ${res.status}`);
-          wasm.registerData(path, new Uint8Array(await res.arrayBuffer()));
-        }));
+        await fetchData(wasm, r.missing);
+      }
+    },
+    // The M/Y shifts that print a mid-grey neutral (Balance Print).
+    async balancePrint(film, paper, params) {
+      for (;;) {
+        const r = wasm.balancePrint(film, paper, params);
+        if (!r.missing.length) return { m: r.mFilterShift, y: r.yFilterShift, elapsedMs: r.elapsedMs };
+        await fetchData(wasm, r.missing);
       }
     },
   };
+}
+
+async function fetchData(wasm, paths) {
+  await Promise.all(paths.map(async (path) => {
+    const res = await fetch(new URL(`data/${path}`, location.origin));
+    if (!res.ok) throw new Error(`${path}: ${res.status}`);
+    wasm.registerData(path, new Uint8Array(await res.arrayBuffer()));
+  }));
 }

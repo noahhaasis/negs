@@ -20,8 +20,8 @@ branch). Commits end with
 | 2. All Lab controls, desktop layout | `feda605` | done, 🛑 reviewed |
 | HTTPS for device testing | `d350950` | done |
 | 3. iPad and phone layout | `842da9c` | done; the owner moved on to piece 4 |
-| **4. Enlarger shifts without a rebuild, Balance Print** | | **next** |
-| 5. Colour management and output colour space | | |
+| 4. Enlarger shifts without a rebuild, Balance Print | see `git log` | done (`docs/web-wasm.md` item 12) |
+| **5. Colour management and output colour space** | | **next** |
 | 6. Resident scan, zoom, true-resolution preview | | 🛑 after it |
 | 7. Placeholder while developing | | Stage 1 🛑 after it |
 

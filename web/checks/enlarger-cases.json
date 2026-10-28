@@ -1,0 +1,6 @@
+[
+ {"enlarger": {"m_filter_shift": 6.4, "y_filter_shift": -9.1}},
+ {"enlarger": {"m_filter_shift": -12.3, "y_filter_shift": 22.2, "preflash_exposure": 0.07, "preflash_m_filter_shift": -11, "preflash_y_filter_shift": 22.5}},
+ {"enlarger": {"print_exposure_compensation": false}, "camera": {"exposure_compensation_ev": 0.7}},
+ {"enlarger": {"m_filter_shift": 0.1, "y_filter_shift": -0.1, "preflash_exposure": 0.31, "print_exposure_compensation": true}, "camera": {"exposure_compensation_ev": -1.3}}
+]

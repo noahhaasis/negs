@@ -84,6 +84,7 @@ async function startEngine(engineKind) {
     minScale = kind === "gpu" ? 0.25 : 0.15;
     interactiveScale = Math.max(interactiveScale, minScale);
     $("engine-info").textContent = `${info.backend}${info.threads > 1 ? ` · ${info.threads} threads` : " · 1 thread"}`;
+    sync(); // Commands that need the engine.
     await attachCanvas();
   } catch (e) {
     if (kind === "gpu") {
@@ -223,7 +224,22 @@ function resetButton(title, b, after) {
   return button;
 }
 
+// Commands the controls' `action` buttons run, with whether each may run now.
+const actions = {
+  balancePrint: { run: balancePrint, busy: () => balancing, busyLabel: "Balancing…", enabled: () => !balancing && !!host && !get("io.scan_film") },
+};
+
 function buildControl(c) {
+  if (c.kind === "action") {
+    const a = actions[c.action];
+    const button = el("button", { type: "button", className: "btn", textContent: c.label, title: c.help });
+    button.addEventListener("click", () => a.run());
+    syncs.push(() => {
+      button.disabled = !a.enabled();
+      button.textContent = a.busy() ? a.busyLabel : c.label;
+    });
+    return el("div", { className: "ctl action" }, button);
+  }
   const b = binding(c);
   const changed = (mode) => { sync(); schedule(mode); };
   if (c.kind === "toggle") {
@@ -681,14 +697,42 @@ async function exportJpeg() {
   }
 }
 
-function showMessage(text, error = false) {
+// A message stays until hidden; one shown for `ms` hides itself then, and
+// the renders that follow it leave it up.
+let messageTimer;
+function showMessage(text, error = false, ms = 0) {
   const m = $("message");
   m.textContent = text;
   m.classList.toggle("error", error);
   m.hidden = false;
+  clearTimeout(messageTimer);
+  messageTimer = ms ? setTimeout(() => { messageTimer = null; m.hidden = true; }, ms) : null;
 }
 function hideMessage() {
-  $("message").hidden = true;
+  if (!messageTimer) $("message").hidden = true;
+}
+
+// The M/Y shifts that print a mid-grey neutral with the current film,
+// bases, paper and enlarger, set as one change (macOS EditorModel.balancePrint).
+let balancing = false;
+async function balancePrint() {
+  if (!actions.balancePrint.enabled()) return;
+  const film = state.film, paper = state.paper, edit = params();
+  balancing = true;
+  sync();
+  try {
+    const r = await host.call("balancePrint", film, paper, edit);
+    console.log(`balance print: magenta ${r.m}, yellow ${r.y} in ${r.elapsedMs.toFixed(0)} ms`);
+    set("enlarger.m_filter_shift", r.m);
+    set("enlarger.y_filter_shift", r.y);
+    showMessage(`Print balanced: magenta ${r.m.toFixed(2)}, yellow ${r.y.toFixed(2)}`, false, 4000);
+    schedule("settled");
+  } catch (e) {
+    await failed(e, "Balance Print failed");
+  } finally {
+    balancing = false;
+    sync();
+  }
 }
 
 // ---- Wiring ----------------------------------------------------------------
@@ -705,6 +749,11 @@ globalThis.negs = {
   edit(path, value) { set(path, value); sync(); schedule("settled"); },
   renders,
   idle: () => !running && !wanted,
+  // The engine's Balance Print for any film, paper and params JSON, without
+  // changing the edit.
+  balance: (film, paper, params) => host.call("balancePrint", film, paper, params),
+  // The edit rendered at `maxDim`, read back as bytes; the page shows nothing.
+  read: (maxDim) => host.call("render", state.film, state.paper, params(), maxDim, false, false),
   // Opens a photograph from a URL as the Open button would.
   // (An array buffer: Chrome fails blob() of a large response in a test profile.)
   open: async (url) => open(new File([await (await fetch(url)).arrayBuffer()], url.split("/").at(-1))),

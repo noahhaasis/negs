@@ -29,6 +29,7 @@ for (const section of SECTIONS) {
       if (was) await edit(group.enable, true);
     }
     for (const c of group.controls) {
+      if (c.kind === "action") continue;
       if (needs[c.path] && !g(needs[c.path])) await edit(needs[c.path], true);
       const base = await hash();
       let path = c.path, to, from = g(c.path);
