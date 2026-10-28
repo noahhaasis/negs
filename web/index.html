@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Negs</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #161616; --panel: #1f1f1f; --line: #2e2e2e; --field: #2a2a2a;
+    --fg: #e8e6e3; --muted: #9a968f; --faint: #6a6762; --accent: #e0a458; --danger: #e5786d;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; }
+  button, select, input { font: inherit; color: inherit; }
+  .app { display: grid; grid-template-columns: 1fr 320px; height: 100%; }
+
+  /* Viewport */
+  .view { position: relative; display: grid; place-items: center; overflow: hidden; min-height: 0; }
+  .photo { display: block; image-rendering: auto; box-shadow: 0 2px 24px rgb(0 0 0 / .5); }
+  .photo[hidden] { display: none; }
+  .empty { text-align: center; color: var(--muted); padding: 24px; max-width: 360px; }
+  .empty h1 { font-size: 15px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
+  .empty p { margin: 0 0 16px; }
+  .view.dragging::after { content: "Drop to open"; position: absolute; inset: 12px; display: grid; place-items: center;
+    border: 2px dashed var(--accent); border-radius: 10px; background: rgb(22 22 22 / .8); color: var(--accent); font-size: 15px; }
+  .busy { position: absolute; top: 0; left: 0; right: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .15s; }
+  .busy.on { opacity: 1; transition-delay: .12s; }
+  .busy::before { content: ""; position: absolute; inset: 0; width: 30%; background: var(--accent); animation: slide 1s ease-in-out infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  .message { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 24px));
+    padding: 8px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 16px rgb(0 0 0 / .4); }
+  .message.error { border-color: var(--danger); color: var(--danger); }
+  .message[hidden] { display: none; }
+  .hud { position: absolute; left: 12px; bottom: 10px; color: var(--faint); font: 11px ui-monospace, monospace; pointer-events: none; }
+
+  /* Sidebar */
+  .side { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0; }
+  .top { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .top strong { font-size: 14px; letter-spacing: .02em; margin-right: auto; }
+  .scroll { overflow-y: auto; flex: 1; }
+  .stock { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
+  .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+  select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
+  select:disabled { color: var(--faint); }
+  details { border-bottom: 1px solid var(--line); }
+  summary { display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600; list-style: none; user-select: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▸"; color: var(--faint); font-size: 10px; transition: transform .15s; }
+  details[open] summary::before { transform: rotate(90deg); }
+  summary .switch { margin-left: auto; }
+  details[data-off] .knobs { opacity: .4; }
+  .knobs { display: grid; gap: 12px; padding: 0 14px 14px; }
+  .knob { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; }
+  .knob label { color: var(--muted); }
+  .knob output { font-variant-numeric: tabular-nums; color: var(--fg); font-size: 12px; }
+  .knob input[type=range] { grid-column: 1 / -1; }
+  .knob.changed label { color: var(--fg); }
+  .row { display: flex; align-items: center; justify-content: space-between; color: var(--muted); }
+  input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); height: 18px; }
+  .switch { appearance: none; width: 28px; height: 16px; border-radius: 8px; background: var(--line); position: relative; cursor: pointer; flex: none; margin: 0; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .15s; }
+  .switch:checked { background: var(--accent); }
+  .switch:checked::after { transform: translateX(12px); background: #1b1b1b; }
+  .bottom { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); }
+  .bottom .row select { width: auto; }
+  .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); cursor: pointer; }
+  .btn:hover:not(:disabled) { border-color: var(--faint); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #1b1b1b; font-weight: 600; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--faint); font-size: 11px; }
+
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; }
+    .side { border-left: 0; border-top: 1px solid var(--line); }
+    .bottom { gap: 4px; padding: 8px 14px; }
+    .bottom .hint:last-child { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="view" id="view">
+    <div class="busy" id="busy"></div>
+    <div class="empty" id="empty">
+      <h1>Open a photograph</h1>
+      <p>A camera RAW, JPEG, PNG or TIFF. Drop it here, or choose one.</p>
+      <button class="btn primary" id="open-empty">Choose photo…</button>
+    </div>
+    <canvas class="photo" id="canvas" hidden></canvas>
+    <div class="message" id="message" hidden></div>
+    <div class="hud" id="hud"></div>
+  </main>
+  <aside class="side">
+    <div class="top">
+      <strong>Negs</strong>
+      <button class="btn" id="open">Open…</button>
+      <button class="btn" id="export" disabled>Export</button>
+    </div>
+    <div class="scroll">
+      <div class="stock">
+        <label>Film <select id="film"></select></label>
+        <label>Paper <select id="paper"></select></label>
+      </div>
+      <div id="sections"></div>
+    </div>
+    <div class="bottom">
+      <div class="row"><span>Engine</span><select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></div>
+      <div class="hint" id="engine-info">Starting…</div>
+      <div class="hint">Double-click a slider to reset it.</div>
+    </div>
+  </aside>
+</div>
+<input type="file" id="file" hidden accept="image/png,image/jpeg,image/tiff,.dng,.nef,.arw,.cr2,.cr3,.raf,.orf,.rw2,.pef,.srw">
+<script type="module" src="app.js"></script>
+</body>
+</html>

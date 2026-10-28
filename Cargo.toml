@@ -9,7 +9,9 @@ members = [
     "crates/spektrafilm-cli",
     "crates/spektrafilm-gui",
     "crates/spektrafilm-native",
+    "crates/spektrafilm-wasm",
 ]
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.9.1"
@@ -43,8 +45,15 @@ anyhow = "1"
 byteorder = "1"
 libm = "0.2"
 rustfft = "6"
+# std::time on native; performance.now() in the browser, where std panics.
+web-time = "1"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 opt-level = 3
+
+# rawler with web_time::Instant, so RAW decoding doesn't panic in the browser.
+# Drop once upstream takes the change (see vendor/README.md).
+[patch.crates-io]
+rawler = { path = "vendor/rawler" }
