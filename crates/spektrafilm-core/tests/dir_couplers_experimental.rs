@@ -102,10 +102,10 @@ fn close(got: f64, want: f64, tolerance: f64) -> bool {
 /// What `apply_film_specific_params` does to a B&W stock: the 3-channel
 /// engine runs upstream's single channel on all three.
 fn broadcast_bw(dir: &mut DirCouplersParams) {
-    dir.gamma_samelayer_rgb = [dir.gamma_samelayer_rgb[0]; 3];
-    dir.gamma_interlayer_r_to_gb = [0.0; 2];
-    dir.gamma_interlayer_g_to_rb = [0.0; 2];
-    dir.gamma_interlayer_b_to_rg = [0.0; 2];
+    dir.gamma_samelayer_rgb = Some([dir.gamma_samelayer()[0]; 3]);
+    dir.gamma_interlayer_r_to_gb = Some([0.0; 2]);
+    dir.gamma_interlayer_g_to_rb = Some([0.0; 2]);
+    dir.gamma_interlayer_b_to_rg = Some([0.0; 2]);
     dir.langmuir_donor_k_rgb = [dir.langmuir_donor_k_rgb[0]; 3];
     dir.langmuir_receiver_k_rgb = [dir.langmuir_receiver_k_rgb[0]; 3];
 }
@@ -163,10 +163,10 @@ fn dir_couplers_model_matches_python() {
         }
 
         let matrix = compute_dir_couplers_matrix(
-            dir.gamma_samelayer_rgb,
-            dir.gamma_interlayer_r_to_gb,
-            dir.gamma_interlayer_g_to_rb,
-            dir.gamma_interlayer_b_to_rg,
+            dir.gamma_samelayer(),
+            dir.gamma_r_to_gb(),
+            dir.gamma_g_to_rb(),
+            dir.gamma_b_to_rg(),
             dir.inhibition_samelayer,
             dir.inhibition_interlayer,
         );

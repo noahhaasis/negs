@@ -115,3 +115,21 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
         );
     }
 }
+
+/// A preset's explicit DIR gammas reach the LUT; the stock's own gammas,
+/// set explicitly, give the same LUT as leaving them unset.
+#[test]
+fn explicit_dir_gammas_reach_the_cube() {
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+    let (film, paper) = ("kodak_portra_400", "kodak_portra_endura");
+    let unset = lut_export::cube(&data, film, paper, RuntimeParams::default(), 5).unwrap();
+
+    let mut stock = RuntimeParams::default();
+    stock.film_render.dir_couplers.gamma_samelayer_rgb = Some([0.5159, 0.5934, 0.2829]);
+    assert_eq!(lut_export::cube(&data, film, paper, stock, 5).unwrap(), unset);
+
+    let mut cooked = RuntimeParams::default();
+    cooked.film_render.dir_couplers.gamma_samelayer_rgb = Some([0.52, 0.51, 0.26]);
+    cooked.film_render.dir_couplers.gamma_interlayer_r_to_gb = Some([0.16, 0.2]);
+    assert_ne!(rows(&lut_export::cube(&data, film, paper, cooked, 5).unwrap()), rows(&unset));
+}
