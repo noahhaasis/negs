@@ -32,6 +32,36 @@ const GRAIN_WORKGROUP_SIZE: u32 = 256;
 #[cfg(feature = "wgpu-backend")]
 const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
+#[cfg(feature = "wgpu-backend")]
+const SPECTRAL_GUARD_WGSL: &str = include_str!("../../spektrafilm-shaders/wgsl/spectral_guard.wgsl");
+
+/// `spectral_guard.wgsl`'s uniform: the front pass's RGB → adapted XYZ matrix
+/// and its inverse, as std140 columns.
+#[cfg(feature = "wgpu-backend")]
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct SpectralGuardParams {
+    n_pixels: u32,
+    _pad: [u32; 3],
+    rgb_to_xyz: [[f32; 4]; 3],
+    xyz_to_rgb: [[f32; 4]; 3],
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl SpectralGuardParams {
+    fn new(n_pixels: u32, rgb_to_xyz: &[[f64; 3]; 3]) -> Self {
+        let columns = |m: &[[f64; 3]; 3]| {
+            std::array::from_fn(|j| [m[0][j] as f32, m[1][j] as f32, m[2][j] as f32, 0.0])
+        };
+        Self {
+            n_pixels,
+            _pad: [0; 3],
+            rgb_to_xyz: columns(rgb_to_xyz),
+            xyz_to_rgb: columns(&spektrafilm_math::colorspace::mat3_inverse(rgb_to_xyz)),
+        }
+    }
+}
+
 /// Workgroup grid for `n_threads` threads in groups of `workgroup_size`.
 /// Wraps into y so neither dimension exceeds the 65535 limit: 1024-thread
 /// groups in x alone stop at 67.1 M threads, 256-thread groups at 16.7 M.
@@ -957,7 +987,7 @@ impl WgpuBackend {
             width: u32,
             height: u32,
             lut_size: u32,
-            guard: u32,
+            _pad: u32,
             col0: [f32; 4],
             col1: [f32; 4],
             col2: [f32; 4],
@@ -973,12 +1003,17 @@ impl WgpuBackend {
             width: image.width,
             height: image.height,
             lut_size: front_lut_size,
-            guard: guard as u32,
+            _pad: 0,
             col0: [m[0][0] as f32, m[1][0] as f32, m[2][0] as f32, 0.0],
             col1: [m[0][1] as f32, m[1][1] as f32, m[2][1] as f32, 0.0],
             col2: [m[0][2] as f32, m[1][2] as f32, m[2][2] as f32, 0.0],
         };
         let front_params_buf = mk_uniform("front_params", bytemuck::bytes_of(&front_params));
+        // The spectral boundary guard rewrites non-physical input in place on
+        // buf_a before the front pass, which stays upstream's arithmetic.
+        let guard_params_buf = guard.then(|| {
+            mk_uniform("guard_params", bytemuck::bytes_of(&SpectralGuardParams::new(n_pixels, m)))
+        });
 
         #[repr(C)]
         #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -1156,6 +1191,21 @@ impl WgpuBackend {
                 (pipe, bg, tc_lut_buf)
             }
         };
+        let guard_pass = guard_params_buf.as_ref().map(|params| {
+            let pipe = self.cached_pipeline(
+                SPECTRAL_GUARD_WGSL,
+                &[wgpu::BufferBindingType::Uniform, wgpu::BufferBindingType::Storage { read_only: false }],
+            );
+            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg_spectral_guard"),
+                layout: &pipe.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: buf_a.as_entire_binding() },
+                ],
+            });
+            (pipe, bg)
+        });
         // After the front pass: log10 + density curve interp into normalized
         // film curves. The front pass outputs raw (not log_raw), so a small
         // log10 shader transforms buf_b in-place, then density_curve_interp
@@ -1569,7 +1619,11 @@ impl WgpuBackend {
 
         let mut profiler = GpuStageProfiler::new(&self.device, &self.queue);
         profiler.mark("upload", &mut encoder);
-        // 1. Front pass (tc LUT lookup): buf_a (rgb in) → buf_b (raw)
+        // 1. Front pass (tc LUT lookup): buf_a (rgb in) → buf_b (raw), after
+        // the spectral boundary guard in place on buf_a.
+        if let Some((pipe, bg)) = guard_pass.as_ref() {
+            dispatch(&mut encoder, pipe, bg, n_pixels);
+        }
         dispatch(&mut encoder, &front_pipe, &bg_front, n_pixels);
         profiler.mark("front", &mut encoder);
         // 1a. Highlight boost on raw, before optical scatter.
@@ -2084,7 +2138,7 @@ impl ComputeBackend for WgpuBackend {
             width: u32,
             height: u32,
             lut_size: u32,
-            guard: u32,
+            _pad: u32,
             col0: [f32; 4],
             col1: [f32; 4],
             col2: [f32; 4],
@@ -2095,7 +2149,7 @@ impl ComputeBackend for WgpuBackend {
             width: image.width,
             height: image.height,
             lut_size,
-            guard: guard as u32,
+            _pad: 0,
             col0: [m[0][0] as f32, m[1][0] as f32, m[2][0] as f32, 0.0],
             col1: [m[0][1] as f32, m[1][1] as f32, m[2][1] as f32, 0.0],
             col2: [m[0][2] as f32, m[1][2] as f32, m[2][2] as f32, 0.0],
@@ -2103,7 +2157,19 @@ impl ComputeBackend for WgpuBackend {
 
         // TC LUT data is f64 on disk; narrow to f32 at the GPU boundary.
         let tc_lut_f32: Vec<f32> = tc_lut.data.iter().map(|&v| v as f32).collect();
-        let input_f32 = scalars_to_f32(&image.data);
+        let mut input_f32 = scalars_to_f32(&image.data);
+        if guard {
+            let guard_params = SpectralGuardParams::new(n_pixels, m);
+            input_f32 = std::borrow::Cow::Owned(self.dispatch_compute(
+                SPECTRAL_GUARD_WGSL,
+                &[
+                    GpuBuffer::uniform(bytemuck::bytes_of(&guard_params)),
+                    GpuBuffer::storage_rw(bytemuck::cast_slice(&input_f32)),
+                ],
+                n_pixels,
+                1,
+            ));
+        }
         let output_bytes = vec![0u8; n_pixels as usize * 3 * 4];
 
         let result = self.dispatch_compute(

@@ -89,9 +89,11 @@ that no spectrum can make (X+Y+Z ≤ 0, or a chromaticity beyond the xy
 triangle, e.g. from wide camera gamuts or noise), upstream's arithmetic folded
 x > 1 back inside. `guard` gives no exposure for non-positive brightness and
 moves out-of-triangle chromaticities toward the white onto the triangle at
-constant brightness. Physical light is unchanged (bit-identical). CPU, wgpu and
-CUDA (source only, untested) share it. `upstream` restores the old arithmetic
-for reference comparisons.
+constant brightness. Physical light is unchanged (bit-identical). On wgpu the
+guard is its own pass (`spectral_guard.wgsl`) that rewrites only non-physical
+input in place before the unchanged front pass, so GPU renders of physical
+light stay byte-identical too; CUDA (source only, untested) guards inside its
+kernel. `upstream` restores the old arithmetic for reference comparisons.
 
 ## 3. Output
 
@@ -182,3 +184,18 @@ export-space values.
 The parity runner (`scripts/parity/check_parity.py`) gives Rust
 `spectral_boundary: upstream` and `output_adaptation: direct` when comparing
 with Python; `--negs-colour-defaults` measures Negs' own defaults.
+
+## 7. Known limitations
+
+- The preview proxy is 8-bit (dithered outside sRGB); the histogram counts
+  proxy values, not export-space values.
+- macOS's press-and-hold Original view is still decoded by Core Image into
+  Display P3 and ignores the Input Colour override; the engine and helper
+  paths honour it.
+- Windows shows sRGB when the monitor has no ICC profile assigned, and its
+  inspector does not show the detected input description.
+- ProPhoto colours beyond BT.2020 are clipped in the preview proxy (never in
+  the export).
+- The 3D LUT export stays sRGB in and out.
+- HDR inputs (PQ, HLG) and CMYK files are refused rather than converted.
+- The CUDA backend's guard is untested (no CUDA hardware).
