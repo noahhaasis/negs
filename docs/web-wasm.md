@@ -248,6 +248,50 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    (99.994%, max 10). Default renders stay byte-identical, and the
    benchmarks are unchanged (card 10 / 29 / 59–68 ms, ARW 71–83 ms).
 
+11. **Phones and iPads** (MVP piece 3). No desktop app has a touch
+   layout, so this one is new. Where a sidebar doesn't fit beside the
+   photograph (narrower than 900 px upright, or than 640 px: phones and
+   iPads held upright), the inspector is a bottom sheet with a tab per
+   section (Stock, Camera, Film, Print, Scan). The sheet rests at just
+   its tabs, at the room the photograph leaves at full width (40–62% of
+   the screen), or at 80%; its grabber drags between them or steps on a
+   tap. Elsewhere (desktop, iPad and phones on their side) it stays the
+   sidebar, as macOS; on screens under 600 px tall the engine's footer
+   scrolls with the panel.
+
+   On a touch screen (`pointer: coarse`) the targets grow (26 px slider
+   thumbs, 44×26 switches, 40 px reset buttons, 48 px group rows), the
+   value fields look like fields without hovering, the hint says "Tap",
+   and fields and pickers are 16 px, below which iOS zooms in on focus.
+   Chrome's own slider swallows a vertical swipe that starts on it, which
+   on a phone is most of the panel, and ignores `touch-action`. So on touch
+   screens the slider takes no input and its track does: a sideways drag
+   anywhere on it moves the value from where it was (as iOS sliders do,
+   with no jump on touch), a vertical one scrolls, and a mouse or pen there
+   (an iPad's trackpad) sets the value under it. Sliders are filled from
+   the minimum, as on desktop. The photograph's area takes pinch and pan
+   for itself (`touch-action: none`) for piece 6, and the page doesn't
+   zoom; the inspector keeps `manipulation` (no double-tap zoom). Safe-area
+   insets pad the sheet and the sidebar. Which groups are open, the tab
+   and the sheet's height are remembered in `localStorage` (wrapped, so a
+   private window still works).
+
+   `web/checks/touch.mjs` checks it with real touches over the DevTools
+   protocol on an emulated 390×844 phone: tabs, a group opening and being
+   remembered, a touch drag (interactive frames, then settled, all
+   presented), a vertical swipe from a slider (scrolls 151 px, value
+   unchanged), the reset button, the grabber (drag up snaps to 675 px of
+   844, a tap steps to the 114 px tabs), a trackpad press and drag (Film
+   format 91 at three quarters, 33 at a quarter), and a pinch on the
+   photograph (page scale stays 1). The desktop wiring check and a mouse
+   drag on a desktop slider are unchanged. Default renders stay
+   byte-identical; card 9–11 / 28–31 / 57–74 ms, ARW 72–83 ms.
+
+   Not seen on a device yet: Safari's handling of the slider tracks,
+   `100dvh` with its toolbars, the safe areas, and whether WebGPU runs in
+   its worker. The 24 MP ARW takes 954 MiB in the engine at a phone's
+   preview size, which iOS may not allow a tab (piece 6's memory caps).
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
@@ -295,9 +339,9 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
 1. Land the engine changes. They are small and leave native output
    unchanged.
 2. Upstream the rawler `web-time` change and drop `vendor/rawler`.
-3. Try it on an iPad (Safari 26): that WebGPU runs in the worker and
-   presents there, the frame times, and how much memory a tab may use before
-   iPadOS ends it.
+3. Try it on an iPad (Safari 26), over `serve.mjs --https` (see the
+   handoff): that WebGPU runs in the worker and presents there, the frame
+   times, and how much memory a tab may use before iPadOS ends it.
 4. Wide-gamut output and post adjustments on the GPU, so they present too
    (they read the scan back now).
 5. Decode an sRGB-encoded input's curve on the GPU (or once per source):

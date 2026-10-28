@@ -253,7 +253,9 @@ function buildControl(c) {
   const value = el("button", { type: "button", className: "value", title: "Click to type a value" });
   const reset = resetButton(c.label, b, () => changed("settled"));
   const range = el("input", { type: "range", min: c.min, max: c.max, step: c.step });
-  const row = el("div", { className: "ctl slider" }, el("div", { className: "head" }, title, reset, value), range);
+  const track = el("div", { className: "track" }, range);
+  touchSlider(track, range);
+  const row = el("div", { className: "ctl slider" }, el("div", { className: "head" }, title, reset, value), track);
   range.setAttribute("aria-label", c.label);
   range.addEventListener("input", () => { b.set(snap(Number(range.value), c)); changed("interactive"); });
   range.addEventListener("change", () => { b.set(snap(Number(range.value), c)); changed("settled"); });
@@ -286,6 +288,7 @@ function buildControl(c) {
     title.textContent = bw ? c.bw : c.label;
     // Sync never writes back: a value outside the slider's window stays.
     range.value = b.get();
+    range.style.setProperty("--f", (Number(range.value) - c.min) / (c.max - c.min));
     value.textContent = formatValue(b.get(), c.step);
     reset.hidden = !b.modified();
     reset.title = `Reset to ${formatValue(b.initial(), c.step)}`;
@@ -294,14 +297,75 @@ function buildControl(c) {
   return row;
 }
 
+// Per-viewer conveniences (which groups are open, the phone's tab and sheet
+// height), kept where the browser allows it.
+function remembered(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(`negs.${key}`)) ?? fallback; } catch { return fallback; }
+}
+function remember(key, value) {
+  try { localStorage.setItem(`negs.${key}`, JSON.stringify(value)); } catch {}
+}
+
+const sectionId = (section) => (section.tab ?? section.title).toLowerCase();
+
+// On touch screens the slider itself takes no input (index.html), as a
+// browser's slider keeps vertical swipes that start on it from scrolling the
+// panel. Its track takes it instead: a sideways drag anywhere on it moves
+// the value from where it was, as on iOS; an upward or downward one
+// scrolls. A mouse or pen there (an iPad's trackpad) sets the value under it.
+function touchSlider(track, range) {
+  let drag = null;
+  const fraction = () => (Number(range.value) - range.min) / (range.max - range.min);
+  const to = (f) => {
+    const before = range.value;
+    range.value = Number(range.min) + Math.min(1, Math.max(0, f)) * (range.max - range.min);
+    if (range.value !== before) range.dispatchEvent(new Event("input"));
+  };
+  // The thumb's centre travels the track less one thumb's width.
+  const travel = () => track.clientWidth - parseFloat(getComputedStyle(range).getPropertyValue("--thumb"));
+  track.addEventListener("pointerdown", (ev) => {
+    if (ev.target !== track || range.matches(":disabled") || !ev.isPrimary) return;
+    drag = { x: ev.clientX, y: ev.clientY, from: fraction(), id: ev.pointerId, moving: ev.pointerType !== "touch" };
+    if (drag.moving) {
+      track.setPointerCapture(ev.pointerId);
+      const box = track.getBoundingClientRect();
+      drag.x = box.x + (track.clientWidth - travel()) / 2;
+      drag.from = 0;
+      to((ev.clientX - drag.x) / travel());
+    }
+  });
+  track.addEventListener("pointermove", (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    const dx = ev.clientX - drag.x;
+    if (!drag.moving) {
+      if (Math.abs(dx) < 6 || Math.abs(dx) < Math.abs(ev.clientY - drag.y)) return;
+      drag.moving = true;
+      track.setPointerCapture(ev.pointerId);
+    }
+    to(drag.from + dx / travel());
+  });
+  const end = (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    const moved = drag.moving;
+    drag = null;
+    if (moved) range.dispatchEvent(new Event("change"));
+  };
+  track.addEventListener("pointerup", end);
+  track.addEventListener("pointercancel", end);
+}
+
 function buildControls() {
   const root = $("sections");
+  const opened = remembered("groups", {});
   for (const section of SECTIONS) {
     // A fieldset, so a section or group that is off disables its controls.
     const body = el("fieldset", { className: "section" }, el("h2", { textContent: section.title }));
+    body.dataset.tab = sectionId(section);
     for (const c of section.controls ?? []) body.append(buildControl(c));
     for (const group of section.groups) {
-      const details = el("details", { open: group.open ?? false });
+      const key = `${section.title}/${group.title}`;
+      const details = el("details", { open: opened[key] ?? group.open ?? false });
+      details.addEventListener("toggle", () => remember("groups", { ...remembered("groups", {}), [key]: details.open }));
       const summary = el("summary", {}, el("span", { textContent: group.title }));
       const controls = el("fieldset", { className: "controls" }, ...group.controls.map(buildControl));
       if (group.enable) {
@@ -367,6 +431,93 @@ function fillStocks() {
     $("paper-row").hidden = get("io.scan_film");
   });
   sync();
+}
+
+// ---- Phone and iPad layout -------------------------------------------------
+
+// Where a sidebar doesn't fit beside the photograph, the inspector is a
+// bottom sheet with a tab per section (index.html has the same query).
+const SHEET = matchMedia("(max-width: 899px) and (orientation: portrait), (max-width: 639px)");
+const TABS = [{ id: "stock", title: "Stock" }, ...SECTIONS.map((s) => ({ id: sectionId(s), title: s.tab ?? s.title }))];
+
+function showTab(id) {
+  if (!TABS.some((t) => t.id === id)) id = "stock";
+  $("side").dataset.tab = id;
+  for (const panel of $("scroll").querySelectorAll("[data-tab]")) panel.classList.toggle("shown", panel.dataset.tab === id);
+  for (const button of $("tabs").children) button.setAttribute("aria-selected", button.dataset.tab === id);
+  remember("tab", id);
+}
+
+// The sheet rests at one of three heights: just its tabs, the room the
+// photograph leaves at the screen's full width (within 40 to 62% of it), or
+// most of the screen. Drag the grabber between them, or tap it to step.
+const SNAPS = ["low", "mid", "high"];
+let sheet = remembered("sheet", "mid");
+function snapHeight(snap) {
+  const side = $("side"), height = $("app").clientHeight, width = $("app").clientWidth;
+  if (snap === "low") return $("scroll").offsetTop - side.offsetTop + parseFloat(getComputedStyle(side).paddingBottom);
+  if (snap === "high") return 0.8 * height;
+  if (!photo) return 0.45 * height;
+  const pad = width < 500 ? 12 : 32, hud = 28;
+  const view = ((width - 2 * pad) * photo.height) / photo.width + 2 * pad + hud;
+  return Math.min(0.62 * height, Math.max(0.4 * height, height - view));
+}
+function setSheet(snap) {
+  sheet = SNAPS.includes(snap) ? snap : "mid";
+  $("app").style.setProperty("--sheet", `${Math.round(snapHeight(sheet))}px`);
+  remember("sheet", sheet);
+}
+
+function buildSheet() {
+  for (const t of TABS) {
+    const button = el("button", { type: "button", textContent: t.title, role: "tab" });
+    button.dataset.tab = t.id;
+    button.addEventListener("click", () => {
+      showTab(t.id);
+      if (sheet === "low") setSheet("mid");
+      $("scroll").scrollTop = 0;
+    });
+    $("tabs").append(button);
+  }
+  showTab(remembered("tab", "stock"));
+  setSheet(sheet);
+  let drag = null;
+  // On the sheet, and on screens too short to spare the room, the engine's
+  // footer scrolls with the Stock tab; otherwise it stays at the sidebar's foot.
+  const short = matchMedia("(max-height: 599px)");
+  const place = () => {
+    SHEET.matches || short.matches ? $("scroll").append($("bottom")) : $("scroll").after($("bottom"));
+    setSheet(sheet);
+  };
+  SHEET.addEventListener("change", place);
+  short.addEventListener("change", place);
+  addEventListener("resize", () => drag || setSheet(sheet));
+  place();
+
+  const grabber = $("grabber");
+  grabber.addEventListener("pointerdown", (ev) => {
+    grabber.setPointerCapture(ev.pointerId);
+    drag = { y: ev.clientY, height: $("side").offsetHeight, moved: false };
+    $("app").classList.add("dragging-sheet");
+  });
+  grabber.addEventListener("pointermove", (ev) => {
+    if (!drag) return;
+    const dy = drag.y - ev.clientY;
+    drag.moved ||= Math.abs(dy) > 4;
+    const max = 0.9 * $("app").clientHeight;
+    $("app").style.setProperty("--sheet", `${Math.min(max, Math.max(snapHeight("low"), drag.height + dy))}px`);
+  });
+  const end = () => {
+    if (!drag) return;
+    $("app").classList.remove("dragging-sheet");
+    const { moved } = drag;
+    drag = null;
+    if (!moved) return setSheet(SNAPS[(SNAPS.indexOf(sheet) + 1) % SNAPS.length]);
+    const height = $("side").offsetHeight;
+    setSheet(SNAPS.reduce((a, b) => Math.abs(snapHeight(b) - height) < Math.abs(snapHeight(a) - height) ? b : a));
+  };
+  grabber.addEventListener("pointerup", end);
+  grabber.addEventListener("pointercancel", end);
 }
 
 // ---- Rendering -------------------------------------------------------------
@@ -474,6 +625,7 @@ async function open(file) {
       }
     }
     photo = { name: file.name, bytes, width: size.width, height: size.height };
+    setSheet(sheet);
     console.log(`decoded ${file.name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
     $("export").disabled = false;
     hideMessage();
@@ -542,6 +694,8 @@ function hideMessage() {
 // ---- Wiring ----------------------------------------------------------------
 
 buildControls();
+buildSheet();
+if (matchMedia("(pointer: coarse)").matches) $("value-hint").textContent = "Tap a value to type one.";
 catalog = await (await fetch("catalog.json")).json();
 fillStocks();
 // For automation over the DevTools protocol (web/cdp.mjs): a copy of the
@@ -551,6 +705,9 @@ globalThis.negs = {
   edit(path, value) { set(path, value); sync(); schedule("settled"); },
   renders,
   idle: () => !running && !wanted,
+  // Opens a photograph from a URL as the Open button would.
+  // (An array buffer: Chrome fails blob() of a large response in a test profile.)
+  open: async (url) => open(new File([await (await fetch(url)).arrayBuffer()], url.split("/").at(-1))),
 };
 
 $("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });

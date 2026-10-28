@@ -101,12 +101,20 @@ baselines `docs/web-wasm.md` quotes (`s0-*` before the frame-cost work,
 `web/cdp.mjs <url> <script.js>` opens the page in the same windowed Chrome,
 prints console messages and exceptions, and runs a script in the page
 (`SHOT=x.png` saves a screenshot, `VIEW=390x844@3m` emulates a touch device's
-viewport). The page exposes `negs` for such checks: `state()` (a copy of the
-edit), `edit(path, value)`, `renders` (each finished frame's size, time,
-stages and whether it presented) and `idle()`. `web/checks/controls.js`
-moves every Lab control and reports its frame (a `pipeline` stage is a
-rebuild, `meter` a re-meter); `web/checks/inspector.js` tests the
-inspector's wiring.
+viewport, with `pointer: coarse`). A script ending in `.mjs` runs in Node
+instead, as `export default async ({ send, evaluate }) => result`, for
+input the page can't make itself (`Input.dispatchTouchEvent`,
+`Input.dispatchMouseEvent`). The page exposes `negs` for such checks:
+`state()` (a copy of the edit), `edit(path, value)`, `renders` (each
+finished frame's size, time, stages and whether it presented), `idle()`
+and `open(url)` (opens a photograph as the Open button does).
+`web/checks/controls.js` moves every Lab control and reports its frame (a
+`pipeline` stage is a rebuild, `meter` a re-meter);
+`web/checks/inspector.js` tests the inspector's wiring;
+`VIEW=390x844@3m node web/cdp.mjs http://localhost:8137/
+web/checks/touch.mjs 2000` tests the phone layout by touch. Chrome fails
+`blob()` on a large response in these test profiles; read an
+`arrayBuffer()`.
 
 To compare two renders, convert them with `magick x.png x.ppm` and run
 `node web/compare.mjs a.ppm b.ppm` (exact, within 1/255, max). The expected agreement is in `docs/web-wasm.md`. The native CLI
@@ -179,7 +187,12 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     read the state through `syncs`, run by `sync()` after any change,
     and write it through `binding(control)`;
   - `web/controls.js`: the Lab controls (macOS `adjustmentGroups`), option
-    titles, and desktop's value snapping and formatting.
+    titles, and desktop's value snapping and formatting;
+  - the touch layout: `index.html`'s `pointer: coarse` and sheet media
+    queries (the sheet's query is also `SHEET` in `app.js`), `buildSheet`
+    (tabs, the grabber's snap points), `touchSlider` (slider tracks on
+    touch screens) and `remembered`/`remember` (per-viewer state in
+    `localStorage`).
     `app.js` keeps one render in flight and only the newest request
     queued, renders an interactive frame while a slider moves (its scale
     adapts to a 90 ms budget, at least 0.25 on WebGPU) and the settled frame

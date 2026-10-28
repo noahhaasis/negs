@@ -1,7 +1,9 @@
 // Drive the page over the DevTools protocol: node web/cdp.mjs <url> <script.js|-> [waitMs]
 // Opens url in a windowed Chrome with WebGPU (as web/bench.sh), prints console
 // messages and exceptions, then evaluates the script (an async function body)
-// in the page and prints its result. SHOT=<file.png> also saves a screenshot;
+// in the page and prints its result. A script ending in .mjs runs in Node
+// instead, as its default export ({ send, evaluate }) => result, for input
+// the page can't make itself, such as touches (Input.dispatchTouchEvent). SHOT=<file.png> also saves a screenshot;
 // VIEW=<w>x<h>[@<dpr>][m] emulates that viewport (m: a touch phone or tablet).
 // The page exposes `negs` for this (web/app.js). Chrome profiles
 // go in $CDP_TMP (default: the system temp dir); $CHROME_FLAGS adds flags
@@ -9,7 +11,8 @@
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const [url, scriptFile, waitMs = "4000"] = process.argv.slice(2);
 const profile = mkdtempSync(join(process.env.CDP_TMP ?? tmpdir(), "cdp-"));
@@ -36,7 +39,6 @@ ws.onmessage = ({ data }) => {
   else if (m.method === "Runtime.exceptionThrown") console.log("[exception]", m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
 };
 const send = (method, params = {}) => new Promise((r) => { waiting.set(++id, r); ws.send(JSON.stringify({ id, method, params })); });
-globalThis.send = send;
 await send("Runtime.enable");
 await send("Page.enable");
 const view = process.env.VIEW?.match(/^(\d+)x(\d+)(?:@([\d.]+))?(m)?$/);
@@ -47,11 +49,22 @@ if (view) {
 }
 await send("Page.navigate", { url });
 await sleep(Number(waitMs));
-if (scriptFile && scriptFile !== "-") {
-  const body = readFileSync(scriptFile, "utf8");
+// Runs an async function body in the page and returns its value.
+async function evaluate(body) {
   const r = await send("Runtime.evaluate", { expression: `(async () => { ${body} })()`, awaitPromise: true, returnByValue: true });
   const failed = r.result?.exceptionDetails;
-  console.log(failed ? `[script failed] ${failed.exception?.description ?? failed.text}` : JSON.stringify(r.result?.result?.value ?? r, null, 1));
+  if (failed) throw new Error(failed.exception?.description ?? failed.text);
+  return r.result?.result?.value;
+}
+if (scriptFile && scriptFile !== "-") {
+  try {
+    const result = scriptFile.endsWith(".mjs")
+      ? await (await import(pathToFileURL(resolve(scriptFile)))).default({ send, evaluate })
+      : await evaluate(readFileSync(scriptFile, "utf8"));
+    console.log(JSON.stringify(result, null, 1));
+  } catch (e) {
+    console.log(`[script failed] ${e.message}`);
+  }
 }
 if (process.env.SHOT) {
   const shot = await send("Page.captureScreenshot", { format: "png" });
