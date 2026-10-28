@@ -1,4 +1,5 @@
 pub mod bases;
+pub mod catalog;
 pub mod color_filters;
 pub mod color_reference;
 pub mod couplers_presets;

@@ -22,6 +22,8 @@ if [[ "$(wasm-bindgen --version 2>/dev/null)" != "wasm-bindgen $want" ]]; then
 fi
 cargo build --release --target wasm32-unknown-unknown -p spektrafilm-wasm
 wasm-bindgen --target web --out-dir web/pkg target/wasm32-unknown-unknown/release/spektrafilm_wasm.wasm
+# The page's film and paper catalog, from the engine just built.
+node web/make-catalog.mjs
 if [[ ${1-} == --threads ]]; then
   # RUSTFLAGS replaces .cargo/config.toml's flags, so repeat getrandom's.
   # Shared, imported memory and the TLS exports are what wasm-bindgen's

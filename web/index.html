@@ -42,6 +42,8 @@
   .scroll { overflow-y: auto; flex: 1; }
   .stock { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
   .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+  .stock label.row { display: flex; }
+  .stock label[hidden] { display: none; }
   select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
   select:disabled { color: var(--faint); }
   details { border-bottom: 1px solid var(--line); }
@@ -101,7 +103,8 @@
     <div class="scroll">
       <div class="stock">
         <label>Film <select id="film"></select></label>
-        <label>Paper <select id="paper"></select></label>
+        <label class="row" title="Skip printing and scan the developed film, as for slides.">Scan film directly <input type="checkbox" class="switch" id="scan-film"></label>
+        <label id="paper-row">Paper <select id="paper"></select></label>
       </div>
       <div id="sections"></div>
     </div>

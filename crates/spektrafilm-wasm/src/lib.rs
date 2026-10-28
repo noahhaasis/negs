@@ -67,6 +67,15 @@ pub fn register_data(path: &str, bytes: Vec<u8>) {
     data_fs::register(Path::new(DATA_DIR).join(path), bytes);
 }
 
+/// The stock catalog of these profiles, as the native helper's `catalog`
+/// gives it (without its protocol fields), as JSON. Their profiles must be
+/// registered; `web/make-catalog.mjs` runs it at build time.
+#[wasm_bindgen]
+pub fn catalog(stocks: Vec<String>) -> Result<String, JsError> {
+    let catalog = spektrafilm_core::catalog::catalog(Path::new(DATA_DIR), stocks).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(catalog.to_string())
+}
+
 /// The module's memory, which only grows: its high-water mark. wasm32 caps
 /// it at 4 GiB.
 #[wasm_bindgen(js_name = memoryBytes)]

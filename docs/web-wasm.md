@@ -157,6 +157,8 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
      don't change (`Pipeline::with_autoexposure_ev`). Metering took 30 to
      70 ms of every frame before.
 
+   - `catalog(stocks)`: the stock catalog, below.
+
    Slide films scan in the resident chain, as natively (the native apps
    reach it through `process_with_backend`). Whatever it can't render
    renders on the CPU engine, never the per-stage GPU methods, which block.
@@ -171,6 +173,36 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
 
    Native passes: `cargo check --workspace --all-targets`, and the core, gpu,
    math, model and io tests.
+9. **The edit and the catalog** (MVP piece 1). The page keeps the edit as
+   desktop does (macOS `EditState`): film, paper and a complete
+   `RuntimeParams` from the engine's defaults, with the values a film's
+   presets fill (grain lanes, DIR gammas, halation baseline, development
+   times) null until edited. It sends the whole object on every render.
+   Choosing a film nulls those and pairs the paper as `chooseFilm` and
+   `pairFilm` do; "Scan film directly" is `io.scan_film`, on for slides,
+   and hides the paper and the print sections.
+
+   The catalog is `spektrafilm_core::catalog`, which the native helper's
+   `catalog` now calls (its response is byte-identical). `web/build.sh`
+   generates `web/catalog.json` from it with the wasm engine in Node
+   (`web/make-catalog.mjs`), rather than the page resolving presets at
+   run time: the page can't list `data/profiles`, and resolving every
+   stock's presets would mean downloading all 33 profiles (5 MB) first.
+   Generating it from the same build keeps it in step with the engine and
+   needs no native toolchain.
+
+   With default params every render is byte-identical to before: test card
+   at 200, 1200 and 2048 px, ARW at 2048 (bytes and canvas), Provia and
+   Tri-X on WebGPU, card and ARW on the CPU. Scanning Portra 400 directly
+   matches the CLI's `--scan-film` on native wgpu within 1/255 on 99.998%
+   of pixels (max 4); the printed card at its full 2752 px is 99.994%
+   (max 10), as before this piece.
+
+   Where the web differed from desktop it now follows it: a film without a
+   target paper (Double-X) keeps the paper; the web used to pick Kodak
+   2302. The default film stays Portra 400 (macOS starts on Gold 200), as
+   the benchmarks use it. Grain Amount and Size are still multipliers of
+   the film's preset lanes, reset by a film change, until piece 2.
 
 ## Limits and open problems
 
@@ -231,7 +263,7 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
 ## Running it
 
 ```sh
-web/build.sh --threads          # web/pkg and web/pkg-threads; needs wasm-bindgen-cli 0.2.121
+web/build.sh --threads          # web/pkg, web/pkg-threads and web/catalog.json; needs wasm-bindgen-cli 0.2.121
 node web/serve.mjs              # http://localhost:8137/
 node web/node-test.mjs in.png kodak_portra_400 kodak_portra_endura 1024 out.ppm   # CPU, headless
 ```
