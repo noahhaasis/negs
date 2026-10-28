@@ -7,9 +7,10 @@ limits.
 ## Where things are
 
 - Worktree `/home/noah/Work/Negs-wasm`, branch `wasm-investigation`, made
-  from `main` at 5a04c47. **Nothing is committed yet.** Commit to this branch
-  when the user asks. Per `AGENTS.md`, finished, authorized work goes to
-  `main` directly, without a PR.
+  from `main` at 5a04c47. Work is committed on this branch and not
+  pushed. Commit each finished piece here; don't push or merge to `main`
+  until the owner says so (for this branch that overrides `AGENTS.md`'s
+  commit-to-`main` rule).
 - `target/linux-toolchain` in this worktree is a symlink to the main
   checkout's toolchain (Rust 1.93.1). That toolchain has the
   `wasm32-unknown-unknown` target, `rust-src` and `wasm-bindgen` 0.2.121 in
@@ -57,8 +58,17 @@ benchmark runs.
 Firefox 158 works too, with `dom.webgpu.enabled` set in a profile's
 `user.js`.
 
-To compare two renders, convert them with `magick x.png x.ppm` and diff them
-per channel. The expected agreement is in `docs/web-wasm.md`. The native CLI
+`web/bench.sh <name> '<query>'` runs that windowed Chrome for you and
+prints first, warm and whole-frame times and the last frame's stages, e.g.
+`web/bench.sh card-1200 'image=results/card.jpg&backend=gpu&max=1200&runs=8'`.
+Test inputs live in the gitignored `web/results/`: `card.jpg` (2048 px),
+`card-1024.png`, `card-24mp.jpg`, `card-60mp.jpg`, `sony.arw` (24 MP) and
+`truncated.arw` (the panic test). Earlier runs' JSON there are the
+baselines `docs/web-wasm.md` quotes (`s0-*` before the frame-cost work,
+`s3-*` and `f-*` after).
+
+To compare two renders, convert them with `magick x.png x.ppm` and run
+`node web/compare.mjs a.ppm b.ppm` (exact, within 1/255, max). The expected agreement is in `docs/web-wasm.md`. The native CLI
 renders a reference:
 
 ```sh
@@ -153,32 +163,6 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
 - **wasm32 memory is capped at 4 GB.** The GPU path peaks at about 3 GB for
   60 MP. The CPU path can't render past about 30 MP.
 
-## Next steps for the demo (suggested order)
+## Next steps
 
-Done: RAW (vendored rawler), the app UI, interactive frames, cached
-metering, panic recovery, an 8-bit JPEG export, the WebGPU frame cost
-(buffers, pooling, resident input, presenting on a canvas) and slide films
-on the GPU.
-
-1. **iPad.** Try Safari 26 on an iPad: WebGPU in the worker, presenting,
-   frame times, and how much memory a tab gets. If WebGPU isn't exposed in
-   workers there, the GPU engine could run on the main thread (the
-   single-threaded build; its frames need little CPU).
-2. **More controls:** RAW white balance (needs a re-decode), crop, the
-   other `linux/src/fixtures.rs` groups, before/after.
-3. **Export:**
-   - encode PNG/JPEG/TIFF in memory, since `spektrafilm_io::save` is
-     path-based and needs a bytes variant;
-   - 16-bit and wide-gamut output.
-5. **Before merging the engine changes to `main`:**
-   - run `cargo check --workspace --all-targets` and the engine tests on
-     Linux;
-   - check macOS and Windows builds: the cfg changes touch `cpu_backend.rs`,
-     `spectral_service.rs`, capacity and `MaybeSendSync`;
-   - confirm native output stays bit-identical (it was on Linux for CPU and
-     wgpu).
-6. **Later:**
-   - hosting (COOP/COEP; GitHub Pages needs a service-worker shim);
-   - `wasm-opt`;
-   - lazy data download;
-   - golden tests in a browser.
+`docs/web-mvp-plan.md`: the MVP, in pieces with checkpoints.
