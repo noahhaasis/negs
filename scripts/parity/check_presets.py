@@ -92,7 +92,10 @@ RENAMES = [
 UNMAPPED = ["film_render.grain.micro_sublayers", "film_render.convert.", "io.input_gamut_compress.active",
             "io.input_gamut_compress.algorithm", "io.input_color_space", "io.input_cctf_decoding",
             "io.output_color_space", "io.output_cctf_encoding", "io.crop", "io.crop_center", "io.crop_size",
-            "io.upscale_factor"]
+            "io.upscale_factor",
+            # Negs snaps a time to the stock's listed one, the entry both
+            # engines pick (unset for a colour stock); the renders check it.
+            "film_render.chemistry.development_time", "print_render.chemistry.development_time"]
 # Python runs the diffusion filter's FFT in float32 and Negs in f64 (decided
 # 2026-10-25, scripts/parity/README.md): presets with a filter on differ by
 # up to about 1e-5 for that reason alone.
