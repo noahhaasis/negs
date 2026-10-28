@@ -740,10 +740,20 @@ mod tests {
                 assert!((REC2020_TO_SRGB[i][j] as f64 - m[i][j]).abs() < 1e-6, "{i},{j}");
             }
         }
-        // The WGSL constant is the same matrix, column by column.
-        let column = |j: usize| format!("vec3f({}, {}, {})", REC2020_TO_SRGB[0][j], REC2020_TO_SRGB[1][j], REC2020_TO_SRGB[2][j]);
+        // The WGSL constant is the same matrix, column by column. Compared as
+        // f32: Display of an f32 needn't repeat its literal's digits.
+        let start = SHADER.find("const REC2020_TO_SRGB = mat3x3f(").unwrap();
+        let body = &SHADER[start..start + SHADER[start..].find(");").unwrap()];
+        let values: Vec<f32> = body
+            .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+            .filter(|s| s.contains('.'))
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(values.len(), 9, "{body}");
         for j in 0..3 {
-            assert!(SHADER.contains(&column(j)), "{}", column(j));
+            for i in 0..3 {
+                assert_eq!(values[3 * j + i], REC2020_TO_SRGB[i][j], "{i},{j}");
+            }
         }
     }
 
