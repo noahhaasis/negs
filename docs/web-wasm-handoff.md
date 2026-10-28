@@ -22,17 +22,20 @@ limits.
 ## Build, run, test
 
 ```sh
-web/build.sh --threads     # web/pkg (single-threaded) + web/pkg-threads (rayon workers)
+web/build.sh --threads     # web/pkg (single-threaded) + web/pkg-threads (rayon workers) + web/catalog.json
 node web/serve.mjs         # http://localhost:8137/ ; ?threads=0 single-threaded, ?backend=cpu
 node web/node-test.mjs in.png kodak_portra_400 kodak_portra_endura 1024 out.ppm
 ```
 
 `serve.mjs` serves `web/` and `data/` (as `/data/`) with COOP/COEP headers.
 It saves what the page POSTs to `/result` in `web/results/` (gitignored).
+Restart it after editing it: a running server keeps its old routes.
 
 To automate, open
 `/?image=results/x.jpg&backend=gpu|cpu&max=2048&runs=3&name=foo` (add
-`&interactive=1` or `&params=<json>` as needed).
+`&interactive=1`, `&film=<id>`, `&paper=<id>` or `&params=<json>` as
+needed; `params` merges into the full edit, as a preset over the defaults
+would).
 Then `web/results/foo.ppm` and `foo.json` hold the image, timings, per-stage
 breakdown, memory and adapter. Headless Chrome only gets SwiftShader on this
 machine (NVIDIA GTX 1660 SUPER, Wayland). For real WebGPU, run a windowed
@@ -61,15 +64,24 @@ Firefox 158 works too, with `dom.webgpu.enabled` set in a profile's
 `web/bench.sh <name> '<query>'` runs that windowed Chrome for you and
 prints first, warm and whole-frame times and the last frame's stages, e.g.
 `web/bench.sh card-1200 'image=results/card.jpg&backend=gpu&max=1200&runs=8'`.
-Test inputs live in the gitignored `web/results/`: `card.jpg` (2048 px),
+`$BENCH_PAGE` points it at another page than `index.html` (for example a
+copy of the previous `app.js` served as `old.html`, for before/after
+renders). Test inputs live in the gitignored `web/results/`: `card.jpg`
+(2752×1536),
 `card-1024.png`, `card-24mp.jpg`, `card-60mp.jpg`, `sony.arw` (24 MP) and
 `truncated.arw` (the panic test). Earlier runs' JSON there are the
 baselines `docs/web-wasm.md` quotes (`s0-*` before the frame-cost work,
 `s3-*` and `f-*` after).
 
+`web/cdp.mjs <url> <script.js>` opens the page in the same windowed Chrome,
+prints console messages and exceptions, and runs a script in the page
+(`SHOT=x.png` saves a screenshot). The page exposes `negsState()`, a copy of
+the edit, for such checks.
+
 To compare two renders, convert them with `magick x.png x.ppm` and run
 `node web/compare.mjs a.ppm b.ppm` (exact, within 1/255, max). The expected agreement is in `docs/web-wasm.md`. The native CLI
-renders a reference:
+renders a reference (`source linux/core-env.sh` first, or it can't find
+`libopenblas.so.0`):
 
 ```sh
 SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm process in.png -o out.png \
@@ -121,10 +133,20 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
   on wasm32.
 - `spektrafilm_io::load_raw_bytes` does RAW decoding from memory, with
   rawler.
+- `spektrafilm_core::catalog`: the stock catalog (profiles with their
+  pairing and resolved presets, `defaults`, `nullable_paths`). The native
+  helper's `catalog` adds its protocol fields to it; the wasm crate's
+  `catalog(stocks)` exports it, and `web/make-catalog.mjs` writes
+  `web/catalog.json` (gitignored) with it at build time.
 - `vendor/rawler`: rawler 0.8.0 with `web_time::Instant` (see
   `vendor/README.md`), patched in from the workspace `Cargo.toml`.
 - Web side:
   - `web/index.html` and `web/app.js`: the app and the automation hook.
+    `state` is the edit: `film`, `paper` and a full `RuntimeParams`
+    (`params`) from the catalog's defaults, sent whole on every render.
+    `chooseFilm`, `choosePaper` and `pairFilm` follow macOS
+    `EditorModel`; `PRESET_PATHS` is macOS `Stock.presetPaths`. Controls
+    read the state through `syncs`, run by `sync()` after any change.
     `app.js` keeps one render in flight and only the newest request
     queued, renders an interactive frame while a slider moves (its scale
     adapts to a 90 ms budget, at least 0.25 on WebGPU) and the settled frame
@@ -135,8 +157,10 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     as `<name>-canvas.ppm`; `?present=0` reads the bytes back instead;
   - `web/engine.js`: render-and-fetch loop inside the worker;
   - `web/worker.js`: the engine (either build) in a worker;
-  - `web/build.sh` and `web/serve.mjs`: build and serve. The server maps
-    `/catalog.json` to `linux/catalog.json`, the film and paper list.
+  - `web/build.sh` and `web/serve.mjs`: build and serve;
+  - `web/make-catalog.mjs`, `web/bench.sh`, `web/cdp.mjs` and
+    `web/compare.mjs`: the catalog, benchmarks, page driving and image
+    comparison.
 
 ## Known gotchas
 

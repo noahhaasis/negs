@@ -5,36 +5,47 @@
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 
-// The sliders: RuntimeParams paths, with the engine's defaults. Only values
-// moved off their default are sent, so the engine keeps its per-film presets.
-// `grain` scales the film's preset lanes from the catalog.
+// The sliders: RuntimeParams paths. Their defaults come from the engine's
+// catalog. `grain` scales the film's preset lanes from the catalog.
 const SECTIONS = [
   { name: "Camera", open: true, knobs: [
-    { key: "camera.exposure_compensation_ev", label: "Exposure", min: -5, max: 5, step: 0.1, value: 0, unit: " EV", signed: true },
-    { key: "camera.film_format_mm", label: "Film format", min: 4, max: 120, step: 1, value: 35, unit: " mm" },
-  ], toggles: [{ key: "camera.auto_exposure", label: "Auto exposure", value: true }] },
+    { key: "camera.exposure_compensation_ev", label: "Exposure", min: -5, max: 5, step: 0.1, unit: " EV", signed: true },
+    { key: "camera.film_format_mm", label: "Film format", min: 4, max: 120, step: 1, unit: " mm" },
+  ], toggles: [{ key: "camera.auto_exposure", label: "Auto exposure" }] },
   { name: "Enlarger", open: true, print: true, knobs: [
-    { key: "enlarger.print_exposure", label: "Print exposure", min: 0.1, max: 5, step: 0.01, value: 1 },
-    { key: "enlarger.y_filter_shift", label: "Yellow filter", min: -50, max: 50, step: 0.5, value: 0, signed: true },
-    { key: "enlarger.m_filter_shift", label: "Magenta filter", min: -50, max: 50, step: 0.5, value: 0, signed: true },
+    { key: "enlarger.print_exposure", label: "Print exposure", min: 0.1, max: 5, step: 0.01 },
+    { key: "enlarger.y_filter_shift", label: "Yellow filter", min: -50, max: 50, step: 0.5, signed: true },
+    { key: "enlarger.m_filter_shift", label: "Magenta filter", min: -50, max: 50, step: 0.5, signed: true },
   ] },
   { name: "Grain", switch: "film_render.grain.active", knobs: [
-    { key: "grain.amount", label: "Amount", min: 0, max: 3, step: 0.05, value: 1, unit: "×", grain: "rms_granularity" },
-    { key: "grain.size", label: "Size", min: 0.25, max: 3, step: 0.05, value: 1, unit: "×", grain: "particle_scale_sublayers" },
+    { key: "grain.amount", label: "Amount", min: 0, max: 3, step: 0.05, unit: "×", grain: "rms_granularity" },
+    { key: "grain.size", label: "Size", min: 0.25, max: 3, step: 0.05, unit: "×", grain: "particle_scale_sublayers" },
   ] },
   { name: "Halation", switch: "film_render.halation.active", knobs: [
-    { key: "film_render.halation.halation_amount", label: "Halation", min: 0, max: 3, step: 0.01, value: 1 },
-    { key: "film_render.halation.halation_spatial_scale", label: "Halation size", min: 0.1, max: 5, step: 0.01, value: 1 },
-    { key: "film_render.halation.scatter_amount", label: "Scatter", min: 0, max: 3, step: 0.01, value: 1 },
+    { key: "film_render.halation.halation_amount", label: "Halation", min: 0, max: 3, step: 0.01 },
+    { key: "film_render.halation.halation_spatial_scale", label: "Halation size", min: 0.1, max: 5, step: 0.01 },
+    { key: "film_render.halation.scatter_amount", label: "Scatter", min: 0, max: 3, step: 0.01 },
   ] },
   { name: "Glare", print: true, switch: "print_render.glare.active", knobs: [
-    { key: "print_render.glare.percent", label: "Amount", min: 0, max: 0.2, step: 0.001, value: 0.02 },
+    { key: "print_render.glare.percent", label: "Amount", min: 0, max: 0.2, step: 0.001 },
   ] },
 ];
-const SWITCH_DEFAULT = true;
 
-const values = new Map();     // key → value, for knobs and switches moved off their default
-let catalog = [];
+// The edit, as desktop keeps it (macOS EditState): the film, the paper and a
+// complete RuntimeParams, starting from the engine's defaults. Values a
+// film's presets fill stay null until edited. The grain multipliers are the
+// page's own until the grain lanes get their sliders.
+let catalog = { profiles: [], defaults: {}, nullable_paths: [] };
+const state = { film: "", paper: "", params: {} };
+const grainScale = new Map();
+// Every value a film's presets fill (macOS Stock.presetPaths): a film change resets them.
+const GRAIN_FIELDS = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"];
+const PRESET_PATHS = [
+  ...GRAIN_FIELDS.map((f) => `film_render.grain.${f}`),
+  "film_render.dir_couplers.gamma_samelayer_rgb", "film_render.dir_couplers.gamma_interlayer_r_to_gb",
+  "film_render.dir_couplers.gamma_interlayer_g_to_rb", "film_render.dir_couplers.gamma_interlayer_b_to_rg",
+  "film_render.halation.halation_strength", "film_render.halation.halation_first_sigma_um",
+];
 let photo = null;             // { name, bytes, width, height }
 let host = null;              // the engine worker
 let kind = "gpu";
@@ -135,33 +146,70 @@ async function attachCanvas() {
 
 // ---- Parameters ------------------------------------------------------------
 
-const film = () => catalog.find((p) => p.id === $("film").value);
+const stock = (id) => catalog.profiles.find((p) => p.id === id);
+const films = () => catalog.profiles.filter((p) => !p.paper);
+const papers = () => catalog.profiles.filter((p) => p.paper);
 
-function params() {
-  const out = {};
-  const set = (path, value) => {
-    const keys = path.split(".");
-    let o = out;
-    for (const k of keys.slice(0, -1)) o = o[k] ??= {};
-    o[keys.at(-1)] = value;
-  };
-  for (const [key, value] of values) {
-    if (!key.startsWith("grain.")) set(key, value);
+function get(path, from = state.params) {
+  return path.split(".").reduce((o, k) => o?.[k], from) ?? null;
+}
+function set(path, value, into = state.params) {
+  const keys = path.split(".");
+  let o = into;
+  for (const k of keys.slice(0, -1)) o = o[k] ??= {};
+  o[keys.at(-1)] = value;
+}
+const defaultValue = (path) => get(path, catalog.defaults);
+// Rust defaults arrive as widened f32 values; slider edits are decimal.
+function isModified(path) {
+  const [a, b] = [get(path), defaultValue(path)];
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) > 1e-6 * Math.max(1, Math.abs(b));
+  return JSON.stringify(a) !== JSON.stringify(b);
+}
+
+const params = () => JSON.stringify(state.params);
+
+// A new film brings its own grain, DIR and halation presets, as upstream
+// applies them (macOS EditorModel.chooseFilm).
+function chooseFilm(id) {
+  state.film = id;
+  set("film_render.development_time", null);
+  for (const path of PRESET_PATHS) set(path, null);
+  grainScale.clear();
+  pairFilm();
+}
+function choosePaper(id) {
+  state.paper = id;
+  set("print_render.development_time", null);
+}
+// A slide scans directly; a film with a target paper prints on it. Others
+// keep the paper, as on desktop.
+function pairFilm() {
+  const f = stock(state.film);
+  if (!f) return;
+  set("io.scan_film", f.positive);
+  if (papers().some((p) => p.id === f.target_print) && state.paper !== f.target_print) {
+    state.paper = f.target_print;
+    set("print_render.development_time", null);
   }
-  const preset = film()?.grain;
-  for (const knob of SECTIONS.flatMap((s) => s.knobs).filter((k) => k.grain)) {
-    if (values.has(knob.key) && preset) {
-      set(`film_render.grain.${knob.grain}`, preset[knob.grain].map((v) => v * values.get(knob.key)));
-    }
-  }
-  if (film()?.positive) set("io.scan_film", true);
-  return JSON.stringify(out);
+}
+
+// The grain multipliers scale the film's preset lanes; at 1 the lane is
+// unset again, so the engine uses its preset.
+function setGrainScale(knob, v) {
+  v === 1 ? grainScale.delete(knob.key) : grainScale.set(knob.key, v);
+  const preset = stock(state.film)?.grain?.[knob.grain];
+  set(`film_render.grain.${knob.grain}`, grainScale.has(knob.key) && preset ? preset.map((x) => x * v) : null);
 }
 
 function format(knob, v) {
   const digits = Math.max(0, -Math.floor(Math.log10(knob.step) + 1e-9));
   return `${knob.signed && v > 0 ? "+" : ""}${v.toFixed(digits)}${knob.unit ?? ""}`;
 }
+
+// Each control's view of the state, run after anything changes it.
+const syncs = [];
+const sync = () => syncs.forEach((f) => f());
 
 function buildControls() {
   const root = $("sections");
@@ -172,13 +220,17 @@ function buildControls() {
     const summary = document.createElement("summary");
     summary.append(section.name);
     if (section.switch) {
-      const sw = Object.assign(document.createElement("input"), { type: "checkbox", className: "switch", checked: SWITCH_DEFAULT });
+      const sw = Object.assign(document.createElement("input"), { type: "checkbox", className: "switch" });
       sw.title = `${section.name} on or off`;
       sw.addEventListener("click", (ev) => ev.stopPropagation());
       sw.addEventListener("change", () => {
-        sw.checked === SWITCH_DEFAULT ? values.delete(section.switch) : values.set(section.switch, sw.checked);
-        sw.checked ? delete details.dataset.off : (details.dataset.off = "");
+        set(section.switch, sw.checked);
+        sync();
         schedule("settled");
+      });
+      syncs.push(() => {
+        sw.checked = get(section.switch);
+        sw.checked ? delete details.dataset.off : (details.dataset.off = "");
       });
       summary.append(sw);
     }
@@ -187,11 +239,12 @@ function buildControls() {
     for (const t of section.toggles ?? []) {
       const row = document.createElement("label");
       row.className = "row";
-      const sw = Object.assign(document.createElement("input"), { type: "checkbox", className: "switch", checked: t.value });
+      const sw = Object.assign(document.createElement("input"), { type: "checkbox", className: "switch" });
       sw.addEventListener("change", () => {
-        sw.checked === t.value ? values.delete(t.key) : values.set(t.key, sw.checked);
+        set(t.key, sw.checked);
         schedule("settled");
       });
+      syncs.push(() => (sw.checked = get(t.key)));
       row.append(t.label, sw);
       knobs.append(row);
     }
@@ -200,17 +253,22 @@ function buildControls() {
       div.className = "knob";
       const id = `k-${knob.key}`;
       const label = Object.assign(document.createElement("label"), { htmlFor: id, textContent: knob.label });
-      const out = Object.assign(document.createElement("output"), { textContent: format(knob, knob.value) });
-      const range = Object.assign(document.createElement("input"), { type: "range", id, min: knob.min, max: knob.max, step: knob.step, value: knob.value });
-      const update = () => {
-        const v = Number(range.value);
-        out.textContent = format(knob, v);
-        Math.abs(v - knob.value) < knob.step / 2 ? values.delete(knob.key) : values.set(knob.key, v);
-        div.classList.toggle("changed", values.has(knob.key));
+      const out = document.createElement("output");
+      const range = Object.assign(document.createElement("input"), { type: "range", id, min: knob.min, max: knob.max, step: knob.step });
+      const value = () => knob.grain ? grainScale.get(knob.key) ?? 1 : get(knob.key);
+      const show = () => {
+        range.value = value();
+        out.textContent = format(knob, value());
+        div.classList.toggle("changed", knob.grain ? grainScale.has(knob.key) : isModified(knob.key));
       };
-      range.addEventListener("input", () => { update(); schedule("interactive"); });
-      range.addEventListener("change", () => { update(); schedule("settled"); });
-      range.addEventListener("dblclick", () => { range.value = knob.value; update(); schedule("settled"); });
+      const update = (v) => {
+        knob.grain ? setGrainScale(knob, v) : set(knob.key, v);
+        show();
+      };
+      syncs.push(show);
+      range.addEventListener("input", () => { update(Number(range.value)); schedule("interactive"); });
+      range.addEventListener("change", () => { update(Number(range.value)); schedule("settled"); });
+      range.addEventListener("dblclick", () => { update(knob.grain ? 1 : defaultValue(knob.key)); schedule("settled"); });
       div.append(label, out, range);
       knobs.append(div);
     }
@@ -219,35 +277,45 @@ function buildControls() {
   }
 }
 
-function fillStocks() {
-  const group = (select, profiles) => {
-    let og;
-    for (const p of profiles) {
-      if (og?.label !== p.group) select.append(og = Object.assign(document.createElement("optgroup"), { label: p.group }));
-      og.append(new Option(p.name, p.id));
-    }
-  };
-  group($("film"), catalog.filter((p) => !p.paper));
-  group($("paper"), catalog.filter((p) => p.paper));
-  $("film").value = query.get("film") ?? "kodak_portra_400";
-  $("paper").value = query.get("paper") ?? "kodak_portra_endura";
-  filmChanged(!query.get("paper"));
+// The pickers' sections, in desktop's order (macOS StockGroup).
+const isMotionPicturePrint = (p) => p.paper && (p.name.includes("Vision") || p.name.includes("Print Film"));
+function stockGroups(stocks, order, kind) {
+  return order.map((title) => ({ title, stocks: stocks.filter((s) => kind(s) === title) })).filter((g) => g.stocks.length);
+}
+function filmGroups() {
+  const cinemaPrints = new Set(papers().filter(isMotionPicturePrint).map((p) => p.id));
+  return stockGroups(films(), ["Color Negative", "Color Slide", "Motion Picture", "Black & White"],
+    (s) => s.bw ? "Black & White" : s.positive ? "Color Slide" : cinemaPrints.has(s.target_print) ? "Motion Picture" : "Color Negative");
+}
+function paperGroups() {
+  return stockGroups(papers(), ["Color Paper", "Motion Picture Print", "Black & White"],
+    (s) => s.bw ? "Black & White" : isMotionPicturePrint(s) ? "Motion Picture Print" : "Color Paper");
 }
 
-function filmChanged(pickPaper = true) {
-  const f = film();
-  if (pickPaper && f.target) $("paper").value = f.target;
-  else if (pickPaper && f.bw && !f.positive) $("paper").value = "kodak_2302";
-  // A slide is scanned directly: no paper.
-  $("paper").disabled = f.positive;
-  $("paper").querySelector("option[value=none]")?.remove();
-  if (f.positive) {
-    $("paper").prepend(new Option("None: slide film is scanned", "none", true, true));
-  } else if ($("paper").value === "none" || !$("paper").value) {
-    $("paper").value = f.target || "kodak_portra_endura";
-  }
-  // A slide is scanned, not printed: no enlarger or print glare.
-  for (const d of document.querySelectorAll("details[data-print]")) d.hidden = f.positive;
+function fillStocks() {
+  const fill = (select, groups) => {
+    for (const g of groups) {
+      const og = Object.assign(document.createElement("optgroup"), { label: g.title });
+      for (const s of g.stocks) og.append(new Option(s.name, s.id));
+      select.append(og);
+    }
+  };
+  fill($("film"), filmGroups());
+  fill($("paper"), paperGroups());
+  state.params = structuredClone(catalog.defaults);
+  state.paper = "kodak_portra_endura";
+  chooseFilm(stock(query.get("film"))?.paper === false ? query.get("film") : "kodak_portra_400");
+  if (stock(query.get("paper"))?.paper) choosePaper(query.get("paper"));
+  syncs.push(() => {
+    $("film").value = state.film;
+    $("paper").value = state.paper;
+    const scanning = get("io.scan_film");
+    $("scan-film").checked = scanning;
+    // Scanned film isn't printed: no paper, enlarger or print glare.
+    $("paper-row").hidden = scanning;
+    for (const d of document.querySelectorAll("details[data-print]")) d.hidden = scanning;
+  });
+  sync();
 }
 
 // ---- Rendering -------------------------------------------------------------
@@ -279,7 +347,7 @@ async function pump() {
     const settled = settledSize();
     const maxDim = interactive ? Math.max(256, Math.round(settled * interactiveScale)) : settled;
     try {
-      const r = await host.call("render", $("film").value, $("paper").value, params(), maxDim, interactive, presenting);
+      const r = await host.call("render", state.film, state.paper, params(), maxDim, interactive, presenting);
       draw(r);
       if (interactive) {
         interactiveScale = Math.min(1, Math.max(minScale, interactiveScale * Math.sqrt(BUDGET_MS / Math.max(r.elapsedMs, 1))));
@@ -387,13 +455,13 @@ async function exportJpeg() {
   $("busy").classList.add("on");
   try {
     while (running) await new Promise((r) => setTimeout(r, 20));
-    const r = await host.call("render", $("film").value, $("paper").value, params(), Math.max(photo.width, photo.height), false);
+    const r = await host.call("render", state.film, state.paper, params(), Math.max(photo.width, photo.height), false);
     const canvas = new OffscreenCanvas(r.width, r.height);
     canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height), 0, 0);
     const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
     const a = Object.assign(document.createElement("a"), {
       href: URL.createObjectURL(blob),
-      download: `${photo.name.replace(/\.[^.]+$/, "")}-${$("film").value}.jpg`,
+      download: `${photo.name.replace(/\.[^.]+$/, "")}-${state.film}.jpg`,
     });
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
@@ -421,11 +489,14 @@ function hideMessage() {
 // ---- Wiring ----------------------------------------------------------------
 
 buildControls();
-catalog = (await (await fetch("catalog.json")).json()).profiles;
+catalog = await (await fetch("catalog.json")).json();
 fillStocks();
+// For automation over the DevTools protocol: a copy of the edit.
+globalThis.negsState = () => structuredClone(state);
 
-$("film").addEventListener("change", () => { filmChanged(); schedule("settled"); });
-$("paper").addEventListener("change", () => schedule("settled"));
+$("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });
+$("paper").addEventListener("change", () => { choosePaper($("paper").value); sync(); schedule("settled"); });
+$("scan-film").addEventListener("change", () => { set("io.scan_film", $("scan-film").checked); sync(); schedule("settled"); });
 $("engine").addEventListener("change", async () => {
   await startEngine($("engine").value).catch((e) => showMessage(e.message, true));
   schedule("settled");
@@ -459,6 +530,16 @@ await startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.me
 // to the dev server (web/serve.mjs).
 if (query.get("image")) {
   const name = query.get("name") ?? "result";
+  // ?params= merges into the edit, as a preset over the defaults would.
+  const merge = (into, from) => {
+    for (const [k, v] of Object.entries(from)) {
+      v && typeof v === "object" && !Array.isArray(v) && into[k] && typeof into[k] === "object" ? merge(into[k], v) : (into[k] = v);
+    }
+  };
+  if (query.get("params")) {
+    merge(state.params, JSON.parse(query.get("params")));
+    sync();
+  }
   const post = (q, body) => fetch(`result?name=${encodeURIComponent(q)}`, { method: "POST", body });
   try {
     const bytes = new Uint8Array(await (await fetch(query.get("image"))).arrayBuffer());
@@ -474,7 +555,7 @@ if (query.get("image")) {
     for (let i = 0; i < Number(query.get("runs") ?? 1); i++) {
       // The whole frame, as the page sees it: the call, and drawing it.
       const t = performance.now();
-      r = await host.call("render", $("film").value, $("paper").value, query.get("params") ?? params(), max, interactive, presenting);
+      r = await host.call("render", state.film, state.paper, params(), max, interactive, presenting);
       draw(r);
       frames.push(performance.now() - t);
       times.push(r.elapsedMs);
@@ -487,7 +568,7 @@ if (query.get("image")) {
       copy.drawImage(shown, 0, 0);
       const body = copy.getImageData(0, 0, shown.width, shown.height).data;
       await fetch(`result?name=${encodeURIComponent(`${name}-canvas`)}&w=${shown.width}&h=${shown.height}`, { method: "POST", body });
-      r = await host.call("render", $("film").value, $("paper").value, query.get("params") ?? params(), max, interactive, false);
+      r = await host.call("render", state.film, state.paper, params(), max, interactive, false);
     }
     await fetch(`result?name=${encodeURIComponent(name)}&w=${r.width}&h=${r.height}`, { method: "POST", body: r.rgba });
     await post(name, JSON.stringify({ threads, presenting, backend: r.backend, width: r.width, height: r.height, loadMs, times, frames, stages, memoryMiB: r.memoryMiB }));

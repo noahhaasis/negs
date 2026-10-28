@@ -1,6 +1,5 @@
 // Dev server for the browser engine: node web/serve.mjs [port]
-// Serves web/ at /, the repository's data/ at /data/ and linux/catalog.json
-// at /catalog.json, and saves what the page POSTs to /result into
+// Serves web/ at /, the repository's data/ at /data/, and saves what the page POSTs to /result into
 // web/results/ (as PPM + JSON), so a headless browser run can be checked from
 // the shell.
 import { createServer } from "node:http";
@@ -10,7 +9,6 @@ import { fileURLToPath } from "node:url";
 
 const web = dirname(fileURLToPath(import.meta.url));
 const data = join(web, "..", "data");
-const linux = join(web, "..", "linux");
 const port = Number(process.argv[2] ?? 8137);
 const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".css": "text/css" };
 
@@ -36,9 +34,7 @@ createServer(async (req, res) => {
     console.log(`saved ${name}`);
     return res.end("ok");
   }
-  // catalog.json: the film and paper catalog the Linux app ships.
-  const [root, rel] = url.pathname.startsWith("/data/") ? [data, url.pathname.slice(6)]
-    : url.pathname === "/catalog.json" ? [linux, "catalog.json"] : [web, url.pathname.slice(1) || "index.html"];
+  const [root, rel] = url.pathname.startsWith("/data/") ? [data, url.pathname.slice(6)] : [web, url.pathname.slice(1) || "index.html"];
   // A directory is its index.js: wasm-bindgen-rayon's worker helper imports
   // the package by its directory, as bundlers resolve it.
   const path = normalize(join(root, decodeURIComponent(rel), rel.endsWith("/") ? "index.js" : ""));

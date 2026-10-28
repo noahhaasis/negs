@@ -190,48 +190,23 @@ struct Rendered {
 }
 
 fn catalog(data: &Path) -> Result<Value> {
-    let mut profiles = Vec::new();
+    let mut stocks = Vec::new();
     for entry in std::fs::read_dir(data.join("profiles"))? {
         let path = entry?.path();
         if path.extension().and_then(|x| x.to_str()) != Some("json") {
             continue;
         }
-        let stock = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let p = profile::load_profile_by_name(data, &stock)?;
-        // The stock's grain preset, resolved: the apps show it while the
-        // edit leaves a value unset (null).
-        let grain = spektrafilm_core::grain::grain_settings(&p, &Default::default());
-        // Likewise the DIR gammas and halation baseline the stock's presets
-        // give an edit that leaves them unset.
-        let mut resolved = RuntimeParams::default();
-        spektrafilm_core::pipeline::apply_film_specific_params(&p, &mut resolved);
-        let dir = &resolved.film_render.dir_couplers;
-        let halation = &resolved.film_render.halation;
-        profiles.push(json!({
-            "id": stock, "name": p.info.name.as_ref().unwrap_or(&stock),
-            "paper": p.info.support == "paper" || p.info.stage == "printing",
-            "positive": p.is_positive(), "bw": p.is_bw(),
-            "target_print": p.info.target_print, "development_times": p.data.development_time,
-            "grain": {
-                "rms_granularity": grain.rms_granularity, "density_min": grain.density_min,
-                "uniformity": grain.uniformity, "particle_scale_sublayers": grain.particle_scale_sublayers,
-            },
-            "dir_couplers": {
-                "gamma_samelayer_rgb": dir.gamma_samelayer(), "gamma_interlayer_r_to_gb": dir.gamma_r_to_gb(),
-                "gamma_interlayer_g_to_rb": dir.gamma_g_to_rb(), "gamma_interlayer_b_to_rg": dir.gamma_b_to_rg(),
-            },
-            "halation": {
-                "halation_strength": halation.strength(), "halation_first_sigma_um": halation.first_sigma_um(),
-            },
-        }));
+        stocks.push(path.file_stem().unwrap().to_string_lossy().into_owned());
     }
-    profiles.sort_by_key(|p| p["name"].as_str().unwrap_or_default().to_lowercase());
+    let mut catalog = spektrafilm_core::catalog::catalog(data, stocks)?;
     ensure!(
-        !profiles.is_empty(),
+        !catalog["profiles"].as_array().is_some_and(Vec::is_empty),
         "No profiles found in {}",
         data.display()
     );
-    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true}, "profiles": profiles, "defaults": RuntimeParams::default(), "nullable_paths": RuntimeParams::nullable_paths()}))
+    catalog["protocol"] = json!(1);
+    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true});
+    Ok(catalog)
 }
 
 impl Session {
