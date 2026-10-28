@@ -45,8 +45,9 @@ import UniformTypeIdentifiers
     /// last render; zero before one finishes.
     private(set) var sourceSize = CGSize.zero
     private(set) var workingSize = CGSize.zero
-    /// The shown texture's linear fraction of the working frame, below 1 when
-    /// the preview is limited or larger than the display proxy.
+    /// The settled preview's linear fraction of the working frame, below 1
+    /// when limited or larger than the display proxy. Temporary drag frames
+    /// leave this unchanged so the Image Size notice doesn't resize the form.
     private(set) var previewScale = 1.0
     private(set) var placeholderSize = CGSize.zero
     private(set) var imageRotation = 0
@@ -738,7 +739,9 @@ import UniformTypeIdentifiers
             imageSize = CGSize(width: result["photo_width"].double, height: result["photo_height"].double)
             sourceSize = CGSize(width: result["source_width"].double, height: result["source_height"].double)
             workingSize = CGSize(width: result["working_width"].double, height: result["working_height"].double)
-            previewScale = workingSize.width > 0 ? min(Double(width) / workingSize.width, 1) : 1
+            if interactiveScale == nil {
+                previewScale = workingSize.width > 0 ? min(Double(width) / workingSize.width, 1) : 1
+            }
             showingInteractiveFrame = interactiveScale != nil
             image = developed; placeholder = nil
             updateHistogram()
