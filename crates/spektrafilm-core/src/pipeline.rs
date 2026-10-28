@@ -210,9 +210,11 @@ impl Pipeline {
 
     /// Return a copy of this calibrated pipeline with updated runtime params.
     /// Callers must only use this when the calibration-affecting inputs match
-    /// the pipeline that was originally built. The print exposure factor
-    /// follows `params` (exposure compensation, film gamma, film curves), so
-    /// those don't.
+    /// the pipeline that was originally built
+    /// ([`crate::preview::preview_pipeline_cache_key`]). The enlarger's M/Y
+    /// shifts and preflash, and the print exposure factor (exposure
+    /// compensation, film gamma, film curves), follow `params`, as a pipeline
+    /// built with them would have them, so those don't.
     pub fn with_params(mut self, params: RuntimeParams) -> Self {
         let mut params = params;
         apply_film_specific_params(&self.film, &mut params);
@@ -222,8 +224,44 @@ impl Pipeline {
         );
         self.params = params;
         self.apply_film_curves_morph();
+        // The simplified pipeline (`Pipeline::new`) neither calibrates nor
+        // preflashes; it keeps the enlarger it was built with.
+        if self.tc_lut.is_some() {
+            let [c, m, y] = self.neutral_cmy;
+            self.params.enlarger.c_filter_neutral = c as f32;
+            self.params.enlarger.m_filter_neutral = m as f32;
+            self.params.enlarger.y_filter_neutral = y as f32;
+            self.filter_enlarger();
+        }
         self.print_exposure_factor = self.compute_print_exposure_factor();
         self
+    }
+
+    /// The print illuminant through the enlarger's neutral filters plus the
+    /// M/Y shifts, and the preflash's constant raw exposure, from
+    /// `self.params.enlarger`. f64 for Python parity: the neutral C/M/Y come
+    /// from the f64 lookup, the shifts are f32 in params.
+    fn filter_enlarger(&mut self) {
+        let [c, m, y] = self.neutral_cmy;
+        let enlarger = &self.params.enlarger;
+        self.print_illuminant = enlarger::enlarger_filtered_illuminant_f64(
+            &enlarger.illuminant,
+            c,
+            m + enlarger.m_filter_shift as f64,
+            y + enlarger.y_filter_shift as f64,
+        );
+        // Constant enlarger preflash exposure (Python `_compute_raw_preflash`):
+        // film base density lit by the preflash-filtered illuminant, integrated
+        // against the print sensitivity. Off (→ [0; 3]) unless preflash_exposure > 0.
+        // Upstream lights the profile's base here, without `film_render.base`.
+        self.preflash_raw = enlarger::compute_preflash_raw(
+            enlarger,
+            c,
+            m,
+            y,
+            &self.film.data.base_density,
+            &self.print_sensitivity,
+        );
     }
 
     /// Re-filter the enlarger with M and Y filter shifts in f64, the unknowns
@@ -458,7 +496,6 @@ impl Pipeline {
             params.enlarger.m_filter_neutral as f64,
             params.enlarger.y_filter_neutral as f64,
         ]);
-        let (c_neutral_f64, m_neutral_f64, y_neutral_f64) = (cmy_f64[0], cmy_f64[1], cmy_f64[2]);
 
         // Film sensitivity: Python `sensitivity = np.nan_to_num(10 ** log_sensitivity)` — f64.
         let log_sens = film.log_sensitivity_f64();
@@ -564,15 +601,6 @@ impl Pipeline {
         // The TC LUT is used unnormalized — Python's `rgb_to_raw_hanatos2025` does NOT scale it.
         // See `spektrafilm/utils/spectral_upsampling.py:rgb_to_raw_hanatos2025` (comment line 373).
 
-        // Compute enlarger illuminant with dichroic filters — f64 for Python parity.
-        // c/m/y come from the f64 lookup, shift values are f32 in params.
-        let print_illuminant = enlarger::enlarger_filtered_illuminant_f64(
-            &params.enlarger.illuminant,
-            c_neutral_f64,
-            m_neutral_f64 + params.enlarger.m_filter_shift as f64,
-            y_neutral_f64 + params.enlarger.y_filter_shift as f64,
-        );
-
         // Print sensitivity: Python `sensitivity = np.nan_to_num(10 ** log_sensitivity)` — f64 with NaN→0.
         let print_log_sens = print.log_sensitivity_f64();
         let print_sensitivity: Vec<[f64; 3]> = print_log_sens
@@ -587,19 +615,6 @@ impl Pipeline {
             })
             .collect();
 
-        // Constant enlarger preflash exposure (Python `_compute_raw_preflash`):
-        // film base density lit by the preflash-filtered illuminant, integrated
-        // against the print sensitivity. Off (→ [0; 3]) unless preflash_exposure > 0.
-        // Upstream lights the profile's base here, without `film_render.base`.
-        let preflash_raw = enlarger::compute_preflash_raw(
-            &params.enlarger,
-            c_neutral_f64,
-            m_neutral_f64,
-            y_neutral_f64,
-            &film.data.base_density,
-            &print_sensitivity,
-        );
-
         let output_gamut = crate::gamut_compression::OutputGamutCompress::build(
             &params.io.output_gamut_compress,
             &params.io.output_color_space,
@@ -611,14 +626,16 @@ impl Pipeline {
             tc_lut,
             front_illuminant,
             print_exposure_factor: 1.0,
-            print_illuminant,
+            print_illuminant: Vec::new(),
             neutral_cmy: cmy_f64,
             print_sensitivity,
-            preflash_raw,
+            preflash_raw: [0.0; 3],
             output_gamut,
             metering_preview: None,
             autoexposure_ev: None,
         };
+        // The enlarger illuminant with its dichroic filters, and the preflash.
+        pipeline.filter_enlarger();
         pipeline.apply_film_curves_morph();
         pipeline.print_exposure_factor = pipeline.compute_print_exposure_factor();
 

@@ -255,6 +255,75 @@ mod integration_tests {
         }
     }
 
+    /// The enlarger's shifts, preflash and exposure normalization aren't in
+    /// `preview_pipeline_cache_key`, so a pipeline built with other values
+    /// and given these through `with_params` must equal one built with them.
+    #[test]
+    fn with_params_refilters_the_enlarger_like_a_new_pipeline() {
+        let dir = data_dir();
+        let film = profile::load_profile_by_name(&dir, "kodak_portra_400").unwrap();
+        let print = profile::load_profile_by_name(&dir, "kodak_portra_endura").unwrap();
+        let backend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let img = ImageBuf::from_data(
+            8,
+            8,
+            (0..8 * 8 * 3)
+                .map(|i| from_f64((i % 17) as f64 / 16.0))
+                .collect(),
+        );
+        let mut built = RuntimeParams::default();
+        built.enlarger.m_filter_shift = 7.3;
+        built.enlarger.preflash_exposure = 0.04;
+        let cached =
+            Pipeline::new_with_spectral(film.clone(), print.clone(), built, &dir).unwrap();
+        let cases: [(f32, f32, f32, f32, f32, bool, bool, f32); 6] = [
+            (0.0, 0.0, 0.0, 0.0, 0.0, true, true, 0.0),
+            (12.3, -4.7, 0.0, 0.0, 0.0, true, true, 0.0),
+            (-0.1, 33.3, 0.05, 0.0, 0.0, true, true, 0.0),
+            (5.0, 5.0, 0.12, -11.0, 44.0, true, true, 1.3),
+            (-21.9, 8.8, 0.3, 17.5, -2.2, true, false, -0.7),
+            (3.3, -3.3, 0.02, 1.0, 1.0, false, true, 0.4),
+        ];
+        for (m, y, preflash, preflash_m, preflash_y, normalize, compensation, ev) in cases {
+            let mut params = RuntimeParams::default();
+            params.enlarger.m_filter_shift = m;
+            params.enlarger.y_filter_shift = y;
+            params.enlarger.preflash_exposure = preflash;
+            params.enlarger.preflash_m_filter_shift = preflash_m;
+            params.enlarger.preflash_y_filter_shift = preflash_y;
+            params.enlarger.normalize_print_exposure = normalize;
+            params.enlarger.print_exposure_compensation = compensation;
+            params.camera.exposure_compensation_ev = ev;
+            let case = format!("{:?}", (m, y, preflash, preflash_m, preflash_y, normalize, compensation, ev));
+            let fresh =
+                Pipeline::new_with_spectral(film.clone(), print.clone(), params.clone(), &dir)
+                    .unwrap();
+            let updated = cached.clone().with_params(params);
+            let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+            assert_eq!(
+                bits(updated.print_illuminant_slice()),
+                bits(fresh.print_illuminant_slice()),
+                "illuminant {case}"
+            );
+            assert_eq!(bits(&updated.preflash_raw()), bits(&fresh.preflash_raw()), "preflash {case}");
+            assert_eq!(
+                updated.print_exposure_factor().to_bits(),
+                fresh.print_exposure_factor().to_bits(),
+                "exposure factor {case}"
+            );
+            assert_eq!(
+                serde_json::to_string(&updated.params).unwrap(),
+                serde_json::to_string(&fresh.params).unwrap(),
+                "params {case}"
+            );
+            assert_eq!(
+                updated.process(img.clone(), &backend).data,
+                fresh.process(img.clone(), &backend).data,
+                "image {case}"
+            );
+        }
+    }
+
     #[test]
     fn positive_slide_film_scan_stays_photographic() {
         let dir = data_dir();

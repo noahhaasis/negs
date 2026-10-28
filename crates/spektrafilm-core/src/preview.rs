@@ -6,6 +6,10 @@ use spektrafilm_io::encoding::Encoding;
 use spektrafilm_math::colorspace::{self, RgbColourspace, SRGB};
 use spektrafilm_math::precision::{from_f32, to_f32};
 
+/// What a built [`crate::pipeline::Pipeline`] can't change: the params its
+/// calibration reads. The enlarger's M/Y shifts, preflash and print exposure
+/// normalization aren't here: [`crate::pipeline::Pipeline::with_params`]
+/// re-filters the enlarger and renormalizes for them, as a new pipeline would.
 pub fn preview_pipeline_cache_key(
     film_name: &str,
     print_name: &str,
@@ -37,13 +41,6 @@ pub fn preview_pipeline_cache_key(
             "c_filter_neutral": params.enlarger.c_filter_neutral,
             "m_filter_neutral": params.enlarger.m_filter_neutral,
             "y_filter_neutral": params.enlarger.y_filter_neutral,
-            "m_filter_shift": params.enlarger.m_filter_shift,
-            "y_filter_shift": params.enlarger.y_filter_shift,
-            "preflash_exposure": params.enlarger.preflash_exposure,
-            "preflash_m_filter_shift": params.enlarger.preflash_m_filter_shift,
-            "preflash_y_filter_shift": params.enlarger.preflash_y_filter_shift,
-            "normalize_print_exposure": params.enlarger.normalize_print_exposure,
-            "print_exposure_compensation": params.enlarger.print_exposure_compensation,
         },
     })
     .to_string()

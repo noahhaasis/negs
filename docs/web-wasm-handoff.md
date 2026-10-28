@@ -106,10 +106,18 @@ instead, as `export default async ({ send, evaluate }) => result`, for
 input the page can't make itself (`Input.dispatchTouchEvent`,
 `Input.dispatchMouseEvent`). The page exposes `negs` for such checks:
 `state()` (a copy of the edit), `edit(path, value)`, `renders` (each
-finished frame's size, time, stages and whether it presented), `idle()`
-and `open(url)` (opens a photograph as the Open button does).
+finished frame's size, time, stages and whether it presented), `idle()`,
+`open(url)` (opens a photograph as the Open button does), `read(maxDim)`
+(the edit rendered and read back as bytes) and `balance(film, paper,
+params)` (the engine's Balance Print, without changing the edit).
 `web/checks/controls.js` moves every Lab control and reports its frame (a
 `pipeline` stage is a rebuild, `meter` a re-meter);
+`web/checks/enlarger.js` moves the Enlarger's controls a few steps each;
+`web/checks/updated.js` saves renders of enlarger edits made in one page,
+to compare with the same params rendered fresh (`?params=`; its header
+says how); `web/checks/balance.js` runs Balance Print on the cases in
+`web/checks/balance-cases.json` and presses the button (send the same
+cases to the helper's `balance_print` to compare);
 `web/checks/inspector.js` tests the inspector's wiring;
 `VIEW=390x844@3m node web/cdp.mjs http://localhost:8137/
 web/checks/touch.mjs 2000` tests the phone layout by touch. Chrome fails
@@ -132,6 +140,8 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
   - `registerData`, `Engine.newCpu`, `Engine.newGpu` (async), `load` (returns
     `[width, height]`) and `render(film, paper, params, maxDim, interactive)`
     (a Promise of `Rendered`);
+  - `balancePrint(film, paper, params)`: the helper's `balance_print`, as
+    `Balanced` (`mFilterShift`, `yFilterShift`, `elapsedMs`, `missing`);
   - `setInstance` and the panic hook, which broadcasts panics on
     `negs-engine-panic`;
   - `Rendered` carries the RGBA, backend, `elapsedMs`, `stages` and
@@ -141,7 +151,11 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
   The engine state is an `Rc<RefCell<State>>`, so `render` can return a
   `'static` future. It caches the pipeline (by
   `preview_pipeline_cache_key`), one resampled source per kind (interactive,
-  settled), the metering frame and the metered auto-exposure EV.
+  settled), the metering frame and the metered auto-exposure EV. The key
+  leaves out what `Pipeline::with_params` follows: the enlarger's shifts,
+  preflash and exposure normalization (it re-filters the enlarger), and
+  exposure compensation. Anything new a pipeline's build reads must go in
+  the key, or be redone in `with_params`.
 - `crates/spektrafilm-core/src/data_fs.rs` reads data from disk natively and
   from a registry in the browser. It records misses, which `render` returns,
   and the page fetches them and retries (`web/engine.js`).
@@ -201,7 +215,12 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     engine, since a canvas transfers once); otherwise the page draws the
     bytes. The automation hook (`?image=…`) also saves what the canvas shows
     as `<name>-canvas.ppm`; `?present=0` reads the bytes back instead;
-  - `web/engine.js`: render-and-fetch loop inside the worker;
+  - `web/engine.js`: render-and-fetch loop inside the worker, and the
+    same for Balance Print;
+  - `controls.js` kind `action` is a command button; `actions` in `app.js`
+    runs it and says when it's enabled (Balance Print: `balancePrint`).
+    `showMessage(text, error, ms)` with `ms` hides itself then and survives
+    the renders that follow (`pump` hides other messages after a render);
   - `web/worker.js`: the engine (either build) in a worker;
   - `web/build.sh` and `web/serve.mjs`: build and serve;
   - `web/make-catalog.mjs`, `web/bench.sh`, `web/cdp.mjs` and

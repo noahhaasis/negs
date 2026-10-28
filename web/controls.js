@@ -7,6 +7,8 @@
 const slider = (label, path, min, max, step) => ({ kind: "slider", label, path, min, max, step });
 const toggle = (label, path) => ({ kind: "toggle", label, path });
 const choice = (label, path, options) => ({ kind: "choice", label, path, options });
+// A command rather than a value: app.js runs `action`.
+const action = (label, action, help) => ({ kind: "action", label, action, help });
 // One lane of a grain array that stays null until edited, so the film's
 // preset from the catalog applies. B&W films have one emulsion: they show
 // the lane under `bw`, or hide it when that is null.
@@ -98,6 +100,7 @@ export const SECTIONS = [
       slider("Preflash exposure", "enlarger.preflash_exposure", 0, 0.5, 0.01),
       slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50, 50, 0.1),
       slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50, 50, 0.1),
+      action("Balance Print", "balancePrint", "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base."),
     ] },
     { title: "Print Diffusion", enable: "enlarger.diffusion_filter.active", controls: [
       choice("Filter", "enlarger.diffusion_filter.filter_family", DIFFUSION_FILTERS),

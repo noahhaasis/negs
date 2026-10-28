@@ -76,6 +76,52 @@ pub fn catalog(stocks: Vec<String>) -> Result<String, JsError> {
     Ok(catalog.to_string())
 }
 
+/// The enlarger M/Y filter shifts that print a mid-grey neutral with these
+/// settings, as the native helper's `balance_print`
+/// ([`spektrafilm_core::print_balance`]); image-independent, on the CPU.
+#[wasm_bindgen(js_name = balancePrint)]
+pub fn balance_print(film: &str, paper: &str, params_json: &str) -> Result<Balanced, JsError> {
+    let started = web_time::Instant::now();
+    let params = parse_params(params_json).map_err(js_error)?;
+    let data = Path::new(DATA_DIR);
+    data_fs::take_missing();
+    let solved = (|| -> Result<(f64, f64), String> {
+        spektrafilm_core::print_balance::solve_neutral_filter_shifts(
+            profile::load_profile_by_name(data, film).map_err(|e| e.to_string())?,
+            profile::load_profile_by_name(data, paper).map_err(|e| e.to_string())?,
+            &params,
+            data,
+            spektrafilm_core::print_balance::MIDGRAY,
+        )
+    })();
+    // A missing neutral-filter database falls back silently, so check even
+    // when it solved.
+    let missing = missing();
+    if !missing.is_empty() {
+        return Ok(Balanced { m_filter_shift: 0.0, y_filter_shift: 0.0, elapsed_ms: 0.0, missing });
+    }
+    let (m, y) = solved.map_err(|e| JsError::new(&e))?;
+    Ok(Balanced {
+        m_filter_shift: m,
+        y_filter_shift: y,
+        elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        missing,
+    })
+}
+
+#[wasm_bindgen(getter_with_clone)]
+pub struct Balanced {
+    #[wasm_bindgen(js_name = mFilterShift)]
+    pub m_filter_shift: f64,
+    #[wasm_bindgen(js_name = yFilterShift)]
+    pub y_filter_shift: f64,
+    #[wasm_bindgen(js_name = elapsedMs)]
+    pub elapsed_ms: f64,
+    /// Data files the solver read but nobody registered, as
+    /// [`Rendered::missing`]: register them and solve again.
+    pub missing: Vec<String>,
+}
+
 /// The module's memory, which only grows: its high-water mark. wasm32 caps
 /// it at 4 GiB.
 #[wasm_bindgen(js_name = memoryBytes)]

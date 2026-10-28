@@ -223,7 +223,8 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    Every control presents its frame on WebGPU (none reads back or falls
    to the CPU). Test card at a 1200 px view, after moving each control
    (`web/checks/controls.js`): every frame is Resident at 13 to 56 ms
-   (warm), except these, which rebuild the spectral pipeline:
+   (warm), except these, which rebuilt the spectral pipeline until piece 4
+   (item 12; now every one of them is a 15–32 ms frame):
 
    | Control | Rebuild | Frame |
    |---|---|---|
@@ -291,6 +292,83 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    `100dvh` with its toolbars, the safe areas, and whether WebGPU runs in
    its worker. The 24 MP ARW takes 954 MiB in the engine at a phone's
    preview size, which iOS may not allow a tab (piece 6's memory caps).
+
+12. **Enlarger shifts without a rebuild, and Balance Print** (MVP
+   piece 4). The magenta and yellow shifts, the preflash (exposure and its
+   shifts), Exposure compensation and the print exposure normalization
+   left `preview_pipeline_cache_key`. `Pipeline::with_params`, which every
+   cached render already goes through, now re-filters the enlarger: the
+   print illuminant from the neutral C/M/Y plus the shifts, and the
+   preflash's raw exposure, in a `filter_enlarger` that `new_with_spectral`
+   calls too, so both take the same f32 → f64 route. It then renormalizes
+   the print exposure as before. Nothing else a build makes reads these
+   values: the colour reference and the chain's parameters are made per
+   render from the pipeline's fields, and the GPU caches only the TC LUT
+   (by content). The simplified `Pipeline::new` (tests only) keeps its
+   enlarger as built.
+
+   The key is shared, so the desktop helper (macOS, Linux) and the egui
+   GUI reuse their pipeline across these edits too. I kept one key rather
+   than a web-only one: the update is exact (below), and a second key
+   would be a second list of what a pipeline can't change. On the 4.2 MP
+   card at the helper's limited preview, an enlarger edit there now takes
+   about 167 ms instead of 300 ms.
+
+   Rebuilt against updated:
+
+   - A core test (`with_params_refilters_the_enlarger_like_a_new_pipeline`)
+     builds a pipeline with a magenta shift and a preflash, updates it to
+     six other combinations of shifts, preflash, normalization,
+     compensation and EV, and compares each with a pipeline built for
+     them: the illuminant, the preflash raw and the exposure factor bit
+     for bit, the params, and the CPU-processed image. All equal; without
+     the re-filter it fails on the first case.
+   - In the browser (`web/checks/updated.js`), four cumulative edits made
+     with `negs.edit` against the same params rendered fresh with
+     `?params=`, the card at 1200 px on WebGPU: byte-identical, and none
+     of the edits rebuilt.
+   - The helper: one session rendering default, two enlarger edits and
+     default again, against fresh sessions and the previous binary:
+     byte-identical previews.
+   - The CLI (which builds its pipeline once) with `wgpu` and `cpu`, card
+     default and with shifts, preflash and compensation, and the ARW:
+     byte-identical to before.
+
+   Every enlarger edit, test card in a 772×431 view
+   (`web/checks/enlarger.js`), WebGPU:
+
+   | Control | Before | After |
+   |---|---|---|
+   | Magenta, Yellow shift | 171–212 ms (rebuild 122–138, re-meter 32–49) | 15–17 ms (first 36) |
+   | Preflash exposure, magenta, yellow | 161–219 ms (rebuild 117–141, re-meter 29–44) | 15–16 ms |
+   | Exposure compensation (toggle) | 223–225 ms (rebuild 138–142) | 15–16 ms |
+   | Print exposure, Exposure (EV), for scale | 41–49 ms | 16–17 ms |
+
+   A rebuild also re-metered, because the metered EV is kept by the
+   pipeline's key; the metering doesn't read the enlarger, so it now stays.
+   `web/checks/controls.js` has no control left that rebuilds (99 rows,
+   all presented, 16–65 ms).
+
+   **Balance Print** is `balancePrint(film, paper, params)` in the wasm
+   crate, `print_balance::solve_neutral_filter_shifts` as the helper's
+   `balance_print` calls it, on the CPU. It answers the files it missed as
+   `render` does, and the worker fetches them and solves again (a missing
+   neutral-filter database falls back silently, so it checks even when it
+   solved). For four cases (Portra 400 on Endura, the same with a tuned
+   film base, Gold 200 on Crystal Archive with shifts and preflash, Vision3
+   250D on 2383) it gives the native helper's shifts to every printed
+   digit, in 177–286 ms (native 158–203 ms). The button sits at the end of
+   Enlarger as on macOS, with its help text as a tooltip; it reads
+   "Balancing…" and is disabled while it runs, while scanning film and
+   until the engine has started, sets both shifts as one change and shows
+   "Print balanced: magenta -0.01, yellow 0.01" for four seconds (macOS
+   puts this in its status line; the page has none). The frame after it
+   doesn't rebuild. `web/checks/balance.js` checks it.
+
+   Default renders are byte-identical to before (card at 200, 1200 and
+   2048 px and the ARW, bytes and canvas; card and ARW on the CPU).
+   Benchmarks, before / after this piece: card 8–15 / 7–14, 26–30 /
+   29–36, 58–71 / 60–72 ms; ARW 71–89 / 74–84 ms.
 
 ## Limits and open problems
 
