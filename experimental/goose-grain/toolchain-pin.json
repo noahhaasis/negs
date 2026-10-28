@@ -1,0 +1,8 @@
+{
+  "release": "v2026.3",
+  "commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+  "runtime": "4d3da949e563",
+  "compiler_artifact": "goose-v2026.3-macos-arm64.tar.gz",
+  "compiler_sha256": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+  "source_sha256": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+}

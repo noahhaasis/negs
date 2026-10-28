@@ -1,0 +1,1613 @@
+{
+  "measurement_notes": [
+    "All durations are internal native elapsed times; process startup and language bridges are excluded.",
+    "The host was not CPU-affinity-pinned or otherwise isolated. The 60 MP parallel and IIR diagnostic runs have substantial spread; pooled medians are descriptive, and paired batch ratios are retained.",
+    "Full grain favors Rust in every measured configuration and paired batch; these results characterize this implementation on macOS arm64."
+  ],
+  "measurement_source_revision": "38722c36f72ae3c6a0113c492b98a4c39032359e",
+  "created_utc": "2026-10-28T06:08:34.933983+00:00",
+  "platform": "macOS 26.5.2 arm64, Apple M1 Pro, 10 CPU cores, 32 GiB RAM",
+  "build": {
+    "release": "v2026.3",
+    "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+    "runtime": "goose runtime 4d3da949e563",
+    "artifacts": {
+      "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+      "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+    },
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+    "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+    "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+    "binary_sha256": {
+      "target/release/goose-grain-experiment": "00dc415a99afa004e164d7dac83f6055497a45ba38f994fffe679c0367ddeeca",
+      "target/goose/goose-bench": "ef77940b57fb12cf5369276189b31081d478cc7e11bd377d44150a2291a5bd87"
+    }
+  },
+  "validation": {
+    "differential_cases": 478,
+    "max_bit_differences": 0,
+    "malformed_rejections": 8,
+    "full_resolution": [
+      {
+        "fixture": "leica60",
+        "language": "rust",
+        "budget": 1,
+        "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+      },
+      {
+        "fixture": "leica60",
+        "language": "goose",
+        "budget": 1,
+        "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+      },
+      {
+        "fixture": "leica60",
+        "language": "rust",
+        "budget": 4,
+        "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+      },
+      {
+        "fixture": "leica60",
+        "language": "goose",
+        "budget": 4,
+        "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+      },
+      {
+        "fixture": "nikon24",
+        "language": "rust",
+        "budget": 1,
+        "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+      },
+      {
+        "fixture": "nikon24",
+        "language": "goose",
+        "budget": 1,
+        "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+      },
+      {
+        "fixture": "nikon24",
+        "language": "rust",
+        "budget": 4,
+        "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+      },
+      {
+        "fixture": "nikon24",
+        "language": "goose",
+        "budget": 4,
+        "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+      }
+    ]
+  },
+  "results": [
+    {
+      "fixture": "leica60",
+      "metadata_sha256": "03f8a2a4d52fb21e1d18a49e11929fbdb65676a672212e00cdecf842198ec68d",
+      "width": 9520,
+      "height": 6336,
+      "effects": {
+        "dye_sigmas": [
+          [
+            0.2931172705374099,
+            0.30283050417942203,
+            0.282077185465863
+          ],
+          [
+            0.1853836392859965,
+            0.1915268276368227,
+            0.17840127640837428
+          ],
+          [
+            0.1465586352687049,
+            0.15141525208971102,
+            0.1410385927329315
+          ]
+        ],
+        "micro_blur": 5.44,
+        "micro_sigma": 0.272,
+        "multilayer": true,
+        "pixel_blur": 0.89,
+        "sharpen_amount": 1.5,
+        "sharpen_sigma": 3.5
+      },
+      "mode": "grain",
+      "sigma": null,
+      "workers": 1,
+      "build": {
+        "release": "v2026.3",
+        "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+        "runtime": "goose runtime 4d3da949e563",
+        "artifacts": {
+          "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+          "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+        },
+        "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+        "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+        "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+        "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+        "binary_sha256": {
+          "target/release/goose-grain-experiment": "00dc415a99afa004e164d7dac83f6055497a45ba38f994fffe679c0367ddeeca",
+          "target/goose/goose-bench": "ef77940b57fb12cf5369276189b31081d478cc7e11bd377d44150a2291a5bd87"
+        }
+      },
+      "platform": "macOS-26.5.2-arm64-arm-64bit",
+      "restoration": "fresh deep copy of immutable input immediately before each timer; warm cache, no explicit cache flush",
+      "timed_boundary": "complete native operation; includes calibration, RNG init, scratch and required worker copies/assembly; excludes startup, fixture load, pools, restoration and checksum",
+      "rows": [
+        {
+          "hashes": [
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+          ],
+          "language": "rust",
+          "ms": [
+            106318.926792,
+            104844.5835,
+            103981.410166,
+            105018.997708,
+            103810.563042,
+            103660.74991700001,
+            104919.4805
+          ],
+          "retained_rss_bytes": [
+            6280675328,
+            6280691712,
+            6280724480,
+            6280724480,
+            6280724480,
+            6280724480,
+            6280740864
+          ],
+          "serial_channels": false,
+          "workers": 1,
+          "batch": 0,
+          "peak_rss_bytes": 6521929728,
+          "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "grain_workers": 0,
+          "serial_channels": false,
+          "ms": [
+            109627.12,
+            109343.422,
+            109816.974,
+            111361.64,
+            110610.204,
+            109974.855,
+            109647.769
+          ],
+          "retained_rss_bytes": [
+            8687960064,
+            8687992832,
+            8687992832,
+            8687992832,
+            8687992832,
+            8687992832,
+            8687992832
+          ],
+          "checksums": [
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005
+          ],
+          "batch": 0,
+          "peak_rss_bytes": 8687992832,
+          "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "grain_workers": 0,
+          "serial_channels": false,
+          "ms": [
+            109846.622,
+            110141.97,
+            109637.863,
+            109335.314,
+            109594.147,
+            109503.457,
+            109262.187
+          ],
+          "retained_rss_bytes": [
+            8687960064,
+            8687992832,
+            8687992832,
+            8687992832,
+            8687992832,
+            8687992832,
+            8687992832
+          ],
+          "checksums": [
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005
+          ],
+          "batch": 1,
+          "peak_rss_bytes": 8687992832,
+          "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+        },
+        {
+          "hashes": [
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+          ],
+          "language": "rust",
+          "ms": [
+            103653.872875,
+            103649.694334,
+            103723.894042,
+            103552.626167,
+            103641.82625,
+            103645.67416699999,
+            103582.392833
+          ],
+          "retained_rss_bytes": [
+            6280658944,
+            6280675328,
+            6280708096,
+            6280708096,
+            6280708096,
+            6280708096,
+            6280724480
+          ],
+          "serial_channels": false,
+          "workers": 1,
+          "batch": 1,
+          "peak_rss_bytes": 6521913344,
+          "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+        }
+      ],
+      "summary": {
+        "rust": {
+          "median_ms": 103692.3219795,
+          "min_ms": 103552.626167,
+          "max_ms": 106318.926792,
+          "p25_ms": 103646.67920874999,
+          "p75_ms": 104628.7901665,
+          "calls": 14,
+          "peak_rss_bytes": 6521929728,
+          "retained_rss_bytes": 6280740864
+        },
+        "goose": {
+          "median_ms": 109642.81599999999,
+          "min_ms": 109262.187,
+          "max_ms": 111361.64,
+          "p25_ms": 109526.1295,
+          "p75_ms": 109942.79675,
+          "calls": 14,
+          "peak_rss_bytes": 8687992832,
+          "retained_rss_bytes": 8687992832
+        }
+      },
+      "rust_over_goose": 0.9457283729332527,
+      "batch_ratios": [
+        0.9547211116926241,
+        0.9457227142522492
+      ]
+    },
+    {
+      "fixture": "leica60",
+      "metadata_sha256": "03f8a2a4d52fb21e1d18a49e11929fbdb65676a672212e00cdecf842198ec68d",
+      "width": 9520,
+      "height": 6336,
+      "effects": {
+        "dye_sigmas": [
+          [
+            0.2931172705374099,
+            0.30283050417942203,
+            0.282077185465863
+          ],
+          [
+            0.1853836392859965,
+            0.1915268276368227,
+            0.17840127640837428
+          ],
+          [
+            0.1465586352687049,
+            0.15141525208971102,
+            0.1410385927329315
+          ]
+        ],
+        "micro_blur": 5.44,
+        "micro_sigma": 0.272,
+        "multilayer": true,
+        "pixel_blur": 0.89,
+        "sharpen_amount": 1.5,
+        "sharpen_sigma": 3.5
+      },
+      "mode": "grain",
+      "sigma": null,
+      "workers": 4,
+      "build": {
+        "release": "v2026.3",
+        "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+        "runtime": "goose runtime 4d3da949e563",
+        "artifacts": {
+          "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+          "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+        },
+        "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+        "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+        "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+        "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+        "binary_sha256": {
+          "target/release/goose-grain-experiment": "00dc415a99afa004e164d7dac83f6055497a45ba38f994fffe679c0367ddeeca",
+          "target/goose/goose-bench": "ef77940b57fb12cf5369276189b31081d478cc7e11bd377d44150a2291a5bd87"
+        }
+      },
+      "platform": "macOS-26.5.2-arm64-arm-64bit",
+      "restoration": "fresh deep copy of immutable input immediately before each timer; warm cache, no explicit cache flush",
+      "timed_boundary": "complete native operation; includes calibration, RNG init, scratch and required worker copies/assembly; excludes startup, fixture load, pools, restoration and checksum",
+      "rows": [
+        {
+          "hashes": [
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+          ],
+          "language": "rust",
+          "ms": [
+            35124.403458,
+            33853.150833,
+            37949.478083,
+            61973.415958,
+            38730.851125,
+            63360.585,
+            41557.642125
+          ],
+          "retained_rss_bytes": [
+            9176547328,
+            9176563712,
+            9176629248,
+            6763855872,
+            8935391232,
+            6763937792,
+            8935456768
+          ],
+          "serial_channels": false,
+          "workers": 4,
+          "batch": 0,
+          "peak_rss_bytes": 9417834496,
+          "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+        },
+        {
+          "language": "goose",
+          "workers": 4,
+          "grain_workers": 3,
+          "serial_channels": false,
+          "ms": [
+            57581.109,
+            61664.188,
+            60271.208,
+            59685.769,
+            62380.319,
+            62751.243,
+            60651.717
+          ],
+          "retained_rss_bytes": [
+            14933901312,
+            14933934080,
+            14933934080,
+            14933934080,
+            14933934080,
+            14933934080,
+            14580236288
+          ],
+          "checksums": [
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005
+          ],
+          "batch": 0,
+          "peak_rss_bytes": 14933934080,
+          "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+        },
+        {
+          "language": "goose",
+          "workers": 4,
+          "grain_workers": 3,
+          "serial_channels": false,
+          "ms": [
+            66803.876,
+            81248.659,
+            80488.818,
+            81571.711,
+            80940.229,
+            63233.394,
+            63982.214
+          ],
+          "retained_rss_bytes": [
+            16409477120,
+            12677709824,
+            14601535488,
+            14482407424,
+            14483423232,
+            14483423232,
+            14483423232
+          ],
+          "checksums": [
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005,
+            12554497807628376005
+          ],
+          "batch": 1,
+          "peak_rss_bytes": 16409509888,
+          "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+        },
+        {
+          "hashes": [
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a",
+            "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+          ],
+          "language": "rust",
+          "ms": [
+            52208.922667000006,
+            69610.641583,
+            48482.765625,
+            49571.387666,
+            68875.05458299999,
+            49694.924208000004,
+            124908.621334
+          ],
+          "retained_rss_bytes": [
+            9176530944,
+            6763855872,
+            9900490752,
+            8935374848,
+            6763823104,
+            8935473152,
+            6764216320
+          ],
+          "serial_channels": false,
+          "workers": 4,
+          "batch": 1,
+          "peak_rss_bytes": 9900490752,
+          "output_sha256": "c5171c4d3d893aae64d281395bbf13cc155f6fe35d36ef6949e8eeaa7c0e185a"
+        }
+      ],
+      "summary": {
+        "rust": {
+          "median_ms": 49633.155937,
+          "min_ms": 33853.150833,
+          "max_ms": 124908.621334,
+          "p25_ms": 39437.548875,
+          "p75_ms": 63013.7927395,
+          "calls": 14,
+          "peak_rss_bytes": 9900490752,
+          "retained_rss_bytes": 9900490752
+        },
+        "goose": {
+          "median_ms": 62992.3185,
+          "min_ms": 57581.109,
+          "max_ms": 81571.711,
+          "p25_ms": 60904.834749999995,
+          "p75_ms": 77067.5825,
+          "calls": 14,
+          "peak_rss_bytes": 16409509888,
+          "retained_rss_bytes": 16409477120
+        }
+      },
+      "rust_over_goose": 0.7879239424565712,
+      "batch_ratios": [
+        0.6385779832910584,
+        0.6486481472122004
+      ]
+    },
+    {
+      "fixture": "nikon24",
+      "metadata_sha256": "ad3cc7503ca2c2315480bc13eeccc8c6a9244da75a390b8767da58152181f7e6",
+      "width": 6048,
+      "height": 4024,
+      "effects": {
+        "dye_sigmas": [
+          [
+            0.186215677753178,
+            0.19238643794927987,
+            0.1792019766489012
+          ],
+          [
+            0.11777313554639775,
+            0.12167586696927557,
+            0.11333728148296716
+          ],
+          [
+            0.093107838876589,
+            0.09619321897463994,
+            0.0896009883244506
+          ]
+        ],
+        "micro_blur": 3.456,
+        "micro_sigma": 0.17279999999999998,
+        "multilayer": true,
+        "pixel_blur": 0.89,
+        "sharpen_amount": 1.5,
+        "sharpen_sigma": 3.5
+      },
+      "mode": "blur",
+      "sigma": "0.89",
+      "workers": 1,
+      "build": {
+        "release": "v2026.3",
+        "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+        "runtime": "goose runtime 4d3da949e563",
+        "artifacts": {
+          "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+          "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+        },
+        "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+        "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+        "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+        "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+        "binary_sha256": {
+          "target/release/goose-grain-experiment": "00dc415a99afa004e164d7dac83f6055497a45ba38f994fffe679c0367ddeeca",
+          "target/goose/goose-bench": "ef77940b57fb12cf5369276189b31081d478cc7e11bd377d44150a2291a5bd87"
+        }
+      },
+      "platform": "macOS-26.5.2-arm64-arm-64bit",
+      "restoration": "fresh deep copy of immutable input immediately before each timer; warm cache, no explicit cache flush",
+      "timed_boundary": "complete native operation; includes calibration, RNG init, scratch and required worker copies/assembly; excludes startup, fixture load, pools, restoration and checksum",
+      "rows": [
+        {
+          "hashes": [
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd"
+          ],
+          "language": "rust",
+          "ms": [
+            316.36433400000004,
+            305.959917,
+            366.99954099999997,
+            203.42262499999998,
+            185.00720900000002,
+            183.173583,
+            181.59008400000002
+          ],
+          "retained_rss_bytes": [
+            1759313920,
+            1759313920,
+            1759313920,
+            1759313920,
+            1759313920,
+            1759313920,
+            1759313920
+          ],
+          "serial_channels": false,
+          "workers": 1,
+          "batch": 0,
+          "peak_rss_bytes": 1759461376,
+          "output_sha256": "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd"
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "grain_workers": 0,
+          "serial_channels": false,
+          "ms": [
+            432.67,
+            430.494,
+            417.508,
+            418.02,
+            433.389,
+            418.045,
+            415.264
+          ],
+          "retained_rss_bytes": [
+            2338291712,
+            2338324480,
+            2338324480,
+            2338324480,
+            2338324480,
+            2338324480,
+            2338324480
+          ],
+          "checksums": [
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622
+          ],
+          "batch": 0,
+          "peak_rss_bytes": 2338324480,
+          "output_sha256": "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd"
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "grain_workers": 0,
+          "serial_channels": false,
+          "ms": [
+            418.63,
+            417.588,
+            440.622,
+            422.56,
+            499.512,
+            428.887,
+            415.612
+          ],
+          "retained_rss_bytes": [
+            2338291712,
+            2338324480,
+            2338324480,
+            2338324480,
+            2338324480,
+            2338324480,
+            2338324480
+          ],
+          "checksums": [
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622,
+            15015298498659583622
+          ],
+          "batch": 1,
+          "peak_rss_bytes": 2338324480,
+          "output_sha256": "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd"
+        },
+        {
+          "hashes": [
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd",
+            "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd"
+          ],
+          "language": "rust",
+          "ms": [
+            175.819167,
+            175.938292,
+            176.053875,
+            176.16316700000002,
+            177.551708,
+            176.41566699999998,
+            176.244542
+          ],
+          "retained_rss_bytes": [
+            1759281152,
+            1759281152,
+            1759281152,
+            1759281152,
+            1759281152,
+            1759281152,
+            1759281152
+          ],
+          "serial_channels": false,
+          "workers": 1,
+          "batch": 1,
+          "peak_rss_bytes": 1759428608,
+          "output_sha256": "86860f196e0e61d08d91be6286c0c7d5ec46d2487913855c712d23cb366f4acd"
+        }
+      ],
+      "summary": {
+        "rust": {
+          "median_ms": 179.570896,
+          "min_ms": 175.819167,
+          "max_ms": 366.99954099999997,
+          "p25_ms": 176.18351075,
+          "p75_ms": 198.818771,
+          "calls": 14,
+          "peak_rss_bytes": 1759461376,
+          "retained_rss_bytes": 1759313920
+        },
+        "goose": {
+          "median_ms": 420.595,
+          "min_ms": 415.264,
+          "max_ms": 499.512,
+          "p25_ms": 417.696,
+          "p75_ms": 432.12600000000003,
+          "calls": 14,
+          "peak_rss_bytes": 2338324480,
+          "retained_rss_bytes": 2338324480
+        }
+      },
+      "rust_over_goose": 0.4269449137531354,
+      "batch_ratios": [
+        0.4866046119436902,
+        0.41689503739113976
+      ]
+    },
+    {
+      "fixture": "nikon24",
+      "metadata_sha256": "ad3cc7503ca2c2315480bc13eeccc8c6a9244da75a390b8767da58152181f7e6",
+      "width": 6048,
+      "height": 4024,
+      "effects": {
+        "dye_sigmas": [
+          [
+            0.186215677753178,
+            0.19238643794927987,
+            0.1792019766489012
+          ],
+          [
+            0.11777313554639775,
+            0.12167586696927557,
+            0.11333728148296716
+          ],
+          [
+            0.093107838876589,
+            0.09619321897463994,
+            0.0896009883244506
+          ]
+        ],
+        "micro_blur": 3.456,
+        "micro_sigma": 0.17279999999999998,
+        "multilayer": true,
+        "pixel_blur": 0.89,
+        "sharpen_amount": 1.5,
+        "sharpen_sigma": 3.5
+      },
+      "mode": "blur",
+      "sigma": "3.5",
+      "workers": 1,
+      "build": {
+        "release": "v2026.3",
+        "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+        "runtime": "goose runtime 4d3da949e563",
+        "artifacts": {
+          "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+          "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+        },
+        "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+        "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+        "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+        "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+        "binary_sha256": {
+          "target/release/goose-grain-experiment": "00dc415a99afa004e164d7dac83f6055497a45ba38f994fffe679c0367ddeeca",
+          "target/goose/goose-bench": "ef77940b57fb12cf5369276189b31081d478cc7e11bd377d44150a2291a5bd87"
+        }
+      },
+      "platform": "macOS-26.5.2-arm64-arm-64bit",
+      "restoration": "fresh deep copy of immutable input immediately before each timer; warm cache, no explicit cache flush",
+      "timed_boundary": "complete native operation; includes calibration, RNG init, scratch and required worker copies/assembly; excludes startup, fixture load, pools, restoration and checksum",
+      "rows": [
+        {
+          "hashes": [
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21"
+          ],
+          "language": "rust",
+          "ms": [
+            1889.866625,
+            1796.369542,
+            1623.884959,
+            1299.5365,
+            1415.01275,
+            1377.0565829999998,
+            948.147667
+          ],
+          "retained_rss_bytes": [
+            1954054144,
+            1954054144,
+            1954054144,
+            1954054144,
+            1954054144,
+            1954054144,
+            1954054144
+          ],
+          "serial_channels": false,
+          "workers": 1,
+          "batch": 0,
+          "peak_rss_bytes": 1954201600,
+          "output_sha256": "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21"
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "grain_workers": 0,
+          "serial_channels": false,
+          "ms": [
+            1238.677,
+            1283.176,
+            1253.372,
+            1252.142,
+            1087.031,
+            1614.785,
+            1855.483
+          ],
+          "retained_rss_bytes": [
+            2533015552,
+            2533048320,
+            2533048320,
+            2533048320,
+            2533048320,
+            2533048320,
+            2533048320
+          ],
+          "checksums": [
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543
+          ],
+          "batch": 0,
+          "peak_rss_bytes": 2533048320,
+          "output_sha256": "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21"
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "grain_workers": 0,
+          "serial_channels": false,
+          "ms": [
+            937.732,
+            797.906,
+            811.001,
+            831.108,
+            805.472,
+            826.492,
+            828.352
+          ],
+          "retained_rss_bytes": [
+            2533015552,
+            2533048320,
+            2533048320,
+            2533048320,
+            2533048320,
+            2533048320,
+            2533048320
+          ],
+          "checksums": [
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543,
+            15457454849434797543
+          ],
+          "batch": 1,
+          "peak_rss_bytes": 2533048320,
+          "output_sha256": "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21"
+        },
+        {
+          "hashes": [
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21",
+            "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21"
+          ],
+          "language": "rust",
+          "ms": [
+            661.100125,
+            673.182375,
+            669.0214159999999,
+            943.273833,
+            1381.479833,
+            1763.510334,
+            1799.999167
+          ],
+          "retained_rss_bytes": [
+            1954004992,
+            1954004992,
+            1954004992,
+            1954004992,
+            1954004992,
+            1954004992,
+            1954004992
+          ],
+          "serial_channels": false,
+          "workers": 1,
+          "batch": 1,
+          "peak_rss_bytes": 1954168832,
+          "output_sha256": "e74533d849e983d6583986ef61e8f5cf8d41f0d7cd0eb9c3ac12a7a2bfdd4e21"
+        }
+      ],
+      "summary": {
+        "rust": {
+          "median_ms": 1379.268208,
+          "min_ms": 661.100125,
+          "max_ms": 1889.866625,
+          "p25_ms": 944.4922915,
+          "p75_ms": 1728.6039902500002,
+          "calls": 14,
+          "peak_rss_bytes": 1954201600,
+          "retained_rss_bytes": 1954054144
+        },
+        "goose": {
+          "median_ms": 1012.3815,
+          "min_ms": 797.906,
+          "max_ms": 1855.483,
+          "p25_ms": 826.957,
+          "p75_ms": 1253.0645,
+          "calls": 14,
+          "peak_rss_bytes": 2533048320,
+          "retained_rss_bytes": 2533048320
+        }
+      },
+      "rust_over_goose": 1.3623996566511736,
+      "batch_ratios": [
+        1.1289647048122984,
+        1.1412982013135033
+      ]
+    },
+    {
+      "fixture": "nikon24",
+      "metadata_sha256": "ad3cc7503ca2c2315480bc13eeccc8c6a9244da75a390b8767da58152181f7e6",
+      "width": 6048,
+      "height": 4024,
+      "effects": {
+        "dye_sigmas": [
+          [
+            0.186215677753178,
+            0.19238643794927987,
+            0.1792019766489012
+          ],
+          [
+            0.11777313554639775,
+            0.12167586696927557,
+            0.11333728148296716
+          ],
+          [
+            0.093107838876589,
+            0.09619321897463994,
+            0.0896009883244506
+          ]
+        ],
+        "micro_blur": 3.456,
+        "micro_sigma": 0.17279999999999998,
+        "multilayer": true,
+        "pixel_blur": 0.89,
+        "sharpen_amount": 1.5,
+        "sharpen_sigma": 3.5
+      },
+      "mode": "grain",
+      "sigma": null,
+      "workers": 1,
+      "build": {
+        "release": "v2026.3",
+        "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+        "runtime": "goose runtime 4d3da949e563",
+        "artifacts": {
+          "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+          "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+        },
+        "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+        "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+        "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+        "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+        "binary_sha256": {
+          "target/release/goose-grain-experiment": "00dc415a99afa004e164d7dac83f6055497a45ba38f994fffe679c0367ddeeca",
+          "target/goose/goose-bench": "ef77940b57fb12cf5369276189b31081d478cc7e11bd377d44150a2291a5bd87"
+        }
+      },
+      "platform": "macOS-26.5.2-arm64-arm-64bit",
+      "restoration": "fresh deep copy of immutable input immediately before each timer; warm cache, no explicit cache flush",
+      "timed_boundary": "complete native operation; includes calibration, RNG init, scratch and required worker copies/assembly; excludes startup, fixture load, pools, restoration and checksum",
+      "rows": [
+        {
+          "hashes": [
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+          ],
+          "language": "rust",
+          "ms": [
+            41357.613333,
+            44051.06125,
+            52004.654125,
+            52081.964959,
+            51534.504917,
+            42312.46475,
+            41532.702709
+          ],
+          "retained_rss_bytes": [
+            2635792384,
+            2635808768,
+            2635825152,
+            2635825152,
+            2635825152,
+            2635825152,
+            2635825152
+          ],
+          "serial_channels": false,
+          "workers": 1,
+          "batch": 0,
+          "peak_rss_bytes": 2635956224,
+          "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "grain_workers": 0,
+          "serial_channels": false,
+          "ms": [
+            45238.462,
+            44730.267,
+            45193.243,
+            44661.968,
+            51781.262,
+            48031.141,
+            45245.935
+          ],
+          "retained_rss_bytes": [
+            3506618368,
+            3506651136,
+            3506651136,
+            3506651136,
+            3506651136,
+            3506651136,
+            3506651136
+          ],
+          "checksums": [
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542
+          ],
+          "batch": 0,
+          "peak_rss_bytes": 3506651136,
+          "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "grain_workers": 0,
+          "serial_channels": false,
+          "ms": [
+            44836.85,
+            44653.431,
+            44740.409,
+            44494.693,
+            44556.47,
+            44559.1,
+            44427.893
+          ],
+          "retained_rss_bytes": [
+            3506618368,
+            3506651136,
+            3506651136,
+            3506651136,
+            3506651136,
+            3506651136,
+            3506651136
+          ],
+          "checksums": [
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542
+          ],
+          "batch": 1,
+          "peak_rss_bytes": 3506651136,
+          "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+        },
+        {
+          "hashes": [
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+          ],
+          "language": "rust",
+          "ms": [
+            41036.944208,
+            41043.900209,
+            41153.659750000006,
+            41192.098959,
+            41395.113792,
+            41192.09225,
+            41223.875041
+          ],
+          "retained_rss_bytes": [
+            2635825152,
+            2635841536,
+            2635841536,
+            2635841536,
+            2635841536,
+            2635841536,
+            2635841536
+          ],
+          "serial_channels": false,
+          "workers": 1,
+          "batch": 1,
+          "peak_rss_bytes": 2636005376,
+          "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+        }
+      ],
+      "summary": {
+        "rust": {
+          "median_ms": 41376.3635625,
+          "min_ms": 41036.944208,
+          "max_ms": 52081.964959,
+          "p25_ms": 41192.09392725,
+          "p75_ms": 43616.412125,
+          "calls": 14,
+          "peak_rss_bytes": 2636005376,
+          "retained_rss_bytes": 2635841536
+        },
+        "goose": {
+          "median_ms": 44735.338,
+          "min_ms": 44427.893,
+          "max_ms": 51781.262,
+          "p25_ms": 44582.68275,
+          "p75_ms": 45227.157250000004,
+          "calls": 14,
+          "peak_rss_bytes": 3506651136,
+          "retained_rss_bytes": 3506651136
+        }
+      },
+      "rust_over_goose": 0.9249145175230373,
+      "batch_ratios": [
+        0.973752406746277,
+        0.9244372586071083
+      ]
+    },
+    {
+      "fixture": "nikon24",
+      "metadata_sha256": "ad3cc7503ca2c2315480bc13eeccc8c6a9244da75a390b8767da58152181f7e6",
+      "width": 6048,
+      "height": 4024,
+      "effects": {
+        "dye_sigmas": [
+          [
+            0.186215677753178,
+            0.19238643794927987,
+            0.1792019766489012
+          ],
+          [
+            0.11777313554639775,
+            0.12167586696927557,
+            0.11333728148296716
+          ],
+          [
+            0.093107838876589,
+            0.09619321897463994,
+            0.0896009883244506
+          ]
+        ],
+        "micro_blur": 3.456,
+        "micro_sigma": 0.17279999999999998,
+        "multilayer": true,
+        "pixel_blur": 0.89,
+        "sharpen_amount": 1.5,
+        "sharpen_sigma": 3.5
+      },
+      "mode": "grain",
+      "sigma": null,
+      "workers": 4,
+      "build": {
+        "release": "v2026.3",
+        "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+        "runtime": "goose runtime 4d3da949e563",
+        "artifacts": {
+          "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+          "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+        },
+        "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+        "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+        "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+        "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+        "binary_sha256": {
+          "target/release/goose-grain-experiment": "00dc415a99afa004e164d7dac83f6055497a45ba38f994fffe679c0367ddeeca",
+          "target/goose/goose-bench": "ef77940b57fb12cf5369276189b31081d478cc7e11bd377d44150a2291a5bd87"
+        }
+      },
+      "platform": "macOS-26.5.2-arm64-arm-64bit",
+      "restoration": "fresh deep copy of immutable input immediately before each timer; warm cache, no explicit cache flush",
+      "timed_boundary": "complete native operation; includes calibration, RNG init, scratch and required worker copies/assembly; excludes startup, fixture load, pools, restoration and checksum",
+      "rows": [
+        {
+          "hashes": [
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+          ],
+          "language": "rust",
+          "ms": [
+            12982.720125,
+            12957.13475,
+            13041.913959,
+            22961.767708,
+            13043.731875000001,
+            22919.777125,
+            22906.22225
+          ],
+          "retained_rss_bytes": [
+            4193927168,
+            4194009088,
+            4291379200,
+            3609919488,
+            4388749312,
+            2636414976,
+            2928492544
+          ],
+          "serial_channels": false,
+          "workers": 4,
+          "batch": 0,
+          "peak_rss_bytes": 4388782080,
+          "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+        },
+        {
+          "language": "goose",
+          "workers": 4,
+          "grain_workers": 3,
+          "serial_channels": false,
+          "ms": [
+            15629.029,
+            15590.087,
+            15631.264,
+            15606.736,
+            15577.94,
+            15636.662,
+            15631.239
+          ],
+          "retained_rss_bytes": [
+            6427639808,
+            6427672576,
+            6427672576,
+            6427672576,
+            6427672576,
+            6427672576,
+            6427672576
+          ],
+          "checksums": [
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542
+          ],
+          "batch": 0,
+          "peak_rss_bytes": 6427672576,
+          "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+        },
+        {
+          "language": "goose",
+          "workers": 4,
+          "grain_workers": 3,
+          "serial_channels": false,
+          "ms": [
+            15562.242,
+            15534.684,
+            15613.918,
+            15614.31,
+            15611.142,
+            15573.366,
+            15618.52
+          ],
+          "retained_rss_bytes": [
+            6622380032,
+            6622412800,
+            6622412800,
+            6622412800,
+            6622412800,
+            6622412800,
+            6622412800
+          ],
+          "checksums": [
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542,
+            10339702893350025542
+          ],
+          "batch": 1,
+          "peak_rss_bytes": 6622412800,
+          "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+        },
+        {
+          "hashes": [
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789",
+            "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+          ],
+          "language": "rust",
+          "ms": [
+            23049.992374999998,
+            13041.302167,
+            13024.532374999999,
+            13014.598082999999,
+            23049.815875,
+            13020.089292,
+            23040.196292
+          ],
+          "retained_rss_bytes": [
+            3804545024,
+            4388700160,
+            4096638976,
+            4388700160,
+            3512516608,
+            4194009088,
+            3220471808
+          ],
+          "serial_channels": false,
+          "workers": 4,
+          "batch": 1,
+          "peak_rss_bytes": 4388700160,
+          "output_sha256": "46f934d9ff007e8ff0482337f3c68b7df64b22cb50e5fe91449efff6d51c4789"
+        }
+      ],
+      "summary": {
+        "rust": {
+          "median_ms": 13042.822917000001,
+          "min_ms": 12957.13475,
+          "max_ms": 23049.992374999998,
+          "p25_ms": 13021.20006275,
+          "p75_ms": 22951.270062249998,
+          "calls": 14,
+          "peak_rss_bytes": 4388782080,
+          "retained_rss_bytes": 4388749312
+        },
+        "goose": {
+          "median_ms": 15612.529999999999,
+          "min_ms": 15534.684,
+          "max_ms": 15636.662,
+          "p25_ms": 15580.97675,
+          "p75_ms": 15626.40175,
+          "calls": 14,
+          "peak_rss_bytes": 6622412800,
+          "retained_rss_bytes": 6622412800
+        }
+      },
+      "rust_over_goose": 0.8354073886167074,
+      "batch_ratios": [
+        0.8345836376015426,
+        0.8353842510048272
+      ]
+    },
+    {
+      "fixture": "nikon24",
+      "metadata_sha256": "ad3cc7503ca2c2315480bc13eeccc8c6a9244da75a390b8767da58152181f7e6",
+      "width": 6048,
+      "height": 4024,
+      "effects": {
+        "dye_sigmas": [
+          [
+            0.186215677753178,
+            0.19238643794927987,
+            0.1792019766489012
+          ],
+          [
+            0.11777313554639775,
+            0.12167586696927557,
+            0.11333728148296716
+          ],
+          [
+            0.093107838876589,
+            0.09619321897463994,
+            0.0896009883244506
+          ]
+        ],
+        "micro_blur": 3.456,
+        "micro_sigma": 0.17279999999999998,
+        "multilayer": true,
+        "pixel_blur": 0.89,
+        "sharpen_amount": 1.5,
+        "sharpen_sigma": 3.5
+      },
+      "mode": "samplers",
+      "sigma": null,
+      "workers": 1,
+      "build": {
+        "release": "v2026.3",
+        "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+        "runtime": "goose runtime 4d3da949e563",
+        "artifacts": {
+          "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+          "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+        },
+        "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+        "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+        "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+        "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+        "binary_sha256": {
+          "target/release/goose-grain-experiment": "00dc415a99afa004e164d7dac83f6055497a45ba38f994fffe679c0367ddeeca",
+          "target/goose/goose-bench": "ef77940b57fb12cf5369276189b31081d478cc7e11bd377d44150a2291a5bd87"
+        }
+      },
+      "platform": "macOS-26.5.2-arm64-arm-64bit",
+      "restoration": "fresh deep copy of immutable input immediately before each timer; warm cache, no explicit cache flush",
+      "timed_boundary": "complete native operation; includes calibration, RNG init, scratch and required worker copies/assembly; excludes startup, fixture load, pools, restoration and checksum",
+      "rows": [
+        {
+          "checksums": [
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98
+          ],
+          "language": "rust",
+          "ms": [
+            13.999292,
+            15.498541,
+            15.576291000000001,
+            15.52675,
+            15.787208,
+            19.403667,
+            15.509791
+          ],
+          "workers": 1,
+          "batch": 0,
+          "peak_rss_bytes": 9109504
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "ms": [
+            15.115,
+            12.346,
+            24.996,
+            12.312,
+            15.084,
+            14.065,
+            21.403
+          ],
+          "checksums": [
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96
+          ],
+          "batch": 0,
+          "peak_rss_bytes": 2850816
+        },
+        {
+          "language": "goose",
+          "workers": 1,
+          "ms": [
+            14.208,
+            15.172,
+            16.116,
+            15.043,
+            15.005,
+            14.937,
+            14.194
+          ],
+          "checksums": [
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96,
+            14910041768484.96
+          ],
+          "batch": 1,
+          "peak_rss_bytes": 2850816
+        },
+        {
+          "checksums": [
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98,
+            14910041768484.98
+          ],
+          "language": "rust",
+          "ms": [
+            15.556417,
+            15.528666999999999,
+            15.431333,
+            15.624834,
+            15.647791000000002,
+            15.444790999999999,
+            15.464749999999999
+          ],
+          "workers": 1,
+          "batch": 1,
+          "peak_rss_bytes": 7847936
+        }
+      ],
+      "summary": {
+        "rust": {
+          "median_ms": 15.5277085,
+          "min_ms": 13.999292,
+          "max_ms": 19.403667,
+          "p25_ms": 15.473197749999999,
+          "p75_ms": 15.612698250000001,
+          "calls": 14,
+          "peak_rss_bytes": 9109504,
+          "retained_rss_bytes": null
+        },
+        "goose": {
+          "median_ms": 15.024000000000001,
+          "min_ms": 12.312,
+          "max_ms": 24.996,
+          "p25_ms": 14.197500000000002,
+          "p75_ms": 15.15775,
+          "calls": 14,
+          "peak_rss_bytes": 2850816,
+          "retained_rss_bytes": null
+        }
+      },
+      "rust_over_goose": 1.0335269235889242,
+      "batch_ratios": [
+        1.0293522938212676,
+        1.034899500166611
+      ]
+    }
+  ]
+}

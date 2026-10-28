@@ -1,0 +1,24 @@
+{
+  "camera": {
+    "film_format_mm": 35.0
+  },
+  "film_render": {
+    "grain": {
+      "active": true,
+      "blur": 0.89,
+      "blur_dye_clouds_um": 2.0,
+      "micro_structure": [
+        20.0,
+        1000.0
+      ],
+      "mult_usm_sigma": 3.5,
+      "mult_usm_amount": 1.5
+    }
+  },
+  "settings": {
+    "preview_mode": false,
+    "serial_grain": false,
+    "use_enlarger_lut": true,
+    "use_scanner_lut": true
+  }
+}

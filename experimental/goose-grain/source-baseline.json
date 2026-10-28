@@ -1,0 +1,80 @@
+{
+  "format": "negs-goose-source-baseline",
+  "version": 1,
+  "repository_commit": "38722c36f72ae3c6a0113c492b98a4c39032359e",
+  "note": "Preparation fingerprint, not benchmark results. Original implementation sources; local research files were not modified. Record the actual revision/diff again when fixtures are captured.",
+  "dependencies": {
+    "rand_mt": "5.0.0",
+    "libm": "0.2.16"
+  },
+  "files": {
+    "Cargo.toml": {
+      "sha256": "79f5dc602600aa6dd06e5c0e8362b526ca3e74a2a89d6bec61ae660a8eaf13d9",
+      "bytes": 1445
+    },
+    "Cargo.lock": {
+      "sha256": "31cff7c11e12238dbf6b7eb1504b483b39fa43abc1c5bcd374ce2d91d9d506b0",
+      "bytes": 135544
+    },
+    "crates/spektrafilm-cli/Cargo.toml": {
+      "sha256": "05ed7d9cf359ce69471ec23936aaeb02aad9ef4d9c8a729fc768524af2db10bb",
+      "bytes": 1159
+    },
+    "crates/spektrafilm-model/src/grain.rs": {
+      "sha256": "84e2a136776b4be628e652f33aada491bc0ac8ddf05c0adf8696f4b56a778e9c",
+      "bytes": 27530
+    },
+    "crates/spektrafilm-math/src/numpy_rng.rs": {
+      "sha256": "ea07db91578a576c78390a4c9c362fd6cb5bb2846ffaabf7591490f0d7d08f08",
+      "bytes": 12044
+    },
+    "crates/spektrafilm-math/src/gaussian.rs": {
+      "sha256": "a9393c02ea45d65579bee34770db314db27ae9ce6a4c114018c70b3a0593ec0f",
+      "bytes": 12789
+    },
+    "crates/spektrafilm-math/src/image.rs": {
+      "sha256": "1b4662ae4b9ec4b3baf2cbb65900a7d5fd2c678fe17e0375a510a39a833e523d",
+      "bytes": 9344
+    },
+    "crates/spektrafilm-math/src/precision.rs": {
+      "sha256": "4ac648ff32c87e383e3f0f8b9a67bd9857dbaab1dbb15cad4871cee6c9a9ce65",
+      "bytes": 1901
+    },
+    "crates/spektrafilm-core/src/grain.rs": {
+      "sha256": "14d3ef80d43fc1c71934750d9c38e8ea8e9cae120dbcf3e193b346047ee5c924",
+      "bytes": 11366
+    },
+    "crates/spektrafilm-core/src/stages/filming.rs": {
+      "sha256": "a74d0116d6dc46a096aa1e04c1ee7dad1d1227ced59188575f1fd2805fa0727b",
+      "bytes": 23792
+    },
+    "crates/spektrafilm-core/tests/grain_statistics.rs": {
+      "sha256": "8f376eaa8b993c9433a766c11079ea182f8cf041df6214bdf6c5155ecc8696ab",
+      "bytes": 16649
+    },
+    "crates/spektrafilm-core/tests/blur_edges.rs": {
+      "sha256": "0f9d9827d72f6c29e2a22aee25356da960a02312d72243b007a4f4f5a5cf8ae0",
+      "bytes": 7632
+    },
+    "crates/spektrafilm-core/tests/fixtures/grain_python_28bf883.json": {
+      "sha256": "91bbdbb3577ef5331adceb5e7778ec4099b4b1226977d664f1931df0cc8c9e45",
+      "bytes": 570554
+    },
+    "crates/spektrafilm-cli/src/bin/golden_probes.rs": {
+      "sha256": "5602f0e74d20f2e8b16651ac8ba4fec73cb88dbc69f40ceb7227c5a33d3506c9",
+      "bytes": 5551
+    },
+    "data/presets/grain.toml": {
+      "sha256": "888238042b586384cd3f00e5fe9fac175840016037a45e66f3d4476bd50a5dcc",
+      "bytes": 2656
+    },
+    "data/profiles/kodak_gold_200.json": {
+      "sha256": "e1fb1fb3b728c67be42524cfca77e03ebded2d53d81ca89f5f8d58bf5ab3291e",
+      "bytes": 162655
+    },
+    "data/profiles/kodak_portra_endura.json": {
+      "sha256": "e3450fd941155c88e63060dcf202542ccb6da151e9ab6c56c295d7b2d4837969",
+      "bytes": 158722
+    }
+  }
+}
