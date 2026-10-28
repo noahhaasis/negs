@@ -1,5 +1,10 @@
 # Linux release and repository distribution
 
+The next release must include a tested Linux x86_64 Flatpak installer. See the
+[Flatpak and Flathub plan](linux-distribution-plan.md) for the acceptance
+checklist, format comparison and submission process. Flathub review may finish
+after the GitHub release; AppImage is an optional additional format.
+
 The GTK app, persistent engine, f32 Fast exporter and f64 Reference exporter
 were integrated and validated in local Arch packages and per-user bundles
 before the experimental engine changes merged from main. The subsequent Linux
