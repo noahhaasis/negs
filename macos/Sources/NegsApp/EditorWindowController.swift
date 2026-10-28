@@ -2,6 +2,20 @@ import AppKit
 import Observation
 import SwiftUI
 
+/// End field editing even when the clicked view doesn't take keyboard focus.
+@MainActor final class EditorWindow: NSWindow {
+    override func sendEvent(_ event: NSEvent) {
+        if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type),
+           let editor = firstResponder as? NSTextView, editor.isFieldEditor,
+           let field = editor.delegate as? NSTextField,
+           !field.bounds.contains(field.convert(event.locationInWindow, from: nil)) {
+            // Commit before dispatch so the clicked control sees the typed value.
+            makeFirstResponder(nil)
+        }
+        super.sendEvent(event)
+    }
+}
+
 /// The editing window: a unified toolbar over the canvas and a trailing
 /// inspector column. The window, toolbar, and columns are AppKit; the canvas
 /// and inspector contents are SwiftUI. They follow the model through
@@ -43,7 +57,7 @@ import SwiftUI
         split.addSplitViewItem(inspector)
         split.splitView.autosaveName = "editor"
 
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 860),
+        let window = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: true)
         window.title = "Negs"
         window.toolbarStyle = .unified

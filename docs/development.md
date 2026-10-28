@@ -180,21 +180,18 @@ memory reductions and optional serial grain. The [memory optimization handoff](h
 records the agreed next steps: GPU scratch reuse, then CPU buffer ownership/reuse,
 while retaining full-resolution previews.
 
-f64 CPU export on a 16 MP Olympus ORF (kodak_gold_200 → kodak_portra_endura, full FX):
+[Benchmarks](benchmarks.md) compare export time and peak memory against
+spektrafilm-rs and Python spektrafilm at 24 and 60 MP, for the CPU reference
+(with and without *Use less memory*) and the GPU; `scripts/benchmark/` reproduces them.
 
-| | Wall time | Notes |
-|---|---|---|
-| Python reference (numpy + numba) | 22 s | LUT enabled, default config |
-| **spektrafilm-rs (f64 CPU)** | **14 s** | **35 % faster than Python** |
+What makes the CPU path fast:
 
-What gets it there:
-
-- **PCHIP LUTs** for the spectral integrations (enlarger + scanner) — same approximation Python uses, same accuracy budget.
+- **PCHIP LUTs** for the spectral integrations (enlarger + scanner) — same approximation Python uses, same accuracy budget. Optional: the app's Reference export leaves them off.
 - **`vForce vvpow`** for `10^x` on the spectral chain — Accelerate's SIMD pow, bit-identical to libm `pow(10, x)`.
 - **Accelerate BLAS dgemm** for the spectral reductions — a single `cblas_dgemm` per contraction, parallelised internally by Accelerate. (It is not safe to call concurrently from multiple threads, so the matmul is never split across rayon.)
 - **Parallelised hot per-pixel loops** in the printing and scanning post-stages.
 
-GPU preview path uses wgpu compute shaders (`crates/spektrafilm-shaders/wgsl/`). All shaders are f32 (WGSL has no f64); the GPU path drives the live preview while the export reaches for f64 CPU. End-to-end preview render: ~250 ms at 6 MP, ~700 ms at 16 MP on Apple Silicon.
+GPU preview path uses wgpu compute shaders (`crates/spektrafilm-shaders/wgsl/`). All shaders are f32 (WGSL has no f64); the GPU path drives the live preview and the default *Fast* export, while *Reference* export runs the f64 CPU path. A full-resolution GPU render takes about 0.9 s at 24 MP and 2.1 s at 60 MP on an M1 Pro.
 
 ## Layout
 

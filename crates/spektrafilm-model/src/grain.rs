@@ -453,8 +453,10 @@ pub fn multiplicative_unsharp_mask(
 /// `curves` are the film's total and per-sub-layer curves; `positive`
 /// reverses the interpolation axis. `monochrome` (B&W, upstream's
 /// single-channel emulsion) grains channel 0 and copies it to all three
-/// lanes. `serial_channels` grains one channel at a time to lower peak
-/// memory; the result is identical.
+/// lanes. Every sub-layer of every channel draws from its own MT19937
+/// stream, so they all run at once; `serial_channels` instead grains one
+/// sub-layer at a time, holding only a channel's running sum and the
+/// current sub-layer, to lower peak memory. The result is identical.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_grain(
     density_cmy: ImageBuf,
@@ -468,41 +470,44 @@ pub fn apply_grain(
     let stage_timings = stage_timings_enabled();
     let (w, h) = (density_cmy.width, density_cmy.height);
     let lp = layer_grain_params(curves, settings, pixel_size_um);
+    let interps: Vec<LayerInterp> =
+        (0..3).map(|ch| LayerInterp::new(curves, ch, positive)).collect();
 
-    let process_channel = |ch: usize| -> Vec<Scalar> {
-        let t_ch = Instant::now();
-        let interp = LayerInterp::new(curves, ch, positive);
-        let mut grain: Option<Vec<Scalar>> = None;
-        for l in 0..lp.n_layers() {
-            let t = Instant::now();
-            // Sub-layer density offset by its floor, built straight from the
-            // shared image so no copy of the channel is held.
-            let dmin_l = from_f64(lp.density_min_layers[l][ch]);
-            let layer: Vec<Scalar> = density_cmy
-                .data
-                .par_chunks_exact(3)
-                .map(|px| {
-                    let pos = interp.locate(to_f64(px[ch]));
-                    from_f64(layer_density(curves, pos, l, ch)) + dmin_l
-                })
-                .collect();
-            let g = layer_particle_model(
-                layer,
-                w,
-                h,
-                lp.density_max_layers[l][ch],
-                lp.n_particles_per_pixel[l][ch],
-                settings.uniformity[ch],
-                (ch + 10 * l) as u32,
-                lp.dye_cloud_sigma(settings.blur_dye_clouds_um, l, ch),
-            );
-            print_stage_timing(stage_timings, "grain.layer_particle_model", t);
-            match grain.as_mut() {
-                None => grain = Some(g),
-                Some(sum) => sum.iter_mut().zip(&g).for_each(|(s, v)| *s += *v),
-            }
+    let sub_layer = |ch: usize, l: usize| -> Vec<Scalar> {
+        let t = Instant::now();
+        // Sub-layer density offset by its floor, built straight from the
+        // shared image so no copy of the channel is held.
+        let interp = &interps[ch];
+        let dmin_l = from_f64(lp.density_min_layers[l][ch]);
+        let layer: Vec<Scalar> = density_cmy
+            .data
+            .par_chunks_exact(3)
+            .map(|px| {
+                let pos = interp.locate(to_f64(px[ch]));
+                from_f64(layer_density(curves, pos, l, ch)) + dmin_l
+            })
+            .collect();
+        let g = layer_particle_model(
+            layer,
+            w,
+            h,
+            lp.density_max_layers[l][ch],
+            lp.n_particles_per_pixel[l][ch],
+            settings.uniformity[ch],
+            (ch + 10 * l) as u32,
+            lp.dye_cloud_sigma(settings.blur_dye_clouds_um, l, ch),
+        );
+        print_stage_timing(stage_timings, "grain.layer_particle_model", t);
+        g
+    };
+
+    // The sub-layers sum in order, so the rounding is the same whichever
+    // way they were scheduled.
+    let finalize_channel = |ch: usize, layers: &mut dyn Iterator<Item = Vec<Scalar>>| -> Vec<Scalar> {
+        let mut grain = layers.next().expect("at least one sub-layer");
+        for g in layers {
+            grain.iter_mut().zip(&g).for_each(|(s, v)| *s += *v);
         }
-        let mut grain = grain.expect("at least one sub-layer");
 
         // Upstream `_finalize_grain`, which is per channel throughout.
         let t = Instant::now();
@@ -527,15 +532,38 @@ pub fn apply_grain(
         let dmin = from_f64(settings.density_min[ch]);
         grain.par_iter_mut().for_each(|v| *v -= dmin);
         print_stage_timing(stage_timings, "grain.finalize", t);
-        print_stage_timing(stage_timings, "grain.channel_total", t_ch);
         grain
     };
 
     let channels: Vec<usize> = if monochrome { vec![0] } else { vec![0, 1, 2] };
+    let n_layers = lp.n_layers();
     let mut out_planes: Vec<(usize, Vec<Scalar>)> = if serial_channels {
-        channels.iter().map(|&ch| (ch, process_channel(ch))).collect()
+        channels
+            .iter()
+            .map(|&ch| (ch, finalize_channel(ch, &mut (0..n_layers).map(|l| sub_layer(ch, l)))))
+            .collect()
     } else {
-        channels.par_iter().map(|&ch| (ch, process_channel(ch))).collect()
+        // One OS thread per stream, not a rayon task: a rayon worker waiting
+        // on a stream's inner parallel work steals whole other streams and
+        // can't resume its own until they finish, which doubled the slowest.
+        let sub_layer = &sub_layer;
+        let mut layers: Vec<Vec<Scalar>> = std::thread::scope(|scope| {
+            let streams: Vec<_> = channels
+                .iter()
+                .flat_map(|&ch| (0..n_layers).map(move |l| scope.spawn(move || sub_layer(ch, l))))
+                .collect();
+            streams.into_iter().map(|s| s.join().expect("grain sub-layer")).collect()
+        });
+        let mut per_channel: Vec<Vec<Vec<Scalar>>> = Vec::with_capacity(channels.len());
+        while !layers.is_empty() {
+            let rest = layers.split_off(n_layers);
+            per_channel.push(std::mem::replace(&mut layers, rest));
+        }
+        channels
+            .par_iter()
+            .zip(per_channel)
+            .map(|(&ch, ch_layers)| (ch, finalize_channel(ch, &mut ch_layers.into_iter())))
+            .collect()
     };
     // Every channel worker has finished reading the density; reuse it.
     let mut out = density_cmy;
