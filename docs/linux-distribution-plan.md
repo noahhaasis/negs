@@ -2,10 +2,9 @@
 
 Prepared 2026-10-28 against Negs `ae042da`; revised after an independent
 [Claude Opus 5.5 High review](linux-distribution-opus-review.md) of draft `ee1246c`.
-Status: ready for feasibility work; later phases require phase 0 evidence.
-Packaging is not implemented. This replaces the earlier Flatpak-only
-requirement following the request to plan both formats. This planning task does
-not publish a release, install over the user's app or submit to Flathub.
+Status: implemented for 0.11.0; see [Linux Flatpak and AppImage](linux-distribution.md)
+for what was built, the phase 0 decisions and test results, and what remains
+untested. Flathub submission is a manual step after the release.
 
 ## Outcome and scope
 

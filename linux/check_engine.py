@@ -13,6 +13,8 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--out', type=Path, default=root / 'target/linux-validation/engine-ui-audit')
 parser.add_argument('--raw', type=Path, help='Also develop a real RAW, change WB, and export with metadata')
 parser.add_argument('--binary', type=Path, default=root / 'target/linux-ui/release/negs')
+parser.add_argument('--flatpak', metavar='APP_ID', help='Run the installed Flatpak, granting only the output folder')
+parser.add_argument('--appimage', type=Path, help='Run this AppImage instead of --binary')
 args = parser.parse_args()
 out = args.out.resolve()
 if not out.is_relative_to(root / 'target'):
@@ -40,8 +42,14 @@ env.pop('NEGS_UI_ONLY', None)
 if args.raw:
     env['NEGS_RAW_AUDIT'] = str(args.raw.resolve())
 with (out / 'app.log').open('w') as log:
-    process = subprocess.Popen([args.binary.resolve(), '--fresh'], cwd=out,
-                               env=env, stdout=log, stderr=log)
+    command = [args.binary.resolve(), '--fresh']
+    if args.appimage:
+        command = [args.appimage.resolve(), '--fresh']
+    elif args.flatpak:
+        grants = [f'--filesystem={out}'] + ([f'--filesystem={args.raw.resolve()}:ro'] if args.raw else [])
+        variables = [f'--env={k}={v}' for k, v in env.items() if k.startswith('NEGS_')]
+        command = ['flatpak', 'run', '--user', *grants, *variables, args.flatpak, '--fresh']
+    process = subprocess.Popen(command, cwd=out, env=env, stdout=log, stderr=log)
     try:
         code = process.wait(timeout=105)
     except subprocess.TimeoutExpired:

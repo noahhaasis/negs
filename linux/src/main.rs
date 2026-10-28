@@ -17,6 +17,7 @@ mod model;
 mod parameters;
 mod perf;
 mod photo;
+mod portal;
 mod preferences;
 mod preset_ui;
 mod presets;
@@ -148,6 +149,7 @@ impl Editor {
         header.pack_start(&undos);
         let menu = gio::Menu::new();
         menu.append(Some("Open Photograph…"), Some("win.open"));
+        menu.append(Some("Open Folder…"), Some("win.open-folder"));
         let recent_menu = gio::Menu::new();
         menu.append_submenu(Some("Open Recent"), &recent_menu);
         menu.append(Some("Save Preview…"), Some("win.save-preview"));
@@ -811,6 +813,7 @@ fn data_root() -> PathBuf {
     {
         for root in [
             directory.join("../share/negs/data"),
+            directory.join("../../share/negs/data"),
             directory.join("../data"),
         ] {
             if root.is_dir() {
@@ -818,7 +821,9 @@ fn data_root() -> PathBuf {
             }
         }
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data")
+    crate::engine::development_root()
+        .unwrap_or_default()
+        .join("data")
 }
 
 fn main() -> glib::ExitCode {
@@ -827,9 +832,9 @@ fn main() -> glib::ExitCode {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let app = adw::Application::builder()
         .application_id(if runtime::ui_only() {
-            "dev.negs.app.UiPreview"
+            runtime::UI_PREVIEW_ID
         } else {
-            "dev.negs.app"
+            runtime::APP_ID
         })
         .flags(
             if std::env::var_os("NEGS_PROFILE_DIR").is_some()

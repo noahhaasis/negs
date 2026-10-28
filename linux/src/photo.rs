@@ -147,6 +147,10 @@ pub fn folder(path: &Path) -> Vec<PathBuf> {
     let Some(parent) = path.parent() else {
         return Vec::new();
     };
+    in_directory(parent)
+}
+/// Supported photographs in a directory, in natural filename order.
+pub fn in_directory(parent: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(parent) else {
         return Vec::new();
     };

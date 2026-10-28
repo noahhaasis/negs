@@ -12,8 +12,10 @@ import subprocess
 import tarfile
 import tempfile
 import tomllib
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
+APP_ID = 'io.github.noahhaasis.negs'
 # Exclude private validation material and historical image-heavy review docs.
 SOURCE_PATHS = [
     '.gitattributes', 'Cargo.toml', 'Cargo.lock', 'LICENSE', 'crates', 'data',
@@ -35,6 +37,14 @@ def metadata(root=ROOT, env=os.environ):
     ui_version = tomllib.loads((root / 'linux/Cargo.toml').read_text())['package']['version']
     if not re.fullmatch(r'\d+\.\d+\.\d+', version) or ui_version != version:
         raise ValueError('Root and Linux Cargo versions must match (major.minor.patch)')
+    metainfo = root / f'linux/{APP_ID}.metainfo.xml'
+    if metainfo.is_file():
+        releases = ElementTree.parse(metainfo).getroot().find('releases')
+        latest = releases.find('release') if releases is not None else None
+        if latest is None or latest.get('version') != version:
+            raise ValueError(f'The newest release in {metainfo.name} must be {version}')
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', latest.get('date', '')):
+            raise ValueError(f'The {version} release in {metainfo.name} needs a YYYY-MM-DD date')
     tag = env.get('RELEASE_TAG', '')
     if tag and tag != f'v{version}':
         raise ValueError(f'Tag {tag!r} does not match Cargo version v{version}')
@@ -190,12 +200,14 @@ package() {{
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['prepare', 'finish'])
+    parser.add_argument('command', choices=['metadata', 'prepare', 'finish'])
     parser.add_argument('--out', type=Path, default=ROOT / 'target/linux-release')
     parser.add_argument('--package', type=Path)
     args = parser.parse_args()
     out = args.out.resolve()
-    if args.command == 'prepare':
+    if args.command == 'metadata':
+        print(json.dumps(metadata(), indent=2))
+    elif args.command == 'prepare':
         print(json.dumps(prepare(out), indent=2))
     elif args.package:
         finish(out, args.package)

@@ -421,14 +421,7 @@ fn extension(format: u32) -> &'static str {
     }
 }
 fn same_file(a: &PathBuf, b: &PathBuf) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    if a == b {
-        return true;
-    }
-    match (std::fs::metadata(a), std::fs::metadata(b)) {
-        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
-        _ => false,
-    }
+    crate::portal::may_be_same_file(a, b)
 }
 
 /// For the dialog's message; None for sRGB in an sRGB preview. The preview

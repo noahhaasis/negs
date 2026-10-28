@@ -2,6 +2,7 @@
 set -eu
 negs_prefix=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
 export NEGS_DATA_DIR="$negs_prefix/share/negs/data"
+export NEGS_PACKAGE_ROOT="$negs_prefix"
 if [ -f "$negs_prefix/lib/negs/libopenblas.so.0" ]; then
     export LD_LIBRARY_PATH="$negs_prefix/lib/negs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi

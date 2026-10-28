@@ -1,19 +1,34 @@
 #!/usr/bin/env python3
-"""Stage an Arch package or relocatable per-user bundle; never include target photos."""
+"""Stage the Linux payload for an Arch package, per-user bundle, Flatpak or AppImage.
+
+Every format shares one layout under the prefix: lib/negs/ holds the four
+executables, share/negs/data the engine data, plus desktop metadata and
+licenses. Only the native format adds the Omarchy integration and its
+launcher; Flatpak and AppImage supply their own launchers. Never includes
+target photos.
+"""
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import shutil
 import subprocess
+import tomllib
 
+APP_ID = 'io.github.noahhaasis.negs'
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--destdir', type=Path, required=True)
 parser.add_argument('--prefix', default='/usr')
+parser.add_argument('--format', choices=['native', 'flatpak', 'appimage'], default='native')
 parser.add_argument('--engine-target', type=Path, default=root / 'target')
 parser.add_argument('--ui-target', type=Path, default=root / 'target/linux-ui')
-parser.add_argument('--source-archive', type=Path, required=True)
+parser.add_argument('--source-archive', type=Path)
 parser.add_argument('--bundle-openblas', type=Path, help='Optional extracted official OpenBLAS /usr tree')
+parser.add_argument('--notices', type=Path, help='Pre-generated Rust crate notices (default: generate)')
 args = parser.parse_args()
+if args.format != 'flatpak' and not args.source_archive:
+    parser.error('--source-archive is required for native and AppImage payloads')
 prefix = args.destdir / args.prefix.lstrip('/')
 
 def copy(source, relative, mode=None):
@@ -26,35 +41,47 @@ def copy(source, relative, mode=None):
 copy(args.ui_target / 'release/negs', 'lib/negs/negs', 0o755)
 for name in ['spektrafilm', 'spektrafilm-f64', 'spektrafilm-native']:
     copy(args.engine_target / 'release' / name, 'lib/negs/' + name, 0o755)
-copy(root / 'linux/negs-launcher', 'bin/negs', 0o755)
 shutil.copytree(root / 'data', prefix / 'share/negs/data', dirs_exist_ok=True)
+for size in [128, 256, 512]:
+    copy(root / f'linux/icons/negs-{size}.png', f'share/icons/hicolor/{size}x{size}/apps/{APP_ID}.png')
 for source, target in [
-    ('assets/negs-icon.png', 'share/icons/hicolor/256x256/apps/dev.negs.app.png'),
+    (f'linux/{APP_ID}.desktop', f'share/applications/{APP_ID}.desktop'),
+    (f'linux/{APP_ID}.metainfo.xml', f'share/metainfo/{APP_ID}.metainfo.xml'),
     ('LICENSE', 'share/licenses/negs/LICENSE'),
-    ('linux/install_omarchy_rules.py', 'share/negs/install_omarchy_rules.py'),
-    ('linux/install.py', 'share/negs/install.py'),
-    ('linux/omarchy/negs-window-rules.lua', 'share/negs/omarchy/negs-window-rules.lua'),
+    ('crates/spektrafilm-io/fonts/OFL-BarlowCondensed.txt', 'share/licenses/negs/OFL-BarlowCondensed.txt'),
     ('docs/linux-app.md', 'share/doc/negs/linux-app.md'),
-    ('docs/linux-core-validation.md', 'share/doc/negs/linux-core-validation.md'),
 ]:
     copy(root / source, target)
-copy(args.source_archive, 'share/negs/source.tar.gz')
+if args.notices:
+    copy(args.notices, 'share/licenses/negs/THIRD-PARTY-RUST.txt')
+else:
+    subprocess.run(['python3', root / 'linux/notices.py', prefix / 'share/licenses/negs/THIRD-PARTY-RUST.txt'], check=True)
+if args.source_archive:
+    copy(args.source_archive, 'share/negs/source.tar.gz')
+if args.format == 'native':
+    copy(root / 'linux/negs-launcher', 'bin/negs', 0o755)
+    for source, target in [
+        ('linux/install_omarchy_rules.py', 'share/negs/install_omarchy_rules.py'),
+        ('linux/install.py', 'share/negs/install.py'),
+        ('linux/omarchy/negs-window-rules.lua', 'share/negs/omarchy/negs-window-rules.lua'),
+        ('docs/linux-core-validation.md', 'share/doc/negs/linux-core-validation.md'),
+    ]:
+        copy(root / source, target)
 if args.bundle_openblas:
     copy(args.bundle_openblas / 'lib/libopenblas.so.0', 'lib/negs/libopenblas.so.0')
     copy(args.bundle_openblas / 'share/licenses/openblas/LICENSE', 'share/licenses/negs/OpenBLAS-LICENSE')
-desktop = prefix / 'share/applications/dev.negs.app.desktop'
-desktop.parent.mkdir(parents=True, exist_ok=True)
-desktop.write_text('''[Desktop Entry]
-Type=Application
-Name=Negs
-Comment=Photographic film simulation
-Exec=negs %f
-Icon=dev.negs.app
-Terminal=false
-Categories=Graphics;Photography;
-StartupWMClass=dev.negs.app
-MimeType=image/jpeg;image/png;image/tiff;image/x-adobe-dng;image/x-canon-cr2;image/x-canon-cr3;image/x-canon-crw;image/x-fuji-raf;image/x-hasselblad-3fr;image/x-hasselblad-fff;image/x-nikon-nef;image/x-nikon-nrw;image/x-olympus-orf;image/x-panasonic-rw;image/x-panasonic-rw2;image/x-pentax-pef;image/x-phaseone-iiq;image/x-samsung-srw;image/x-sigma-x3f;image/x-sony-arw;image/x-sony-sr2;image/x-sony-srf;
-''')
+
+# Immutable payload identity for the preview cache: relocation (an AppImage
+# mount) keeps it, any changed executable, library or data file replaces it.
+digest = hashlib.sha256()
+for path in sorted([*(prefix / 'lib/negs').iterdir(), *(prefix / 'share/negs/data').rglob('*')]):
+    if path.is_file():
+        digest.update(str(path.relative_to(prefix)).encode() + b'\0')
+        with path.open('rb') as stream:
+            digest.update(hashlib.file_digest(stream, 'sha256').digest())
+version = tomllib.loads((root / 'linux/Cargo.toml').read_text())['package']['version']
+(prefix / 'share/negs/payload.json').write_text(json.dumps(
+    {'version': version, 'format': args.format, 'digest': digest.hexdigest()}, indent=2) + '\n')
 if shutil.which('desktop-file-validate'):
-    subprocess.run(['desktop-file-validate', desktop], check=True)
+    subprocess.run(['desktop-file-validate', prefix / f'share/applications/{APP_ID}.desktop'], check=True)
 print(prefix)

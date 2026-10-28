@@ -1022,7 +1022,9 @@ impl Editor {
             .and_then(|_| {
                 gio::AppInfo::launch_default_for_uri(
                     &gio::File::for_path(&folder).uri(),
-                    Some(&gtk::prelude::WidgetExt::display(&self.window).app_launch_context()),
+                    Some(&crate::portal::host_launch_context(
+                        &gtk::prelude::WidgetExt::display(&self.window),
+                    )),
                 )
                 .map_err(|e| e.to_string())
             });

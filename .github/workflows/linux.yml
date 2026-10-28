@@ -61,3 +61,89 @@ jobs:
           path: target/linux-release/recipes/
           include-hidden-files: true
           if-no-files-found: error
+
+  flatpak:
+    name: Flatpak x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release metadata and Cargo source lists
+        run: |
+          python3 linux/release.py metadata
+          python3 linux/flatpak/cargo_sources.py --check
+      - name: Install Flatpak tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder xvfb xauth
+          # Ubuntu 24.04 restricts the unprivileged user namespaces bubblewrap needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          df -h /
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/flatpak/state/cache
+            target/flatpak/state/downloads
+          key: flatpak-${{ hashFiles('linux/flatpak/*.json') }}-${{ github.sha }}
+          restore-keys: flatpak-${{ hashFiles('linux/flatpak/*.json') }}-
+      - name: Build the Flatpak bundle offline from this checkout
+        run: bash linux/flatpak/build.sh target/flatpak/out
+      - name: Install and verify inside the sandbox
+        run: xvfb-run -a bash linux/flatpak/verify.sh target/flatpak/out/negs-*-linux-x86_64.flatpak
+      - name: Record checksums and disk usage
+        run: |
+          cd target/flatpak/out
+          sha256sum negs-*-linux-x86_64.flatpak > SHA256SUMS-flatpak
+          cat SHA256SUMS-flatpak
+          du -sh "$GITHUB_WORKSPACE/target/flatpak" ~/.local/share/flatpak
+      - uses: actions/upload-artifact@v4
+        with:
+          name: negs-linux-flatpak
+          path: target/flatpak/out/
+          if-no-files-found: error
+
+  appimage:
+    name: AppImage x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive this commit
+        run: python3 linux/release.py prepare --out target/appimage/release
+      - uses: actions/cache@v4
+        with:
+          # The pinned GTK/libadwaita/OpenBLAS stack, source downloads and crates.
+          path: |
+            target/appimage/cache/stack-*
+            target/appimage/cache/src
+            target/appimage/cache/cargo/registry
+          key: appimage-${{ hashFiles('linux/appimage/Dockerfile', 'linux/appimage/build.sh', 'linux/appimage/*.patch') }}-${{ hashFiles('Cargo.lock', 'linux/Cargo.lock') }}
+          restore-keys: appimage-${{ hashFiles('linux/appimage/Dockerfile', 'linux/appimage/build.sh', 'linux/appimage/*.patch') }}-
+      - name: Build in the Ubuntu 24.04 baseline container
+        run: |
+          archive=$(echo target/appimage/release/assets/negs-*.tar.gz)
+          bash linux/appimage/package.sh "$archive" target/appimage/out
+          cat target/appimage/out/library-ledger.json
+      - name: Run on clean Ubuntu 24.04, Fedora and Arch without GTK 4
+        run: bash linux/appimage/smoke.sh target/appimage/out/Negs-*-x86_64.AppImage ubuntu fedora arch
+      - name: Record checksums
+        run: |
+          cd target/appimage/out
+          mkdir -p ../validation && mv library-ledger.json ../validation/
+          sha256sum Negs-*-x86_64.AppImage negs-*-appimage-sources.tar > SHA256SUMS-appimage
+          cat SHA256SUMS-appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: negs-linux-appimage
+          path: target/appimage/out/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: negs-linux-appimage-ledger
+          path: target/appimage/validation/
+          retention-days: 14
+

@@ -39,6 +39,7 @@ impl Editor {
         ));
         self.window.add_action(&self.redo);
         self.action("open", |ui| ui.open_dialog());
+        self.action("open-folder", |ui| ui.open_folder_dialog());
         let recent = gio::SimpleAction::new("open-recent", Some(glib::VariantTy::STRING));
         recent.connect_activate(glib::clone!(
             #[weak(rename_to=ui)]
@@ -233,7 +234,7 @@ impl Editor {
         self.action("appearance", |ui| ui.settings());
         self.action("about", |ui| {
             let d = adw::AboutDialog::builder().application_name("Negs")
-                .application_icon("dev.negs.app").version(if crate::runtime::ui_only() { "0.10.0 · Linux UI preview" } else { "0.10.0 · Linux" })
+                .application_icon(crate::runtime::APP_ID).version(format!("{} · {}", env!("CARGO_PKG_VERSION"), if crate::runtime::ui_only() { "Linux UI preview" } else { crate::runtime::package_format() }))
                 .developer_name("Negs contributors")
                 .comments("Film simulation with a native GTK4/libadwaita editor and the Spektrafilm engine.")
                 .license_type(gtk::License::Gpl30).build();
@@ -405,6 +406,35 @@ impl Editor {
                         && let Some(path) = file.path()
                     {
                         ui.open(path);
+                    }
+                }
+            ),
+        );
+    }
+    /// A folder grant lets the sandboxed app show the whole folder in the
+    /// film strip; opening one photograph grants only that file.
+    fn open_folder_dialog(self: &Rc<Self>) {
+        let dialog = gtk::FileDialog::builder().title("Open Folder").build();
+        if let Some(parent) = self.current_path.borrow().as_ref().and_then(|p| p.parent()) {
+            dialog.set_initial_folder(Some(&gio::File::for_path(parent)));
+        }
+        dialog.select_folder(
+            Some(&self.window),
+            None::<&gio::Cancellable>,
+            glib::clone!(
+                #[weak(rename_to=ui)]
+                self,
+                move |result| {
+                    if let Ok(folder) = result
+                        && let Some(folder) = folder.path()
+                    {
+                        match crate::photo::in_directory(&folder).into_iter().next() {
+                            Some(path) => ui.open(path),
+                            None => ui.toast.add_toast(adw::Toast::new(&format!(
+                                "No photographs in {}",
+                                crate::portal::display(&folder)
+                            ))),
+                        }
                     }
                 }
             ),

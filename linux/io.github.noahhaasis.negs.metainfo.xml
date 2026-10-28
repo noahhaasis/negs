@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright Negs contributors -->
+<component type="desktop-application">
+  <id>io.github.noahhaasis.negs</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only AND CC-BY-SA-4.0 AND OFL-1.1</project_license>
+  <name>Negs</name>
+  <summary>Develop photographs with a physical simulation of film</summary>
+  <developer id="io.github.noahhaasis">
+    <name>Negs</name>
+  </developer>
+  <description>
+    <p>
+      Negs runs your pictures through a physical simulation of film: the dyes,
+      the print paper, the glow around highlights and the grain. They come out
+      looking shot on film, not filtered to look like it.
+    </p>
+    <p>
+      It is built on the spektrafilm spectral film model and its GPU port,
+      spektrafilm-rs. Every slider updates the preview live, and what you see
+      is what you export.
+    </p>
+    <ul>
+      <li>Opens RAW files from most cameras, plus JPEG, TIFF and PNG with their colour profiles</li>
+      <li>Pick from dozens of colour and black-and-white film stocks and print papers</li>
+      <li>Crop, straighten, and add borders with each stock's real edge print</li>
+      <li>Image Size enlarges a photo before the film, so grain forms at print size</li>
+      <li>Save, apply, import and export film and Lab presets</li>
+      <li>Exports PNG, TIFF or JPEG at 8 or 16 bits with EXIF and an embedded ICC profile</li>
+      <li>Fast GPU exports, with a 64-bit reference render for the most exact result</li>
+      <li>Export the current film and paper as a .cube LUT</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.noahhaasis.negs.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Developing a photograph with the film, camera and print controls</caption>
+      <image>https://raw.githubusercontent.com/noahhaasis/negs/v0.11.0/docs/readme/linux-window.png</image>
+    </screenshot>
+  </screenshots>
+  <url type="homepage">https://getnegs.com</url>
+  <url type="bugtracker">https://github.com/noahhaasis/negs/issues</url>
+  <url type="vcs-browser">https://github.com/noahhaasis/negs</url>
+  <branding>
+    <color type="primary" scheme_preference="light">#d8d2e8</color>
+    <color type="primary" scheme_preference="dark">#2c2f3a</color>
+  </branding>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <provides>
+    <binary>negs</binary>
+  </provides>
+  <releases>
+    <release version="0.11.0" date="2026-10-28">
+      <description>
+        <p>Negs for Linux is now available as a Flatpak and an AppImage for any x86_64 distribution.</p>
+        <ul>
+          <li>Open Folder shows every photograph in a folder in the film strip</li>
+          <li>A Presets page saves, applies, imports and exports film and Lab presets</li>
+          <li>Reference exports are about 30% faster on the CPU</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.10.0" date="2026-10-28">
+      <description>
+        <p>Presets on Mac and Windows, and colour-managed input and previews on every platform.</p>
+      </description>
+    </release>
+  </releases>
+</component>

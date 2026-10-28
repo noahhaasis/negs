@@ -21,7 +21,7 @@ prepare() {
 
 build() {
     cd "$srcdir/negs-$pkgver"
-    NEGS_CARGO_OFFLINE=1 bash linux/build.sh
+    NEGS_CARGO_OFFLINE=1 NEGS_PACKAGED=1 bash linux/build.sh
 }
 
 check() {
@@ -34,6 +34,6 @@ check() {
 
 package() {
     cd "$srcdir/negs-$pkgver"
-    python3 linux/stage.py --destdir "$pkgdir" --prefix /usr \
+    NEGS_CARGO_OFFLINE=1 python3 linux/stage.py --destdir "$pkgdir" --prefix /usr \
         --source-archive "$srcdir/negs-$pkgver.tar.gz"
 }

@@ -72,6 +72,16 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Commit tracked changes'):
             self.prepare()
 
+    def test_metainfo_release_must_match_cargo(self):
+        metainfo = self.root / f'linux/{release.APP_ID}.metainfo.xml'
+        metainfo.write_text('<component><releases><release version="0.7.0" date="2026-01-01"/>'
+                            '</releases></component>')
+        with self.assertRaisesRegex(ValueError, 'newest release'):
+            release.metadata(self.root, self.env)
+        metainfo.write_text('<component><releases><release version="0.8.0" date="2026-01-01"/>'
+                            '<release version="0.7.0" date="2025-01-01"/></releases></component>')
+        self.assertEqual(release.metadata(self.root, self.env)['version'], '0.8.0')
+
     def test_existing_output_is_rejected(self):
         self.prepare()
         with self.assertRaisesRegex(ValueError, 'empty release output'):

@@ -1,0 +1,19 @@
+#!/bin/sh
+# AppImage entry point. Bundled GTK resources are visible to Negs only: the
+# original values are saved as NEGS_ORIG_* and restored for host programs
+# Negs launches (see linux/src/portal.rs). Writes no desktop configuration.
+set -eu
+here=$(dirname -- "$(readlink -f -- "$0")")
+for name in XDG_DATA_DIRS GTK_PATH GTK_EXE_PREFIX GTK_DATA_PREFIX GDK_PIXBUF_MODULE_FILE \
+            GIO_EXTRA_MODULES GSETTINGS_SCHEMA_DIR LD_LIBRARY_PATH; do
+    eval "export NEGS_ORIG_$name=\"\${$name-}\""
+done
+export NEGS_ORIG_SAVED=1
+# Bundled GTK schemas and Adwaita symbolic icons come first; the host's stay
+# visible after them.
+export XDG_DATA_DIRS="$here/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+# The bundled GTK has a private module prefix; never load host GTK modules.
+unset GTK_PATH GTK_EXE_PREFIX GTK_DATA_PREFIX GSETTINGS_SCHEMA_DIR
+export NEGS_DATA_DIR="$here/usr/share/negs/data"
+export NEGS_PACKAGE_ROOT="$here/usr"
+exec "$here/usr/lib/negs/negs" "$@"

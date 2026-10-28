@@ -59,17 +59,28 @@ else:
         if destination.exists() and (relative not in owned or digest(destination) != owned[relative]):
             raise SystemExit('Preserving unowned/modified file; resolve first: ' + str(destination))
     current = dict(owned)
+    installed = set()
     for path in files:
         relative = str(path.relative_to(source))
         destination = target(relative)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(destination.name + '.tmp-negs-install')
         shutil.copy2(path, temporary)
-        if relative == 'share/applications/dev.negs.app.desktop':
+        if relative.startswith('share/applications/') and relative.endswith('.desktop'):
             command = str(prefix / 'bin/negs').replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`').replace('$', '\\$').replace('%', '%%')
             temporary.write_text(temporary.read_text().replace('Exec=negs %f', f'Exec="{command}" %f'))
         temporary.replace(destination)
         current[relative] = digest(destination)
+        installed.add(relative)
+    # Remove unmodified files an earlier version installed but this one no
+    # longer ships, such as the previous application ID's desktop entry.
+    for relative in sorted(set(owned) - installed):
+        path = target(relative)
+        if path.is_file() and digest(path) == owned[relative]:
+            path.unlink()
+        elif path.exists():
+            print('Preserving modified file:', path)
+        del current[relative]
     manifest.parent.mkdir(parents=True, exist_ok=True)
     temporary = manifest.with_suffix('.tmp')
     temporary.write_text(json.dumps(current, indent=2) + '\n')

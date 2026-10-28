@@ -42,17 +42,17 @@ bin_dir.mkdir(parents=True, exist_ok=True)
 launcher = bin_dir / "negs-ui-preview"
 launcher.write_text('#!/bin/sh\nexport NEGS_UI_ONLY=1\nexec ' + shlex.quote(str(app / "bin/negs")) + ' "$@"\n')
 launcher.chmod(0o755)
-icon = data / "icons/hicolor/256x256/apps/dev.negs.app.UiPreview.png"
+icon = data / "icons/hicolor/256x256/apps/io.github.noahhaasis.negs.UiPreview.png"
 icon.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(root / "assets/negs-icon.png", icon)
 applications = data / "applications"
 applications.mkdir(parents=True, exist_ok=True)
 exec_path = str(launcher).replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`').replace('$', '\\$').replace('%', '%%')
-(applications / "dev.negs.app.UiPreview.desktop").write_text(
+(applications / "io.github.noahhaasis.negs.UiPreview.desktop").write_text(
     '[Desktop Entry]\nType=Application\nName=Negs UI Preview\n'
     'Comment=Native photograph editor interface preview\n'
-    f'Exec="{exec_path}" %f\nIcon=dev.negs.app.UiPreview\nTerminal=false\n'
-    'Categories=Graphics;Photography;\nStartupWMClass=dev.negs.app.UiPreview\n'
+    f'Exec="{exec_path}" %f\nIcon=io.github.noahhaasis.negs.UiPreview\nTerminal=false\n'
+    'Categories=Graphics;Photography;\nStartupWMClass=io.github.noahhaasis.negs.UiPreview\n'
     'MimeType=image/jpeg;image/png;image/tiff;image/x-nikon-nef;image/x-adobe-dng;\n'
 )
 if (config / "hypr/hyprland.lua").is_file():

@@ -142,8 +142,13 @@ pub fn key(source: &Path, state: &State, defaults: &Value, paths: &Paths) -> Opt
         }
         Some(())
     }
-    let mut files = vec![stamp(source)?, stamp(&paths.helper)?];
-    scan(&paths.data, &mut files, &mut BTreeSet::new())?;
+    let mut files = vec![stamp(source)?];
+    if let Some(payload) = package_identity(paths) {
+        files.push(payload);
+    } else {
+        files.push(stamp(&paths.helper)?);
+        scan(&paths.data, &mut files, &mut BTreeSet::new())?;
+    }
     for path in std::iter::once(PathBuf::from("/usr/lib/libopenblas.so.0")).chain(
         std::env::var_os("LD_LIBRARY_PATH")
             .into_iter()
@@ -173,16 +178,27 @@ pub fn key(source: &Path, state: &State, defaults: &Value, paths: &Paths) -> Opt
     for path in ["/proc/driver/nvidia/version", "/proc/sys/kernel/osrelease"] {
         hardware.push((path.to_owned(), fs::read_to_string(path).ok()));
     }
-    for directory in [
-        "/sys/class/drm",
-        "/usr/share/vulkan/icd.d",
-        "/etc/vulkan/icd.d",
-    ] {
+    // Flatpak GL extensions and other loaders' ICDs live under XDG_DATA_DIRS.
+    let mut directories: Vec<PathBuf> = ["/sys/class/drm", "/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d"]
+        .map(PathBuf::from)
+        .into();
+    for variable in ["XDG_DATA_DIRS", "XDG_CONFIG_DIRS"] {
+        if let Some(value) = std::env::var_os(variable) {
+            for path in std::env::split_paths(&value).take(64) {
+                let path = path.join("vulkan/icd.d");
+                if !directories.contains(&path) {
+                    directories.push(path);
+                }
+            }
+        }
+    }
+    for directory in &directories {
+        let directory = directory.as_path();
         if let Ok(entries) = fs::read_dir(directory) {
             let mut entries: Vec<_> = entries.flatten().take(256).map(|e| e.path()).collect();
             entries.sort();
             for entry in entries {
-                if directory == "/sys/class/drm" {
+                if directory == Path::new("/sys/class/drm") {
                     for name in ["vendor", "device", "revision", "subsystem_device"] {
                         let path = entry.join("device").join(name);
                         if let Ok(value) = fs::read_to_string(&path) {
@@ -196,6 +212,18 @@ pub fn key(source: &Path, state: &State, defaults: &Value, paths: &Paths) -> Opt
         }
     }
     serde_json::to_string(&json!({"schema":2,"files":files,"hardware":hardware,"render":identity(state,defaults),"environment":variables})).ok()
+}
+/// A packaged build's immutable payload is identified by its build-time
+/// digest, so an AppImage keeps cache hits across mount paths and inodes.
+fn package_identity(paths: &Paths) -> Option<Value> {
+    let root = PathBuf::from(std::env::var_os("NEGS_PACKAGE_ROOT")?);
+    if !paths.helper.starts_with(&root) || !paths.data.starts_with(&root) {
+        return None;
+    }
+    let bytes = fs::read(root.join("share/negs/payload.json")).ok()?;
+    let payload: Value = serde_json::from_slice(&bytes).ok()?;
+    payload.get("digest")?.as_str()?;
+    Some(payload)
 }
 pub fn identity(state: &State, defaults: &Value) -> Value {
     let params = parameters::runtime(state, defaults);

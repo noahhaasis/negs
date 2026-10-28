@@ -1,0 +1,128 @@
+Make AppStream optional so the Negs AppImage need not bundle libappstream,
+curl, libxml2 and ICU. Only the *_new_from_appdata() constructors, which
+Negs does not call, depend on it.
+
+diff -ru a/src/adw-about-dialog.c b/src/adw-about-dialog.c
+--- a/src/adw-about-dialog.c
++++ b/src/adw-about-dialog.c
+@@ -7,7 +7,9 @@
+ 
+ #include "config.h"
+ #include <glib/gi18n-lib.h>
++#ifdef HAVE_APPSTREAM
+ #include <appstream.h>
++#endif
+ 
+ #include "adw-about-dialog.h"
+ 
+@@ -423,12 +425,14 @@
+   self->legal_showing_idle_id = 0;
+ }
+ 
++#ifdef HAVE_APPSTREAM
+ static gboolean
+ get_release_for_version (AsRelease  *rel,
+                          const char *version)
+ {
+   return !g_strcmp0 (as_release_get_version (rel), version);
+ }
++#endif
+ 
+ static void
+ update_credits_legal_group (AdwAboutDialog *self)
+@@ -2000,6 +2004,11 @@
+ adw_about_dialog_new_from_appdata (const char *resource_path,
+                                    const char *release_notes_version)
+ {
++#ifndef HAVE_APPSTREAM
++  g_return_val_if_fail (resource_path, NULL);
++  g_critical ("libadwaita was built without AppStream; cannot read %s", resource_path);
++  return ADW_DIALOG (adw_about_dialog_new ());
++#else
+   AdwAboutDialog *self;
+   GFile *appdata_file;
+   char *appdata_uri;
+@@ -2145,6 +2154,7 @@
+   g_free (appdata_uri);
+ 
+   return ADW_DIALOG (self);
++#endif
+ }
+ 
+ /**
+diff -ru a/src/adw-about-window.c b/src/adw-about-window.c
+--- a/src/adw-about-window.c
++++ b/src/adw-about-window.c
+@@ -6,7 +6,9 @@
+ 
+ #include "config.h"
+ #include <glib/gi18n-lib.h>
++#ifdef HAVE_APPSTREAM
+ #include <appstream.h>
++#endif
+ 
+ #include "adw-about-window.h"
+ 
+@@ -422,12 +424,14 @@
+     g_idle_add_once ((GSourceOnceFunc) legal_showing_idle_cb, self);
+ }
+ 
++#ifdef HAVE_APPSTREAM
+ static gboolean
+ get_release_for_version (AsRelease  *rel,
+                          const char *version)
+ {
+   return !g_strcmp0 (as_release_get_version (rel), version);
+ }
++#endif
+ 
+ static void
+ update_credits_legal_group (AdwAboutWindow *self)
+@@ -2023,6 +2027,11 @@
+ adw_about_window_new_from_appdata (const char *resource_path,
+                                    const char *release_notes_version)
+ {
++#ifndef HAVE_APPSTREAM
++  g_return_val_if_fail (resource_path, NULL);
++  g_critical ("libadwaita was built without AppStream; cannot read %s", resource_path);
++  return adw_about_window_new ();
++#else
+   AdwAboutWindow *self;
+   GFile *appdata_file;
+   char *appdata_uri;
+@@ -2168,6 +2177,7 @@
+   g_free (appdata_uri);
+ 
+   return GTK_WIDGET (self);
++#endif
+ }
+ 
+ /**
+diff -ru a/src/meson.build b/src/meson.build
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -302,13 +302,9 @@
+ 
+ gio_dep = dependency('gio-2.0', version: glib_min_version)
+ gtk_dep = dependency('gtk4', version: gtk_min_version)
+-appstream_dep = dependency('appstream',
+-  fallback : ['appstream', 'appstream_dep'],
+-  default_options : [
+-    'systemd=false', 'apidocs=false', 'install-docs=false',
+-    'stemming=false', 'svg-support=false', 'gir=false',
+-  ],
+-)
++# Negs AppImage: AppStream is optional. Without it, only the
++# *_new_from_appdata() constructors are unavailable.
++appstream_dep = dependency('appstream', required : false)
+ 
+ libadwaita_deps = [
+   dependency('glib-2.0', version: glib_min_version),
+@@ -330,6 +326,7 @@
+ 
+ config_h = configuration_data()
+ config_h.set_quoted('GETTEXT_PACKAGE', 'libadwaita')
++config_h.set('HAVE_APPSTREAM', appstream_dep.found())
+ config_h.set_quoted('LOCALEDIR', get_option('prefix') / get_option('localedir'))
+ 
+ # Symbol visibility

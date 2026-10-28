@@ -8,7 +8,7 @@ resolver = "2"
 name = "negs-windows"
 version = "0.10.0"
 edition = "2024"
-license = "GPL-3.0"
+license = "GPL-3.0-only"
 publish = false
 
 [[bin]]

@@ -1,9 +1,10 @@
 # Linux release and repository distribution
 
-The next release must include tested Linux x86_64 Flatpak and AppImage downloads.
-See the [distribution plan](linux-distribution-plan.md) for implementation phases,
-release gates, maintenance estimates and the Flathub submission process. Flathub
-review may finish after the GitHub release. Packaging is not implemented yet.
+From 0.11.0, every release also publishes an x86_64 Flatpak bundle and an
+AppImage, built and checked by the Linux workflow. See
+[Linux Flatpak and AppImage](linux-distribution.md) for how they are built and
+tested, and for the Flathub submission steps. Flathub review may finish after
+the GitHub release.
 
 The GTK app, persistent engine, f32 Fast exporter and f64 Reference exporter
 were integrated and validated in local Arch packages and per-user bundles

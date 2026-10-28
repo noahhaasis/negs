@@ -4,7 +4,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
     os::unix::{
-        fs::{DirBuilderExt, MetadataExt},
+        fs::DirBuilderExt,
         process::CommandExt,
     },
     path::{Path, PathBuf},
@@ -28,23 +28,32 @@ pub struct Paths {
     pub reference: PathBuf,
     pub data: PathBuf,
 }
+/// The source checkout for development runs. Packaged builds (feature
+/// `packaged`) never fall back to the build machine's tree.
+pub fn development_root() -> Option<PathBuf> {
+    std::env::var_os("SPEKTRAFILM_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            (!cfg!(feature = "packaged"))
+                .then(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".."))
+        })
+}
 impl Paths {
     pub fn locate() -> Result<Self> {
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
         let directory = executable.parent().unwrap_or(Path::new("."));
-        let root = std::env::var_os("SPEKTRAFILM_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".."));
+        let root = development_root();
         let find = |name: &str, variable: &str| {
             std::env::var_os(variable)
                 .map(PathBuf::from)
                 .unwrap_or_else(|| {
                     [
-                        directory.join(name),
-                        directory.join("../lib/negs").join(name),
-                        root.join("target/release").join(name),
+                        Some(directory.join(name)),
+                        Some(directory.join("../lib/negs").join(name)),
+                        root.as_ref().map(|r| r.join("target/release").join(name)),
                     ]
                     .into_iter()
+                    .flatten()
                     .find(|p| p.is_file())
                     .unwrap_or_else(|| directory.join(name))
                 })
@@ -53,14 +62,17 @@ impl Paths {
             .or_else(|| std::env::var_os("NEGS_DATA_DIR"))
             .map(PathBuf::from)
             .unwrap_or_else(|| {
+                let installed = directory.join("../../share/negs/data");
                 [
-                    directory.join("../share/negs/data"),
-                    directory.join("../data"),
-                    root.join("data"),
+                    Some(directory.join("../share/negs/data")),
+                    Some(installed.clone()),
+                    Some(directory.join("../data")),
+                    root.as_ref().map(|r| r.join("data")),
                 ]
                 .into_iter()
+                .flatten()
                 .find(|p| p.join("profiles").is_dir())
-                .unwrap_or_else(|| root.join("data"))
+                .unwrap_or(installed)
             });
         Ok(Self {
             helper: find("spektrafilm-native", "SPEKTRAFILM_NATIVE_HELPER"),
@@ -95,8 +107,13 @@ impl Scratch {
         }
         // SAFETY: geteuid is a read-only libc system call with no arguments.
         let user = unsafe { geteuid() };
+        // Each Flatpak instance has a private XDG_RUNTIME_DIR; only the app
+        // directory inside it is shared, so crash cleanup must look there.
         let root = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(|p| PathBuf::from(p).join("negs"))
+            .map(|p| match std::env::var_os("FLATPAK_ID") {
+                Some(id) => PathBuf::from(p).join("app").join(id).join("negs"),
+                None => PathBuf::from(p).join("negs"),
+            })
             .unwrap_or_else(|| std::env::temp_dir().join(format!("negs-{user}")));
         fs::DirBuilder::new()
             .recursive(true)
@@ -449,11 +466,9 @@ impl Frame {
     }
 }
 
+/// Conservative: also true when portal aliases cannot be told apart.
 pub fn same_file(source: &Path, destination: &Path) -> bool {
-    match (fs::metadata(source), fs::metadata(destination)) {
-        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
-        _ => false,
-    }
+    crate::portal::may_be_same_file(source, destination)
 }
 pub fn tail(path: &Path) -> String {
     use std::io::{Seek, SeekFrom};

@@ -7,7 +7,8 @@ if ! command -v cargo >/dev/null; then
   export CARGO_HOME="$root/target/linux-toolchain/cargo"
   export PATH="$CARGO_HOME/bin:$PATH"
 fi
-export CARGO_TARGET_DIR="$root/target/linux-ui"
+export CARGO_TARGET_DIR="${NEGS_UI_TARGET_DIR:-$root/target/linux-ui}"
+read -r -a toolchain <<< "${NEGS_TOOLCHAIN-+1.93.1}"
 command="$1"
 shift
-exec cargo +1.93.1 "$command" --manifest-path "$root/linux/Cargo.toml" "$@"
+exec cargo "${toolchain[@]}" "$command" --manifest-path "$root/linux/Cargo.toml" "$@"

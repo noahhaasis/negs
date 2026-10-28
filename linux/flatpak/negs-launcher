@@ -1,0 +1,6 @@
+#!/bin/sh
+# Flatpak entry point: the packaged GUI with explicit payload locations.
+# Never touches desktop configuration; all state stays in ~/.var/app.
+export NEGS_DATA_DIR=/app/share/negs/data
+export NEGS_PACKAGE_ROOT=/app
+exec /app/lib/negs/negs "$@"

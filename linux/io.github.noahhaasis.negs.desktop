@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Negs
+GenericName=Film Simulation
+Comment=Develop photographs with a physical simulation of film
+Exec=negs %f
+Icon=io.github.noahhaasis.negs
+Terminal=false
+Categories=Graphics;Photography;
+Keywords=film;photo;raw;grain;darkroom;
+StartupNotify=true
+StartupWMClass=io.github.noahhaasis.negs
+MimeType=image/jpeg;image/png;image/tiff;image/x-adobe-dng;image/x-canon-cr2;image/x-canon-cr3;image/x-canon-crw;image/x-fuji-raf;image/x-hasselblad-3fr;image/x-hasselblad-fff;image/x-nikon-nef;image/x-nikon-nrw;image/x-olympus-orf;image/x-panasonic-rw;image/x-panasonic-rw2;image/x-pentax-pef;image/x-phaseone-iiq;image/x-samsung-srw;image/x-sigma-x3f;image/x-sony-arw;image/x-sony-sr2;image/x-sony-srf;

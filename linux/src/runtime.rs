@@ -58,6 +58,18 @@ impl Runtime {
 pub fn ui_only() -> bool {
     std::env::var_os("NEGS_UI_ONLY").is_some()
 }
+pub const APP_ID: &str = "io.github.noahhaasis.negs";
+pub const UI_PREVIEW_ID: &str = "io.github.noahhaasis.negs.UiPreview";
+/// For the About dialog: which Linux package is running.
+pub fn package_format() -> &'static str {
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        "Linux Flatpak"
+    } else if std::env::var_os("APPIMAGE").is_some() {
+        "Linux AppImage"
+    } else {
+        "Linux"
+    }
+}
 
 impl Editor {
     pub fn start_engine(self: &Rc<Self>) {
