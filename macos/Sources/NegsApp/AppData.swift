@@ -7,13 +7,25 @@ struct AppDataLocations: Sendable {
     var temporary: URL
     var preferencesDomain: String
 
+    /// The folder name of the app's own data: the bundle identifier, so a
+    /// preview build (`dev.negs.app.preview`) keeps its sessions, presets and
+    /// caches apart from the release's. `swift run` has no bundle.
+    static var root: String { Bundle.main.bundleIdentifier ?? "dev.negs.app" }
+    /// Sessions and presets.
+    static var supportDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent(root, isDirectory: true)
+    }
+    static var cachesDirectory: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent(root, isDirectory: true)
+    }
+
     static var current: AppDataLocations {
         let fm = FileManager.default
         let library = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         let domain = Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName
         return AppDataLocations(directories: [
-            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("dev.negs.app"),
-            fm.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("dev.negs.app"),
+            supportDirectory,
+            cachesDirectory,
             // Sparkle stores downloads and updater state under the bundle ID.
             fm.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent(domain),
             library.appendingPathComponent("HTTPStorages/\(domain)"),

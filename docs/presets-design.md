@@ -227,13 +227,17 @@ override.
 | New Preset | ⇧⌘S | Ctrl+Shift+S | Ctrl+Shift+S |
 | Import Preset… | ⇧⌘O | Ctrl+Shift+O | Ctrl+Shift+O |
 | Drag and drop | `onDrop` of file URLs on the panel | `WM_DROPFILES` on the panel | `DropTarget` for `gio::File` lists |
-| Rename | double-click or Return, inline | F2 or slow click, inline label edit | `EditableLabel` |
+| Apply | click a row; double-click or Return applies it again | the same | the same |
+| Rename | context menu, inline; New Preset starts it | F2 or slow click, inline label edit | `EditableLabel` |
 | Delete | Delete key or menu, confirmation alert | Del or menu, confirmation | Delete or menu, confirmation |
 | Reveal | Show Presets Folder (Finder) | Show Presets Folder (Explorer) | Show Presets Folder (`gio::AppInfo::launch_default_for_uri`) |
 
 The shortcuts are free on all three platforms today. The panel header has "+" (New Preset) and
 a "…" menu (Import…, Show Presets Folder). Each row's context menu: Apply, Rename, Export…,
-Delete. The open panel is remembered across launches, like the Lab/Post tab.
+Delete. The open panel is remembered across launches, like the Lab/Post tab. Clicking a preset
+applies it, as in Lightroom and Photos, so double-click and Return apply rather than rename (a
+change from the first design, where they renamed). New Preset names the file after the film and
+starts renaming it. Files the engine refuses are listed greyed, with the reason.
 
 Out of scope: per-film defaults (later, possibly "Use as Default for <film>" on a preset),
 thumbnails, manual ordering, the matching-preset checkmark, darktable `.dtpreset` / `.dtstyle`
@@ -278,7 +282,11 @@ without Noah's go-ahead.
    - the forum files are unlicensed: used locally only, never committed or bundled.
 4. **macOS app:** data root from the bundle identifier, storage, panel, toolbar, menu and
    shortcuts, drag and drop, cleanup text. XCTest for apply and undo, the excluded settings,
-   naming rules and the session migration; an apply → render test through the helper.
+   naming rules and the session migration; an apply → render test through the helper. **Done**
+   (`macos/Sources/NegsApp/Presets.swift`, `PresetInspector.swift`, `PresetTests.swift`; 86
+   tests pass). Imported development times snap to the stock's listed ones in the engine, so the
+   Development picker shows them. The render after applying is covered by the helper's own
+   import tests and the parity check, not a separate app test.
 5. **Windows app:** the same; `cargo check --target x86_64-pc-windows-msvc`, unit tests for
    storage and naming, installer text.
 6. **Linux app:** the adapter and the same UI; tests for apply, film A → B → A, undo, redo and

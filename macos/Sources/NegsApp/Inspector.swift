@@ -302,7 +302,9 @@ private struct ValueField: NSViewRepresentable {
     }
 }
 
-private final class FocusingTextField: NSTextField {
+/// Takes focus as it appears, selecting its text, in the inspector column
+/// where SwiftUI focus doesn’t reach.
+final class FocusingTextField: NSTextField {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         DispatchQueue.main.async { [weak self] in

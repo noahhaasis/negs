@@ -37,8 +37,7 @@ struct EditorSession: Codable, Equatable, Sendable {
 actor SessionStore {
     let file: URL
 
-    init(file: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("dev.negs.app/session.json")) {
+    init(file: URL = AppDataLocations.supportDirectory.appendingPathComponent("session.json")) {
         self.file = file
     }
 
