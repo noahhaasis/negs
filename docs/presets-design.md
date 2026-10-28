@@ -296,7 +296,12 @@ without Noah's go-ahead.
    Development picker shows them. The render after applying is covered by the helper's own
    import tests and the parity check, not a separate app test.
 5. **Windows app:** the same; `cargo check --target x86_64-pc-windows-msvc`, unit tests for
-   storage and naming, installer text.
+   storage and naming, installer text. **Done** on Noah's Windows box (`windows/src/presets.rs`,
+   `ui/presets.rs`, `// MARK: Presets` in `model.rs`; details and evidence in
+   [windows-app.md](windows-app.md#presets)). 73 Windows tests pass, 6 of them through the
+   release helper. Writes use `MoveFileExW` without replace instead of a hard link (same
+   guarantee, any file system). Open: the community test presets and the uninstaller test with
+   Inno Setup on a disposable profile.
 6. **Linux app:** the adapter and the same UI; tests for apply, film A → B → A, undo, redo and
    restart through `parameters::runtime`; `check_controls.py`/`check_ui.py`; the Keyboard
    Shortcuts window.
