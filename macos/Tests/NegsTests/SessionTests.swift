@@ -65,6 +65,61 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(ImageSize.target(of: sized), 7200)
     }
 
+    func testSavedNullsSurviveWhereTheyAreValues() {
+        let defaults: JSONValue = .object([
+            "dir": .object(["langmuir": .array([.number(1), .number(1), .number(1)]), "gamma": .null]),
+            "gamut": .object(["lightness": .array([.number(0.95), .number(1), .number(1.6)]), "knee": .number(1)])
+        ])
+        let nullable: Set = ["dir.langmuir[*]", "dir.gamma", "gamut.lightness"]
+        let saved: JSONValue = .object([
+            "dir": .object(["langmuir": .array([.null, .number(0.5), .null]), "gamma": .array([.number(0.52), .number(0.51), .number(0.26)])]),
+            "gamut": .object(["lightness": .null, "knee": .null])
+        ])
+        let merged = defaults.restoring(saved, nullable: nullable)
+        // An infinite Langmuir knee and disabled lightness compression stay as saved.
+        XCTAssertEqual(merged["dir.langmuir"], .array([.null, .number(0.5), .null]))
+        XCTAssertEqual(merged["gamut.lightness"], .null)
+        // A value set over a null default comes back.
+        XCTAssertEqual(merged["dir.gamma"], .array([.number(0.52), .number(0.51), .number(0.26)]))
+        // Elsewhere a saved null still falls back to the default.
+        XCTAssertEqual(merged["gamut.knee"], .number(1))
+        XCTAssertEqual(defaults.restoring(saved)["dir.langmuir"], .array([.number(1), .number(0.5), .number(1)]))
+    }
+
+    func testSchema1SessionDropsDIRAndHalationValuesThatNeverApplied() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let photo = dir.appendingPathComponent("photo.png")
+        try Data("photo".utf8).write(to: photo)
+        let file = dir.appendingPathComponent("session.json")
+        var state = EditState()
+        state.params = .object(["film_render": .object([
+            "dir_couplers": .object(["gamma_samelayer_rgb": .array([.number(0.341), .number(0.324), .number(0.273)]),
+                                     "amount": .number(0.8)]),
+            "halation": .object(["halation_strength": .array([.number(0.05), .number(0.015), .number(0)])]),
+            "grain": .object(["rms_granularity": .array([.number(12), .number(13), .number(12)])])
+        ])])
+        var old = EditorSession(source: photo, state: state)
+        old.schema = 1
+        try JSONEncoder().encode(old).write(to: file)
+        let loaded = try await SessionStore(file: file).load()
+        XCTAssertEqual(loaded?.schema, 2)
+        XCTAssertEqual(loaded?.state.params["film_render.dir_couplers.gamma_samelayer_rgb"], .null)
+        XCTAssertEqual(loaded?.state.params["film_render.halation.halation_strength"], .null)
+        // Values that did apply in schema 1 stay.
+        XCTAssertEqual(loaded?.state.params["film_render.dir_couplers.amount"], .number(0.8))
+        XCTAssertEqual(loaded?.state.params["film_render.grain.rms_granularity"],
+                       .array([.number(12), .number(13), .number(12)]))
+        // A schema-2 session keeps set values.
+        var current = EditorSession(source: photo, state: state)
+        current.state.params["film_render.dir_couplers.gamma_samelayer_rgb"] = .array([.number(0.52), .number(0.51), .number(0.26)])
+        try await SessionStore(file: file).save(current)
+        let kept = try await SessionStore(file: file).load()
+        XCTAssertEqual(kept?.state.params["film_render.dir_couplers.gamma_samelayer_rgb"],
+                       .array([.number(0.52), .number(0.51), .number(0.26)]))
+    }
+
     func testUpdaterRequiresBothHTTPSFeedAndValidPublicKey() {
         let key = Data(repeating: 1, count: 32).base64EncodedString()
         XCTAssertFalse(UpdateController.validConfiguration([:]))

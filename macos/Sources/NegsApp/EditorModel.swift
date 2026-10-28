@@ -346,8 +346,8 @@ import UniformTypeIdentifiers
     func chooseFilm(_ stock: String) {
         var next = state; next.film = stock
         next.params["film_render.development_time"] = .null
-        // A new film brings its own grain preset, as upstream applies it.
-        for field in Stock.grainFields { next.params["film_render.grain.\(field)"] = .null }
+        // A new film brings its own grain, DIR and halation presets, as upstream applies them.
+        for path in Stock.presetPaths { next.params[path] = .null }
         pairFilm(in: &next); apply(next, action: "Change Film")
     }
     func choosePaper(_ stock: String) {
@@ -556,7 +556,7 @@ import UniformTypeIdentifiers
         let generation = sourceGeneration
         if let session {
             var restored = session.state
-            restored.params = defaults.restoring(restored.params)
+            restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = defaults[ImageSize.factorPath]
             if factor != .null { restored.params[ImageSize.factorPath] = factor }

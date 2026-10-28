@@ -240,6 +240,8 @@ pub struct Rendered {
 pub struct Model {
     pub state: EditState,
     pub defaults: Value,
+    /// The catalog's `nullable_paths`: where a saved null is a value.
+    nullable_paths: Vec<String>,
     catalog: Value,
     pub stocks: Vec<Stock>,
     pub source: Option<PathBuf>,
@@ -326,6 +328,7 @@ impl Model {
         Self {
             state: EditState::default(),
             defaults: json!({}),
+            nullable_paths: vec![],
             catalog: Value::Null,
             stocks: vec![],
             source: None,
@@ -555,6 +558,10 @@ impl Model {
     fn apply_catalog(&mut self, catalog: Value) {
         self.stocks = catalog["profiles"].as_array().map(|a| a.iter().map(Stock::new).collect()).unwrap_or_default();
         self.defaults = catalog["defaults"].clone();
+        self.nullable_paths = catalog["nullable_paths"]
+            .as_array()
+            .map(|paths| paths.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default();
         self.catalog = catalog;
         // Keep anything already applied to the photograph, such as its rotation.
         let rotation = self.state.value("io.rotate_cw").clone();
@@ -671,9 +678,12 @@ impl Model {
         let mut next = self.state.clone();
         next.film = stock.into();
         json::set(&mut next.params, "film_render.development_time", Value::Null);
-        // A new film brings its own grain preset, as upstream applies it.
+        // A new film brings its own grain, DIR and halation presets, as upstream applies them.
         for field in state::GRAIN_STOCK_FIELDS {
             json::set(&mut next.params, &format!("film_render.grain.{field}"), Value::Null);
+        }
+        for path in state::DIR_HALATION_STOCK_PATHS {
+            json::set(&mut next.params, path, Value::Null);
         }
         self.pair_film(&mut next);
         self.apply(next, "Change Film");
@@ -899,7 +909,7 @@ impl Model {
         if let Some(session) = &self.crop_session {
             saved.crop = session.settings();
         }
-        Some(EditorSession { schema: 1, source, state: saved, inspector_visible: self.inspector_visible, fit_image: self.fit_image })
+        Some(EditorSession { schema: EditorSession::SCHEMA, source, state: saved, inspector_visible: self.inspector_visible, fit_image: self.fit_image })
     }
 
     fn restore(&mut self, session: EditorSession) -> Result<()> {
@@ -996,7 +1006,7 @@ impl Model {
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
         if let Some(session) = session {
             let mut restored = session.state;
-            restored.params = json::restoring(&self.defaults, &restored.params);
+            restored.params = json::restoring(&self.defaults, &restored.params, &self.nullable_paths);
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
             if !factor.is_null() {

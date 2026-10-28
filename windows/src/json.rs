@@ -83,15 +83,28 @@ pub fn same(a: &Value, b: &Value) -> bool {
 
 /// Saved values merged into the current defaults: new engine fields keep
 /// their defaults, known fields are restored, removed fields are dropped.
-pub fn restoring(defaults: &Value, saved: &Value) -> Value {
+/// A saved null stays where `nullable` (the catalog's `nullable_paths`, `[*]`
+/// for every element) says it is a value, such as an infinite Langmuir knee.
+pub fn restoring(defaults: &Value, saved: &Value, nullable: &[String]) -> Value {
+    restoring_at(defaults, saved, nullable, "")
+}
+
+fn restoring_at(defaults: &Value, saved: &Value, nullable: &[String], path: &str) -> Value {
+    if saved.is_null() && nullable.iter().any(|p| p == path) {
+        return Value::Null;
+    }
     match (defaults, saved) {
         (Value::Object(d), Value::Object(s)) => Value::Object(
             d.iter()
-                .map(|(k, v)| (k.clone(), s.get(k).map_or_else(|| v.clone(), |saved| restoring(v, saved))))
+                .map(|(k, v)| {
+                    let child = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
+                    (k.clone(), s.get(k).map_or_else(|| v.clone(), |saved| restoring_at(v, saved, nullable, &child)))
+                })
                 .collect(),
         ),
         (Value::Array(d), Value::Array(s)) if d.len() == s.len() => {
-            Value::Array(d.iter().zip(s).map(|(v, w)| restoring(v, w)).collect())
+            let element = format!("{path}[*]");
+            Value::Array(d.iter().zip(s).map(|(v, w)| restoring_at(v, w, nullable, &element)).collect())
         }
         (Value::Number(_), Value::Number(_))
         | (Value::Bool(_), Value::Bool(_))
@@ -129,6 +142,18 @@ mod tests {
     fn restoring_keeps_new_defaults_and_drops_removed_fields() {
         let defaults = json!({"a": 1, "b": {"c": true, "d": [1, 2]}, "e": null, "f": "x"});
         let saved = json!({"a": 5, "b": {"c": false, "d": [1, 2, 3], "gone": 1}, "e": 3, "f": 7, "removed": 1});
-        assert_eq!(restoring(&defaults, &saved), json!({"a": 5, "b": {"c": false, "d": [1, 2]}, "e": 3, "f": "x"}));
+        assert_eq!(restoring(&defaults, &saved, &[]), json!({"a": 5, "b": {"c": false, "d": [1, 2]}, "e": 3, "f": "x"}));
+    }
+
+    #[test]
+    fn restoring_keeps_saved_nulls_where_they_are_values() {
+        let defaults = json!({"dir": {"langmuir": [1, 1, 1], "gamma": null}, "gamut": {"lightness": [0.95, 1, 1.6], "knee": 1}});
+        let saved = json!({"dir": {"langmuir": [null, 0.5, null], "gamma": [0.52, 0.51, 0.26]}, "gamut": {"lightness": null, "knee": null}});
+        let nullable = ["dir.langmuir[*]", "dir.gamma", "gamut.lightness"].map(String::from);
+        assert_eq!(
+            restoring(&defaults, &saved, &nullable),
+            json!({"dir": {"langmuir": [null, 0.5, null], "gamma": [0.52, 0.51, 0.26]}, "gamut": {"lightness": null, "knee": 1}})
+        );
+        assert_eq!(restoring(&defaults, &saved, &[])["dir"]["langmuir"], json!([1, 0.5, 1]));
     }
 }
