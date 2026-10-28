@@ -25,7 +25,7 @@ The mechanism reproduces on Apple Silicon running macOS 26.5.2. The
 regression test uses a 96 × 64 PNG enlarged to a 2400-pixel longest side
 in a 1100 × 860 native window; this forces different drag and settled
 resolutions without requiring a large fixture. Confirmation on the
-reporter's Intel Mac remains outstanding. Windows is a separate investigation.
+reporter's Intel Mac remains outstanding.
 
 ## Cause and fix
 
@@ -101,3 +101,20 @@ bash linux/cargo.sh test --locked --offline slider_previews_keep_inspector_layou
 
 The Linux suite passed 26 tests with 5 opt-in tests skipped. The explicit
 GTK layout regression also passed.
+
+## Windows counterpart
+
+Windows had the macOS cause. `Model::render_finished` set `preview_scale`
+from every frame, so a reduced drag frame inserted or reworded the Image Size
+notice. The inspector then laid its rows out again at the same scroll offset,
+moving every slider below the notice. Only settled renders update the scale
+now; cached preview restoration and source changes are unaffected.
+
+`model::tests::drag_frames_keep_the_preview_scale` drives a settled render, a
+reduced drag frame, and the release render, for full and reduced settled
+resolutions. Before the fix the drag frame changed the scale from 1.0 to 0.25,
+which shows the notice. The Windows suite passes 57 tests.
+
+```sh
+cargo test --release --manifest-path windows/Cargo.toml drag_frames_keep_the_preview_scale
+```
