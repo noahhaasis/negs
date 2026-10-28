@@ -1,0 +1,792 @@
+{
+  "host": {
+    "machine": "MacBookPro18,3",
+    "cpu": "Apple M1 Pro",
+    "memory_bytes": 34359738368,
+    "macos": "26.5.2"
+  },
+  "started": "2026-10-28T16:04:08+0100",
+  "configs": [
+    {
+      "id": "negs-cpu",
+      "engine": "Negs",
+      "path": "CPU reference (f64)",
+      "backend": "cpu"
+    },
+    {
+      "id": "negs-cpu-less-memory",
+      "engine": "Negs",
+      "path": "CPU reference (f64), less memory",
+      "backend": "cpu",
+      "params": {
+        "settings": {
+          "serial_grain": true
+        }
+      }
+    },
+    {
+      "id": "negs-cpu-luts",
+      "engine": "Negs",
+      "path": "CPU (f64, LUTs)",
+      "backend": "cpu",
+      "params": {
+        "settings": {
+          "use_enlarger_lut": true,
+          "use_scanner_lut": true
+        }
+      }
+    },
+    {
+      "id": "negs-gpu",
+      "engine": "Negs",
+      "path": "GPU (f32, Metal)",
+      "backend": "wgpu"
+    },
+    {
+      "id": "rs-cpu",
+      "engine": "spektrafilm-rs",
+      "path": "CPU (f64, LUTs)",
+      "backend": "cpu",
+      "params": {
+        "settings": {
+          "use_enlarger_lut": true,
+          "use_scanner_lut": true
+        }
+      }
+    },
+    {
+      "id": "rs-gpu",
+      "engine": "spektrafilm-rs",
+      "path": "GPU (f32, Metal)",
+      "backend": "wgpu"
+    },
+    {
+      "id": "python",
+      "engine": "Python spektrafilm",
+      "path": "CPU (f64, NumPy + Numba)",
+      "backend": null
+    }
+  ],
+  "medians": {
+    "nikon-z6": {
+      "negs-cpu": {
+        "runs": 3,
+        "wall_s": 14.131,
+        "wall_range": [
+          14.129,
+          14.141
+        ],
+        "engine_s": 13.19,
+        "peak_gib": 7.107320584356785,
+        "peak_range": [
+          6.7412619441747665,
+          7.654180705547333
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "negs-cpu-less-memory": {
+        "runs": 3,
+        "wall_s": 38.383,
+        "wall_range": [
+          38.373,
+          38.433
+        ],
+        "engine_s": 37.458,
+        "peak_gib": 3.859759733080864,
+        "peak_range": [
+          3.854434348642826,
+          3.8724396973848343
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "negs-cpu-luts": {
+        "runs": 3,
+        "wall_s": 9.74,
+        "wall_range": [
+          9.726,
+          9.764
+        ],
+        "engine_s": 8.763,
+        "peak_gib": 5.099338762462139,
+        "peak_range": [
+          4.549747318029404,
+          5.280292898416519
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "negs-gpu": {
+        "runs": 3,
+        "wall_s": 1.854,
+        "wall_range": [
+          1.845,
+          1.857
+        ],
+        "engine_s": 0.931,
+        "peak_gib": 2.068193092942238,
+        "peak_range": [
+          2.0678421407938004,
+          2.0682693645358086
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "rs-cpu": {
+        "runs": 3,
+        "wall_s": 10.584,
+        "wall_range": [
+          10.538,
+          10.671
+        ],
+        "engine_s": 9.733,
+        "peak_gib": 7.545187130570412,
+        "peak_range": [
+          7.544958204030991,
+          7.545644849538803
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "rs-gpu": {
+        "runs": 3,
+        "wall_s": 2.024,
+        "wall_range": [
+          2.021,
+          2.025
+        ],
+        "engine_s": 1.257,
+        "peak_gib": 3.6320358216762543,
+        "peak_range": [
+          3.6319900453090668,
+          3.6330429017543793
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "python": {
+        "runs": 3,
+        "wall_s": 46.126,
+        "wall_range": [
+          46.06,
+          46.139
+        ],
+        "engine_s": 43.43,
+        "peak_gib": 13.67815675586462,
+        "peak_range": [
+          13.614237666130066,
+          13.700739853084087
+        ],
+        "max_swapped_out_gib": 0.0
+      }
+    },
+    "leica-q3": {
+      "negs-cpu": {
+        "runs": 3,
+        "wall_s": 37.785,
+        "wall_range": [
+          37.459,
+          37.99
+        ],
+        "engine_s": 35.315,
+        "peak_gib": 13.926096931099892,
+        "peak_range": [
+          13.483774796128273,
+          14.75742681324482
+        ],
+        "max_swapped_out_gib": 0.10845947265625
+      },
+      "negs-cpu-less-memory": {
+        "runs": 3,
+        "wall_s": 101.468,
+        "wall_range": [
+          101.352,
+          101.817
+        ],
+        "engine_s": 99.177,
+        "peak_gib": 9.723457127809525,
+        "peak_range": [
+          9.716163471341133,
+          9.972572319209576
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "negs-cpu-luts": {
+        "runs": 3,
+        "wall_s": 26.43,
+        "wall_range": [
+          26.396,
+          26.658
+        ],
+        "engine_s": 24.136,
+        "peak_gib": 10.653694570064545,
+        "peak_range": [
+          10.244133122265339,
+          11.145973980426788
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "negs-gpu": {
+        "runs": 3,
+        "wall_s": 4.445,
+        "wall_range": [
+          4.359,
+          4.46
+        ],
+        "engine_s": 2.145,
+        "peak_gib": 4.95854439586401,
+        "peak_range": [
+          4.958223961293697,
+          4.958544418215752
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "rs-cpu": {
+        "runs": 3,
+        "wall_s": 27.954,
+        "wall_range": [
+          27.915,
+          30.146
+        ],
+        "engine_s": 25.874,
+        "peak_gib": 17.182019598782063,
+        "peak_range": [
+          17.18186703324318,
+          18.547605887055397
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "rs-gpu": {
+        "runs": 3,
+        "wall_s": 5.97,
+        "wall_range": [
+          5.939,
+          6.007
+        ],
+        "engine_s": 4.062,
+        "peak_gib": 8.8570891097188,
+        "peak_range": [
+          8.857073873281479,
+          8.85739428550005
+        ],
+        "max_swapped_out_gib": 0.0
+      },
+      "python": {
+        "runs": 3,
+        "wall_s": 112.77,
+        "wall_range": [
+          108.495,
+          118.366
+        ],
+        "engine_s": 107.63,
+        "peak_gib": 27.751287154853344,
+        "peak_range": [
+          27.750875055789948,
+          28.42743506282568
+        ],
+        "max_swapped_out_gib": 7.295623779296875
+      }
+    }
+  },
+  "runs": [
+    {
+      "config": "negs-cpu",
+      "image": "nikon-z6",
+      "rep": 1,
+      "wall_s": 14.131,
+      "pipeline_s": 13.181,
+      "time_real_s": 14.12,
+      "user_s": 98.27,
+      "peak_footprint_bytes": 8218613952,
+      "max_rss_bytes": 8222490624,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-less-memory",
+      "image": "nikon-z6",
+      "rep": 1,
+      "wall_s": 38.433,
+      "pipeline_s": 37.499,
+      "time_real_s": 38.43,
+      "user_s": 94.23,
+      "peak_footprint_bytes": 4144385456,
+      "max_rss_bytes": 4176166912,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-gpu",
+      "image": "nikon-z6",
+      "rep": 1,
+      "wall_s": 1.845,
+      "pipeline_s": 0.93,
+      "time_real_s": 1.84,
+      "user_s": 1.51,
+      "peak_footprint_bytes": 2220705424,
+      "max_rss_bytes": 1591689216,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-cpu",
+      "image": "nikon-z6",
+      "rep": 1,
+      "wall_s": 10.538,
+      "pipeline_s": 9.693,
+      "time_real_s": 10.53,
+      "user_s": 55.83,
+      "peak_footprint_bytes": 8102074464,
+      "max_rss_bytes": 8104837120,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-gpu",
+      "image": "nikon-z6",
+      "rep": 1,
+      "wall_s": 2.021,
+      "pipeline_s": 1.254,
+      "time_real_s": 2.01,
+      "user_s": 0.86,
+      "peak_footprint_bytes": 3899819616,
+      "max_rss_bytes": 1548599296,
+      "swapouts": 0
+    },
+    {
+      "config": "python",
+      "image": "nikon-z6",
+      "rep": 1,
+      "wall_s": 46.139,
+      "pipeline_s": 43.46,
+      "time_real_s": 46.13,
+      "user_s": 116.17,
+      "peak_footprint_bytes": 14618176384,
+      "max_rss_bytes": 14694367232,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu",
+      "image": "nikon-z6",
+      "rep": 2,
+      "wall_s": 14.129,
+      "pipeline_s": 13.19,
+      "time_real_s": 14.12,
+      "user_s": 98.06,
+      "peak_footprint_bytes": 7631427368,
+      "max_rss_bytes": 7635582976,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-less-memory",
+      "image": "nikon-z6",
+      "rep": 2,
+      "wall_s": 38.383,
+      "pipeline_s": 37.458,
+      "time_real_s": 38.37,
+      "user_s": 95.0,
+      "peak_footprint_bytes": 4158000464,
+      "max_rss_bytes": 4167467008,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-gpu",
+      "image": "nikon-z6",
+      "rep": 2,
+      "wall_s": 1.857,
+      "pipeline_s": 0.939,
+      "time_real_s": 1.85,
+      "user_s": 1.53,
+      "peak_footprint_bytes": 2220328592,
+      "max_rss_bytes": 1591771136,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-cpu",
+      "image": "nikon-z6",
+      "rep": 2,
+      "wall_s": 10.671,
+      "pipeline_s": 9.819,
+      "time_real_s": 10.66,
+      "user_s": 56.49,
+      "peak_footprint_bytes": 8101337184,
+      "max_rss_bytes": 8104099840,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-gpu",
+      "image": "nikon-z6",
+      "rep": 2,
+      "wall_s": 2.024,
+      "pipeline_s": 1.257,
+      "time_real_s": 2.02,
+      "user_s": 0.86,
+      "peak_footprint_bytes": 3899868768,
+      "max_rss_bytes": 1548632064,
+      "swapouts": 0
+    },
+    {
+      "config": "python",
+      "image": "nikon-z6",
+      "rep": 2,
+      "wall_s": 46.06,
+      "pipeline_s": 43.35,
+      "time_real_s": 46.05,
+      "user_s": 116.41,
+      "peak_footprint_bytes": 14711057400,
+      "max_rss_bytes": 14793441280,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu",
+      "image": "nikon-z6",
+      "rep": 3,
+      "wall_s": 14.141,
+      "pipeline_s": 13.194,
+      "time_real_s": 14.13,
+      "user_s": 98.34,
+      "peak_footprint_bytes": 7238374896,
+      "max_rss_bytes": 7242743808,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-less-memory",
+      "image": "nikon-z6",
+      "rep": 3,
+      "wall_s": 38.373,
+      "pipeline_s": 37.438,
+      "time_real_s": 38.36,
+      "user_s": 94.25,
+      "peak_footprint_bytes": 4138667368,
+      "max_rss_bytes": 4163911680,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-gpu",
+      "image": "nikon-z6",
+      "rep": 3,
+      "wall_s": 1.854,
+      "pipeline_s": 0.931,
+      "time_real_s": 1.85,
+      "user_s": 1.53,
+      "peak_footprint_bytes": 2220787320,
+      "max_rss_bytes": 1592246272,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-cpu",
+      "image": "nikon-z6",
+      "rep": 3,
+      "wall_s": 10.584,
+      "pipeline_s": 9.733,
+      "time_real_s": 10.58,
+      "user_s": 55.87,
+      "peak_footprint_bytes": 8101582992,
+      "max_rss_bytes": 8104312832,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-gpu",
+      "image": "nikon-z6",
+      "rep": 3,
+      "wall_s": 2.025,
+      "pipeline_s": 1.257,
+      "time_real_s": 2.02,
+      "user_s": 0.86,
+      "peak_footprint_bytes": 3900950112,
+      "max_rss_bytes": 1549271040,
+      "swapouts": 0
+    },
+    {
+      "config": "python",
+      "image": "nikon-z6",
+      "rep": 3,
+      "wall_s": 46.126,
+      "pipeline_s": 43.43,
+      "time_real_s": 46.12,
+      "user_s": 116.2,
+      "peak_footprint_bytes": 14686808984,
+      "max_rss_bytes": 14763999232,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu",
+      "image": "leica-q3",
+      "rep": 1,
+      "wall_s": 37.99,
+      "pipeline_s": 35.629,
+      "time_real_s": 37.98,
+      "user_s": 249.75,
+      "peak_footprint_bytes": 15845666384,
+      "max_rss_bytes": 15845769216,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-less-memory",
+      "image": "leica-q3",
+      "rep": 1,
+      "wall_s": 101.468,
+      "pipeline_s": 99.177,
+      "time_real_s": 101.46,
+      "user_s": 244.98,
+      "peak_footprint_bytes": 10440482592,
+      "max_rss_bytes": 10476716032,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-gpu",
+      "image": "leica-q3",
+      "rep": 1,
+      "wall_s": 4.46,
+      "pipeline_s": 2.158,
+      "time_real_s": 4.45,
+      "user_s": 3.66,
+      "peak_footprint_bytes": 5324196504,
+      "max_rss_bytes": 3779706880,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-cpu",
+      "image": "leica-q3",
+      "rep": 1,
+      "wall_s": 30.146,
+      "pipeline_s": 27.754,
+      "time_real_s": 30.14,
+      "user_s": 144.08,
+      "peak_footprint_bytes": 19915340176,
+      "max_rss_bytes": 17850695680,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-gpu",
+      "image": "leica-q3",
+      "rep": 1,
+      "wall_s": 5.97,
+      "pipeline_s": 4.062,
+      "time_real_s": 5.96,
+      "user_s": 1.9,
+      "peak_footprint_bytes": 9510227016,
+      "max_rss_bytes": 3708534784,
+      "swapouts": 0
+    },
+    {
+      "config": "python",
+      "image": "leica-q3",
+      "rep": 1,
+      "wall_s": 118.366,
+      "pipeline_s": 112.47,
+      "time_real_s": 118.36,
+      "user_s": 238.64,
+      "peak_footprint_bytes": 29797275200,
+      "max_rss_bytes": 21222834176,
+      "swapouts": 478126
+    },
+    {
+      "config": "negs-cpu",
+      "image": "leica-q3",
+      "rep": 2,
+      "wall_s": 37.785,
+      "pipeline_s": 35.315,
+      "time_real_s": 37.78,
+      "user_s": 251.41,
+      "peak_footprint_bytes": 14953032720,
+      "max_rss_bytes": 14987591680,
+      "swapouts": 7108
+    },
+    {
+      "config": "negs-cpu-less-memory",
+      "image": "leica-q3",
+      "rep": 2,
+      "wall_s": 101.352,
+      "pipeline_s": 99.09,
+      "time_real_s": 101.34,
+      "user_s": 244.11,
+      "peak_footprint_bytes": 10707967992,
+      "max_rss_bytes": 10745741312,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-gpu",
+      "image": "leica-q3",
+      "rep": 2,
+      "wall_s": 4.445,
+      "pipeline_s": 2.136,
+      "time_real_s": 4.44,
+      "user_s": 3.63,
+      "peak_footprint_bytes": 5323852440,
+      "max_rss_bytes": 3779198976,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-cpu",
+      "image": "leica-q3",
+      "rep": 2,
+      "wall_s": 27.915,
+      "pipeline_s": 25.694,
+      "time_real_s": 27.91,
+      "user_s": 144.2,
+      "peak_footprint_bytes": 18448889248,
+      "max_rss_bytes": 18446450688,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-gpu",
+      "image": "leica-q3",
+      "rep": 2,
+      "wall_s": 5.939,
+      "pipeline_s": 4.06,
+      "time_real_s": 5.93,
+      "user_s": 1.89,
+      "peak_footprint_bytes": 9510210656,
+      "max_rss_bytes": 3708485632,
+      "swapouts": 0
+    },
+    {
+      "config": "python",
+      "image": "leica-q3",
+      "rep": 2,
+      "wall_s": 112.77,
+      "pipeline_s": 107.63,
+      "time_real_s": 112.76,
+      "user_s": 239.47,
+      "peak_footprint_bytes": 29797717688,
+      "max_rss_bytes": 23975231488,
+      "swapouts": 294386
+    },
+    {
+      "config": "negs-cpu",
+      "image": "leica-q3",
+      "rep": 3,
+      "wall_s": 37.459,
+      "pipeline_s": 35.078,
+      "time_real_s": 37.45,
+      "user_s": 251.58,
+      "peak_footprint_bytes": 14478092944,
+      "max_rss_bytes": 14497628160,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-less-memory",
+      "image": "leica-q3",
+      "rep": 3,
+      "wall_s": 101.817,
+      "pipeline_s": 99.557,
+      "time_real_s": 101.81,
+      "user_s": 243.78,
+      "peak_footprint_bytes": 10432651088,
+      "max_rss_bytes": 10469785600,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-gpu",
+      "image": "leica-q3",
+      "rep": 3,
+      "wall_s": 4.359,
+      "pipeline_s": 2.145,
+      "time_real_s": 4.35,
+      "user_s": 3.62,
+      "peak_footprint_bytes": 5324196528,
+      "max_rss_bytes": 3778904064,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-cpu",
+      "image": "leica-q3",
+      "rep": 3,
+      "wall_s": 27.954,
+      "pipeline_s": 25.874,
+      "time_real_s": 27.95,
+      "user_s": 144.48,
+      "peak_footprint_bytes": 18449053064,
+      "max_rss_bytes": 18446630912,
+      "swapouts": 0
+    },
+    {
+      "config": "rs-gpu",
+      "image": "leica-q3",
+      "rep": 3,
+      "wall_s": 6.007,
+      "pipeline_s": 4.066,
+      "time_real_s": 6.0,
+      "user_s": 1.9,
+      "peak_footprint_bytes": 9510554696,
+      "max_rss_bytes": 3708551168,
+      "swapouts": 0
+    },
+    {
+      "config": "python",
+      "image": "leica-q3",
+      "rep": 3,
+      "wall_s": 108.495,
+      "pipeline_s": 103.54,
+      "time_real_s": 108.49,
+      "user_s": 238.52,
+      "peak_footprint_bytes": 30523725976,
+      "max_rss_bytes": 23846076416,
+      "swapouts": 247045
+    },
+    {
+      "config": "negs-cpu-luts",
+      "image": "nikon-z6",
+      "rep": 1,
+      "wall_s": 9.726,
+      "pipeline_s": 8.758,
+      "time_real_s": 9.72,
+      "user_s": 70.51,
+      "peak_footprint_bytes": 4885253984,
+      "max_rss_bytes": 4890820608,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-luts",
+      "image": "nikon-z6",
+      "rep": 2,
+      "wall_s": 9.764,
+      "pipeline_s": 8.795,
+      "time_real_s": 9.75,
+      "user_s": 70.09,
+      "peak_footprint_bytes": 5475373304,
+      "max_rss_bytes": 5480660992,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-luts",
+      "image": "nikon-z6",
+      "rep": 3,
+      "wall_s": 9.74,
+      "pipeline_s": 8.763,
+      "time_real_s": 9.73,
+      "user_s": 70.38,
+      "peak_footprint_bytes": 5669671328,
+      "max_rss_bytes": 5674844160,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-luts",
+      "image": "leica-q3",
+      "rep": 1,
+      "wall_s": 26.43,
+      "pipeline_s": 24.136,
+      "time_real_s": 26.42,
+      "user_s": 182.9,
+      "peak_footprint_bytes": 10999554184,
+      "max_rss_bytes": 11001790464,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-luts",
+      "image": "leica-q3",
+      "rep": 2,
+      "wall_s": 26.658,
+      "pipeline_s": 24.338,
+      "time_real_s": 26.65,
+      "user_s": 183.77,
+      "peak_footprint_bytes": 11439317440,
+      "max_rss_bytes": 11441356800,
+      "swapouts": 0
+    },
+    {
+      "config": "negs-cpu-luts",
+      "image": "leica-q3",
+      "rep": 3,
+      "wall_s": 26.396,
+      "pipeline_s": 24.103,
+      "time_real_s": 26.39,
+      "user_s": 183.17,
+      "peak_footprint_bytes": 11967898432,
+      "max_rss_bytes": 11969658880,
+      "swapouts": 0
+    }
+  ]
+}

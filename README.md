@@ -64,6 +64,30 @@ Finish with a solid border or a thin keyline in any width and colour, a black fi
 |---|---|---|---|
 | ![A bench on a terrace above a lake and mountains, with a white border](docs/readme/border-white.webp) | ![Horse-drawn carriages in front of a palace, with a keyline border](docs/readme/border-keyline.webp) | ![A bar at night with glowing shelves, with a black film border](docs/readme/border-film.webp) | ![The Colosseum in a 35mm Kodak Gold 200 frame with sprocket holes and edge print](docs/readme/border-35mm.webp) |
 
+## Speed
+
+While you drag a slider, Negs renders only the pixels your screen shows, so the picture follows your hand. When you let go, the GPU develops the photo again at full resolution, with grain and halation at their real size. That full frame is what Fast export saves, so exporting takes no extra time.
+
+The table compares render times on a MacBook Pro with an M1 Pro and 32 GB: the same photo in every app (Kodak Gold 200 printed on Portra Endura), developed at full resolution. Memory is the most each program used.
+
+| | Nikon Z 6 · 24 MP | Leica Q3 · 60 MP |
+|---|---:|---:|
+| **Negs, full-resolution render (GPU)** | **0.9 s · 2.1 GB** | **2.1 s · 5.0 GB** |
+| spektrafilm-rs (GPU) | 1.3 s · 3.6 GB | 4.1 s · 8.9 GB |
+| **Negs, Reference export (CPU, 64-bit)** | **13.2 s · 7.1 GB** | **35.3 s · 13.9 GB** |
+| Negs, Reference with *Use less memory* | 37.5 s · 3.9 GB | 99.2 s · 9.7 GB |
+| Negs (CPU, 64-bit, LUTs) | 8.8 s · 5.1 GB | 24.1 s · 10.7 GB |
+| spektrafilm-rs (CPU, 64-bit, LUTs) | 9.7 s · 7.5 GB | 25.9 s · 17.2 GB |
+| Python spektrafilm (CPU, 64-bit, LUTs) | 43.4 s · 13.7 GB | 107.6 s · 27.8 GB* |
+
+\* More than fits in 32 GB alongside macOS: it swapped up to 7 GB to disk.
+
+Negs' Reference export computes the full spectrum for every pixel. spektrafilm-rs and Python speed up two spectral steps (enlarger and scanner) with small lookup tables (LUTs), which are quicker but approximate. These aren't film-look LUTs: grain, halation and the rest of the film are still simulated. The LUT row shows Negs with the same lookup tables, for a like-for-like comparison; the app doesn't export that way.
+
+**Use less memory** (Scan & Color → Output) is for Reference exports of large photos on Macs with less RAM. If an export would fill your Mac's memory and slow everything down, turn it on: the image is exactly the same, the export just takes longer.
+
+Method, versions and reproduction: [benchmarks](docs/benchmarks.md).
+
 ## Your film shelf
 
 | | |
