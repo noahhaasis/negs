@@ -35,8 +35,10 @@ struct PresetInspector: View {
         HStack(spacing: 8) {
             Text("Presets").font(.headline)
             Spacer()
+            // Borderless buttons draw their symbol gray, which beside the menu reads as disabled.
             Button(action: model.newPreset) { Image(systemName: "plus") }
                 .buttonStyle(.borderless)
+                .foregroundStyle(model.canChangePresets ? .primary : .tertiary)
                 .help("Save the film, paper and Lab settings as a preset (⇧⌘S)")
                 .accessibilityLabel("New Preset")
             Menu {

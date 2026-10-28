@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "negs-linux"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gtk4",
  "libadwaita",

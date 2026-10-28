@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "negs-windows"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -1696,7 +1696,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "spektrafilm-io"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -1711,7 +1711,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-math"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "byteorder",
  "half",

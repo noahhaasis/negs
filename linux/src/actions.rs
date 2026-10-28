@@ -219,7 +219,7 @@ impl Editor {
         self.action("appearance", |ui| ui.settings());
         self.action("about", |ui| {
             let d = adw::AboutDialog::builder().application_name("Negs")
-                .application_icon("dev.negs.app").version(if crate::runtime::ui_only() { "0.9.1 · Linux UI preview" } else { "0.9.1 · Linux" })
+                .application_icon("dev.negs.app").version(if crate::runtime::ui_only() { "0.10.0 · Linux UI preview" } else { "0.10.0 · Linux" })
                 .developer_name("Negs contributors")
                 .comments("Film simulation with a native GTK4/libadwaita editor and the Spektrafilm engine.")
                 .license_type(gtk::License::Gpl30).build();
