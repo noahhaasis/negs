@@ -25,6 +25,8 @@ const OPEN_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a00
 const EXPORT_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a002);
 const PREVIEW_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a003);
 const LUT_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a004);
+const PRESET_IMPORT_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a005);
+const PRESET_EXPORT_GUID: GUID = GUID::from_u128(0x6a3b_51f0_9c1e_4d2b_8f3a_0e5d_7c41_a006);
 
 thread_local! {
     static TOOLTIP: Cell<isize> = const { Cell::new(0) };
@@ -124,6 +126,24 @@ pub fn error(owner: HWND, message: &str) {
     let (first, rest) = message.split_once('\n').unwrap_or((message, ""));
     let details = (!rest.trim().is_empty()).then_some(rest.trim());
     task_dialog(owner, first, "", details, TD_WARNING_ICON, &[], TASKDIALOG_FLAGS(0));
+}
+
+/// A short message with an explanation below it.
+pub fn notice(owner: HWND, instruction: &str, content: &str) {
+    task_dialog(owner, instruction, content, None, TD_WARNING_ICON, &[], TASKDIALOG_FLAGS(0));
+}
+
+/// True to delete the preset.
+pub fn confirm_delete_preset(owner: HWND, name: &str) -> bool {
+    task_dialog(
+        owner,
+        &format!("Delete the preset “{name}”?"),
+        "This can’t be undone. Photographs edited with it keep their settings.",
+        None,
+        TD_WARNING_ICON,
+        &[(100, "Delete"), (IDCANCEL.0, "Cancel")],
+        TDF_ALLOW_DIALOG_CANCELLATION,
+    ) == 100
 }
 
 /// True to quit and cancel the export.
@@ -628,5 +648,70 @@ pub fn save(app: &mut App, export: bool) {
         app.model.export(path, chosen_engine, size, settings);
     } else {
         app.model.save_preview(path, size, settings);
+    }
+}
+
+/// Import Presets…: several files, saved by Negs or by spektrafilm.
+pub fn import_presets(app: &mut App) {
+    if !app.model.can_change_presets() {
+        return;
+    }
+    let filters = [("Presets (*.json, *.txt)", "*.json;*.txt"), ("All files", "*.*")];
+    let wide_filters: Vec<(Vec<u16>, Vec<u16>)> = filters.iter().map(|(n, p)| (wide(n), wide(p))).collect();
+    let specs: Vec<COMDLG_FILTERSPEC> = wide_filters.iter().map(|(n, p)| COMDLG_FILTERSPEC { pszName: pcwstr(n), pszSpec: pcwstr(p) }).collect();
+    let chosen = unsafe {
+        (|| -> Option<Vec<PathBuf>> {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            dialog.SetClientGuid(&PRESET_IMPORT_GUID).ok()?;
+            dialog.SetFileTypes(&specs).ok()?;
+            let title = wide("Import Presets");
+            let _ = dialog.SetTitle(pcwstr(&title));
+            let label = wide("Import");
+            let _ = dialog.SetOkButtonLabel(pcwstr(&label));
+            let _ = dialog.SetOptions(FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_ALLOWMULTISELECT);
+            dialog.Show(app.main).ok()?;
+            let items = dialog.GetResults().ok()?;
+            let mut paths = vec![];
+            for i in 0..items.GetCount().ok()? {
+                let Ok(item) = items.GetItemAt(i) else { continue };
+                let Ok(name) = item.GetDisplayName(SIGDN_FILESYSPATH) else { continue };
+                if let Ok(path) = name.to_string() {
+                    paths.push(PathBuf::from(path));
+                }
+                CoTaskMemFree(Some(name.0 as *const _));
+            }
+            Some(paths)
+        })()
+    };
+    if let Some(paths) = chosen {
+        app.model.import_presets(paths, None);
+    }
+}
+
+/// Export…: a byte-for-byte copy of the preset wherever the user picks.
+pub fn export_preset(app: &mut App, preset: &crate::presets::PresetFile) {
+    let selected = unsafe {
+        (|| -> windows::core::Result<PathBuf> {
+            let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)?;
+            dialog.SetClientGuid(&PRESET_EXPORT_GUID)?;
+            let title = wide("Export Preset");
+            dialog.SetTitle(pcwstr(&title))?;
+            let name = wide("Preset (*.json)");
+            let pattern = wide("*.json");
+            dialog.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: pcwstr(&name), pszSpec: pcwstr(&pattern) }])?;
+            let extension = wide("json");
+            dialog.SetDefaultExtension(pcwstr(&extension))?;
+            let filename = wide(format!("{}.json", preset.name()));
+            dialog.SetFileName(pcwstr(&filename))?;
+            dialog.SetOptions(dialog.GetOptions()? | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_NOREADONLYRETURN)?;
+            let customize: IFileDialogCustomize = dialog.cast()?;
+            let message = wide("spektrafilm’s GUI state format: opens in Negs and in spektrafilm.");
+            customize.AddText(MESSAGE, pcwstr(&message))?;
+            dialog.Show(app.main)?;
+            result_path(&dialog.cast()?).ok_or_else(windows::core::Error::from_win32)
+        })()
+    };
+    if let Ok(path) = selected {
+        app.model.export_preset(preset, &path);
     }
 }

@@ -90,16 +90,18 @@ impl ColorReference {
     /// scanner white/black correction is on AND one of the two faithful
     /// paths (slide or print) applies; other combos get no correction.
     ///
-    /// `print_illuminant` is the enlarger's filtered illuminant and
-    /// `print_exposure_factor` the midgray normalization — both already
-    /// computed by the pipeline for the printing stage and reused here so the
-    /// print references match `_film_cmy_to_print_log_raw` exactly.
+    /// `print_illuminant` is the enlarger's filtered illuminant,
+    /// `print_exposure_factor` the midgray normalization and `preflash_raw`
+    /// the enlarger preflash — all already computed by the pipeline for the
+    /// printing stage and reused here so the print references match
+    /// `_film_cmy_to_print_log_raw` exactly.
     pub fn compute(
         film: &Profile,
         print: &Profile,
         params: &RuntimeParams,
         print_illuminant: &[f64],
         print_exposure_factor: f64,
+        preflash_raw: [f64; 3],
     ) -> Self {
         let white_corr = params.scanner.white_correction;
         let black_corr = params.scanner.black_correction;
@@ -115,6 +117,7 @@ impl ColorReference {
                 params,
                 print_illuminant,
                 print_exposure_factor,
+                preflash_raw,
                 white_corr,
                 black_corr,
             )
@@ -201,6 +204,7 @@ impl ColorReference {
         params: &RuntimeParams,
         print_illuminant: &[f64],
         print_exposure_factor: f64,
+        preflash_raw: [f64; 3],
         white_corr: bool,
         black_corr: bool,
     ) -> Self {
@@ -211,8 +215,8 @@ impl ColorReference {
         let film_curves = film.density_curves_f64();
         let cmy_film_white = nanmax_per_channel(&film_curves);
 
-        // Enlarger spectral exposure of those references
-        // (`_film_cmy_to_print_log_raw`, sans the unported preflash term).
+        // Enlarger spectral exposure of those references, preflash included
+        // (`_film_cmy_to_print_log_raw`).
         let film_channel_density = profile_channel_density(film);
         let film_base_density = crate::bases::film_base_density(film, params);
         let print_sensitivity = profile_sensitivity(print);
@@ -234,7 +238,7 @@ impl ColorReference {
             );
             let mut out = [0.0f64; 3];
             for c in 0..3 {
-                out[c] = ((raw[c] * print_exposure_factor).max(0.0) + 1e-10).log10();
+                out[c] = ((raw[c] * print_exposure_factor + preflash_raw[c]).max(0.0) + 1e-10).log10();
             }
             out
         };
@@ -534,6 +538,7 @@ mod parity_tests {
             &pipeline.params,
             pipeline.print_illuminant_slice(),
             pipeline.print_exposure_factor(),
+            pipeline.preflash_raw(),
         );
 
         assert!(cref.has_remap(), "print path must build a luminance remap");
@@ -551,5 +556,38 @@ mod parity_tests {
             cref.filming_exposure_correction, 1.0,
             "print path leaves filming untouched"
         );
+    }
+
+    /// The same with a preflash, which lights the black and white
+    /// references too (`_film_cmy_to_print_log_raw`). Reference values from
+    /// 28bf883 with preflash 0.03, Y +44, M −11.
+    #[test]
+    fn print_bw_correction_includes_the_preflash() {
+        let dir = data_dir();
+        let film = crate::profile::load_profile_by_name(&dir, "kodak_portra_400").unwrap();
+        let print = crate::profile::load_profile_by_name(&dir, "kodak_portra_endura").unwrap();
+        let mut params = crate::params::RuntimeParams::default();
+        params.scanner.white_correction = true;
+        params.scanner.black_correction = true;
+        params.camera.auto_exposure = false;
+        params.film_render.grain.active = false;
+        params.enlarger.preflash_exposure = 0.03;
+        params.enlarger.preflash_y_filter_shift = 44.0;
+        params.enlarger.preflash_m_filter_shift = -11.0;
+
+        let pipeline = Pipeline::new_with_spectral(film, print, params, &dir).unwrap();
+        let cref = ColorReference::compute(
+            &pipeline.film,
+            &pipeline.print,
+            &pipeline.params,
+            pipeline.print_illuminant_slice(),
+            pipeline.print_exposure_factor(),
+            pipeline.preflash_raw(),
+        );
+        let (m, q) = cref.xyz_remap.unwrap();
+        assert!((m - 1.2983743459314119).abs() < 1e-6, "m = {m}");
+        assert!((q - -0.0044160680268989895).abs() < 1e-7, "q = {q}");
+        let correction = cref.printing_exposure_correction;
+        assert!((correction - 1.1058804587422928).abs() < 1e-6, "printing_exposure_correction = {correction}");
     }
 }

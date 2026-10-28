@@ -162,6 +162,7 @@ begin
   begin
     DeleteAppDataFile(RoamingData + '\settings.json');
     DeleteAppDataFile(RoamingData + '\session.json');
+    DeleteAppDataDirectory(RoamingData + '\Presets');
     if RegKeyExists(HKCU, 'Software\Negs') then
       if not RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Negs') then
         CleanupFailed('HKCU\Software\Negs');
@@ -184,7 +185,7 @@ begin
     begin
       Choice := TaskDialogMsgBox('Choose what to keep after uninstalling Negs',
         'Caches, logs, and temporary files will be removed either way. Original photographs and exported images are kept.',
-        mbConfirmation, MB_YESNOCANCEL, ['Remove all app data', 'Keep settings and editing session', 'Cancel'], 0);
+        mbConfirmation, MB_YESNOCANCEL, ['Remove all app data', 'Keep settings, presets and editing session', 'Cancel'], 0);
       if (Choice <> IDYES) and (Choice <> IDNO) then Abort;
       KeepSettings := Choice = IDNO;
     end;

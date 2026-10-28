@@ -103,6 +103,7 @@ impl Editor {
                         return;
                     }
                     let defaults = catalog["defaults"].clone();
+                    parameters::set_nullable_paths(&catalog);
                     {
                         let mut h = ui.history.borrow_mut();
                         parameters::install_defaults(&mut h.state, &defaults, false);

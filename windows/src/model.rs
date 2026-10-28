@@ -3,6 +3,8 @@
 //! saving and exporting. It runs on the UI thread and owns no windows; it
 //! marks what changed in `dirty`, and the UI redraws those parts.
 
+use std::borrow::Cow;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,6 +18,7 @@ use crate::engine::{self, EngineClient, EnginePaths, ExportEngine, ExportHandle,
 use crate::histogram::Histogram;
 use crate::json;
 use crate::picture::Picture;
+use crate::presets::{self, PresetFile, Status as PresetStatus};
 use crate::session::{CatalogCache, EditorSession, Preferences};
 use crate::rendered_preview::{self, Frame, RenderedPreviewCache};
 use crate::state::{self, EditState, Stock};
@@ -34,6 +37,7 @@ pub mod dirty {
     pub const ZOOM: u32 = 1 << 8;
     pub const CROP: u32 = 1 << 9;
     pub const LAYOUT: u32 = 1 << 10;
+    pub const PRESETS: u32 = 1 << 11;
     pub const ALL: u32 = u32::MAX;
 }
 
@@ -222,8 +226,8 @@ impl ExportSize {
 
 /// One undo step: the state to restore and the action's name.
 struct UndoStack {
-    undo: Vec<(EditState, &'static str)>,
-    redo: Vec<(EditState, &'static str)>,
+    undo: Vec<(EditState, Cow<'static, str>)>,
+    redo: Vec<(EditState, Cow<'static, str>)>,
 }
 
 /// What a finished render brings back to the UI thread.
@@ -240,6 +244,8 @@ pub struct Rendered {
 pub struct Model {
     pub state: EditState,
     pub defaults: Value,
+    /// The catalog's `nullable_paths`: where a saved null is a value.
+    nullable_paths: Vec<String>,
     catalog: Value,
     pub stocks: Vec<Stock>,
     pub source: Option<PathBuf>,
@@ -278,6 +284,8 @@ pub struct Model {
     pub exporting: bool,
     pub export_started: Instant,
     pub error: Option<String>,
+    /// A message and its explanation, shown together (import failures).
+    pub notice: Option<(String, String)>,
     pub status: String,
     pub inspector_visible: bool,
     pub fit_image: bool,
@@ -317,6 +325,31 @@ pub struct Model {
     /// When the app started and when the first developed photograph went on
     /// screen, for the startup report.
     pub first_render_shown: bool,
+    pub preset_library: presets::Library,
+    /// The Presets folder as last listed, in the user's order.
+    pub presets: Vec<PresetFile>,
+    /// What the engine made of each listed file, by its identity.
+    pub preset_status: HashMap<PresetFile, PresetStatus>,
+    /// The preset whose name is being edited.
+    pub renaming_preset: Option<PathBuf>,
+    /// New Preset's file while it is first named: Escape removes it.
+    unnamed_preset: Option<PathBuf>,
+}
+
+/// What the adjustments column shows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pane {
+    Adjustments,
+    Presets,
+}
+
+/// Files being imported, one engine check at a time.
+struct PresetImport {
+    paths: VecDeque<PathBuf>,
+    /// Dropped between rows: the index to insert the imported presets at.
+    position: Option<usize>,
+    added: Vec<PathBuf>,
+    failures: Vec<String>,
 }
 
 impl Model {
@@ -327,6 +360,7 @@ impl Model {
         Self {
             state: EditState::default(),
             defaults: json!({}),
+            nullable_paths: vec![],
             catalog: Value::Null,
             stocks: vec![],
             source: None,
@@ -351,6 +385,7 @@ impl Model {
             exporting: false,
             export_started: Instant::now(),
             error: None,
+            notice: None,
             status: "Starting…".into(),
             inspector_visible: true,
             fit_image: true,
@@ -383,6 +418,11 @@ impl Model {
             original_loading: false,
             histogram_request: 0,
             first_render_shown: false,
+            preset_library: presets::Library::default(),
+            presets: vec![],
+            preset_status: HashMap::new(),
+            renaming_preset: None,
+            unnamed_preset: None,
         }
     }
 
@@ -460,11 +500,11 @@ impl Model {
     fn shown_image_size(&self) -> Size {
         if self.rotation() % 2 != 0 { self.image_size.swapped() } else { self.image_size }
     }
-    pub fn undo_title(&self) -> Option<&'static str> {
-        self.undo.undo.last().map(|u| u.1)
+    pub fn undo_title(&self) -> Option<&str> {
+        self.undo.undo.last().map(|u| u.1.as_ref())
     }
-    pub fn redo_title(&self) -> Option<&'static str> {
-        self.undo.redo.last().map(|u| u.1)
+    pub fn redo_title(&self) -> Option<&str> {
+        self.undo.redo.last().map(|u| u.1.as_ref())
     }
     pub fn render_backend_gpu(&self) -> bool {
         self.render_on_gpu
@@ -544,6 +584,7 @@ impl Model {
             }
         }
         self.ready = true;
+        self.check_presets();
         if self.source.is_none() && self.status == "Starting…" {
             self.status.clear();
         }
@@ -556,6 +597,10 @@ impl Model {
     fn apply_catalog(&mut self, catalog: Value) {
         self.stocks = catalog["profiles"].as_array().map(|a| a.iter().map(Stock::new).collect()).unwrap_or_default();
         self.defaults = catalog["defaults"].clone();
+        self.nullable_paths = catalog["nullable_paths"]
+            .as_array()
+            .map(|paths| paths.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default();
         self.catalog = catalog;
         // Keep anything already applied to the photograph, such as its rotation.
         let rotation = self.state.value("io.rotate_cw").clone();
@@ -672,9 +717,12 @@ impl Model {
         let mut next = self.state.clone();
         next.film = stock.into();
         json::set(&mut next.params, "film_render.development_time", Value::Null);
-        // A new film brings its own grain preset, as upstream applies it.
+        // A new film brings its own grain, DIR and halation presets, as upstream applies them.
         for field in state::GRAIN_STOCK_FIELDS {
             json::set(&mut next.params, &format!("film_render.grain.{field}"), Value::Null);
+        }
+        for path in state::DIR_HALATION_STOCK_PATHS {
+            json::set(&mut next.params, path, Value::Null);
         }
         self.pair_film(&mut next);
         self.apply(next, "Change Film");
@@ -787,7 +835,7 @@ impl Model {
         self.apply(next, "Reset Adjustments");
     }
 
-    fn apply(&mut self, next: EditState, action: &'static str) {
+    fn apply(&mut self, next: EditState, action: impl Into<Cow<'static, str>>) {
         if next == self.state {
             return;
         }
@@ -834,8 +882,8 @@ impl Model {
         )
     }
 
-    fn register_undo(&mut self, previous: EditState, action: &'static str) {
-        self.undo.undo.push((previous, action));
+    fn register_undo(&mut self, previous: EditState, action: impl Into<Cow<'static, str>>) {
+        self.undo.undo.push((previous, action.into()));
         self.undo.redo.clear();
         self.mark(dirty::CHROME);
     }
@@ -900,7 +948,7 @@ impl Model {
         if let Some(session) = &self.crop_session {
             saved.crop = session.settings();
         }
-        Some(EditorSession { schema: 1, source, state: saved, inspector_visible: self.inspector_visible, fit_image: self.fit_image })
+        Some(EditorSession { schema: EditorSession::SCHEMA, source, state: saved, inspector_visible: self.inspector_visible, fit_image: self.fit_image })
     }
 
     fn restore(&mut self, session: EditorSession) -> Result<()> {
@@ -912,6 +960,310 @@ impl Model {
         let source = session.source.clone();
         self.open_restoring(&source, Some(session));
         Ok(())
+    }
+
+    // MARK: Presets
+
+    pub fn pane(&self) -> Pane {
+        if self.prefs.inspector_pane == "Presets" { Pane::Presets } else { Pane::Adjustments }
+    }
+
+    /// The toolbar's Adjustments and Presets buttons: show that panel, or
+    /// hide the column if it already shows it.
+    pub fn toggle_pane(&mut self, pane: Pane) {
+        if self.inspector_visible && self.pane() == pane {
+            self.inspector_visible = false;
+            self.mark(dirty::LAYOUT | dirty::CHROME);
+        } else {
+            self.show_pane(pane);
+        }
+    }
+
+    /// Shows a panel, remembered across launches. Opening Presets lists the
+    /// folder again, so files copied in by hand appear.
+    pub fn show_pane(&mut self, pane: Pane) {
+        let opening = !self.inspector_visible || self.pane() != pane;
+        self.inspector_visible = true;
+        if self.pane() != pane {
+            self.prefs.inspector_pane = if pane == Pane::Presets { "Presets" } else { "Adjustments" }.into();
+            self.prefs.save();
+        }
+        if opening && pane == Pane::Presets {
+            self.refresh_presets();
+        }
+        self.mark(dirty::LAYOUT | dirty::CHROME | dirty::PRESETS);
+    }
+
+    pub fn can_change_presets(&self) -> bool {
+        self.has_catalog() && !self.cropping() && self.engine.is_some()
+    }
+
+    /// Lists the folder again and asks the engine about files it hasn't seen.
+    pub fn refresh_presets(&mut self) {
+        match self.preset_library.list() {
+            Ok(presets) => self.presets = presets,
+            Err(error) => {
+                self.presets.clear();
+                self.report(&error);
+            }
+        }
+        let presets = &self.presets;
+        self.preset_status.retain(|file, _| presets.contains(file));
+        self.mark(dirty::PRESETS);
+        self.check_presets();
+    }
+
+    /// Checks unchecked presets once the photograph is on screen, so a
+    /// remembered Presets panel never delays the first render.
+    fn check_presets(&mut self) {
+        let Some(engine) = self.engine.clone() else { return };
+        if !self.ready || (self.source.is_some() && self.image.is_none()) {
+            return;
+        }
+        let unchecked: Vec<PresetFile> = self.presets.iter().filter(|p| !self.preset_status.contains_key(p)).cloned().collect();
+        if unchecked.is_empty() {
+            return;
+        }
+        for preset in unchecked {
+            let text = match self.preset_library.read(&preset).and_then(|data| presets::text(&data)) {
+                Ok(text) => text,
+                Err(error) => {
+                    self.preset_status.insert(preset, PresetStatus::Invalid(format!("{error:#}")));
+                    continue;
+                }
+            };
+            self.preset_status.insert(preset.clone(), PresetStatus::Checking);
+            engine.request(json!({"command": "preset_import", "text": text}), engine::timeout_for("preset_import"), move |result| {
+                ui::post(move |app: &mut App| app.model.preset_checked(preset, result));
+            });
+        }
+        self.mark(dirty::PRESETS);
+    }
+
+    fn preset_checked(&mut self, preset: PresetFile, result: Result<(u64, Value)>) {
+        if !self.presets.contains(&preset) {
+            return;
+        }
+        let status = match result {
+            Ok((_, result)) => PresetStatus::Valid {
+                film: json::string(&result["film"]).into(),
+                paper: json::string(&result["paper"]).into(),
+                scan: json::boolean(&result["params"]["io"]["scan_film"]),
+            },
+            Err(error) => PresetStatus::Invalid(format!("{error:#}")),
+        };
+        self.preset_status.insert(preset, status);
+        self.mark(dirty::PRESETS);
+    }
+
+    /// The film, paper and Lab settings of a preset, as one undo step. The
+    /// photograph's own settings stay: Image Size, rotation, crop, border,
+    /// output encoding, the preview limit and the Post tab.
+    pub fn apply_preset(&mut self, preset: &PresetFile) {
+        if !self.can_change_presets() {
+            return;
+        }
+        match self.preset_library.read(preset).and_then(|data| presets::text(&data)) {
+            Ok(text) => self.request_preset(preset.name(), text, 0),
+            Err(error) => {
+                self.report(&error);
+                self.refresh_presets();
+            }
+        }
+    }
+
+    /// The engine keeps the photograph's settings from the params it's
+    /// given; ask again if they changed while it answered.
+    fn request_preset(&mut self, name: String, text: String, attempt: u32) {
+        let Some(engine) = self.engine.clone() else { return };
+        let snapshot = self.state.clone();
+        let command = json!({"command": "preset_import", "text": text, "params": snapshot.params});
+        engine.request(command, engine::timeout_for("preset_import"), move |result| {
+            ui::post(move |app: &mut App| app.model.preset_imported(name, text, snapshot, attempt, result));
+        });
+    }
+
+    fn preset_imported(&mut self, name: String, text: String, snapshot: EditState, attempt: u32, result: Result<(u64, Value)>) {
+        let result = match result {
+            Ok((_, result)) => result,
+            Err(error) => {
+                self.report(&error);
+                return self.refresh_presets();
+            }
+        };
+        if !self.can_change_presets() {
+            return;
+        }
+        if self.state != snapshot {
+            if attempt < 2 {
+                self.request_preset(name, text, attempt + 1);
+            }
+            return;
+        }
+        let (film, paper) = (json::string(&result["film"]).to_owned(), json::string(&result["paper"]).to_owned());
+        let known = |id: &str, paper: bool| self.stocks.iter().any(|s| s.paper == paper && s.id == id);
+        if !known(&film, false) || !known(&paper, true) {
+            return self.report(&anyhow!("This version of Negs doesn’t have the preset’s film or paper."));
+        }
+        // Not `choose_film`: its stock-preset resets would discard the preset's values.
+        let mut next = self.state.clone();
+        next.film = film;
+        next.paper = paper;
+        next.params = result["params"].clone();
+        self.apply(next, format!("Apply Preset “{name}”"));
+        self.status = format!("Applied preset “{name}”");
+        self.mark(dirty::STATUS);
+    }
+
+    /// Saves the film, paper and Lab settings as a new preset, named after
+    /// the film, at the end of the list, and starts renaming it.
+    pub fn new_preset(&mut self) {
+        if !self.can_change_presets() {
+            return;
+        }
+        self.show_pane(Pane::Presets);
+        let Some(engine) = self.engine.clone() else { return };
+        let name = presets::name::from_file_name(&self.film_name());
+        let command = json!({"command": "preset_export", "film": self.state.film, "paper": self.state.paper, "params": self.state.params});
+        engine.request(command, engine::timeout_for("preset_export"), move |result| {
+            ui::post(move |app: &mut App| app.model.preset_exported(name, result));
+        });
+    }
+
+    fn preset_exported(&mut self, name: String, result: Result<(u64, Value)>) {
+        let added = result.and_then(|(_, result)| {
+            let text = result["text"].as_str().ok_or_else(|| anyhow!("The image engine didn’t return the preset."))?;
+            self.preset_library.add(text.as_bytes(), &name)
+        });
+        match added {
+            Ok(file) => {
+                self.refresh_presets();
+                self.unnamed_preset = Some(file.path.clone());
+                self.renaming_preset = Some(file.path);
+            }
+            Err(error) => self.report(&error),
+        }
+    }
+
+    /// Copies each file that the engine reads into the Presets folder, under
+    /// its own name, and lists the ones that it refuses. They go to the end,
+    /// or before the preset at `position` (a drop between rows).
+    pub fn import_presets(&mut self, paths: Vec<PathBuf>, position: Option<usize>) {
+        if !self.can_change_presets() || paths.is_empty() {
+            return;
+        }
+        self.show_pane(Pane::Presets);
+        self.import_next(PresetImport { paths: paths.into(), position, added: vec![], failures: vec![] });
+    }
+
+    fn import_next(&mut self, mut job: PresetImport) {
+        while let Some(path) = job.paths.pop_front() {
+            let read = presets::read_file(&path).and_then(|data| Ok((presets::text(&data)?, data)));
+            match (read, self.engine.clone()) {
+                (Ok(_), None) => job.failures.push(format!("{}: {}", file_name(&path), engine::STOPPED)),
+                (Ok((text, data)), Some(engine)) => {
+                    engine.request(json!({"command": "preset_import", "text": text}), engine::timeout_for("preset_import"), move |result| {
+                        ui::post(move |app: &mut App| app.model.import_checked(job, path, data, result));
+                    });
+                    return;
+                }
+                (Err(error), _) => job.failures.push(format!("{}: {error:#}", file_name(&path))),
+            }
+        }
+        self.finish_import(job);
+    }
+
+    fn import_checked(&mut self, mut job: PresetImport, path: PathBuf, data: Vec<u8>, result: Result<(u64, Value)>) {
+        let name = presets::name::from_file_name(&path.file_stem().unwrap_or_default().to_string_lossy());
+        match result.and_then(|_| self.preset_library.add(&data, &name)) {
+            Ok(file) => job.added.push(file.path),
+            Err(error) => job.failures.push(format!("{}: {error:#}", file_name(&path))),
+        }
+        self.import_next(job);
+    }
+
+    fn finish_import(&mut self, job: PresetImport) {
+        let imported = job.added.len();
+        if let (Some(position), true) = (job.position, imported > 0) {
+            if let Ok(listed) = self.preset_library.list() {
+                let added = |p: &PresetFile| job.added.contains(&p.path);
+                let moved: Vec<PresetFile> = listed.iter().filter(|p| added(p)).cloned().collect();
+                let mut order: Vec<PresetFile> = listed.iter().filter(|p| !added(p)).cloned().collect();
+                let before = listed.iter().take(position).filter(|p| !added(p)).count().min(order.len());
+                order.splice(before..before, moved);
+                if let Err(error) = self.preset_library.set_order(&order) {
+                    self.report(&error);
+                }
+            }
+        }
+        self.refresh_presets();
+        if imported > 0 {
+            self.status = if imported == 1 { "Imported 1 preset".into() } else { format!("Imported {imported} presets") };
+            self.mark(dirty::STATUS);
+        }
+        if !job.failures.is_empty() {
+            let lead = if imported == 0 { "No presets were imported." } else { "Some files weren’t imported." };
+            self.notice = Some((lead.into(), job.failures.join("\n\n")));
+            self.mark(dirty::ERROR);
+        }
+    }
+
+    /// The presets in a new order, as dragged; remembered at once.
+    pub fn move_presets(&mut self, order: Vec<PresetFile>) {
+        if order == self.presets {
+            return;
+        }
+        self.presets = order;
+        if let Err(error) = self.preset_library.set_order(&self.presets) {
+            self.report(&error);
+        }
+        self.refresh_presets();
+    }
+
+    /// Escape while naming: keeps the old name, or removes the preset New
+    /// Preset just made.
+    pub fn cancel_rename(&mut self, preset: &PresetFile) {
+        self.renaming_preset = None;
+        self.mark(dirty::PRESETS);
+        if self.unnamed_preset.as_ref() != Some(&preset.path) {
+            return;
+        }
+        self.unnamed_preset = None;
+        if let Err(error) = self.preset_library.delete(preset) {
+            self.report(&error);
+        }
+        self.refresh_presets();
+    }
+
+    pub fn rename_preset(&mut self, preset: &PresetFile, name: &str) {
+        self.renaming_preset = None;
+        self.mark(dirty::PRESETS);
+        if self.unnamed_preset.as_ref() == Some(&preset.path) {
+            self.unnamed_preset = None;
+        }
+        if name == preset.name() {
+            return;
+        }
+        if let Err(error) = self.preset_library.rename(preset, name) {
+            self.report(&error);
+        }
+        self.refresh_presets();
+    }
+
+    pub fn delete_preset(&mut self, preset: &PresetFile) {
+        if let Err(error) = self.preset_library.delete(preset) {
+            self.report(&error);
+        }
+        self.refresh_presets();
+    }
+
+    /// Writes a copy wherever the user picked, byte for byte.
+    pub fn export_preset(&mut self, preset: &PresetFile, destination: &Path) {
+        let copied = self.preset_library.read(preset).and_then(|data| crate::session::write_atomic(destination, &data));
+        if let Err(error) = copied {
+            self.report(&error);
+            self.refresh_presets();
+        }
     }
 
     // MARK: Cropping
@@ -997,7 +1349,7 @@ impl Model {
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
         if let Some(session) = session {
             let mut restored = session.state;
-            restored.params = json::restoring(&self.defaults, &restored.params);
+            restored.params = json::restoring(&self.defaults, &restored.params, &self.nullable_paths);
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
             if !factor.is_null() {
@@ -1301,6 +1653,7 @@ impl Model {
                     format!("{} × {}{shown} · {time}{backend}", photograph.width as u64, photograph.height as u64)
                 };
                 self.mark(dirty::CANVAS | dirty::STATUS | dirty::INSPECTOR | dirty::CROP);
+                self.check_presets();
             }
             Ok(_) => {}
             Err(error) => {
@@ -1736,6 +2089,251 @@ mod tests {
             model.end_interaction("Adjust");
             model.render_finished(Ok(rendered(&model, settled, false)), revision, generation, false);
             assert_eq!(model.preview_scale, scale);
+        }
+    }
+}
+
+/// Presets through the real helper (`target\release`, built from this
+/// checkout); skipped without it. `NEGS_PRESETS_TEST_DIR` (or
+/// `%USERPROFILE%\negs-presets-test`) adds every file there.
+#[cfg(test)]
+mod preset_tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    struct Live {
+        model: Model,
+        engine: Arc<EngineClient>,
+        folder: PathBuf,
+    }
+
+    impl Drop for Live {
+        fn drop(&mut self) {
+            self.engine.stop();
+            let _ = std::fs::remove_dir_all(&self.folder);
+        }
+    }
+
+    fn ask(engine: &EngineClient, command: Value) -> Result<Value> {
+        let (sender, receiver) = mpsc::channel();
+        engine.request(command, Duration::from_secs(300), move |result| {
+            let _ = sender.send(result);
+        });
+        receiver.recv()?.map(|(_, value)| value)
+    }
+
+    /// A model with the helper's catalog and an empty Presets folder. Its
+    /// own requests go nowhere (no window); tests ask the helper themselves.
+    fn live(test: &str) -> Option<Live> {
+        let Ok(paths) = EnginePaths::locate() else {
+            eprintln!("skipped: build the release helper first");
+            return None;
+        };
+        let engine = Arc::new(EngineClient::start(paths).ok()?);
+        let catalog = ask(&engine, json!({"command": "catalog"})).unwrap();
+        assert_eq!(catalog["capabilities"]["presets"], json!(true), "the helper predates presets");
+        let mut model = Model::new(Preferences::default());
+        model.apply_catalog(catalog);
+        model.ready = true;
+        model.engine = Some(engine.clone());
+        let folder = std::env::temp_dir().join(format!("negs-presets-{test}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        model.preset_library = presets::Library::new(folder.clone());
+        Some(Live { model, engine, folder })
+    }
+
+    impl Live {
+        /// What the panel does on a click, with the helper's answer.
+        fn apply(&mut self, name: &str, text: &str) -> Result<()> {
+            let snapshot = self.model.state.clone();
+            let result = ask(&self.engine, json!({"command": "preset_import", "text": text, "params": snapshot.params}))?;
+            self.model.preset_imported(name.into(), text.into(), snapshot, 0, Ok((0, result)));
+            match self.model.error.take() {
+                Some(error) => Err(anyhow!(error)),
+                None => Ok(()),
+            }
+        }
+
+        fn export(&self) -> String {
+            let state = &self.model.state;
+            let result = ask(&self.engine, json!({"command": "preset_export", "film": state.film, "paper": state.paper, "params": state.params})).unwrap();
+            result["text"].as_str().unwrap().to_owned()
+        }
+    }
+
+    const DOUBLE_X: &str = r#"{"simulation": {"film_stock": "kodak_doublex", "print_paper": "kodak_2302"},
+        "film_chemistry": {"development_time": 8.0}, "couplers": {"langmuir_donor_k_rgb": [Infinity, 1.0, 1.0]},
+        "camera": {"exposure_compensation_ev": -0.5}, "load_raw": {"white_balance": "daylight"}}"#;
+
+    #[test]
+    fn applying_is_one_undo_step_and_keeps_the_photographs_settings() {
+        let Some(mut live) = live("apply") else { return };
+        let model = &mut live.model;
+        // The photograph's own settings, which a preset never changes.
+        model.set(state::SIZE_TARGET, json!(3000));
+        model.set("io.rotate_cw", json!(1));
+        model.set("post.contrast", json!(20));
+        model.set("settings.use_cat16", json!(false));
+        model.set("camera.exposure_compensation_ev", json!(1.5));
+        model.limit_preview(true);
+        let before = model.state.clone();
+        let steps = model.undo.undo.len();
+
+        live.apply("Double-X", DOUBLE_X).unwrap();
+        let model = &mut live.model;
+        assert_eq!((model.state.film.as_str(), model.state.paper.as_str()), ("kodak_doublex", "kodak_2302"));
+        assert_eq!(model.value("camera.exposure_compensation_ev"), &json!(-0.5));
+        // Snapped to a time Double-X lists, so the Development list shows it.
+        assert_eq!(json::number(model.value("film_render.development_time")), 9.0);
+        assert_eq!(model.value("film_render.dir_couplers.langmuir_donor_k_rgb.0"), &Value::Null);
+        assert_eq!(model.value("io.raw_white_balance.mode"), &json!("daylight"));
+        for path in [state::SIZE_TARGET, "io.rotate_cw", "post.contrast", "settings.use_cat16"] {
+            assert!(json::same(model.value(path), before.value(path)), "{path}");
+        }
+        assert!(model.state.limit_preview);
+        assert_eq!(model.undo.undo.len(), steps + 1);
+        assert_eq!(model.undo_title(), Some("Apply Preset “Double-X”"));
+        assert_eq!(model.status, "Applied preset “Double-X”");
+        model.perform_undo();
+        assert_eq!(model.state, before);
+        model.perform_redo();
+        assert_eq!(model.state.film, "kodak_doublex");
+        assert_eq!(model.value("camera.exposure_compensation_ev"), &json!(-0.5));
+    }
+
+    #[test]
+    fn a_film_change_after_a_preset_brings_back_the_films_own_presets() {
+        let Some(mut live) = live("films") else { return };
+        let stock_paths: Vec<String> = state::DIR_HALATION_STOCK_PATHS
+            .iter()
+            .map(|p| p.to_string())
+            .chain(state::GRAIN_STOCK_FIELDS.iter().map(|f| format!("film_render.grain.{f}")))
+            .collect();
+        let explicit = r#"{"simulation": {"film_stock": "kodak_portra_400", "print_paper": "kodak_portra_endura"},
+            "couplers": {"gamma_samelayer_rgb": [0.5, 0.5, 0.25]}, "halation": {"strength": [0.1, 0.02, 0.0]}}"#;
+        // Film A, a preset with explicit DIR and halation values, film B, film A.
+        live.model.choose_film("kodak_portra_400");
+        live.apply("Explicit", explicit).unwrap();
+        let applied = live.model.state.clone();
+        assert!(!applied.value("film_render.dir_couplers.gamma_samelayer_rgb").is_null());
+        live.model.choose_film("kodak_gold_200");
+        live.model.choose_film("kodak_portra_400");
+        for path in &stock_paths {
+            assert!(live.model.state.value(path).is_null(), "{path} kept the preset's value");
+        }
+        // Undo goes back through B to the preset's values.
+        live.model.perform_undo();
+        live.model.perform_undo();
+        assert_eq!(live.model.state, applied);
+    }
+
+    #[test]
+    fn a_session_saved_after_applying_restores_the_same_params() {
+        let Some(mut live) = live("session") else { return };
+        live.apply("Double-X", DOUBLE_X).unwrap();
+        let photo = live.folder.join("photo.png");
+        std::fs::create_dir_all(&live.folder).unwrap();
+        std::fs::write(&photo, b"x").unwrap();
+        let session = EditorSession { schema: EditorSession::SCHEMA, source: photo, state: live.model.state.clone(), inspector_visible: true, fit_image: true };
+        let store = crate::session::SessionStore { file: live.folder.join("session.json") };
+        store.save(&session).unwrap();
+        let loaded = store.load().unwrap().unwrap();
+        let restored = json::restoring(&live.model.defaults, &loaded.state.params, &live.model.nullable_paths);
+        assert!(json::same(&restored, &live.model.state.params));
+        assert_eq!(loaded.state.film, "kodak_doublex");
+    }
+
+    #[test]
+    fn new_preset_saves_the_settings_and_escape_removes_it() {
+        let Some(mut live) = live("new") else { return };
+        live.apply("Double-X", DOUBLE_X).unwrap();
+        live.model.preset_library.add(DOUBLE_X.as_bytes(), "Double-X").unwrap();
+        let text = live.export();
+        let name = presets::name::from_file_name(&live.model.film_name());
+        live.model.preset_exported(name.clone(), Ok((0, json!({"text": text}))));
+        let saved = live.model.presets.last().cloned().unwrap();
+        assert_eq!(saved.name(), name);
+        assert_eq!(live.model.renaming_preset.as_ref(), Some(&saved.path));
+        // It reads back as the same stocks.
+        let check = ask(&live.engine, json!({"command": "preset_import", "text": presets::text(&std::fs::read(&saved.path).unwrap()).unwrap()})).unwrap();
+        assert_eq!((check["film"].as_str(), check["paper"].as_str()), (Some("kodak_doublex"), Some("kodak_2302")));
+        // Escape while naming it removes it again.
+        let model = &mut live.model;
+        model.cancel_rename(&saved);
+        assert_eq!(model.presets.iter().map(PresetFile::name).collect::<Vec<_>>(), ["Double-X"]);
+        assert!(!saved.path.exists());
+
+        // Enter keeps it, under the typed name; Escape on it later only stops renaming.
+        model.preset_exported(name, Ok((0, json!({"text": text}))));
+        let kept = model.presets.last().cloned().unwrap();
+        model.rename_preset(&kept, "Mine");
+        let mine = model.presets.iter().find(|p| p.name() == "Mine").cloned().unwrap();
+        model.renaming_preset = Some(mine.path.clone());
+        model.cancel_rename(&mine);
+        assert!(model.renaming_preset.is_none() && mine.path.exists());
+        // Dragging the last row to the top is remembered.
+        let order = vec![model.presets[1].clone(), model.presets[0].clone()];
+        model.move_presets(order);
+        assert_eq!(model.presets.iter().map(PresetFile::name).collect::<Vec<_>>(), ["Mine", "Double-X"]);
+        let reread = presets::Library::new(live.folder.clone()).list().unwrap();
+        assert_eq!(reread.iter().map(PresetFile::name).collect::<Vec<_>>(), ["Mine", "Double-X"]);
+    }
+
+    #[test]
+    fn files_the_engine_refuses_are_listed_with_the_reason() {
+        let Some(mut live) = live("refused") else { return };
+        let exotic = live.model.preset_library.add(br#"{"output_gamut_compress": {"algorithm": "jzazbz"}}"#, "Exotic").unwrap();
+        live.model.refresh_presets();
+        let result = ask(&live.engine, json!({"command": "preset_import", "text": presets::text(&std::fs::read(&exotic.path).unwrap()).unwrap()}));
+        live.model.preset_checked(exotic.clone(), result.map(|v| (0, v)));
+        match live.model.preset_status.get(&exotic) {
+            Some(PresetStatus::Invalid(reason)) => assert!(reason.contains("jzazbz"), "{reason}"),
+            other => panic!("accepted: {other:?}"),
+        }
+        // Importing refuses a file the same way and copies nothing.
+        let outside = live.folder.with_extension("refused.json");
+        std::fs::write(&outside, br#"{"simulation": {"film_stock": "kodak_unknown"}}"#).unwrap();
+        let text = presets::text(&std::fs::read(&outside).unwrap()).unwrap();
+        let result = ask(&live.engine, json!({"command": "preset_import", "text": text}));
+        let job = PresetImport { paths: VecDeque::new(), position: None, added: vec![], failures: vec![] };
+        live.model.engine = None;
+        live.model.import_checked(job, outside.clone(), text.into_bytes(), result.map(|v| (0, v)));
+        let _ = std::fs::remove_file(&outside);
+        let (message, reasons) = live.model.notice.take().unwrap_or_default();
+        assert_eq!(message, "No presets were imported.");
+        assert!(reasons.contains(".refused.json: ") && reasons.contains("kodak_unknown"), "{reasons}");
+        assert_eq!(live.model.presets.len(), 1);
+    }
+
+    #[test]
+    fn every_test_preset_imports_and_applies_and_exports_again() {
+        let Some(mut live) = live("all") else { return };
+        let mut files: Vec<PathBuf> = vec![];
+        let shared = std::env::var_os("NEGS_PRESETS_TEST_DIR")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("negs-presets-test")));
+        if let Some(Ok(entries)) = shared.map(std::fs::read_dir) {
+            files.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json")));
+        }
+        files.push(live.engine.paths.data.join("presets").join("spektrafilm-gui-default-28bf883.json"));
+        eprintln!("{} preset files", files.len());
+        // The photograph's own settings survive every one.
+        live.model.set("io.rotate_cw", json!(3));
+        live.model.set("post.saturation", json!(-40));
+        for file in &files {
+            let text = presets::text(&std::fs::read(file).unwrap()).unwrap();
+            let name = file.file_stem().unwrap().to_string_lossy().into_owned();
+            live.apply(&name, &text).unwrap_or_else(|e| panic!("{}: {e:#}", file.display()));
+            assert_eq!(json::number(live.model.value("io.rotate_cw")), 3.0, "{name}");
+            assert_eq!(json::number(live.model.value("post.saturation")), -40.0, "{name}");
+            // Saved again by New Preset, it applies to the same settings.
+            let (film, paper, params) = (live.model.state.film.clone(), live.model.state.paper.clone(), live.model.state.params.clone());
+            let again = live.export();
+            live.model.set("camera.exposure_compensation_ev", json!(2.75));
+            live.apply("again", &again).unwrap();
+            assert_eq!((&live.model.state.film, &live.model.state.paper), (&film, &paper), "{name}");
+            let ev = |p: &Value| json::number(json::get(p, "camera.exposure_compensation_ev"));
+            assert_eq!(ev(&live.model.state.params), ev(&params), "{name}");
         }
     }
 }

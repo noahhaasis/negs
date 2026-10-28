@@ -42,6 +42,14 @@ function Seed {
     }
     [IO.File]::WriteAllText((Join-Path $roaming 'settings.json'), (@{recentFiles = @($photo); lastSaveFolder = $root} | ConvertTo-Json))
     [IO.File]::WriteAllText((Join-Path $roaming 'session.json'), (@{source = $photo} | ConvertTo-Json))
+    $presets = Join-Path $roaming 'Presets'
+    New-Item -ItemType Directory -Force -Path $presets | Out-Null
+    [IO.File]::WriteAllText((Join-Path $presets 'Portra warm.json'), '{"simulation": {"film_stock": "kodak_portra_400"}}')
+    $order = Join-Path $presets '.order.json'
+    # Kept hidden by the previous Keep settings run; a hidden file can't be overwritten.
+    if (Test-Path -LiteralPath $order) { (Get-Item -LiteralPath $order -Force).Attributes = 'Normal' }
+    [IO.File]::WriteAllText($order, '{"order": ["Portra warm.json"]}')
+    (Get-Item -LiteralPath $order -Force).Attributes = 'Hidden'
     foreach ($name in @('settings.tmp', 'session.tmp', 'panic.log')) {
         [IO.File]::WriteAllText((Join-Path $roaming $name), 'temporary app data')
     }
@@ -87,6 +95,7 @@ try {
     Install
     if ([IO.File]::ReadAllText((Join-Path $roaming 'settings.json')) -ne $settings) { throw 'Upgrade lost settings' }
     if ([IO.File]::ReadAllText((Join-Path $roaming 'session.json')) -ne $session) { throw 'Upgrade lost the session' }
+    if (-not (Test-Path -LiteralPath (Join-Path $roaming 'Presets\Portra warm.json'))) { throw 'Upgrade lost the presets' }
     if (-not (Test-Path -LiteralPath (Join-Path $local 'rendered-preview.cache'))) { throw 'Upgrade removed the cache' }
 
     $uninstaller = (Get-ChildItem -LiteralPath $app -Filter 'unins*.exe' | Select-Object -First 1).FullName
@@ -103,6 +112,8 @@ try {
     if ([IO.File]::ReadAllText((Join-Path $roaming 'settings.json')) -ne $settings) { throw 'Keep settings lost preferences' }
     if ([IO.File]::ReadAllText((Join-Path $roaming 'session.json')) -ne $session) { throw 'Keep settings lost the session' }
     if (-not (Test-Path -LiteralPath "$registry\Updates")) { throw 'Keep settings lost update preferences' }
+    if ([IO.File]::ReadAllText((Join-Path $roaming 'Presets\Portra warm.json')) -notmatch 'portra') { throw 'Keep settings lost the presets' }
+    if (-not (Test-Path -LiteralPath (Join-Path $roaming 'Presets\.order.json'))) { throw 'Keep settings lost the order of the presets' }
 
     Install
     Seed
@@ -115,7 +126,8 @@ try {
         if (Test-Path -LiteralPath (Join-Path $roaming $name)) { throw "Settings remained: $name" }
     }
     if (Test-Path -LiteralPath $registry) { throw 'Update preferences remained' }
-    Write-Output 'Passed: upgrade preservation, running-app protection, both cleanup modes, and photograph/export preservation.'
+    if (Test-Path -LiteralPath (Join-Path $roaming 'Presets')) { throw 'Presets remained' }
+    Write-Output 'Passed: upgrade preservation, running-app protection, both cleanup modes (with presets), and photograph/export preservation.'
 } finally {
     # These locations were absent before the test; all their contents are fixtures.
     $remaining = Get-ChildItem -LiteralPath $app -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1

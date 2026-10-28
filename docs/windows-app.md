@@ -60,6 +60,74 @@ worktree. Reports are `scripts/golden/reports/{windows,macos}-ui-exact.json`.
 preview dimensions and byte-identical Save before/after Original; it passes
 on the test D750 NEF (602 × 402 at 10% resolution).
 
+## Presets
+
+Step 5 of [presets-design.md](presets-design.md), matching the macOS app.
+`src/presets.rs` handles the files in `%APPDATA%\Negs\Presets` (under
+`NEGS_PROFILE_DIR` when set): the naming policy (NFC + case-folded key via
+`NormalizeString`, Windows device names also with an extension), the
+`.order.json` order file in the Mac's format (hidden), and the identity check
+(size and modification time, read fresh) before rename, delete and read.
+New files are written to a dot-prefixed temporary file and moved into place
+with `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`. That never replaces,
+like the hard link the handoff suggested, and also works off NTFS; a
+case-only rename of the same file succeeds. Sharing violations (Explorer's
+preview pane) are reported, never retried into another name.
+
+The model (`// MARK: Presets` in `model.rs`) applies a preset as one undo
+step, `Apply Preset “Name”`, replacing the params with the helper's
+`preset_import` answer and setting film and paper without `choose_film`'s
+resets; it asks again if the edit changed while the helper answered. Undo
+names are now `Cow<'static, str>`. Unchecked files are sent to the helper
+only once the photograph is on screen, so a remembered Presets panel never
+delays the first render.
+
+`ui/presets.rs` is the panel: a header with "+" and a "…" menu, then a
+report-view ListView (`LVS_EDITLABELS`, custom-drawn two-line rows, a
+one-pixel image list for the row height). Refused files are greyed with the
+reason as subtitle and info tip. Click or arrow keys apply, double-click and
+Enter apply again, a drag doesn't; F2, Delete and the context menu (Apply,
+Rename, Export…, Delete…) work as specified. The label edit is moved onto the
+name's line. Dragging rows draws its own insertion line (the list view's
+insertion mark isn't drawn in report view) and saves the order at once; the
+OLE drop target in `ui/drop.rs` imports files dropped on the panel, between
+the rows they are dropped between. The panel is created the first time it
+shows, after the window's first frame. While cropping, the column shows the
+crop panel. The shown pane is the `inspectorPane` preference.
+
+Toolbar Presets button (checked state) beside Adjustments; View ▸ Presets
+(F8), File ▸ New Preset (Ctrl+Shift+S) and Import Presets… (Ctrl+Shift+O). The
+uninstaller's full cleanup deletes the Presets folder, and its second button
+reads "Keep settings, presets and editing session".
+
+Validation (2026-10-28, this machine): 73 Windows tests pass, among them 9
+storage tests and 6 that drive the model with the release helper (apply and
+undo/redo keep Image Size, rotation, Post, CAT16 and the preview limit; film
+A → preset → B → A restores the film's own DIR, halation and grain presets; a
+saved session restores the same params; New Preset → Escape leaves no file;
+refused files carry the reason; the frozen default GUI state and any files in
+`NEGS_PRESETS_TEST_DIR` import, apply and re-export). With the 19 community
+and 5 spektrafilm-generated test presets in `%USERPROFILE%\negs-presets-test`
+(not in the repository), all 24 and the default state pass that test, and
+the panel lists all 24 as valid. Driven in the running app with a scratch
+profile: apply by click, New Preset → Escape and → Enter, F2 with an invalid
+name, the delete prompt, Import Presets… with one good and one refused file,
+a real OLE file drop between rows, dragging a row, Export… (byte-identical
+copy), the empty state, and relaunch with the panel remembered.
+`check_original.py` passes. The uninstaller test wasn't run: it needs Inno
+Setup and a disposable user profile.
+
+Startup, release builds, `docs/card.jpg` passed on the command line, warm
+profile, 6 runs each after a warm-up, medians in ms from process start
+(`NEGS_STARTUP_REPORT` stamps; each window closed automatically once the
+photograph was on screen, all exits clean):
+
+| Build | first window composited | adjustments column shown | photograph on screen |
+|---|---|---|---|
+| branch before presets (`8b1d9a8`) | 98.0 | 339.0 | 947.8 |
+| presets, Adjustments panel | 97.7 | 333.4 | 947.9 |
+| presets, Presets panel remembered (8 presets) | 98.4 | 307.9 | 925.5 |
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,

@@ -7,6 +7,11 @@
 //! `cine.<tungsten|daylight>` branch (tungsten when the reference illuminant
 //! starts with "T"), and a per-stock table overrides on top. As upstream,
 //! only keys that name a `DirCouplersParams` field apply.
+//!
+//! The preset fills only fields left unset (`None`). Upstream applies it when
+//! the stock is chosen and a saved GUI state then overrides it
+//! (`params_mapper.py` replaces the whole couplers group after
+//! `init_params`), so a value set in params wins here too.
 
 use std::sync::OnceLock;
 
@@ -33,7 +38,15 @@ fn table<'a>(map: &'a Map<String, Value>, path: &[&str]) -> Option<&'a Map<Strin
         .try_fold(map, |map, key| map.get(*key)?.as_object())
 }
 
-/// Overwrite `dir`'s fields with the preset values for `film`.
+/// The fields a preset may set: `DirCouplersParams`' optional gammas.
+const PRESET_FIELDS: [&str; 4] = [
+    "gamma_samelayer_rgb",
+    "gamma_interlayer_r_to_gb",
+    "gamma_interlayer_g_to_rb",
+    "gamma_interlayer_b_to_rg",
+];
+
+/// Fill `dir`'s unset gammas with the preset values for `film`.
 pub fn apply_couplers_preset(film: &Profile, dir: &mut DirCouplersParams) {
     let presets = presets();
     let channel_model = if film.is_bw() { "bw" } else { "color" };
@@ -49,7 +62,7 @@ pub fn apply_couplers_preset(film: &Profile, dir: &mut DirCouplersParams) {
     let mut merged = Map::new();
     let mut merge = |source: Option<&Map<String, Value>>| {
         for (key, value) in source.into_iter().flatten() {
-            if fields.contains_key(key) {
+            if PRESET_FIELDS.contains(&key.as_str()) && fields.get(key) == Some(&Value::Null) {
                 merged.insert(key.clone(), value.clone());
             }
         }
@@ -93,6 +106,25 @@ mod tests {
         }
         for branch in ["daylight", "tungsten"] {
             assert!(table(presets, &["defaults", "color", "negative", "cine", branch]).is_some());
+        }
+    }
+
+    /// Every value the TOML sets must be one `apply_couplers_preset` fills;
+    /// a new key would otherwise be dropped silently.
+    #[test]
+    fn presets_set_only_optional_gammas() {
+        fn walk(map: &Map<String, Value>, path: &str) {
+            for (key, value) in map {
+                match value {
+                    Value::Object(child) => walk(child, &format!("{path}.{key}")),
+                    _ => assert!(PRESET_FIELDS.contains(&key.as_str()), "{path}.{key}"),
+                }
+            }
+        }
+        walk(presets(), "couplers.toml");
+        let unset = serde_json::to_value(DirCouplersParams::default()).unwrap();
+        for key in PRESET_FIELDS {
+            assert_eq!(unset[key], Value::Null, "{key} is unset by default");
         }
     }
 }

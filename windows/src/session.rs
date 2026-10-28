@@ -56,11 +56,26 @@ fn yes() -> bool {
 }
 
 impl EditorSession {
+    /// 2: the DIR gammas and halation baseline are null unless set, and a set
+    /// value beats the film's preset. Schema 1 stored values for them that the
+    /// engine ignored and nothing could set, so `migrate` drops them.
+    pub const SCHEMA: u32 = 2;
+
+    pub fn migrate(&mut self) {
+        if self.schema != 1 {
+            return;
+        }
+        for path in crate::state::DIR_HALATION_STOCK_PATHS {
+            crate::json::set(&mut self.state.params, path, serde_json::Value::Null);
+        }
+        self.schema = Self::SCHEMA;
+    }
+
     pub fn validate(&self) -> Result<()> {
         let crop = &self.state.crop;
         let values = [crop.rect.x, crop.rect.y, crop.rect.width, crop.rect.height, crop.custom.width, crop.custom.height, crop.angle];
         let rotation = self.state.value("io.rotate_cw").as_f64().unwrap_or(-1.0);
-        let ok = self.schema == 1
+        let ok = self.schema == Self::SCHEMA
             && self.source.is_absolute()
             && values.iter().all(|v| v.is_finite())
             && crop.rect.x >= 0.0
@@ -97,8 +112,9 @@ impl SessionStore {
             bail!("The previous editing session is too large to restore.");
         }
         let data = std::fs::read(&self.file)?;
-        let session: EditorSession =
+        let mut session: EditorSession =
             serde_json::from_slice(&data).context("The previous editing session could not be restored.")?;
+        session.migrate();
         session.validate()?;
         if !session.source.is_file() {
             bail!("The previous photograph is unavailable. Open a photograph to continue.");
@@ -122,6 +138,8 @@ pub struct Preferences {
     /// Comma-separated titles of the expanded groups.
     pub expanded_adjustments: String,
     pub inspector_tab: String,
+    /// What the adjustments column shows: "Adjustments" or "Presets".
+    pub inspector_pane: String,
     pub export_engine: String,
     pub output_format: String,
     pub export_edge: String,
@@ -150,6 +168,7 @@ impl Default for Preferences {
             filmstrip_visible: true,
             expanded_adjustments: "Enlarger".into(),
             inspector_tab: "Lab".into(),
+            inspector_pane: "Adjustments".into(),
             export_engine: "fast".into(),
             output_format: "png".into(),
             export_edge: "full".into(),
@@ -250,7 +269,7 @@ mod tests {
 
     fn session() -> EditorSession {
         EditorSession {
-            schema: 1,
+            schema: EditorSession::SCHEMA,
             source: PathBuf::from(r"C:\photos\DSC_1.NEF"),
             state: EditState { params: json!({"io": {"rotate_cw": 1}}), ..Default::default() },
             inspector_visible: true,
@@ -293,6 +312,31 @@ mod tests {
         std::fs::write(&store.file, vec![b' '; 1_048_577]).unwrap();
         assert!(store.load().unwrap_err().to_string().contains("too large"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schema_1_drops_dir_and_halation_values_that_never_applied() {
+        let mut s = session();
+        s.schema = 1;
+        s.state.params = json!({"io": {"rotate_cw": 1}, "film_render": {
+            "dir_couplers": {"gamma_samelayer_rgb": [0.341, 0.324, 0.273], "amount": 0.8},
+            "halation": {"halation_strength": [0.05, 0.015, 0.0]},
+            "grain": {"rms_granularity": [12, 13, 12]}}});
+        s.migrate();
+        assert_eq!(s.schema, EditorSession::SCHEMA);
+        assert!(s.validate().is_ok());
+        let render = &s.state.params["film_render"];
+        assert!(render["dir_couplers"]["gamma_samelayer_rgb"].is_null());
+        assert!(render["halation"]["halation_strength"].is_null());
+        // Values that applied in schema 1 stay.
+        assert_eq!(render["dir_couplers"]["amount"], json!(0.8));
+        assert_eq!(render["grain"]["rms_granularity"], json!([12, 13, 12]));
+        // A current session keeps set values.
+        let mut current = session();
+        current.state.params["film_render"] = json!({"dir_couplers": {"gamma_samelayer_rgb": [0.52, 0.51, 0.26]}});
+        let before = current.clone();
+        current.migrate();
+        assert_eq!(current, before);
     }
 
     #[test]

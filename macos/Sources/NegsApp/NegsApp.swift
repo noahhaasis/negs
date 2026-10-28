@@ -99,7 +99,7 @@ import SwiftUI
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Remove all Negs app data and quit?"
-        alert.informativeText = "This removes your settings, saved editing session, recent-file history, and caches. Your current adjustments will be discarded. Original photographs and exported images are kept.\n\nNegs remains installed. You can move it to the Trash after it quits."
+        alert.informativeText = "This removes your settings, presets, saved editing session, recent-file history, and caches. Your current adjustments will be discarded. Original photographs and exported images are kept.\n\nNegs remains installed. You can move it to the Trash after it quits."
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Remove App Data and Quit")
         guard alert.runModal() == .alertSecondButtonReturn else { return }
@@ -173,7 +173,9 @@ struct InspectorPanel: View {
 
     var body: some View {
         if !built { Color.clear }
-        else if let session = model.cropSession { CropInspector(model: model, session: session) } else { AdjustmentInspector(model: model) }
+        else if let session = model.cropSession { CropInspector(model: model, session: session) }
+        else if model.inspectorPane == .presets { PresetInspector(model: model) }
+        else { AdjustmentInspector(model: model) }
     }
 }
 
