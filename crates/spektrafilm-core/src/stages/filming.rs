@@ -144,6 +144,10 @@ fn gaussian_kernel(sigma: f64) -> Vec<f64> {
     phi.iter().map(|v| v / sum).collect()
 }
 
+/// The metering patterns [`measure_raw_autoexposure_ev`] knows.
+pub const METERING_METHODS: [&str; 7] =
+    ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"];
+
 /// Auto-exposure compensation on film raw, upstream experimental's
 /// `measure_raw_autoexposure_ev` (`utils/autoexposure.py`): the field is the
 /// mean of the raw channels, metered with `method`, and the EV brings it to
@@ -629,4 +633,18 @@ pub fn process(
         autoexposure_ev,
     );
     develop(log_raw, film, params, backend)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metering_methods_are_the_ones_meter_field_knows() {
+        let field = [0.1, 0.2, 0.3, 0.4];
+        for method in METERING_METHODS {
+            assert!(meter_field(&field, 2, 2, method).is_some(), "{method}");
+        }
+        assert!(meter_field(&field, 2, 2, "spot").is_none());
+    }
 }

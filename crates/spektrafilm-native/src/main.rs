@@ -8,6 +8,7 @@ use spektrafilm_core::{
     params::RuntimeParams,
     pipeline::Pipeline,
     post::{PostParams, PostProcess},
+    presets,
     preview::*,
     profile,
 };
@@ -58,6 +59,21 @@ enum Command {
     },
     /// Unprocessed, identically framed source for the Windows original view.
     /// This does not replace the retained film render used by Save.
+    /// A preset file's text (Python spektrafilm's GUI state) as the stocks
+    /// and params to apply over `params`, which keeps what a preset doesn't
+    /// carry (see `spektrafilm_core::presets::KEPT`). Without `params`, over
+    /// the defaults: enough to check a file.
+    PresetImport {
+        text: String,
+        #[serde(default)]
+        params: Option<Box<RuntimeParams>>,
+    },
+    /// The settings as a preset file's text.
+    PresetExport {
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+    },
     Original {
         input: PathBuf,
         params: Box<RuntimeParams>,
@@ -186,7 +202,7 @@ fn catalog(data: &Path) -> Result<Value> {
         "No profiles found in {}",
         data.display()
     );
-    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true}, "profiles": profiles, "defaults": RuntimeParams::default(), "nullable_paths": RuntimeParams::nullable_paths()}))
+    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true, "presets": true}, "profiles": profiles, "defaults": RuntimeParams::default(), "nullable_paths": RuntimeParams::nullable_paths()}))
 }
 
 impl Session {
@@ -212,6 +228,15 @@ impl Session {
                     .map_err(anyhow::Error::msg)?;
                 std::fs::write(&output, cube)?;
                 Ok(json!({"size": size, "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0}))
+            }
+            Command::PresetImport { text, params } => {
+                let preset = presets::import(&text, data).map_err(anyhow::Error::msg)?;
+                let params = presets::apply(&preset.params, &params.unwrap_or_default());
+                Ok(json!({"film": preset.film, "paper": preset.paper, "params": params}))
+            }
+            Command::PresetExport { film, paper, params } => {
+                let text = presets::export(&film, &paper, &params, data).map_err(anyhow::Error::msg)?;
+                Ok(json!({"text": text}))
             }
             Command::Original { input, params, limit_preview, preview_path } => {
                 ensure!(input != preview_path, "Choose a different preview path to preserve the source");
@@ -576,6 +601,35 @@ mod tests {
         assert_eq!(paper["bw"], true);
         assert_eq!(stock("kodak_trix")["positive"], true);
     }
+    #[test]
+    fn presets_import_over_the_current_params_and_export() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let mut session = Session::default();
+        let mut current = RuntimeParams::default();
+        current.io.photo_long_side_px = Some(2400);
+        current.camera.exposure_compensation_ev = 1.0;
+        let text = r#"{"simulation": {"film_stock": "kodak_portra_400", "route": "input > film > scan"},
+                       "couplers": {"langmuir_donor_k_rgb": [Infinity, 1.0, 1.0]}}"#;
+        let imported = session.handle(Request { id: 1, command: Command::PresetImport {
+            text: text.into(), params: Some(Box::new(current)),
+        } }, &data).unwrap();
+        assert_eq!(imported["film"], "kodak_portra_400");
+        assert_eq!(imported["params"]["io"]["photo_long_side_px"], 2400);
+        assert_eq!(imported["params"]["io"]["scan_film"], true);
+        assert_eq!(imported["params"]["camera"]["exposure_compensation_ev"], 0.0);
+        assert_eq!(imported["params"]["film_render"]["dir_couplers"]["langmuir_donor_k_rgb"][0], Value::Null);
+        let params: RuntimeParams = serde_json::from_value(imported["params"].clone()).unwrap();
+        let exported = session.handle(Request { id: 2, command: Command::PresetExport {
+            film: "kodak_portra_400".into(), paper: "kodak_supra_endura".into(), params: Box::new(params),
+        } }, &data).unwrap();
+        let text = exported["text"].as_str().unwrap();
+        assert!(text.contains("Infinity"), "{text}");
+        let refused = session.handle(Request { id: 3, command: Command::PresetImport {
+            text: r#"{"simulation": {"film_stock": "kodak_unknown"}}"#.into(), params: None,
+        } }, &data).unwrap_err();
+        assert!(refused.to_string().contains("kodak_unknown"), "{refused}");
+    }
+
     #[test]
     fn linear_display_is_encoded_without_mutating_output() {
         let image = ImageBuf::from_data(1, 1, vec![0.0, 0.18, 1.0]);
