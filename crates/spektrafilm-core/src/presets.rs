@@ -117,11 +117,24 @@ pub struct Preset {
 pub fn import(text: &str, data_dir: &Path) -> Result<Preset, String> {
     let state = gui_state(&parse(text)?)?;
     let (film, paper) = (stock(&state, "simulation.film_stock")?, stock(&state, "simulation.print_paper")?);
-    load_stock(data_dir, &film, false)?;
-    load_stock(data_dir, &paper, true)?;
-    let params = translate(&state)?;
+    let film_stock = load_stock(data_dir, &film, false)?;
+    let paper_stock = load_stock(data_dir, &paper, true)?;
+    let mut params = translate(&state)?;
     check(&state, &params)?;
+    params.film_render.development_time = listed_time(&film_stock, params.film_render.development_time);
+    params.print_render.development_time = listed_time(&paper_stock, params.print_render.development_time);
     Ok(Preset { film, paper, params })
+}
+
+/// A development time as the stock's family lists it: the entry the engine
+/// picks anyway (the nearest), so the apps' pickers show it. A stock without
+/// a family ignores the time; it becomes unset (Python writes 1.0 there).
+fn listed_time(stock: &Profile, time: Option<f64>) -> Option<f64> {
+    let times = &stock.data.development_time;
+    if times.len() <= 1 {
+        return None;
+    }
+    time.map(|t| times[profile::development_time_index(times, Some(t))])
 }
 
 /// The params after applying a preset: its own, with [`KEPT`] from `current`.
@@ -731,6 +744,18 @@ mod tests {
         assert_eq!(p.film_render.dir_couplers.gamma_samelayer_rgb, Some([0.5159, 0.5934, 0.2829]));
         assert_eq!(p.film_render.halation.halation_first_sigma_um, Some([65.0; 3]));
         assert!(p.film_render.grain.rms_granularity.is_some());
+    }
+
+    #[test]
+    fn imported_development_times_are_the_listed_ones() {
+        let text = r#"{"simulation": {"film_stock": "kodak_doublex", "print_paper": "kodak_2302"},
+            "film_chemistry": {"development_time": 8.0}, "chemistry": {"development_time": null}}"#;
+        let p = import(text, &data_dir()).unwrap().params;
+        // Double-X lists 4, 5, 6.5, 9 and 12 minutes; 8 develops as 9.
+        assert_eq!(p.film_render.development_time, Some(9.0));
+        assert_eq!(p.print_render.development_time, None);
+        let colour = r#"{"film_chemistry": {"development_time": 1.0}}"#;
+        assert_eq!(import(colour, &data_dir()).unwrap().params.film_render.development_time, None);
     }
 
     #[test]
