@@ -1129,6 +1129,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spektrafilm-io",
+ "spektrafilm-math",
  "wgpu",
  "windows",
  "windows-core",

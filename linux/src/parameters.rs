@@ -234,8 +234,14 @@ pub const TOGGLES: &[(&str, &str)] = &[
     ("Black correction", "scanner.black_correction"),
     ("CAT16 adaptation", "settings.use_cat16"),
     ("Encode output as sRGB", "io.output_cctf_encoding"),
+    ("Linear input", "io.input_interpretation.linear"),
+    ("Decode input curve", "io.input_cctf_decoding"),
     ("Use less memory for export", "settings.serial_grain"),
 ];
+/// The colour spaces Assume offers, as `spektrafilm-io::colour::ASSUMABLE`.
+pub const ASSUMED_SPACES: &[&str] = &["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020"];
+/// Manual: the pipeline's own input colour space, as Negs 0.8 used it.
+pub const MANUAL_SPACES: &[&str] = &["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020", "ACES2065-1", "ACEScg"];
 pub const CHOICES: &[(&str, &str, &[&str])] = &[
     (
         "Metering",
@@ -255,6 +261,10 @@ pub const CHOICES: &[(&str, &str, &[&str])] = &[
         "io.raw_white_balance.mode",
         &["as_shot", "daylight", "tungsten", "custom"],
     ),
+    // How a non-RAW photograph's values are read.
+    ("Input colour", "io.input_interpretation.mode", &["auto", "assume", "manual"]),
+    ("Assumed colour space", "io.input_interpretation.color_space", ASSUMED_SPACES),
+    ("Manual colour space", "io.input_color_space", MANUAL_SPACES),
     (
         "Filter",
         "camera.diffusion_filter.filter_family",
@@ -385,6 +395,8 @@ fn apply_default(state: &mut State, fixture: &State, defaults: &Value, key: &str
 /// RuntimeParams stays complete: fields without controls keep the engine's values.
 pub fn runtime(state: &State, defaults: &Value) -> Value {
     let mut params = merge(defaults, &state.params);
+    // The helper renders in the preview space; exports name their own.
+    set(&mut params, "io.output_color_space", json!(crate::preferences::preview_space()));
     for (key, value) in &state.values {
         if value.is_finite()
             && grain_lane(key).is_none()

@@ -2,6 +2,8 @@
 use crate::params::RuntimeParams;
 use rayon::prelude::*;
 use spektrafilm_math::image::ImageBuf;
+use spektrafilm_io::encoding::Encoding;
+use spektrafilm_math::colorspace::{self, RgbColourspace, SRGB};
 use spektrafilm_math::precision::{from_f32, to_f32};
 
 pub fn preview_pipeline_cache_key(
@@ -157,25 +159,77 @@ pub fn downsample_area(image: &ImageBuf, (new_w, new_h): (u32, u32)) -> ImageBuf
     ImageBuf::from_data(new_w, new_h, data)
 }
 
+/// The space of a display proxy's bytes, which the clients tag the proxy
+/// with so the system converts it for the display.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplaySpace {
+    /// sRGB: the proxy of an sRGB render, byte for byte what it always was.
+    Srgb,
+    /// ITU-R BT.2020 primaries and white with the sRGB transfer function, for
+    /// renders in any other output space: it holds Display P3, Adobe RGB and
+    /// DCI-P3 whole, so the preview shows their colours outside sRGB on a
+    /// wide-gamut display. ProPhoto colours beyond it are clipped, as no
+    /// display shows them.
+    Rec2020SrgbTransfer,
+}
+
+impl DisplaySpace {
+    pub fn of(encoding: Encoding) -> Self {
+        if encoding.space.name == SRGB.name { Self::Srgb } else { Self::Rec2020SrgbTransfer }
+    }
+
+    /// The name the helper's responses use.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Srgb => "sRGB",
+            Self::Rec2020SrgbTransfer => "Rec. 2020 (sRGB transfer)",
+        }
+    }
+}
+
+/// Triangular dither in (-1, 1) quantisation steps, a fixed function of the
+/// pixel and channel so the same render gives the same bytes.
+fn tpdf_dither(x: usize, y: usize, c: usize) -> f64 {
+    let mut h = (x as u32).wrapping_mul(0x9E37_79B1)
+        ^ (y as u32).wrapping_mul(0x85EB_CA77)
+        ^ (c as u32).wrapping_mul(0xC2B2_AE3D);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7FEB_352D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846C_A68B);
+    h ^= h >> 16;
+    (h & 0xFFFF) as f64 / 65536.0 - (h >> 16) as f64 / 65536.0
+}
+
 /// An RGBA8 display proxy of `image`, fitted within `max_dim` on its longer
 /// side. Bilinear and parallel, writing bytes directly: a general-purpose
 /// resampler would add a float copy and, being serial, seconds at 60 MP.
-/// `encoded` says whether `image` is already sRGB-encoded; if not, each
-/// interpolated value is encoded here. `image` itself is never modified.
-pub fn display_rgba(image: &ImageBuf, max_dim: usize, encoded: bool) -> (usize, usize, Vec<u8>) {
-    display_rgba_with_post(image, max_dim, encoded, None)
+/// `encoding` says how `image` is encoded (a bool means sRGB, encoded or
+/// linear); the bytes are in [`DisplaySpace::of`] it. `image` itself is
+/// never modified.
+pub fn display_rgba(image: &ImageBuf, max_dim: usize, encoding: impl Into<Encoding>) -> (usize, usize, Vec<u8>) {
+    display_rgba_with_post(image, max_dim, encoding, None)
 }
 
 /// [`display_rgba`] with post adjustments, so a post-only edit redraws the
 /// preview without developing the film again. They are applied to the source
 /// pixels before downscaling, as an export applies them before any resize, so
 /// the preview matches the adjusted image at every size.
+///
+/// An sRGB render becomes sRGB bytes as it always did. A render in another
+/// space is clipped there, as its export is, converted colorimetrically
+/// (Bradford between the whites) to [`DisplaySpace::Rec2020SrgbTransfer`]
+/// and dithered: 8-bit steps in that wider space are coarser than sRGB's
+/// (adjacent codes about 1.2 ΔE00 at the 99th percentile against 0.8), and
+/// the dither keeps smooth gradients from banding.
 pub fn display_rgba_with_post(
     image: &ImageBuf,
     max_dim: usize,
-    encoded: bool,
+    encoding: impl Into<Encoding>,
     post: Option<&crate::post::PostProcess>,
 ) -> (usize, usize, Vec<u8>) {
+    let encoding = encoding.into();
+    let encoded = encoding.encoded;
     let src_w = image.width as usize;
     let src_h = image.height as usize;
     let max_src_dim = src_w.max(src_h).max(1);
@@ -191,7 +245,26 @@ pub fn display_rgba_with_post(
         let rgb = [0, 1, 2].map(|c| to_f32(image.data[p + c].clamp(lo, hi)));
         post.map_or(rgb, |post| post.apply_rgb(rgb))
     };
-    let write = |out: &mut [u8], rgb: [f32; 3]| {
+    let wide = (DisplaySpace::of(encoding) == DisplaySpace::Rec2020SrgbTransfer).then(|| {
+        let rec2020 = RgbColourspace::find("ITU-R BT.2020").expect("BT.2020 is a colour space");
+        colorspace::icc_rgb_to_rgb(encoding.space, rec2020)
+    });
+    let write = |out: &mut [u8], rgb: [f32; 3], x: usize, y: usize| {
+        if let Some(m) = &wide {
+            let linear = rgb.map(|v| {
+                let v = f64::from(v);
+                if encoded { encoding.space.cctf.decode(v) } else { v }
+            });
+            for (c, v) in colorspace::mat3_vec_f64(m, linear).into_iter().enumerate() {
+                let v = v.clamp(0.0, 1.0);
+                let v = if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+                // Black and white stay exact: borders, clipped highlights.
+                let dither = if v > 0.0 && v < 1.0 { tpdf_dither(x, y, c) } else { 0.0 };
+                out[c] = (v * 255.0 + dither).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = 255;
+            return;
+        }
         for (c, mut v) in rgb.into_iter().enumerate() {
             if !encoded {
                 v = if v <= 0.0031308 {
@@ -209,7 +282,7 @@ pub fn display_rgba_with_post(
             .enumerate()
             .for_each(|(y, row)| {
                 for (x, out) in row.chunks_exact_mut(4).enumerate() {
-                    write(out, pixel(y, x));
+                    write(out, pixel(y, x), x, y);
                 }
             });
         return (w, h, rgba);
@@ -268,14 +341,14 @@ pub fn display_rgba_with_post(
                     }
                 }
                 let (top_row, bottom_row) = (&cached[0].1, &cached[1].1);
-                for (out, &(x0, tx)) in row.chunks_exact_mut(4).zip(&columns) {
+                for (x, (out, &(x0, tx))) in row.chunks_exact_mut(4).zip(&columns).enumerate() {
                     let x1 = (x0 + 1).min(src_w - 1);
                     let rgb = [0, 1, 2].map(|c| {
                         let top = top_row[x0][c] + (top_row[x1][c] - top_row[x0][c]) * tx;
                         let bot = bottom_row[x0][c] + (bottom_row[x1][c] - bottom_row[x0][c]) * tx;
                         top + (bot - top) * ty
                     });
-                    write(out, rgb);
+                    write(out, rgb, x, y);
                 }
             }
         });
@@ -386,6 +459,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A render outside sRGB reaches the display as the same colour in the
+    /// Rec. 2020 proxy: a flat field averages, through the dither, to the
+    /// exact conversion within a tenth of a code; white and black stay exact;
+    /// the bytes repeat; and P3's pure green, outside sRGB, survives.
+    #[test]
+    fn wide_proxies_hold_the_renders_colours() {
+        use spektrafilm_io::encoding::Encoding;
+        let rec2020 = RgbColourspace::find("ITU-R BT.2020").unwrap();
+        let encode = |v: f64| if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+        for (space, encoded) in [("Display P3", true), ("Adobe RGB (1998)", false), ("ProPhoto RGB", true)] {
+            let encoding = Encoding::new(space, encoded);
+            assert_eq!(DisplaySpace::of(encoding), DisplaySpace::Rec2020SrgbTransfer);
+            let colour = [0.2f32, 0.55, 0.35];
+            let image = ImageBuf::from_data(64, 64, colour.repeat(64 * 64).into_iter().map(from_f32).collect());
+            let (_, _, rgba) = display_rgba(&image, 64, encoding);
+            assert_eq!(display_rgba(&image, 64, encoding).2, rgba, "{space}: deterministic");
+            let linear = colour.map(|v| if encoded { encoding.space.cctf.decode(f64::from(v)) } else { f64::from(v) });
+            let want = colorspace::mat3_vec_f64(&colorspace::icc_rgb_to_rgb(encoding.space, rec2020), linear);
+            for c in 0..3 {
+                let mean = rgba.chunks_exact(4).map(|p| f64::from(p[c])).sum::<f64>() / (64.0 * 64.0);
+                let want = encode(want[c]) * 255.0;
+                assert!((mean - want).abs() < 0.1, "{space} channel {c}: {mean} vs {want}");
+            }
+            let extremes = ImageBuf::from_data(2, 1, [1.0f32, 1.0, 1.0, 0.0, 0.0, 0.0].map(from_f32).to_vec());
+            assert_eq!(display_rgba(&extremes, 2, encoding).2, [255, 255, 255, 255, 0, 0, 0, 255], "{space}");
+        }
+        // Display P3 green in the proxy is more saturated than sRGB allows.
+        let green = ImageBuf::from_data(1, 1, [0.0f32, 1.0, 0.0].map(from_f32).to_vec());
+        let (_, _, p3) = display_rgba(&green, 1, Encoding::new("Display P3", true));
+        let (_, _, srgb) = display_rgba(&green, 1, Encoding::new("sRGB", true));
+        let srgb_green_in_2020 = colorspace::mat3_vec_f64(&colorspace::icc_rgb_to_rgb(&SRGB, rec2020), [0.0, 1.0, 0.0]);
+        assert!(f64::from(p3[0]) < encode(srgb_green_in_2020[0]) * 255.0 - 20.0, "{p3:?}");
+        assert_eq!(srgb, [0, 255, 0, 255], "sRGB proxies are unchanged");
     }
 
     /// Fine detail above the display cap: adjusting then downscaling, as an

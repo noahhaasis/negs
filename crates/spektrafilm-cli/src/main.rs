@@ -43,6 +43,16 @@ enum Commands {
         /// io.output_color_space in --params; the file carries its ICC profile.
         #[arg(long)]
         color_space: Option<String>,
+        /// How to read a non-RAW input's values (overrides
+        /// io.input_interpretation in --params): "auto" (its ICC profile and
+        /// metadata, else sRGB), "manual" (0.8: io.input_color_space and
+        /// io.input_cctf_decoding), or a colour space to assume: sRGB,
+        /// "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020".
+        #[arg(long)]
+        input_colour: Option<String>,
+        /// With --input-colour SPACE: the values are linear light.
+        #[arg(long, requires = "input_colour")]
+        input_linear: bool,
         /// Omit the source photograph's camera metadata.
         #[arg(long)]
         no_metadata: bool,
@@ -165,6 +175,8 @@ fn main() -> Result<()> {
             jpeg_quality,
             bit_depth,
             color_space,
+            input_colour,
+            input_linear,
             no_metadata,
             film,
             paper,
@@ -188,6 +200,10 @@ fn main() -> Result<()> {
             data_dir,
         } => {
             let border = border.as_deref().map(str::parse).transpose()?;
+            let input_interpretation = input_colour
+                .as_deref()
+                .map(|spec| parse_input_colour(spec, input_linear))
+                .transpose()?;
             let fit = long_edge
                 .map(Fit::LongEdge)
                 .or(short_edge.map(Fit::ShortEdge));
@@ -208,6 +224,7 @@ fn main() -> Result<()> {
                     ..Default::default()
                 },
                 color_space.as_deref(),
+                input_interpretation,
                 &film,
                 paper.as_deref(),
                 scan_film,
@@ -244,12 +261,41 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// A params file. One from before `io.input_interpretation` keeps the
+/// meaning of its input fields; see `infer_input_interpretation`.
+fn read_params(path: &Path) -> Result<RuntimeParams> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("opening params file: {}", path.display()))?;
+    let mut value: serde_json::Value = serde_json::from_str(&text).context("parsing params file")?;
+    spektrafilm_core::params::infer_input_interpretation(&mut value);
+    serde_json::from_value(value).context("parsing params file")
+}
+
+/// `--input-colour`: auto, manual, or a colour space to assume.
+fn parse_input_colour(spec: &str, linear: bool) -> Result<spektrafilm_io::InputInterpretation> {
+    use spektrafilm_io::InputInterpretation;
+    let interpretation = match spec.to_ascii_lowercase().as_str() {
+        "auto" | "manual" if linear => bail!("--input-linear needs a colour space, not {spec}"),
+        "auto" => InputInterpretation::default(),
+        "manual" => InputInterpretation::manual(),
+        _ => {
+            let space = RgbColourspace::find(spec)
+                .filter(|cs| spektrafilm_io::colour::ASSUMABLE.contains(&cs.name))
+                .with_context(|| {
+                    format!("--input-colour: use auto, manual or one of {}", spektrafilm_io::colour::ASSUMABLE.join(", "))
+                })?;
+            InputInterpretation::assume(space.name, linear)
+        }
+    };
+    Ok(interpretation)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_process(
     input: &Path,
     output: &Path,
     mut save_options: spektrafilm_io::save::SaveOptions,
     color_space: Option<&str>,
+    input_interpretation: Option<spektrafilm_io::InputInterpretation>,
     film_name: &str,
     paper_name: Option<&str>,
     scan_film: bool,
@@ -290,14 +336,15 @@ fn cmd_process(
 
     // Load params (defaults + optional overrides)
     let mut params = if let Some(pf) = params_file {
-        let f = std::fs::File::open(pf)
-            .with_context(|| format!("opening params file: {}", pf.display()))?;
-        serde_json::from_reader(std::io::BufReader::new(f))
-            .with_context(|| "parsing params file")?
+        read_params(pf)?
     } else {
         RuntimeParams::default()
     };
     params.io.scan_film = scan_film;
+    if let Some(interpretation) = input_interpretation {
+        params.io.input_interpretation = interpretation;
+    }
+    params.io.input_interpretation.validate()?;
     apply_raw_wb_overrides(
         &mut params.io.raw_white_balance,
         raw_wb,
@@ -311,26 +358,27 @@ fn cmd_process(
     }
     let rotate_cw = params.io.rotate_cw;
     let encoded = params.io.output_cctf_encoding;
+    // Borders, the 35mm strip and resizing work in the output space.
+    let finish = spektrafilm_io::encoding::Encoding::new(&params.io.output_color_space, encoded);
     // The pipeline falls back to sRGB for a name it doesn't know; so does the profile.
     save_options.color_space = RgbColourspace::output(&params.io.output_color_space).name.into();
     save_options.linear = !encoded;
     save_options.check(output)?;
 
-    // Auto-detect input color space from file extension
-    if spektrafilm_io::input_is_linear_srgb(input) {
-        // PNG and RAW come out of the loader as linear sRGB.
-        // Tell the pipeline so it doesn't decode gamma a second time.
-        params.io.input_color_space = "sRGB".to_string();
-        params.io.input_cctf_decoding = false;
-    }
-
     // Load image
     let t = Instant::now();
-    let image = spektrafilm_io::load_image_with_wb(
+    let loaded = spektrafilm_io::load_image_colour(
         input,
         spektrafilm_io::Formats::Any,
         params.io.raw_white_balance,
+        &params.io.input_interpretation,
     )?;
+    eprintln!("Input colour: {}", loaded.colour.summary);
+    if let Some(warning) = &loaded.colour.warning {
+        eprintln!("Warning: {warning}");
+    }
+    params.io.apply_input_colour(&loaded.colour);
+    let image = loaded.image;
     eprintln!(
         "Image loaded: {}x{} ({} MP), {} ms",
         image.width,
@@ -422,7 +470,7 @@ fn cmd_process(
                 style,
                 border_options,
                 film_name,
-                encoded,
+                finish,
                 data_dir,
             )?;
             if instagram {
@@ -430,7 +478,7 @@ fn cmd_process(
                     &bordered,
                     style,
                     border_options,
-                    encoded,
+                    finish,
                 )
             } else {
                 bordered
@@ -438,7 +486,7 @@ fn cmd_process(
         }
         None => result,
     };
-    let result = match fit.and_then(|fit| spektrafilm_io::resize::fit(&result, fit, encoded)) {
+    let result = match fit.and_then(|fit| spektrafilm_io::resize::fit(&result, fit, finish)) {
         Some(resized) => resized,
         None => result,
     };

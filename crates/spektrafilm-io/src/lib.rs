@@ -1,19 +1,22 @@
 //! Image and camera-RAW loading shared by the GUI, the CLI and
 //! `decode_raw_gui`.
 //!
-//! Every loader returns an [`ImageBuf`] of **linear** RGB values:
-//! - RAW files use the platform decoder and come out in linear sRGB primaries.
-//! - PNG is sRGB gamma-encoded and is decoded to linear here.
-//! - TIFF (and any other `image`-crate format) passes through unchanged.
+//! Every loader returns an [`ImageBuf`] in the engine's input representation:
+//! linear light, unclamped, in sRGB (BT.709) primaries with a D65 white.
+//! - RAW files use the platform decoder (scene-referred).
+//! - JPEG, PNG and TIFF are read through their embedded profile or colour
+//!   metadata, with documented fallbacks for untagged files ([`colour`]).
 //!
-//! Use [`input_is_linear_srgb`] to decide the pipeline's input colour
-//! space for a given file.
+//! [`load_image_colour`] also reports what the file was read as
+//! ([`InputColour`]), and takes the input interpretation override.
 //!
 //! [`save_image`] writes the rendered result as TIFF/PNG/JPEG, carrying
 //! over the source file's camera metadata read by [`read_metadata`].
 
 pub mod border;
+pub mod colour;
 pub mod crop;
+pub mod encoding;
 pub mod film35;
 pub mod icc;
 pub mod image_size;
@@ -23,6 +26,7 @@ pub mod resize;
 pub mod save;
 mod white_balance;
 
+pub use colour::{InputColour, InputInterpretation, InputMode};
 pub use metadata::{ImageMetadata, read_metadata};
 pub use save::save_image;
 pub use white_balance::{RawWhiteBalance, RawWhiteBalanceMode};
@@ -32,7 +36,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use rayon::prelude::*;
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::precision::{Scalar, from_f32, srgb_decode};
+use spektrafilm_math::precision::{Scalar, from_f32};
 
 /// Which non-RAW formats [`load_image`] accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,71 +93,89 @@ pub fn is_raw_extension(ext: &str) -> bool {
     )
 }
 
-/// True if the loaders return linear sRGB for this file (PNG after its
-/// sRGB decode, RAW after the selected backend's development). The pipeline should
-/// then use `input_color_space = "sRGB"` and
-/// `input_cctf_decoding = false`, so the gamma isn't decoded twice.
-pub fn input_is_linear_srgb(path: &Path) -> bool {
-    let ext = extension(path);
-    ext == "png" || is_raw_extension(&ext)
-}
-
 /// Whether the file extension selects the RAW decoder (case-insensitive).
 pub fn is_raw(path: &Path) -> bool {
     is_raw_extension(&extension(path))
 }
 
-/// Load an image as linear RGB, applying its EXIF orientation. RAW
-/// extensions go to [`load_raw`] in both modes.
+/// Load an image in the engine's representation, applying its EXIF
+/// orientation. RAW extensions go to [`load_raw`] in both modes.
 pub fn load_image(path: &Path, formats: Formats) -> Result<ImageBuf> {
     load_image_with_wb(path, formats, RawWhiteBalance::default())
 }
 
-/// Shared preview/export loader. RAW WB is ignored for non-RAW inputs,
-/// whose white balance is already baked into their RGB pixels.
+/// [`load_image_colour`] with automatic input interpretation, without the report.
 pub fn load_image_with_wb(path: &Path, formats: Formats, wb: RawWhiteBalance) -> Result<ImageBuf> {
+    Ok(load_image_colour(path, formats, wb, &InputInterpretation::default())?.image)
+}
+
+/// An input in the engine's representation, and what it was read as.
+pub struct LoadedImage {
+    pub image: ImageBuf,
+    pub colour: InputColour,
+}
+
+/// Shared preview/export loader. RAW WB applies to RAW files only, and the
+/// input interpretation to non-RAW files only: a RAW is always developed by
+/// its decoder. A non-RAW file's white balance is already in its pixels.
+pub fn load_image_colour(
+    path: &Path,
+    formats: Formats,
+    wb: RawWhiteBalance,
+    interpretation: &InputInterpretation,
+) -> Result<LoadedImage> {
     let ext = extension(path);
     if is_raw_extension(&ext) {
-        return load_raw_with_wb(path, wb);
+        let decoded = raw::decode_raw(
+            path,
+            raw::RawDecodeOptions { white_balance: wb, apply_orientation: true },
+            raw::RawDecoderPreference::Auto,
+        )?;
+        return Ok(LoadedImage { image: decoded.image, colour: InputColour::raw(decoded.decoder) });
     }
     if formats == Formats::TiffPngRaw && !matches!(ext.as_str(), "tif" | "tiff" | "png") {
         bail!("unsupported image format: .{ext} (supported: tiff, png, raw)");
     }
-    let img = decode_no_limits(path)?;
-    let rgb = img.to_rgb32f();
-    let (w, h) = (rgb.width(), rgb.height());
-    let data: Vec<f32> = rgb.into_raw();
-    let scalars: Vec<Scalar> = match ext.as_str() {
-        // PNG is sRGB gamma-encoded: widen to Scalar first, then decode
-        // to linear.
-        "png" => data
-            .into_par_iter()
-            .map(|v| srgb_decode(from_f32(v)))
-            .collect(),
-        _ => data.into_par_iter().map(from_f32).collect(),
-    };
-    Ok(ImageBuf::from_data(w, h, scalars))
+    let (img, info, format) = decode_no_limits(path)?;
+    let (image, colour) = colour::convert(img, &info, interpretation, format == image::ImageFormat::Png)?;
+    Ok(LoadedImage { image, colour })
 }
 
 /// Decode with the `image` crate's memory limits disabled and apply the
-/// EXIF/TIFF orientation tag. The default 512 MiB cap rejects large float
-/// TIFFs (a 60 MP 32-bit RGB frame alone is ~720 MiB). Local files are
-/// trusted.
-fn decode_no_limits(path: &Path) -> Result<image::DynamicImage> {
+/// EXIF/TIFF orientation tag, keeping what the file says about its colour.
+/// The default 512 MiB cap rejects large float TIFFs (a 60 MP 32-bit RGB
+/// frame alone is ~720 MiB). Local files are trusted.
+fn decode_no_limits(path: &Path) -> Result<(image::DynamicImage, colour::FileColour, image::ImageFormat)> {
     let mut reader = image::ImageReader::open(path)
         .with_context(|| format!("opening image: {}", path.display()))?
         .with_guessed_format()
         .with_context(|| format!("detecting image format: {}", path.display()))?;
     reader.no_limits();
+    let format = reader.format().with_context(|| format!("unknown image format: {}", path.display()))?;
     let mut decoder = reader
         .into_decoder()
         .with_context(|| format!("decoding image: {}", path.display()))?;
-    let orientation = image::ImageDecoder::orientation(&mut decoder)
-        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    use image::ImageDecoder;
+    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let open = || std::fs::File::open(path).map(std::io::BufReader::new);
+    let mut info = colour::FileColour {
+        icc: decoder.icc_profile().ok().flatten(),
+        exif: decoder.exif_metadata().ok().flatten(),
+        cmyk: matches!(decoder.original_color_type(), image::ExtendedColorType::Cmyk8 | image::ExtendedColorType::Cmyk16),
+        ..Default::default()
+    };
+    match format {
+        image::ImageFormat::Png => info.png = open().ok().and_then(colour::tags::png_chunks),
+        image::ImageFormat::Jpeg => info.cmyk |= open().ok().and_then(colour::tags::jpeg_components) == Some(4),
+        image::ImageFormat::Tiff if info.icc.is_none() => info.icc = open().ok().and_then(colour::tags::tiff_icc),
+        _ => {}
+    }
     let mut img = image::DynamicImage::from_decoder(decoder)
         .with_context(|| format!("decoding image: {}", path.display()))?;
     img.apply_orientation(orientation);
-    Ok(img)
+    info.float = matches!(img, image::DynamicImage::ImageRgb32F(_) | image::DynamicImage::ImageRgba32F(_));
+    info.gray = !img.color().has_color();
+    Ok((img, info, format))
 }
 
 /// Decode a camera RAW file to **linear** sRGB primaries, with its EXIF
@@ -161,7 +183,8 @@ fn decode_no_limits(path: &Path) -> Result<image::DynamicImage> {
 ///
 /// Auto selects Apple's full-resolution RAW developer on macOS and rawler
 /// elsewhere. Unsupported Apple formats fall back to rawler. Both produce
-/// linear sRGB; negatives are floored at zero, highlights are not clipped.
+/// unclamped linear sRGB: values above 1 and negative (outside-sRGB)
+/// coordinates are kept.
 pub fn load_raw(path: &Path) -> Result<ImageBuf> {
     load_raw_with_wb(path, RawWhiteBalance::default())
 }
@@ -203,7 +226,8 @@ fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Ima
     let mut raw = rawler::decode(&src, &decode_params)
         .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
     let mut dev = RawDevelop::default();
-    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb));
+    // Our `calibrate` replaces rawler's, which clips (see there).
+    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb | ProcessingStep::Calibrate));
     // rawler guards `decode` against panics but not `develop_intermediate`,
     // which still has `panic!`/`unimplemented!`/`assert!` paths for unusual
     // files (e.g. Fuji SuperCCD with an active area, non-3x3 colour matrices
@@ -211,9 +235,10 @@ fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Ima
     // into an error instead of taking the app down.
     let intermediate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<_> {
         white_balance::prepare(&mut raw, wb)?;
-        let mut intermediate = dev
+        let intermediate = dev
             .develop_intermediate(&raw)
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        let mut intermediate = calibrate(&raw, intermediate);
         white_balance::finish(&mut intermediate, wb, white_balance::is_monochrome(&raw))?;
         Ok(intermediate)
     }))
@@ -261,19 +286,82 @@ fn raw_exif_orientation(
     .unwrap_or(1)
 }
 
-/// Convert rawler's developed output to RGB, clamping negatives to 0.
-/// Monochrome is copied into all three channels; FourColor drops the
+/// Raw sensor values (white level 1) from which a pixel is desaturated toward
+/// neutral, reaching neutral at the white level. See [`calibrate`].
+const RAW_DESATURATE_FROM: f32 = 0.85;
+
+/// rawler 0.8's Calibrate step (white balance, then camera RGB → linear
+/// sRGB through the camera's D65 matrix, Bradford-adapted when it has
+/// none), without its final `clip_euclidean_norm_avg`. That clip floored
+/// negative channels (colours outside sRGB) and rescaled every pixel with a
+/// channel above 1, whether or not the sensor had clipped there, so bright
+/// but unclipped highlights lost their linearity and saturation. Here the
+/// result stays linear and unclamped. Only near the sensor's white level,
+/// where a clipped channel would show as false (typically magenta) colour,
+/// is a pixel blended toward the neutral of the same luminance: not at all
+/// below [`RAW_DESATURATE_FROM`] of the white level, fully at it.
+fn calibrate(raw: &rawler::RawImage, intermediate: rawler::imgop::develop::Intermediate) -> rawler::imgop::develop::Intermediate {
+    use rawler::imgop::develop::Intermediate;
+    use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
+    use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65};
+    use rawler::imgop::{chromatic_adaption::adapt_bradford, xyz::Illuminant as I};
+    let (illuminant, matrix) = raw
+        .color_matrix_find_first([I::D65, I::A, I::B, I::C, I::D50, I::D55, I::D75, I::Daylight, I::Flash])
+        .unwrap_or((Illuminant::D65, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]));
+    let matrix = if illuminant == Illuminant::D65 || matrix.len() != 9 {
+        matrix
+    } else {
+        let m: [[f32; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|j| matrix[i * 3 + j]));
+        adapt_bradford(&illuminant, &Illuminant::D65, &m).as_flattened().to_vec()
+    };
+    let mut xyz2cam = [[0.0f32; 3]; 4];
+    for (i, row) in matrix.chunks_exact(3).take(4).enumerate() {
+        xyz2cam[i].copy_from_slice(row);
+    }
+    let wb = if raw.wb_coeffs[0].is_nan() { [1.0; 4] } else { raw.wb_coeffs };
+    let cam2rgb = pseudo_inverse(normalize(multiply(&xyz2cam, &SRGB_TO_XYZ_D65)));
+    let luma = [0.2126f32, 0.7152, 0.0722];
+    let develop = |cam: &[f32]| -> [f32; 3] {
+        let mut rgb = [0.0f32; 3];
+        for (c, &v) in cam.iter().enumerate() {
+            for (i, out) in rgb.iter_mut().enumerate() {
+                *out += cam2rgb[i][c] * v * wb[c];
+            }
+        }
+        let peak = cam.iter().copied().fold(0.0f32, f32::max);
+        let t = ((peak - RAW_DESATURATE_FROM) / (1.0 - RAW_DESATURATE_FROM)).clamp(0.0, 1.0);
+        if t > 0.0 {
+            let t = t * t * (3.0 - 2.0 * t);
+            let y = luma[0] * rgb[0] + luma[1] * rgb[1] + luma[2] * rgb[2];
+            rgb = rgb.map(|v| v + (y - v) * t);
+        }
+        rgb
+    };
+    match intermediate {
+        Intermediate::ThreeColor(pixels) => {
+            let data = pixels.data.par_iter().map(|p| develop(p)).collect();
+            Intermediate::ThreeColor(rawler::pixarray::Color2D::new_with(data, pixels.width, pixels.height))
+        }
+        Intermediate::FourColor(pixels) => {
+            let data = pixels.data.par_iter().map(|p| develop(p)).collect();
+            Intermediate::ThreeColor(rawler::pixarray::Color2D::new_with(data, pixels.width, pixels.height))
+        }
+        mono @ Intermediate::Monochrome(_) => mono,
+    }
+}
+
+/// Convert rawler's developed output to RGB, unclamped. Monochrome is copied
+/// into all three channels; FourColor (only without calibration) drops the
 /// fourth channel.
 fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate) -> ImageBuf {
     use rawler::imgop::develop::Intermediate;
 
-    let floor = |v: f32| from_f32(v.max(0.0));
     let (w, h, scalars): (usize, usize, Vec<Scalar>) = match intermediate {
         Intermediate::Monochrome(pixels) => {
             let mut out = vec![from_f32(0.0); pixels.width * pixels.height * 3];
             out.par_chunks_exact_mut(3)
                 .zip(pixels.data.par_iter())
-                .for_each(|(dst, &v)| dst.fill(floor(v)));
+                .for_each(|(dst, &v)| dst.fill(from_f32(v)));
             (pixels.width, pixels.height, out)
         }
         Intermediate::ThreeColor(pixels) => {
@@ -281,7 +369,7 @@ fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate)
             out.par_chunks_exact_mut(3)
                 .zip(pixels.data.par_iter())
                 .for_each(|(dst, src)| {
-                    dst.copy_from_slice(&[floor(src[0]), floor(src[1]), floor(src[2])]);
+                    dst.copy_from_slice(&[from_f32(src[0]), from_f32(src[1]), from_f32(src[2])]);
                 });
             (pixels.width, pixels.height, out)
         }
@@ -290,7 +378,7 @@ fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate)
             out.par_chunks_exact_mut(3)
                 .zip(pixels.data.par_iter())
                 .for_each(|(dst, src)| {
-                    dst.copy_from_slice(&[floor(src[0]), floor(src[1]), floor(src[2])]);
+                    dst.copy_from_slice(&[from_f32(src[0]), from_f32(src[1]), from_f32(src[2])]);
                 });
             (pixels.width, pixels.height, out)
         }
@@ -315,15 +403,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn linear_srgb_detection() {
-        assert!(input_is_linear_srgb(Path::new("a/b.PNG")));
-        assert!(input_is_linear_srgb(Path::new("x.Nef")));
-        assert!(!input_is_linear_srgb(Path::new("x.tiff")));
-        assert!(!input_is_linear_srgb(Path::new("x.jpg")));
-        assert!(!input_is_linear_srgb(Path::new("noext")));
-    }
-
     // No real camera file reliably reaches every `Intermediate` variant:
     // with rawler 0.8's default steps, Calibrate always turns FourColor
     // into ThreeColor (falling back to an identity matrix), and Monochrome
@@ -340,21 +419,21 @@ mod tests {
         }
 
         #[test]
-        fn monochrome_is_copied_into_rgb_and_clamped() {
+        fn monochrome_is_copied_into_rgb_unclamped() {
             let px = vec![0.25, -0.5, 1.5, 0.0, -0.0, 0.125];
             let img =
                 intermediate_to_image_buf(Intermediate::Monochrome(PixF32::new_with(px, 3, 2)));
             assert_eq!((img.width, img.height), (3, 2));
             #[rustfmt::skip]
             let want = s(&[
-                0.25, 0.25, 0.25,  0.0, 0.0, 0.0,  1.5, 1.5, 1.5,
-                0.0, 0.0, 0.0,     0.0, 0.0, 0.0,  0.125, 0.125, 0.125,
+                0.25, 0.25, 0.25,  -0.5, -0.5, -0.5,  1.5, 1.5, 1.5,
+                0.0, 0.0, 0.0,     -0.0, -0.0, -0.0,  0.125, 0.125, 0.125,
             ]);
             assert_eq!(img.data, want);
         }
 
         #[test]
-        fn three_color_keeps_channel_order_and_clamps() {
+        fn three_color_keeps_channel_order_unclamped() {
             let px = vec![
                 [0.1, 0.2, 0.3],
                 [-1.0, 0.5, 2.0],
@@ -368,8 +447,8 @@ mod tests {
             assert_eq!((img.width, img.height), (3, 2));
             #[rustfmt::skip]
             let want = s(&[
-                0.1, 0.2, 0.3,  0.0, 0.5, 2.0,  0.0, 0.0, 0.75,
-                1.0, 1.0, 0.0,  0.4, 0.5, 0.6,  0.7, 0.8, 0.9,
+                0.1, 0.2, 0.3,  -1.0, 0.5, 2.0,  0.0, -0.25, 0.75,
+                1.0, 1.0, -1.0,  0.4, 0.5, 0.6,  0.7, 0.8, 0.9,
             ]);
             assert_eq!(img.data, want);
         }
@@ -389,8 +468,8 @@ mod tests {
             assert_eq!((img.width, img.height), (3, 2));
             #[rustfmt::skip]
             let want = s(&[
-                0.1, 0.2, 0.3,  0.0, 0.5, 2.0,  0.0, 0.0, 0.75,
-                1.0, 1.0, 0.0,  0.4, 0.5, 0.6,  0.7, 0.8, 0.9,
+                0.1, 0.2, 0.3,  -1.0, 0.5, 2.0,  0.0, -0.25, 0.75,
+                1.0, 1.0, -1.0,  0.4, 0.5, 0.6,  0.7, 0.8, 0.9,
             ]);
             assert_eq!(img.data, want);
         }

@@ -84,11 +84,11 @@ impl Editor {
             2 => json!({"short_edge":p.export_pixels}),
             _ => Value::Null,
         };
-        // The retained render is sRGB: a Fast export in a wider space develops
-        // again in that space, where Save Preview converts what it shows.
+        // A Fast export in another space than the retained render's develops
+        // again in it, where Save Preview converts what it shows.
         let retained = if kind == Kind::Preview
             || (kind == Kind::Fast
-                && color_space == "sRGB"
+                && r.developed.as_ref().is_some_and(|f| f.result["output_color_space"] == color_space.as_str())
                 && r.current_revision == Some(r.revision)
                 && r.developed
                     .as_ref()
@@ -164,6 +164,7 @@ impl Editor {
             ),
         );
         let ui = self.clone();
+        let followed = snapshot.color_space.clone();
         glib::MainContext::default().spawn_local(async move {
             let result = gio::spawn_blocking(move || write_export(&client, &job, snapshot)).await;
             {
@@ -202,6 +203,10 @@ impl Editor {
                     error
                 }),
                 Err(_) => ui.engine_error("The export worker stopped unexpectedly."),
+            }
+            // Then the preview follows the space just saved in.
+            if kind != Kind::Lut && crate::preferences::set_preview_space(&followed) {
+                ui.observe_edit();
             }
             ui.sync_history();
             ui.render_next();

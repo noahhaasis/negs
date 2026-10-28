@@ -151,13 +151,18 @@ impl SaveSettings {
             "--color-space".into(), self.space_name().into(),
         ]
     }
-    /// For the save dialog's message; None for sRGB.
-    pub fn summary(self, export: bool) -> Option<String> {
-        (!self.is_srgb()).then(|| if export {
-            format!("Develops in {} and embeds its profile", self.space_name())
-        } else {
-            format!("Converts to {}; the preview's colours stay within sRGB", self.space_name())
-        })
+    /// For the save dialog's message; None for sRGB in an sRGB preview. The
+    /// preview develops in `preview_space`; afterwards it follows this save.
+    pub fn summary(self, export: bool, preview_space: &str) -> Option<String> {
+        let space = self.space_name();
+        let follows = if space == preview_space { String::new() } else { format!("; the preview then shows {space}") };
+        if export {
+            return (!self.is_srgb() || !follows.is_empty()).then(|| format!("Develops in {space} and embeds its profile{follows}"));
+        }
+        if space == preview_space {
+            return (!self.is_srgb()).then(|| format!("Keeps the preview's {space} colours and embeds its profile"));
+        }
+        Some(format!("Converts the {preview_space} preview to {space}, clipping colours outside the smaller space{follows}"))
     }
 }
 
@@ -305,6 +310,11 @@ pub struct Model {
     /// Fast export, byte for byte.
     render_at_export_size: bool,
     render_on_gpu: bool,
+    /// The output colour space of the last render, which a save in the same
+    /// space keeps and a Fast export can reuse.
+    rendered_space: String,
+    /// How the helper read the photograph's colours (`input_colour`).
+    pub input_colour: Value,
     /// The shown frame was rendered at canvas size while a slider moved;
     /// letting go renders the photograph at export size.
     showing_interactive_frame: bool,
@@ -403,6 +413,8 @@ impl Model {
             render_id: 0,
             render_at_export_size: false,
             render_on_gpu: false,
+            rendered_space: String::new(),
+            input_colour: Value::Null,
             showing_interactive_frame: false,
             showing_cached_preview: false,
             preview_cache: RenderedPreviewCache::default(),
@@ -1358,6 +1370,11 @@ impl Model {
             self.state = restored;
         } else {
             json::set(&mut self.state.params, "io.rotate_cw", json::num(0.0));
+            // How one file's colours are read never carries over to the next.
+            let interpretation = json::get(&self.defaults, "io.input_interpretation").clone();
+            if !interpretation.is_null() {
+                json::set(&mut self.state.params, "io.input_interpretation", interpretation);
+            }
             self.state.crop = CropSettings::default();
         }
         self.is_raw = is_raw(path);
@@ -1371,7 +1388,8 @@ impl Model {
         self.mark(dirty::ALL & !dirty::ERROR);
         // Check the exact developed frame before decoding the raw placeholder.
         let path = path.to_path_buf();
-        let state = self.state.clone();
+        let state = self.render_state();
+        self.input_colour = Value::Null;
         let fallback = move || {
             if let Some((picture, size)) = crate::thumbnail::placeholder(&path) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
@@ -1386,11 +1404,11 @@ impl Model {
                     let working = Size::new(frame.working_width, frame.working_height);
                     let scale = (frame.width as f64 / frame.working_width).min(1.0);
                     let raw = frame.raw;
-                    let picture = Picture::new(frame.pixels, frame.width, frame.height);
+                    let picture = Picture::new(frame.pixels, frame.width, frame.height).in_display_space(&frame.display_space);
                     ui::post(move |app: &mut App| {
                         let model = &mut app.model;
                         if generation != model.source_generation || model.image.is_some() || model.closing { return; }
-                        if model.state.rendered() != expected { std::thread::spawn(fallback); return; }
+                        if model.render_state().rendered() != expected { std::thread::spawn(fallback); return; }
                         model.image = Some(picture); model.image_size = size; model.is_raw = raw;
                         model.source_size = source_size; model.working_size = working; model.preview_scale = scale;
                         model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
@@ -1489,12 +1507,13 @@ impl Model {
             let buffer = engine.directory().join("original.rgba");
             let command = json!({
                 "command": "original", "input": source.clone(), "source_generation": generation,
-                "params": self.state.params, "limit_preview": self.state.limit_preview,
+                "params": self.render_state().params, "limit_preview": self.state.limit_preview,
                 "preview_path": buffer,
             });
             engine.request(command, engine::timeout_for("original"), move |result| {
                 let picture = result.and_then(|(_, r)| {
                     Picture::read(&buffer, json::number(&r["width"]) as u32, json::number(&r["height"]) as u32)
+                        .map(|p| p.in_display_space(json::string(&r["display_color_space"])))
                 });
                 ui::post(move |app: &mut App| finish(app, picture));
             });
@@ -1508,6 +1527,39 @@ impl Model {
     }
 
     // MARK: Rendering
+
+    /// The colour space the preview develops in: the one Save and Export
+    /// last used, so editing shows the export's gamut.
+    pub fn preview_space(&self) -> &str {
+        COLOR_SPACES.iter().find(|s| **s == self.prefs.color_space).copied().unwrap_or(COLOR_SPACES[0])
+    }
+
+    /// The edit as the helper renders it: in the preview space. Sessions
+    /// keep the edit itself; the space is the app's.
+    pub fn render_state(&self) -> EditState {
+        let mut state = self.state.clone();
+        json::set(&mut state.params, "io.output_color_space", Value::String(self.preview_space().into()));
+        state
+    }
+
+    /// Develops the preview in `space` from now on, and remembers it for
+    /// the next save.
+    pub fn choose_preview_space(&mut self, space: &str) {
+        if space == self.preview_space() || !COLOR_SPACES.contains(&space) {
+            return;
+        }
+        self.prefs.color_space = space.into();
+        self.prefs.save();
+        self.changed();
+    }
+
+    /// After a save or export picked another colour space, the preview
+    /// develops in it. Requests run in order, so the save goes first.
+    pub fn follow_preview_space(&mut self) {
+        if self.source.is_some() && !self.rendered_space.is_empty() && self.rendered_space != self.preview_space() {
+            self.changed();
+        }
+    }
 
     fn changed(&mut self) {
         self.changed_with_cache(true);
@@ -1559,9 +1611,10 @@ impl Model {
         self.rendering = true;
         self.mark(dirty::CHROME);
         let buffer = engine.directory().join("preview.rgba");
+        let state = self.render_state();
         let mut command = json!({
             "command": "render", "input": source, "source_generation": generation,
-            "film": self.state.film, "paper": self.state.paper, "params": self.state.params,
+            "film": state.film, "paper": state.paper, "params": state.params,
             "limit_preview": self.state.limit_preview, "preview_path": buffer,
         });
         if let Some(scale) = interactive_scale {
@@ -1573,7 +1626,6 @@ impl Model {
             command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": self.state.crop.angle});
         }
         let started = Instant::now();
-        let state = self.state.clone();
         let paths = self.paths.clone();
         std::thread::spawn(move || {
             let cache_key = if interactive_scale.is_none() { paths.and_then(|paths| rendered_preview::key(&source, &state, &paths)) } else { None };
@@ -1589,9 +1641,10 @@ impl Model {
                         width: w, height: h, photo_width: json::number(&result["photo_width"]), photo_height: json::number(&result["photo_height"]),
                         source_width: json::number(&result["source_width"]), source_height: json::number(&result["source_height"]),
                         working_width: json::number(&result["working_width"]), working_height: json::number(&result["working_height"]),
-                        raw: json::boolean(&result["raw"]), pixels: pixels.clone(),
+                        raw: json::boolean(&result["raw"]), display_space: json::string(&result["display_color_space"]).to_string(),
+                        pixels: pixels.clone(),
                     }));
-                    let picture = Picture::new(pixels, w, h);
+                    let picture = Picture::new(pixels, w, h).in_display_space(json::string(&result["display_color_space"]));
                     // A long GPU render may have outlived a driver reset.
                     if engine::elapsed_ms(started) > 1500.0
                         && ExportEngine::ran_on_gpu(json::string(&result["backend"]))
@@ -1627,6 +1680,10 @@ impl Model {
                     session.update(shown, rotation);
                 }
                 self.is_raw = json::boolean(&result["raw"]);
+                self.rendered_space = json::string(&result["output_color_space"]).to_string();
+                if self.input_colour != result["input_colour"] {
+                    self.input_colour = result["input_colour"].clone();
+                }
                 if self.revision == revision && !rendered.interactive {
                     self.render_id = rendered.id;
                     self.preview_current = true;
@@ -1892,13 +1949,13 @@ impl Model {
     /// Exports at full resolution. A current preview at export size is what
     /// a Fast export would render, so it is saved instead, through a hidden
     /// sibling renamed into place; if that save fails (an edit arrived
-    /// meanwhile), the exporter runs. The preview is sRGB, so an export in
-    /// another colour space always develops again in it.
+    /// meanwhile), the exporter runs. An export in another colour space than
+    /// the preview's always develops again in it.
     pub fn export(&mut self, destination: PathBuf, engine_choice: ExportEngine, size: ExportSize, save: SaveSettings) {
         if !self.check_destination(&destination) || self.exporting || self.saving {
             return;
         }
-        if engine_choice == ExportEngine::Fast && save.is_srgb() && self.can_save() && self.render_at_export_size {
+        if engine_choice == ExportEngine::Fast && save.space_name() == self.rendered_space && self.can_save() && self.render_at_export_size {
             if let Some(engine) = self.engine.clone() {
                 self.saving = true;
                 self.mark(dirty::CHROME);
@@ -2055,7 +2112,17 @@ mod tests {
         assert_eq!(save.json(), json!({"jpeg_quality": 80, "bit_depth": 16, "color_space": "Display P3"}));
         assert_eq!(save.arguments(), ["--jpeg-quality", "80", "--bit-depth", "16", "--color-space", "Display P3"]);
         assert!(!save.is_srgb());
-        assert_eq!(SaveSettings { color_space: 0, ..save }.summary(true), None);
+        assert_eq!(SaveSettings { color_space: 0, ..save }.summary(true, "sRGB"), None);
+        // A save in the preview's space keeps its values; another converts it.
+        assert_eq!(save.summary(false, "Display P3").as_deref(), Some("Keeps the preview's Display P3 colours and embeds its profile"));
+        assert_eq!(
+            save.summary(false, "sRGB").as_deref(),
+            Some("Converts the sRGB preview to Display P3, clipping colours outside the smaller space; the preview then shows Display P3")
+        );
+        assert_eq!(
+            SaveSettings { color_space: 0, ..save }.summary(true, "Display P3").as_deref(),
+            Some("Develops in sRGB and embeds its profile; the preview then shows sRGB")
+        );
     }
 
     /// A finished render of `width` pixels across a 2400 × 1600 working frame.

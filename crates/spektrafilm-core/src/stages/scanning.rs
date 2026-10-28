@@ -9,7 +9,7 @@ use spektrafilm_math::tetra3d::tetrahedral_interp;
 use spektrafilm_math::precision::{Scalar, from_f64};
 use spektrafilm_math::spectral;
 
-use crate::params::RuntimeParams;
+use crate::params::{OutputAdaptation, RuntimeParams};
 use crate::profile::Profile;
 
 /// Build a `steps × steps² × 3` ImageBuf holding the LUT-input cmy grid.
@@ -246,7 +246,7 @@ pub fn scan(
     // accumulates to ~5e-6 scan-stage drift. We keep them split for
     // CPU bit-parity; the GPU path can collapse them for performance.
     let output = RgbColourspace::output(&params.io.output_color_space);
-    let adapt = colorspace::chromatic_adaptation_matrix_f64(viewing_white, output.whitepoint_xyz);
+    let adapt = output_adaptation(viewing_white, output, params.settings.output_adaptation);
     let base_xyz_to_rgb = output.xyz_to_rgb;
 
     // Dispatch spectral integration to backend (GPU or CPU). The backend
@@ -415,18 +415,34 @@ pub fn encode_output(rgb: &mut ImageBuf, output_color_space: &str) {
     });
 }
 
+/// The scan's XYZ adaptation, from the viewing illuminant's white to
+/// `output`'s white (see [`OutputAdaptation`]). The CPU scan and the GPU
+/// chains both use it.
+pub fn output_adaptation(viewing_white: [f64; 3], output: &RgbColourspace, mode: OutputAdaptation) -> [[f64; 3]; 3] {
+    let d65 = RgbColourspace::output("sRGB").whitepoint_xyz;
+    let is_d65 = (0..3).all(|i| (output.whitepoint_xyz[i] - d65[i]).abs() < 1e-9);
+    if mode == OutputAdaptation::Direct || is_d65 {
+        return colorspace::chromatic_adaptation_matrix_f64(viewing_white, output.whitepoint_xyz);
+    }
+    colorspace::mat3_mul3_f64(
+        &colorspace::bradford_matrix(d65, output.whitepoint_xyz),
+        &colorspace::chromatic_adaptation_matrix_f64(viewing_white, d65),
+    )
+}
+
 /// Re-encode a finished `from` image in `to`, clipped to [0, 1]: decode,
-/// convert through XYZ with CAT02 between the whitepoints (as the scan's
-/// own output matrix does), encode. `encoded` false means the image is
-/// linear and stays linear. Converting doesn't widen the gamut: an sRGB
-/// render saved as Display P3 keeps sRGB's colours.
+/// convert through XYZ with Bradford between the whitepoints (as ICC does,
+/// and as a [`OutputAdaptation::ViaD65`] render encodes a non-D65 space, so
+/// a converted render matches one rendered in `to` within `from`'s gamut),
+/// encode. `encoded` false means the image is linear and stays linear.
+/// Converting doesn't widen the gamut: an sRGB render saved as Display P3
+/// keeps sRGB's colours.
 pub fn convert_output(rgb: &mut ImageBuf, from: &str, to: &str, encoded: bool) {
     let (from, to) = (RgbColourspace::output(from), RgbColourspace::output(to));
     if from == to {
         return;
     }
-    let adapt = colorspace::chromatic_adaptation_matrix_f64(from.whitepoint_xyz, to.whitepoint_xyz);
-    let m = colorspace::mat3_mul3_f64(&to.xyz_to_rgb, &colorspace::mat3_mul3_f64(&adapt, &from.rgb_to_xyz));
+    let m = colorspace::icc_rgb_to_rgb(from, to);
     let (decode, encode) = (from.cctf, to.cctf);
     rgb.data.par_chunks_exact_mut(3).for_each(|px| {
         let lin = [0, 1, 2].map(|i| {

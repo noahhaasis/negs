@@ -561,6 +561,46 @@ pub fn build(ui: &Rc<Editor>) {
         visible(ui, &row, |s| choice(s, "White balance") == 3);
         raw.append(&row);
     }
+    // How a non-RAW photograph's values are read: automatically from its
+    // profile and tags, as an assumed colour space, or (Manual) by the input
+    // colour space and curve, as Negs 0.8 read every file.
+    let input = list();
+    let mode = combo(ui, &input, "Input colour", &["Automatic", "Assume", "Manual"]);
+    mode.set_subtitle("Automatic reads the embedded profile or tags; untagged files are read as sRGB");
+    let assumed = combo(ui, &input, "Assumed colour space", crate::parameters::ASSUMED_SPACES);
+    visible(ui, &assumed, |s| choice(s, "Input colour") == 1);
+    let linear = toggle(ui, &input, "Linear input", false);
+    visible(ui, &linear, |s| choice(s, "Input colour") == 1);
+    let manual = combo(ui, &input, "Manual colour space", crate::parameters::MANUAL_SPACES);
+    visible(ui, &manual, |s| choice(s, "Input colour") == 2);
+    let decode = toggle(ui, &input, "Decode input curve", true);
+    visible(ui, &decode, |s| choice(s, "Input colour") == 2);
+    ui.input_summary.set_wrap(true);
+    ui.input_summary.set_xalign(0.);
+    ui.input_summary.add_css_class("caption");
+    ui.input_summary.add_css_class("dim-label");
+    let input_caption = gtk::Label::new(Some("Input colour"));
+    input_caption.add_css_class("caption");
+    lab.append(&input_caption);
+    lab.append(&input);
+    lab.append(&ui.input_summary);
+    for widget in [
+        input.upcast::<gtk::Widget>(),
+        input_caption.upcast::<gtk::Widget>(),
+        ui.input_summary.clone().upcast::<gtk::Widget>(),
+    ] {
+        let owner = Rc::downgrade(ui);
+        ui.rules.borrow_mut().push(Box::new(move |_| {
+            if let Some(ui) = owner.upgrade() {
+                widget.set_visible(
+                    ui.current_path
+                        .borrow()
+                        .as_deref()
+                        .is_some_and(|p| !crate::photo::is_raw(p)),
+                );
+            }
+        }));
+    }
     let raw_caption = gtk::Label::new(Some("RAW white balance · changes re-decode the photograph"));
     raw_caption.set_wrap(true);
     raw_caption.add_css_class("caption");
@@ -730,7 +770,40 @@ pub fn build(ui: &Rc<Editor>) {
         &["Hanatos 2025", "Arctic 2026 (Beta)", "Mallett 2019"],
     );
     toggle(ui, &color, "Limit preview to 12 MP", true);
-    toggle(ui, &color, "Encode output as sRGB", true);
+    // The preview space is the app's, not the edit's: no undo, no session.
+    let spaces = gtk::StringList::new(&crate::preferences::COLOR_SPACES);
+    let preview_space = adw::ComboRow::builder()
+        .title("Colour space")
+        .subtitle("The preview develops in it; Save and Export use it next")
+        .model(&spaces)
+        .build();
+    let current = crate::preferences::preview_space();
+    preview_space.set_selected(crate::preferences::COLOR_SPACES.iter().position(|s| *s == current).unwrap_or(0) as u32);
+    preview_space.connect_selected_notify(glib::clone!(
+        #[weak]
+        ui,
+        move |row| {
+            let Some(space) = crate::preferences::COLOR_SPACES.get(row.selected() as usize) else { return };
+            ui.preferences.borrow_mut().color_space = (*space).into();
+            if crate::preferences::set_preview_space(space) {
+                ui.observe_edit();
+            }
+        }
+    ));
+    {
+        // Follows a save in another space.
+        let row = preview_space.clone();
+        ui.rules.borrow_mut().push(Box::new(move |_| {
+            let current = crate::preferences::preview_space();
+            let index = crate::preferences::COLOR_SPACES.iter().position(|s| *s == current).unwrap_or(0) as u32;
+            if row.selected() != index {
+                row.set_selected(index);
+            }
+        }));
+    }
+    color.append(&preview_space);
+    // The session key keeps its old name; the curve is the output space's.
+    toggle(ui, &color, "Encode output as sRGB", true).set_title("Encode with the colour space’s curve");
     toggle(ui, &color, "Use less memory for export", false);
     lab.append(&color);
     let scroll = gtk::ScrolledWindow::builder()

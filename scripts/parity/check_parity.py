@@ -420,6 +420,9 @@ def parse_args(argv=None):
                         help="colour-science name of the output colour space, e.g. 'Display P3'")
     parser.add_argument("--output-cctf-encoding", action="store_true",
                         help="encode rgb_out with the output colour space's CCTF")
+    parser.add_argument("--negs-colour-defaults", action="store_true",
+                        help="keep Negs' spectral boundary guard and D65 output adaptation (they differ from "
+                             "upstream for non-physical input light and non-D65 output whites)")
     parser.add_argument("--override", type=json.loads, metavar="JSON", default={},
                         help="extra nested params for both engines, in the Rust names, merged "
                              "last, e.g. '{\"film_render\": {\"base\": {\"tilt\": 0.5}}}'")
@@ -459,6 +462,11 @@ def parse_args(argv=None):
     if args.morph_source is not None and args.film_curves_morph is None:
         parser.error("--morph-source only applies with --film-curves-morph")
     return parser, args
+
+
+# Negs' colour-management defaults that deliberately differ from upstream
+# (docs/colour-management.md); parity compares upstream's arithmetic.
+UPSTREAM_COLOUR_SETTINGS = {"spectral_boundary": "upstream", "output_adaptation": "direct"}
 
 
 def main(argv=None):
@@ -567,7 +575,13 @@ def main(argv=None):
                         if morph is not None:
                             overrides[group]["density_curves_morph"] = morph
                     merge_overrides(overrides, args.override)
-                    (directory / "params.json").write_text(json.dumps(overrides, indent=2) + "\n")
+                    # Negs-only settings that Python doesn't have: upstream's
+                    # arithmetic unless --negs-colour-defaults asks for Negs'.
+                    rust_params = json.loads(json.dumps(overrides))
+                    if not args.negs_colour_defaults:
+                        for key, value in UPSTREAM_COLOUR_SETTINGS.items():
+                            rust_params.setdefault("settings", {}).setdefault(key, value)
+                    (directory / "params.json").write_text(json.dumps(rust_params, indent=2) + "\n")
                     python = python_overrides(overrides, api)
                     (directory / "python-overrides.json").write_text(json.dumps(python, indent=2) + "\n")
                     params = apply_params(init_params(film, paper), python)

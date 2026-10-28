@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use spektrafilm_math::image::ImageBuf;
-use spektrafilm_math::precision::{Scalar, from_f32, from_f64, srgb_decode, srgb_encode, to_f32, to_f64};
+use spektrafilm_math::precision::{Scalar, from_f32, from_f64, to_f32};
 
 /// The edge an export is fitted to, in pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,19 +44,17 @@ impl Fit {
 }
 
 /// `image` fitted to `fit`, or `None` if it already fits. Resamples with a
-/// Lanczos-3 filter in linear light: an `encoded` (sRGB) image is decoded
-/// first and encoded again after, so fine grain averages to the same
-/// brightness it has at full size.
-pub fn fit(image: &ImageBuf, fit: Fit, encoded: bool) -> Option<ImageBuf> {
+/// Lanczos-3 filter in linear light: an encoded image is decoded with its
+/// space's transfer function first and encoded again after, so fine grain
+/// averages to the same brightness it has at full size.
+pub fn fit(image: &ImageBuf, fit: Fit, encoding: impl Into<crate::encoding::Encoding>) -> Option<ImageBuf> {
     let (width, height) = fit.dimensions(image.width, image.height);
     if (width, height) == (image.width, image.height) {
         return None;
     }
-    let decode = |v: Scalar| to_f64(if encoded { srgb_decode(v) } else { v });
-    let encode = |v: f64| {
-        let v = from_f64(v);
-        if encoded { srgb_encode(v) } else { v }
-    };
+    let encoding = encoding.into();
+    let decode = |v: Scalar| encoding.decode(v);
+    let encode = |v: f64| encoding.encode(v);
     let (sw, dw) = (image.width as usize, width as usize);
     let (columns, rows) = (taps(sw, dw), taps(image.height as usize, height as usize));
 
@@ -124,9 +122,12 @@ fn taps(src: usize, dst: usize) -> Vec<(usize, Vec<f64>)> {
 ///
 /// The arithmetic is `image::imageops::resize` with `CatmullRom` in f32,
 /// down the columns then across the rows, with the same weights, pixel
-/// centres, edges and order of accumulation. Unlike it, values above 1 are
-/// kept: RAW highlights reach halation and auto exposure unclipped. Only the
-/// undershoot below zero is floored, where `image` clamps to [0, 1]. Each
+/// centres, edges and order of accumulation. Unlike it, nothing is clamped:
+/// RAW highlights above 1 reach halation and auto exposure unclipped, and
+/// negative coordinates (colours outside the sRGB primaries) keep their
+/// colour. The filter's undershoot beside an edge may also go below zero;
+/// the spectral model treats a pixel without positive light as black
+/// (`spektrafilm_math::spectral::hanatos2025_rgb_to_raw_prepared`). Each
 /// output row is filtered down and then across in one go, so no
 /// intermediate image is allocated.
 ///
@@ -150,7 +151,7 @@ pub fn catmull_rom(image: &ImageBuf, (width, height): (u32, u32)) -> ImageBuf {
                         *d += to_f32(v) * w;
                     }
                 }
-                // Across, flooring the undershoot only.
+                // Across.
                 for (x, (first, weights)) in columns.iter().enumerate() {
                     let mut px = [0f32; 3];
                     for (k, &w) in weights.iter().enumerate() {
@@ -159,7 +160,7 @@ pub fn catmull_rom(image: &ImageBuf, (width, height): (u32, u32)) -> ImageBuf {
                         }
                     }
                     for c in 0..3 {
-                        line[x * 3 + c] = from_f32(if px[c] < 0.0 { 0.0 } else { px[c] });
+                        line[x * 3 + c] = from_f32(px[c]);
                     }
                 }
             },
@@ -226,6 +227,21 @@ fn lanczos3(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use spektrafilm_math::precision::{srgb_encode, to_f64};
+
+    /// A flat colour stays put when resampled in another space's linear
+    /// light: ProPhoto RGB's curve decodes and encodes it exactly.
+    #[test]
+    fn fit_resamples_in_the_output_spaces_linear_light() {
+        let encoding = crate::encoding::Encoding::new("ProPhoto RGB", true);
+        let img = ImageBuf::from_data(64, 32, [0.3f32, 0.6, 0.15].repeat(64 * 32).into_iter().map(from_f32).collect());
+        let small = fit(&img, Fit::LongEdge(16), encoding).unwrap();
+        for px in small.data.chunks_exact(3) {
+            for (v, want) in px.iter().zip([0.3, 0.6, 0.15]) {
+                assert!((to_f64(*v) - want).abs() < 1e-5, "{px:?}");
+            }
+        }
+    }
 
     #[test]
     fn dimensions_fit_the_edge_and_never_enlarge() {
@@ -270,7 +286,7 @@ mod tests {
     }
 
     /// Where `image` didn't clamp, the result is the same to the bit; where it
-    /// clamped at 1, the value is kept, and at 0 both floor the undershoot.
+    /// clamped, the value is kept: above 1, and the undershoot below 0.
     #[test]
     fn catmull_rom_matches_the_image_crate_wherever_it_did_not_clip() {
         let sizes = [(37, 23, 101, 59), (101, 59, 37, 23), (64, 48, 64, 97), (64, 48, 13, 48), (5, 3, 1, 1), (1, 1, 7, 4), (40, 30, 120, 90)];
@@ -283,8 +299,10 @@ mod tests {
                 let mut kept = 0;
                 for (k, (&a, &b)) in old.iter().zip(&new.data).enumerate() {
                     let b = to_f32(b);
-                    if a < 1.0 {
+                    if a > 0.0 && a < 1.0 {
                         assert_eq!(a.to_bits(), b.to_bits(), "{sw}x{sh}->{dw}x{dh} at {k}: {a} vs {b}");
+                    } else if a == 0.0 {
+                        assert!(b <= 0.0, "{b}");
                     } else {
                         assert!(b >= 1.0, "{b}");
                         kept += usize::from(b > 1.0);
@@ -300,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn catmull_rom_keeps_highlights_and_floors_undershoot() {
+    fn catmull_rom_keeps_highlights_negative_coordinates_and_undershoot() {
         for value in [0.0, 0.18, 1.0, 2.5] {
             let flat = ImageBuf::from_data(9, 7, vec![from_f64(value); 9 * 7 * 3]);
             for size in [(27, 21), (4, 3)] {
@@ -309,13 +327,25 @@ mod tests {
             }
         }
         // A bright impulse above 1 keeps its energy past the clip, and the
-        // cubic's negative lobes floor at zero rather than going negative.
+        // cubic's negative lobes are kept, so the filter preserves the mean.
         let mut impulse = ImageBuf::from_data(9, 9, vec![from_f64(0.0); 9 * 9 * 3]);
         impulse.set(4, 4, [from_f64(40.0); 3]);
         let out = catmull_rom(&impulse, (27, 27));
         let peak = out.data.iter().map(|&v| to_f64(v)).fold(0.0, f64::max);
         assert!(peak > 30.0, "{peak}");
-        assert!(out.data.iter().all(|&v| to_f64(v) >= 0.0));
+        assert!(out.data.iter().any(|&v| to_f64(v) < 0.0));
+        // A flat colour outside sRGB (Display P3 green in linear sRGB) keeps
+        // its negative coordinates through enlarging and reducing.
+        let p3_green = [-0.2247, 1.0420, -0.0786].map(from_f64);
+        let flat: Vec<Scalar> = (0..9 * 7).flat_map(|_| p3_green).collect();
+        let flat = ImageBuf::from_data(9, 7, flat);
+        for size in [(27, 21), (4, 3)] {
+            for px in catmull_rom(&flat, size).data.chunks_exact(3) {
+                for (a, b) in px.iter().zip(p3_green) {
+                    assert!((to_f64(*a) - to_f64(b)).abs() < 1e-6, "{px:?} at {size:?}");
+                }
+            }
+        }
         // Overshoot of a [0, 1] edge rises above 1: the old resize clipped it.
         let edge: Vec<Scalar> = (0..16 * 3).map(|i| from_f64(if i / 3 < 8 { 0.0 } else { 1.0 })).collect();
         let edge = ImageBuf::from_data(16, 1, edge);

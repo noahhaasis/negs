@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{Scalar, from_f32, srgb_decode, to_f32};
 
-use crate::film35::{Renderer, Strip, linear_to_srgb};
+use crate::encoding::Encoding;
+use crate::film35::{Renderer, Strip};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,12 +56,13 @@ impl Rgb {
     pub const WHITE: Self = Self([255; 3]);
     pub const BLACK: Self = Self([0; 3]);
 
-    /// The colour's values in an image that is sRGB-`encoded`, or linear.
-    fn values(self, encoded: bool) -> [Scalar; 3] {
-        self.0.map(|v| {
+    /// The colour's values in an image with this encoding.
+    fn values(self, encoding: Encoding) -> [Scalar; 3] {
+        let srgb = self.0.map(|v| {
             let v = from_f32(v as f32 / 255.0);
-            if encoded { v } else { srgb_decode(v) }
-        })
+            to_f32(if encoding.encoded { v } else { srgb_decode(v) })
+        });
+        encoding.from_srgb(srgb).map(from_f32)
     }
 }
 
@@ -171,14 +173,15 @@ pub fn extend_for_instagram(
     bordered: &ImageBuf,
     style: BorderStyle,
     options: &BorderOptions,
-    encoded: bool,
+    encoding: impl Into<Encoding>,
 ) -> ImageBuf {
+    let encoding: Encoding = encoding.into();
     let (w, h) = instagram_canvas(bordered.width, bordered.height, style);
     let fill = match style {
         BorderStyle::Solid | BorderStyle::Keyline => options.color,
         BorderStyle::Film | BorderStyle::Film35 => Rgb::WHITE,
     };
-    centered(bordered, w, h, fill.values(encoded))
+    centered(bordered, w, h, fill.values(encoding))
 }
 
 /// The 35mm frame a photograph fills, chosen by its aspect ratio.
@@ -209,17 +212,19 @@ impl FilmFormat {
     }
 }
 
-/// `image` with a `style` border. `encoded` says whether the values are
-/// sRGB-encoded (otherwise linear), which matters for the colours and the
-/// textures. `film` picks the 35mm border's edge print.
+/// `image` with a `style` border. `encoding` is the image's colour space and
+/// whether its values are encoded (otherwise linear); the border's colours
+/// and textures are sRGB and are converted to it. `film` picks the 35mm
+/// border's edge print.
 pub fn add_border(
     image: &ImageBuf,
     style: BorderStyle,
     options: &BorderOptions,
     film: &str,
-    encoded: bool,
+    encoding: impl Into<Encoding>,
     data_dir: &Path,
 ) -> Result<ImageBuf> {
+    let encoding: Encoding = encoding.into();
     let (w, h) = (image.width, image.height);
     let width = options.width(style);
     ensure!(
@@ -227,8 +232,8 @@ pub fn add_border(
         "Border widths are fractions of the long edge, from 0 to 1"
     );
     let (color, line_color) = (
-        options.color.values(encoded),
-        options.line_color.values(encoded),
+        options.color.values(encoding),
+        options.line_color.values(encoding),
     );
     Ok(match style {
         BorderStyle::Solid => framed(image, margin(w, h, width), 0, color, line_color),
@@ -248,9 +253,9 @@ pub fn add_border(
                 texture = imageops::rotate270(&texture);
             }
             let (inset, pad) = film_geometry(w, h);
-            let black = Rgb::BLACK.values(encoded);
+            let black = Rgb::BLACK.values(encoding);
             let mut out = framed(image, inset, 0, black, black);
-            overlay_nine_patch(&mut out, texture, pad, encoded);
+            overlay_nine_patch(&mut out, texture, pad, encoding);
             match margin(w, h, width) {
                 0 => out,
                 extra => centered(&out, out.width + 2 * extra, out.height + 2 * extra, black),
@@ -262,11 +267,11 @@ pub fn add_border(
             })?;
             let strip = Strip::load(data_dir, film, format)?;
             let (cw, ch) = strip.canvas(w, h);
-            let mut out = centered(image, cw, ch, Rgb::BLACK.values(encoded));
+            let mut out = centered(image, cw, ch, Rgb::BLACK.values(encoding));
             overlay_strip(
                 &mut out,
                 &strip.renderer(cw, ch, strip.turned(w, h)),
-                encoded,
+                encoding,
             );
             out
         }
@@ -275,7 +280,7 @@ pub fn add_border(
 
 /// Draws the 35mm strip over `out`, which is the strip's canvas, at the
 /// canvas's own resolution.
-fn overlay_strip(out: &mut ImageBuf, renderer: &Renderer, encoded: bool) {
+fn overlay_strip(out: &mut ImageBuf, renderer: &Renderer, encoding: Encoding) {
     let width = out.width as usize;
     out.data
         .par_chunks_exact_mut(width * 3)
@@ -287,8 +292,8 @@ fn overlay_strip(out: &mut ImageBuf, renderer: &Renderer, encoded: bool) {
                 if alpha <= 0.0 {
                     continue;
                 }
-                for (value, c) in pixel.iter_mut().zip([r, g, b]) {
-                    let c = if encoded { linear_to_srgb(c) } else { c };
+                let colour = encoding.from_linear_srgb([r, g, b]);
+                for (value, c) in pixel.iter_mut().zip(colour) {
                     *value = from_f32(c * alpha + to_f32(*value) * (1.0 - alpha));
                 }
             }
@@ -343,7 +348,7 @@ fn framed(
 /// Stretches `texture` over `out` as a nine-patch whose corners are `pad`
 /// pixels, like upstream's `Border::custom`, and composites it on top.
 /// With no `pad` it scales the whole texture.
-fn overlay_nine_patch(out: &mut ImageBuf, mut texture: RgbaImage, pad: u32, encoded: bool) {
+fn overlay_nine_patch(out: &mut ImageBuf, mut texture: RgbaImage, pad: u32, encoding: Encoding) {
     let (dw, dh) = (out.width, out.height);
     // Scale with the short side. Shrink once up front, so minification
     // doesn't alias; bilinear sampling is enough for magnification.
@@ -363,7 +368,7 @@ fn overlay_nine_patch(out: &mut ImageBuf, mut texture: RgbaImage, pad: u32, enco
     let color: Vec<f32> = (0..=255u8)
         .map(|v| {
             let v = from_f32(v as f32 / 255.0);
-            to_f32(if encoded { v } else { srgb_decode(v) })
+            to_f32(if encoding.encoded { v } else { srgb_decode(v) })
         })
         .collect();
     let (tw, texels) = (texture.width() as usize, texture.as_raw());
@@ -386,11 +391,12 @@ fn overlay_nine_patch(out: &mut ImageBuf, mut texture: RgbaImage, pad: u32, enco
                 if alpha <= 0.0 {
                     continue;
                 }
-                for (c, value) in pixel.iter_mut().enumerate() {
-                    let tex: f32 = taps
-                        .iter()
-                        .map(|&(i, k)| color[texels[i + c] as usize] * k)
-                        .sum();
+                // Interpolated as sRGB values, as for an sRGB image, then
+                // converted to the image's space.
+                let tex = encoding.from_srgb([0, 1, 2].map(|c| {
+                    taps.iter().map(|&(i, k)| color[texels[i + c] as usize] * k).sum::<f32>()
+                }));
+                for (value, tex) in pixel.iter_mut().zip(tex) {
                     *value = from_f32(tex * alpha + to_f32(*value) * (1.0 - alpha));
                 }
             }
@@ -509,6 +515,30 @@ mod tests {
         assert!(out.get(18, out.height / 2)[0] < from_f32(0.01));
     }
 
+    /// In another output space a border keeps its sRGB colour (the same
+    /// XYZ), and white stays white: in Display P3, encoded and linear, and in
+    /// ProPhoto RGB with its D50 white.
+    #[test]
+    fn border_colours_are_converted_to_the_output_space() {
+        use spektrafilm_math::colorspace::{RgbColourspace, SRGB, mat3_vec_f64};
+        let options = BorderOptions { width: Some(0.1), color: "#204060".parse().unwrap(), ..Default::default() };
+        let srgb_lin = [0x20, 0x40, 0x60].map(|v| to_f32(srgb_decode(from_f32(v as f32 / 255.0))) as f64);
+        let srgb_xyz = mat3_vec_f64(&SRGB.rgb_to_xyz, srgb_lin);
+        for encoded in [true, false] {
+            let encoding = Encoding::new("Display P3", encoded);
+            let out = add_border(&photo(200, 100), BorderStyle::Solid, &options, "", encoding, &data_dir()).unwrap();
+            let lin = out.get(0, 0).map(|v| encoding.decode(v));
+            let xyz = mat3_vec_f64(&RgbColourspace::output("Display P3").rgb_to_xyz, lin);
+            for c in 0..3 {
+                assert!((xyz[c] - srgb_xyz[c]).abs() < 1e-5, "{xyz:?} vs {srgb_xyz:?}");
+            }
+            assert_eq!(out.get(20, 70), [from_f32(0.5); 3], "the photograph is untouched");
+        }
+        let white = BorderOptions { width: Some(0.1), ..Default::default() };
+        let out = add_border(&photo(200, 100), BorderStyle::Solid, &white, "", Encoding::new("ProPhoto RGB", true), &data_dir()).unwrap();
+        assert!(out.get(0, 0).iter().all(|&v| (to_f32(v) - 1.0).abs() < 2e-4), "{:?}", out.get(0, 0));
+    }
+
     #[test]
     fn solid_border_takes_a_width_and_colour() {
         let options = BorderOptions {
@@ -545,8 +575,8 @@ mod tests {
 
     #[test]
     fn white_and_black_are_exact_in_linear_images() {
-        assert_eq!(Rgb::WHITE.values(false), [from_f32(1.0); 3]);
-        assert_eq!(Rgb::BLACK.values(false), [from_f32(0.0); 3]);
+        assert_eq!(Rgb::WHITE.values(false.into()), [from_f32(1.0); 3]);
+        assert_eq!(Rgb::BLACK.values(false.into()), [from_f32(0.0); 3]);
     }
 
     #[test]

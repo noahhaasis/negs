@@ -16,6 +16,7 @@ use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_io::{
     border::{BorderOptions, BorderStyle, add_border, extend_for_instagram},
     crop::Crop,
+    encoding::Encoding,
     resize::{self, Fit},
 };
 use spektrafilm_core::stages::scanning::convert_output;
@@ -28,9 +29,6 @@ use std::{
 
 /// EditorModel.readPreview rejects larger preview buffers.
 const DISPLAY_MAX_DIM: usize = 8192;
-/// The only output colour space the helper renders. A save converts the
-/// render to the colour space it asks for.
-const OUTPUT_SPACE: &str = "sRGB";
 
 #[derive(Deserialize)]
 struct Request {
@@ -131,7 +129,7 @@ enum Command {
 struct Session {
     source_generation: u64,
     backend: Option<Box<dyn ComputeBackend>>,
-    source: Option<(PathBuf, spektrafilm_io::RawWhiteBalance, ImageBuf)>,
+    source: Option<Source>,
     /// The source resized to the working/preview dimensions, so edits that
     /// don't change the size skip a full-resolution resample.
     scaled: Option<((u32, u32), ImageBuf)>,
@@ -146,6 +144,23 @@ struct Session {
     output: Option<Rendered>,
 }
 
+/// The decoded input, and what it was decoded with: a RAW's white balance
+/// and a non-RAW file's interpretation each need a new decode.
+struct Source {
+    path: PathBuf,
+    wb: spektrafilm_io::RawWhiteBalance,
+    interpretation: spektrafilm_io::InputInterpretation,
+    colour: spektrafilm_io::InputColour,
+    image: ImageBuf,
+}
+
+impl Source {
+    fn current(&self, path: &Path, wb: spektrafilm_io::RawWhiteBalance, interpretation: &spektrafilm_io::InputInterpretation) -> bool {
+        self.path == path
+            && if spektrafilm_io::is_raw(path) { self.wb == wb } else { &self.interpretation == interpretation }
+    }
+}
+
 /// The last render. `image` is the scan before the post adjustments, so a
 /// post-only edit reuses it; `key` is everything else the render depended on.
 struct Rendered {
@@ -155,7 +170,9 @@ struct Rendered {
     response: Value,
     source: PathBuf,
     film: String,
-    encoded: bool,
+    /// The render's output space and encoding: the preview space. Post, the
+    /// border and resizing work in it; a save to another space converts.
+    encoding: Encoding,
     post: PostParams,
     image: ImageBuf,
 }
@@ -202,7 +219,7 @@ fn catalog(data: &Path) -> Result<Value> {
         "No profiles found in {}",
         data.display()
     );
-    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true, "presets": true}, "profiles": profiles, "defaults": RuntimeParams::default(), "nullable_paths": RuntimeParams::nullable_paths()}))
+    Ok(json!({"protocol": 1, "capabilities": {"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true}, "profiles": profiles, "defaults": RuntimeParams::default(), "nullable_paths": RuntimeParams::nullable_paths()}))
 }
 
 impl Session {
@@ -243,9 +260,12 @@ impl Session {
                 ensure!(params.io.upscale_factor.is_finite()
                     && (0.1..=1.0).contains(&params.io.upscale_factor), "Invalid working resolution");
                 params.io.raw_white_balance.validate()?;
-                let source = spektrafilm_io::load_image_with_wb(
+                params.io.input_interpretation.validate()?;
+                let loaded = spektrafilm_io::load_image_colour(
                     &input, spektrafilm_io::Formats::Any, params.io.raw_white_balance,
+                    &params.io.input_interpretation,
                 )?;
+                let source = loaded.image;
                 // Never enlarged: an Image Size target is ignored, and the
                 // canvas fits the original to the developed photograph.
                 let factor = if params.io.photo_long_side_px.is_some() { 1.0 } else { params.io.upscale_factor };
@@ -253,9 +273,11 @@ impl Session {
                 let resized = (dimensions != (source.width, source.height))
                     .then(|| rescale_preview_input_fast(&source, dimensions));
                 let working = resized.as_ref().unwrap_or(&source);
-                let encoded = !spektrafilm_io::input_is_linear_srgb(&input);
-                let (width, height) = write_display(working, encoded, &PostParams::default(), &preview_path)?;
-                Ok(json!({"width": width, "height": height}))
+                let (encoding, converted) = original_encoding(&params, &loaded.colour, working);
+                let working = converted.as_ref().unwrap_or(working);
+                let (width, height) = write_display(working, encoding, &PostParams::default(), &preview_path)?;
+                Ok(json!({"width": width, "height": height, "input_colour": loaded.colour,
+                          "display_color_space": DisplaySpace::of(encoding).name()}))
             }
             Command::Save {
                 render_id,
@@ -273,11 +295,12 @@ impl Session {
                     id,
                     source,
                     film,
-                    encoded,
+                    encoding,
                     post,
                     image,
                     ..
                 } = self.output.as_mut().context("No preview to save")?;
+                let (encoding, encoded) = (*encoding, encoding.encoded);
                 ensure!(
                     *id == render_id,
                     "The preview changed; wait for the current render and try again"
@@ -294,16 +317,16 @@ impl Session {
                 // The render is the unclipped scan; Post, crop, border and resize
                 // work on it as the file will hold it. Clipping in place keeps
                 // memory flat, and the display clips the same way.
-                spektrafilm_core::pipeline::clip_to_display(image, *encoded);
+                spektrafilm_core::pipeline::clip_to_display(image, encoded);
                 let image = &*image;
                 let adjusted_before = (crop_after_post && !post.is_identity())
-                    .then(|| PostProcess::new(post, *encoded, OUTPUT_SPACE).applied(image));
+                    .then(|| PostProcess::new(post, encoded, encoding.space.name).applied(image));
                 let image = adjusted_before.as_ref().unwrap_or(image);
                 // Crop in the unrotated orientation, then rotate, then add the border.
                 let cropped = crop.map(|crop| crop.apply(image));
                 let image = cropped.as_ref().unwrap_or(image);
                 let adjusted = (!crop_after_post && !post.is_identity())
-                    .then(|| PostProcess::new(post, *encoded, OUTPUT_SPACE).applied(image));
+                    .then(|| PostProcess::new(post, encoded, encoding.space.name).applied(image));
                 let image = adjusted.as_ref().unwrap_or(image);
                 let rotated =
                     (rotate_cw.rem_euclid(4) != 0).then(|| image.clone().rotated_cw(rotate_cw));
@@ -311,9 +334,9 @@ impl Session {
                 let bordered = match border {
                     Some(style) => {
                         let bordered =
-                            add_border(image, style, &border_options, film, *encoded, data)?;
+                            add_border(image, style, &border_options, film, encoding, data)?;
                         Some(if instagram {
-                            extend_for_instagram(&bordered, style, &border_options, *encoded)
+                            extend_for_instagram(&bordered, style, &border_options, encoding)
                         } else {
                             bordered
                         })
@@ -321,18 +344,20 @@ impl Session {
                     None => None,
                 };
                 let image = bordered.as_ref().unwrap_or(image);
-                let resized = fit.and_then(|fit| resize::fit(image, fit, *encoded));
+                let resized = fit.and_then(|fit| resize::fit(image, fit, encoding));
                 let image = resized.as_ref().unwrap_or(image);
-                // The render is sRGB; another space gets sRGB's colours in its encoding.
+                // Saved in the preview's space, the file holds the render's
+                // values. Another space gets the preview's colours, clipped to
+                // the smaller of the two gamuts (relative colorimetric).
                 let space = RgbColourspace::find(&save_options.color_space)
                     .with_context(|| format!("Unknown colour space: {}", save_options.color_space))?;
-                let converted = (space.name != OUTPUT_SPACE).then(|| {
+                let converted = (space.name != encoding.space.name).then(|| {
                     let mut converted = image.clone();
-                    convert_output(&mut converted, OUTPUT_SPACE, space.name, *encoded);
+                    convert_output(&mut converted, encoding.space.name, space.name, encoded);
                     converted
                 });
                 let image = converted.as_ref().unwrap_or(image);
-                let save_options = spektrafilm_io::save::SaveOptions { linear: !*encoded, ..save_options };
+                let save_options = spektrafilm_io::save::SaveOptions { linear: !encoded, ..save_options };
                 spektrafilm_io::save::save_image_with_options(image, &output, metadata.as_ref(), &save_options)?;
                 Ok(json!({"saved": output}))
             }
@@ -357,43 +382,50 @@ impl Session {
                     interactive_scale.is_none_or(|s| s.is_finite() && s > 0.0),
                     "Invalid interactive scale"
                 );
+                // The preview space: the app sends the export's colour space,
+                // so the preview judges the export's gamut.
                 ensure!(
-                    params.io.output_color_space == OUTPUT_SPACE,
-                    "Native preview requires sRGB output"
+                    RgbColourspace::find(&params.io.output_color_space).is_some(),
+                    "Unknown output colour space: {}",
+                    params.io.output_color_space
                 );
                 params.io.raw_white_balance.validate()?;
-                // Linear PNG/RAW loader behavior must match the CLI exporter.
-                if spektrafilm_io::input_is_linear_srgb(&input) {
-                    params.io.input_color_space = "sRGB".into();
-                    params.io.input_cctf_decoding = false;
-                }
                 params.settings.serial_grain = false;
                 // Applied to the display and on save, so the pipeline runs without them.
                 let post = std::mem::take(&mut params.post);
                 let wb = params.io.raw_white_balance;
+                let interpretation = params.io.input_interpretation.clone();
+                interpretation.validate()?;
                 let reload = self.source_generation != source_generation
-                    || self.source.as_ref().is_none_or(|(path, old_wb, _)| {
-                        path != &input || (spektrafilm_io::is_raw(&input) && *old_wb != wb)
-                    });
+                    || self.source.as_ref().is_none_or(|source| !source.current(&input, wb, &interpretation));
                 if reload {
                     // Release the last source's caches before decoding the next.
                     self.source = None;
                     self.scaled = None;
                     self.interactive = None;
                     self.metering = None;
-                    let image = spektrafilm_io::load_image_with_wb(
+                    let loaded = spektrafilm_io::load_image_colour(
                         &input,
                         spektrafilm_io::Formats::Any,
                         wb,
+                        &interpretation,
                     )?;
-                    self.source = Some((input.clone(), wb, image));
+                    self.source = Some(Source {
+                        path: input.clone(),
+                        wb,
+                        interpretation,
+                        colour: loaded.colour,
+                        image: loaded.image,
+                    });
                     self.source_generation = source_generation;
                 }
+                let Source { image: source, colour: input_colour, .. } = self.source.as_ref().unwrap();
+                // RAW and decoded files are the engine's linear sRGB; manual
+                // pass-through keeps the params' input fields, as 0.8 did.
+                params.io.apply_input_colour(input_colour);
                 if params.camera.auto_exposure && self.metering.is_none() {
-                    let source = &self.source.as_ref().unwrap().2;
                     self.metering = Some(spektrafilm_core::stages::filming::metering_preview(source));
                 }
-                let source = &self.source.as_ref().unwrap().2;
                 let (source_width, source_height) = (source.width, source.height);
                 // The uncapped frame an export develops, and the photograph the
                 // crop cuts from it; an invalid or too-large request fails here,
@@ -417,7 +449,7 @@ impl Session {
                 });
                 let reused = self.output.take().filter(|last| last.key == render_key);
                 if let Some(last) = reused {
-                    write_display(&last.image, last.encoded, &post, &preview_path)?;
+                    write_display(&last.image, last.encoding, &post, &preview_path)?;
                     let mut response = last.response.clone();
                     // Edge rounding moves the crop's pixels with its position.
                     response["photo_crop_width"] = json!(size.photo.0);
@@ -477,8 +509,8 @@ impl Session {
                         .map(|output| (output, backend.name()))
                         .unwrap_or_else(|| pipeline.process_with_backend(working.clone(), backend.as_ref()))
                 };
-                let encoded = params.io.output_cctf_encoding;
-                let (width, height) = write_display(&output, encoded, &post, &preview_path)?;
+                let encoding = Encoding::new(&params.io.output_color_space, params.io.output_cctf_encoding);
+                let (width, height) = write_display(&output, encoding, &post, &preview_path)?;
                 // At the uncapped working size the output is byte-identical to
                 // a Fast (GPU) export, so the app can save it instead of
                 // rendering again. The display proxy's limit doesn't matter:
@@ -492,6 +524,9 @@ impl Session {
                     "source_width": source_width, "source_height": source_height,
                     "export_resolution": export_resolution,
                     "raw": spektrafilm_io::is_raw(&input), "backend": used_backend,
+                    "input_colour": input_colour,
+                    "output_color_space": encoding.space.name,
+                    "display_color_space": DisplaySpace::of(encoding).name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                 });
                 self.output = Some(Rendered {
@@ -500,7 +535,7 @@ impl Session {
                     response: response.clone(),
                     source: input,
                     film,
-                    encoded,
+                    encoding,
                     post,
                     image: output,
                 });
@@ -510,19 +545,65 @@ impl Session {
     }
 }
 
+/// A request line. Params from before `io.input_interpretation` keep the
+/// meaning of their input fields; see `infer_input_interpretation`.
+fn parse_request(line: &str) -> Result<Request> {
+    let mut value: Value = serde_json::from_str(line)?;
+    if let Some(params) = value.get_mut("params") {
+        spektrafilm_core::params::infer_input_interpretation(params);
+    }
+    Ok(serde_json::from_value(value)?)
+}
+
 /// Writes the preview for the app as raw RGBA, avoiding PNG compression on
 /// every slider edit. Save keeps the float output, independent of this proxy.
+/// The bytes are in `DisplaySpace::of(encoding)`.
 fn write_display(
     image: &ImageBuf,
-    encoded: bool,
+    encoding: Encoding,
     post: &PostParams,
     path: &Path,
 ) -> Result<(usize, usize)> {
-    let post = (!post.is_identity()).then(|| PostProcess::new(post, encoded, OUTPUT_SPACE));
+    let post = (!post.is_identity()).then(|| PostProcess::new(post, encoding.encoded, encoding.space.name));
     let (width, height, bytes) =
-        display_rgba_with_post(image, DISPLAY_MAX_DIM, encoded, post.as_ref());
+        display_rgba_with_post(image, DISPLAY_MAX_DIM, encoding, post.as_ref());
     std::fs::write(path, bytes).context("Writing preview buffer")?;
     Ok((width, height))
+}
+
+/// How the original view shows the source. A decoded source, linear sRGB
+/// that may lie outside sRGB's gamut, is converted to the preview space, so
+/// the original and the render are clipped to the same gamut. Manual
+/// pass-through shows the stored values in the space the params name.
+fn original_encoding(
+    params: &RuntimeParams,
+    colour: &spektrafilm_io::InputColour,
+    image: &ImageBuf,
+) -> (Encoding, Option<ImageBuf>) {
+    if !colour.linear_srgb {
+        let space = RgbColourspace::input(&params.io.input_color_space);
+        return (Encoding { space, encoded: params.io.input_cctf_decoding }, None);
+    }
+    let encoding = Encoding::new(&params.io.output_color_space, false);
+    let converted = (encoding.space.name != "sRGB").then(|| {
+        let mut converted = image.clone();
+        convert_linear(&mut converted, encoding.space);
+        converted
+    });
+    (encoding, converted)
+}
+
+/// Linear sRGB → linear `to`, unclipped (the display clips).
+fn convert_linear(image: &mut ImageBuf, to: &RgbColourspace) {
+    use spektrafilm_math::colorspace::{SRGB, icc_rgb_to_rgb, mat3_vec_f64};
+    use spektrafilm_math::precision::{from_f64, to_f64};
+    let m = icc_rgb_to_rgb(&SRGB, to);
+    for px in image.data.chunks_exact_mut(3) {
+        let rgb = mat3_vec_f64(&m, [to_f64(px[0]), to_f64(px[1]), to_f64(px[2])]);
+        for (v, out) in rgb.into_iter().zip(px) {
+            *out = from_f64(v);
+        }
+    }
 }
 
 /// The source at `dimensions`. A resampled copy is kept until the source or
@@ -563,7 +644,7 @@ fn main() -> Result<()> {
             .and_then(|v| v["id"].as_u64())
             .unwrap_or(0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<Value> {
-            session.handle(serde_json::from_str(&line)?, &data)
+            session.handle(parse_request(&line)?, &data)
         }))
         .unwrap_or_else(|_| {
             // A panicked GPU/decoder may have invalidated its cached state.
@@ -653,7 +734,7 @@ mod tests {
         spektrafilm_io::save_image(&source, &input, None).unwrap();
         let mut session = Session {
             output: Some(Rendered { id: 7, key: Value::Null, response: Value::Null,
-                source: input.clone(), film: "kodak_gold_200".into(), encoded: true,
+                source: input.clone(), film: "kodak_gold_200".into(), encoding: Encoding::from(true),
                 post: PostParams::default(), image: source.clone() }),
             ..Default::default()
         };
@@ -694,6 +775,64 @@ mod tests {
         assert!(pixels[3] < 65535 && pixels[5] > 0, "{pixels:?}");
         std::fs::remove_dir_all(dir).unwrap();
     }
+    /// A Display P3 preview renders in P3 and shows through the Rec. 2020
+    /// proxy; saving it as P3 writes the render's own values, and saving it
+    /// as sRGB converts them. The original view shares the preview space.
+    #[test]
+    fn wide_preview_space_renders_and_saves_without_reconverting() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-wide-preview-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (input, preview) = (dir.join("input.png"), dir.join("preview.rgba"));
+        let pixels = (0..24 * 16 * 3).map(|i| ((i * 37) % 255) as spektrafilm_math::Scalar / 255.0).collect();
+        spektrafilm_io::save_image(&ImageBuf::from_data(24, 16, pixels), &input, None).unwrap();
+        let mut session = Session::default();
+        let Command::Render { mut params, .. } = render(&input, &preview, None, None, None) else { unreachable!() };
+        params.io.output_color_space = "Display P3".into();
+        params.settings.serial_grain = false;
+        let command = |params: Box<RuntimeParams>| Command::Render {
+            input: input.clone(), source_generation: 1, film: "kodak_portra_400".into(),
+            paper: "kodak_portra_endura".into(), params, limit_preview: false,
+            preview_path: preview.clone(), interactive_scale: None, crop: None,
+        };
+        let response = session.handle(Request { id: 1, command: command(params.clone()) }, &data).unwrap();
+        assert_eq!(response["output_color_space"], "Display P3");
+        assert_eq!(response["display_color_space"], DisplaySpace::Rec2020SrgbTransfer.name());
+        let rendered = session.output.as_ref().unwrap();
+        assert_eq!(rendered.encoding, Encoding::new("Display P3", true));
+        let mut clipped = rendered.image.clone();
+        spektrafilm_core::pipeline::clip_to_display(&mut clipped, true);
+
+        let save = |session: &mut Session, name: &str, space: &str| {
+            let output = dir.join(name);
+            let save_options = spektrafilm_io::save::SaveOptions {
+                bit_depth: Some(16), color_space: space.into(), ..Default::default()
+            };
+            session.handle(Request { id: 2, command: Command::Save {
+                render_id: 1, output: output.clone(), save_options, crop_after_post: false, border: None,
+                border_options: BorderOptions::default(), instagram: false, crop: None, rotate_cw: 0, fit: None,
+            } }, &data).unwrap();
+            image::open(&output).unwrap().to_rgb16().into_raw()
+        };
+        let p3 = save(&mut session, "p3.png", "Display P3");
+        for (saved, want) in p3.iter().zip(&clipped.data) {
+            assert!((f64::from(*saved) / 65535.0 - f64::from(*want)).abs() <= 0.5 / 65535.0 + 1e-6);
+        }
+        let srgb = save(&mut session, "srgb.png", "sRGB");
+        let mut converted = clipped.clone();
+        convert_output(&mut converted, "Display P3", "sRGB", true);
+        for (saved, want) in srgb.iter().zip(&converted.data) {
+            assert!((f64::from(*saved) / 65535.0 - f64::from(*want)).abs() <= 0.5 / 65535.0 + 1e-6);
+        }
+        assert_ne!(p3, srgb);
+
+        let original = session.handle(Request { id: 3, command: Command::Original {
+            input: input.clone(), params, limit_preview: false, preview_path: dir.join("original.rgba"),
+        } }, &data).unwrap();
+        assert_eq!(original["display_color_space"], DisplaySpace::Rec2020SrgbTransfer.name());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     fn render(input: &Path, preview: &Path, target: Option<u32>, crop: Option<Crop>, interactive_scale: Option<f32>) -> Command {
         let mut params = RuntimeParams::default();
         params.io.photo_long_side_px = target;
@@ -834,7 +973,7 @@ mod tests {
                 response: Value::Null,
                 source: "source.png".into(),
                 film: "kodak_gold_200".into(),
-                encoded: true,
+                encoding: Encoding::from(true),
                 post: PostParams::default(),
                 image: ImageBuf::from_data(1, 1, vec![0.0; 3]),
             }),
