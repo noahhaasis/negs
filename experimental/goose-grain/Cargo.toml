@@ -1,0 +1,23 @@
+[package]
+name = "goose-grain-experiment"
+version = "0.1.0"
+edition = "2024"
+publish = false
+[workspace]
+[lib]
+crate-type = ["staticlib", "rlib"]
+[dependencies]
+spektrafilm-core = { path = "../../crates/spektrafilm-core", features = ["precision-f64"] }
+spektrafilm-model = { path = "../../crates/spektrafilm-model", features = ["precision-f64"] }
+spektrafilm-math = { path = "../../crates/spektrafilm-math", features = ["precision-f64"] }
+spektrafilm-gpu = { path = "../../crates/spektrafilm-gpu", features = ["precision-f64"] }
+spektrafilm-io = { path = "../../crates/spektrafilm-io", features = ["precision-f64"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10"
+rayon = "1.10"
+rand_mt = "=5.0.0"
+libm = "=0.2.16"
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3

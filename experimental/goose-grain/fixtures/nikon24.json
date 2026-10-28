@@ -1,0 +1,143 @@
+{
+  "channels": 3,
+  "dtype": "f64le",
+  "effects": {
+    "dye_sigmas": [
+      [
+        0.186215677753178,
+        0.19238643794927987,
+        0.1792019766489012
+      ],
+      [
+        0.11777313554639775,
+        0.12167586696927557,
+        0.11333728148296716
+      ],
+      [
+        0.093107838876589,
+        0.09619321897463994,
+        0.0896009883244506
+      ]
+    ],
+    "micro_blur": 3.456,
+    "micro_sigma": 0.17279999999999998,
+    "multilayer": true,
+    "pixel_blur": 0.89,
+    "sharpen_amount": 1.5,
+    "sharpen_sigma": 3.5
+  },
+  "files": {
+    "curves-layers": {
+      "bytes": 18432,
+      "path": "curves-layers.f64le",
+      "sha256": "0aae072a77963754f32ab1ad592486bfd37feaf2b92bdb79f5dfa2e2e729ed6c"
+    },
+    "curves-total": {
+      "bytes": 6144,
+      "path": "curves-total.f64le",
+      "sha256": "852bc980977edaf9db4e5b1adb55dc3bf1653cbd4924825256efb7644996feed"
+    },
+    "density": {
+      "bytes": 584091648,
+      "path": "density.f64le",
+      "sha256": "a97b43830829f55fc99e517b74d3c4ad75dcc1813ab242bd5b29dc87a3310412"
+    }
+  },
+  "format": "negs-grain-fixture",
+  "height": 4024,
+  "layout": "HWC",
+  "monochrome": false,
+  "n_layers": 3,
+  "n_samples": 256,
+  "pixel_size_um": 5.787037037037037,
+  "positive": false,
+  "provenance": {
+    "input_sha256": "b94778ba69873ceea9359524882c7a8944139afe7ddac452c899fc4b66c2d8d6",
+    "recipe": {
+      "camera": {
+        "film_format_mm": 35.0
+      },
+      "film_render": {
+        "grain": {
+          "active": true,
+          "blur": 0.89,
+          "blur_dye_clouds_um": 2.0,
+          "micro_structure": [
+            20.0,
+            1000.0
+          ],
+          "mult_usm_amount": 1.5,
+          "mult_usm_sigma": 3.5
+        }
+      },
+      "settings": {
+        "preview_mode": false,
+        "serial_grain": false,
+        "use_enlarger_lut": true,
+        "use_scanner_lut": true
+      }
+    },
+    "source_revision": "38722c36f72ae3c6a0113c492b98a4c39032359e",
+    "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sources": {
+      "crates/spektrafilm-model/src/grain.rs": "84e2a136776b4be628e652f33aada491bc0ac8ddf05c0adf8696f4b56a778e9c",
+      "crates/spektrafilm-math/src/numpy_rng.rs": "ea07db91578a576c78390a4c9c362fd6cb5bb2846ffaabf7591490f0d7d08f08",
+      "crates/spektrafilm-math/src/gaussian.rs": "a9393c02ea45d65579bee34770db314db27ae9ce6a4c114018c70b3a0593ec0f",
+      "data/profiles/kodak_gold_200.json": "e1fb1fb3b728c67be42524cfca77e03ebded2d53d81ca89f5f8d58bf5ab3291e",
+      "data/profiles/kodak_portra_endura.json": "e3450fd941155c88e63060dcf202542ccb6da151e9ab6c56c295d7b2d4837969",
+      "data/presets/grain.toml": "888238042b586384cd3f00e5fe9fac175840016037a45e66f3d4476bd50a5dcc",
+      "experimental/goose-grain/capture-params.json": "995bdc113a46c4fe53ab023ed04ee5b89d10f688f99e47077459a26ce5160dea"
+    },
+    "build": {
+      "release": "v2026.3",
+      "release_commit": "8511ae34bdc9aabf77baaab80b4d659ea87835e2",
+      "runtime": "goose runtime 4d3da949e563",
+      "artifacts": {
+        "goose.tar.gz": "2ffaaf46b3edde27aed03fcd9ebe73e9b6639cac30d8a6915f7dc00795b7aedf",
+        "source.tar.gz": "73ef9aeced4a4a3d93dbb3cb0b65a9a1ec3c0efa6c3d4fa4298211919023a5a4"
+      },
+      "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+      "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+      "rust_policy": "opt-level=3, thin LTO, codegen-units=1, default target CPU, no fast math",
+      "goose_policy": "Goose -O2 inlining, standalone generated C, clang -O3 -ffp-contract=off, default target CPU",
+      "binary_sha256": {
+        "target/release/goose-grain-experiment": "a060c9e15e40f0cfc7387fca0e51b514aa52869baa6b0adc164e618e20afd624",
+        "target/goose/goose-bench": "5466213b5dfe6f089b65d2d0642076041b05f98710eb133c81a0a9692b1fc4a1"
+      }
+    },
+    "capture_command": "target/release/goose-grain-experiment capture <private-local-RAW> target/goose/fixtures/nikon24"
+  },
+  "settings": {
+    "blur": 0.89,
+    "blur_dye_clouds_um": 2.0,
+    "density_min": [
+      0.03,
+      0.03,
+      0.03
+    ],
+    "micro_structure": [
+      20.0,
+      1000.0
+    ],
+    "mult_usm_amount": 1.5,
+    "mult_usm_sigma": 3.5,
+    "particle_scale_sublayers": [
+      1.0,
+      0.4,
+      0.25
+    ],
+    "rms_granularity": [
+      5.0,
+      5.0,
+      5.0
+    ],
+    "uniformity": [
+      0.97,
+      0.97,
+      0.97
+    ]
+  },
+  "version": 1,
+  "width": 6048,
+  "original_metadata_sha256": "ad3cc7503ca2c2315480bc13eeccc8c6a9244da75a390b8767da58152181f7e6"
+}
