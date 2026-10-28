@@ -5,39 +5,13 @@
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 
-// The sliders: RuntimeParams paths. Their defaults come from the engine's
-// catalog. `grain` scales the film's preset lanes from the catalog.
-const SECTIONS = [
-  { name: "Camera", open: true, knobs: [
-    { key: "camera.exposure_compensation_ev", label: "Exposure", min: -5, max: 5, step: 0.1, unit: " EV", signed: true },
-    { key: "camera.film_format_mm", label: "Film format", min: 4, max: 120, step: 1, unit: " mm" },
-  ], toggles: [{ key: "camera.auto_exposure", label: "Auto exposure" }] },
-  { name: "Enlarger", open: true, print: true, knobs: [
-    { key: "enlarger.print_exposure", label: "Print exposure", min: 0.1, max: 5, step: 0.01 },
-    { key: "enlarger.y_filter_shift", label: "Yellow filter", min: -50, max: 50, step: 0.5, signed: true },
-    { key: "enlarger.m_filter_shift", label: "Magenta filter", min: -50, max: 50, step: 0.5, signed: true },
-  ] },
-  { name: "Grain", switch: "film_render.grain.active", knobs: [
-    { key: "grain.amount", label: "Amount", min: 0, max: 3, step: 0.05, unit: "×", grain: "rms_granularity" },
-    { key: "grain.size", label: "Size", min: 0.25, max: 3, step: 0.05, unit: "×", grain: "particle_scale_sublayers" },
-  ] },
-  { name: "Halation", switch: "film_render.halation.active", knobs: [
-    { key: "film_render.halation.halation_amount", label: "Halation", min: 0, max: 3, step: 0.01 },
-    { key: "film_render.halation.halation_spatial_scale", label: "Halation size", min: 0.1, max: 5, step: 0.01 },
-    { key: "film_render.halation.scatter_amount", label: "Scatter", min: 0, max: 3, step: 0.01 },
-  ] },
-  { name: "Glare", print: true, switch: "print_render.glare.active", knobs: [
-    { key: "print_render.glare.percent", label: "Amount", min: 0, max: 0.2, step: 0.001 },
-  ] },
-];
+import { SECTIONS, optionTitle, snap, formatValue } from "./controls.js";
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
 // complete RuntimeParams, starting from the engine's defaults. Values a
-// film's presets fill stay null until edited. The grain multipliers are the
-// page's own until the grain lanes get their sliders.
+// film's presets fill stay null until edited.
 let catalog = { profiles: [], defaults: {}, nullable_paths: [] };
 const state = { film: "", paper: "", params: {} };
-const grainScale = new Map();
 // Every value a film's presets fill (macOS Stock.presetPaths): a film change resets them.
 const GRAIN_FIELDS = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"];
 const PRESET_PATHS = [
@@ -175,7 +149,6 @@ function chooseFilm(id) {
   state.film = id;
   set("film_render.development_time", null);
   for (const path of PRESET_PATHS) set(path, null);
-  grainScale.clear();
   pairFilm();
 }
 function choosePaper(id) {
@@ -194,86 +167,166 @@ function pairFilm() {
   }
 }
 
-// The grain multipliers scale the film's preset lanes; at 1 the lane is
-// unset again, so the engine uses its preset.
-function setGrainScale(knob, v) {
-  v === 1 ? grainScale.delete(knob.key) : grainScale.set(knob.key, v);
-  const preset = stock(state.film)?.grain?.[knob.grain];
-  set(`film_render.grain.${knob.grain}`, grainScale.has(knob.key) && preset ? preset.map((x) => x * v) : null);
+// Restores the defaults, keeping the film, paper and rotation, as desktop's
+// Reset Adjustments does (macOS EditorModel.reset).
+function resetAdjustments() {
+  const kept = ["io.rotate_cw", "io.photo_long_side_px"].map((path) => [path, get(path)]);
+  state.params = structuredClone(catalog.defaults);
+  for (const [path, value] of kept) set(path, value);
+  set("io.scan_film", stock(state.film)?.positive ?? false);
 }
 
-function format(knob, v) {
-  const digits = Math.max(0, -Math.floor(Math.log10(knob.step) + 1e-9));
-  return `${knob.signed && v > 0 ? "+" : ""}${v.toFixed(digits)}${knob.unit ?? ""}`;
+// Grain lanes (`film_render.grain.<field>`) are null until edited: the
+// engine then uses the film's preset, which the catalog resolves (macOS
+// EditorModel.stockNumber and setStock).
+const filmIsBW = () => stock(state.film)?.bw ?? false;
+const stockDefaults = (path) => stock(state.film)?.grain?.[path.split(".").at(-1)] ?? [];
+const stockValues = (path) => get(path) ?? stockDefaults(path);
+const near = (a, b) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
+function setStock(path, index, value) {
+  const values = [...stockValues(path)];
+  if (index >= values.length) return;
+  values[index] = value;
+  const preset = stockDefaults(path);
+  const atPreset = values.length === preset.length && values.every((v, i) => near(v, preset[i]));
+  set(path, atPreset ? null : values);
 }
 
 // Each control's view of the state, run after anything changes it.
 const syncs = [];
 const sync = () => syncs.forEach((f) => f());
+// One control's reads and writes of the edit: sliders, stock lanes, toggles
+// and choices alike.
+function binding(c) {
+  if (c.kind === "stock") {
+    return {
+      get: () => stockValues(c.path)[c.index] ?? 0,
+      set: (v) => setStock(c.path, c.index, v),
+      initial: () => stockDefaults(c.path)[c.index] ?? 0,
+      modified: () => { const v = stockValues(c.path)[c.index]; return v !== undefined && !near(v, stockDefaults(c.path)[c.index] ?? 0); },
+    };
+  }
+  return { get: () => get(c.path), set: (v) => set(c.path, v), initial: () => defaultValue(c.path), modified: () => isModified(c.path) };
+}
+
+const el = (tag, props = {}, ...children) => {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...children);
+  return e;
+};
+
+// A reset button, shown while the control is off its default.
+function resetButton(title, b, after) {
+  const button = el("button", { type: "button", className: "reset", textContent: "↺", hidden: true });
+  button.setAttribute("aria-label", `Reset ${title}`);
+  button.addEventListener("click", () => { b.set(b.initial()); after(); });
+  return button;
+}
+
+function buildControl(c) {
+  const b = binding(c);
+  const changed = (mode) => { sync(); schedule(mode); };
+  if (c.kind === "toggle") {
+    const sw = el("input", { type: "checkbox", className: "switch" });
+    const reset = resetButton(c.label, b, () => changed("settled"));
+    sw.addEventListener("change", () => { b.set(sw.checked); changed("settled"); });
+    const row = el("div", { className: "ctl row" }, el("label", {}, el("span", { textContent: c.label }), reset, sw));
+    syncs.push(() => { sw.checked = b.get(); reset.hidden = !b.modified(); row.classList.toggle("changed", b.modified()); });
+    return row;
+  }
+  if (c.kind === "choice") {
+    const select = el("select", {}, ...c.options.map((o) => new Option(optionTitle(o), o)));
+    const reset = resetButton(c.label, b, () => changed("settled"));
+    select.addEventListener("change", () => { b.set(select.value); changed("settled"); });
+    const row = el("div", { className: "ctl choice" }, el("label", {}, el("span", { textContent: c.label }), reset, select));
+    syncs.push(() => {
+      select.value = b.get();
+      reset.hidden = !b.modified();
+      row.classList.toggle("changed", b.modified());
+      if (c.when) row.hidden = !get(c.when);
+    });
+    return row;
+  }
+  // A slider under its title and value. Clicking the value types one; off
+  // its default, a button resets it (macOS LabeledSlider).
+  const title = el("span", { className: "label" });
+  const value = el("button", { type: "button", className: "value", title: "Click to type a value" });
+  const reset = resetButton(c.label, b, () => changed("settled"));
+  const range = el("input", { type: "range", min: c.min, max: c.max, step: c.step });
+  const row = el("div", { className: "ctl slider" }, el("div", { className: "head" }, title, reset, value), range);
+  range.setAttribute("aria-label", c.label);
+  range.addEventListener("input", () => { b.set(snap(Number(range.value), c)); changed("interactive"); });
+  range.addEventListener("change", () => { b.set(snap(Number(range.value), c)); changed("settled"); });
+  title.addEventListener("dblclick", () => { b.set(b.initial()); changed("settled"); });
+  value.addEventListener("click", () => {
+    const field = el("input", { className: "value-field", inputMode: "decimal", value: formatValue(b.get(), c.step) });
+    field.setAttribute("aria-label", c.label);
+    // Return, Tab and clicking elsewhere commit; Escape discards the typing.
+    // Not through blur alone: removing a focused field doesn't fire it.
+    let done = false;
+    const finish = (commit) => {
+      if (done) return;
+      done = true;
+      const typed = Number(field.value.replace(",", "."));
+      field.replaceWith(value);
+      if (commit && field.value.trim() && Number.isFinite(typed)) { b.set(snap(typed, c)); changed("settled"); }
+    };
+    field.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") finish(true);
+      if (ev.key === "Escape") finish(false);
+    });
+    field.addEventListener("blur", () => finish(true));
+    value.replaceWith(field);
+    field.focus();
+    field.select();
+  });
+  syncs.push(() => {
+    const bw = c.kind === "stock" && filmIsBW();
+    row.hidden = bw && !c.bw;
+    title.textContent = bw ? c.bw : c.label;
+    // Sync never writes back: a value outside the slider's window stays.
+    range.value = b.get();
+    value.textContent = formatValue(b.get(), c.step);
+    reset.hidden = !b.modified();
+    reset.title = `Reset to ${formatValue(b.initial(), c.step)}`;
+    row.classList.toggle("changed", b.modified());
+  });
+  return row;
+}
 
 function buildControls() {
   const root = $("sections");
   for (const section of SECTIONS) {
-    const details = document.createElement("details");
-    details.open = section.open ?? false;
-    if (section.print) details.dataset.print = "";
-    const summary = document.createElement("summary");
-    summary.append(section.name);
-    if (section.switch) {
-      const sw = Object.assign(document.createElement("input"), { type: "checkbox", className: "switch" });
-      sw.title = `${section.name} on or off`;
-      sw.addEventListener("click", (ev) => ev.stopPropagation());
-      sw.addEventListener("change", () => {
-        set(section.switch, sw.checked);
-        sync();
-        schedule("settled");
-      });
+    // A fieldset, so a section or group that is off disables its controls.
+    const body = el("fieldset", { className: "section" }, el("h2", { textContent: section.title }));
+    for (const c of section.controls ?? []) body.append(buildControl(c));
+    for (const group of section.groups) {
+      const details = el("details", { open: group.open ?? false });
+      const summary = el("summary", {}, el("span", { textContent: group.title }));
+      const controls = el("fieldset", { className: "controls" }, ...group.controls.map(buildControl));
+      if (group.enable) {
+        const sw = el("input", { type: "checkbox", className: "switch", title: `${group.title} on or off` });
+        sw.setAttribute("aria-label", group.title);
+        sw.addEventListener("click", (ev) => ev.stopPropagation());
+        sw.addEventListener("change", () => { set(group.enable, sw.checked); sync(); schedule("settled"); });
+        syncs.push(() => {
+          sw.checked = get(group.enable);
+          controls.disabled = !sw.checked;
+        });
+        summary.append(sw);
+      }
+      details.append(summary, controls);
+      body.append(details);
+    }
+    if (section.print) {
+      const footer = el("p", { className: "hint footer", textContent: section.footer });
+      body.append(footer);
       syncs.push(() => {
-        sw.checked = get(section.switch);
-        sw.checked ? delete details.dataset.off : (details.dataset.off = "");
+        body.disabled = get("io.scan_film");
+        footer.hidden = !body.disabled;
       });
-      summary.append(sw);
     }
-    const knobs = document.createElement("div");
-    knobs.className = "knobs";
-    for (const t of section.toggles ?? []) {
-      const row = document.createElement("label");
-      row.className = "row";
-      const sw = Object.assign(document.createElement("input"), { type: "checkbox", className: "switch" });
-      sw.addEventListener("change", () => {
-        set(t.key, sw.checked);
-        schedule("settled");
-      });
-      syncs.push(() => (sw.checked = get(t.key)));
-      row.append(t.label, sw);
-      knobs.append(row);
-    }
-    for (const knob of section.knobs) {
-      const div = document.createElement("div");
-      div.className = "knob";
-      const id = `k-${knob.key}`;
-      const label = Object.assign(document.createElement("label"), { htmlFor: id, textContent: knob.label });
-      const out = document.createElement("output");
-      const range = Object.assign(document.createElement("input"), { type: "range", id, min: knob.min, max: knob.max, step: knob.step });
-      const value = () => knob.grain ? grainScale.get(knob.key) ?? 1 : get(knob.key);
-      const show = () => {
-        range.value = value();
-        out.textContent = format(knob, value());
-        div.classList.toggle("changed", knob.grain ? grainScale.has(knob.key) : isModified(knob.key));
-      };
-      const update = (v) => {
-        knob.grain ? setGrainScale(knob, v) : set(knob.key, v);
-        show();
-      };
-      syncs.push(show);
-      range.addEventListener("input", () => { update(Number(range.value)); schedule("interactive"); });
-      range.addEventListener("change", () => { update(Number(range.value)); schedule("settled"); });
-      range.addEventListener("dblclick", () => { update(knob.grain ? 1 : defaultValue(knob.key)); schedule("settled"); });
-      div.append(label, out, range);
-      knobs.append(div);
-    }
-    details.append(summary, knobs);
-    root.append(details);
+    root.append(body);
   }
 }
 
@@ -309,11 +362,9 @@ function fillStocks() {
   syncs.push(() => {
     $("film").value = state.film;
     $("paper").value = state.paper;
-    const scanning = get("io.scan_film");
-    $("scan-film").checked = scanning;
-    // Scanned film isn't printed: no paper, enlarger or print glare.
-    $("paper-row").hidden = scanning;
-    for (const d of document.querySelectorAll("details[data-print]")) d.hidden = scanning;
+    // Scanned film isn't printed: no paper.
+    $("scan-film").checked = get("io.scan_film");
+    $("paper-row").hidden = get("io.scan_film");
   });
   sync();
 }
@@ -327,6 +378,7 @@ function fillStocks() {
 const BUDGET_MS = 90;
 let interactiveScale = 0.5, minScale = 0.15;
 let wanted = null, running = false, settleTimer = 0, exporting = false;
+const renders = [];
 
 function schedule(mode) {
   if (!photo) return;
@@ -353,6 +405,7 @@ async function pump() {
         interactiveScale = Math.min(1, Math.max(minScale, interactiveScale * Math.sqrt(BUDGET_MS / Math.max(r.elapsedMs, 1))));
       }
       hud(r, interactive);
+      renders.push({ interactive, width: r.width, height: r.height, elapsedMs: r.elapsedMs, stages: r.stages, presented: r.presented, backend: r.backend });
       hideMessage();
     } catch (e) {
       await failed(e, "Render failed");
@@ -491,11 +544,18 @@ function hideMessage() {
 buildControls();
 catalog = await (await fetch("catalog.json")).json();
 fillStocks();
-// For automation over the DevTools protocol: a copy of the edit.
-globalThis.negsState = () => structuredClone(state);
+// For automation over the DevTools protocol (web/cdp.mjs): a copy of the
+// edit, edits through the path the controls take, and the renders so far.
+globalThis.negs = {
+  state: () => structuredClone(state),
+  edit(path, value) { set(path, value); sync(); schedule("settled"); },
+  renders,
+  idle: () => !running && !wanted,
+};
 
 $("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });
 $("paper").addEventListener("change", () => { choosePaper($("paper").value); sync(); schedule("settled"); });
+$("reset").addEventListener("click", () => { resetAdjustments(); sync(); schedule("settled"); });
 $("scan-film").addEventListener("change", () => { set("io.scan_film", $("scan-film").checked); sync(); schedule("settled"); });
 $("engine").addEventListener("change", async () => {
   await startEngine($("engine").value).catch((e) => showMessage(e.message, true));

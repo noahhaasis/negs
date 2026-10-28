@@ -201,8 +201,52 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    Where the web differed from desktop it now follows it: a film without a
    target paper (Double-X) keeps the paper; the web used to pick Kodak
    2302. The default film stays Portra 400 (macOS starts on Gold 200), as
-   the benchmarks use it. Grain Amount and Size are still multipliers of
-   the film's preset lanes, reset by a film change, until piece 2.
+   the benchmarks use it.
+10. **The Lab controls** (MVP piece 2). `web/controls.js` is the macOS
+   inspector's control set (`adjustmentGroups` and the Camera section:
+   titles, paths, ranges, steps), grouped as there: Camera with Lens
+   Diffusion, Film, Print and Scan & Color, with each effect's switch in
+   its group's header. Grain shows the film's preset lanes, null until
+   edited and null again when every lane is back at the preset; a B&W film
+   shows one granularity and one uniformity lane, as macOS. Print
+   Diffusion (`enlarger.diffusion_filter`) follows
+   `docs/print-diffusion-plan.md` on main (after Enlarger, upstream's
+   ranges), which the desktop apps haven't shipped yet. Metering shows
+   while auto exposure is on; the Print section is disabled while scanning
+   film, with desktop's footer. Each control has a reset button while it
+   is off its default, a value that types a new one when clicked (snapped
+   and clamped as macOS `snap`; Escape cancels), and the title still
+   resets on double-click. Reset Adjustments keeps film, paper, rotation
+   and Image Size. Colour management and Output are piece 5, Balance Print
+   piece 4. Linux calls grain Blur "Post blur"; the web follows macOS.
+
+   Every control presents its frame on WebGPU (none reads back or falls
+   to the CPU). Test card at a 1200 px view, after moving each control
+   (`web/checks/controls.js`): every frame is Resident at 13 to 56 ms
+   (warm), except these, which rebuild the spectral pipeline:
+
+   | Control | Rebuild | Frame |
+   |---|---|---|
+   | Enlarger: Exposure compensation (toggle) | 146 ms | 165 ms |
+   | Enlarger: Magenta shift, Yellow shift | 117 ms | 137–158 ms |
+   | Enlarger: Preflash exposure, magenta, yellow | 117 ms | 151–188 ms |
+   | Metering method (re-meters, no rebuild) | 42 ms meter | 54 ms |
+
+   Switching an effect on costs one slower frame the first time (Lens or
+   Print Diffusion about 110 ms, Halation 41 ms), its shaders compiling.
+   Preflash magenta and yellow change nothing without a preflash exposure,
+   and Exposure compensation nothing without an exposure offset; grain dye
+   clouds and clump size and blur act below a pixel at preview size and
+   change the full 2752 px card by at most 1/255, natively too.
+
+   Against the native CLI on wgpu with the same params JSON, at the card's
+   full 2752 px, one case per group (lens blur, lens diffusion, film
+   curves, grain lanes, grain micro-structure, halation, DIR, film base,
+   preflash, exposure compensation, print diffusion, print curves, print
+   base, glare, scanner, metering): 99.99–100% of pixels within 1/255, max
+   2 to 13, the agreement the default render already has at this size
+   (99.994%, max 10). Default renders stay byte-identical, and the
+   benchmarks are unchanged (card 10 / 29 / 59–68 ms, ARW 71–83 ms).
 
 ## Limits and open problems
 
