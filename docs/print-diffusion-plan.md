@@ -1,7 +1,9 @@
 # Handoff: expose Print Diffusion on macOS, Windows, and Linux
 
-Prepared 2026-10-28 against Negs `def3716`. This is an implementation plan;
-the feature has not been implemented by the agent preparing this document.
+Prepared 2026-10-28 against Negs `def3716`; reviewed adversarially the same
+day against `167602b` (see [Review notes](#review-notes)).
+
+**Status:** ready for implementation. Nothing below has been implemented yet.
 
 ## Objective
 
@@ -12,6 +14,11 @@ reset, session restoration, and preset import/export working consistently.
 
 User request: [pixls.us #1062](https://discuss.pixls.us/t/48209/1062).
 This is a UI omission in Negs' port, not a request for a new diffusion model.
+The omission is also a hidden state today: applying an upstream preset whose
+`enlarger_diffusion` is active turns print diffusion on in every app, with no
+control that shows it or turns it off (only Reset Adjustments clears it).
+Photographs and sessions with such values may already exist and must keep
+them.
 The original Spektrafilm exposes it under **PRINT → Diffusion** on all three
 checked branch tips:
 
@@ -62,9 +69,17 @@ Use experimental `28bf883` as the reference. Its complete UI manifest is
 Use the same name, order, field set, defaults, and ranges on all platforms.
 
 - Group title: **Print Diffusion**.
-- Location: Lab, in the print controls immediately after **Enlarger**, before
-  **Print Curves**. Linux currently collects these in DEVELOPMENT; place the
-  new group immediately after Enlarger there.
+- Location: Lab, as the first print effect group. The neighbouring groups
+  already differ per platform, so place it by platform:
+  - macOS: immediately after **Enlarger**, before **Print Curves**.
+  - Windows: immediately after **Enlarger**, before **Print Base** (Windows
+    orders Print Base before Print Curves; do not reorder existing groups).
+  - Linux: DEVELOPMENT hoists Enlarger to the top (`inspector.rs`, the
+    `groups` chain) and then lists every other group in `fixtures::GROUPS`
+    order, so Enlarger is followed by Film Curves. Put the new group in
+    `GROUPS` between **Lens Diffusion** and **Print Curves**, so it leads the
+    print groups. Don't hoist it next to Enlarger: that would put a print
+    effect above the film groups.
 - Header enable switch: `enlarger.diffusion_filter.active`, initially false.
 - Start collapsed, following the existing persistence of expanded groups.
 - When off, disable the group's controls but leave its header switch usable.
@@ -76,8 +91,9 @@ Use the same name, order, field set, defaults, and ranges on all platforms.
   separately maintained set of processing defaults.
 - No new nested advanced-panel framework is needed. Place the detailed
   controls below Filter, Strength, Spatial scale, and Halo warmth.
-- Short help where the existing UI permits it: "Diffuses light in the
-  enlarger before the print develops. Skipped when scanning film directly."
+- No group-level help exists on any platform; don't add a mechanism for it.
+  The existing print footer ("Printing is skipped while scanning film
+  directly.") already covers direct scan.
 
 All paths below are relative to `enlarger.diffusion_filter`:
 
@@ -98,16 +114,32 @@ All paths below are relative to `enlarger.diffusion_filter`:
 Filter values, in that order:
 `black_pro_mist`, `glimmerglass`, `pro_mist`, `cinebloom`.
 
-The parameter coverage and detailed-control limits follow upstream. Strength
-uses Negs' existing camera UI step, rather than upstream's 0.125 step. Spatial
-scale uses the camera panel's practical slider window; upstream permits zero
-and has no declared upper bound. These are UI choices, not new engine or
-preset validity restrictions. Opening a panel, syncing controls, restoring a
-session, or importing a valid preset must not silently rewrite values outside
-the visible slider window. Verify this with a non-default spatial-scale value
-outside that window. If the existing widget cannot display it faithfully,
-extend its displayed bounds to include the loaded value without changing the
-stored parameter; retain the normal range for fresh settings.
+The parameter coverage, detailed-control limits, and detailed-control steps
+follow upstream (`params_manifest.py` in the frozen checkout at
+`~/.negs/parity/exp-28bf883`). Strength, Spatial scale, and Halo warmth use
+Negs' existing camera-panel step of 0.01 instead of upstream's 0.125, 0.1,
+and 0.05. Spatial scale uses the camera panel's practical slider window;
+upstream permits zero and has no declared upper bound. These are UI choices,
+not new engine or preset validity restrictions.
+
+Opening a panel, syncing controls, restoring a session, or importing a valid
+preset must not silently rewrite values outside the visible slider window.
+Test with `spatial_scale` 4.0, which is valid upstream and above the
+window. Zero is valid too, but the engine clamps it to an effectively empty
+kernel, so it makes a poor visual test. Current behaviour by platform:
+
+- Linux already widens a slider's bounds to a loaded value in `sync_state`
+  (`fixtures::range`), as long as the knob is in `fixtures::GROUPS`. Check
+  that it also holds for a lazily built group that is opened after the
+  value is loaded.
+- macOS: the `number` binding's getter returns the stored value and only
+  the setter snaps and clamps. Confirm the row shows 4 and that opening the
+  group or applying a preset writes nothing back.
+- Windows: confirm the same for the trackbar and its value text.
+
+Where a widget can't show the value faithfully, widen its displayed bounds
+to include it without changing the stored parameter. Keep the normal range
+for fresh settings.
 
 Do not simply copy the existing Lens Diffusion group and stop there: that
 group currently omits `core_size` and has narrower detailed-control ranges.
@@ -123,15 +155,22 @@ Expose all ten controls plus the header switch (eleven fields total) for print.
   new group's identity/expanded state work through the generic path.
 - Reuse `EditorModel` and `Parameters` bindings; only change them if a
   concrete sync, history, reset, or persistence issue is found.
+- Group identity and the expanded state come from the title
+  (`expandedAdjustments` is a comma-joined list of titles), so the title has
+  to stay unique. Groups are `.disabled(scanning)` as a whole section, header
+  switch included.
 - Extend appropriate existing tests under `macos/Tests/NegsTests/`, especially
   `EngineTests`, `SessionTests`, and `PresetTests`, as needed for the acceptance
   checks below. `testCatalogMatchesEveryInspectorControl` already checks
-  control paths against the real helper catalog.
+  control paths against the real helper catalog, but it `XCTSkip`s unless
+  `target/release/spektrafilm-native` exists. A skipped run is not a pass.
 
 ### Windows
 
 - `windows/src/state.rs`: add the matching `ADJUSTMENT_GROUPS` entry in
-  `Section::Print`, using the same labels, paths, ranges, and steps.
+  `Section::Print`, directly after Enlarger, using the same labels, paths,
+  ranges, and steps. Rows, resets, and choices are keyed by path, so reusing
+  the labels "Filter" and "Strength" is safe.
 - `windows/src/ui/inspector.rs`: generic row construction consumes those
   definitions and marks print rows. Confirm the new group uses the existing
   scan-directly disabling, effect enabling, reset, scroll, and history paths.
@@ -144,28 +183,56 @@ Expose all ten controls plus the header switch (eleven fields total) for print.
 Linux needs both the group and its translation from presentation keys to
 helper parameters. Merely adding rows will not wire the feature correctly.
 
-- `linux/src/fixtures.rs`: add the group and numeric knobs. This file defines
-  inspector metadata as well as UI-only fixtures; real defaults still come
-  from the helper.
+- `linux/src/fixtures.rs`: add the group and its ten numeric knobs, between
+  Lens Diffusion and Print Curves (see Location). This file defines inspector
+  metadata as well as UI-only fixtures; real defaults still come from the
+  helper. `presets::value_keys`, `parameters::validate`, and
+  `install_defaults` all iterate `GROUPS`, so they pick the knobs up.
 - `linux/src/parameters.rs`:
   - Extend `path()` for `Print Diffusion.<numeric label>` →
-    `enlarger.diffusion_filter.<field>`.
-  - Add `Print Diffusion enabled` to `TOGGLES`.
+    `enlarger.diffusion_filter.<field>`. The Lens Diffusion branch's
+    lowercase-and-underscore rule fits these labels too.
+  - Add `Print Diffusion enabled` to `TOGGLES`. The inspector builds the
+    `{group} enabled` key itself, so the spelling must match.
   - Add a distinct choice key, e.g. **Print diffusion filter**, to `CHOICES`,
     mapped to `enlarger.diffusion_filter.filter_family`.
   - The existing global `Filter` choice belongs to camera diffusion. Preserve
     it for backward compatibility; do not bind the new dropdown to that key.
-  - Check `install_defaults`, `runtime`, reset, session restore, and preset
-    application all populate the new choice, toggle, and numeric state.
-    In particular, adding control-backed paths must not let UI defaults
-    overwrite previously stored/imported enlarger parameters.
+- **Session-restore regression to fix in `install_defaults`.** Linux keeps
+  the full params in `State.params`, but `runtime` overwrites every
+  control-backed path with `State.values` / `State.choices`. Today
+  `enlarger.diffusion_filter` has no controls, so an applied preset's print
+  diffusion survives in `State.params` and the saved session. After this
+  change, restoring such a session runs `install_defaults(…, reset: false)`
+  (`runtime.rs`), finds no `Print Diffusion.*` values or
+  `Print Diffusion enabled` / `Print diffusion filter` choices, and fills
+  them from the helper defaults. The next `runtime` call then switches the
+  effect off and resets its values without telling anyone. Fix: when a key
+  is missing and `reset` is false, seed it from the restored `State.params`
+  at its path, and fall back to the helper default only when that is null
+  or missing. Apply the same rule to numeric keys, `TOGGLES`, and `CHOICES`.
+  This runs before `merge(defaults, params)` in `runtime.rs`, so read the
+  unmerged params. Keep `reset: true` (Reset Adjustments) using helper
+  defaults. Add a `parameters` unit test: a state with no Print Diffusion
+  keys and `params.enlarger.diffusion_filter` = {active: true, cinebloom,
+  strength 1.25, spatial_scale 4}. After `install_defaults` and `runtime`,
+  every field must be unchanged.
 - `linux/src/inspector.rs`:
-  - Include the group in the header-effect switch list and print sensitivity
-    list; add its dropdown in `group_controls` with a separate state key.
-  - Give it a false disabled fallback in `effect_default`.
-  - If needed, let the combo helper separate its visible label from the
-    internal key. Keep the implementation small and preserve old saved keys.
+  - Add "Print Diffusion" to the header-effect switch list
+    (`matches!(group.name, …)`) and the print sensitivity list
+    (`"Enlarger" | "Print Curves" | …`); add its dropdown in `group_controls`.
+  - Give it a false disabled fallback in `effect_default`. This matters in
+    `NEGS_UI_ONLY` mode, where there are no helper defaults.
+  - `combo` uses its title as the state key, the `choice_default` lookup,
+    the reset key, and the `ui.choices` sync key. A "Filter" row in Print
+    Diffusion would therefore drive the camera filter. Add a separate key
+    parameter, e.g. a `combo_keyed(ui, list, title, key, options)` that
+    `combo` delegates to. Keep the visible label **Filter** and leave the
+    existing key and callers unchanged.
   - Keep lazy group construction and expanded-state persistence working.
+  - Accessible names repeat across the camera and print groups ("Filter",
+    "Strength value", "Reset Strength"). AT-SPI checks must find these
+    controls within the Print Diffusion expander, not by first match.
 - Extend existing `parameters` tests and the relevant validation hooks in
   `linux/src/validation.rs` / `linux/src/engine_validation.rs`. The important
   regression is independent camera and print state through runtime rebuilding
@@ -220,17 +287,26 @@ The implementation is complete when these behaviors hold:
 7. **UI behavior:** no inspector movement during reduced-resolution drags or
    release; ordinary keyboard editing and accessible labels remain usable.
 8. **Compatibility:** existing sessions/presets without explicit print values
-   still load with the existing helper defaults. No schema migration is
-   required merely to expose the fields.
+   still load with the existing helper defaults. A session saved by the
+   current release after applying a preset with active, non-default
+   `enlarger_diffusion` restores with the same values on every platform, and
+   the new controls show them. This matters most on Linux; see the
+   `install_defaults` item. No schema migration is required merely to
+   expose the fields.
 
 Run focused checks first, then the relevant native suites once:
 
 ```sh
-# Shared parameter/preset behavior (use the documented platform BLAS env).
+# Shared parameter/preset behavior. On Linux, `source linux/core-env.sh` first
+# (OpenBLAS); macOS uses Accelerate; Windows needs no BLAS.
 cargo test --locked -p spektrafilm-core presets
 
-# macOS: build the helper first using the existing project instructions.
-swift test --package-path macos
+# macOS (docs/native-macos-ui.md). Without the release helper,
+# testCatalogMatchesEveryInspectorControl skips.
+cargo build --release -p spektrafilm-native
+cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precision-f64
+swift test --package-path macos --scratch-path target/swift-native
+python3 scripts/check_native_macos.py
 
 # Windows, on Windows:
 cargo test --locked --manifest-path windows/Cargo.toml
@@ -239,10 +315,16 @@ cargo build --release --locked --manifest-path windows/Cargo.toml
 # Linux:
 bash linux/cargo.sh test --locked --offline
 bash linux/build.sh
-# From the logged-in desktop, with the environment in linux/desktop-env.sh:
-python3 linux/check_controls.py
-python3 linux/check_engine.py
+# From the logged-in Wayland desktop, with the environment in linux/desktop-env.sh:
+python3 linux/check_controls.py   # NEGS_UI_ONLY: header, dropdown, disabled states
+python3 linux/check_engine.py     # real helper: preview, Fast and Reference export
+python3 linux/check_presets.py    # real helper: preset apply/export round trip
 ```
+
+`check_controls.py` runs without the engine, so it can't show that the
+controls reach the renderer. Each script exercises only the controls it
+already knows about, so extend it to cover Print Diffusion. Running it
+unchanged proves nothing about the new group.
 
 Extend/run the existing rendering/parity coverage for enlarger diffusion if
 the UI-to-render checks reveal a gap. `scripts/parity/sweep_experimental.py`
@@ -255,3 +337,43 @@ Native UI checks must interact with the actual group on each platform; model
 tests alone do not prove that the header, dropdown, and disabled states work.
 Record what was run, results, and any unavailable OS/backend in the handoff
 back to Noah. Update this document's status when implementation is complete.
+
+## Review notes
+
+Adversarial review, 2026-10-28, against `167602b`.
+
+Checked and still accurate:
+
+- `DiffusionFilterParams` fields and defaults match the table and the frozen
+  upstream default state (`data/presets/spektrafilm-gui-default-28bf883.json`).
+- The upstream manifest (`params_manifest.py:752–804` at `28bf883`) matches
+  the table's ranges. `napari_layout.py:450` puts it on the PRINT tab.
+- The engine is wired: `printing.rs` diffuses linear print exposure on CPU and
+  GPU, and `pipeline.rs` builds the resident GPU plan only when
+  `!io.scan_film && active`.
+- Presets: `SECTIONS` maps `enlarger_diffusion` both ways, and `check`
+  rejects unknown families for both stages.
+- The camera group omits `core_size` and caps intensities at 2 and sizes at
+  3 on all three platforms.
+- macOS and Windows effect groups, direct-scan disabling, and resets are
+  generic, as stated.
+
+Corrected in this revision:
+
+- **Placement** couldn't be met: Windows orders Print Base before Print
+  Curves, and Linux hoists Enlarger above the film groups. Placement is now
+  per platform.
+- **Linux session restore** would silently switch off print diffusion that
+  an applied preset had saved in `State.params`. The fix and its test are
+  now required.
+- **Linux combo key**: `combo` keys state, defaults, reset, and sync by its
+  title. A second "Filter" would drive the camera filter. Splitting label
+  from key is now required, not optional.
+- Compatibility now covers sessions *with* print values, not only without.
+- Out-of-range values: recorded each platform's current behaviour and named
+  a concrete test value (4.0).
+- Commands: the macOS helper build and scratch path, Linux `core-env.sh`,
+  `check_presets.py`, and `check_native_macos.py`. Noted that
+  `check_controls.py` is UI-only and that a skipped Swift catalog test is
+  not a pass.
+- Dropped the group help text: no platform has group-level help.
