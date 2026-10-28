@@ -77,7 +77,7 @@ jobs:
       - name: Install Flatpak tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder xvfb xauth
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils xvfb xauth
           # Ubuntu 24.04 restricts the unprivileged user namespaces bubblewrap needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           df -h /
