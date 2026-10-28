@@ -106,9 +106,10 @@ undo/redo keep Image Size, rotation, Post, CAT16 and the preview limit; film
 A → preset → B → A restores the film's own DIR, halation and grain presets; a
 saved session restores the same params; New Preset → Escape leaves no file;
 refused files carry the reason; the frozen default GUI state and any files in
-`NEGS_PRESETS_TEST_DIR` import, apply and re-export). The 19 community and 5
-spektrafilm-generated test presets weren't on this machine, so that test ran
-on the bundled default state only. Driven in the running app with a scratch
+`NEGS_PRESETS_TEST_DIR` import, apply and re-export). With the 19 community
+and 5 spektrafilm-generated test presets in `%USERPROFILE%\negs-presets-test`
+(not in the repository), all 24 and the default state pass that test, and
+the panel lists all 24 as valid. Driven in the running app with a scratch
 profile: apply by click, New Preset → Escape and → Enter, F2 with an invalid
 name, the delete prompt, Import Presets… with one good and one refused file,
 a real OLE file drop between rows, dragging a row, Export… (byte-identical
