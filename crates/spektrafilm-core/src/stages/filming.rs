@@ -476,8 +476,8 @@ pub fn expose(
             halation.scatter_tail_weight,
             halation.halation_amount,
             halation.halation_spatial_scale,
-            halation.halation_strength,
-            halation.halation_first_sigma_um,
+            halation.strength(),
+            halation.first_sigma_um(),
             halation.halation_n_bounces,
             halation.halation_bounce_decay,
             halation.halation_renormalize,
@@ -516,10 +516,10 @@ pub fn dir_couplers_model(
     positive: bool,
 ) -> spektrafilm_model::couplers::DirCouplersModel {
     let matrix = spektrafilm_model::couplers::compute_dir_couplers_matrix(
-        dir.gamma_samelayer_rgb,
-        dir.gamma_interlayer_r_to_gb,
-        dir.gamma_interlayer_g_to_rb,
-        dir.gamma_interlayer_b_to_rg,
+        dir.gamma_samelayer(),
+        dir.gamma_r_to_gb(),
+        dir.gamma_g_to_rb(),
+        dir.gamma_b_to_rg(),
         dir.inhibition_samelayer,
         dir.inhibition_interlayer,
     );

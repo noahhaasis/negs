@@ -86,7 +86,7 @@ fn every_shipped_profile_digests_like_python() {
         let mut params = RuntimeParams::default();
         pipeline::apply_film_specific_params(&film, &mut params);
         let h = &params.film_render.halation;
-        assert_eq!(h.halation_first_sigma_um, lanes(case.halation_first_sigma_um, case.is_bw), "{}", case.stock);
-        assert_eq!(h.halation_strength, lanes(case.halation_strength, case.is_bw), "{}", case.stock);
+        assert_eq!(h.first_sigma_um(), lanes(case.halation_first_sigma_um, case.is_bw), "{}", case.stock);
+        assert_eq!(h.strength(), lanes(case.halation_strength, case.is_bw), "{}", case.stock);
     }
 }
