@@ -64,10 +64,24 @@ struct PresetInspector: View {
     }
 
     private var list: some View {
-        List(selection: $selection) {
-            ForEach(model.presets) { preset in
-                PresetRow(model: model, preset: preset, status: model.presetStatus[preset])
-                    .tag(preset.url)
+        ScrollViewReader { scroller in
+            List(selection: $selection) {
+                ForEach(model.presets) { preset in
+                    PresetRow(model: model, preset: preset, status: model.presetStatus[preset])
+                        .tag(preset.url)
+                        .id(preset.url)
+                }
+                // Dragging rows sorts the presets; files dropped between rows import there.
+                .onMove(perform: model.movePresets)
+                .onInsert(of: [.fileURL]) { index, providers in
+                    Task {
+                        let urls = await Self.fileURLs(providers)
+                        model.importPresets(urls, at: index)
+                    }
+                }
+            }
+            .onChange(of: model.renamingPreset) { _, url in
+                if let url { withAnimation { scroller.scrollTo(url) } }
             }
         }
         .listStyle(.inset)
@@ -89,6 +103,17 @@ struct PresetInspector: View {
     }
 
     private func preset(_ url: URL?) -> PresetFile? { model.presets.first { $0.url == url } }
+
+    private static func fileURLs(_ providers: [NSItemProvider]) async -> [URL] {
+        var urls: [URL] = []
+        for provider in providers {
+            let url: URL? = await withCheckedContinuation { continuation in
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in continuation.resume(returning: url) }
+            }
+            if let url, url.isFileURL { urls.append(url) }
+        }
+        return urls
+    }
     private func valid(_ preset: PresetFile) -> Bool {
         if case .valid = model.presetStatus[preset] { return true }
         return false
@@ -103,7 +128,7 @@ private struct PresetRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if model.renamingPreset == preset.url {
-                NameField(name: preset.name) { model.renamePreset(preset, to: $0) } cancel: { model.renamingPreset = nil }
+                NameField(name: preset.name) { model.renamePreset(preset, to: $0) } cancel: { model.cancelRename(preset) }
             } else {
                 Text(preset.name).lineLimit(1).foregroundStyle(invalid == nil ? .primary : .secondary)
             }
@@ -129,8 +154,9 @@ private struct PresetRow: View {
     }
 }
 
-/// The name being edited: Return keeps it if it's a valid preset name,
-/// Escape discards it. AppKit, like the inspector's value fields.
+/// The name being edited: Return or clicking elsewhere keeps it if it's a
+/// valid preset name (an invalid one keeps the old name), Escape cancels.
+/// AppKit, like the inspector's value fields.
 private struct NameField: NSViewRepresentable {
     let name: String
     let commit: (String) -> Void
@@ -166,8 +192,8 @@ private struct NameField: NSViewRepresentable {
             let name = field.stringValue.trimmingCharacters(in: .whitespaces)
             if let problem = PresetName.problem(name) {
                 NSSound.beep()
-                parent.cancel()
-                if name != parent.name, !name.isEmpty {
+                parent.commit(parent.name)
+                if !name.isEmpty {
                     let alert = NSAlert()
                     alert.messageText = "“\(name)” can’t be used as a preset name."
                     alert.informativeText = problem
