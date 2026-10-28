@@ -3,7 +3,9 @@
 Prepared 2026-10-27 for an agent on Noah's Omarchy machine (`noah@192.168.178.33`).
 Build the Presets feature into the GTK app (`linux/`), matching the macOS app.
 Steps 1–4 of [presets-design.md](presets-design.md) are done; this is step 6.
-Windows (step 5) is separate and not part of this handoff.
+Windows (step 5) is separate, [handoff-presets-windows.md](handoff-presets-windows.md), and
+may be in progress at the same time on `feature/presets`: fetch before you start and before
+you commit, and rebase on top of the other agent's commits rather than over them.
 
 ## Where to work
 
