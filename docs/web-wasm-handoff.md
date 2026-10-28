@@ -75,8 +75,13 @@ baselines `docs/web-wasm.md` quotes (`s0-*` before the frame-cost work,
 
 `web/cdp.mjs <url> <script.js>` opens the page in the same windowed Chrome,
 prints console messages and exceptions, and runs a script in the page
-(`SHOT=x.png` saves a screenshot). The page exposes `negsState()`, a copy of
-the edit, for such checks.
+(`SHOT=x.png` saves a screenshot, `VIEW=390x844@3m` emulates a touch device's
+viewport). The page exposes `negs` for such checks: `state()` (a copy of the
+edit), `edit(path, value)`, `renders` (each finished frame's size, time,
+stages and whether it presented) and `idle()`. `web/checks/controls.js`
+moves every Lab control and reports its frame (a `pipeline` stage is a
+rebuild, `meter` a re-meter); `web/checks/inspector.js` tests the
+inspector's wiring.
 
 To compare two renders, convert them with `magick x.png x.ppm` and run
 `node web/compare.mjs a.ppm b.ppm` (exact, within 1/255, max). The expected agreement is in `docs/web-wasm.md`. The native CLI
@@ -146,7 +151,10 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     (`params`) from the catalog's defaults, sent whole on every render.
     `chooseFilm`, `choosePaper` and `pairFilm` follow macOS
     `EditorModel`; `PRESET_PATHS` is macOS `Stock.presetPaths`. Controls
-    read the state through `syncs`, run by `sync()` after any change.
+    read the state through `syncs`, run by `sync()` after any change,
+    and write it through `binding(control)`;
+  - `web/controls.js`: the Lab controls (macOS `adjustmentGroups`), option
+    titles, and desktop's value snapping and formatting.
     `app.js` keeps one render in flight and only the newest request
     queued, renders an interactive frame while a slider moves (its scale
     adapts to a 90 ms budget, at least 0.25 on WebGPU) and the settled frame

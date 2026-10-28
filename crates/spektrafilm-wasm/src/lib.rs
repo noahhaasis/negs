@@ -329,6 +329,7 @@ async fn render(
                 return Ok(Rendered::missing(missing));
             }
             state.pipeline = Some((key, built.map_err(|e| JsError::new(&e))?));
+            stages.mark("pipeline");
         }
         if params.camera.auto_exposure && state.metering.is_none() {
             let full = &state.source.as_ref().unwrap().0;
@@ -348,7 +349,11 @@ async fn render(
             .to_string();
             let ev = match &state.autoexposure {
                 Some((key, ev)) if *key == metered => *ev,
-                _ => pipeline.frame_autoexposure_ev(&source.0),
+                _ => {
+                    let ev = pipeline.frame_autoexposure_ev(&source.0);
+                    stages.mark("meter");
+                    ev
+                }
             };
             state.autoexposure = Some((metered, ev));
             pipeline = pipeline.with_autoexposure_ev(ev);

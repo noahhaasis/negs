@@ -46,25 +46,39 @@
   .stock label[hidden] { display: none; }
   select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
   select:disabled { color: var(--faint); }
-  details { border-bottom: 1px solid var(--line); }
-  summary { display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600; list-style: none; user-select: none; }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .section { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .section > h2 { margin: 0; padding: 14px 14px 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .section > .ctl { padding: 0 14px; margin-bottom: 12px; }
+  .section:disabled > :not(h2, .footer) { opacity: .45; }
+  .footer { padding: 0 14px 8px; margin: 0; }
+  .footer[hidden] { display: none; }
+  summary { display: flex; align-items: center; gap: 8px; padding: 8px 14px; cursor: pointer; font-weight: 600; list-style: none; user-select: none; }
   summary::-webkit-details-marker { display: none; }
   summary::before { content: "▸"; color: var(--faint); font-size: 10px; transition: transform .15s; }
   details[open] summary::before { transform: rotate(90deg); }
   summary .switch { margin-left: auto; }
-  details[data-off] .knobs { opacity: .4; }
-  .knobs { display: grid; gap: 12px; padding: 0 14px 14px; }
-  .knob { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; }
-  .knob label { color: var(--muted); }
-  .knob output { font-variant-numeric: tabular-nums; color: var(--fg); font-size: 12px; }
-  .knob input[type=range] { grid-column: 1 / -1; }
-  .knob.changed label { color: var(--fg); }
+  .controls { display: grid; gap: 12px; padding: 4px 14px 14px 32px; }
+  .controls:disabled .ctl { opacity: .45; }
+  .ctl[hidden] { display: none; }
+  .ctl .head, .ctl > label { display: flex; flex: 1; align-items: center; gap: 6px; color: var(--muted); }
+  .ctl .head .label, .ctl > label > span { margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctl.changed .head .label, .ctl.changed > label > span { color: var(--fg); }
+  .ctl.choice select { width: auto; max-width: 60%; padding: 3px 6px; }
+  .value { font-variant-numeric: tabular-nums; font-size: 12px; min-width: 40px; text-align: right; padding: 1px 2px; border: 0; border-radius: 4px; background: none; cursor: text; }
+  .value:hover:not(:disabled) { background: var(--field); }
+  .value-field { width: 64px; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; padding: 1px 4px; border: 1px solid var(--accent); border-radius: 4px; background: var(--field); outline: none; }
+  .reset { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 13px; line-height: 1; }
+  .reset:hover:not(:disabled) { color: var(--fg); }
+  .reset[hidden] { display: none; }
+  .ctl.slider input[type=range] { margin-top: 4px; }
   .row { display: flex; align-items: center; justify-content: space-between; color: var(--muted); }
   input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); height: 18px; }
   .switch { appearance: none; width: 28px; height: 16px; border-radius: 8px; background: var(--line); position: relative; cursor: pointer; flex: none; margin: 0; }
   .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .15s; }
   .switch:checked { background: var(--accent); }
   .switch:checked::after { transform: translateX(12px); background: #1b1b1b; }
+  .actions { display: grid; padding: 14px; }
   .bottom { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); }
   .bottom .row select { width: auto; }
   .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); cursor: pointer; }
@@ -107,11 +121,12 @@
         <label id="paper-row">Paper <select id="paper"></select></label>
       </div>
       <div id="sections"></div>
+      <div class="actions"><button class="btn" id="reset" title="Restore the defaults while keeping the film, paper and rotation.">Reset Adjustments</button></div>
     </div>
     <div class="bottom">
       <div class="row"><span>Engine</span><select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></div>
       <div class="hint" id="engine-info">Starting…</div>
-      <div class="hint">Double-click a slider to reset it.</div>
+      <div class="hint">Click a value to type one.</div>
     </div>
   </aside>
 </div>
