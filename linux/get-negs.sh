@@ -2,7 +2,7 @@
 # Download the latest Negs release for Linux x86_64, verify its checksum and
 # install it for the current user under ~/.local (no root needed).
 #   curl -fsSL https://raw.githubusercontent.com/noahhaasis/negs/main/linux/get-negs.sh | sh
-# NEGS_VERSION=0.10.0 installs a specific version instead of the latest.
+# NEGS_VERSION=0.11.0 installs a specific version instead of the latest.
 set -eu
 
 repo=noahhaasis/negs

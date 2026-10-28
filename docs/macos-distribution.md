@@ -1,6 +1,6 @@
 # macOS installation, updates, and releases
 
-Negs is currently **0.10.0, build 11**, before the public 1.0 release. The
+Negs is currently **0.11.0, build 12**, before the public 1.0 release. The
 installer is a universal app for Apple silicon and Intel Macs on macOS 14+. The source repository
 and downloads will be public from the first release. No remote repository has
 been configured or release published by this implementation.
@@ -153,7 +153,7 @@ swift test --package-path macos --force-resolved-versions
 python3 -m unittest discover -s scripts -p 'test_macos_release.py'
 ```
 
-The local package is `dist/releases/Negs-0.10.0-macos-universal.dmg`; the folder
+The local package is `dist/releases/Negs-0.11.0-macos-universal.dmg`; the folder
 also includes the update ZIP, source archive, installation instructions, build
 information, and SHA-256 checksums. `scripts/verify_macos_package.py` audits an
 extracted ZIP independently of the build tree. No production key is necessary
