@@ -1191,9 +1191,8 @@ fn image_size(ui: &Rc<Editor>, body: &gtk::Box) {
         let source = ui.canvas.source_size();
         let r=ui.runtime.borrow();
         let note=if crate::runtime::ui_only(){"This preview still displays the camera image.".to_string()}
-            else if let Some(frame)=r.developed.as_ref().filter(|_|r.current_revision==Some(r.revision)){
-                let full=frame.result["working_width"].as_f64().unwrap_or(frame.width as f64);
-                let percent=(frame.width as f64/full*100.).min(100.);
+            else if let Some(scale)=r.preview_scale{
+                let percent=scale*100.;
                 if percent<99.9 {format!("Preview shown at {percent:.0}%. Exports develop all pixels; inspect grain in an export.")}else{String::new()}
             }else{"Developing the current adjustments…".into()};
         readout.set_text(&format!(
@@ -1328,6 +1327,190 @@ fn effect_default(ui: &Editor, group: &str) -> bool {
         &format!("{group} enabled"),
         fallback,
     ) == "true"
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use crate::{engine::Frame, perf::Perf};
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    fn widgets(root: &impl IsA<gtk::Widget>) -> Vec<gtk::Widget> {
+        let mut pending = vec![root.as_ref().clone()];
+        let mut result = Vec::new();
+        while let Some(widget) = pending.pop() {
+            let mut child = widget.first_child();
+            while let Some(next) = child {
+                child = next.next_sibling();
+                pending.push(next);
+            }
+            result.push(widget);
+        }
+        result
+    }
+
+    fn settle_layout() {
+        let until = Instant::now() + Duration::from_millis(150);
+        while Instant::now() < until {
+            while glib::MainContext::default().iteration(false) {}
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn frame(width: i32) -> Arc<Frame> {
+        Arc::new(Frame {
+            width,
+            height: width * 2 / 3,
+            pixels: Vec::new().into(),
+            result: serde_json::json!({"working_width":6000,"working_height":4000}),
+        })
+    }
+
+    #[test]
+    #[ignore = "Requires a desktop; run explicitly with --ignored --test-threads=1"]
+    fn slider_previews_keep_inspector_layout_stable() {
+        assert!(!crate::runtime::ui_only(), "Run without NEGS_UI_ONLY");
+        adw::init().unwrap();
+        let app = adw::Application::builder()
+            .application_id("org.negs.InspectorLayoutTest")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let ui = Editor::new(&app, Perf::new());
+        ui.runtime.borrow_mut().set_developed(frame(1200), true);
+        assert_eq!(ui.runtime.borrow().preview_scale, None);
+        // Use the actual inspector and slider widgets, with synthetic helper
+        // replies so the layout regression doesn't depend on render timing.
+        build(&ui);
+        ui.current_path.replace(Some("layout-test.png".into()));
+        let texture = crate::canvas::srgb_texture(
+            3,
+            2,
+            gtk::gdk::MemoryFormat::R8g8b8,
+            &glib::Bytes::from_owned(vec![128; 18]),
+            9,
+        );
+        ui.canvas.set_texture(&texture, (6000, 4000));
+        let all = widgets(&ui.inspector);
+        let enlarger = all
+            .iter()
+            .find_map(|widget| {
+                widget
+                    .clone()
+                    .downcast::<adw::ExpanderRow>()
+                    .ok()
+                    .filter(|row| row.title() == "Enlarger")
+            })
+            .unwrap();
+        enlarger.set_expanded(true);
+        let adjustment = ui
+            .adjustments
+            .borrow()
+            .iter()
+            .find(|(key, _)| key == "Enlarger.Magenta shift")
+            .unwrap()
+            .1
+            .clone();
+        let scale = all
+            .iter()
+            .find_map(|widget| {
+                widget
+                    .clone()
+                    .downcast::<gtk::Scale>()
+                    .ok()
+                    .filter(|scale| scale.adjustment() == adjustment)
+            })
+            .unwrap();
+        ui.sync_history();
+        let readout = all
+            .iter()
+            .find_map(|widget| {
+                widget
+                    .clone()
+                    .downcast::<gtk::Label>()
+                    .ok()
+                    .filter(|label| label.text().starts_with("Source "))
+            })
+            .unwrap();
+        let mut ancestor = readout.parent().unwrap();
+        let scroll = loop {
+            if let Ok(scroll) = ancestor.clone().downcast::<gtk::ScrolledWindow>() {
+                break scroll;
+            }
+            ancestor = ancestor.parent().unwrap();
+        };
+        let form = readout.parent().unwrap();
+        ui.window.present();
+        settle_layout();
+        let measure = || {
+            settle_layout();
+            (
+                readout.text(),
+                form.height(),
+                scale.compute_bounds(&ui.inspector).unwrap().y(),
+                scroll.vadjustment().value(),
+            )
+        };
+        // Unlimited and limited settled previews must both stay stable while
+        // edits make the retained revision stale, during drag replies, and
+        // after release while waiting for the settled render.
+        for settled_width in [6000, 4200] {
+            {
+                let mut r = ui.runtime.borrow_mut();
+                r.set_developed(frame(settled_width), false);
+                r.current_revision = Some(r.revision);
+            }
+            ui.sync_history();
+            settle_layout();
+            let y = scale.compute_bounds(&ui.inspector).unwrap().y();
+            scroll
+                .vadjustment()
+                .set_value(scroll.vadjustment().value() + y as f64 - 400.);
+            let before = measure();
+            assert!(before.1 > scroll.height());
+            assert_eq!(before.0.contains("Preview shown at"), settled_width < 6000);
+            {
+                let mut r = ui.runtime.borrow_mut();
+                r.interacting = true;
+                r.revision += 1;
+            }
+            adjustment.set_value(adjustment.value() + 1.);
+            ui.sync_history();
+            assert_eq!(measure(), before, "queued edit changed the inspector");
+            ui.runtime.borrow_mut().set_developed(frame(1200), true);
+            assert_eq!(ui.runtime.borrow().developed.as_ref().unwrap().width, 1200);
+            ui.sync_history();
+            assert_eq!(measure(), before, "drag preview changed the inspector");
+            ui.runtime.borrow_mut().interacting = false;
+            ui.sync_history();
+            assert_eq!(measure(), before, "release changed the inspector");
+            {
+                let mut r = ui.runtime.borrow_mut();
+                r.set_developed(frame(settled_width), false);
+                r.current_revision = Some(r.revision);
+            }
+            ui.sync_history();
+            assert_eq!(measure(), before, "settled render changed the inspector");
+        }
+        // A genuine settled resolution change must still update the notice.
+        ui.runtime.borrow_mut().set_developed(frame(6000), false);
+        ui.sync_history();
+        assert!(!readout.text().contains("Preview shown at"));
+        // A different source must not inherit the old source's scale notice.
+        {
+            let mut r = ui.runtime.borrow_mut();
+            r.set_developed(frame(4200), false);
+            r.ready = true;
+        }
+        ui.observe_edit();
+        assert_eq!(ui.runtime.borrow().preview_scale, None);
+        ui.sync_history();
+        assert!(readout.text().contains("Developing the current adjustments"));
+        ui.window.destroy();
+    }
 }
 
 #[cfg(test)]

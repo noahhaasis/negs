@@ -575,7 +575,8 @@ impl Editor {
                     ui.sync_state();
                     let restored = cached.is_some();
                     if let Some(frame) = cached {
-                        ui.runtime.borrow_mut().developed = Some(frame);
+                        ui.runtime.borrow_mut().set_developed(frame, false);
+                        ui.sync_history();
                         ui.update_engine_histogram();
                     }
                     if let Some(hist) = ui.histogram.borrow().as_ref() {

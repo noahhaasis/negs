@@ -26,6 +26,9 @@ pub struct Runtime {
     pub current_revision: Option<u64>,
     pub retained_id: Option<u64>,
     pub developed: Option<Arc<Frame>>,
+    /// The settled preview's fraction of the working frame. Drag frames leave
+    /// this unchanged so the Image Size notice doesn't resize the inspector.
+    pub preview_scale: Option<f64>,
     pub original: Option<Arc<Frame>>,
     pub showing_original: bool,
     pub original_loading: bool,
@@ -39,6 +42,18 @@ pub struct Runtime {
     pub original_key: Value,
     pub histogram_crop: Value,
     pub interactive_frames: u64,
+}
+impl Runtime {
+    pub fn set_developed(&mut self, frame: Arc<Frame>, interactive: bool) {
+        if !interactive {
+            let full = frame.result["working_width"]
+                .as_f64()
+                .filter(|width| *width > 0.)
+                .unwrap_or(frame.width as f64);
+            self.preview_scale = Some((frame.width as f64 / full).min(1.));
+        }
+        self.developed = Some(frame);
+    }
 }
 pub fn ui_only() -> bool {
     std::env::var_os("NEGS_UI_ONLY").is_some()
@@ -227,6 +242,7 @@ impl Editor {
             r.original = None;
             r.original_loading = false;
             r.developed = None;
+            r.preview_scale = None;
             r.current_revision = None;
             r.showing_original = false;
             r.desired = Value::Null;
@@ -347,7 +363,7 @@ impl Editor {
             let current = generation == r.source_generation && (revision == r.revision || r.interacting);
             match result {
                 Ok(Ok((id,frame,cache_key))) if current => {
-                    r.developed = Some(frame.clone());
+                    r.set_developed(frame.clone(), interactive.is_some());
                     if interactive.is_none() && revision == r.revision { r.retained_id = Some(id); r.current_revision = Some(revision); r.cached_restoring=false;ui.perf.mark("saveable_render_ready_ms");if let Some(key)=cache_key {ui.cache.save(key,frame.clone());} }
                     if interactive.is_some() { r.interactive_frames += 1; ui.perf.detail("interactive_frames_presented", r.interactive_frames); }
                     let show = !r.showing_original;

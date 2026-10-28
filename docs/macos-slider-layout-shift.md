@@ -69,3 +69,35 @@ The original reproduction failed on form height, slider movement during
 the drag, and slider movement at release. After the fix, all three measured
 positions stayed constant. Both layout tests pass. The full macOS suite
 ran 79 tests with 6 opt-in tests skipped and no failures.
+
+## Linux counterpart
+
+Linux's Image Size readout had a related trigger: it replaced its preview
+notice with “Developing the current adjustments…” whenever the retained
+revision became stale. This changed the wrapping above the sliders on edits,
+drag frames, and release. Computing the notice from a temporary frame could
+also report the drag resolution instead of the settled preview resolution.
+
+The Linux runtime now stores the settled preview scale separately from the
+displayed frame. Edits and interactive frames preserve it; settled renders
+and cached preview restoration update it. Changing the source clears it.
+
+The opt-in GTK regression uses the actual inspector and Magenta shift slider
+with synthetic helper replies, independently of engine timing. It checks the
+readout, form height, slider position, and scroll offset before an edit, while
+queued, during a reduced preview, at release, and after settling. Both full
+and reduced settled resolutions are covered, along with source replacement.
+With the old readout logic, the queued edit increased the form height from
+2219 to 2236 logical pixels and moved the slider from Y=400 to Y=417 while
+the scroll offset stayed at 661. With the fix, those measurements stay
+constant throughout each interaction.
+
+```sh
+bash linux/cargo.sh test --locked --offline
+# Requires a desktop; do not set NEGS_UI_ONLY.
+source linux/desktop-env.sh
+bash linux/cargo.sh test --locked --offline slider_previews_keep_inspector_layout_stable -- --ignored --test-threads=1
+```
+
+The Linux suite passed 26 tests with 5 opt-in tests skipped. The explicit
+GTK layout regression also passed.
