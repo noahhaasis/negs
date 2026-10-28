@@ -732,7 +732,7 @@ impl Editor {
             state.crop = Some(self.canvas.crop_draft());
             state.straighten = self.canvas.draft_angle();
         }
-        let value = serde_json::json!({"schema":1,"ui_only":runtime::ui_only(),"photo":*self.current_path.borrow(),"state":state,"preferences":*prefs,"recent":*self.recent.borrow(),"view":self.canvas.view()});
+        let value = serde_json::json!({"schema":parameters::SESSION_SCHEMA,"ui_only":runtime::ui_only(),"photo":*self.current_path.borrow(),"state":state,"preferences":*prefs,"recent":*self.recent.borrow(),"view":self.canvas.view()});
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -844,6 +844,10 @@ fn main() -> glib::ExitCode {
                 .and_then(|s| s.get("state"))
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
         {
+            let mut state = state;
+            // Sessions before schema 1 was written count as schema 1.
+            let schema = session.as_ref().and_then(|s| s["schema"].as_u64()).unwrap_or(1);
+            parameters::migrate_session(schema, &mut state);
             ui.history.borrow_mut().state = state;
             ui.history.borrow_mut().state.sanitize();
             ui.pending_view
