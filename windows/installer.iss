@@ -9,7 +9,7 @@
 [Setup]
 AppId=dev.negs.app
 AppName=Negs
-AppVersion=0.9.0
+AppVersion=0.9.1
 AppPublisher=Negs
 DefaultDirName={localappdata}\Programs\Negs
 PrivilegesRequired=lowest
