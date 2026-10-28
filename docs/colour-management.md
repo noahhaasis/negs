@@ -56,6 +56,12 @@ to a 33³ grid, up to 11% off LittleCMS in the shadows.
 
 PCS XYZ (D50) is adapted to D65 with Bradford, as ICC viewers do.
 
+Reading a profile interprets the stored values correctly; it does not undo
+what made them. A JPEG or TIFF from a camera or editor already carries that
+software's tone curve, white balance and gamut mapping, and the scene's
+spectrum is gone: Negs films the image as rendered, not the original scene.
+RAW files are the input the film model is built for.
+
 ### Overrides (`io.input_interpretation`)
 
 | `mode` | Meaning |
@@ -84,16 +90,24 @@ colours (negative components are allowed end to end), keeps every existing
 matrix, GPU kernel and golden input valid, and costs nothing at f32/f64.
 
 **Spectral boundary** (`settings.spectral_boundary`, default `guard`): the
-film's spectral lookup takes chromaticity (x, y) and brightness. For light
-that no spectrum can make (X+Y+Z ≤ 0, or a chromaticity beyond the xy
-triangle, e.g. from wide camera gamuts or noise), upstream's arithmetic folded
-x > 1 back inside. `guard` gives no exposure for non-positive brightness and
-moves out-of-triangle chromaticities toward the white onto the triangle at
-constant brightness. Physical light is unchanged (bit-identical). On wgpu the
-guard is its own pass (`spectral_guard.wgsl`) that rewrites only non-physical
-input in place before the unchanged front pass, so GPU renders of physical
-light stay byte-identical too; CUDA (source only, untested) guards inside its
-kernel. `upstream` restores the old arithmetic for reference comparisons.
+film's spectral lookup takes chromaticity (x, y) and brightness b = X+Y+Z of
+the CAT-adapted input. The unclamped input can hold values outside the xy
+triangle: X+Y+Z ≤ 0, or a negative X, Y or Z (from wide camera gamuts, camera
+matrices or noise). Upstream's arithmetic folded x > 1 back inside, a
+different hue. `guard` gives no exposure for b ≤ 0 and moves an
+out-of-triangle chromaticity toward the white onto the triangle at the same
+X+Y+Z (so Y changes). It is an arithmetic safeguard at the triangle, not a
+gamut map to the spectral locus: the triangle is larger than the locus, and
+chromaticities between the two (non-physical but non-negative) pass through
+the guard and are compressed by the input gamut compression (`xy`, inscribed
+hull, on by default), as before. Pixels with no negative X, Y or Z are
+unchanged (bit-identical); this includes every physical colour, but a real
+colour that a camera matrix or adaptation has already pushed to a negative
+component is changed. On wgpu the guard is its own pass
+(`spectral_guard.wgsl`) that rewrites only out-of-triangle input in place
+before the unchanged front pass, so GPU renders of everything else stay
+byte-identical too; CUDA (source only, untested) guards inside its kernel.
+`upstream` restores the old arithmetic for reference comparisons.
 
 ## 3. Output
 
@@ -151,7 +165,7 @@ double the buffer on every edit; it is a possible later step.
 | Platform | How the proxy is tagged |
 |---|---|
 | macOS | IOSurface `kIOSurfaceColorSpace` = sRGB or `itur_2020_sRGBGamma`; Core Animation converts for each display. The rendered-preview cache records the space. |
-| Windows | The canvas samples the sRGB texture as linear, multiplies a Rec. 2020 proxy by the BT.2020 → sRGB matrix (unclipped), then applies the monitor's ICC matrix/TRC transform when one is assigned. Without a monitor profile it shows sRGB. The software fallback does the same. |
+| Windows | The canvas samples the sRGB texture as linear, multiplies a Rec. 2020 proxy by the BT.2020 → sRGB matrix (unclipped), then applies the monitor's ICC matrix/TRC transform when one is assigned (`windows/src/icc.rs`; only the colorant and TRC tags are read). Without a usable monitor profile it shows sRGB. The software fallback does the same. |
 | Linux | `GdkMemoryTexture` with colour state sRGB or CICP 9/13/0 (full range); GTK converts for the output. |
 
 Grain inspection, the histogram and the press-and-hold original use the same
@@ -173,7 +187,7 @@ export-space values.
 |---|---|---|
 | ICC evaluation (matrix, gray, lut8, lut16 Lab, mAB Lab/XYZ) | `spektrafilm-io/src/colour/tests.rs`, fixtures from `scripts/gen_colour_input_fixtures.py` | LittleCMS 2.19 `transicc`: 3e-5 XYZ for LUTs (16-bit fixture quantisation); 2.5e-4 for matrix profiles (IEC sRGB white Z 1.0890 vs xy D65 1.08883); colour-science ProPhoto 5e-5 (ICC D50 vs xy white). |
 | Tag precedence, CMYK/PQ refusal, overrides, non-finite input | same | exact |
-| Spectral guard | `spektrafilm-math` spectral tests, `spektrafilm-core/tests/bw_expansion.rs`, wgpu `front_pass_boundary_matches_cpu` | physical pixels bit-identical; GPU vs CPU as existing gates |
+| Spectral guard | `spektrafilm-math` spectral tests, `spektrafilm-core/tests/bw_expansion.rs`, wgpu `front_pass_boundary_matches_cpu` | pixels with non-negative XYZ bit-identical; GPU vs CPU as existing gates |
 | Output adaptation | `scanning.rs` tests | D65 outputs bit-identical |
 | Finishing in the output space | `encoding.rs`, `border.rs`, `resize.rs`, `post.rs` tests | XYZ of border colours 1e-5; flat fields 1e-5 |
 | Wide proxy | `preview.rs` `wide_proxies_hold_the_renders_colours` | mean of a dithered flat field within 0.1 code of the exact conversion |
@@ -192,10 +206,21 @@ with Python; `--negs-colour-defaults` measures Negs' own defaults.
 - macOS's press-and-hold Original view is still decoded by Core Image into
   Display P3 and ignores the Input Colour override; the engine and helper
   paths honour it.
-- Windows shows sRGB when the monitor has no ICC profile assigned, and its
-  inspector does not show the detected input description.
+- Windows reads only the matrix/TRC part of the monitor profile: a LUT-only
+  profile can't be read, so the preview is shown as sRGB as if no profile
+  were assigned, and a profile with both LUT and matrix tags is applied
+  through its matrix, ignoring the LUTs. This is unlike input profiles, whose
+  LUTs are evaluated. Monitor profiles have not been tested on Windows
+  hardware. Its inspector does not show the detected input description.
 - ProPhoto colours beyond BT.2020 are clipped in the preview proxy (never in
   the export).
 - The 3D LUT export stays sRGB in and out.
 - HDR inputs (PQ, HLG) and CMYK files are refused rather than converted.
 - The CUDA backend's guard is untested (no CUDA hardware).
+- The output gamut compressor (`oklch`/`oklrab`, inherited from upstream)
+  converts ProPhoto RGB and DCI-P3 to Oklab relative to their own white,
+  though Oklab assumes D65. Highlights compress toward D65 rather than the
+  space's white; measured on neutrals the tint is at most C\*ab 0.4 (ProPhoto
+  white), and saturated colours near the gamut edge are compressed in a
+  slightly skewed direction. D65 outputs (sRGB, Display P3, Adobe RGB,
+  BT.2020) are exact.

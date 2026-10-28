@@ -1,10 +1,10 @@
 // The spectral boundary guard, in place on the front pass's RGB input, as
-// `adapted_xyz_to_tc_b` does on the CPU. Light no spectrum makes is rewritten
-// before `hanatos2025_rgb_to_raw`: X + Y + Z <= 0 or non-finite values become
-// black (no exposure), and a negative X, Y or Z moves toward the adapted
-// white onto the xy triangle at the same X + Y + Z, instead of folding
-// x > 1 back inside. Physical light is left untouched, so the front pass
-// computes it exactly as without the guard.
+// `adapted_xyz_to_tc_b` does on the CPU. Values outside the xy triangle are
+// rewritten before `hanatos2025_rgb_to_raw`: X + Y + Z <= 0 or non-finite
+// values become black (no exposure), and a negative X, Y or Z moves toward
+// the adapted white onto the triangle at the same X + Y + Z, instead of
+// folding x > 1 back inside. Values with no negative X, Y or Z are left
+// untouched, so the front pass computes them exactly as without the guard.
 
 struct Params {
     n_pixels: u32,

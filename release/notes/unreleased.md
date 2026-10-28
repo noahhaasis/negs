@@ -34,7 +34,8 @@
   (they differed by up to about 1.4 ΔE). sRGB, Display P3 and Adobe RGB exports
   are unchanged. `settings.output_adaptation: "direct"` restores the old
   behaviour.
-- **Non-physical input colours** (from very wide camera gamuts or noise) are
-  handled safely instead of folding into wrong hues; ordinary colours are
+- **Input colours with a negative X, Y or Z** (from very wide camera gamuts,
+  camera matrices or noise) are moved onto the nearest chromaticity the film
+  lookup accepts instead of folding into wrong hues. All other colours are
   unchanged. `settings.spectral_boundary: "upstream"` restores the old
   arithmetic.

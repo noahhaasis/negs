@@ -1009,8 +1009,9 @@ impl WgpuBackend {
             col2: [m[0][2] as f32, m[1][2] as f32, m[2][2] as f32, 0.0],
         };
         let front_params_buf = mk_uniform("front_params", bytemuck::bytes_of(&front_params));
-        // The spectral boundary guard rewrites non-physical input in place on
-        // buf_a before the front pass, which stays upstream's arithmetic.
+        // The spectral boundary guard rewrites input outside the xy triangle
+        // in place on buf_a before the front pass, which stays upstream's
+        // arithmetic.
         let guard_params_buf = guard.then(|| {
             mk_uniform("guard_params", bytemuck::bytes_of(&SpectralGuardParams::new(n_pixels, m)))
         });

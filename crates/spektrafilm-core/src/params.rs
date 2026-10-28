@@ -854,9 +854,9 @@ pub struct SettingsParams {
 #[serde(rename_all = "snake_case")]
 pub enum SpectralBoundary {
     /// No exposure for X + Y + Z <= 0 or non-finite values; a chromaticity
-    /// beyond the triangle moves toward the white onto it (see
-    /// `spektrafilm_math::spectral::adapted_xyz_to_tc_b`). Physical light is
-    /// unaffected.
+    /// beyond the triangle moves toward the white onto it at the same
+    /// X + Y + Z (see `spektrafilm_math::spectral::adapted_xyz_to_tc_b`).
+    /// Values with no negative X, Y or Z are unaffected.
     #[default]
     Guard,
     /// Upstream's arithmetic, which folds x > 1 back inside the triangle. For
