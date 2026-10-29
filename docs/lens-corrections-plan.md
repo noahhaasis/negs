@@ -36,34 +36,126 @@ against current sources or sample files during the spike.
 
   | Phase | Scope | Estimate |
   | --- | --- | --- |
-  | 0 | Spike: sample files, Apple geometry, coordinate mapping | 1–2 days |
-  | 1 | DNG opcodes, shared engine stage, UI on all three apps | 1–1.5 weeks |
-  | 2 | Sony, Fujifilm, OM/Olympus, Panasonic embedded data | ~1 week |
+  | 0 | Mac check of Apple's correction; sample files; coordinate mapping | 1–2 days |
+  | 1a | macOS: Apple's built-in correction behind a toggle | ~1 day |
+  | 1b | DNG opcodes, shared Rust stage, UI on Windows and Linux | 1–1.5 weeks |
+  | 2 | Sony, Fujifilm, OM/Olympus, Panasonic (port from darktable) | 3–5 days |
   | 3 | Optional: lensfun database for Nikon, Canon and the rest | 1–2 weeks |
 
   Phases 1–2 cover phones, Sony, Fuji, M43 and Leica without any lens database.
 
-## Design decision: one Rust implementation everywhere
+## Apple's built-in correction
 
-Two routes exist:
+`CIRAWFilter` (the decoder Negs already uses on macOS) exposes exactly two
+things: `isLensCorrectionSupported` (does this file have correction data Apple
+can apply) and `lensCorrectionEnabled` (on/off). The older dictionary key was
+`kCIInputEnableVendorLensCorrectionKey`: it applies the correction data the
+camera vendor embedded in the RAW. Negs currently sets it off together with
+every other Apple processing step (`apple_raw.m:46`).
 
-1. **Platform-native on macOS** — set Apple's `lensCorrectionEnabled = YES`
-   and implement something else for rawler on Windows/Linux.
-2. **Shared Rust stage** in `spektrafilm-io`, used after every decoder,
-   with Apple's correction kept off.
+What Apple does not document:
 
-**Recommendation: route 2.** Apple's correction is opaque (its coverage
-depends on the macOS version and is not documented), it requires a full
-re-decode to toggle, and it would make the same file correct differently on
-macOS than on Windows/Linux. A shared stage gives one behaviour, one status
-message ("Embedded Sony profile: distortion, vignetting, CA") and one test
-suite, and it is pure Rust, so the web port in `~/Work/Negs-wasm` can reuse
-it later.
+- which cameras and lenses are covered (it changes with macOS releases; an
+  [Apple forum thread](https://developer.apple.com/forums/thread/28477) asks
+  for exactly this and reports seeing no effect on one file);
+- which of distortion, lateral CA and vignetting it corrects; there are no
+  separate switches;
+- whether turning it off also suppresses a DNG's own `OpcodeList` warps
+  (relevant for iPhone ProRAW, Leica, Pixel);
+- whether the output extent changes when it is on.
 
-Fallback if the Phase 0 spike shows Apple's output cannot be mapped to the
-sensor coordinates the metadata uses: enable Apple's correction on macOS for
-the Apple-decoded path only, and document the difference. Decide this at the
-end of Phase 0, not before.
+| | Apple built-in | Shared Rust stage |
+| --- | --- | --- |
+| Effort on macOS | ~1 day incl. UI | Phases 1b–2 |
+| Windows, Linux, rawler fallback on macOS | no | yes |
+| Coverage | unknown, set by Apple | known, documented, testable |
+| Separate distortion / vignetting / CA | no | yes |
+| Status ("Embedded Sony profile") | only "supported" | yes |
+| Toggle cost | re-decode (as white balance already does) | same |
+
+Earlier drafts rejected Apple's route for cross-platform consistency. That
+argument is weak: Apple and rawler already demosaic and calibrate differently,
+so the same file does not match pixel-for-pixel across platforms today.
+
+## Design decision: Apple on macOS now, shared Rust stage everywhere else
+
+1. **macOS (Phase 1a):** turn on `lensCorrectionEnabled` when the user's
+   setting is on and `isLensCorrectionSupported` is true. Show the toggle only
+   when supported. Ship it independently of the Rust work.
+2. **Windows, Linux and the rawler fallback on macOS (Phases 1b–2):** a pure-Rust
+   stage in `spektrafilm-io`, used after rawler. Pure Rust also lets the web
+   port in `~/Work/Negs-wasm` reuse it later.
+3. **Later:** once the Rust stage exists, compare both on the same Mac files.
+   If ours matches or beats Apple and covers more, switch macOS to it too
+   (this requires the Apple-geometry mapping described under Coordinates).
+
+Both use the same `io.lens_correction` setting, so sessions, undo and the UI
+stay the same on every platform.
+
+## Prior art and what we can reuse
+
+### spektrafilm OFX ([spektrafilm.114c.de](https://spektrafilm.114c.de/))
+
+Not reusable for this. It is a DaVinci Resolve / OpenFX plugin for footage
+(log and Cineon/DPX input, no RAW decoding). Its "Lens, Gate, and Movement"
+group (distortion, vignetting, chromatic aberration, bokeh, coma, film gate)
+*adds* lens character as a creative effect; it does not remove a real lens's
+defects using camera data. The public GPL-3.0 repository
+([chaert-s/spektrafilm-ofx](https://github.com/chaert-s/spektrafilm-ofx),
+last pushed 2026-07-06) contains none of the lens code: its parameters and
+Metal shader have no distortion, vignetting or CA terms. Official binaries
+ship under a separate non-GPL notice. Could be interesting later as an
+"add lens character" feature; it is the opposite of this one.
+
+### darktable (lens correction module)
+
+The best reference, and licence-compatible. darktable 5.x has two methods in
+`src/iop/lens.cc`:
+
+1. **Lensfun** profiles (C library) for any camera/lens in the database.
+2. **Embedded metadata**, `dt_image_correction_type_t` in
+   `src/common/image.h`: `SONY`, `FUJI`, `DNG`, `OLYMPUS`, `PANASONIC`.
+   - Parsing: `_check_lens_correction_data` in `src/common/exif.cc`
+     (~400 lines, from line ~1376; uses exiv2 tag names such as
+     `Exif.SubImage1.DistortionCorrParams`, `Exif.Fujifilm.VignettingParams`).
+   - DNG opcodes: `src/common/dng_opcode.c` (~290 lines;
+     `WarpRectilinear`, `FixVignetteRadial`, `GainMap`).
+   - Turning coefficients into radial knots, scale-to-fill and rendering:
+     `_commit_params_md`, `_process_md`, `_init_vignette_spline` and
+     neighbours in `lens.cc` (~500 lines).
+
+So the vendor knowledge is about 1,200 lines of C/C++. It is not reusable
+as a library: it is tied to darktable's pixelpipe, exiv2 and GLib. It is
+reusable as source to port to Rust. We would read the same tags through
+rawler's TIFF/maker-note parsers instead of exiv2 (Phase 0 must check that
+rawler exposes the Sony `SubImage1` and Fujifilm tags; darktable copies some
+of them around itself, e.g. `exif.cc:3236` onward).
+
+**Licence:** darktable is GPL-3.0-or-later; Negs is GPL-3.0-only. Porting
+darktable code into Negs is allowed (we take it under v3). Keep darktable's
+copyright notices in the ported files and credit it in the README.
+
+### Lensfun
+
+- **Library:** LGPL-3.0, C/C++ (`/usr/include/lensfun` is installed here,
+  version 0.3.4). Linking it would add a native dependency to the Windows
+  installer and the macOS bundle. Not worth it: the models (`poly3`, `poly5`,
+  `ptlens` distortion; `pa` vignetting; `linear`/`poly3` TCA) are short
+  formulas. Implement them in Rust.
+- **Database:** XML, about 56 files (`/usr/share/lensfun/version_1`),
+  CC BY-SA 3.0. darktable and RawTherapee ship it alongside GPL code. Ship it
+  as separate data files with its licence and attribution, not compiled into
+  the binary, and confirm this reading before release.
+- The hard part is not the maths but matching camera and lens names from EXIF
+  to database entries and interpolating by focal length/aperture/distance.
+  That is why Phase 3 stays optional.
+
+### Effort impact
+
+Porting from darktable removes most of the reverse-engineering risk in
+Phase 2: the formats are already decoded and tested by darktable users. That
+lowers Phase 2 from ~1 week to 3–5 days. Phase 1b is unchanged because the
+pipeline, settings and UI work dominate it.
 
 ## Where the stage goes
 
@@ -131,7 +223,8 @@ pub struct LensProfile {
 ### Coordinates
 
 - rawler path: we own the crop steps, so active-area coordinates are direct.
-- Apple path: `CIRAWFilter` output is already default-cropped. Read
+- Apple path (only needed if macOS later moves off Apple's own correction):
+  `CIRAWFilter` output is already default-cropped. Read
   `DefaultCropOrigin/Size` and the active area through rawler's metadata and
   offset the profile centre and normalisation radius accordingly. **Phase 0
   must confirm** the Apple output extent equals the default crop for each
@@ -181,6 +274,12 @@ The old egui app (`crates/spektrafilm-gui`) is not maintained; skip it.
 
 ### Phase 0 — spike (1–2 days)
 
+0. **On a Mac (Noah):** decode a Sony, Fujifilm, OM/Olympus or Panasonic RAW,
+   an iPhone ProRAW DNG and a Nikon NEF with `lensCorrectionEnabled` off and
+   on. For each, record `isLensCorrectionSupported`, the output size, and
+   whether corners brighten (vignetting) and straight lines move
+   (distortion). A small change to `raw_decoder_probe` plus a temporary
+   environment switch in `apple_raw.m` is enough. This decides Phase 1a.
 1. Collect samples with known in-camera corrections: iPhone ProRAW DNG, Pixel
    DNG, a Leica or Ricoh DNG, Sony ARW, Fujifilm RAF, OM/Olympus ORF,
    Panasonic RW2, a Nikon Z NEF and a Canon CR3. raw.pixls.us and
@@ -196,25 +295,35 @@ The old egui app (`crates/spektrafilm-gui`) is not maintained; skip it.
 5. Write the result into this document: confirmed formats, the Apple
    decision, and any revision of the estimates.
 
-### Phase 1 — DNG opcodes and the full pipeline (1–1.5 weeks)
+### Phase 1a — macOS via Apple (~1 day)
+
+1. `io.lens_correction` setting (one `enabled` flag is enough for Apple),
+   passed through `RawDecodeOptions` and the bridge.
+2. `apple_raw.m`: set `lensCorrectionEnabled` from the option when supported;
+   return `isLensCorrectionSupported` in `SFAppleRaw`.
+3. macOS inspector toggle, shown only when supported; undo, reset, sessions.
+4. Update `docs/apple-raw-decoder.md` (lens correction is no longer always off).
+
+### Phase 1b — DNG opcodes and the shared pipeline (1–1.5 weeks)
 
 1. `lens` module: model, `WarpRectilinear`, `FixVignetteRadial`, `GainMap`
-   parsers (big-endian opcode blobs, per the DNG 1.6 spec), renderer.
+   parsers (big-endian opcode blobs, per the DNG 1.6 spec; port from
+   darktable's `dng_opcode.c`), renderer.
 2. Rawler path: remove `CropDefault`, apply correction, crop, orient.
-3. Apple path: apply correction to Apple's output with the Phase 0 mapping.
-4. Settings, native helper, CLI flag (`--lens-correction on|off`).
-5. UI on macOS, Windows, Linux.
-6. Tests (below).
+3. Settings sub-flags, native helper, CLI flag (`--lens-correction on|off`).
+4. UI on Windows and Linux; on macOS the same toggle drives the Rust stage
+   when the file fell back to rawler.
+5. Tests (below).
 
-Ship after Phase 1: it is already useful for phone DNGs, and it puts every
-cross-cutting piece in place.
+Ship after Phase 1b: it is already useful for phone DNGs on Windows/Linux, and
+it puts every cross-cutting piece in place.
 
-### Phase 2 — vendor embedded data (~1 week)
+### Phase 2 — vendor embedded data (3–5 days)
 
-One parser per vendor, each converting to `LensProfile`, each a day or two
-with tests: Sony, Fujifilm, OM/Olympus, Panasonic. Add more only where
-Phase 0 found decodable data. Nikon HE★ files decode only through Apple; their
-profile parsing is independent of the decoder and still applies.
+Port darktable's Sony, Fujifilm, OM/Olympus and Panasonic parsers and their
+coefficient-to-knot conversion, each converting to `LensProfile`, with tests
+against darktable's results on the same files (darktable 5.6.2 is installed
+here, so its output can serve as the reference).
 
 ### Phase 3 — optional lensfun database (1–2 weeks)
 
@@ -252,7 +361,11 @@ Only do this if users ask for Nikon/Canon coverage after Phase 2.
 - **Reverse-engineered formats drift** with new camera bodies. Parse
   defensively; an unrecognised layout yields "no profile", never an error
   that blocks opening the file.
-- **Apple geometry mismatch** (Phase 0) could force the fallback route.
+- **Apple's coverage is unknown** and may change between macOS releases;
+  the toggle follows `isLensCorrectionSupported` per file, so nothing breaks,
+  but coverage can differ from Windows/Linux.
+- **Apple geometry mismatch** only matters if macOS later switches to the
+  Rust stage for Apple-decoded files.
 - **Crop shift** when toggling distortion on an edited photo. Acceptable
   if documented; optionally rescale the stored crop in a later pass.
 - **Memory:** correction can run in place except for the resample, which needs
