@@ -2,10 +2,12 @@
 
 For the agent picking up the browser version of Negs. Read, in this order:
 `docs/web-mvp-plan.md` (the pieces, their order and their "Done when"),
-`docs/web-wasm.md` (what exists, measurements, limits),
-`docs/web-wasm-handoff.md` (code map, build, serve, tools, gotchas) and
-`docs/web-feature-inventory.md`. This file adds where things stand, what
-the next pieces touch, and notes for piece 5, which now comes later.
+`docs/web-wasm.md` (what exists, measurements, limits; items 14 and 15
+are the last two pieces), `docs/web-wasm-handoff.md` (code map, build,
+serve, tools, gotchas) and `docs/web-feature-inventory.md`. This file
+says where things stand, and what the next piece, **8: Before/After**,
+touches and needs decided. Notes for piece 5, which comes later, are at
+the end.
 
 ## Where things stand
 
@@ -22,9 +24,9 @@ branch). Commits end with
 | HTTPS for device testing | `d350950` | done |
 | 3. iPad and phone layout | `842da9c` | done |
 | 4. Enlarger shifts without a rebuild, Balance Print | `adcee97` | done (`docs/web-wasm.md` item 12) |
-| 6. Resident scan, zoom, true-resolution preview | `fc6322d` | done ahead of piece 5, at the owner's request (`docs/web-wasm.md` item 14); approved |
-| 7. Placeholder Image, and the sample photo (lossy DNG) | | done (`docs/web-wasm.md` item 15) |
-| **8. Before/After toggle** | | **next**, owner's list |
+| 6. Resident scan, zoom, true-resolution preview | `fc6322d` | done (item 14); approved |
+| 7. Placeholder Image, sample photo | `9d4f4b4` | done (item 15) |
+| **8. Before/After toggle** | | **next**; below |
 | 9. Export LUT | | owner's list |
 | 10. Export Preset | | owner's list |
 | 11. Borders and Fit for Instagram | | owner's list; 🛑 owner review of 7–11 |
@@ -32,27 +34,175 @@ branch). Commits end with
 | Stage 1 checkpoint | | 🛑 |
 
 The owner asked for pieces 7–11 (their features) ahead of everything else
-left, so piece 5 moved after them. The plan's "Order of work" has it.
+left, so piece 5 moved after them. Pieces 7–11 end at one 🛑 review, after
+piece 11, so carry on from 8 to 11 unless the owner says otherwise; report
+at the end of each piece all the same.
 
-Still open from piece 3: nobody has opened the page on a real iPad or
-iPhone (ufw blocks ports 8137 and 8443 from the LAN; the owner's call), and
-the 24 MP ARW takes 954 MiB in the engine at a phone's preview size
-(piece 6).
+What piece 7 settled with the owner, which later pieces shouldn't undo:
 
-## Pieces 7–11: what they touch
+- **The page starts on the empty screen** and downloads nothing big. The
+  owner wants the first load fast. "Try a sample photo" there opens
+  `web/sample/DSC_6377.dng`, a 3.4 MB lossy DNG that
+  `web/sample/make-dng.py` made from the owner's NEF (31.6 MB, not in the
+  repository, at `~/Downloads/raws/DSC_6377.NEF`). The NEF must not come
+  back into the repository.
+- A photograph shows at once from its placeholder (`web/placeholder.js`)
+  with a "Developing" badge (`setBadge`), until the first frame.
 
-The plan has each piece's desktop sources and "Done when". Notes from
-reading the code:
+Open items that aren't yours to settle:
 
-- **Piece 6's display pass is the base for 8 and 11.** The canvas keeps
-  the frame's bytes as a texture (`Canvas.shown` in
-  `crates/spektrafilm-gpu/src/wgpu_backend.rs`, the last two kept) and
-  draws it with a `View` (`fs_view` in
-  `crates/spektrafilm-shaders/wgsl/display_present.wgsl`); `Engine.show`
-  redraws without the film chain. The original (piece 8) is another shown
-  texture; a border (piece 11) is drawn around the photograph in
-  `fs_view`, and the view in `web/view.js` then places the bordered
-  canvas, not the photograph alone.
+- The owner's Cloudflare packager (`web/package-static.mjs`, uncommitted)
+  doesn't copy `web/sample/` yet; the owner knows.
+- Nobody has opened the page on a real iPad or iPhone (ufw blocks ports
+  8137 and 8443 from the LAN; the owner's call).
+
+## The owner's uncommitted work: don't commit it
+
+`web/credits.html`, `web/package-static.mjs`, `web/static/`,
+`docs/cloudflare.md`, and two lines in `web/index.html` (the empty
+screen's "Your photo stays in your browser." and the sidebar's "Credits &
+source" link). Leave them as they are. When you commit `web/index.html`,
+stage your version without those two lines, as piece 7 did:
+
+```sh
+grep -v -F -e '      <p>Your photo stays in your browser.</p>' \
+  -e '      <div class="hint"><a href="credits.html" target="_blank" rel="noopener" style="color: inherit">Credits &amp; source</a></div>' \
+  web/index.html > <scratch>/index.html
+git update-index --cacheinfo 100644,$(git hash-object -w <scratch>/index.html),web/index.html
+```
+
+Then `git diff web/index.html` must show exactly those two lines left
+unstaged.
+
+## Piece 8: Before/After (Show Original)
+
+The plan's text is under "8. Before/After toggle". What I found reading
+the desktop apps and the engine:
+
+### What desktop does
+
+- **macOS** (`macos/Sources/NegsApp/NegsApp.swift` `OriginalButton`, around
+  line 289; `EditorModel.swift` "MARK: Original", around line 670;
+  `EditorWindowController.swift` `holdOriginal`, around line 107):
+  - a button in the status bar, beside the zoom controls (line 278), with
+    the `square.split.diagonal.fill` symbol; held, it shows the original,
+    released, the developed photograph. Help text: "Hold to show the
+    original (\\)";
+  - holding `\` does the same, without Command or Control, not while
+    typing in a text field, ignoring key repeat;
+  - the decode starts when the pointer reaches the button
+    (`prepareOriginal` on hover), so the press usually shows it at once;
+  - the badge (`ActivityBadge`) says "Original" while it shows, and
+    "Loading Original" while held before the decode is done;
+  - `canShowOriginal`: there is a developed image and it isn't cropping;
+  - it decodes at the developed preview's resolution (never above the
+    source's), so it's as sharp at 100%; the canvas keeps the view, crop,
+    rotation and border;
+  - VoiceOver can't hold, so activating the button toggles it.
+- **Linux** has a toggling `original` action (`linux/src/actions.rs`
+  line 85, `runtime.rs` `show_original`); Windows a similar view.
+- **The helper's `original`** (`crates/spektrafilm-native/src/main.rs`,
+  `Command::Original`, around line 236), which Linux and Windows show:
+  the engine's decoded source (rawler's develop for a RAW, the file for a
+  JPEG), resampled to the preview size, encoded by `original_encoding`
+  (a linear-sRGB decode to the output space without its curve flag,
+  otherwise the stored values in the input space) and turned into bytes by
+  `display_rgba_with_post` with no Post.
+
+### Decide first: which original
+
+macOS's original is **Apple's RAW develop** (`Original.swift`,
+`CIRAWFilter`), a different look from the engine's. A browser has no such
+decoder. Two candidates:
+
+1. **The engine's source, as the helper's `original`** (Linux and Windows,
+   and what the plan says). Exact framing, any resolution, and it's what
+   the film simulation starts from. Its look is flat (rawler's develop,
+   no tone curve), so "before" can look dull next to the film.
+2. **The camera's embedded preview** (piece 7's placeholder): the camera's
+   own look, closest in spirit to macOS's, free, already decoded. But it's
+   1620 px or so (soft at 100%), absent for some files, and framed a
+   little differently (the ARW's is 0.25% narrower).
+
+I recommend 1, matching the plan, the helper and two of three desktop apps,
+and saying in the report that macOS differs and why. If you think 2 is
+better, ask the owner before building it.
+
+### How it could fit the code
+
+- **Engine (wasm).** A new `Engine.original(maxDim, present)` beside
+  `render` in `crates/spektrafilm-wasm/src/lib.rs`: take the loaded source
+  (`state.source`, a `Keyed` image; `state.input_colour` says whether it's
+  linear sRGB), resample it to the size of the developed frame on screen
+  (reuse the settled resample, `state.scaled`), encode it as
+  `original_encoding` does, and make the bytes with the same display
+  function the helper uses, so they compare within 1/255. Move
+  `original_encoding` (and `convert_linear`) from the helper into
+  `spektrafilm-core` or `spektrafilm-io` so both use one copy; the
+  helper's output must not change (render its `original` before and after
+  and compare the `.rgba` files).
+- **Canvas (`wgpu_backend.rs`, wasm only).** `Canvas.shown` holds the
+  developed frames (the last two sizes). Give the original its own slot
+  (say `original: Option<Shown>` and a `showing_original` flag that
+  `encode_view` reads to pick the texture), written like `present_rgba`
+  writes bytes. Then switching is a `show()`: one display pass, no film
+  chain, the same `View`, so zoom and pan stay put. `forget_photograph`
+  must free the slot too. Budget its memory with the shown images (a 24 MP
+  RGBA texture with mips is about 128 MB). Keep the slot after release
+  while the photograph and its size stay the same, so the next press is
+  instant, like macOS's cache.
+- **While it shows:** a render that finishes (a slider moved with `\`
+  held, or a settled frame after a zoom) updates the developed texture
+  but must not draw over the original; `encode_view` taking the flag
+  handles that. If a zoom needs a bigger developed frame, the original
+  needs remaking at that size too (or show the old one smoothed until it
+  is).
+- **The CPU engine** draws bytes on the page's canvas (`paint` in
+  `web/app.js`): keep the original's bitmap beside `frame` and paint it
+  while showing.
+- **The page (`web/app.js`, `web/index.html`).** A button in the `.zoom`
+  bar, before Fit (macOS puts it beside its zoom controls). Mouse and pen:
+  hold (`pointerdown` shows; `pointerup`, `pointercancel` and
+  `lostpointercapture` hide). Touch: a tap toggles (the plan: holding
+  hides the photograph under the finger), and the button shows it's on.
+  `\` keydown/keyup on `window`, not in inputs or when Ctrl/Meta is held,
+  ignoring `repeat`. `pointerenter` on the button prepares the original,
+  as macOS's hover. The badge says "Original" while it shows ("Loading
+  Original" while waiting); `setBadge` from piece 7 is there, but it's
+  also the "Developing" badge, so don't clear one with the other. Disabled
+  while `loading` or a placeholder (`early`) shows, or without a photo:
+  macOS's `canShowOriginal`.
+- **Automation.** Add hooks to `negs` (for example `original(on)` and
+  whether it's showing) and a check, `web/checks/original.js`: switch both
+  ways, measure the display pass (`negs.views`) and that `negs.renders`
+  didn't grow, read the canvas while showing (as `checks/zoom.mjs` reads
+  it) and compare with the helper's `original` for the card and the ARW;
+  then by keyboard (`Input.dispatchKeyEvent` in a `.mjs` check), mouse
+  and touch (`VIEW=390x844@3m`).
+
+### Done when (from the plan)
+
+Switching either way is one display frame (measure it), the stage list
+shows no render, the original matches the helper's `original` for the card
+and the ARW within 1/255 (or the difference explained), it works by
+keyboard, mouse and touch, and zoom and pan stay where they were across the
+switch. Update `docs/web-wasm.md` (item 16), `docs/web-wasm-handoff.md`
+(code map, `negs` hooks, the new check) and this file, then commit.
+
+If the engine changes (moving `original_encoding`, the canvas slot), the
+plan's ground rules apply: the CLI and the helper before and after
+(byte-identical, `SPEKTRAFILM_BACKEND=wgpu` and `cpu`),
+`cargo check --workspace --all-targets`, and the core, gpu, math, model,
+io and spektrafilm-native tests. Rerun `web/checks/zoom.mjs`,
+`placeholder.js`, `inspector.js` and `touch.mjs` after.
+
+## After piece 8: pieces 9–11
+
+- **Piece 6's display pass is the base for 11 too.** A border is drawn
+  around the photograph in `fs_view`
+  (`crates/spektrafilm-shaders/wgsl/display_present.wgsl`), and the view
+  in `web/view.js` then places the bordered canvas, not the photograph
+  alone.
 - **Engine entry points that read the data directory.**
   `lut_export::cube` (piece 9), `presets::export`/`import` (piece 10) and
   `border::add_border` (piece 11, the textures) take a `data_dir: &Path`.
@@ -65,67 +215,27 @@ reading the code:
   border on export needs the bytes back in the worker for `add_border`
   first; measure memory at 24 MP.
 - **Licences.** The film border textures are MIT (`film.png`) and
-  CC BY-SA (35mm); see `data/borders/README.md`. The owner has uncommitted
-  credits work in the worktree (`web/credits.html`,
-  `web/package-static.mjs`, `web/static/`, `docs/cloudflare.md`, two lines
-  in `web/index.html`): leave it alone and don't commit it.
+  CC BY-SA (35mm); see `data/borders/README.md`.
 
-## `/tmp` cleanup (done in piece 4)
+## Lessons from piece 7
 
-Piece 4 hit `Disk quota exceeded` partway through: `/tmp` is a 7.8 GB
-tmpfs, and `/tmp/claude-1000` had reached 5.4 GB. Its symptom is quiet. A
-`cdp.mjs` run exits with code 13 and prints nothing, because Chrome can't
-write its profile. Almost all of the space is Chrome profiles from earlier
-sessions' benchmarks and page checks.
-
-The owner asked for this cleanup. What was there at the end of piece 4
-(under `/tmp/claude-1000/-home-noah-Work-Negs/`):
-
-| Folder | Size | What |
-|---|---|---|
-| `6143adf9-…` | 4.1 GB | piece 3's scratch: 60 `cdp-*` Chrome profiles, `p3-*` and `p2-*` screenshots |
-| `ba7e0e5e-…` | 477 MB | piece 4's session folder (`tasks/` holds its background-task output); earlier renders |
-| `f4cba253-…` | 365 MB | `adw16.meson`, `demo.jpg`, `dl/`: looks like other Negs work (Linux), not the web |
-| `1ecb165a-…` | 213 MB | earlier web session: `chrome/` profile, ARW renders |
-| `2ab84e89-…` | 182 MB | earlier web session: `chrome/`, `ff/` profiles, SIMD comparison renders |
-| `798deb0f-…` | 128 MB | piece 4's scratchpad: CLI before/after renders, helper scripts |
-| `56b14bc1-…` | 0 | empty |
-
-Outside it, `/tmp/negs-upstream-ui-review` (89 MB) belongs to other work.
-
-Do this:
-
-1. Make sure nothing is using a folder before you delete it:
-   `lsof +D <folder> 2>/dev/null | head`, and no test Chrome running
-   (`pgrep -af '/opt/google/chrome/chrome' | grep claude-1000`). Your own
-   session's folder is the one your scratchpad is in; leave it.
-2. Delete the Chrome profiles everywhere: every `cdp-*`, `chrome/`, `ff/`
-   and `bench/` under those folders. They're reproducible and are the bulk.
-3. Delete the whole folders of the finished web sessions: `6143adf9-…`,
-   `1ecb165a-…`, `2ab84e89-…`, `798deb0f-…`, `ba7e0e5e-…` and the empty
-   `56b14bc1-…`. Nothing in them is needed: the baselines the docs quote
-   are in `web/results/` in the worktree, not in `/tmp`.
-4. Leave `f4cba253-…` (apart from any Chrome profiles in it) and
-   `/tmp/negs-upstream-ui-review` alone. They look like other work, so ask
-   the owner before removing them.
-5. Check: `du -sh /tmp/claude-1000` and `df -h /tmp`. Report what you
-   freed.
-
-Then stop it from filling up again:
-
-- `web/cdp.mjs` makes a profile with `mkdtempSync` and never removes it,
-  and `web/bench.sh` defaults to `mktemp -d` and leaves its profile too.
-  Make both delete the profile they made when Chrome exits (only one they
-  created, not a `$BENCH_PROFILE` or `$CDP_TMP` directory the caller
-  passed). Then piece 4's `rm -rf <scratch>/bench/*` after every run isn't
-  needed. Commit that with a line in the handoff doc.
-  **Done:** both now delete the profile they made once Chrome has exited
-  (`cdp.mjs` also on a failed run). The cleanup freed 5.0 GB (`/tmp` went
-  from 5.6 GB used to 586 MB). `ba7e0e5e-…/tasks` and `56b14bc1-…` were
-  left: live Claude sessions hold them. `f4cba253-…` and
-  `/tmp/negs-upstream-ui-review` are untouched, waiting on the owner.
-- Keep large renders (the helper's `.rgba` previews are 17 MB each) only as
-  long as a comparison needs them.
+- **Keep the first load light.** Anything big (samples, textures, LUTs)
+  downloads when it's asked for, with progress (`download` in `app.js`
+  reads the body against `Content-Length`, which `serve.mjs` now sends).
+- **Starting the engine resets the canvases' visibility.**
+  `attachCanvas` hid the page's canvas while a placeholder showed on it;
+  it now keeps it for `early`. Anything new drawn on the page's canvas
+  (the CPU engine's original) needs the same care.
+- **`loading` gates renders while a photograph opens**, and `draw` leaves
+  the placeholder until the opening photograph's first frame. A new
+  display state (the original) shouldn't fight it: disable it while
+  `loading`.
+- **A lossy DNG's raw data is JPEG tiles.** Any code that looks for JPEGs
+  in a RAW must skip the raw directories' strips and tiles
+  (`rawData` in `placeholder.js`).
+- **Don't run a compressor on a user's file without `-c`** (or `-k`):
+  `gzip file` replaces it. Piece 7 did that to the owner's NEF by mistake
+  and had to restore it. Work on copies in your scratchpad.
 
 ## Piece 5 (after piece 11)
 
@@ -368,8 +478,8 @@ the chosen space and its ICC profile:
 
 ## Practical notes
 
-- The dev server runs at `node web/serve.mjs` (port 8137); piece 4 left it
-  running, and `serve.mjs --https` on 8443 from piece 3. Restart after
+- The dev server runs at `node web/serve.mjs` (port 8137); piece 7 left it
+  running (restarted for its `Content-Length`). Restart after
   editing `serve.mjs`; kill by port:
   `kill $(ss -ltnpH 'sport = :8137' | grep -o 'pid=[0-9]*' | cut -d= -f2)`.
 - After changing Rust, `web/build.sh --threads` (also regenerates
@@ -381,13 +491,16 @@ the chosen space and its ICC profile:
   `enlarger.js`, `updated.js` (updated vs fresh renders; its header says
   how), `balance.js`, `inspector.js` (desktop wiring; its `fieldFocused`
   is false in this unfocused window, before piece 4 too) and `touch.mjs`
-  (phone layout). Rerun the last two after UI changes.
+  (phone layout), `zoom.mjs` (zoom and pan) and `placeholder.js`
+  (piece 7). Rerun the last four after UI changes.
 - `negs` in the page: `state()`, `edit(path, value)`, `renders`, `idle()`,
-  `open(url)`, `read(maxDim)` (render, read back the bytes) and
-  `balance(...)`.
+  `open(url)`, `read(maxDim)` (render, read back the bytes),
+  `balance(...)`, `view`, `views`, `placeholder()`, `timeline`, `badge()`
+  and `openSample()`; `docs/web-wasm-handoff.md` lists them all.
 - Messages: `showMessage(text, error, ms)` with `ms` stays up through the
   renders that follow and hides itself after `ms`; without it, the next
-  finished render hides it. A download-progress message wants the first.
+  finished render hides it. The badge (`setBadge`) is for states the
+  photograph is in (downloading, developing; the original next).
 - Controls that need the engine read `host` in `sync()`. `startEngine`
   calls `sync()` once the engine is up.
 - Keep temporary files in your scratchpad; use
