@@ -8,6 +8,7 @@ const query = new URLSearchParams(location.search);
 import { SECTIONS, POST_SECTIONS, optionTitle, snap, formatValue } from "./controls.js";
 import { createView } from "./view.js";
 import { placeholder } from "./placeholder.js";
+import * as Border from "./border.js";
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
 // complete RuntimeParams, starting from the engine's defaults. Values a
@@ -23,6 +24,9 @@ const PRESET_PATHS = [
   "film_render.halation.halation_strength", "film_render.halation.halation_first_sigma_um",
 ];
 let photo = null;             // { name, bytes, width, height }
+// The presentation border (web/border.js), beside the edit as desktop keeps
+// it: not in its params, so it never renders the film.
+const border = { ...Border.DEFAULT_BORDER };
 let host = null;              // the engine worker
 let kind = "gpu";
 
@@ -110,6 +114,7 @@ let presenting = false;
 async function attachCanvas() {
   presenting = false;
   sentView = "";
+  engineTexture = null;
   $("gpu-canvas")?.remove();
   // The page's canvas keeps the bytes' frame, or a placeholder.
   $("canvas").hidden = !frame && !early;
@@ -214,6 +219,15 @@ function binding(c) {
       modified: () => { const v = stockValues(c.path)[c.index]; return v !== undefined && !near(v, stockDefaults(c.path)[c.index] ?? 0); },
     };
   }
+  if (c.border) {
+    const initial = Border.DEFAULT_BORDER[c.border];
+    return {
+      get: () => (c.percent ? border[c.border] * 100 : border[c.border]),
+      set: (v) => { border[c.border] = c.percent ? v / 100 : v; },
+      initial: () => (c.percent ? initial * 100 : initial),
+      modified: () => (c.percent ? Math.abs(border[c.border] - initial) > 1e-9 : border[c.border] !== initial),
+    };
+  }
   return { get: () => get(c.path), set: (v) => set(c.path, v), initial: () => defaultValue(c.path), modified: () => isModified(c.path) };
 }
 
@@ -237,6 +251,21 @@ const actions = {
 };
 
 function buildControl(c) {
+  const row = buildRow(c);
+  if (c.help) row.title = c.help;
+  // A border setting: shown for its styles, off while the border is.
+  if (c.border && c.border !== "enabled") {
+    syncs.push(() => {
+      row.hidden = !!c.styles && !c.styles.includes(border.style);
+      row.classList.toggle("off", !border.enabled);
+      for (const e of row.querySelectorAll("input, button, select")) e.disabled = !border.enabled || (e.dataset.fits === "false");
+    });
+  }
+  return row;
+}
+
+function buildRow(c) {
+  if (c.kind === "styles") return buildStyles(c);
   if (c.kind === "action") {
     const a = actions[c.action];
     const button = el("button", { type: "button", className: "btn", textContent: c.label, title: c.help });
@@ -248,7 +277,17 @@ function buildControl(c) {
     return el("div", { className: "ctl action" }, button);
   }
   const b = binding(c);
-  const changed = (mode) => { sync(); schedule(mode); };
+  // A border change is a display pass; anything else renders.
+  const changed = c.border ? () => borderChanged() : (mode) => { sync(); schedule(mode); };
+  if (c.kind === "color") {
+    const input = el("input", { type: "color" });
+    input.setAttribute("aria-label", c.label);
+    const reset = resetButton(c.label, b, () => changed("settled"));
+    input.addEventListener("input", () => { b.set(input.value); changed("settled"); });
+    const row = el("div", { className: "ctl row color" }, el("label", {}, el("span", { textContent: c.label }), reset, input));
+    syncs.push(() => { input.value = b.get(); reset.hidden = !b.modified(); row.classList.toggle("changed", b.modified()); });
+    return row;
+  }
   if (c.kind === "toggle") {
     const sw = el("input", { type: "checkbox", className: "switch" });
     const reset = resetButton(c.label, b, () => changed("settled"));
@@ -318,6 +357,53 @@ function buildControl(c) {
     row.classList.toggle("changed", b.modified());
   });
   return row;
+}
+
+// The border's style picker (macOS BorderStylePicker): a drawn sample of
+// each in the current mat and line colours. 35mm only fits 3:2 and 3:4
+// photographs; the note under the picker says why it's off.
+function buildStyles(c) {
+  const buttons = Border.STYLES.map((style) => {
+    const swatch = el("span", { className: "swatch" });
+    const button = el("button", { type: "button", className: "style", title: style.help }, swatch, el("span", { textContent: style.title }));
+    button.dataset.style = style.id;
+    button.setAttribute("aria-label", `${style.title} border`);
+    button.addEventListener("click", () => { border.style = style.id; borderChanged(); });
+    return { style, button, swatch };
+  });
+  const note = el("p", { className: "hint note", hidden: true });
+  const row = el("div", { className: "ctl styles" }, el("div", { className: "picker", role: "group" }, ...buttons.map((b) => b.button)), note);
+  row.querySelector(".picker").setAttribute("aria-label", c.label);
+  let colours = "";
+  syncs.push(() => {
+    const size = photo ?? early;
+    for (const { style, button } of buttons) {
+      button.setAttribute("aria-pressed", border.style === style.id);
+      button.dataset.fits = !size || Border.fits(style.id, size.width, size.height);
+    }
+    const fits35 = !size || Border.fits("35mm", size.width, size.height);
+    note.hidden = fits35;
+    if (!fits35) note.textContent = `35mm needs a 3:2 or 3:4 photograph. This one is ${Border.ratioName(size.width, size.height)}.`;
+    if (colours !== border.color + border.lineColor) {
+      colours = border.color + border.lineColor;
+      for (const { style, swatch } of buttons) swatch.innerHTML = swatchSvg(style.id, border.color, border.lineColor);
+    }
+  });
+  return row;
+}
+
+// macOS BorderSwatch, 50 × 36.
+function swatchSvg(style, mat, line) {
+  const photo = (x, y, w, h, r = 0) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="url(#sky-${style})"/>`;
+  const perfs = (y) => Array.from({ length: 8 }, (_, i) => `<rect x="${1.5 + i * 6}" y="${y}" width="3.5" height="3.5" rx="0.8" fill="#f2f2f2"/>`).join("");
+  const body = {
+    solid: `<rect width="50" height="36" fill="${mat}"/>${photo(5, 5, 40, 26)}`,
+    keyline: `<rect width="50" height="36" fill="${mat}"/><rect x="4" y="4" width="42" height="28" fill="${line}"/>${photo(5, 5, 40, 26)}`,
+    film: `<rect width="50" height="36" fill="#000"/>${photo(2, 2, 46, 32, 2)}`,
+    "35mm": `<rect width="50" height="36" fill="#000"/>${perfs(1.5)}${photo(1, 8, 48, 20)}${perfs(31)}`,
+  }[style];
+  return `<svg viewBox="0 0 50 36" width="50" height="36" aria-hidden="true"><defs><linearGradient id="sky-${style}" x1="0" y1="0" x2="0" y2="1">`
+    + `<stop offset="0" stop-color="rgb(140 173 199)"/><stop offset="1" stop-color="rgb(219 189 143)"/></linearGradient></defs>${body}</svg>`;
 }
 
 // Per-viewer conveniences (which groups are open, the phone's tab and sheet
@@ -629,8 +715,10 @@ let limits = null;       // the WebGPU engine's: { side, pixels }
 function renderSide() {
   const long = Math.max(photo.width, photo.height), short = Math.min(photo.width, photo.height);
   const sideAt = (zoom) => Math.min(long, Math.round(long * zoom));
-  let side = sideAt(view.zoom());
-  const pixels = limits ? Math.min(limits.pixels, MAX_PIXELS) : Math.max(CPU_PIXELS, (sideAt(view.fitZoom()) ** 2 * short) / long);
+  // Fitted, as many as the photograph would fill without a border, so a
+  // border's change never renders: the frame shrinks into it.
+  let side = sideAt(view.fitting() ? view.fitZoom(true) : view.zoom());
+  const pixels = limits ? Math.min(limits.pixels, MAX_PIXELS) : Math.max(CPU_PIXELS, (sideAt(view.fitZoom(true)) ** 2 * short) / long);
   if ((side * side * short) / long > pixels) side = Math.floor(Math.sqrt((pixels * long) / short));
   if (limits) side = Math.min(side, limits.side);
   return Math.max(1, side);
@@ -640,7 +728,7 @@ function renderSide() {
 
 // Around the photograph, as the page's background (index.html --bg).
 const BACKGROUND = [0x16 / 255, 0x16 / 255, 0x16 / 255];
-const view = createView($("stage"), $("view"), { changed: showView, settled: viewSettled });
+const view = createView($("stage"), $("view"), { changed: showView, settled: viewSettled, around: (w, h) => borderLayout(w, h) ?? { width: w, height: h, x: 0, y: 0 } });
 let frame = null;        // the last frame drawn from bytes: { bitmap, width, height }
 let settledSide = 0;     // the longest side of the last settled frame asked for
 const views = [];        // display passes' times (the engine's, or the page's paint), for checks
@@ -670,11 +758,12 @@ function showView() {
       }
     });
 }
-const viewKey = () => JSON.stringify([view.size(), view.rect(), showingOriginal]);
+const viewKey = () => JSON.stringify([view.size(), view.rect(), showingOriginal, borderView()]);
 function sendView() {
   const { width, height } = view.size(), r = view.rect();
   sentView = viewKey();
-  return host.call("show", width, height, [r.x, r.y, r.width, r.height], BACKGROUND, showingOriginal);
+  sendBorderTexture();
+  return host.call("show", width, height, [r.x, r.y, r.width, r.height], BACKGROUND, showingOriginal, borderView());
 }
 
 // Once a zoom, pan or resize stops: render again when the view needs more
@@ -697,6 +786,9 @@ function paint() {
   const shown = early ?? (photo && (showingOriginal && original?.bitmap ? original : frame));
   if (!shown) return;
   const r = view.rect(), { width: w, height: h } = shown.bitmap;
+  // The border around the photograph's frame, not the placeholder's.
+  const l = !early && borderLayout(photo.width, photo.height);
+  if (l) Border.paintUnder(ctx, l, r, photo.width);
   if (Math.abs(r.width - w) <= 1 && Math.abs(r.height - h) <= 1) {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(shown.bitmap, Math.round(r.x + (r.width - w) / 2), Math.round(r.y + (r.height - h) / 2));
@@ -705,6 +797,88 @@ function paint() {
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(shown.bitmap, r.x, r.y, r.width, r.height);
   }
+  if (l) Border.paintOver(ctx, l, r, photo.width, borderTexture()?.bitmap);
+}
+
+// ---- The border --------------------------------------------------------------
+
+// Desktop's presentation border (macOS BorderLayers), drawn around the
+// photograph in the display pass, so a change never renders the film. The
+// 120 frame and the 35mm strip need textures (data/borders), downloaded
+// when first chosen and kept for the session; until one arrives the border
+// shows without it, and the 35mm canvas is the photograph alone.
+const textures = new Map();   // what a texture is for (textureFor) → { path, bytes, width, height, bitmap } or its download
+let engineTexture = null;     // the texture the engine has
+
+// The border a `w` × `h` photograph shows, and the texture it needs: the
+// 120 frame's, or the film's 35mm strip.
+function textureFor(w, h) {
+  const b = Border.shown(border, w, h);
+  if (b?.style === "film") return Border.FILM_TEXTURE.path;
+  if (b?.style === "35mm") return Border.stripPath(Border.filmFormat(w, h), state.film);
+  return null;
+}
+// That texture, once it's here. Until another film's strip arrives, the
+// last strip of the same format stands in (as on macOS).
+let lastStrip = null;
+function borderTexture(w = photo?.width, h = photo?.height) {
+  const key = w && textureFor(w, h);
+  const t = key && textures.get(key);
+  if (t && !(t instanceof Promise)) return t;
+  return key && border.style === "35mm" && lastStrip?.format === Border.filmFormat(w, h) ? lastStrip : null;
+}
+// Where everything goes around a `w` × `h` photograph (web/border.js), or
+// null without a border.
+function borderLayout(w, h) {
+  const b = Border.shown(border, w, h);
+  return b && Border.layout(b, w, h, borderTexture(w, h));
+}
+// The layout as the engine's view takes it.
+function borderView() {
+  const l = photo && borderLayout(photo.width, photo.height);
+  return l ? Border.viewOf(l, photo.width, photo.height) : [];
+}
+
+// Fetch the texture the border needs, with progress, once: a film without
+// an edge print takes the generic strip.
+function fetchBorderTexture() {
+  const key = photo && textureFor(photo.width, photo.height);
+  if (!key || textures.has(key)) return;
+  const style = Border.STYLES.find((s) => s.id === border.style).title;
+  const progress = (f) => showMessage(`Downloading the ${style} border… ${Math.floor(f * 100)}%`);
+  const get = (path) => download(`data/${path}`, undefined, progress).then((bytes) => ({ path, bytes }));
+  const load = get(key)
+    .catch((e) => {
+      if (e.status !== 404 || border.style !== "35mm") throw e;
+      return get(Border.genericStrip(Border.filmFormat(photo.width, photo.height)));
+    })
+    .then(async ({ path, bytes }) => {
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+      const format = key === Border.FILM_TEXTURE.path ? null : Border.filmFormat(photo.width, photo.height);
+      const t = { path, format, bytes, width: bitmap.width, height: bitmap.height, bitmap };
+      textures.set(key, t);
+      if (format) lastStrip = t;
+      hideMessage();
+      view.refresh();
+    }, (e) => {
+      textures.delete(key);
+      showMessage(`The border couldn't be downloaded: ${e.message}`, true, 4000);
+    });
+  textures.set(key, load);
+}
+
+// The engine draws the texture the view needs; it gets each once.
+function sendBorderTexture() {
+  const t = borderTexture();
+  if (!t || t.path === engineTexture) return;
+  engineTexture = t.path;
+  host.call("borderTexture", t.path, t.bytes).catch((e) => console.warn(`The border texture didn't load: ${e.message}`));
+}
+
+// A border setting changed: lay it out again, a display pass.
+function borderChanged() {
+  sync();
+  view.refresh();
 }
 
 // A presented frame is already on the engine's canvas; otherwise draw the
@@ -941,6 +1115,7 @@ async function open(name, data) {
     }
     setSheet(sheet);
     loading = false;
+    sync();
     schedule("settled");
   } catch (e) {
     loaded = true;
@@ -997,7 +1172,7 @@ function openSample() {
 // says the length.
 async function download(url, signal, progress) {
   const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(`${url}: ${res.status}`), { status: res.status });
   const total = Number(res.headers.get("Content-Length")) || 0;
   if (!total || !res.body) return new Uint8Array(await res.arrayBuffer());
   const chunks = [];
@@ -1044,7 +1219,7 @@ async function exportJpeg() {
   $("busy").classList.add("on");
   try {
     while (running) await new Promise((r) => setTimeout(r, 20));
-    const r = await host.call("render", state.film, state.paper, params(), Math.max(photo.width, photo.height), false);
+    const r = await exportRender();
     const canvas = new OffscreenCanvas(r.width, r.height);
     canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height), 0, 0);
     const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
@@ -1063,6 +1238,19 @@ async function exportJpeg() {
     $("busy").classList.remove("on");
     if (wanted) pump();
   }
+}
+
+// The export's bytes: the edit at full size, then its border, if it has one
+// and includes it, as the CLI adds it (`addBorder`: spektrafilm-io's
+// add_border on the bytes, in the engine's worker).
+async function exportRender() {
+  const r = await host.call("render", state.film, state.paper, params(), Math.max(photo.width, photo.height), false);
+  const b = Border.exported(border, r.width, r.height);
+  if (!b) return r;
+  sendBorderTexture();
+  const bordered = await host.call("addBorder", r.rgba, r.width, r.height, b.style, JSON.stringify(Border.options(b)), b.instagram, state.film);
+  console.log(`border ${bordered.width}×${bordered.height} in ${bordered.elapsedMs.toFixed(0)} ms, ${bordered.memoryMiB} MiB`);
+  return { ...bordered, unbordered: r };
 }
 
 // A message stays until hidden; one shown for `ms` hides itself then, and
@@ -1158,8 +1346,26 @@ globalThis.negs = {
   originalMade: () => original && { side: original.side, width: original.width, height: original.height, presented: original.presented, elapsedMs: original.elapsedMs, stages: original.stages },
   prepareOriginal: () => prepareOriginal(),
   readOriginal: (maxDim) => host.call("original", params(), maxDim, false),
+  // The border: change its settings as the controls do (a display pass),
+  // read them, and where it lies (web/border.js layout) around the photograph.
+  border(settings) {
+    if (settings) {
+      Object.assign(border, settings);
+      borderChanged();
+    }
+    return { ...border };
+  },
+  borderLayout: () => photo && borderLayout(photo.width, photo.height),
+  borderTexture: () => { const t = borderTexture(); return t && { path: t.path, width: t.width, height: t.height }; },
+  borderTextures: () => [...textures.keys()],
+  canvasRect: () => view.canvasRect(),
+  // The export's bytes, bordered as it would be, and the bytes before; and
+  // the engine's border on any bytes.
+  exportBytes: () => exportRender(),
+  addBorder: (...args) => host.call("addBorder", ...args),
 };
 
+syncs.push(fetchBorderTexture);
 $("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });
 $("paper").addEventListener("change", () => { choosePaper($("paper").value); sync(); schedule("settled"); });
 $("reset").addEventListener("click", () => { resetAdjustments(); sync(); schedule("settled"); });

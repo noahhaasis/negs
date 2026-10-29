@@ -73,7 +73,7 @@ research:
 | Crop with aspect presets, handles, grid | Missing | UI-only preview; export crop needs bytes/float path | M–L |
 | Straighten ±45° | Missing | as crop | M |
 | Image Size (longest side) | Missing | **Forces CPU today**; wasm must resolve/clear like the helper | M |
-| Borders (solid, keyline, 120 film, 35mm strip, 3:4 Instagram) | Missing | Preview UI-only; export CPU compositing; textures 17 MB total | M–L |
+| Borders (solid, keyline, 120 film, 35mm strip, 3:4 Instagram) | Done (piece 11, `docs/web-wasm.md` item 18) | Preview in the view's display pass (no film render); export `add_border` on the bytes in the worker; textures fetched when chosen (120 frame 170 KB, a 35mm strip 280–430 KB, export material 498 KB) | — |
 
 ## Post
 | Feature | Web today | GPU path | Effort |

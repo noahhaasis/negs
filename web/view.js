@@ -6,7 +6,8 @@
 // smaller than the view is centred; a larger one can't be dragged off it.
 //
 // Positions are in the stage's device pixels: `rect()` is where the canvas
-// draws the whole photograph.
+// draws the whole photograph, and `canvasRect()` the canvas around it (a
+// border's, web/border.js), which fit fits and panning keeps in view.
 
 // Desktop's magnification range, in CSS pixels per photograph pixel.
 const MIN_ZOOM = 0.005, MAX_ZOOM = 16;
@@ -16,9 +17,11 @@ const WHEEL_ZOOM = 0.01, WHEEL_MAX = 50;
 
 // `stage` holds the canvases and takes the gestures; `frame` is the view
 // whose padding (safe areas) a photograph stays inside. `changed` runs
-// after every change, `settled` once the view stops changing.
-export function createView(stage, frame, { changed, settled }) {
-  let photo = null;
+// after every change, `settled` once the view stops changing. `around`
+// gives the canvas around a `width` × `height` photograph, in its pixels:
+// `{ width, height, x, y }`, the photograph's top-left corner at x, y.
+export function createView(stage, frame, { changed, settled, around = (width, height) => ({ width, height, x: 0, y: 0 }) }) {
+  let photo = null, canvas = null;
   let size = { width: 1, height: 1, dpr: 1 };
   // Device pixels per photograph pixel, and the photograph's top-left corner.
   let zoom = 1, x = 0, y = 0, fitting = true;
@@ -37,19 +40,25 @@ export function createView(stage, frame, { changed, settled }) {
     };
   }
 
-  // At most 100% in CSS pixels, as before zoom came.
-  function fitZoom() {
-    const b = bounds(stage.clientWidth < 500 ? 12 : 32);
-    return Math.min(b.width / photo.width, b.height / photo.height, size.dpr);
+  // At most 100% in CSS pixels, as before zoom came. The whole canvas, or
+  // with `bare` the photograph alone.
+  function fitZoom(bare = false) {
+    const b = bounds(stage.clientWidth < 500 ? 12 : 32), c = bare ? photo : canvas;
+    return Math.min(b.width / c.width, b.height / c.height, size.dpr);
   }
 
+  // The canvas centred in the view where it fits, else kept from leaving it.
   function clamp() {
-    const b = bounds(), w = photo.width * zoom, h = photo.height * zoom;
-    x = w <= b.width ? b.left + (b.width - w) / 2 : Math.min(b.left, Math.max(b.left + b.width - w, x));
-    y = h <= b.height ? b.top + (b.height - h) / 2 : Math.min(b.top, Math.max(b.top + b.height - h, y));
+    const b = bounds(), w = canvas.width * zoom, h = canvas.height * zoom;
+    let cx = x - canvas.x * zoom, cy = y - canvas.y * zoom;
+    cx = w <= b.width ? b.left + (b.width - w) / 2 : Math.min(b.left, Math.max(b.left + b.width - w, cx));
+    cy = h <= b.height ? b.top + (b.height - h) / 2 : Math.min(b.top, Math.max(b.top + b.height - h, cy));
+    x = cx + canvas.x * zoom;
+    y = cy + canvas.y * zoom;
   }
 
   function update() {
+    canvas = around(photo.width, photo.height);
     if (fitting) zoom = fitZoom();
     clamp();
     cursor();
@@ -61,7 +70,7 @@ export function createView(stage, frame, { changed, settled }) {
   // A hand where the photograph can be dragged.
   function cursor() {
     const b = bounds();
-    const pannable = photo && (photo.width * zoom > b.width + 0.5 || photo.height * zoom > b.height + 0.5);
+    const pannable = photo && (canvas.width * zoom > b.width + 0.5 || canvas.height * zoom > b.height + 0.5);
     stage.style.cursor = pannable ? (pointers.size ? "grabbing" : "grab") : "";
   }
 
@@ -210,6 +219,11 @@ export function createView(stage, frame, { changed, settled }) {
       fitting = true;
       update();
     },
+    // The canvas around the photograph changed (a border): a fitted view
+    // fits it again, a zoomed one keeps the photograph where it is.
+    refresh() {
+      if (photo) update();
+    },
     // 100% around the view's centre, or another zoom (device pixels per
     // photograph pixel).
     actualSize(z = 1) {
@@ -217,10 +231,12 @@ export function createView(stage, frame, { changed, settled }) {
     },
     // The photograph's rectangle on the stage, in device pixels.
     rect: () => ({ x, y, width: photo.width * zoom, height: photo.height * zoom }),
+    // The canvas around it.
+    canvasRect: () => ({ x: x - canvas.x * zoom, y: y - canvas.y * zoom, width: canvas.width * zoom, height: canvas.height * zoom }),
     // The stage's size in device pixels, which the canvas takes.
     size: () => ({ width: size.width, height: size.height }),
     zoom: () => zoom,
-    fitZoom: () => (photo ? fitZoom() : 1),
+    fitZoom: (bare = false) => (photo ? fitZoom(bare) : 1),
     fitting: () => fitting,
     atFit,
   };

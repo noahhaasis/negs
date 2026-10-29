@@ -10,7 +10,7 @@ use spektrafilm_core::{data_fs, params::RuntimeParams, pipeline::Pipeline, previ
 use spektrafilm_gpu::{
     ChainOutput, ChainResult, ComputeBackend,
     cpu_backend::CpuBackend,
-    wgpu_backend::{View, WgpuBackend},
+    wgpu_backend::{BorderView, View, WgpuBackend},
 };
 use spektrafilm_io::encoding::Encoding;
 use spektrafilm_math::image::ImageBuf;
@@ -124,6 +124,82 @@ pub struct Balanced {
     /// Data files the solver read but nobody registered, as
     /// [`Rendered::missing`]: register them and solve again.
     pub missing: Vec<String>,
+}
+
+/// A presentation border around an exported frame's sRGB RGBA8 bytes, as
+/// the CLI adds one (`spektrafilm-io::border`): `style` (`solid`, `keyline`,
+/// `film` or `35mm`) with `options` (a `BorderOptions` object), and with
+/// `instagram` the 3:4 extension; `film` picks the 35mm edge print. The
+/// bytes are bordered as encoded sRGB values (byte / 255) and rounded back.
+/// Textures it reads but nobody registered come back in `missing`, as for
+/// renders.
+#[wasm_bindgen(js_name = addBorder)]
+pub fn add_border(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    style: &str,
+    options_json: &str,
+    instagram: bool,
+    film: &str,
+) -> Result<Bordered, JsError> {
+    use spektrafilm_io::border;
+    let started = web_time::Instant::now();
+    let style: border::BorderStyle = style.parse().map_err(js_error)?;
+    let options: border::BorderOptions = serde_json::from_str(options_json).map_err(|e| JsError::new(&e.to_string()))?;
+    let encoding = Encoding::new("sRGB", true);
+    let pixels = (width as usize) * (height as usize);
+    if rgba.len() != pixels * 4 {
+        return Err(JsError::new("the bytes aren't width × height RGBA"));
+    }
+    let data = rgba
+        .chunks_exact(4)
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .map(|v| spektrafilm_math::precision::from_f32(v as f32 / 255.0))
+        .collect();
+    let image = ImageBuf::from_data(width, height, data);
+    data_fs::take_missing();
+    let bordered = border::add_border_with(&image, style, &options, film, encoding, &load_data_image);
+    let missing = missing();
+    if !missing.is_empty() {
+        return Ok(Bordered { width: 0, height: 0, rgba: Vec::new(), elapsed_ms: 0.0, missing });
+    }
+    let mut bordered = bordered.map_err(js_error)?;
+    drop(image);
+    if instagram {
+        bordered = border::extend_for_instagram(&bordered, style, &options, encoding);
+    }
+    let mut out = Vec::with_capacity(bordered.data.len() / 3 * 4);
+    for p in bordered.data.chunks_exact(3) {
+        for &v in p {
+            out.push((spektrafilm_math::precision::to_f32(v).clamp(0.0, 1.0) * 255.0).round() as u8);
+        }
+        out.push(255);
+    }
+    Ok(Bordered {
+        width: bordered.width,
+        height: bordered.height,
+        rgba: out,
+        elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        missing,
+    })
+}
+
+#[wasm_bindgen(getter_with_clone)]
+pub struct Bordered {
+    pub width: u32,
+    pub height: u32,
+    /// sRGB RGBA8, empty when `missing` isn't.
+    pub rgba: Vec<u8>,
+    #[wasm_bindgen(js_name = elapsedMs)]
+    pub elapsed_ms: f64,
+    pub missing: Vec<String>,
+}
+
+/// A registered image in the data directory, decoded.
+fn load_data_image(path: &str) -> anyhow::Result<image::DynamicImage> {
+    let bytes = data_fs::read(&Path::new(DATA_DIR).join(path)).map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
+    Ok(image::load_from_memory(&bytes)?)
 }
 
 /// The module's memory, which only grows: its high-water mark. wasm32 caps
@@ -241,9 +317,19 @@ impl Engine {
     /// the whole photograph's left, top, width and height on it, and
     /// `background` the RGB around it, 0 to 1. `original` draws the
     /// original ([`Engine::original`]) in the developed frame's place, when
-    /// there is one. Resolves to the milliseconds until the GPU had drawn it,
-    /// or -1 with no frame to draw yet.
-    pub fn show(&self, width: u32, height: u32, rect: Vec<f32>, background: Vec<f32>, original: bool) -> js_sys::Promise {
+    /// there is one. `border` is a [`BorderView`]'s 36 numbers, as
+    /// `web/border.js` lays it out, or empty for none. Resolves to the
+    /// milliseconds until the GPU had drawn it, or -1 with no frame to draw
+    /// yet.
+    pub fn show(
+        &self,
+        width: u32,
+        height: u32,
+        rect: Vec<f32>,
+        background: Vec<f32>,
+        original: bool,
+        border: Vec<f32>,
+    ) -> js_sys::Promise {
         let gpu = {
             let state = self.state.borrow();
             state.gpu.clone().filter(|_| state.canvas)
@@ -252,7 +338,24 @@ impl Engine {
             return js_sys::Promise::resolve(&JsValue::from(-1.0));
         };
         let started = web_time::Instant::now();
-        let view = View { width, height, rect: [x, y, w, h], background: [r, g, b], original };
+        let border = match border.len() {
+            36 => {
+                let v = |i: usize| [border[4 * i], border[4 * i + 1], border[4 * i + 2], border[4 * i + 3]];
+                BorderView {
+                    photo: v(0),
+                    canvas: v(1),
+                    frame: v(2),
+                    line: v(3),
+                    fill: v(4),
+                    mat: v(5),
+                    line_color: v(6),
+                    texture: v(7),
+                    texture_fit: v(8),
+                }
+            }
+            _ => BorderView::default(),
+        };
+        let view = View { width, height, rect: [x, y, w, h], background: [r, g, b], original, border };
         let (drawn_tx, drawn_rx) = futures_channel::oneshot::channel();
         let drawing = gpu.show(
             view,
@@ -267,6 +370,31 @@ impl Engine {
             drawn_rx.await.map_err(|_| JsValue::from("GPU drawing was cancelled"))?;
             Ok(JsValue::from(started.elapsed().as_secs_f64() * 1000.0))
         })
+    }
+
+    /// Decode the registered PNG at `path` in the data directory
+    /// (`borders/film.png`) and keep it as the border's texture on the
+    /// canvas, for views whose border has one; an empty path clears it.
+    /// Resolves to its `[width, height]`, or empty without a canvas.
+    #[wasm_bindgen(js_name = borderTexture)]
+    pub fn border_texture(&self, path: &str) -> Result<Vec<u32>, JsError> {
+        let gpu = {
+            let state = self.state.borrow();
+            state.gpu.clone().filter(|_| state.canvas)
+        };
+        let Some(gpu) = gpu else {
+            return Ok(Vec::new());
+        };
+        if path.is_empty() {
+            gpu.set_border_texture(None);
+            return Ok(Vec::new());
+        }
+        let image = load_data_image(path).map_err(js_error)?.to_rgba8();
+        let (width, height) = image.dimensions();
+        if !gpu.set_border_texture(Some((width, height, image.as_raw()))) {
+            return Ok(Vec::new());
+        }
+        Ok(vec![width, height])
     }
 
     /// The frame on the canvas and where it's drawn, in the canvas's device

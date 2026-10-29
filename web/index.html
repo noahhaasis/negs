@@ -100,6 +100,18 @@
   .ctl.changed .head .label, .ctl.changed > label > span { color: var(--fg); }
   .ctl.choice select { width: auto; max-width: 60%; padding: 3px 6px; }
   .ctl.action { display: flex; justify-content: flex-end; }
+  .ctl.off { opacity: .45; }
+  .ctl.color input { width: 44px; height: 24px; padding: 0 2px; border: 1px solid var(--line); border-radius: 4px; background: var(--field); cursor: pointer; }
+  /* The border's style picker (macOS BorderStylePicker). */
+  .picker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .style { display: grid; justify-items: center; gap: 4px; padding: 4px 2px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+  .style .swatch { display: block; padding: 2px; border: 2px solid transparent; border-radius: 7px; line-height: 0; }
+  .style svg { outline: .5px solid var(--line); }
+  .style[aria-pressed=true] { color: var(--accent); }
+  .style[aria-pressed=true] .swatch { border-color: var(--accent); }
+  .style:disabled { cursor: default; }
+  .style:disabled .swatch { opacity: .35; }
+  .styles .note { margin: 6px 0 0; }
   .value { font-variant-numeric: tabular-nums; font-size: 12px; min-width: 40px; text-align: right; padding: 1px 2px; border: 0; border-radius: 4px; background: none; cursor: text; }
   .value:hover:not(:disabled) { background: var(--field); }
   .value-field { width: 64px; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; padding: 1px 4px; border: 1px solid var(--accent); border-radius: 4px; background: var(--field); outline: none; }
@@ -160,6 +172,8 @@
     .switch::after { width: 22px; height: 22px; }
     .switch:checked::after { transform: translateX(18px); }
     .ctl.choice select { max-width: 65%; }
+    .style { min-height: 64px; font-size: 13px; }
+    .ctl.color input { width: 56px; height: 34px; }
   }
 
   /* A bottom sheet with a tab per section, where the screen is too narrow

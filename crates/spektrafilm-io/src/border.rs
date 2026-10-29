@@ -184,6 +184,9 @@ pub fn extend_for_instagram(
     centered(bordered, w, h, fill.values(encoding))
 }
 
+/// The 120 film frame's texture, in the data directory.
+pub const FILM_TEXTURE: &str = "borders/film.png";
+
 /// The 35mm frame a photograph fills, chosen by its aspect ratio.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilmFormat {
@@ -215,7 +218,7 @@ impl FilmFormat {
 /// `image` with a `style` border. `encoding` is the image's colour space and
 /// whether its values are encoded (otherwise linear); the border's colours
 /// and textures are sRGB and are converted to it. `film` picks the 35mm
-/// border's edge print.
+/// border's edge print. The textures come from `data_dir`.
 pub fn add_border(
     image: &ImageBuf,
     style: BorderStyle,
@@ -223,6 +226,23 @@ pub fn add_border(
     film: &str,
     encoding: impl Into<Encoding>,
     data_dir: &Path,
+) -> Result<ImageBuf> {
+    add_border_with(image, style, options, film, encoding, &|name| {
+        let path = data_dir.join(name);
+        image::open(&path).with_context(|| format!("loading border texture {}", path.display()))
+    })
+}
+
+/// [`add_border`] with its textures from `load`, which decodes one by its
+/// path in the data directory (`borders/film.png`), as the browser reads
+/// what the page registered.
+pub fn add_border_with(
+    image: &ImageBuf,
+    style: BorderStyle,
+    options: &BorderOptions,
+    film: &str,
+    encoding: impl Into<Encoding>,
+    load: &dyn Fn(&str) -> Result<image::DynamicImage>,
 ) -> Result<ImageBuf> {
     let encoding: Encoding = encoding.into();
     let (w, h) = (image.width, image.height);
@@ -245,10 +265,7 @@ pub fn add_border(
             line_color,
         ),
         BorderStyle::Film => {
-            let path = data_dir.join("borders/film.png");
-            let mut texture = image::open(&path)
-                .with_context(|| format!("loading border texture {}", path.display()))?
-                .to_rgba8();
+            let mut texture = load(FILM_TEXTURE)?.to_rgba8();
             if h > w {
                 texture = imageops::rotate270(&texture);
             }
@@ -265,7 +282,7 @@ pub fn add_border(
             let format = FilmFormat::of(w, h).with_context(|| {
                 format!("The 35mm border needs a 3:2 or 3:4 photograph, not {w} × {h}")
             })?;
-            let strip = Strip::load(data_dir, film, format)?;
+            let strip = Strip::load_with(load, film, format)?;
             let (cw, ch) = strip.canvas(w, h);
             let mut out = centered(image, cw, ch, Rgb::BLACK.values(encoding));
             overlay_strip(
