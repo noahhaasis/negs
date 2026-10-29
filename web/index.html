@@ -68,6 +68,11 @@
   .top { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
   .top strong { font-size: 14px; letter-spacing: .02em; margin-right: auto; }
   .scroll { overflow-y: auto; flex: 1; overscroll-behavior: contain; }
+  /* Lab | Post, a segmented control as on macOS. */
+  .panes { display: flex; flex: none; margin: 10px 14px; padding: 2px; border-radius: 7px; background: var(--field); }
+  .panes button { flex: 1; padding: 3px 0; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; font-weight: 500; }
+  .panes button[aria-selected=true] { background: var(--line); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / .3); }
+  .side:not(.sheet)[data-pane=lab] .scroll [data-pane=post], .side:not(.sheet)[data-pane=post] .scroll [data-pane=lab] { display: none; }
   .grabber, .tabs { display: none; }
   .stock { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
   .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
@@ -169,12 +174,13 @@
     .grabber:hover::before { background: var(--faint); }
     .top { padding: 0 14px 10px; border-bottom: 0; }
     .tabs { display: flex; flex: none; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+    .panes { display: none; }
     .tabs button { flex: 1 0 auto; min-height: 40px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; background: none;
       color: var(--muted); cursor: pointer; font-weight: 600; white-space: nowrap; }
     .tabs button[aria-selected=true] { color: var(--fg); border-bottom-color: var(--accent); }
     .scroll [data-tab]:not(.shown) { display: none; }
     .section { border-bottom: 0; }
-    .section > h2 { display: none; }
+    .section:not(.titled) > h2 { display: none; }
     .section > .ctl:first-of-type { margin-top: 12px; }
     .bottom { gap: 4px; padding: 10px 14px 16px; }
     .app { transition: grid-template-rows .2s ease; }
@@ -214,14 +220,18 @@
       <button class="btn" id="open">Open…</button>
       <button class="btn" id="export" disabled>Export</button>
     </div>
+    <div class="panes" id="panes" role="tablist" aria-label="Inspector">
+      <button type="button" role="tab" data-pane="lab">Lab</button><button type="button" role="tab" data-pane="post">Post</button>
+    </div>
     <nav class="tabs" id="tabs" role="tablist" aria-label="Inspector"></nav>
     <div class="scroll" id="scroll">
-      <div class="stock" data-tab="stock">
+      <div class="stock" data-tab="stock" data-pane="lab">
         <label>Film <select id="film"></select></label>
         <label class="row" title="Skip printing and scan the developed film, as for slides.">Scan film directly <input type="checkbox" class="switch" id="scan-film"></label>
         <label id="paper-row">Paper <select id="paper"></select></label>
       </div>
       <div id="sections"></div>
+      <div id="post-sections"></div>
       <div class="actions" data-tab="stock"><button class="btn" id="reset" title="Restore the defaults while keeping the film, paper and rotation.">Reset Adjustments</button></div>
     </div>
     <div class="bottom" id="bottom" data-tab="stock">

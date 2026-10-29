@@ -976,15 +976,24 @@ impl Pipeline {
     }
 
     /// Whether the resident chain's display output
-    /// ([`spektrafilm_gpu::ChainOutput::Rgba8`]) is what
-    /// `preview::display_rgba` makes of the finished scan: an sRGB output,
-    /// encoded on the GPU if at all, with no post adjustments.
+    /// ([`spektrafilm_gpu::ChainOutput::Rgba8`], with [`Self::display_post`])
+    /// is what `preview::display_rgba` makes of the finished, post-adjusted
+    /// scan: an sRGB output, encoded on the GPU if at all.
     pub fn display_on_gpu(&self, backend: &dyn ComputeBackend) -> bool {
         let output = spektrafilm_math::colorspace::RgbColourspace::output(&self.params.io.output_color_space);
         backend.resident_chain_applies_post_scan()
             && output.name == spektrafilm_math::colorspace::SRGB.name
             && (!self.params.io.output_cctf_encoding || self.gpu_encodes_output())
-            && self.params.post.is_identity()
+    }
+
+    /// The post adjustments for the GPU display pass, as [`Self::apply_post`]
+    /// makes them; none when they change nothing.
+    pub fn display_post(&self) -> Option<spektrafilm_gpu::DisplayPost> {
+        let post = &self.params.post;
+        (!post.is_identity()).then(|| {
+            crate::post::PostProcess::new(post, self.params.io.output_cctf_encoding, &self.params.io.output_color_space)
+                .display()
+        })
     }
 
     fn borrowed_resident<T>(

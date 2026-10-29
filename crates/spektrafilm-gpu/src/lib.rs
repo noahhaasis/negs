@@ -9,6 +9,7 @@ mod pipeline_cache;
 mod capacity;
 
 use spektrafilm_math::image::ImageBuf;
+use std::sync::Arc;
 
 /// `Send + Sync`, except in browsers: there WebGPU objects belong to the
 /// thread that made them, so a backend stays on one thread (wgpu's
@@ -207,16 +208,36 @@ pub trait PendingFilmChain {
 }
 
 /// What [`ComputeBackend::submit_film_chain`] makes of the scan.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ChainOutput {
     /// The scan itself, as `try_run_film_chain` returns it.
     Scan,
     /// sRGB display bytes, as `preview::display_rgba` makes them from an
-    /// sRGB scan: clipped, encoded unless `encoded` says the scan is, and
-    /// rounded to 8 bits.
-    Rgba8 { encoded: bool },
+    /// sRGB scan: clipped, adjusted by `post` if any, encoded unless
+    /// `encoded` says the scan is, and rounded to 8 bits.
+    Rgba8 { encoded: bool, post: Option<Arc<DisplayPost>> },
     /// Those bytes drawn on the backend's canvas, with nothing read back.
-    Present { encoded: bool },
+    Present { encoded: bool, post: Option<Arc<DisplayPost>> },
+}
+
+/// Post adjustments for the display pass, as
+/// `spektrafilm_core::post::PostProcess` tabulates them: the display pass
+/// applies them to the clipped scan with the same tables and arithmetic.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DisplayPost {
+    /// The output space's luminance weights.
+    pub luma: [f32; 3],
+    /// From -1 to 1.
+    pub saturation: f32,
+    /// Whether the scan is encoded with the output space's curve; the tables
+    /// below are that curve's.
+    pub encoded: bool,
+    /// Encoded → linear, on [0, 1].
+    pub decode: Vec<f32>,
+    /// Linear → encoded, sampled on √x.
+    pub encode: Vec<f32>,
+    /// Linear luminance → adjusted linear luminance, sampled on √Y.
+    pub tone: Vec<f32>,
 }
 
 /// A finished [`PendingFilmChain`], by its [`ChainOutput`].

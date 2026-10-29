@@ -26,9 +26,11 @@ branch). Commits end with
 | 6. Resident scan, zoom, true-resolution preview | `fc6322d` | done (item 14); approved |
 | 7. Placeholder Image, sample photo | `9d4f4b4` | done (item 15) |
 | 8. Before/After toggle (Show Original) | `3aa412c` | done (item 16) |
-| **9. Export LUT** | | **next**; notes below |
+| 15. Post: Tone and Color | (this commit) | done (item 17); the owner asked for the whole Post tab next |
+| **11. Borders and Fit for Instagram** | | **next**: the Post tab's Border section |
+| 9. Export LUT | | after 11; notes below |
 | 10. Export Preset | | owner's list |
-| 11. Borders and Fit for Instagram | | owner's list; 🛑 owner review of 7–11 |
+| 🛑 | | owner review of 7–11 and 15, after 10 |
 | 5. Colour management and output colour space | | after 11; notes below |
 | Stage 1 checkpoint | | 🛑 |
 

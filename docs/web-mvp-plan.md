@@ -23,6 +23,9 @@ The pieces are numbered as first planned; work in this order:
 3. **The owner's features, next and in this order:** 7 Placeholder Image
    (done), 8 Before/After toggle (done), 9 Export LUT, 10 Export Preset, 11 Borders and
    Fit for Instagram. They come before everything else left in the plan.
+   On 2026-10-29 the owner asked for the whole Post tab next: its Tone and
+   Color sections (piece 15, below) and its Border section (piece 11), so
+   those two come first, then 9 and 10.
 4. Piece 5 (colour management), then the Stage 1 checkpoint 🛑.
 5. Stage 2 (pieces 12–14), and the HEIC research.
 
@@ -268,7 +271,18 @@ same state; importing it renders identically (compare renders, not raw
 params, as the design doc says); presets exported by the desktop apps
 import; a malformed file shows the engine's error.
 
+### 15. Post: Tone and Color (owner's request, 2026-10-29)
+
+Done (`docs/web-wasm.md` item 17). Desktop's Post tab (macOS
+`Inspector.swift` `post`): Brightness, Contrast, Whites and Blacks under
+Tone, with its footer, and Saturation under Color, −100 to 100. A Lab |
+Post switch on the sidebar, a Post tab on the phone's sheet. Post runs in
+the GPU display pass, and a Post-only change makes the shown frame again
+from the scan the GPU still holds, without the film chain.
+
 ### 11. Borders and Fit for Instagram (owner's list)
+
+The Post tab's Border section.
 
 Desktop: solid, keyline, 120 film and 35mm strip, with the mat width (3%),
 the black around film, the keyline width (0.4%), the mat and line colours,
@@ -379,5 +393,5 @@ read by rawler? Recommend one approach.
 
 Everything else in `docs/web-feature-inventory.md`: crop, rotate,
 straighten, Image Size (note: it forces the CPU engine on the web
-until the wasm crate resolves it as the helper does), Post, histogram,
+until the wasm crate resolves it as the helper does), histogram,
 export formats and options, a preset library, undo, sessions, and so on.
