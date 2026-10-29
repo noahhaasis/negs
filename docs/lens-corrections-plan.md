@@ -3,7 +3,13 @@
 Prepared 2026-10-29 against Negs `17e8a8c`, on branch `lens-corrections`
 (worktree `~/Work/Negs-lens`).
 
-**Status:** plan only. Nothing below is implemented. Claims marked
+**Status:** plan only. Nothing below is implemented.
+
+**Decided 2026-10-29 (Noah):** macOS first, using Apple's built-in
+correction (Phases 0 and 1a). Windows/Linux later, as a Rust port of
+darktable's embedded-metadata correction (Phases 1b–2) plus a Rust
+implementation of lensfun's models and database (Phase 3, no longer
+optional). Claims marked
 *(verify)* come from memory of other projects' code and must be checked
 against current sources or sample files during the spike.
 
