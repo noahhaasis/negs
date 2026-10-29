@@ -1,0 +1,50 @@
+// Decodes one photograph and ends: wasm's memory never shrinks, so a decode
+// in the engine's module (web/worker.js) leaves its peak there for good. A
+// phone keeps a smaller copy than it decodes; this module makes it, the
+// engine takes it (`loadDecoded`) and this worker ends, which hands its
+// memory back. The page starts it before it's needed, so a photograph
+// doesn't wait for the module to compile.
+
+// rayon's pool workers, ended with this one as web/worker.js ends them:
+// Safari keeps a terminated worker waiting in `memory.atomic.wait`, and so
+// the memory it shares.
+const pool = [];
+globalThis.Worker = class extends Worker {
+  constructor(...args) {
+    super(...args);
+    pool.push(this);
+  }
+};
+
+// The page's first message says whether to start rayon; then a photograph.
+let wasm, readyMs;
+async function start(threads) {
+  const begun = performance.now();
+  const wasm = threads ? await import("./pkg-threads/index.js") : await import("./pkg/spektrafilm_wasm.js");
+  await wasm.default();
+  if (threads) await wasm.initThreadPool(navigator.hardwareConcurrency);
+  readyMs = performance.now() - begun;
+  return wasm;
+}
+
+onmessage = async ({ data: { threads, bytes, maxDim, maxPixels } }) => {
+  if (!wasm) return void (wasm = start(threads));
+  let message;
+  try {
+    const module = await wasm;
+    const t = performance.now();
+    const decoded = module.decode(bytes, maxDim, maxPixels);
+    const pixels = decoded.takePixels();
+    message = [{ result: { pixels, width: decoded.width, height: decoded.height, fullWidth: decoded.fullWidth, fullHeight: decoded.fullHeight,
+      colour: decoded.colour, decodeMs: performance.now() - t, readyMs, memoryMiB: Math.round(module.memoryBytes() / 2 ** 20) } }, [pixels.buffer]];
+    decoded.free();
+  } catch (e) {
+    message = [{ error: String(e?.message ?? e) }];
+  }
+  for (const worker of pool) worker.terminate();
+  try {
+    (await wasm).wakeThreadPool?.();
+  } catch {}
+  postMessage(...message);
+  close();
+};

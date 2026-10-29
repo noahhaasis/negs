@@ -69,7 +69,7 @@ function startHost(engineKind) {
   };
   const call = (method, ...args) => dead ? Promise.reject(dead) : new Promise((resolve, reject) => {
     pending.set(++next, [resolve, reject]);
-    worker.postMessage({ id: next, method, args }, args.filter((a) => a instanceof OffscreenCanvas));
+    worker.postMessage({ id: next, method, args }, args.flatMap((a) => a instanceof OffscreenCanvas ? [a] : a?.pixels instanceof Float32Array ? [a.pixels.buffer] : []));
   });
   const ready = call("init", engineKind, threads, instance);
   const kill = () => {
@@ -107,6 +107,7 @@ async function startEngine(engineKind) {
     const [side, pixels] = await host.call("limits");
     limits = side ? { side, pixels } : null;
     if (side && DIFFUSION_GRID_BUDGET) await host.call("setDiffusionGridBudget", DIFFUSION_GRID_BUDGET);
+    if (keptPixels()) decoder ??= startDecoder();
     sync(); // Commands that need the engine.
     await attachCanvas();
   } catch (e) {
@@ -739,7 +740,43 @@ let limits = null;       // the WebGPU engine's: { side, pixels }
 // exports every pixel. The same budget as renderSide's, so its largest frame
 // is this copy at 1:1.
 const keptPixels = () => (matchMedia("(pointer: coarse)").matches ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
-const loadPhoto = (bytes) => host.call("load", bytes, 0, keptPixels());
+async function loadPhoto(bytes) {
+  const pixels = keptPixels();
+  if (!pixels) return host.call("load", bytes, 0, 0);
+  // Decoded in a worker that then ends, so the engine's memory holds only
+  // the copy it keeps, never the decode's peak.
+  const t = performance.now();
+  const decoded = await decodeKept(bytes, pixels);
+  const size = await host.call("loadDecoded", decoded);
+  console.log(`decoded in a worker in ${decoded.decodeMs.toFixed(0)} ms (ready after ${decoded.readyMs.toFixed(0)} ms), ${decoded.memoryMiB} MiB; kept after ${(performance.now() - t).toFixed(0)} ms`);
+  return { ...size, decodeMs: decoded.decodeMs };
+}
+
+// web/decoder.js on `bytes`, kept within `maxPixels`. Each decodes once;
+// the next starts after, so it has compiled by the next photograph.
+let decoder = null;
+function startDecoder() {
+  const worker = new Worker("decoder.js", { type: "module" });
+  worker.postMessage({ threads });
+  return worker;
+}
+function decodeKept(bytes, maxPixels) {
+  const worker = decoder ?? startDecoder();
+  decoder = null;
+  // A panic on one of its rayon threads says so here, as the engine's do;
+  // its instance is 0, which no engine is.
+  const panics = new BroadcastChannel("negs-engine-panic");
+  return new Promise((resolve, reject) => {
+    worker.onmessage = ({ data: { result, error } }) => error ? reject(new Error(error)) : resolve(result);
+    worker.onerror = (ev) => reject(new Error(ev.message || "the decoder stopped"));
+    panics.onmessage = ({ data }) => data.instance === 0 && reject(new Error(`the decoder crashed: ${data.message}`));
+    worker.postMessage({ bytes, maxDim: 0, maxPixels });
+  }).finally(() => {
+    panics.close();
+    worker.terminate();
+    decoder ??= startDecoder();
+  });
+}
 // A diffusion filter's FFT grid, several times the frame, may take this much
 // there, 0 for any: past it, the engine makes the glow from a copy of the
 // frame shrunk 2× or more (a 12 MP export's default diffusion halves, which
