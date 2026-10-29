@@ -17,12 +17,14 @@
   .app { display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: 100%; height: 100dvh; }
 
   /* Viewport. Pinch and drag on the photograph are the page's, not the
-     browser's (zoom and pan come with the resident scan). */
+     browser's: they zoom and pan it (view.js). The canvases fill the stage,
+     at its device pixels, and draw the photograph where the view puts it. */
   .view { position: relative; display: grid; place-items: center; overflow: hidden; min-height: 0; touch-action: none;
     padding: env(safe-area-inset-top) 0 0 env(safe-area-inset-left); }
-  .photo { display: block; image-rendering: auto; box-shadow: 0 2px 24px rgb(0 0 0 / .5); -webkit-touch-callout: none; user-select: none; }
+  .stage { position: absolute; inset: 0; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  .photo { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
   .photo[hidden] { display: none; }
-  .empty { text-align: center; color: var(--muted); padding: 24px; max-width: 360px; }
+  .empty { position: relative; text-align: center; color: var(--muted); padding: 24px; max-width: 360px; }
   .empty h1 { font-size: 15px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
   .empty p { margin: 0 0 16px; }
   .view.dragging::after { content: "Drop to open"; position: absolute; inset: 12px; display: grid; place-items: center;
@@ -35,7 +37,14 @@
     padding: 8px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 16px rgb(0 0 0 / .4); }
   .message.error { border-color: var(--danger); color: var(--danger); }
   .message[hidden] { display: none; }
-  .hud { position: absolute; left: 12px; bottom: 10px; color: var(--faint); font: 11px ui-monospace, monospace; pointer-events: none; }
+  /* The status line wraps between its parts (app.js joins them with
+     breakable separators), so the "shown at" notice never gets cut off. */
+  .hud { position: absolute; left: 12px; right: 168px; bottom: 10px; color: var(--faint); font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
+    text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
+  .zoom { position: absolute; right: 10px; bottom: 6px; display: flex; align-items: center; gap: 4px; }
+  .zoom[hidden] { display: none; }
+  .zoom .btn { padding: 2px 8px; font-size: 12px; background: rgb(31 31 31 / .85); }
+  .zoom-level { min-width: 44px; text-align: right; color: var(--muted); font: 11px ui-monospace, monospace; text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
 
   /* Sidebar */
   .side { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
@@ -110,6 +119,8 @@
     select, .value-field { font-size: 16px; }
     select { padding: 8px 10px; }
     .btn { min-height: 40px; padding: 8px 14px; }
+    .zoom .btn { min-height: 36px; padding: 4px 12px; font-size: 14px; }
+    .hud { right: 196px; }
     .stock { gap: 14px; }
     .stock label, .hint { font-size: 13px; }
     .section > h2 { font-size: 12px; }
@@ -162,9 +173,14 @@
       <p>A camera RAW, JPEG, PNG or TIFF. Drop it here, or choose one.</p>
       <button class="btn primary" id="open-empty">Choose photo…</button>
     </div>
-    <canvas class="photo" id="canvas" hidden></canvas>
+    <div class="stage" id="stage"><canvas class="photo" id="canvas" hidden></canvas></div>
     <div class="message" id="message" hidden></div>
     <div class="hud" id="hud"></div>
+    <div class="zoom" id="zoom" hidden>
+      <span class="zoom-level" id="zoom-level"></span>
+      <button class="btn" id="fit" title="Fit the photograph in the view (double-click)">Fit</button>
+      <button class="btn" id="actual" title="Actual size: a pixel of the photograph on each screen pixel (double-click)">100%</button>
+    </div>
   </main>
   <aside class="side" id="side">
     <div class="grabber" id="grabber" title="Drag to resize, or tap"></div>

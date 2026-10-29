@@ -109,8 +109,11 @@ input the page can't make itself (`Input.dispatchTouchEvent`,
 `state()` (a copy of the edit), `edit(path, value)`, `renders` (each
 finished frame's size, time, stages and whether it presented), `idle()`,
 `open(url)` (opens a photograph as the Open button does), `read(maxDim)`
-(the edit rendered and read back as bytes) and `balance(film, paper,
-params)` (the engine's Balance Print, without changing the edit).
+(the edit rendered and read back as bytes), `balance(film, paper,
+params)` (the engine's Balance Print, without changing the edit), `view`
+(the view: `zoom()`, `fit()`, `actualSize(zoom)`, `rect()`), `views` (each
+display pass's time), `renderSide()`, `photo()` and `shown()` (where the
+engine drew its frame).
 `web/checks/controls.js` moves every Lab control and reports its frame (a
 `pipeline` stage is a rebuild, `meter` a re-meter);
 `web/checks/enlarger.js` moves the Enlarger's controls a few steps each;
@@ -129,7 +132,10 @@ for grain a 33×33 average; it needs `uv`, and writes to
 memory over a long session (`nvidia-smi`);
 `web/checks/inspector.js` tests the inspector's wiring;
 `VIEW=390x844@3m node web/cdp.mjs http://localhost:8137/
-web/checks/touch.mjs 2000` tests the phone layout by touch. Chrome fails
+web/checks/touch.mjs 2000` tests the phone layout by touch;
+`web/checks/zoom.mjs` zooms and pans (fit, Actual Size, wheel pans with
+their display passes' times, the canvas against a render read back, 25%,
+Ctrl-wheel, a pinch with `VIEW=…m`, Fit) and logs GPU memory. Chrome fails
 `blob()` on a large response in these test profiles; read an
 `arrayBuffer()`.
 
@@ -184,6 +190,16 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
   `display_rgba8.wgsl` and `display_present.wgsl`. A presented frame reads
   back four bytes as its completion fence: wgpu 24's
   `on_submitted_work_done` panics in browsers.
+- The canvas (`docs/web-wasm.md` item 14, wasm only in `wgpu_backend.rs`):
+  `Canvas` holds the surface, `display_present.wgsl`'s three pipelines
+  (`make_shown` writes a frame's bytes into the shown texture, `fs_mip`
+  makes its mip levels, `fs_view` draws it), the page's `View` and the
+  last two `Shown` textures. A presented chain and `present_rgba` both end
+  in `encode_view`; `show(view, on_drawn)` draws it again alone (a texel
+  copied to a 4-byte buffer is its fence). `View::place` decides 1:1 or
+  sampled; `paint` in `app.js` makes the same decision for the page's own
+  canvas, so change both together. `image_limits` gives the page its caps;
+  `forget_photograph` frees the shown textures and inputs on `load`.
 - GPU memory in browsers (`docs/web-wasm.md` item 13): a dropped
   `wgpu::Buffer` keeps its memory until the garbage collector takes its
   JavaScript object. A buffer made for one render goes through
@@ -225,11 +241,19 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     `app.js` keeps one render in flight and only the newest request
     queued, renders an interactive frame while a slider moves (its scale
     adapts to a 90 ms budget, at least 0.25 on WebGPU) and the settled frame
-    at device resolution when it stops. The WebGPU engine presents on a
-    canvas the page transfers to its worker (`attachCanvas`; a new one per
-    engine, since a canvas transfers once); otherwise the page draws the
-    bytes. The automation hook (`?image=…`) also saves what the canvas shows
-    as `<name>-canvas.ppm`; `?present=0` reads the bytes back instead;
+    when it stops, at `renderSide()`: the device pixels the view covers,
+    within `MAX_PIXELS`, the engine's `limits` and, on the CPU,
+    `CPU_PIXELS`. The WebGPU engine presents on a canvas the page transfers
+    to its worker (`attachCanvas`; a new one per engine, since a canvas
+    transfers once); otherwise the page draws the bytes (`paint`, from an
+    `ImageBitmap` in `frame`). `showView` sends the view (`sendView`: one
+    `show` in flight, the newest next; a render sends it first if it
+    changed), and `viewSettled` renders when the settled view needs more
+    pixels. The automation hook (`?image=…`) shows its frame 1:1, compares
+    the canvas with the bytes and saves what the canvas shows as
+    `<name>-canvas.ppm`; `?present=0` reads the bytes back instead;
+  - `web/view.js`: the view (fit, zoom, pan and their gestures), in the
+    stage's device pixels;
   - `web/engine.js`: render-and-fetch loop inside the worker, and the
     same for Balance Print;
   - `controls.js` kind `action` is a command button; `actions` in `app.js`
@@ -244,6 +268,14 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
 
 ## Known gotchas
 
+- **WGSL reserves more words than you'd think**: `smooth` (a sampler's
+  name) made the whole display module invalid, and a frame then presents
+  nothing with no error but in Chrome's log (`cdp.mjs` prints it).
+- **`globalThis.status` is `window.status`**, a string: a check's helper of
+  that name silently becomes text.
+- **Chrome's device emulation** (`VIEW=…@3`) reports the device-pixel
+  content box in CSS pixels; `view.js` trusts it only when it agrees with
+  `devicePixelRatio`.
 - **rawler is vendored** for its `Instant` calls, which panic on wasm32.
   An upstream PR would let `vendor/rawler` go; ask the user before opening
   one.

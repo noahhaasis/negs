@@ -6,6 +6,7 @@ const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 
 import { SECTIONS, optionTitle, snap, formatValue } from "./controls.js";
+import { createView } from "./view.js";
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
 // complete RuntimeParams, starting from the engine's defaults. Values a
@@ -84,6 +85,8 @@ async function startEngine(engineKind) {
     minScale = kind === "gpu" ? 0.25 : 0.15;
     interactiveScale = Math.max(interactiveScale, minScale);
     $("engine-info").textContent = `${info.backend}${info.threads > 1 ? ` · ${info.threads} threads` : " · 1 thread"}`;
+    const [side, pixels] = await host.call("limits");
+    limits = side ? { side, pixels } : null;
     sync(); // Commands that need the engine.
     await attachCanvas();
   } catch (e) {
@@ -104,15 +107,16 @@ async function startEngine(engineKind) {
 let presenting = false;
 async function attachCanvas() {
   presenting = false;
+  sentView = "";
   $("gpu-canvas")?.remove();
-  $("canvas").hidden = !photo;
+  $("canvas").hidden = !frame;
   if (kind !== "gpu" || !self.OffscreenCanvas || !HTMLCanvasElement.prototype.transferControlToOffscreen || query.get("present") === "0") return;
   const canvas = Object.assign(document.createElement("canvas"), { id: "gpu-canvas", className: "photo", hidden: true });
   $("canvas").after(canvas);
   try {
     await host.call("setCanvas", canvas.transferControlToOffscreen());
     presenting = true;
-    layout();
+    showView();
   } catch (e) {
     console.warn(`Presenting from the engine failed (${e.message}); drawing its bytes instead.`);
     canvas.remove();
@@ -563,16 +567,19 @@ async function pump() {
   while (wanted && photo) {
     const interactive = wanted === "interactive";
     wanted = null;
-    const settled = settledSize();
-    const maxDim = interactive ? Math.max(256, Math.round(settled * interactiveScale)) : settled;
+    const side = renderSide();
+    const maxDim = interactive ? Math.max(256, Math.round(side * interactiveScale)) : side;
+    if (!interactive) settledSide = side;
     try {
+      // The engine presents with the view it was last sent.
+      if (presenting && viewKey() !== sentView) sendView().catch(() => {});
       const r = await host.call("render", state.film, state.paper, params(), maxDim, interactive, presenting);
-      draw(r);
+      await draw(r);
       if (interactive) {
         interactiveScale = Math.min(1, Math.max(minScale, interactiveScale * Math.sqrt(BUDGET_MS / Math.max(r.elapsedMs, 1))));
       }
       hud(r, interactive);
-      renders.push({ interactive, width: r.width, height: r.height, elapsedMs: r.elapsedMs, stages: r.stages, presented: r.presented, backend: r.backend });
+      renders.push({ interactive, width: r.width, height: r.height, elapsedMs: r.elapsedMs, stages: r.stages, presented: r.presented, backend: r.backend, memoryMiB: r.memoryMiB });
       hideMessage();
     } catch (e) {
       await failed(e, "Render failed");
@@ -582,42 +589,125 @@ async function pump() {
   $("busy").classList.remove("on");
 }
 
-// The longest side the viewport shows the photograph at, in device pixels.
-function settledSize() {
-  const { width, height } = fit();
-  return Math.min(Math.max(photo.width, photo.height), Math.ceil(Math.max(width, height) * devicePixelRatio));
+// The longest side to render, in photograph pixels: as many as the device
+// pixels the view covers, so all of them from 100% on, within what the GPU
+// takes and the device's cap (MAX_PIXELS). The CPU engine renders the
+// fitted size and more only up to a few megapixels, as each takes seconds.
+const MAX_PIXELS = matchMedia("(pointer: coarse)").matches ? 12e6 : 40e6;
+const CPU_PIXELS = 4e6;
+let limits = null;       // the WebGPU engine's: { side, pixels }
+function renderSide() {
+  const long = Math.max(photo.width, photo.height), short = Math.min(photo.width, photo.height);
+  const sideAt = (zoom) => Math.min(long, Math.round(long * zoom));
+  let side = sideAt(view.zoom());
+  const pixels = limits ? Math.min(limits.pixels, MAX_PIXELS) : Math.max(CPU_PIXELS, (sideAt(view.fitZoom()) ** 2 * short) / long);
+  if ((side * side * short) / long > pixels) side = Math.floor(Math.sqrt((pixels * long) / short));
+  if (limits) side = Math.min(side, limits.side);
+  return Math.max(1, side);
 }
 
-// The photograph's box in the viewport, in CSS pixels.
-function fit() {
-  const view = $("view");
-  const pad = view.clientWidth < 500 ? 12 : 32;
-  const scale = Math.min((view.clientWidth - 2 * pad) / photo.width, (view.clientHeight - 2 * pad) / photo.height, 1);
-  return { width: Math.max(1, Math.round(photo.width * scale)), height: Math.max(1, Math.round(photo.height * scale)) };
-}
+// ---- The view --------------------------------------------------------------
 
-function layout() {
+// Around the photograph, as the page's background (index.html --bg).
+const BACKGROUND = [0x16 / 255, 0x16 / 255, 0x16 / 255];
+const view = createView($("stage"), $("view"), { changed: showView, settled: viewSettled });
+let frame = null;        // the last frame drawn from bytes: { bitmap, width, height }
+let settledSide = 0;     // the longest side of the last settled frame asked for
+const views = [];        // display passes' times, for checks
+
+// Draw the photograph where the view now puts it: the engine draws its
+// canvas again from the frame it holds (one pass at a time, the newest view
+// next), or the page draws the bytes.
+let showing = false, showAgain = false, sentView = "";
+function showView() {
   if (!photo) return;
-  const { width, height } = fit();
-  for (const canvas of document.querySelectorAll(".photo")) Object.assign(canvas.style, { width: `${width}px`, height: `${height}px` });
+  zoomLevel();
+  if (!presenting) return paint();
+  if (showing) return void (showAgain = true);
+  showing = true;
+  sendView()
+    .then((ms) => ms >= 0 && views.push(ms), () => {})
+    .finally(() => {
+      showing = false;
+      if (showAgain) {
+        showAgain = false;
+        showView();
+      }
+    });
+}
+const viewKey = () => JSON.stringify([view.size(), view.rect()]);
+function sendView() {
+  const { width, height } = view.size(), r = view.rect();
+  sentView = viewKey();
+  return host.call("show", width, height, [r.x, r.y, r.width, r.height], BACKGROUND);
+}
+
+// Once a zoom, pan or resize stops: render again when the view needs more
+// pixels than the frame has, or, fitted, other ones.
+function viewSettled() {
+  if (!photo) return;
+  const side = renderSide();
+  if (side > settledSide + 1 || (view.fitting() && side !== settledSide)) schedule("settled");
+}
+
+// The bytes' frame on the page's canvas, placed as the engine places its
+// own (`View::place` in wgpu_backend.rs): 1:1 within a pixel, else smoothed.
+function paint() {
+  const canvas = $("canvas"), { width, height } = view.size();
+  if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = `rgb(${BACKGROUND.map((c) => Math.round(c * 255)).join(" ")})`;
+  ctx.fillRect(0, 0, width, height);
+  if (!frame || !photo) return;
+  const r = view.rect();
+  if (Math.abs(r.width - frame.width) <= 1 && Math.abs(r.height - frame.height) <= 1) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(frame.bitmap, Math.round(r.x + (r.width - frame.width) / 2), Math.round(r.y + (r.height - frame.height) / 2));
+  } else {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(frame.bitmap, r.x, r.y, r.width, r.height);
+  }
 }
 
 // A presented frame is already on the engine's canvas; otherwise draw the bytes.
-function draw(r) {
+async function draw(r) {
   const canvas = $("canvas"), gpu = $("gpu-canvas");
   if (!r.presented) {
-    if (canvas.width !== r.width || canvas.height !== r.height) Object.assign(canvas, { width: r.width, height: r.height });
-    canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height), 0, 0);
+    const image = new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height);
+    const bitmap = await createImageBitmap(image, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+    frame?.bitmap.close();
+    frame = { bitmap, width: r.width, height: r.height };
+    paint();
   }
   canvas.hidden = r.presented;
   if (gpu) gpu.hidden = !r.presented;
   $("empty").hidden = true;
+  $("zoom").hidden = false;
 }
 
+// macOS EditorModel.percent.
+const percent = (f) => `${(f * 100).toFixed(f < 0.1 ? 1 : 0)}%`;
+
+function zoomLevel() {
+  $("zoom-level").textContent = percent(view.zoom());
+  $("fit").disabled = view.atFit();
+}
+
+// As desktop's status line: the photograph's size, and the share of its
+// pixels the frame shows when it has fewer (exports develop all of them).
 function hud(r, interactive) {
   const el = $("hud");
-  el.textContent = `${photo.width}×${photo.height} · ${interactive ? "preview " : ""}${r.width}×${r.height} in ${r.elapsedMs.toFixed(0)} ms · ${r.memoryMiB} MiB`;
-  el.title = r.stages;
+  const ms = `${r.elapsedMs.toFixed(0)} ms`;
+  const shown = Math.max(r.width, r.height) / Math.max(photo.width, photo.height);
+  const parts = interactive
+    ? ["Preview", `${r.width} × ${r.height}`, ms]
+    : [`${photo.width} × ${photo.height}`, ...(shown < 1 ? [`shown at ${percent(shown)}`] : []), ms, `${r.memoryMiB} MiB`];
+  // Each part on one line; the line breaks between them.
+  el.textContent = parts.map((p) => p.replaceAll(" ", "\u00a0")).join("\u00a0· ");
+  el.title = shown < 1 && !interactive
+    ? `The preview shows ${percent(shown)} of these pixels. Exports develop all of them; inspect grain in an exported file.\n${r.stages}`
+    : r.stages;
 }
 
 // ---- Opening and exporting -------------------------------------------------
@@ -645,7 +735,12 @@ async function open(file) {
     console.log(`decoded ${file.name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
     $("export").disabled = false;
     hideMessage();
-    layout();
+    // Nothing of the last photograph shows; the engine forgot its frame.
+    frame?.bitmap.close();
+    frame = null;
+    for (const canvas of document.querySelectorAll(".photo")) canvas.hidden = true;
+    settledSide = 0;
+    view.setPhoto(photo.width, photo.height);
     schedule("settled");
   } catch (e) {
     photo = previous;
@@ -767,6 +862,13 @@ globalThis.negs = {
   // Opens a photograph from a URL as the Open button would.
   // (An array buffer: Chrome fails blob() of a large response in a test profile.)
   open: async (url) => open(new File([await (await fetch(url)).arrayBuffer()], url.split("/").at(-1))),
+  // The view (web/view.js), the times of its display passes, the side a
+  // settled frame renders at, and where the engine draws its frame.
+  view,
+  views,
+  renderSide: () => renderSide(),
+  photo: () => photo && { width: photo.width, height: photo.height },
+  shown: () => host.call("shownRect"),
 };
 
 $("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });
@@ -781,29 +883,27 @@ for (const b of [$("open"), $("open-empty")]) b.addEventListener("click", () => 
 $("file").addEventListener("change", () => $("file").files[0] && open($("file").files[0]));
 $("export").addEventListener("click", exportJpeg);
 
-const view = $("view");
-view.addEventListener("dragover", (ev) => { ev.preventDefault(); view.classList.add("dragging"); });
-view.addEventListener("dragleave", () => view.classList.remove("dragging"));
-view.addEventListener("drop", (ev) => {
+$("fit").addEventListener("click", () => view.fit());
+$("actual").addEventListener("click", () => view.actualSize());
+
+const viewport = $("view");
+viewport.addEventListener("dragover", (ev) => { ev.preventDefault(); viewport.classList.add("dragging"); });
+viewport.addEventListener("dragleave", () => viewport.classList.remove("dragging"));
+viewport.addEventListener("drop", (ev) => {
   ev.preventDefault();
-  view.classList.remove("dragging");
+  viewport.classList.remove("dragging");
   const file = ev.dataTransfer.files[0];
   if (file) open(file);
 });
-
-let resizeTimer = 0;
-new ResizeObserver(() => {
-  layout();
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => schedule("settled"), 150);
-}).observe(view);
 
 const gpu = query.get("backend") ?? (navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)) ? "gpu" : "cpu");
 await startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
 
 // Automation: ?image=<url>&name=<result>&runs=<n>&max=<px>[&params=<json>]
-// opens the image, renders it n times at max pixels, then posts the last image and the timings
-// to the dev server (web/serve.mjs).
+// opens the image, renders it n times at max pixels, shown 1:1, then posts the last image and
+// the timings to the dev server (web/serve.mjs). A presented frame's canvas is compared with
+// the image read back (`canvas` in the timings), and the part of it the canvas shows is posted
+// as <name>-canvas.
 if (query.get("image")) {
   const name = query.get("name") ?? "result";
   // ?params= merges into the edit, as a preset over the defaults would.
@@ -823,8 +923,14 @@ if (query.get("image")) {
     const size = await host.call("load", bytes, 0);
     const loadMs = performance.now() - t;
     photo = { name: "automation", bytes, ...size };
-    layout();
     const max = Number(query.get("max") ?? 2048);
+    // The frame 1:1, so the canvas shows its pixels (or those that fit).
+    const long = Math.max(photo.width, photo.height);
+    view.setPhoto(photo.width, photo.height);
+    view.actualSize(Math.min(max, long) / long);
+    // The frames below are the settled ones; the view asks for no other.
+    settledSide = renderSide();
+    if (presenting) await sendView();
     const interactive = query.get("interactive") === "1";
     const times = [], stages = [], frames = [];
     let r;
@@ -832,22 +938,37 @@ if (query.get("image")) {
       // The whole frame, as the page sees it: the call, and drawing it.
       const t = performance.now();
       r = await host.call("render", state.film, state.paper, params(), max, interactive, presenting);
-      draw(r);
+      await draw(r);
       frames.push(performance.now() - t);
       times.push(r.elapsedMs);
       stages.push(r.stages);
     }
-    // The image itself, read back, and what the engine's canvas shows.
+    // The image itself, read back, and what the engine's canvas shows of
+    // it, compared pixel for pixel.
+    let canvas;
     if (r.presented) {
+      const [width, height, left, top, drawnWidth, drawnHeight] = await host.call("shownRect");
       const shown = await createImageBitmap($("gpu-canvas"));
       const copy = new OffscreenCanvas(shown.width, shown.height).getContext("2d");
       copy.drawImage(shown, 0, 0);
-      const body = copy.getImageData(0, 0, shown.width, shown.height).data;
-      await fetch(`result?name=${encodeURIComponent(`${name}-canvas`)}&w=${shown.width}&h=${shown.height}`, { method: "POST", body });
+      const [x0, y0] = [Math.max(0, left), Math.max(0, top)];
+      const [w, h] = [Math.min(shown.width, left + width) - x0, Math.min(shown.height, top + height) - y0];
+      const seen = copy.getImageData(x0, y0, w, h).data;
+      await fetch(`result?name=${encodeURIComponent(`${name}-canvas`)}&w=${w}&h=${h}`, { method: "POST", body: seen });
       r = await host.call("render", state.film, state.paper, params(), max, interactive, false);
+      let same = 0, most = 0;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const a = (y * w + x) * 4, b = ((y + y0 - top) * width + (x + x0 - left)) * 4;
+          const d = Math.max(...[0, 1, 2].map((c) => Math.abs(seen[a + c] - r.rgba[b + c])));
+          same += d === 0;
+          most = Math.max(most, d);
+        }
+      }
+      canvas = { oneToOne: drawnWidth === width && drawnHeight === height, pixels: w * h, exact: same / (w * h), max: most };
     }
     await fetch(`result?name=${encodeURIComponent(name)}&w=${r.width}&h=${r.height}`, { method: "POST", body: r.rgba });
-    await post(name, JSON.stringify({ threads, presenting, backend: r.backend, width: r.width, height: r.height, loadMs, times, frames, stages, memoryMiB: r.memoryMiB }));
+    await post(name, JSON.stringify({ threads, presenting, backend: r.backend, width: r.width, height: r.height, loadMs, times, frames, stages, canvas, memoryMiB: r.memoryMiB }));
   } catch (e) {
     await post(name, JSON.stringify({ error: String(e), stack: e?.stack }));
   }

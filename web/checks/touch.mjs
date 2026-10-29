@@ -1,6 +1,7 @@
 // The phone layout by touch: tabs, a group, dragging a slider, a vertical
 // swipe over a slider (scrolls, doesn't move it), the reset button, the
-// sheet's grabber, and a pinch on the photograph (the page doesn't zoom).
+// sheet's grabber, and a pinch on the photograph (it zooms the photograph,
+// 40 to 240 px apart: 6×, not the page).
 //   VIEW=390x844@3m node web/cdp.mjs http://localhost:8137/ web/checks/touch.mjs 2000
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -80,11 +81,11 @@ export default async function ({ send, evaluate }) {
   await mouse("mouseReleased", x0 + travel * 0.25);
   out.mouse = { pressed, released: await page(`await settle(); return g("camera.film_format_mm");`), range: await page(`const r = rowOf("Film format (mm)").querySelector("input"); return [r.min, r.max];`) };
 
-  // A pinch on the photograph doesn't zoom the page.
-  const view = await page(`return center(document.querySelector("#view"));`);
+  // A pinch on the photograph zooms it, not the page.
+  const view = await page(`return { ...center(document.querySelector("#view")), zoom: negs.view.zoom() };`);
   await touch("touchStart", [[view.x - 20, view.y], [view.x + 20, view.y]]);
   for (let i = 1; i <= 10; i++) { await touch("touchMove", [[view.x - 20 - 10 * i, view.y], [view.x + 20 + 10 * i, view.y]]); await sleep(16); }
   await touch("touchEnd", []);
-  out.pinch = await page(`await wait(300); return { scale: visualViewport.scale, scrollY };`);
+  out.pinch = await page(`await wait(300); return { scale: visualViewport.scale, scrollY, photograph: +(negs.view.zoom() / ${view.zoom}).toFixed(3) };`);
   return out;
 }

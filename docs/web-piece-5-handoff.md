@@ -22,11 +22,11 @@ branch). Commits end with
 | 3. iPad and phone layout | `842da9c` | done |
 | 4. Enlarger shifts without a rebuild, Balance Print | `adcee97` | done (`docs/web-wasm.md` item 12) |
 | **5. Colour management and output colour space** | | **next** |
-| 6. Resident scan, zoom, true-resolution preview | | 🛑 after it |
+| 6. Resident scan, zoom, true-resolution preview | see `git log` | done first, at the owner's request (`docs/web-wasm.md` item 14); 🛑 owner review |
 | 7. Placeholder while developing | | Stage 1 🛑 after it |
 
-There is no 🛑 after piece 5: commit it and go on to piece 6. Stop at the
-🛑 after piece 6.
+Piece 6 is done (it came first, at the owner's request), so after piece 5
+go on to piece 7, once the owner has reviewed piece 6.
 
 Still open from piece 3: nobody has opened the page on a real iPad or
 iPhone (ufw blocks ports 8137 and 8443 from the LAN; the owner's call), and
@@ -94,8 +94,8 @@ Then stop it from filling up again:
 
 `docs/web-wasm.md` item 13: the browser matches native wgpu and the f64
 reference on 63 cases (films, papers, scans, settings, the ARW), and a GPU
-memory leak that blacked out a long session's 24 MP frame is fixed. Piece 5's
-table therefore goes in item 14, not 13. Rerun
+memory leak that blacked out a long session's 24 MP frame is fixed. Piece 6
+took item 14, so piece 5's table goes in item 15. Rerun
 `web/checks/correctness.sh` after engine changes. Add cases for the new
 output spaces once they present, with the reference converted the way the
 display converts them.
@@ -227,7 +227,11 @@ page draws them on an sRGB canvas as if they were sRGB, so a P3, Adobe or
 ProPhoto output looks desaturated. Confirm with a render, and fix it as
 part of the GPU work, not separately.
 
-**The GPU display pass.**
+**The GPU display pass.** Since piece 6, presenting writes a frame's
+bytes into a texture (`make_shown` in `display_present.wgsl`) that a view
+pass draws; a frame displayed on the CPU (`present_rgba`) goes into the
+same texture. A non-sRGB output's conversion belongs in `make_shown` and
+`display_rgba8.wgsl`; the view pass only places bytes.
 
 - `display_rgba8.wgsl` and `display_present.wgsl` both take `encoded` and,
   if the scan isn't encoded, apply the sRGB curve, then clip and round.
