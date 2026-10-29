@@ -364,8 +364,10 @@ desktop decode.
 
 ### 13. Download and caching
 
-Being done separately as the installable, offline app
-(`docs/web-app-install-handoff.md`); take that work into account here.
+Done with the installable, offline app (`docs/web-wasm.md` item 19):
+content-addressed caches under a build version from the packager's
+hashes, everything needed offline saved at install and the rest on first
+use, COOP/COEP added where the host sends none, and start-up measured.
 
 A service worker that caches the wasm, JS and data (the LUT is 6 MB, 4 MB
 brotli), with versioned cache names; lazy fetches for the upsampling LUTs

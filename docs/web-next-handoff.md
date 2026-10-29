@@ -55,10 +55,12 @@ What piece 7 settled with the owner, which later pieces shouldn't undo:
 
 Owner's decisions, 2026-10-29: finish the MVP first. Optimising and
 accuracy work from piece 11 is listed under "Later" in the plan. Making
-the app installable and offline is a separate agent's work
-(`docs/web-app-install-handoff.md`); expect a `web/sw.js` and a manifest
-to appear, and keep exports and data fetches going through `fetch`, so its
-service worker sees them.
+the app installable and offline is done (`docs/web-wasm.md` item 19).
+For later pieces: a new file the page loads goes in `SHELL` in
+`web/offline.mjs` (the packager copies that list, and the service worker
+saves it); data goes through `fetch`, and a failed one through
+`fetchFailed` (`engine.js`), which says when it isn't saved for offline
+use. `showMessage` takes an optional `{ label, run }` button.
 
 Open items that aren't yours to settle:
 

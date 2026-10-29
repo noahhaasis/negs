@@ -1,23 +1,30 @@
-// Dev server for the browser engine: node web/serve.mjs [port] [--https]
+// Dev server for the browser engine: node web/serve.mjs [port] [--https] [--static <dir>]
 // Serves web/ at /, the repository's data/ at /data/, and saves what the page POSTs to /result into
 // web/results/ (as PPM + JSON), so a headless browser run can be checked from
 // the shell. --https serves over TLS (port 8443 by default) with the
 // certificate web/dev-cert.sh makes, for opening it on a phone or iPad;
 // either server hands out that certificate's authority at /ca.crt.
+// /sw.js is the service worker with the list of what this server serves
+// (web/offline.mjs). --static serves a package (web/package-static.mjs)
+// as it is instead, its own sw.js included, as the host would.
 import { createServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { readFileSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, extname, normalize, dirname } from "node:path";
+import { join, extname, normalize, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { devAssets, serviceWorker } from "./offline.mjs";
 
 const web = dirname(fileURLToPath(import.meta.url));
 const data = join(web, "..", "data");
 const https = process.argv.includes("--https");
-const port = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) ?? (https ? 8443 : 8137));
+const args = process.argv.slice(2);
+const packaged = args.includes("--static") ? resolve(args[args.indexOf("--static") + 1]) : null;
+const port = Number(args.find((a, i) => /^\d+$/.test(a) && args[i - 1] !== "--static") ?? (https ? 8443 : 8137));
 const certs = process.env.NEGS_DEV_CERTS ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "negs-dev-certs");
-const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".css": "text/css", ".jpg": "image/jpeg" };
+const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".css": "text/css", ".jpg": "image/jpeg",
+  ".png": "image/png", ".webmanifest": "application/manifest+json", ".txt": "text/plain", ".md": "text/plain" };
 
 async function serve(req, res) {
   const url = new URL(req.url, "http://x");
@@ -50,7 +57,12 @@ async function serve(req, res) {
       return res.writeHead(404).end("No certificate yet: run web/dev-cert.sh");
     }
   }
-  const [root, rel] = url.pathname.startsWith("/data/") ? [data, url.pathname.slice(6)] : [web, url.pathname.slice(1) || "index.html"];
+  if (url.pathname === "/sw.js" && !packaged) {
+    const source = serviceWorker(await readFile(join(web, "sw.js"), "utf8"), devAssets(web, data), { dev: true });
+    return res.writeHead(200, { "Content-Type": "text/javascript" }).end(source);
+  }
+  const [root, rel] = packaged ? [packaged, url.pathname.slice(1) || "index.html"]
+    : url.pathname.startsWith("/data/") ? [data, url.pathname.slice(6)] : [web, url.pathname.slice(1) || "index.html"];
   // A directory is its index.js: wasm-bindgen-rayon's worker helper imports
   // the package by its directory, as bundlers resolve it.
   const path = normalize(join(root, decodeURIComponent(rel), rel.endsWith("/") ? "index.js" : ""));

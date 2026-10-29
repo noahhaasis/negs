@@ -889,6 +889,124 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    rows too). `cargo check --workspace --all-targets` and the core, gpu,
    math, model, io and spektrafilm-native tests pass.
 
+19. **Installable and offline** (the owner's request, 2026-10-29;
+   `docs/web-app-install-handoff.md`, and MVP piece 13). Negs installs
+   from Chrome and Edge (desktop and Android) and from Safari (iOS and
+   iPadOS: Share → Add to Home Screen; macOS: File → Add to Dock), opens
+   standalone, and works with no network.
+
+   **Manifest** (`web/manifest.webmanifest`): "Negs", standalone, `#161616`
+   theme and background, `start_url`/`scope`/`id` `./`. Icons from
+   `assets/negs-icon.svg` (`web/icons/make-icons.sh`): the rounded desktop
+   icon at 192 and 512 px, a maskable 512 px (the squircle's background
+   full-bleed, the film inside the 80% circle) and a 180 px full-bleed
+   `apple-touch-icon` (iOS rounds it). `file_handlers` (the owner said
+   yes) lets Chrome and Edge on a computer open JPEG, PNG, TIFF and the
+   RAWs the file picker takes with the installed app; `launchQueue` opens
+   the first file, `launch_handler` `focus-existing` reuses the window.
+   Chrome's `Page.getInstallabilityErrors` reports none. With
+   `black-translucent`, iOS's status bar lies over the page, so the badge,
+   messages and progress bar sit below `safe-area-inset-top`, and the HUD
+   and zoom buttons above the home indicator beside a landscape sidebar.
+
+   **Service worker** (`web/sw.js`). `web/offline.mjs` writes the list of
+   files, with each one's sha256 and size, into the worker; the packager
+   does it for a deploy and `serve.mjs` for development. The list's hash
+   is the build's version, so any changed file makes a new worker.
+   - Files are cached **by content** in one cache, `negs-files`, keyed by
+     path and hash. A new build downloads only what changed, and a
+     file's bytes are checked against the list before they're kept or
+     served. A newer build's copy is never served to an older page: code
+     and small files are checked before they reach the page (a 503 that
+     says Negs was updated), large data streams and is cut off if it
+     doesn't match; either way the worker looks for its update.
+   - **Pinned builds.** Each window, and every worker it starts (the
+     engine's and rayon's, by `resultingClientId`), is pinned to the build
+     it opened with (`negs-meta`), and is served that build's list until
+     it closes. Two tabs on two builds work: tested with a build that
+     changed `view.js` and `engine.js`, one tab updated, the other kept
+     its files, restarted its engine on the CPU (27 clients pinned to the
+     old build, 14 to the new) and got the new files only when it
+     reloaded. Pages that opened before the first worker are pinned when
+     it activates. A build's files are dropped when a newer build takes
+     over and no open page uses them; a build that loses its last page
+     between updates keeps its files until the next one (a few MB).
+   - **Saved at install**: the pages, scripts, catalog, manifest, icons,
+     **both** engine builds, all profiles and filters, the spectral
+     tables' `.toml`s and the default table: 28.6 MB, 8.9 MB with brotli,
+     about 2 MB of which the first start already fetched (the threaded
+     build), so a first visit downloads about 7 MB more in the background.
+     Both builds, because the worker can't reliably know which one a page
+     will use (`crossOriginIsolated` in a worker isn't the page's), and
+     the one it would skip would make a page that falls back fail offline.
+     The profiles are saved too (5 MB, 1 MB compressed): offline, any film
+     and paper develop, which is the point. The worker registers after the
+     engine has started, so none of this slows the first start.
+   - **Saved when first used**: border textures, the Arctic and Mallett
+     tables (piece 5), the sample, licences. "Save everything (28 MB
+     more)" (the owner said yes) saves them all at once.
+   - **Updates** wait: a new build installs in the background and the
+     sidebar's footer says "A new version of Negs is ready. Reload", with a
+     message for six seconds. Reload tells the waiting worker to take
+     over and reloads that page; other open pages say "Negs was updated in
+     another window" and keep their build. Nothing reloads by itself. An
+     open app looks for updates when it comes back to the foreground,
+     hourly at most; browsers also do at each start.
+   - **Isolation offline.** Cached responses keep the host's COOP/COEP;
+     the worker adds them (and CORP) to any response without them, which
+     also makes the threaded engine work on hosts that can't set headers,
+     from the second load.
+   - **Missing files** come back as 503s with `X-Negs-Offline`, and
+     `fetchFailed` (`engine.js`) says "data/borders/35mm/material.png isn't
+     saved for offline use; connect to the internet to download it"
+     (border downloads, the sample, the engine's data, exports). Offline,
+     the 35mm border falls back to the generic strip when that's saved.
+
+   **Footer** (`#bottom`): "Works offline · 29 MB saved. Save everything
+   (28 MB more) · Clear" (sizes from the worker); "Install app" where the
+   browser offers it (`beforeinstallprompt`), or Safari's menu path on iOS,
+   iPadOS and macOS Safari 17+; dismissible, remembered, hidden when
+   running installed. Clear unregisters the worker and deletes its caches.
+   An installed app asks for persistent storage (`navigator.storage.persist`),
+   and so does Save everything.
+
+   **Export on iOS.** A home-screen app on iOS has no downloads, so there
+   the export ends in a message with "Save or share…", which opens the
+   share sheet (`navigator.share({ files })`: Photos, Files). It needs a
+   fresh tap, which a render outlasts, hence the button. Untested on a
+   device; everywhere else `<a download>` as before.
+
+   **Start-up** (Chrome, the package over `serve.mjs --static` on
+   localhost, GTX 1660 SUPER; engine ready = the engine line set, from
+   navigation start; two runs, three reloads each):
+
+   | | Engine ready |
+   |---|---|
+   | First visit (no worker) | 315 ms; saved for offline 530 ms after navigation |
+   | Repeat, online, from the worker | 221–249 ms |
+   | Repeat, offline (server stopped) | 222–243 ms |
+   | Repeat without the worker (HTTP cache, `no-cache` revalidation) | 218–251 ms |
+
+   Locally the worker costs nothing and saves nothing: wasm compilation
+   dominates. Over a network the first start needs the page, scripts and
+   the threaded build, 9.7 MB or 2.0 MB with brotli; every later start
+   reads them from the cache instead of revalidating ~40 requests, and the
+   first render's 6 MB table (4 MB brotli) is already there. Nobody has
+   measured a real phone on a real network yet.
+
+   **Tested** (`web/cdp.mjs`, a windowed Chrome): installed, then offline
+   with the server stopped, a reload starts the threaded engine
+   (`crossOriginIsolated`, 12 threads), opens a photograph by drop,
+   develops it on all 23 films and 10 papers without an error, shows a
+   saved border and exports it; an unsaved file says so. Save everything,
+   Clear and the update with two tabs as above. `controls.js`,
+   `inspector.js`, `balance.js`, `enlarger.js`, `placeholder.js`,
+   `border.mjs` (and `QUICK=1` on a phone), `original.mjs`, `post.mjs`,
+   `zoom.mjs` (both also on a phone) and `touch.mjs` give the same results
+   with the worker off and on (`&sw=1`), but for timing. Not tested:
+   iOS and Android devices (the home-screen app, its export, WebGPU in
+   standalone mode), Firefox, and a real install prompt.
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
@@ -923,7 +1041,7 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
   Chrome on this machine only gets SwiftShader. The CPU engine is the
   fallback everywhere.
 - **Hosting.** Threads need COOP/COEP headers, which GitHub Pages can't set
-  (a service-worker shim can). wasm-bindgen-rayon's worker imports the
+  (the service worker adds them from the second load, item 19). wasm-bindgen-rayon's worker imports the
   package by directory URL, which a bundler or `index.js` naming handles.
 - **Download.** 8.1 MB wasm (2.4 MB gzip; `wasm-opt` not tried) plus the
   4 MB LUT. The sample photograph (3.4 MB) and the border textures
