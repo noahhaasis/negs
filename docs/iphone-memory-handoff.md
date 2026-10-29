@@ -237,3 +237,41 @@ iPhone, fresh tab, same steps as above:
   space. Next: decode in a short-lived worker, so the editing engine's
   memory holds only the 12 MP copy.
 - Not yet checked: desktop in a browser, the iPad.
+
+Steps 1 to 3 are committed (580344d).
+
+## Step 4 (22:50Z): decode in a short-lived worker on touch devices
+
+- `web/decoder.js` decodes and shrinks the photograph (wasm `decode`, the
+  same code as `Engine::load`) and ends; the engine takes the kept copy
+  (`Engine::loadDecoded`, after `forget`, so the copy takes the last one's
+  room). The page starts the next decoder after each decode and when the
+  engine starts, so the module has compiled by the next photograph. It
+  runs rayon as the engine does and ends its pool workers the same way
+  (terminate, `wakeThreadPool`). Desktop (`keptPixels()` 0) decodes in the
+  engine as before.
+- Same render bytes as `Engine::load` (RAF and a 24 MP JPEG, at 12 MP, in
+  Node). Open times on the phone about as before: 1.1 s (single-threaded
+  and compiled on demand it was 3.3 s).
+- iPhone, full scenario, all pass (runs `w5`, `w6`):
+
+| Step | Step 3 | Step 4 |
+|---|---|---|
+| WASM after open 1 / 2 / 3 | 645 / 944 / 944 MiB | 211 to 217 MiB, flat |
+| extremes peak | 1.57 GB | 0.95 GB |
+| export peak | 1.82 GB | 1.43 to 1.45 GB |
+| idle after an open | 1.3 to 1.4 GB | 0.5 GB (0.85 to 1.0 after an export) |
+| open peak (transient) | 1.03 to 1.48 GB | 1.09 to 1.66 GB |
+
+- The open peaks are the decoder (645 MiB of WASM: the RAW's bytes, its
+  decode and the 12 MP copy) beside the engine; it's gone seconds later.
+  After an export the tab stays at ~0.9 GB: GPU buffers waiting for GC (the
+  export's buffer set is over the pool's 512 MiB, so the pool doesn't keep
+  it; releasing the pool explicitly changed nothing and was removed).
+- Desktop Chrome on the Mac: desktop decodes in the engine (6240 × 4160
+  kept, 505 ms); with a touch viewport (`VIEW=390x844@3m`) in the worker
+  (507 ms, engine 221 MiB, exports 4242 × 2828). Mac Safari needs "Allow
+  remote automation" for safaridriver, not enabled.
+- Next leads: the decoder's peak (drop the RAW's bytes after the raw decode;
+  shrink during develop), and the open-after-export peak. Not yet checked:
+  the iPad.

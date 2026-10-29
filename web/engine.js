@@ -40,6 +40,13 @@ export function client(wasm, kind) {
       const [kept, keptHeight, width, height] = engine.load(bytes, maxDim, maxPixels);
       return { width, height, kept, keptHeight, decodeMs: performance.now() - t };
     },
+    // A photograph web/decoder.js decoded, as `load` keeps one. The last
+    // goes before its pixels are copied in, which then take its room.
+    loadDecoded({ pixels, width, height, fullWidth, fullHeight, colour }) {
+      engine.forget();
+      engine.loadDecoded(pixels, width, height, colour);
+      return { width: fullWidth, height: fullHeight, kept: width, keptHeight: height };
+    },
     async render(film, paper, params, maxDim, interactive, present = false) {
       for (;;) {
         const r = await engine.render(film, paper, params, maxDim, interactive, present);

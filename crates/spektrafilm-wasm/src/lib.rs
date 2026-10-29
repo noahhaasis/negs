@@ -445,45 +445,30 @@ impl Engine {
         // decode: wasm's memory never shrinks, so its peak is what stays.
         // A failed load leaves none.
         self.forget();
-        // A RAW turns upright after it shrinks: a smaller copy to turn.
-        let mut orientation = 1;
-        let (image, colour) = match decode(bytes) {
-            Ok((image, info, format)) => {
-                let interpretation = spektrafilm_io::InputInterpretation::default();
-                let png = format == image::ImageFormat::Png;
-                spektrafilm_io::colour::convert(image, &info, &interpretation, png).map_err(js_error)?
-            }
-            Err(not_an_image) => {
-                // A camera RAW the decoder knows but can't read says so;
-                // anything else may have been a damaged image.
-                let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented(bytes, Default::default()).map_err(|raw| {
-                    let raw = format!("{raw:#}");
-                    match raw.split_once("DecoderFailed(\"") {
-                        Some((_, reason)) => JsError::new(reason.split('"').next().unwrap_or(&raw)),
-                        None => js_error(not_an_image.context(raw)),
-                    }
-                })?;
-                orientation = exif;
-                (image, spektrafilm_io::InputColour::raw("rawler"))
-            }
-        };
-        let (width, height) = (image.width, image.height);
-        let target = kept_size(width, height, max_dim, max_pixels);
-        let image = if target == (width, height) {
-            image
-        } else {
-            // The full image goes as its copy comes.
-            let small = preview::downsample_area(&image, target);
-            drop(image);
-            small
-        };
-        let image = image.oriented(orientation);
-        let full = if (5..=8).contains(&orientation) { (height, width) } else { (width, height) };
+        let (image, colour, full) = decode_photo(bytes, max_dim, max_pixels)?;
         let size = vec![image.width, image.height, full.0, full.1];
+        self.keep(image, colour);
+        Ok(size)
+    }
+
+    /// Keep a photograph [`decode`] made elsewhere: its `width` × `height`
+    /// RGB pixels and its [`Decoded::colour`]. Its decode's memory then
+    /// stays with the module that made it, which can end.
+    #[wasm_bindgen(js_name = loadDecoded)]
+    pub fn load_decoded(&self, pixels: Vec<f32>, width: u32, height: u32, colour: &str) -> Result<(), JsError> {
+        self.forget();
+        if pixels.len() != width as usize * height as usize * 3 {
+            return Err(JsError::new("decoded pixels don't match their size"));
+        }
+        let colour = serde_json::from_str(colour).map_err(|e| js_error(e.into()))?;
+        self.keep(ImageBuf::from_data(width, height, pixels), colour);
+        Ok(())
+    }
+
+    fn keep(&self, image: ImageBuf, colour: spektrafilm_io::InputColour) {
         let mut state = self.state.borrow_mut();
         state.source = Some(state.keyed(image));
         state.input_colour = Some(colour);
-        Ok(size)
     }
 
     /// Drop the loaded photograph and everything made from it. Before a
@@ -582,6 +567,88 @@ fn kept_size(width: u32, height: u32, max_dim: u32, max_pixels: f64) -> (u32, u3
         ((width as f64 * scale).round() as u32).clamp(1, width),
         ((height as f64 * scale).round() as u32).clamp(1, height),
     )
+}
+
+/// A photograph decoded and kept as [`Engine::load`] keeps it, for a
+/// short-lived module to make: wasm's memory never shrinks, so the decode's
+/// peak then leaves with it instead of staying in the engine's.
+#[wasm_bindgen]
+pub struct Decoded {
+    pixels: Vec<f32>,
+    pub width: u32,
+    pub height: u32,
+    /// The size as decoded, upright.
+    #[wasm_bindgen(js_name = fullWidth)]
+    pub full_width: u32,
+    #[wasm_bindgen(js_name = fullHeight)]
+    pub full_height: u32,
+    colour: String,
+}
+
+#[wasm_bindgen]
+impl Decoded {
+    /// The RGB pixels, row-major; the first call takes them.
+    #[wasm_bindgen(js_name = takePixels)]
+    pub fn take_pixels(&mut self) -> Vec<f32> {
+        std::mem::take(&mut self.pixels)
+    }
+
+    /// What the loader read it as, for [`Engine::load_decoded`].
+    #[wasm_bindgen(getter)]
+    pub fn colour(&self) -> String {
+        self.colour.clone()
+    }
+}
+
+/// Decode a photograph as [`Engine::load`] does, without an engine.
+#[wasm_bindgen(js_name = decode)]
+pub fn decode_kept(bytes: &[u8], max_dim: u32, max_pixels: f64) -> Result<Decoded, JsError> {
+    let (image, colour, (full_width, full_height)) = decode_photo(bytes, max_dim, max_pixels)?;
+    let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
+    let (width, height) = (image.width, image.height);
+    Ok(Decoded { pixels: image.data, width, height, full_width, full_height, colour })
+}
+
+/// The kept image, how to read it and its size as decoded, upright.
+fn decode_photo(
+    bytes: &[u8],
+    max_dim: u32,
+    max_pixels: f64,
+) -> Result<(ImageBuf, spektrafilm_io::InputColour, (u32, u32)), JsError> {
+    // A RAW turns upright after it shrinks: a smaller copy to turn.
+    let mut orientation = 1;
+    let (image, colour) = match decode(bytes) {
+        Ok((image, info, format)) => {
+            let interpretation = spektrafilm_io::InputInterpretation::default();
+            let png = format == image::ImageFormat::Png;
+            spektrafilm_io::colour::convert(image, &info, &interpretation, png).map_err(js_error)?
+        }
+        Err(not_an_image) => {
+            // A camera RAW the decoder knows but can't read says so;
+            // anything else may have been a damaged image.
+            let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented(bytes, Default::default()).map_err(|raw| {
+                let raw = format!("{raw:#}");
+                match raw.split_once("DecoderFailed(\"") {
+                    Some((_, reason)) => JsError::new(reason.split('"').next().unwrap_or(&raw)),
+                    None => js_error(not_an_image.context(raw)),
+                }
+            })?;
+            orientation = exif;
+            (image, spektrafilm_io::InputColour::raw("rawler"))
+        }
+    };
+    let (width, height) = (image.width, image.height);
+    let target = kept_size(width, height, max_dim, max_pixels);
+    let image = if target == (width, height) {
+        image
+    } else {
+        // The full image goes as its copy comes.
+        let small = preview::downsample_area(&image, target);
+        drop(image);
+        small
+    };
+    let full = if (5..=8).contains(&orientation) { (height, width) } else { (width, height) };
+    Ok((image.oriented(orientation), colour, full))
 }
 
 #[derive(Clone, Copy, PartialEq)]
