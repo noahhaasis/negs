@@ -28,7 +28,7 @@ branch). Commits end with
 | 7. Placeholder Image, sample photo | `9d4f4b4` | done (item 15) |
 | 8. Before/After toggle (Show Original) | `3aa412c` | done (item 16) |
 | 15. Post: Tone and Color | `7ee6e80` | done (item 17) |
-| 11. Borders and Fit for Instagram | (this commit) | done (item 18) |
+| 11. Borders and Fit for Instagram | `5240171` | done (item 18) |
 | **9. Export LUT** | | **next**; below |
 | 10. Export Preset | | after 9 |
 | 🛑 | | owner review of 7–11 and 15, after 10 |
