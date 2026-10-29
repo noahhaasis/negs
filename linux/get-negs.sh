@@ -39,5 +39,5 @@ python3 "$work/bundle/share/negs/install.py" --from "$work/bundle"
 
 echo
 echo "Negs $version is installed. Start it from your app launcher, or run: ~/.local/bin/negs"
-echo "Negs needs GTK 4.16+, libadwaita 1.6+, OpenBLAS and a Vulkan driver."
+echo "Negs needs GTK 4.16+, libadwaita 1.6+, libgfortran/libgomp and a Vulkan driver. OpenBLAS is bundled."
 echo "To remove it: python3 ~/.local/share/negs/install.py --uninstall"

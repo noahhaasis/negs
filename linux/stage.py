@@ -8,12 +8,11 @@ launcher; Flatpak and AppImage supply their own launchers. Never includes
 target photos.
 """
 import argparse
-import hashlib
-import json
 from pathlib import Path
 import shutil
 import subprocess
 import tomllib
+from payload import bundle_openblas, write_identity
 
 APP_ID = 'io.github.noahhaasis.negs'
 root = Path(__file__).resolve().parent.parent
@@ -68,20 +67,12 @@ if args.format == 'native':
     ]:
         copy(root / source, target)
 if args.bundle_openblas:
-    copy(args.bundle_openblas / 'lib/libopenblas.so.0', 'lib/negs/libopenblas.so.0')
-    copy(args.bundle_openblas / 'share/licenses/openblas/LICENSE', 'share/licenses/negs/OpenBLAS-LICENSE')
+    bundle_openblas(prefix, args.bundle_openblas)
 
 # Immutable payload identity for the preview cache: relocation (an AppImage
 # mount) keeps it, any changed executable, library or data file replaces it.
-digest = hashlib.sha256()
-for path in sorted([*(prefix / 'lib/negs').iterdir(), *(prefix / 'share/negs/data').rglob('*')]):
-    if path.is_file():
-        digest.update(str(path.relative_to(prefix)).encode() + b'\0')
-        with path.open('rb') as stream:
-            digest.update(hashlib.file_digest(stream, 'sha256').digest())
 version = tomllib.loads((root / 'linux/Cargo.toml').read_text())['package']['version']
-(prefix / 'share/negs/payload.json').write_text(json.dumps(
-    {'version': version, 'format': args.format, 'digest': digest.hexdigest()}, indent=2) + '\n')
+write_identity(prefix, version, args.format)
 if shutil.which('desktop-file-validate'):
     subprocess.run(['desktop-file-validate', prefix / f'share/applications/{APP_ID}.desktop'], check=True)
 print(prefix)

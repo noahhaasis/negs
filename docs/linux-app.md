@@ -66,8 +66,8 @@ python3 /path/to/unpacked/share/negs/install.py --from /path/to/unpacked
 ```
 
 The default prefix is `~/.local`; `--prefix` supports an isolated installation.
-The bundle can include the official OpenBLAS shared library and license when
-using the development sysroot. It still requires system GTK/libadwaita, Vulkan
+The per-user bundle includes the OpenBLAS shared library and license from the
+build system or development sysroot. It still requires system GTK/libadwaita, Vulkan
 loader, Python, libgfortran/libgomp and their runtime dependencies. It is not a
 universal binary for arbitrary older Linux distributions.
 

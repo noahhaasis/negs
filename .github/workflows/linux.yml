@@ -50,6 +50,12 @@ jobs:
         run: runuser -u builder -- python3 linux/verify_package.py target/linux-release/build/negs-*.pkg.tar.zst
       - name: Generate checksummed assets, AUR recipes and Omarchy submission
         run: runuser -u builder -- python3 linux/release.py finish --package target/linux-release/build/negs-*.pkg.tar.zst
+      - name: Verify the per-user bundle includes and uses OpenBLAS
+        run: |
+          mkdir -p target/linux-bundle-check
+          tar -xzf target/linux-release/assets/negs-*-linux-x86_64.tar.gz -C target/linux-bundle-check
+          chown -R builder:builder target/linux-bundle-check
+          runuser -u builder -- python3 linux/verify_package.py --prefix target/linux-bundle-check --require-bundled-openblas
       - uses: actions/upload-artifact@v4
         with:
           name: negs-linux

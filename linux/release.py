@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 import tomllib
 from xml.etree import ElementTree
+from payload import bundle_openblas, write_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_ID = 'io.github.noahhaasis.negs'
@@ -123,7 +124,7 @@ def write_recipe(directory, recipe):
         'PERFORMANCE OF THIS SOFTWARE.\n')
 
 
-def finish(out, package, root=ROOT, env=os.environ):
+def finish(out, package, root=ROOT, env=os.environ, openblas_prefix=Path('/usr')):
     meta = json.loads((out / 'metadata.json').read_text())
     if metadata(root, env) != {key: value for key, value in meta.items() if key != 'source_sha256'}:
         raise ValueError('Checkout or release metadata changed since prepare')
@@ -139,7 +140,11 @@ def finish(out, package, root=ROOT, env=os.environ):
     with tempfile.TemporaryDirectory(prefix='negs-release-') as work:
         stage = Path(work)
         subprocess.run(['bsdtar', '-xf', str(package.resolve()), '-C', str(stage), 'usr'], check=True)
-        # Same package bytes in the per-user bundle and the AUR binary recipe.
+        # pacman installs the package's OpenBLAS dependency. A per-user
+        # installation has no package manager, so ship the library and license.
+        prefix = stage / 'usr'
+        bundle_openblas(prefix, openblas_prefix)
+        write_identity(prefix, meta['version'], 'native')
         with bundle.open('wb') as raw, gzip.GzipFile(filename='', mode='wb', fileobj=raw, mtime=0) as compressed:
             with tarfile.open(fileobj=compressed, mode='w|') as tar:
                 for path in sorted((stage / 'usr').rglob('*')):
@@ -203,6 +208,7 @@ def main():
     parser.add_argument('command', choices=['metadata', 'prepare', 'finish'])
     parser.add_argument('--out', type=Path, default=ROOT / 'target/linux-release')
     parser.add_argument('--package', type=Path)
+    parser.add_argument('--openblas-prefix', type=Path, default=Path('/usr'))
     args = parser.parse_args()
     out = args.out.resolve()
     if args.command == 'metadata':
@@ -210,7 +216,7 @@ def main():
     elif args.command == 'prepare':
         print(json.dumps(prepare(out), indent=2))
     elif args.package:
-        finish(out, args.package)
+        finish(out, args.package, openblas_prefix=args.openblas_prefix)
     else:
         parser.error('finish requires --package')
 

@@ -93,15 +93,36 @@ class ReleaseTests(unittest.TestCase):
         stage = Path(self.work.name) / 'stage'
         (stage / 'usr/bin').mkdir(parents=True)
         (stage / 'usr/bin/negs').write_text('fixture binary')
+        (stage / 'usr/lib/negs').mkdir(parents=True)
+        (stage / 'usr/lib/negs/spektrafilm-native').write_text('fixture engine')
+        (stage / 'usr/share/negs/data').mkdir(parents=True)
+        openblas = Path(self.work.name) / 'openblas/usr'
+        (openblas / 'lib').mkdir(parents=True)
+        (openblas / 'lib/libopenblas.so.0.3').write_bytes(b'fixture OpenBLAS')
+        (openblas / 'lib/libopenblas.so.0').symlink_to('libopenblas.so.0.3')
+        (openblas / 'share/licenses/openblas').mkdir(parents=True)
+        (openblas / 'share/licenses/openblas/LICENSE').write_text('fixture license')
+        release.write_identity(stage / 'usr', '0.8.0', 'native')
+        original_identity = (stage / 'usr/share/negs/payload.json').read_bytes()
         package = self.out / 'build/negs-0.8.0-1-x86_64.pkg.tar.zst'
         subprocess.run(['bsdtar', '--zstd', '-cf', str(package), '-C', str(stage), 'usr'], check=True)
-        release.finish(self.out, package, root=self.root, env=self.env)
+        with self.assertRaisesRegex(ValueError, 'Cannot create a per-user bundle'):
+            release.finish(self.out, package, root=self.root, env=self.env,
+                           openblas_prefix=Path(self.work.name) / 'missing')
+        release.finish(self.out, package, root=self.root, env=self.env, openblas_prefix=openblas)
         assets = self.out / 'assets'
         for line in (assets / 'SHA256SUMS-linux').read_text().splitlines():
             digest, name = line.split('  ')
             self.assertEqual(digest, release.sha256(assets / name))
         with tarfile.open(assets / 'negs-0.8.0-linux-x86_64.tar.gz') as archive:
             self.assertEqual(archive.extractfile('bin/negs').read(), b'fixture binary')
+            self.assertTrue(archive.getmember('lib/negs/libopenblas.so.0').isfile())
+            self.assertEqual(archive.extractfile('lib/negs/libopenblas.so.0').read(), b'fixture OpenBLAS')
+            self.assertEqual(archive.extractfile('share/licenses/negs/OpenBLAS-LICENSE').read(), b'fixture license')
+            self.assertNotEqual(archive.extractfile('share/negs/payload.json').read(), original_identity)
+        # System packages retain their declared dependency and original payload.
+        self.assertEqual(package.read_bytes(), (assets / package.name).read_bytes())
+        self.assertFalse((stage / 'usr/lib/negs/libopenblas.so.0').exists())
         recipes = self.out / 'recipes'
         source = (recipes / 'aur/negs/PKGBUILD').read_text()
         self.assertIn('url=\'https://github.com/example/negs\'', source)
