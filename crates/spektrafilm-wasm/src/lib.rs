@@ -179,6 +179,11 @@ struct State {
     input_colour: Option<spektrafilm_io::InputColour>,
     /// The spectral pipeline of the last render, by `preview_pipeline_cache_key`.
     pipeline: Option<(String, Pipeline)>,
+    /// The frame on the canvas, when the GPU made it from a scan it still
+    /// may hold: everything it was rendered from but the Post settings
+    /// ([`look_key`]), and its size. A change to Post alone then makes it
+    /// again from that scan ([`WgpuBackend::repost`]).
+    shown: Option<(String, (u32, u32))>,
 }
 
 #[wasm_bindgen]
@@ -209,6 +214,7 @@ impl Engine {
             autoexposure: None,
             input_colour: None,
             pipeline: None,
+            shown: None,
         };
         Engine { state: Rc::new(RefCell::new(state)) }
     }
@@ -325,6 +331,7 @@ impl Engine {
         state.scaled.clear();
         state.metering = None;
         state.autoexposure = None;
+        state.shown = None;
         state.source = Some(state.keyed(image));
         state.input_colour = Some(colour);
         Ok(size)
@@ -412,15 +419,22 @@ impl State {
         (Rc::new(image), self.keys)
     }
 
+    /// The size of the source fitted within `max_dim`.
+    fn size_at(&self, max_dim: u32) -> Option<(u32, u32)> {
+        let source = self.source.as_ref()?;
+        let (width, height) = (source.0.width, source.0.height);
+        let scale = (max_dim as f64 / width.max(height) as f64).min(1.0);
+        Some((
+            ((width as f64 * scale).round() as u32).clamp(1, width),
+            ((height as f64 * scale).round() as u32).clamp(1, height),
+        ))
+    }
+
     /// The source fitted within `max_dim`, resampled once per size.
     fn source_at(&mut self, max_dim: u32, interactive: bool) -> Option<Keyed> {
         let source = self.source.clone()?;
         let (width, height) = (source.0.width, source.0.height);
-        let scale = (max_dim as f64 / width.max(height) as f64).min(1.0);
-        let size = (
-            ((width as f64 * scale).round() as u32).clamp(1, width),
-            ((height as f64 * scale).round() as u32).clamp(1, height),
-        );
+        let size = self.size_at(max_dim)?;
         if size == (width, height) {
             return Some(source);
         }
@@ -453,6 +467,9 @@ async fn render(
     let started = web_time::Instant::now();
     let mut params = parse_params(params_json).map_err(js_error)?;
     let mut stages = Stages::new(started);
+    if present && let Some(rendered) = repost(state, film, paper, &params, max_dim, interactive, started).await? {
+        return Ok(rendered);
+    }
     let (pipeline, (source, source_key), backend, gpu) = {
         let mut state = state.borrow_mut();
         let source = state.source_at(max_dim, interactive).ok_or_else(|| JsError::new("no image loaded"))?;
@@ -519,9 +536,10 @@ async fn render(
     // The GPU makes the display bytes when they'd be the same, and presents
     // them when there's a canvas.
     let encoded = params.io.output_cctf_encoding;
+    let post = || pipeline.display_post().map(std::sync::Arc::new);
     let output = match (pipeline.display_on_gpu(backend.as_ref()), gpu.is_some()) {
-        (true, true) => ChainOutput::Present { encoded },
-        (true, false) => ChainOutput::Rgba8 { encoded },
+        (true, true) => ChainOutput::Present { encoded, post: post() },
+        (true, false) => ChainOutput::Rgba8 { encoded, post: post() },
         (false, _) => ChainOutput::Scan,
     };
     let submitted = if backend.is_gpu() {
@@ -559,6 +577,14 @@ async fn render(
         ChainResult::Rgba8 { width, height, rgba } => (width, height, rgba, false),
         ChainResult::Presented { width, height } => (width, height, Vec::new(), true),
     };
+    {
+        let mut state = state.borrow_mut();
+        if presented {
+            state.shown = Some((look_key(&state, film, paper, &params), (width, height)));
+        } else if gpu.is_some() {
+            state.shown = None;
+        }
+    }
     if let Some(gpu) = gpu.filter(|_| !presented) {
         presented = gpu.present_rgba(width, height, &rgba);
         if presented {
@@ -576,6 +602,73 @@ async fn render(
         elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         stages: stages.text,
     })
+}
+
+/// A Post edit to the frame on the canvas: made again from its scan, with no
+/// film chain, when everything else it was rendered from is the same. An
+/// interactive frame takes the frame whatever its size, a settled one only
+/// at its own size. None when it has to render.
+async fn repost(
+    state: &RefCell<State>,
+    film: &str,
+    paper: &str,
+    params: &RuntimeParams,
+    max_dim: u32,
+    interactive: bool,
+    started: web_time::Instant,
+) -> Result<Option<Rendered>, JsError> {
+    let (gpu, post) = {
+        let state = state.borrow();
+        let Some(gpu) = state.gpu.clone().filter(|_| state.canvas) else {
+            return Ok(None);
+        };
+        let Some((key, size)) = &state.shown else {
+            return Ok(None);
+        };
+        let mut params = params.clone();
+        if let Some(colour) = &state.input_colour {
+            params.io.apply_input_colour(colour);
+        }
+        if *key != look_key(&state, film, paper, &params) || !(interactive || state.size_at(max_dim) == Some(*size)) {
+            return Ok(None);
+        }
+        let post = (!params.post.is_identity()).then(|| {
+            spektrafilm_core::post::PostProcess::new(&params.post, params.io.output_cctf_encoding, &params.io.output_color_space)
+                .display()
+        });
+        (gpu, post)
+    };
+    let (drawn_tx, drawn_rx) = futures_channel::oneshot::channel();
+    let on_drawn = Box::new(move || {
+        let _ = drawn_tx.send(());
+    });
+    let Some((width, height)) = gpu.repost(post.as_ref(), on_drawn) else {
+        state.borrow_mut().shown = None;
+        return Ok(None);
+    };
+    let mut stages = Stages::new(started);
+    stages.mark("submit");
+    drawn_rx.await.map_err(|_| JsError::new("GPU drawing was cancelled"))?;
+    stages.mark("post");
+    Ok(Some(Rendered {
+        width,
+        height,
+        rgba: Vec::new(),
+        presented: true,
+        missing: Vec::new(),
+        backend: gpu.name().to_owned(),
+        elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        stages: stages.text,
+    }))
+}
+
+/// What a frame is rendered from but its Post settings: the photograph, the
+/// stocks and every other parameter.
+fn look_key(state: &State, film: &str, paper: &str, params: &RuntimeParams) -> String {
+    let mut params = params.clone();
+    params.post = Default::default();
+    let photo = state.source.as_ref().map_or(0, |(_, key)| *key);
+    serde_json::json!([photo, film, paper, params]).to_string()
 }
 
 fn key_of(pipeline: &Option<(String, Pipeline)>) -> &str {

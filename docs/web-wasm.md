@@ -701,6 +701,65 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    desktop's Rec. 2020 ones, wrong on an sRGB canvas in the same way as
    today's non-sRGB frames; fix both together.
 
+17. **Post: Tone and Color** (MVP piece 15, the owner's request on
+   2026-10-29: the whole Post tab next; Border is piece 11). The Post tab
+   of macOS `Inspector.swift`: Brightness, Contrast, Whites and Blacks
+   under Tone, with its footer, and Saturation under Color, each −100 to
+   100 in steps of 1 (`POST_SECTIONS` in `web/controls.js`). The sidebar
+   has macOS's Lab | Post switch (remembered per viewer, `pane`); the
+   phone's sheet has a Post tab after Scan. Reset Adjustments resets Post
+   too, as on macOS.
+
+   **In the display pass.** `display_post.wgsl` is `PostProcess::apply_rgb`
+   with the same tables (`PostProcess::display` hands them over as a
+   `spektrafilm_gpu::DisplayPost`) and the same f32 arithmetic. Both
+   display shaders append it: `make_shown` (a presented frame) and
+   `display_rgba8` (bytes read back: `negs.read`, exports). So
+   `Pipeline::display_on_gpu` no longer excludes Post, and a frame with
+   Post presents. `ChainOutput::Rgba8` and `Present` carry the
+   `DisplayPost`.
+
+   **A Post-only change doesn't run the film.** A shown image remembers
+   which render's pooled scan it was made from (`ShownScan`, the
+   `ImageSet::generation`). When everything a frame is rendered from but
+   Post is the same as the shown frame's (`look_key` in the wasm crate),
+   `render` calls `WgpuBackend::repost`: `make_shown` again from that scan
+   with the new Post, then the view, a display pass. An interactive frame
+   takes the shown frame at its size; a settled one only at its own size.
+   When the scan is gone (a render of the same size took the pool's
+   buffers, as `negs.read` or an export does, or the pool let them go), it
+   renders as before.
+
+   **Measured** (`web/checks/post.mjs`, Chrome on the GTX 1660 SUPER):
+
+   | | Card (2752 × 1536) | Sony ARW (4000 × 6000) |
+   |---|---|---|
+   | Post slider dragged, fitted (each frame) | display pass, 5–16 ms | 7–18 ms |
+   | The same at 100% | display pass, 6–9 ms | **film render, 560–575 ms**: the pool lets a 24 MP frame's buffers go (`MAX_POOLED_BYTES`) |
+   | Canvas against the edit rendered and read back | 100% exact, fitted and at 100% | 100% exact |
+   | Lab change with Post set | one film render, Post in its display pass; canvas exact | the same |
+   | Phone (`VIEW=390x844@3m`), fitted 1098 × 613 | display pass, 5–11 ms; canvas exact | |
+   | CPU engine | a film render per frame (130–240 ms interactive, 740–760 ms settled); Post on the CPU as before | |
+
+   `crates/spektrafilm-core/tests/display_post.rs` renders a gradient on
+   Portra 400 → Endura on native wgpu and compares the display bytes with
+   GPU Post against `PostProcess` plus `preview::display_rgba` on the same
+   scan: 18 cases (each control at both ends, combinations, encoded and
+   linear output); 2 of 442,368 bytes differ, by 1.
+
+   Native output is unchanged: the CLI (the card on Portra → Endura, and
+   Velvia in Display P3; wgpu and cpu) is byte-identical before and after.
+   `cargo check --workspace --all-targets` and the core, gpu, math, model,
+   io and spektrafilm-native tests pass; `inspector.js`, `controls.js`
+   (all 99 Lab controls present), `touch.mjs` and `original.mjs` pass as
+   before. `original.mjs`'s fitted card comparison shows one byte off by 1
+   (99.999%) with HEAD's wasm too, unlike piece 8's notes.
+
+   For the owner: keeping a 24 MP scan for Post at 100% would hold about
+   288 MB more on the GPU between renders (12 MP on phones: 144 MB). Not
+   done; say if Post at 100% on large photographs should be a display pass
+   too.
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for

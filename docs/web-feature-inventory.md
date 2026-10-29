@@ -78,7 +78,7 @@ research:
 ## Post
 | Feature | Web today | GPU path | Effort |
 |---|---|---|---|
-| Tone (Brightness, Contrast, Whites, Blacks) + Saturation | Missing | Readback today; fits in the display shader (M), and should not re-render the film | M (S as CPU+readback) |
+| Tone (Brightness, Contrast, Whites, Blacks) + Saturation | Present (piece 15) | In the display pass; a Post-only change re-runs it on the kept scan, no film render | – |
 | Highlights/Shadows | Not implemented anywhere (draft plan) | New GPU, spatial | L |
 
 ## Viewing

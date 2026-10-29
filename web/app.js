@@ -5,7 +5,7 @@
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 
-import { SECTIONS, optionTitle, snap, formatValue } from "./controls.js";
+import { SECTIONS, POST_SECTIONS, optionTitle, snap, formatValue } from "./controls.js";
 import { createView } from "./view.js";
 import { placeholder } from "./placeholder.js";
 
@@ -378,14 +378,17 @@ function touchSlider(track, range) {
 }
 
 function buildControls() {
-  const root = $("sections");
   const opened = remembered("groups", {});
-  for (const section of SECTIONS) {
+  const sections = [...SECTIONS.map((s) => [s, "lab"]), ...POST_SECTIONS.map((s) => [s, "post"])];
+  for (const [section, pane] of sections) {
     // A fieldset, so a section or group that is off disables its controls.
     const body = el("fieldset", { className: "section" }, el("h2", { textContent: section.title }));
     body.dataset.tab = sectionId(section);
+    body.dataset.pane = pane;
+    // A phone tab with several sections keeps their titles.
+    body.classList.toggle("titled", sections.filter(([s]) => sectionId(s) === body.dataset.tab).length > 1);
     for (const c of section.controls ?? []) body.append(buildControl(c));
-    for (const group of section.groups) {
+    for (const group of section.groups ?? []) {
       const key = `${section.title}/${group.title}`;
       const details = el("details", { open: opened[key] ?? group.open ?? false });
       details.addEventListener("toggle", () => remember("groups", { ...remembered("groups", {}), [key]: details.open }));
@@ -412,9 +415,29 @@ function buildControls() {
         body.disabled = get("io.scan_film");
         footer.hidden = !body.disabled;
       });
+    } else if (section.footer) {
+      body.append(el("p", { className: "hint footer", textContent: section.footer }));
     }
-    root.append(body);
+    $(pane === "post" ? "post-sections" : "sections").append(body);
   }
+}
+
+// Desktop's Lab | Post switch (macOS AdjustmentInspector): which pane the
+// sidebar shows. On the phone's sheet each section has its tab instead.
+function showPane(pane) {
+  if (pane !== "post") pane = "lab";
+  $("side").dataset.pane = pane;
+  for (const button of $("panes").children) button.setAttribute("aria-selected", button.dataset.pane === pane);
+  remember("pane", pane);
+}
+function buildPanes() {
+  for (const button of $("panes").children) {
+    button.addEventListener("click", () => {
+      showPane(button.dataset.pane);
+      $("scroll").scrollTop = 0;
+    });
+  }
+  showPane(remembered("pane", "lab"));
 }
 
 // The pickers' sections, in desktop's order (macOS StockGroup).
@@ -461,7 +484,8 @@ function fillStocks() {
 // Where a sidebar doesn't fit beside the photograph, the inspector is a
 // bottom sheet with a tab per section (index.html has the same query).
 const SHEET = matchMedia("(max-width: 899px) and (orientation: portrait), (max-width: 639px)");
-const TABS = [{ id: "stock", title: "Stock" }, ...SECTIONS.map((s) => ({ id: sectionId(s), title: s.tab ?? s.title }))];
+const TABS = [{ id: "stock", title: "Stock" }, ...[...SECTIONS, ...POST_SECTIONS].map((s) => ({ id: sectionId(s), title: s.tab ?? s.title }))]
+  .filter((t, i, all) => all.findIndex((u) => u.id === t.id) === i);
 
 function showTab(id) {
   if (!TABS.some((t) => t.id === id)) id = "stock";
@@ -510,6 +534,8 @@ function buildSheet() {
   // footer scrolls with the Stock tab; otherwise it stays at the sidebar's foot.
   const short = matchMedia("(max-height: 599px)");
   const place = () => {
+    // The Lab | Post panes are the sidebar's; the sheet shows a tab at a time.
+    $("side").classList.toggle("sheet", SHEET.matches);
     SHEET.matches || short.matches ? $("scroll").append($("bottom")) : $("scroll").after($("bottom"));
     setSheet(sheet);
   };
@@ -1080,6 +1106,7 @@ async function balancePrint() {
 // ---- Wiring ----------------------------------------------------------------
 
 buildControls();
+buildPanes();
 buildSheet();
 if (matchMedia("(pointer: coarse)").matches) $("value-hint").textContent = "Tap a value to type one.";
 catalog = await (await fetch("catalog.json")).json();
@@ -1089,6 +1116,8 @@ fillStocks();
 globalThis.negs = {
   state: () => structuredClone(state),
   edit(path, value) { set(path, value); sync(); schedule("settled"); },
+  // Desktop's Lab | Post switch.
+  pane: (pane) => showPane(pane),
   // A fresh edit: Reset Adjustments, the film (and paper, if given) chosen
   // as the pickers choose them, then `edits` ({ path: value }).
   start(film, paper, edits = {}) {

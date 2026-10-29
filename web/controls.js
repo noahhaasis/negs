@@ -27,7 +27,7 @@ const curves = (at) => [
 ];
 
 // Sections hold loose controls (`controls`, each shown while its `when`
-// path is true) and then their effect groups. A group's `enable` is the
+// path is true) and then their effect groups, if any. A group's `enable` is the
 // switch in its header; `print` sections are skipped while scanning film.
 // `tab` names a section's tab on phones when its title is too long.
 export const SECTIONS = [
@@ -137,6 +137,20 @@ export const SECTIONS = [
       toggle("Black correction", "scanner.black_correction"),
       slider("Black level", "scanner.black_level", 0, 0.5, 0.01),
     ] },
+  ] },
+];
+
+// The Post tab (macOS Inspector `post`): finishing edits on the scan, after
+// the film. Each section shows on desktop's Post pane and the phone's Post tab.
+export const POST_SECTIONS = [
+  { title: "Tone", tab: "Post", controls: [
+    slider("Brightness", "post.brightness", -100, 100, 1),
+    slider("Contrast", "post.contrast", -100, 100, 1),
+    slider("Whites", "post.whites", -100, 100, 1),
+    slider("Blacks", "post.blacks", -100, 100, 1),
+  ], footer: "Adjusts the finished scan/print. To recover a clipped highlight, use exposure in the Lab." },
+  { title: "Color", tab: "Post", controls: [
+    slider("Saturation", "post.saturation", -100, 100, 1),
   ] },
 ];
 
