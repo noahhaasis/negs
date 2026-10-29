@@ -17,7 +17,7 @@ const data = join(web, "..", "data");
 const https = process.argv.includes("--https");
 const port = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) ?? (https ? 8443 : 8137));
 const certs = process.env.NEGS_DEV_CERTS ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "negs-dev-certs");
-const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".css": "text/css" };
+const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".css": "text/css", ".jpg": "image/jpeg" };
 
 async function serve(req, res) {
   const url = new URL(req.url, "http://x");
@@ -55,7 +55,8 @@ async function serve(req, res) {
   if (!path.startsWith(root)) return res.writeHead(403).end();
   try {
     const bytes = await readFile(path);
-    res.writeHead(200, { "Content-Type": types[extname(path)] ?? "application/octet-stream" }).end(bytes);
+    // The length lets the page show a download's progress (the sample photograph).
+    res.writeHead(200, { "Content-Type": types[extname(path)] ?? "application/octet-stream", "Content-Length": bytes.length }).end(bytes);
   } catch {
     res.writeHead(404).end();
   }

@@ -19,9 +19,9 @@ The pieces are numbered as first planned; work in this order:
 
 1. Pieces 1–4: done.
 2. Piece 6 (resident scan, zoom): done ahead of piece 5 at the owner's
-   request, waiting for the owner's review 🛑.
-3. **The owner's features, next and in this order:** 7 Placeholder Image,
-   8 Before/After toggle, 9 Export LUT, 10 Export Preset, 11 Borders and
+   request, and approved.
+3. **The owner's features, next and in this order:** 7 Placeholder Image
+   (done), 8 Before/After toggle, 9 Export LUT, 10 Export Preset, 11 Borders and
    Fit for Instagram. They come before everything else left in the plan.
 4. Piece 5 (colour management), then the Stage 1 checkpoint 🛑.
 5. Stage 2 (pieces 12–14), and the HEIC research.
@@ -192,6 +192,10 @@ test in `photo.rs` covers it). A "Developing" badge as on desktop.
 
 Done when: opening the ARW shows the placeholder in well under a second and
 the developed frame replaces it in place.
+
+The owner added: the placeholder image is `DSC_6377.NEF`, then: keep the
+empty screen, offer that photograph there as a sample, as a lossy DNG, so
+the first load stays fast. Done: `docs/web-wasm.md` item 15.
 
 ### 8. Before/After toggle (owner's list)
 

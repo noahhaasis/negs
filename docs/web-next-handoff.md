@@ -22,9 +22,9 @@ branch). Commits end with
 | HTTPS for device testing | `d350950` | done |
 | 3. iPad and phone layout | `842da9c` | done |
 | 4. Enlarger shifts without a rebuild, Balance Print | `adcee97` | done (`docs/web-wasm.md` item 12) |
-| 6. Resident scan, zoom, true-resolution preview | `fc6322d` | done ahead of piece 5, at the owner's request (`docs/web-wasm.md` item 14); 🛑 waiting for the owner's review |
-| **7. Placeholder Image** | | **next**, once the owner has reviewed piece 6 |
-| 8. Before/After toggle | | owner's list |
+| 6. Resident scan, zoom, true-resolution preview | `fc6322d` | done ahead of piece 5, at the owner's request (`docs/web-wasm.md` item 14); approved |
+| 7. Placeholder Image, and the sample photo (lossy DNG) | | done (`docs/web-wasm.md` item 15) |
+| **8. Before/After toggle** | | **next**, owner's list |
 | 9. Export LUT | | owner's list |
 | 10. Export Preset | | owner's list |
 | 11. Borders and Fit for Instagram | | owner's list; 🛑 owner review of 7–11 |
@@ -134,7 +134,7 @@ Then stop it from filling up again:
 `docs/web-wasm.md` item 13: the browser matches native wgpu and the f64
 reference on 63 cases (films, papers, scans, settings, the ARW), and a GPU
 memory leak that blacked out a long session's 24 MP frame is fixed. Piece 6
-took item 14, so piece 5's table goes in item 15. Rerun
+took item 14 and piece 7 item 15; later pieces take the next free number. Rerun
 `web/checks/correctness.sh` after engine changes. Add cases for the new
 output spaces once they present, with the reference converted the way the
 display converts them.

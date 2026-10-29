@@ -7,6 +7,7 @@ const query = new URLSearchParams(location.search);
 
 import { SECTIONS, optionTitle, snap, formatValue } from "./controls.js";
 import { createView } from "./view.js";
+import { placeholder } from "./placeholder.js";
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
 // complete RuntimeParams, starting from the engine's defaults. Values a
@@ -109,7 +110,8 @@ async function attachCanvas() {
   presenting = false;
   sentView = "";
   $("gpu-canvas")?.remove();
-  $("canvas").hidden = !frame;
+  // The page's canvas keeps the bytes' frame, or a placeholder.
+  $("canvas").hidden = !frame && !early;
   if (kind !== "gpu" || !self.OffscreenCanvas || !HTMLCanvasElement.prototype.transferControlToOffscreen || query.get("present") === "0") return;
   const canvas = Object.assign(document.createElement("canvas"), { id: "gpu-canvas", className: "photo", hidden: true });
   $("canvas").after(canvas);
@@ -477,9 +479,10 @@ function snapHeight(snap) {
   const side = $("side"), height = $("app").clientHeight, width = $("app").clientWidth;
   if (snap === "low") return $("scroll").offsetTop - side.offsetTop + parseFloat(getComputedStyle(side).paddingBottom);
   if (snap === "high") return 0.8 * height;
-  if (!photo) return 0.45 * height;
+  const shape = photo ?? early;
+  if (!shape) return 0.45 * height;
   const pad = width < 500 ? 12 : 32, hud = 28;
-  const view = ((width - 2 * pad) * photo.height) / photo.width + 2 * pad + hud;
+  const view = ((width - 2 * pad) * shape.height) / shape.width + 2 * pad + hud;
   return Math.min(0.62 * height, Math.max(0.4 * height, height - view));
 }
 function setSheet(snap) {
@@ -564,7 +567,7 @@ async function pump() {
   if (running || exporting) return;
   running = true;
   $("busy").classList.add("on");
-  while (wanted && photo) {
+  while (wanted && photo && !loading) {
     const interactive = wanted === "interactive";
     wanted = null;
     const side = renderSide();
@@ -620,9 +623,10 @@ const views = [];        // display passes' times, for checks
 // next), or the page draws the bytes.
 let showing = false, showAgain = false, sentView = "";
 function showView() {
-  if (!photo) return;
+  if (!photo && !early) return;
   zoomLevel();
-  if (!presenting) return paint();
+  if (!presenting || early) paint();
+  if (!presenting || !photo) return;
   if (showing) return void (showAgain = true);
   showing = true;
   sendView()
@@ -650,27 +654,31 @@ function viewSettled() {
   if (side > settledSide + 1 || (view.fitting() && side !== settledSide)) schedule("settled");
 }
 
-// The bytes' frame on the page's canvas, placed as the engine places its
-// own (`View::place` in wgpu_backend.rs): 1:1 within a pixel, else smoothed.
+// The bytes' frame (or the placeholder) on the page's canvas, placed as the
+// engine places its own (`View::place` in wgpu_backend.rs): 1:1 within a
+// pixel, else smoothed.
 function paint() {
   const canvas = $("canvas"), { width, height } = view.size();
   if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = `rgb(${BACKGROUND.map((c) => Math.round(c * 255)).join(" ")})`;
   ctx.fillRect(0, 0, width, height);
-  if (!frame || !photo) return;
-  const r = view.rect();
-  if (Math.abs(r.width - frame.width) <= 1 && Math.abs(r.height - frame.height) <= 1) {
+  const shown = early ?? (photo && frame);
+  if (!shown) return;
+  const r = view.rect(), { width: w, height: h } = shown.bitmap;
+  if (Math.abs(r.width - w) <= 1 && Math.abs(r.height - h) <= 1) {
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(frame.bitmap, Math.round(r.x + (r.width - frame.width) / 2), Math.round(r.y + (r.height - frame.height) / 2));
+    ctx.drawImage(shown.bitmap, Math.round(r.x + (r.width - w) / 2), Math.round(r.y + (r.height - h) / 2));
   } else {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(frame.bitmap, r.x, r.y, r.width, r.height);
+    ctx.drawImage(shown.bitmap, r.x, r.y, r.width, r.height);
   }
 }
 
-// A presented frame is already on the engine's canvas; otherwise draw the bytes.
+// A presented frame is already on the engine's canvas; otherwise draw the
+// bytes. The photograph's first frame takes the placeholder's place; while
+// another photograph opens, its placeholder stays.
 async function draw(r) {
   const canvas = $("canvas"), gpu = $("gpu-canvas");
   if (!r.presented) {
@@ -678,12 +686,54 @@ async function draw(r) {
     const bitmap = await createImageBitmap(image, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
     frame?.bitmap.close();
     frame = { bitmap, width: r.width, height: r.height };
-    paint();
   }
+  if (loading) return;
+  if (!$("badge").hidden) mark("frame", photo.name);
+  dropEarly();
+  setBadge(null);
+  if (!r.presented) paint();
   canvas.hidden = r.presented;
   if (gpu) gpu.hidden = !r.presented;
   $("empty").hidden = true;
   $("zoom").hidden = false;
+}
+
+// ---- The placeholder -------------------------------------------------------
+
+// What shows while a photograph opens, until its first frame (web/placeholder.js):
+// { bitmap, width, height } in the photograph's (estimated) size, and what it covers.
+let early = null;
+// When each opening's placeholder, decode and first frame happened, for checks.
+const timeline = [];
+const mark = (event, name) => timeline.push({ event, name, t: performance.now() });
+function showEarly(p, opening) {
+  const canvases = [...document.querySelectorAll(".photo")];
+  early = { ...p, opening, covered: { canvases: canvases.map((c) => [c, c.hidden]), hud: $("hud").textContent } };
+  for (const c of canvases) c.hidden = c.id !== "canvas";
+  $("empty").hidden = true;
+  $("hud").textContent = "";
+  view.setPhoto(p.width, p.height);
+  setSheet(sheet);
+}
+// Gone, once the photograph shows; or, when it didn't open, showing again
+// what it covered.
+function dropEarly(restore = false) {
+  if (!early) return;
+  const { bitmap, covered } = early;
+  early = null;
+  bitmap.close();
+  if (!restore) return;
+  $("empty").hidden = !!photo;
+  for (const [c, hidden] of covered.canvases) c.hidden = hidden;
+  $("hud").textContent = covered.hud;
+  if (photo) view.setPhoto(photo.width, photo.height);
+  else paint();
+}
+
+// macOS ActivityBadge: "Developing" until a photograph's first frame shows.
+function setBadge(text) {
+  $("badge").hidden = !text;
+  if (text) $("badge-text").textContent = text;
 }
 
 // macOS EditorModel.percent.
@@ -712,14 +762,32 @@ function hud(r, interactive) {
 
 // ---- Opening and exporting -------------------------------------------------
 
-async function open(file) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const previous = photo;
-  showMessage(`Opening ${file.name}…`);
+// Opens `name`, whose bytes `data` resolves to. Until its first frame, a
+// placeholder from the bytes shows.
+let opens = 0, loading = false, starting = null;
+async function open(name, data) {
+  const opening = ++opens, previous = photo;
+  let loaded = false;
+  loading = true;
+  // Another photograph's placeholder isn't this one's.
+  dropEarly(true);
   $("busy").classList.add("on");
+  const t = performance.now();
+  mark("open", name);
+  data.then((bytes) => placeholder(bytes, longSide())).then((p) => {
+    if (!p) return;
+    if (loaded || opening !== opens) return p.bitmap.close();
+    showEarly(p, opening);
+    mark("placeholder", name);
+    console.log(`placeholder for ${name} ${p.bitmap.width}×${p.bitmap.height} after ${(performance.now() - t).toFixed(0)} ms`);
+  }, (e) => console.warn(`No placeholder for ${name}: ${e.message}`));
   try {
+    const bytes = await data;
+    if (opening !== opens) return;
+    setBadge("Developing");
     const t = performance.now();
     let size;
+    await starting;
     // Switching engines restarts the worker under a load: load again.
     for (;;) {
       try {
@@ -730,24 +798,100 @@ async function open(file) {
         if (!e.restarted) throw e;
       }
     }
-    photo = { name: file.name, bytes, width: size.width, height: size.height };
-    setSheet(sheet);
-    console.log(`decoded ${file.name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
+    loaded = true;
+    mark("decoded", name);
+    // A newer photograph is opening; the engine loads it next.
+    if (opening !== opens) return;
+    photo = { name, bytes, width: size.width, height: size.height };
+    console.log(`decoded ${name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
     $("export").disabled = false;
-    hideMessage();
     // Nothing of the last photograph shows; the engine forgot its frame.
     frame?.bitmap.close();
     frame = null;
-    for (const canvas of document.querySelectorAll(".photo")) canvas.hidden = true;
     settledSide = 0;
-    view.setPhoto(photo.width, photo.height);
+    if (early) {
+      // The placeholder stays until the first frame, where it was.
+      view.resize(photo.width, photo.height);
+    } else {
+      for (const canvas of document.querySelectorAll(".photo")) canvas.hidden = true;
+      view.setPhoto(photo.width, photo.height);
+    }
+    setSheet(sheet);
+    loading = false;
     schedule("settled");
   } catch (e) {
+    loaded = true;
+    if (opening !== opens || e.name === "AbortError") return;
+    setBadge(null);
     photo = previous;
-    await failed(e, `Couldn't open ${file.name}`);
+    dropEarly(true);
+    $("empty").hidden = !!photo;
+    await failed(e, `Couldn't open ${name}`);
   } finally {
+    if (opening === opens) loading = false;
     if (!running) $("busy").classList.remove("on");
+    if (!loading && wanted) pump();
   }
+}
+
+// The longest side a placeholder needs: the stage's in device pixels, or
+// before it's measured, the window's, which it never exceeds.
+function longSide() {
+  const { width, height } = view.size();
+  return width > 1 ? Math.max(width, height) : Math.round(Math.max(innerWidth, innerHeight) * devicePixelRatio);
+}
+
+// A photograph the viewer chose; it replaces the sample if that's still
+// downloading.
+function openFile(file) {
+  sample?.abort();
+  return open(file.name, file.arrayBuffer().then((b) => new Uint8Array(b)));
+}
+
+// ---- The sample photograph ---------------------------------------------------
+
+// A photograph to try Negs on without one of your own, offered on the empty
+// screen and downloaded only when asked for: a Nikon Z f NEF made into a
+// 3.4 MB lossy DNG (web/sample/make-dng.py), whose camera preview shows
+// while it develops.
+const SAMPLE = { name: "DSC_6377.dng", url: "sample/DSC_6377.dng" };
+let sample = null;
+function openSample() {
+  sample = new AbortController();
+  const { signal } = sample;
+  setBadge("Downloading");
+  $("empty").hidden = true;
+  // open() counts this opening as the next.
+  const opening = opens + 1;
+  const data = download(SAMPLE.url, signal, (f) => opens === opening && setBadge(`Downloading ${Math.floor(f * 100)}%`));
+  return open(SAMPLE.name, data).finally(() => {
+    if (sample?.signal === signal) sample = null;
+  });
+}
+
+// `url`'s bytes, telling `progress` the fraction so far when the server
+// says the length.
+async function download(url, signal, progress) {
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  const total = Number(res.headers.get("Content-Length")) || 0;
+  if (!total || !res.body) return new Uint8Array(await res.arrayBuffer());
+  const chunks = [];
+  let received = 0;
+  for (const reader = res.body.getReader(); ;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    progress(Math.min(1, received / total));
+  }
+  const bytes = new Uint8Array(received);
+  let at = 0;
+  for (const c of chunks) {
+    bytes.set(c, at);
+    at += c.length;
+  }
+  return bytes;
 }
 
 // A crash kills the engine's module: start a new worker, with the last
@@ -755,6 +899,11 @@ async function open(file) {
 async function failed(e, what) {
   if (e.restarted) return;
   console.error(e);
+  setBadge(null);
+  if (!loading && early) {
+    dropEarly();
+    paint();
+  }
   showMessage(`${what}: ${e.message}`, true);
   if (e.crashed) {
     const message = $("message").textContent;
@@ -861,13 +1010,18 @@ globalThis.negs = {
   read: (maxDim) => host.call("render", state.film, state.paper, params(), maxDim, false, false),
   // Opens a photograph from a URL as the Open button would.
   // (An array buffer: Chrome fails blob() of a large response in a test profile.)
-  open: async (url) => open(new File([await (await fetch(url)).arrayBuffer()], url.split("/").at(-1))),
+  open: async (url) => openFile(new File([await (await fetch(url)).arrayBuffer()], url.split("/").at(-1))),
   // The view (web/view.js), the times of its display passes, the side a
   // settled frame renders at, and where the engine draws its frame.
   view,
   views,
   renderSide: () => renderSide(),
   photo: () => photo && { width: photo.width, height: photo.height },
+  openSample,
+  // The placeholder showing, if any, and when each opening's steps happened.
+  placeholder: () => early && { width: early.width, height: early.height, bitmap: [early.bitmap.width, early.bitmap.height], visible: !$("canvas").hidden },
+  timeline,
+  badge: () => !$("badge").hidden && $("badge-text").textContent,
   shown: () => host.call("shownRect"),
 };
 
@@ -880,7 +1034,8 @@ $("engine").addEventListener("change", async () => {
   schedule("settled");
 });
 for (const b of [$("open"), $("open-empty")]) b.addEventListener("click", () => $("file").click());
-$("file").addEventListener("change", () => $("file").files[0] && open($("file").files[0]));
+$("open-sample").addEventListener("click", openSample);
+$("file").addEventListener("change", () => $("file").files[0] && openFile($("file").files[0]));
 $("export").addEventListener("click", exportJpeg);
 
 $("fit").addEventListener("click", () => view.fit());
@@ -893,11 +1048,12 @@ viewport.addEventListener("drop", (ev) => {
   ev.preventDefault();
   viewport.classList.remove("dragging");
   const file = ev.dataTransfer.files[0];
-  if (file) open(file);
+  if (file) openFile(file);
 });
 
 const gpu = query.get("backend") ?? (navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)) ? "gpu" : "cpu");
-await startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
+starting = startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
+await starting;
 
 // Automation: ?image=<url>&name=<result>&runs=<n>&max=<px>[&params=<json>]
 // opens the image, renders it n times at max pixels, shown 1:1, then posts the last image and
