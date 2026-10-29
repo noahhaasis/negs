@@ -17,7 +17,7 @@ use crate::{
     sensor::{Demosaic, SensorType, xtrans::bilinear::XTransBilinearDemosaic},
   },
   pixarray::{Color2D, PixF32},
-  rawimage::RawPhotometricInterpretation,
+  rawimage::{RawImageData, RawPhotometricInterpretation},
   rawsource::RawSource,
   tags::{ExifTag, TiffCommonTag},
 };
@@ -165,13 +165,25 @@ impl RawDevelop {
   /// If demosaic is disabled or camera raw is monochrome, the TIFF
   /// has only one color channel.
   pub fn develop_intermediate(&self, rawimage: &RawImage) -> crate::Result<Intermediate> {
-    let mut rawimage = rawimage.clone();
+    self.develop_intermediate_owned(rawimage.clone())
+  }
+
+  /// [`Self::develop_intermediate`], consuming the image: its sensor data
+  /// becomes the intermediate without another copy, and is gone when the
+  /// developed image is made, keeping the peak memory down.
+  pub fn develop_intermediate_owned(&self, mut rawimage: RawImage) -> crate::Result<Intermediate> {
     if self.steps.contains(&ProcessingStep::Rescale) {
       rawimage.apply_scaling()?;
     }
 
     let mut intermediate = match rawimage.cpp {
-      1 => Intermediate::Monochrome(PixF32::new_with(rawimage.data.as_f32().into_owned(), rawimage.width, rawimage.height)),
+      1 => {
+        let data = match std::mem::replace(&mut rawimage.data, RawImageData::Float(Vec::new())) {
+          RawImageData::Float(data) => data,
+          integer => integer.as_f32().into_owned(),
+        };
+        Intermediate::Monochrome(PixF32::new_with(data, rawimage.width, rawimage.height))
+      }
       3 => Intermediate::ThreeColor(Color2D::<f32, 3>::new_with(
         rawimage.data.as_f32().chunks_exact(3).map(|x| [x[0], x[1], x[2]]).collect(),
         rawimage.width,
@@ -306,11 +318,11 @@ impl RawDevelop {
         // Only apply crop if dimensions differ.
         if crop.d != intermediate.dim() {
           log::debug!("crop: {:?}, intermediate dim: {:?}, rawimage: {:?}", crop, intermediate.dim(), rawimage.dim());
-          intermediate = match intermediate {
-            Intermediate::Monochrome(pixels) => Intermediate::Monochrome(pixels.crop(crop)),
-            Intermediate::ThreeColor(pixels) => Intermediate::ThreeColor(pixels.crop(crop)),
-            Intermediate::FourColor(pixels) => Intermediate::FourColor(pixels.crop(crop)),
-          };
+          match &mut intermediate {
+            Intermediate::Monochrome(pixels) => pixels.crop_in_place(crop),
+            Intermediate::ThreeColor(pixels) => pixels.crop_in_place(crop),
+            Intermediate::FourColor(pixels) => pixels.crop_in_place(crop),
+          }
         }
       }
     }

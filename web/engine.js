@@ -7,6 +7,7 @@ export function client(wasm, kind) {
       engine = kind === "gpu" ? await wasm.Engine.newGpu() : wasm.Engine.newCpu();
     },
     backend: () => engine.backend(),
+    setDiffusionGridBudget: (bytes) => engine.setDiffusionGridBudget(bytes),
     // An OffscreenCanvas the WebGPU engine presents renders on.
     setCanvas: (canvas) => engine.setCanvas(canvas),
     // Where that canvas shows the photograph, drawn again at once without
@@ -31,10 +32,13 @@ export function client(wasm, kind) {
     shownRect: () => [...engine.shownRect()],
     // The largest frame the WebGPU engine renders and shows.
     limits: () => [...engine.limits()],
-    load(bytes, maxDim) {
+    // `width` × `height` as decoded; the engine keeps `kept` × `keptHeight`,
+    // within `maxDim` and `maxPixels` (0: no limit).
+    load(bytes, maxDim, maxPixels = 0) {
       const t = performance.now();
-      const [width, height] = engine.load(bytes, maxDim);
-      return { width, height, decodeMs: performance.now() - t };
+      engine.forget();
+      const [kept, keptHeight, width, height] = engine.load(bytes, maxDim, maxPixels);
+      return { width, height, kept, keptHeight, decodeMs: performance.now() - t };
     },
     async render(film, paper, params, maxDim, interactive, present = false) {
       for (;;) {

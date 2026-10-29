@@ -27,6 +27,15 @@ use wasm_bindgen::prelude::*;
 #[cfg(feature = "threads")]
 pub use wasm_bindgen_rayon::init_thread_pool;
 
+/// Wakes rayon's workers after the page terminated them, so they end: Safari
+/// doesn't end a worker that waits in `memory.atomic.wait`, as idle ones do,
+/// and their shared memory stayed taken until the tab closed.
+#[cfg(feature = "threads")]
+#[wasm_bindgen(js_name = wakeThreadPool)]
+pub fn wake_thread_pool() {
+    rayon::spawn_broadcast(|_| {});
+}
+
 /// Where the engine looks for its data; the page registers files under it.
 const DATA_DIR: &str = "/data";
 
@@ -406,6 +415,16 @@ impl Engine {
         gpu.and_then(|gpu| gpu.shown()).map_or(Vec::new(), |shown| shown.to_vec())
     }
 
+    /// Limit the WebGPU engine's diffusion FFT grid to `bytes` (0: none),
+    /// past which it makes the glow from a smaller copy of the frame
+    /// ([`WgpuBackend::set_diffusion_grid_budget`]).
+    #[wasm_bindgen(js_name = setDiffusionGridBudget)]
+    pub fn set_diffusion_grid_budget(&self, bytes: f64) {
+        if let Some(gpu) = &self.state.borrow().gpu {
+            gpu.set_diffusion_grid_budget(bytes as u64);
+        }
+    }
+
     /// The largest frame the WebGPU engine renders and shows: `[longest
     /// side, pixels]`; empty for the CPU engine.
     pub fn limits(&self) -> Vec<f64> {
@@ -417,9 +436,17 @@ impl Engine {
     }
 
     /// Decode a PNG, JPEG or TIFF (with its embedded profile) or a camera
-    /// RAW (with rawler, as shot), at most `max_dim` pixels on the longer
-    /// side (0: full size), resolving to its `[width, height]`.
-    pub fn load(&self, bytes: &[u8], max_dim: u32) -> Result<Vec<u32>, JsError> {
+    /// RAW (with rawler, as shot), keeping it at most `max_dim` pixels on the
+    /// longer side and `max_pixels` in all (0: no limit), resolving to its
+    /// `[width, height]` as kept and as decoded. A device short of memory
+    /// keeps a smaller working copy so; exports load it again in full.
+    pub fn load(&self, bytes: &[u8], max_dim: u32, max_pixels: f64) -> Result<Vec<u32>, JsError> {
+        // The last photograph goes first, so its memory holds the new one's
+        // decode: wasm's memory never shrinks, so its peak is what stays.
+        // A failed load leaves none.
+        self.forget();
+        // A RAW turns upright after it shrinks: a smaller copy to turn.
+        let mut orientation = 1;
         let (image, colour) = match decode(bytes) {
             Ok((image, info, format)) => {
                 let interpretation = spektrafilm_io::InputInterpretation::default();
@@ -429,28 +456,40 @@ impl Engine {
             Err(not_an_image) => {
                 // A camera RAW the decoder knows but can't read says so;
                 // anything else may have been a damaged image.
-                let image = spektrafilm_io::load_raw_bytes(bytes, Default::default()).map_err(|raw| {
+                let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented(bytes, Default::default()).map_err(|raw| {
                     let raw = format!("{raw:#}");
                     match raw.split_once("DecoderFailed(\"") {
                         Some((_, reason)) => JsError::new(reason.split('"').next().unwrap_or(&raw)),
                         None => js_error(not_an_image.context(raw)),
                     }
                 })?;
+                orientation = exif;
                 (image, spektrafilm_io::InputColour::raw("rawler"))
             }
         };
-        let long_side = image.width.max(image.height);
-        let scale = if max_dim == 0 { 1.0 } else { (max_dim as f64 / long_side as f64).min(1.0) };
-        let target = (
-            ((image.width as f64 * scale).round() as u32).max(1),
-            ((image.height as f64 * scale).round() as u32).max(1),
-        );
-        let image = if target == (image.width, image.height) {
+        let (width, height) = (image.width, image.height);
+        let target = kept_size(width, height, max_dim, max_pixels);
+        let image = if target == (width, height) {
             image
         } else {
-            preview::downsample_area(&image, target)
+            // The full image goes as its copy comes.
+            let small = preview::downsample_area(&image, target);
+            drop(image);
+            small
         };
-        let size = vec![image.width, image.height];
+        let image = image.oriented(orientation);
+        let full = if (5..=8).contains(&orientation) { (height, width) } else { (width, height) };
+        let size = vec![image.width, image.height, full.0, full.1];
+        let mut state = self.state.borrow_mut();
+        state.source = Some(state.keyed(image));
+        state.input_colour = Some(colour);
+        Ok(size)
+    }
+
+    /// Drop the loaded photograph and everything made from it. Before a
+    /// [`Engine::load`], whose bytes the call copies into the module's memory
+    /// first: then they and the decode have the photograph's room too.
+    pub fn forget(&self) {
         let mut state = self.state.borrow_mut();
         if let Some(gpu) = &state.gpu {
             gpu.forget_photograph();
@@ -460,9 +499,7 @@ impl Engine {
         state.metering = None;
         state.autoexposure = None;
         state.shown = None;
-        state.source = Some(state.keyed(image));
-        state.input_colour = Some(colour);
-        Ok(size)
+        state.input_colour = None;
     }
 
     /// The loaded photograph before any film, as the native helper's
@@ -529,6 +566,22 @@ impl Engine {
                 .map_err(JsValue::from)
         })
     }
+}
+
+/// The size an image of `width` × `height` is kept at, within `max_dim` on
+/// its longer side and `max_pixels` in all (0: no limit): the longer side the
+/// page's `renderSide` caps a render at, so the largest render is this copy.
+fn kept_size(width: u32, height: u32, max_dim: u32, max_pixels: f64) -> (u32, u32) {
+    let (long, short) = (width.max(height) as f64, width.min(height) as f64);
+    let mut side = if max_dim == 0 { long } else { long.min(max_dim as f64) };
+    if max_pixels > 0.0 && side * side * short / long > max_pixels {
+        side = (max_pixels * long / short).sqrt().floor();
+    }
+    let scale = (side / long).min(1.0);
+    (
+        ((width as f64 * scale).round() as u32).clamp(1, width),
+        ((height as f64 * scale).round() as u32).clamp(1, height),
+    )
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -600,6 +653,18 @@ async fn render(
     }
     let (pipeline, (source, source_key), backend, gpu) = {
         let mut state = state.borrow_mut();
+        if !state.backend.is_gpu() {
+            let (width, height) = state.size_at(max_dim).ok_or_else(|| JsError::new("no image loaded"))?;
+            // The exact CPU convolution keeps three complex FFT planes
+            // alive, plus the PSF, RGB images, and decoded source. Leave
+            // room for those in wasm32's 4 GiB address space. The iPad
+            // reproduction requested a 2.7 GiB Vec (itself > isize::MAX).
+            // Reject before resampling or constructing the large PSF.
+            const MAX_FFT_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
+            if preview::cpu_diffusion_fft_buffer_bytes(&params, width, height) > MAX_FFT_BUFFER_BYTES {
+                return Err(JsError::new("BROWSER_RENDER_LIMIT: Diffusion at this resolution needs too much memory in this browser. Reduce its spatial scale or use the desktop app for full-resolution export."));
+            }
+        }
         let source = state.source_at(max_dim, interactive).ok_or_else(|| JsError::new("no image loaded"))?;
         stages.mark("resample");
         if let Some(colour) = &state.input_colour {

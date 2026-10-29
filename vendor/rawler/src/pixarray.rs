@@ -210,6 +210,27 @@ where
       crop(&self, area)
     }
   }
+
+  /// [`Self::crop`] within this buffer, without a second one.
+  pub fn crop_in_place(&mut self, area: Rect) {
+    assert!(self.initialized);
+    crop_vec_in_place(&mut self.data, self.width, self.height, area);
+    (self.width, self.height) = (area.width(), area.height());
+  }
+}
+
+/// Crops a row-major `width` × `height` image in its own buffer: each kept
+/// row moves to its place, which is never after where it was, then the rest
+/// is released.
+fn crop_vec_in_place<P: Copy>(data: &mut Vec<P>, width: usize, height: usize, area: Rect) {
+  assert!(area.y() + area.height() <= height);
+  assert!(area.x() + area.width() <= width);
+  for row in 0..area.height() {
+    let from = (area.y() + row) * width + area.x();
+    data.copy_within(from..from + area.width(), row * area.width());
+  }
+  data.truncate(area.width() * area.height());
+  data.shrink_to_fit();
 }
 
 #[multiversion(targets("x86_64+avx+avx2", "x86+sse", "aarch64+neon"))]
@@ -471,6 +492,12 @@ where
       .pixel_rows_mut()
       .enumerate()
       .for_each(|(row, rowbuf)| rowbuf.iter_mut().enumerate().for_each(|(col, v)| *v = op(*v, row, col)));
+  }
+
+  /// [`Self::crop`] within this buffer, without a second one.
+  pub fn crop_in_place(&mut self, area: Rect) {
+    crop_vec_in_place(&mut self.data, self.width, self.height, area);
+    (self.width, self.height) = (area.d.w, area.d.h);
   }
 
   pub fn crop(&self, area: Rect) -> Self {

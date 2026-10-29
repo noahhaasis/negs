@@ -228,6 +228,16 @@ pub fn load_raw_bytes(bytes: &[u8], wb: RawWhiteBalance) -> Result<ImageBuf> {
     develop_rawler(&rawler::rawsource::RawSource::new_from_slice(bytes), true, wb)
 }
 
+/// [`load_raw_bytes`] without turning the image upright, and the EXIF
+/// orientation (1 to 8) that would: for a caller that shrinks it first,
+/// which then turns a smaller copy.
+pub fn load_raw_bytes_unoriented(bytes: &[u8], wb: RawWhiteBalance) -> Result<(ImageBuf, u16)> {
+    wb.validate()?;
+    let src = rawler::rawsource::RawSource::new_from_slice(bytes);
+    let image = develop_rawler(&src, false, wb)?;
+    Ok((image, raw_exif_orientation(&src, &rawler::decoders::RawDecodeParams::default())))
+}
+
 fn develop_rawler(src: &rawler::rawsource::RawSource, orient: bool, wb: RawWhiteBalance) -> Result<ImageBuf> {
     use rawler::{
         decoders::RawDecodeParams,
@@ -236,6 +246,7 @@ fn develop_rawler(src: &rawler::rawsource::RawSource, orient: bool, wb: RawWhite
     let decode_params = RawDecodeParams::default();
     let mut raw = rawler::decode(src, &decode_params)
         .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
+
     let mut dev = RawDevelop::default();
     // Our `calibrate` replaces rawler's, which clips (see there).
     dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb | ProcessingStep::Calibrate));
@@ -246,17 +257,18 @@ fn develop_rawler(src: &rawler::rawsource::RawSource, orient: bool, wb: RawWhite
     // into an error instead of taking the app down.
     let intermediate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<_> {
         white_balance::prepare(&mut raw, wb)?;
+        // The develop consumes the sensor data, so it never holds a second
+        // copy; the rest (the matrices, the white balance) calibrates.
+        let meta = without_data(&mut raw);
         let intermediate = dev
-            .develop_intermediate(&raw)
+            .develop_intermediate_owned(raw)
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-        let mut intermediate = calibrate(&raw, intermediate);
-        white_balance::finish(&mut intermediate, wb, white_balance::is_monochrome(&raw))?;
+        let mut intermediate = calibrate(&meta, intermediate);
+        white_balance::finish(&mut intermediate, wb, white_balance::is_monochrome(&meta))?;
         Ok(intermediate)
     }))
     .map_err(|p| anyhow::anyhow!("RAW develop failed: panicked: {}", panic_message(&p)))?
     .context("RAW develop failed")?;
-    // The developed pixels no longer depend on the sensor buffer.
-    drop(raw);
     let img = intermediate_to_image_buf(intermediate);
     if !orient {
         return Ok(img);
@@ -265,6 +277,14 @@ fn develop_rawler(src: &rawler::rawsource::RawSource, orient: bool, wb: RawWhite
     // upstream TODO), so read the EXIF tag ourselves.
     let orientation = raw_exif_orientation(src, &decode_params);
     Ok(img.oriented(orientation))
+}
+
+/// A copy of `raw` without its sensor data.
+fn without_data(raw: &mut rawler::RawImage) -> rawler::RawImage {
+    let data = std::mem::replace(&mut raw.data, rawler::rawimage::RawImageData::Integer(Vec::new()));
+    let meta = raw.clone();
+    raw.data = data;
+    meta
 }
 
 /// Text of a caught panic payload (`panic!` with a literal or a format).
@@ -349,9 +369,9 @@ fn calibrate(raw: &rawler::RawImage, intermediate: rawler::imgop::develop::Inter
         rgb
     };
     match intermediate {
-        Intermediate::ThreeColor(pixels) => {
-            let data = pixels.data.par_iter().map(|p| develop(p)).collect();
-            Intermediate::ThreeColor(rawler::pixarray::Color2D::new_with(data, pixels.width, pixels.height))
+        Intermediate::ThreeColor(mut pixels) => {
+            pixels.data.par_iter_mut().for_each(|p| *p = develop(p));
+            Intermediate::ThreeColor(pixels)
         }
         Intermediate::FourColor(pixels) => {
             let data = pixels.data.par_iter().map(|p| develop(p)).collect();
@@ -375,6 +395,10 @@ fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate)
                 .for_each(|(dst, &v)| dst.fill(from_f32(v)));
             (pixels.width, pixels.height, out)
         }
+        // The same f32s, in their buffer.
+        #[cfg(not(feature = "precision-f64"))]
+        Intermediate::ThreeColor(pixels) => (pixels.width, pixels.height, flatten_rgb(pixels.data)),
+        #[cfg(feature = "precision-f64")]
         Intermediate::ThreeColor(pixels) => {
             let mut out = vec![from_f32(0.0); pixels.width * pixels.height * 3];
             out.par_chunks_exact_mut(3)
@@ -395,6 +419,16 @@ fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate)
         }
     };
     ImageBuf::from_data(w as u32, h as u32, scalars)
+}
+
+/// RGB pixels as their channels, without a copy.
+#[cfg(not(feature = "precision-f64"))]
+fn flatten_rgb(pixels: Vec<[f32; 3]>) -> Vec<f32> {
+    let mut pixels = std::mem::ManuallyDrop::new(pixels);
+    let (ptr, len, capacity) = (pixels.as_mut_ptr(), pixels.len(), pixels.capacity());
+    // SAFETY: [f32; 3] is three f32s with f32's alignment, so the allocation
+    // is one of `capacity * 3` f32s, `len * 3` of them initialised.
+    unsafe { Vec::from_raw_parts(ptr.cast::<f32>(), len * 3, capacity * 3) }
 }
 
 #[cfg(test)]

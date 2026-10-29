@@ -73,7 +73,11 @@ function startHost(engineKind) {
   });
   const ready = call("init", engineKind, threads, instance);
   const kill = () => {
-    worker.terminate();
+    // The worker ends its thread pool and itself (see worker.js), once a
+    // call it's running returns; terminating it alone leaves the pool's
+    // memory taken.
+    worker.postMessage({ method: "dispose" });
+    setTimeout(() => worker.terminate(), 10000);
     panics.close();
     fail(Object.assign(new Error("engine restarted"), { restarted: true }));
   };
@@ -81,6 +85,14 @@ function startHost(engineKind) {
 }
 
 async function startEngine(engineKind) {
+  // Safari versions without WebGPU cannot start this backend. Keep the
+  // working CPU engine and its decoded RAW instead of allocating another
+  // WASM pool just to discover that the API is absent.
+  if (engineKind === "gpu" && !navigator.gpu) {
+    engineKind = "cpu";
+    $("engine").value = engineKind;
+    if (host && kind === "cpu") return;
+  }
   host?.kill();
   forgetOriginal();
   kind = engineKind;
@@ -94,6 +106,7 @@ async function startEngine(engineKind) {
     $("engine-info").textContent = `${info.backend}${info.threads > 1 ? ` · ${info.threads} threads` : " · 1 thread"}`;
     const [side, pixels] = await host.call("limits");
     limits = side ? { side, pixels } : null;
+    if (side && DIFFUSION_GRID_BUDGET) await host.call("setDiffusionGridBudget", DIFFUSION_GRID_BUDGET);
     sync(); // Commands that need the engine.
     await attachCanvas();
   } catch (e) {
@@ -107,7 +120,7 @@ async function startEngine(engineKind) {
   }
   if (photo) {
     $("busy").classList.add("on");
-    const loaded = await host.call("load", photo.bytes, 0)
+    const loaded = await loadPhoto(photo.bytes)
       .then(() => true, (e) => { if (e.restarted) return false; throw e; })
       .finally(() => running || $("busy").classList.remove("on"));
     if (!loaded) return false;
@@ -719,6 +732,22 @@ async function pump() {
 const MAX_PIXELS = matchMedia("(pointer: coarse)").matches ? 12e6 : 40e6;
 const CPU_PIXELS = 4e6;
 let limits = null;       // the WebGPU engine's: { side, pixels }
+
+// The pixels the engine keeps of a photograph, 0 for all. A phone or tablet,
+// whose tab iOS ends from about 1.5 GB, keeps no more than it ever renders,
+// and exports that copy: a full-size export there doesn't fit, so the desktop
+// exports every pixel. The same budget as renderSide's, so its largest frame
+// is this copy at 1:1.
+const keptPixels = () => (matchMedia("(pointer: coarse)").matches ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
+const loadPhoto = (bytes) => host.call("load", bytes, 0, keptPixels());
+// A diffusion filter's FFT grid, several times the frame, may take this much
+// there, 0 for any: past it, the engine makes the glow from a copy of the
+// frame shrunk 2× or more (a 12 MP export's default diffusion halves, which
+// differs from the exact glow by at most 0.5 ΔE00). Previews fit as they are.
+const DIFFUSION_GRID_BUDGET = matchMedia("(pointer: coarse)").matches ? 160 * 2 ** 20 : 0;
+// The photograph as opened: its size as decoded, and as the engine keeps and
+// exports it.
+const opened = (name, bytes, size) => ({ name, bytes, width: size.width, height: size.height, exportWidth: size.kept, exportHeight: size.keptHeight });
 function renderSide() {
   const long = Math.max(photo.width, photo.height), short = Math.min(photo.width, photo.height);
   const sideAt = (zoom) => Math.min(long, Math.round(long * zoom));
@@ -1048,7 +1077,8 @@ function zoomLevel() {
 }
 
 // As desktop's status line: the photograph's size, and the share of its
-// pixels the frame shows when it has fewer (exports develop all of them).
+// pixels the frame shows when it has fewer (exports develop all of them, or
+// on a phone or tablet the copy it keeps).
 function hud(r, interactive) {
   const el = $("hud");
   const ms = `${r.elapsedMs.toFixed(0)} ms`;
@@ -1059,11 +1089,16 @@ function hud(r, interactive) {
   // Each part on one line; the line breaks between them.
   el.textContent = parts.map((p) => p.replaceAll(" ", "\u00a0")).join("\u00a0· ");
   el.title = shown < 1 && !interactive
-    ? `The preview shows ${percent(shown)} of these pixels. Exports develop all of them; inspect grain in an exported file.\n${r.stages}`
+    ? `The preview shows ${percent(shown)} of these pixels. ${exportNote()}; inspect grain in an exported file.\n${r.stages}`
     : r.stages;
 }
 
 // ---- Opening and exporting -------------------------------------------------
+
+// What an export of the photograph develops.
+const exportNote = () => photo.exportWidth < photo.width
+  ? `Exports here develop ${photo.exportWidth} × ${photo.exportHeight}; a desktop browser exports all of them`
+  : "Exports develop all of them";
 
 // Opens `name`, whose bytes `data` resolves to. Until its first frame, a
 // placeholder from the bytes shows.
@@ -1096,7 +1131,7 @@ async function open(name, data) {
     for (;;) {
       try {
         await host.ready;
-        size = await host.call("load", bytes, 0);
+        size = await loadPhoto(bytes);
         break;
       } catch (e) {
         if (!e.restarted) throw e;
@@ -1106,9 +1141,11 @@ async function open(name, data) {
     mark("decoded", name);
     // A newer photograph is opening; the engine loads it next.
     if (opening !== opens) return;
-    photo = { name, bytes, width: size.width, height: size.height };
+    // Its size as decoded, whatever the engine keeps.
+    photo = opened(name, bytes, size);
     console.log(`decoded ${name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
     $("export").disabled = false;
+    $("export").title = photo.exportWidth < photo.width ? `${exportNote()}.` : "";
     // Nothing of the last photograph shows; the engine forgot its frame.
     frame?.bitmap.close();
     frame = null;
@@ -1131,6 +1168,8 @@ async function open(name, data) {
     setBadge(null);
     photo = previous;
     dropEarly(true);
+    // The engine let the last photograph go before this one's decode.
+    if (photo) await reloadPhoto().catch(() => {});
     $("empty").hidden = !!photo;
     await failed(e, `Couldn't open ${name}`);
   } finally {
@@ -1205,6 +1244,11 @@ async function download(url, signal, progress) {
 // photograph that opened.
 async function failed(e, what) {
   if (e.restarted) return;
+  if (e.message?.startsWith("BROWSER_RENDER_LIMIT:")) {
+    setBadge(null);
+    showMessage(e.message.slice("BROWSER_RENDER_LIMIT:".length).trim());
+    return;
+  }
   console.error(e);
   setBadge(null);
   if (!loading && early) {
@@ -1223,7 +1267,7 @@ async function exportJpeg() {
   if (!photo || exporting) return;
   exporting = true;
   $("export").disabled = true;
-  showMessage(`Rendering ${photo.width}×${photo.height} for export…`);
+  showMessage(`Rendering ${photo.exportWidth}×${photo.exportHeight} for export…`);
   $("busy").classList.add("on");
   try {
     while (running) await new Promise((r) => setTimeout(r, 20));
@@ -1257,13 +1301,22 @@ async function exportJpeg() {
 // and includes it, as the CLI adds it (`addBorder`: spektrafilm-io's
 // add_border on the bytes, in the engine's worker).
 async function exportRender() {
-  const r = await host.call("render", state.film, state.paper, params(), Math.max(photo.width, photo.height), false);
+  const r = await host.call("render", state.film, state.paper, params(), Math.max(photo.exportWidth, photo.exportHeight), false);
   const b = Border.exported(border, r.width, r.height);
   if (!b) return r;
   sendBorderTexture();
   const bordered = await host.call("addBorder", r.rgba, r.width, r.height, b.style, JSON.stringify(Border.options(b)), b.instagram, state.film);
   console.log(`border ${bordered.width}×${bordered.height} in ${bordered.elapsedMs.toFixed(0)} ms, ${bordered.memoryMiB} MiB`);
   return { ...bordered, unbordered: r };
+}
+
+// Loads the photograph again, after the engine let it go: nothing of it shows
+// there until it renders again.
+async function reloadPhoto() {
+  await loadPhoto(photo.bytes);
+  forgetOriginal();
+  settledSide = 0;
+  schedule("settled");
 }
 
 // A message stays until hidden; one shown for `ms` hides itself then, and
@@ -1470,6 +1523,7 @@ fillStocks();
 // For automation over the DevTools protocol (web/cdp.mjs): a copy of the
 // edit, edits through the path the controls take, and the renders so far.
 globalThis.negs = {
+  engineInstances: () => instances,
   state: () => structuredClone(state),
   edit(path, value) { set(path, value); sync(); schedule("settled"); },
   // Desktop's Lab | Post switch.
@@ -1539,6 +1593,7 @@ $("paper").addEventListener("change", () => { choosePaper($("paper").value); syn
 $("reset").addEventListener("click", () => { resetAdjustments(); sync(); schedule("settled"); });
 $("scan-film").addEventListener("change", () => { set("io.scan_film", $("scan-film").checked); sync(); schedule("settled"); });
 $("engine").addEventListener("change", async () => {
+  if ($("engine").value === kind) return;
   // A superseded start leaves rendering to the selection that replaced it.
   if (await startEngine($("engine").value).catch((e) => showMessage(e.message, true)) === false) return;
   schedule("settled");
@@ -1633,9 +1688,9 @@ if (query.get("image")) {
   try {
     const bytes = new Uint8Array(await (await fetch(query.get("image"))).arrayBuffer());
     const t = performance.now();
-    const size = await host.call("load", bytes, 0);
+    const size = await loadPhoto(bytes);
     const loadMs = performance.now() - t;
-    photo = { name: "automation", bytes, ...size };
+    photo = opened("automation", bytes, size);
     const max = Number(query.get("max") ?? 2048);
     // The frame 1:1, so the canvas shows its pixels (or those that fit).
     const long = Math.max(photo.width, photo.height);
