@@ -10,7 +10,7 @@
 
 typedef struct {
     float *pixels; // RGBA float32, top row first, malloc-owned until release.
-    uint32_t width, height, monochrome;
+    uint32_t width, height, monochrome, lens_correction_supported;
     char version[32];
     char error[768];
 } SFAppleRaw;
@@ -22,7 +22,7 @@ static int fail(SFAppleRaw *out, int code, NSString *message) {
 
 // 0 success, 1 unsupported format, 2 I/O/render failure. The caller always frees
 // pixels, including on exceptions. No exception crosses the C ABI.
-int sf_apple_raw_decode(const char *path, int orient, int as_shot, SFAppleRaw *out) {
+int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_correction, SFAppleRaw *out) {
     @autoreleasepool {
         @try {
             NSURL *url = CFBridgingRelease(CFURLCreateFromFileSystemRepresentation(
@@ -43,7 +43,11 @@ int sf_apple_raw_decode(const char *path, int orient, int as_shot, SFAppleRaw *o
             raw.gamutMappingEnabled = NO;
             raw.extendedDynamicRangeAmount = 0;
             if (raw.isLocalToneMapSupported) raw.localToneMapAmount = 0;
-            if (raw.isLensCorrectionSupported) raw.lensCorrectionEnabled = NO;
+            // The vendor's distortion and vignetting corrections, applied
+            // together and scaled to fill the same extent. Off also leaves a
+            // DNG's own warp/vignette opcodes unapplied.
+            out->lens_correction_supported = raw.isLensCorrectionSupported;
+            if (raw.isLensCorrectionSupported) raw.lensCorrectionEnabled = lens_correction ? YES : NO;
             if (raw.isLuminanceNoiseReductionSupported) raw.luminanceNoiseReductionAmount = 0;
             if (raw.isColorNoiseReductionSupported) raw.colorNoiseReductionAmount = 0;
             if (raw.isSharpnessSupported) raw.sharpnessAmount = 0;

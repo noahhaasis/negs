@@ -5,6 +5,7 @@
 use std::{fmt, path::Path, str::FromStr};
 
 use anyhow::{Result, bail};
+use serde::{Deserialize, Serialize};
 use spektrafilm_math::image::ImageBuf;
 
 use crate::RawWhiteBalance;
@@ -35,10 +36,20 @@ impl FromStr for RawDecoderPreference {
     }
 }
 
+/// The lens corrections the camera maker recorded in the RAW (distortion and
+/// vignetting), applied by the decoder where it supports the file. Off keeps
+/// the lens's own projection; see docs/lens-corrections-plan.md.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LensCorrection {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct RawDecodeOptions {
     pub white_balance: RawWhiteBalance,
     pub apply_orientation: bool,
+    pub lens_correction: LensCorrection,
 }
 
 impl Default for RawDecodeOptions {
@@ -46,6 +57,7 @@ impl Default for RawDecodeOptions {
         Self {
             white_balance: RawWhiteBalance::default(),
             apply_orientation: true,
+            lens_correction: LensCorrection::default(),
         }
     }
 }
@@ -66,7 +78,14 @@ impl std::error::Error for UnsupportedRaw {}
 /// dependencies and sensor development inside the backend, not the film engine.
 pub trait RawDecoder: Send + Sync {
     fn name(&self) -> &'static str;
-    fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<ImageBuf>;
+    fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage>;
+}
+
+pub struct RawImage {
+    pub image: ImageBuf,
+    /// The decoder can apply [`LensCorrection`] to this file, whether or not
+    /// it was requested.
+    pub lens_correction_supported: bool,
 }
 
 pub struct RawlerDecoder;
@@ -75,14 +94,29 @@ impl RawDecoder for RawlerDecoder {
     fn name(&self) -> &'static str {
         "rawler"
     }
-    fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<ImageBuf> {
-        crate::load_raw_rawler(path, options.apply_orientation, options.white_balance)
+    /// No lens corrections yet (plan Phase 1b).
+    fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
+        Ok(RawImage {
+            image: crate::load_raw_rawler(path, options.apply_orientation, options.white_balance)?,
+            lens_correction_supported: false,
+        })
     }
 }
 
 pub struct DecodedRaw {
     pub image: ImageBuf,
     pub decoder: &'static str,
+    pub lens_correction_supported: bool,
+}
+
+impl DecodedRaw {
+    fn new(raw: RawImage, decoder: &dyn RawDecoder) -> Self {
+        Self {
+            image: raw.image,
+            decoder: decoder.name(),
+            lens_correction_supported: raw.lens_correction_supported,
+        }
+    }
 }
 
 #[cfg(any(test, all(target_os = "macos", feature = "apple-raw")))]
@@ -93,16 +127,10 @@ fn decode_with_fallback(
     options: RawDecodeOptions,
 ) -> Result<DecodedRaw> {
     match primary.decode(path, options) {
-        Ok(image) => Ok(DecodedRaw {
-            image,
-            decoder: primary.name(),
-        }),
+        Ok(raw) => Ok(DecodedRaw::new(raw, primary)),
         Err(error) if error.is::<UnsupportedRaw>() => fallback
             .decode(path, options)
-            .map(|image| DecodedRaw {
-                image,
-                decoder: fallback.name(),
-            })
+            .map(|raw| DecodedRaw::new(raw, fallback))
             .map_err(|other| {
                 anyhow::anyhow!(
                     "{error}; {} fallback also failed: {other:#}",
@@ -128,18 +156,14 @@ pub fn decode_raw(
     } else if preference == RawDecoderPreference::Apple {
         return AppleRawDecoder
             .decode(path, options)
-            .map(|image| DecodedRaw {
-                image,
-                decoder: AppleRawDecoder.name(),
-            });
+            .map(|raw| DecodedRaw::new(raw, &AppleRawDecoder));
     }
     if preference == RawDecoderPreference::Apple {
         bail!("Apple RAW decoding requires macOS and the apple-raw Cargo feature");
     }
-    RawlerDecoder.decode(path, options).map(|image| DecodedRaw {
-        image,
-        decoder: RawlerDecoder.name(),
-    })
+    RawlerDecoder
+        .decode(path, options)
+        .map(|raw| DecodedRaw::new(raw, &RawlerDecoder))
 }
 
 #[cfg(test)]
@@ -157,12 +181,15 @@ mod tests {
         fn name(&self) -> &'static str {
             "test backend"
         }
-        fn decode(&self, _: &Path, _: RawDecodeOptions) -> Result<ImageBuf> {
+        fn decode(&self, _: &Path, _: RawDecodeOptions) -> Result<RawImage> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             match self.mode {
                 1 => Err(UnsupportedRaw("unsupported profile".into()).into()),
                 2 => bail!("render failed"),
-                _ => Ok(ImageBuf::new(1, 1)),
+                _ => Ok(RawImage {
+                    image: ImageBuf::new(1, 1),
+                    lens_correction_supported: false,
+                }),
             }
         }
     }
@@ -219,14 +246,14 @@ mod tests {
             .context("SPEKTRAFILM_RAW_TEST_FILE is required")?;
         let path = Path::new(&path);
         let options = RawDecodeOptions::default();
-        let upright = AppleRawDecoder.decode(path, options)?;
+        let upright = AppleRawDecoder.decode(path, options)?.image;
         let sensor = AppleRawDecoder.decode(
             path,
             RawDecodeOptions {
                 apply_orientation: false,
                 ..options
             },
-        )?;
+        )?.image;
         let orientation = raw_exif_orientation(&RawSource::new(path)?, &RawDecodeParams::default());
         let transformed = sensor.oriented(orientation);
         assert_eq!(
@@ -247,7 +274,7 @@ mod tests {
             },
             ..options
         };
-        let day = AppleRawDecoder.decode(path, daylight)?;
+        let day = AppleRawDecoder.decode(path, daylight)?.image;
         let identity = AppleRawDecoder.decode(
             path,
             RawDecodeOptions {
@@ -258,7 +285,7 @@ mod tests {
                 },
                 ..options
             },
-        )?;
+        )?.image;
         assert_eq!(
             day.data, identity.data,
             "custom daylight must be exactly daylight"
@@ -273,7 +300,7 @@ mod tests {
                 },
                 ..options
             },
-        )?;
+        )?.image;
         assert!(
             day.data
                 .iter()
@@ -284,6 +311,32 @@ mod tests {
         // A fixture with exposure metadata can contain values above 1. Their
         // preservation is also measured by raw_decoder_probe, not asserted for
         // a photograph which may have no saturated scene content.
+        Ok(())
+    }
+
+    /// Apple corrects within the same extent, so a crop keeps its size. A
+    /// file without correction data is unchanged by the request.
+    #[cfg(all(target_os = "macos", feature = "apple-raw"))]
+    #[test]
+    #[ignore = "requires a local camera RAW: set SPEKTRAFILM_RAW_TEST_FILE"]
+    fn apple_raw_lens_correction() -> Result<()> {
+        let path = std::env::var_os("SPEKTRAFILM_RAW_TEST_FILE")
+            .context("SPEKTRAFILM_RAW_TEST_FILE is required")?;
+        let path = Path::new(&path);
+        let off = AppleRawDecoder.decode(path, RawDecodeOptions::default())?;
+        let on = AppleRawDecoder.decode(
+            path,
+            RawDecodeOptions {
+                lens_correction: LensCorrection { enabled: true },
+                ..Default::default()
+            },
+        )?;
+        assert_eq!(off.lens_correction_supported, on.lens_correction_supported);
+        assert_eq!(
+            (off.image.width, off.image.height),
+            (on.image.width, on.image.height)
+        );
+        assert_eq!(off.image.data != on.image.data, on.lens_correction_supported);
         Ok(())
     }
 }

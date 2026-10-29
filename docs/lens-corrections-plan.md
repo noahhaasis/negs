@@ -3,7 +3,8 @@
 Prepared 2026-10-29 against Negs `17e8a8c`, on branch `lens-corrections`
 (worktree `~/Work/Negs-lens`).
 
-**Status:** plan only. Nothing below is implemented.
+**Status:** Phases 0 and 1a (macOS via Apple) implemented on 2026-10-29;
+see "Phase 0 results". Phases 1b–3 are not started.
 
 **Decided 2026-10-29 (Noah):** macOS first, using Apple's built-in
 correction (Phases 0 and 1a). Windows/Linux later, as a Rust port of
@@ -50,6 +51,25 @@ against current sources or sample files during the spike.
   | 3 | Optional: lensfun database for Nikon, Canon and the rest | 1–2 weeks |
 
   Phases 1–2 cover phones, Sony, Fuji, M43 and Leica without any lens database.
+
+## Phase 0 results (2026-10-29, macOS 26.5, Apple silicon)
+
+Each file decoded with `lensCorrectionEnabled` off and on (scratch Core Image
+probe, now also `raw_decoder_probe --lens-correction`):
+
+| File | `isLensCorrectionSupported` | Effect when on |
+| --- | --- | --- |
+| Leica Q3 DNG (Summilux 28), 2 files | yes | distortion and strong vignetting (corner/centre 0.18 → 0.74) |
+| Fujifilm X-A2 RAF, XC 16-50 OIS II | yes | distortion (visible reframing) and vignetting |
+| Fujifilm X100V RAF, 2 files | no | none |
+| Nikon Z f NEF, 58mm f/1.4 | no | none |
+
+- Distortion and vignetting are corrected together; there is no separate switch.
+- The output extent is identical off and on: Apple scales to fill. A crop's
+  normalised rectangle therefore keeps its size, only the content shifts.
+- Off leaves a DNG's own warp/vignette opcodes unapplied (the Q3 files are
+  uncorrected with it off), so Negs has been ignoring them until now.
+- Not yet sampled: Sony, OM/Olympus, Panasonic, iPhone ProRAW, Canon.
 
 ## Apple's built-in correction
 
@@ -302,14 +322,24 @@ The old egui app (`crates/spektrafilm-gui`) is not maintained; skip it.
 5. Write the result into this document: confirmed formats, the Apple
    decision, and any revision of the estimates.
 
-### Phase 1a — macOS via Apple (~1 day)
+### Phase 1a — macOS via Apple (done 2026-10-29)
 
-1. `io.lens_correction` setting (one `enabled` flag is enough for Apple),
-   passed through `RawDecodeOptions` and the bridge.
-2. `apple_raw.m`: set `lensCorrectionEnabled` from the option when supported;
-   return `isLensCorrectionSupported` in `SFAppleRaw`.
-3. macOS inspector toggle, shown only when supported; undo, reset, sessions.
-4. Update `docs/apple-raw-decoder.md` (lens correction is no longer always off).
+1. `io.lens_correction: { enabled }` (`spektrafilm_io::LensCorrection`), off
+   when missing, passed through `load_image_colour`, `RawDecodeOptions` and the
+   bridge. Kept across presets (`presets::KEPT`). Sub-flags come with 1b.
+2. `apple_raw.m` sets `lensCorrectionEnabled` from the option when supported
+   and returns `isLensCorrectionSupported`; it travels as
+   `RawImage`/`DecodedRaw`/`LoadedImage::lens_correction_supported` to the
+   native helper's render response (`lens_correction_supported`).
+3. macOS: "Lens corrections" toggle in Camera, below RAW White Balance, shown
+   only when the last render reports support. On for each newly opened photo
+   and after Reset; off for sessions saved before the key existed. Undo via
+   the normal `set` path. The press-and-hold original uses the same setting so
+   its framing matches.
+4. `docs/apple-raw-decoder.md` updated.
+
+The rawler fallback reports no support, so the toggle stays hidden for files
+Apple cannot open. The CLI and Windows/Linux keep it off unless params set it.
 
 ### Phase 1b — DNG opcodes and the shared pipeline (1–1.5 weeks)
 

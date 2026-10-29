@@ -648,6 +648,10 @@ pub struct IoParams {
     /// Input RAW development only; independent of scanner white correction.
     #[serde(default)]
     pub raw_white_balance: spektrafilm_io::RawWhiteBalance,
+    /// The RAW's embedded lens corrections. Off unless set: params from before
+    /// it keep their geometry, so their crops stay where they were.
+    #[serde(default)]
+    pub lens_correction: spektrafilm_io::LensCorrection,
     /// How the loaders read a non-RAW file's values (see
     /// `spektrafilm_io::colour`). Params JSON without it, but with either
     /// field below, is read as manual: see [`infer_input_interpretation`].
@@ -699,6 +703,7 @@ impl Default for IoParams {
     fn default() -> Self {
         Self {
             raw_white_balance: spektrafilm_io::RawWhiteBalance::default(),
+            lens_correction: spektrafilm_io::LensCorrection::default(),
             input_interpretation: spektrafilm_io::InputInterpretation::default(),
             input_color_space: "ProPhoto RGB".into(),
             input_cctf_decoding: false,
@@ -1126,6 +1131,14 @@ mod input_interpretation_tests {
     }
 
     #[test]
+    fn lens_correction_is_off_for_params_without_it() {
+        let io: IoParams = serde_json::from_str("{}").unwrap();
+        assert!(!io.lens_correction.enabled);
+        let io: IoParams = serde_json::from_str(r#"{"lens_correction": {"enabled": true}}"#).unwrap();
+        assert!(io.lens_correction.enabled);
+    }
+
+    #[test]
     fn loaded_colour_sets_the_pipeline_input() {
         let mut io = IoParams::default();
         io.apply_input_colour(&spektrafilm_io::InputColour::raw("rawler"));
@@ -1139,6 +1152,7 @@ mod input_interpretation_tests {
         let loaded = spektrafilm_io::load_image_colour(
             &path,
             spektrafilm_io::Formats::Any,
+            Default::default(),
             Default::default(),
             &spektrafilm_io::InputInterpretation::manual(),
         )
