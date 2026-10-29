@@ -1957,10 +1957,11 @@ impl WgpuBackend {
             let entry = inputs.remove(i);
             inputs.insert(0, entry);
         } else {
+            // Storage too: the canvas shows the input as the original.
             let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("resident_input"),
                 size: bytes,
-                usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
             self.queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&data()));
@@ -2100,6 +2101,9 @@ struct Canvas {
     /// The shown image first, and the one before it if it was another size:
     /// a slider's interactive frames and the settled frame take turns.
     shown: Vec<Shown>,
+    /// The photograph before any film (`set_original`), which a view with
+    /// `original` draws in the shown image's place.
+    original: Option<Shown>,
 }
 
 /// A frame's display bytes, kept in a texture with mip levels so that a new
@@ -2123,6 +2127,8 @@ pub struct View {
     pub rect: [f32; 4],
     /// The canvas around the photograph, RGB from 0 to 1, stored as is.
     pub background: [f32; 3],
+    /// Draw the original instead of the developed frame, when there is one.
+    pub original: bool,
 }
 
 /// Where a view draws a shown image: its top-left corner on the canvas,
@@ -2223,13 +2229,92 @@ impl WgpuBackend {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let canvas = Canvas { surface, size: (0, 0), make_shown, mip, draw, sampler, view: None, shown: Vec::new() };
+        let canvas = Canvas {
+            surface,
+            size: (0, 0),
+            make_shown,
+            mip,
+            draw,
+            sampler,
+            view: None,
+            shown: Vec::new(),
+            original: None,
+        };
         if let Some(old) = self.canvas.lock().unwrap().replace(canvas) {
-            for shown in old.shown {
+            for shown in old.shown.into_iter().chain(old.original) {
                 shown.texture.destroy();
             }
         }
         Ok(())
+    }
+
+    /// Keep RGBA8 display bytes of the photograph before any film, for views
+    /// with `original` to draw in place of the developed frame; nothing is
+    /// drawn now. False without a canvas or when a texture can't be that
+    /// large.
+    pub fn set_original(&self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        let Some(texture) = self.original_texture(canvas, width, height) else {
+            return false;
+        };
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        canvas.original = Some(Shown { texture, mipped: false });
+        Self::trim_shown(canvas);
+        true
+    }
+
+    /// [`Self::set_original`] from a linear (or, with `encoded`, sRGB-encoded)
+    /// sRGB `image` on the GPU: the input uploaded under `key`, as the film
+    /// chain keeps it (uploaded now if it isn't there), made into display
+    /// bytes by the pass a presented frame's scan takes. Those equal
+    /// `preview::display_rgba` of the image for an sRGB display.
+    pub fn set_original_from_input(&self, key: u64, image: &ImageBuf, encoded: bool) -> bool {
+        let (width, height) = (image.width, image.height);
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        let Some(texture) = self.original_texture(canvas, width, height) else {
+            return false;
+        };
+        let input = self.resident_input(key, u64::from(width) * u64::from(height) * 12, || scalars_to_f32(&image.data));
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.encode_make_shown(&mut encoder, canvas, &input, &texture, encoded);
+        self.queue.submit(Some(encoder.finish()));
+        self.release_transient();
+        canvas.original = Some(Shown { texture, mipped: false });
+        Self::trim_shown(canvas);
+        true
+    }
+
+    /// The texture for a `width` × `height` original: the last one if it's
+    /// that size. None when a texture can't be that large.
+    fn original_texture(&self, canvas: &mut Canvas, width: u32, height: u32) -> Option<wgpu::Texture> {
+        if width.max(height) > self.device.limits().max_texture_dimension_2d {
+            return None;
+        }
+        Some(match canvas.original.take() {
+            Some(old) if (old.texture.width(), old.texture.height()) == (width, height) => old.texture,
+            old => {
+                if let Some(old) = old {
+                    old.texture.destroy();
+                }
+                self.shown_image(width, height)
+            }
+        })
     }
 
     /// Draw RGBA8 display bytes on the canvas, for frames made elsewhere
@@ -2271,7 +2356,7 @@ impl WgpuBackend {
         };
         canvas.view = Some(view);
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        let Some(frame) = self.encode_view(&mut encoder, canvas) else {
+        let (Some(frame), Some(drawn)) = (self.encode_view(&mut encoder, canvas), Self::drawn(canvas)) else {
             return false;
         };
         // One texel copied after the drawing says when the GPU is done, as a
@@ -2284,7 +2369,7 @@ impl WgpuBackend {
         });
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &canvas.shown[0].texture,
+                texture: &drawn.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -2309,20 +2394,20 @@ impl WgpuBackend {
     /// The shown image's size and where its view draws it, in the canvas's
     /// device pixels: `[width, height, left, top, drawn width, drawn height]`.
     pub fn shown(&self) -> Option<[f32; 6]> {
-        let canvas = self.canvas.lock().unwrap();
-        let canvas = canvas.as_ref()?;
-        let texture = &canvas.shown.first()?.texture;
+        let mut canvas = self.canvas.lock().unwrap();
+        let canvas = canvas.as_mut()?;
+        let texture = &Self::drawn(canvas)?.texture;
         let (width, height) = (texture.width(), texture.height());
         let place = self.view_of(canvas, width, height).place(width, height);
         let (w, h) = (width as f32 * place.scale[0], height as f32 * place.scale[1]);
         Some([width as f32, height as f32, place.origin[0], place.origin[1], w, h])
     }
 
-    /// Free what the GPU keeps of the photograph: its shown images and its
-    /// inputs, before another opens (see `release`).
+    /// Free what the GPU keeps of the photograph: its shown images, its
+    /// original and its inputs, before another opens (see `release`).
     pub fn forget_photograph(&self) {
         if let Some(canvas) = self.canvas.lock().unwrap().as_mut() {
-            for shown in canvas.shown.drain(..) {
+            for shown in canvas.shown.drain(..).chain(canvas.original.take()) {
                 shown.texture.destroy();
             }
         }
@@ -2345,7 +2430,17 @@ impl WgpuBackend {
             height,
             rect: [0.0, 0.0, width as f32, height as f32],
             background: [0.0; 3],
+            original: false,
         })
+    }
+
+    /// The image the canvas's view draws: the original when the view asks
+    /// for it and there is one, otherwise the shown image.
+    fn drawn(canvas: &mut Canvas) -> Option<&mut Shown> {
+        match &mut canvas.original {
+            Some(original) if canvas.view.is_some_and(|v| v.original) => Some(original),
+            _ => canvas.shown.first_mut(),
+        }
     }
 
     /// The shown image for a `width` × `height` frame, the last of that size
@@ -2357,33 +2452,42 @@ impl WgpuBackend {
         let same = canvas.shown.iter().position(|s| (s.texture.width(), s.texture.height()) == (width, height));
         let shown = match same {
             Some(i) => canvas.shown.remove(i),
-            None => Shown {
-                texture: self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("shown"),
-                    size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-                    mip_level_count: width.max(height).ilog2() + 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: CANVAS_FORMAT,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::STORAGE_BINDING
-                        | wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::COPY_DST
-                        | wgpu::TextureUsages::COPY_SRC,
-                    view_formats: &[],
-                }),
-                mipped: false,
-            },
+            None => Shown { texture: self.shown_image(width, height), mipped: false },
         };
         let texture = shown.texture.clone();
         canvas.shown.insert(0, Shown { mipped: false, ..shown });
+        Self::trim_shown(canvas);
+        Some(texture)
+    }
+
+    /// A texture for a shown image of `width` × `height`, with its mip levels.
+    fn shown_image(&self, width: u32, height: u32) -> wgpu::Texture {
+        self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shown"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: width.max(height).ilog2() + 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: CANVAS_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        })
+    }
+
+    /// Keep the shown image before the first only while it, the first and
+    /// the original fit `MAX_SHOWN_BYTES`.
+    fn trim_shown(canvas: &mut Canvas) {
         // With its mip levels, a third more than its bytes.
         let bytes = |s: &Shown| u64::from(s.texture.width()) * u64::from(s.texture.height()) * 16 / 3;
-        let kept = if canvas.shown.iter().take(2).map(bytes).sum::<u64>() <= MAX_SHOWN_BYTES { 2 } else { 1 };
+        let total = canvas.shown.iter().take(2).chain(&canvas.original).map(bytes).sum::<u64>();
+        let kept = if total <= MAX_SHOWN_BYTES { 2 } else { 1 };
         for old in canvas.shown.drain(kept.min(canvas.shown.len())..) {
             old.texture.destroy();
         }
-        Some(texture)
     }
 
     /// Encode making `rgb`'s display bytes the shown image and drawing it on
@@ -2397,6 +2501,23 @@ impl WgpuBackend {
         height: u32,
         encoded: bool,
     ) -> Option<wgpu::SurfaceTexture> {
+        let mut canvas = self.canvas.lock().unwrap();
+        let canvas = canvas.as_mut()?;
+        let texture = self.shown_texture(canvas, width, height)?;
+        self.encode_make_shown(encoder, canvas, rgb, &texture, encoded);
+        self.encode_view(encoder, canvas)
+    }
+
+    /// Encode making `rgb` (linear, or with `encoded` sRGB-encoded, RGB
+    /// floats of `texture`'s size) display bytes in `texture`'s first level.
+    fn encode_make_shown(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        canvas: &Canvas,
+        rgb: &wgpu::Buffer,
+        texture: &wgpu::Texture,
+        encoded: bool,
+    ) {
         #[repr(C)]
         #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
         struct Params {
@@ -2405,9 +2526,7 @@ impl WgpuBackend {
             encoded: u32,
             _pad: u32,
         }
-        let mut canvas = self.canvas.lock().unwrap();
-        let canvas = canvas.as_mut()?;
-        let texture = self.shown_texture(canvas, width, height)?;
+        let (width, height) = (texture.width(), texture.height());
         let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("make_shown_params"),
             contents: bytemuck::bytes_of(&Params { width, height, encoded: encoded as u32, _pad: 0 }),
@@ -2427,8 +2546,6 @@ impl WgpuBackend {
         pass.set_pipeline(&canvas.make_shown);
         pass.set_bind_group(0, &bg, &[]);
         pass.dispatch_workgroups(width.div_ceil(16), height.div_ceil(16), 1);
-        drop(pass);
-        self.encode_view(encoder, canvas)
     }
 
     /// Encode drawing the shown image where the view says, its mip levels
@@ -2445,13 +2562,13 @@ impl WgpuBackend {
             exact: u32,
             background: [f32; 4],
         }
-        let texture = canvas.shown.first()?.texture.clone();
+        let texture = Self::drawn(canvas)?.texture.clone();
         let (width, height) = (texture.width(), texture.height());
         let view = self.view_of(canvas, width, height);
         let place = view.place(width, height);
-        if place.lod > 0.0 && !canvas.shown[0].mipped {
+        if place.lod > 0.0 && !Self::drawn(canvas)?.mipped {
             self.encode_mips(encoder, canvas, &texture);
-            canvas.shown[0].mipped = true;
+            Self::drawn(canvas)?.mipped = true;
         }
         let frame = self.canvas_frame(canvas, view.width, view.height)?;
         let [r, g, b] = view.background;

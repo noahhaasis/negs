@@ -233,9 +233,11 @@ impl Engine {
     /// on and at once, from the frame on it: a display pass, without the
     /// film chain. `width` × `height` is the canvas in device pixels, `rect`
     /// the whole photograph's left, top, width and height on it, and
-    /// `background` the RGB around it, 0 to 1. Resolves to the milliseconds
-    /// until the GPU had drawn it, or -1 with no frame to draw yet.
-    pub fn show(&self, width: u32, height: u32, rect: Vec<f32>, background: Vec<f32>) -> js_sys::Promise {
+    /// `background` the RGB around it, 0 to 1. `original` draws the
+    /// original ([`Engine::original`]) in the developed frame's place, when
+    /// there is one. Resolves to the milliseconds until the GPU had drawn it,
+    /// or -1 with no frame to draw yet.
+    pub fn show(&self, width: u32, height: u32, rect: Vec<f32>, background: Vec<f32>, original: bool) -> js_sys::Promise {
         let gpu = {
             let state = self.state.borrow();
             state.gpu.clone().filter(|_| state.canvas)
@@ -244,7 +246,7 @@ impl Engine {
             return js_sys::Promise::resolve(&JsValue::from(-1.0));
         };
         let started = web_time::Instant::now();
-        let view = View { width, height, rect: [x, y, w, h], background: [r, g, b] };
+        let view = View { width, height, rect: [x, y, w, h], background: [r, g, b], original };
         let (drawn_tx, drawn_rx) = futures_channel::oneshot::channel();
         let drawing = gpu.show(
             view,
@@ -326,6 +328,47 @@ impl Engine {
         state.source = Some(state.keyed(image));
         state.input_colour = Some(colour);
         Ok(size)
+    }
+
+    /// The loaded photograph before any film, as the native helper's
+    /// `original` shows it (the decoded source: rawler's develop for a RAW),
+    /// at most `max_dim` pixels on the longer side, resampled as a settled
+    /// frame of that size is. `params_json` says how to show it (the input
+    /// interpretation, the output colour space). `present` keeps it on the
+    /// canvas, if there is one, for views with `original` to draw
+    /// ([`Engine::show`]); otherwise the [`Rendered`] carries its bytes.
+    pub fn original(&self, params_json: &str, max_dim: u32, present: bool) -> Result<Rendered, JsError> {
+        let started = web_time::Instant::now();
+        let mut params = parse_params(params_json).map_err(js_error)?;
+        let mut stages = Stages::new(started);
+        let mut state = self.state.borrow_mut();
+        let (source, key) = state.source_at(max_dim, false).ok_or_else(|| JsError::new("no image loaded"))?;
+        stages.mark("resample");
+        let colour = state.input_colour.clone().ok_or_else(|| JsError::new("no image loaded"))?;
+        params.io.apply_input_colour(&colour);
+        let (encoding, converted) = preview::original_encoding(&params, &colour, &source);
+        let gpu = state.gpu.clone().filter(|_| present && state.canvas);
+        // An sRGB original is the input the film chain has on the GPU, made
+        // into bytes there as a presented frame's scan is; others are made
+        // here.
+        if let Some(gpu) = &gpu
+            && converted.is_none()
+            && encoding.space.name == "sRGB"
+            && gpu.set_original_from_input(key, &source, encoding.encoded)
+        {
+            stages.mark("gpu");
+            let (width, height) = (source.width, source.height);
+            return Ok(Rendered::original(width, height, Vec::new(), true, &state, started, stages));
+        }
+        let (width, height, mut rgba) = preview::display_rgba(converted.as_ref().unwrap_or(&source), usize::MAX, encoding);
+        let (width, height) = (width as u32, height as u32);
+        stages.mark("display");
+        let presented = gpu.is_some_and(|gpu| gpu.set_original(width, height, &rgba));
+        if presented {
+            rgba = Vec::new();
+            stages.mark("upload");
+        }
+        Ok(Rendered::original(width, height, rgba, presented, &state, started, stages))
     }
 
     /// Develop the loaded photograph on `film`, printed on `paper` (ignored
@@ -561,6 +604,28 @@ impl Rendered {
     fn missing(missing: Vec<String>) -> Self {
         let (backend, stages) = (String::new(), String::new());
         Rendered { width: 0, height: 0, rgba: Vec::new(), presented: false, missing, backend, elapsed_ms: 0.0, stages }
+    }
+
+    /// An original's ([`Engine::original`]).
+    fn original(
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+        presented: bool,
+        state: &State,
+        started: web_time::Instant,
+        stages: Stages,
+    ) -> Self {
+        Rendered {
+            width,
+            height,
+            rgba,
+            presented,
+            missing: Vec::new(),
+            backend: state.backend.name().to_owned(),
+            elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+            stages: stages.text,
+        }
     }
 }
 

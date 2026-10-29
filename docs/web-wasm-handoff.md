@@ -115,9 +115,13 @@ params)` (the engine's Balance Print, without changing the edit), `view`
 display pass's time), `renderSide()`, `photo()`, `placeholder()` (the
 placeholder showing, its size and whether the page's canvas shows it),
 `timeline` (each opening's `open`, `placeholder`, `decoded` and `frame`
-times), `badge()` (the badge's text, or false), `openSample()` and
+times), `badge()` (the badge's text, or false), `openSample()`,
 `shown()` (where the
-engine drew its frame).
+engine drew its frame), and Show Original's `original(on)` (hold it or
+let go), `showingOriginal()`, `originalMade()` (its size, time and whether
+the engine keeps it), `prepareOriginal()` and `readOriginal(maxDim)` (its
+bytes, shown nowhere). `views` also counts the page's own paint as a
+display pass when the engine doesn't present.
 `web/checks/controls.js` moves every Lab control and reports its frame (a
 `pipeline` stage is a rebuild, `meter` a re-meter);
 `web/checks/enlarger.js` moves the Enlarger's controls a few steps each;
@@ -141,7 +145,12 @@ web/checks/touch.mjs 2000` tests the phone layout by touch;
 their display passes' times, the canvas against a render read back, 25%,
 Ctrl-wheel, a pinch with `VIEW=…m`, Fit) and logs GPU memory;
 `web/checks/placeholder.js` tests the placeholder's orientation handling
-and a lossy DNG's preview, and times opening the ARW and the sample. Chrome fails
+and a lossy DNG's preview, and times opening the ARW and the sample;
+`web/checks/original.mjs` tests Show Original by mouse, keyboard and (with
+`VIEW=…m`) touch: each switch's display passes and no render, the view
+kept, the canvas against the original's bytes, and with
+`HELPER=results/helper-….rgba` (its header says how to make one) the full
+size against the helper's `original`. Chrome fails
 `blob()` on a large response in these test profiles; read an
 `arrayBuffer()`.
 
@@ -163,6 +172,11 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     (a Promise of `Rendered`);
   - `balancePrint(film, paper, params)`: the helper's `balance_print`, as
     `Balanced` (`mFilterShift`, `yFilterShift`, `elapsedMs`, `missing`);
+  - `original(params, maxDim, present)`: the helper's `original` (the
+    source before any film) at the settled frame's size, kept on the canvas
+    (from the resident input on the GPU for an sRGB display) or returned as
+    a `Rendered`'s bytes; `show(…, original)` draws it in the developed
+    frame's place (`docs/web-wasm.md` item 16);
   - `setInstance` and the panic hook, which broadcasts panics on
     `negs-engine-panic`;
   - `Rendered` carries the RGBA, backend, `elapsedMs`, `stages` and
@@ -205,7 +219,11 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
   copied to a 4-byte buffer is its fence). `View::place` decides 1:1 or
   sampled; `paint` in `app.js` makes the same decision for the page's own
   canvas, so change both together. `image_limits` gives the page its caps;
-  `forget_photograph` frees the shown textures and inputs on `load`.
+  `forget_photograph` frees the shown textures, the original and inputs on
+  `load`. `Canvas.original` is Show Original's image (`set_original`
+  from bytes, `set_original_from_input` from a resident input through
+  `make_shown`); a `View` with `original` draws it (`drawn`) in place of
+  the shown image, and `trim_shown` counts it in the shown images' budget.
 - GPU memory in browsers (`docs/web-wasm.md` item 13): a dropped
   `wgpu::Buffer` keeps its memory until the garbage collector takes its
   JavaScript object. A buffer made for one render goes through
@@ -268,7 +286,13 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     (`draw`), or restores what it covered if the photograph fails
     (`dropEarly(true)`); `loading` holds renders and the first frame's
     swap until the engine has the new photograph. `setBadge` is the
-    "Developing" badge;
+    "Developing" badge; Show Original's badge shows over it
+    (`originalBadge`, `showBadge`), so neither clears the other;
+  - Show Original (its section in `app.js`): `prepareOriginal` (on hover,
+    and when the settled frame's size changes while held), `holdOriginal`,
+    `updateOriginal` (the badge, the button, and `showingOriginal`, which
+    `sendView` and `paint` read), `forgetOriginal` on a new photograph or
+    engine; the button's pointer and `\` handlers are in the wiring;
   - the sample: the empty screen's "Try a sample photo" runs
     `openSample`, which downloads `web/sample/DSC_6377.dng` with progress
     (`download`); `web/sample/make-dng.py` makes that lossy DNG from the

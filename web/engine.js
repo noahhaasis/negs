@@ -11,7 +11,7 @@ export function client(wasm, kind) {
     setCanvas: (canvas) => engine.setCanvas(canvas),
     // Where that canvas shows the photograph, drawn again at once without
     // the film chain; and where it drew the last frame.
-    show: (width, height, rect, background) => engine.show(width, height, rect, background),
+    show: (width, height, rect, background, original = false) => engine.show(width, height, rect, background, original),
     shownRect: () => [...engine.shownRect()],
     // The largest frame the WebGPU engine renders and shows.
     limits: () => [...engine.limits()],
@@ -29,6 +29,12 @@ export function client(wasm, kind) {
         }
         await fetchData(wasm, r.missing);
       }
+    },
+    // The photograph before any film, kept on the canvas to show in the
+    // developed frame's place when `present`; otherwise its bytes.
+    original(params, maxDim, present = false) {
+      const r = engine.original(params, maxDim, present);
+      return { width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, elapsedMs: r.elapsedMs, stages: r.stages };
     },
     // The M/Y shifts that print a mid-grey neutral (Balance Print).
     async balancePrint(film, paper, params) {

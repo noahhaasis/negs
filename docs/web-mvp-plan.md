@@ -21,7 +21,7 @@ The pieces are numbered as first planned; work in this order:
 2. Piece 6 (resident scan, zoom): done ahead of piece 5 at the owner's
    request, and approved.
 3. **The owner's features, next and in this order:** 7 Placeholder Image
-   (done), 8 Before/After toggle, 9 Export LUT, 10 Export Preset, 11 Borders and
+   (done), 8 Before/After toggle (done), 9 Export LUT, 10 Export Preset, 11 Borders and
    Fit for Instagram. They come before everything else left in the plan.
 4. Piece 5 (colour management), then the Stage 1 checkpoint 🛑.
 5. Stage 2 (pieces 12–14), and the HEIC research.

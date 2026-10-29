@@ -546,41 +546,6 @@ fn write_display(
     Ok((width, height))
 }
 
-/// How the original view shows the source. A decoded source, linear sRGB
-/// that may lie outside sRGB's gamut, is converted to the preview space, so
-/// the original and the render are clipped to the same gamut. Manual
-/// pass-through shows the stored values in the space the params name.
-fn original_encoding(
-    params: &RuntimeParams,
-    colour: &spektrafilm_io::InputColour,
-    image: &ImageBuf,
-) -> (Encoding, Option<ImageBuf>) {
-    if !colour.linear_srgb {
-        let space = RgbColourspace::input(&params.io.input_color_space);
-        return (Encoding { space, encoded: params.io.input_cctf_decoding }, None);
-    }
-    let encoding = Encoding::new(&params.io.output_color_space, false);
-    let converted = (encoding.space.name != "sRGB").then(|| {
-        let mut converted = image.clone();
-        convert_linear(&mut converted, encoding.space);
-        converted
-    });
-    (encoding, converted)
-}
-
-/// Linear sRGB → linear `to`, unclipped (the display clips).
-fn convert_linear(image: &mut ImageBuf, to: &RgbColourspace) {
-    use spektrafilm_math::colorspace::{SRGB, icc_rgb_to_rgb, mat3_vec_f64};
-    use spektrafilm_math::precision::{from_f64, to_f64};
-    let m = icc_rgb_to_rgb(&SRGB, to);
-    for px in image.data.chunks_exact_mut(3) {
-        let rgb = mat3_vec_f64(&m, [to_f64(px[0]), to_f64(px[1]), to_f64(px[2])]);
-        for (v, out) in rgb.into_iter().zip(px) {
-            *out = from_f64(v);
-        }
-    }
-}
-
 /// The source at `dimensions`. A resampled copy is kept until the source or
 /// the size changes, so ordinary edits don't resample the full image again.
 fn working_source<'a>(

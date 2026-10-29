@@ -77,6 +77,7 @@ function startHost(engineKind) {
 
 async function startEngine(engineKind) {
   host?.kill();
+  forgetOriginal();
   kind = engineKind;
   $("engine").value = kind;
   $("engine-info").textContent = "Starting…";
@@ -616,7 +617,7 @@ const BACKGROUND = [0x16 / 255, 0x16 / 255, 0x16 / 255];
 const view = createView($("stage"), $("view"), { changed: showView, settled: viewSettled });
 let frame = null;        // the last frame drawn from bytes: { bitmap, width, height }
 let settledSide = 0;     // the longest side of the last settled frame asked for
-const views = [];        // display passes' times, for checks
+const views = [];        // display passes' times (the engine's, or the page's paint), for checks
 
 // Draw the photograph where the view now puts it: the engine draws its
 // canvas again from the frame it holds (one pass at a time, the newest view
@@ -625,7 +626,11 @@ let showing = false, showAgain = false, sentView = "";
 function showView() {
   if (!photo && !early) return;
   zoomLevel();
-  if (!presenting || early) paint();
+  if (!presenting || early) {
+    const t = performance.now();
+    paint();
+    if (!presenting && !early) views.push(performance.now() - t);
+  }
   if (!presenting || !photo) return;
   if (showing) return void (showAgain = true);
   showing = true;
@@ -639,11 +644,11 @@ function showView() {
       }
     });
 }
-const viewKey = () => JSON.stringify([view.size(), view.rect()]);
+const viewKey = () => JSON.stringify([view.size(), view.rect(), showingOriginal]);
 function sendView() {
   const { width, height } = view.size(), r = view.rect();
   sentView = viewKey();
-  return host.call("show", width, height, [r.x, r.y, r.width, r.height], BACKGROUND);
+  return host.call("show", width, height, [r.x, r.y, r.width, r.height], BACKGROUND, showingOriginal);
 }
 
 // Once a zoom, pan or resize stops: render again when the view needs more
@@ -663,7 +668,7 @@ function paint() {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = `rgb(${BACKGROUND.map((c) => Math.round(c * 255)).join(" ")})`;
   ctx.fillRect(0, 0, width, height);
-  const shown = early ?? (photo && frame);
+  const shown = early ?? (photo && (showingOriginal && original?.bitmap ? original : frame));
   if (!shown) return;
   const r = view.rect(), { width: w, height: h } = shown.bitmap;
   if (Math.abs(r.width - w) <= 1 && Math.abs(r.height - h) <= 1) {
@@ -688,14 +693,16 @@ async function draw(r) {
     frame = { bitmap, width: r.width, height: r.height };
   }
   if (loading) return;
-  if (!$("badge").hidden) mark("frame", photo.name);
+  if (activity) mark("frame", photo.name);
   dropEarly();
   setBadge(null);
+  developed = true;
   if (!r.presented) paint();
   canvas.hidden = r.presented;
   if (gpu) gpu.hidden = !r.presented;
   $("empty").hidden = true;
   $("zoom").hidden = false;
+  updateOriginal();
 }
 
 // ---- The placeholder -------------------------------------------------------
@@ -730,10 +737,98 @@ function dropEarly(restore = false) {
   else paint();
 }
 
-// macOS ActivityBadge: "Developing" until a photograph's first frame shows.
+// macOS ActivityBadge: "Developing" until a photograph's first frame shows,
+// and "Original" over it while the original shows.
+let activity = null, originalBadge = null;
 function setBadge(text) {
+  activity = text;
+  showBadge();
+}
+function showBadge() {
+  const text = originalBadge ?? activity;
   $("badge").hidden = !text;
   if (text) $("badge-text").textContent = text;
+}
+
+// ---- Show Original -----------------------------------------------------------
+
+// The photograph before any film, as desktop's Show Original (macOS
+// EditorModel "Original"; the helper's `original`, as Linux and Windows show
+// it): the engine's decoded source, rawler's develop for a RAW, made at the
+// settled frame's size and drawn in the developed frame's place with the
+// same view, so switching is one display pass. It shows while the button or
+// `\` is held; a tap toggles it on touch screens, where holding would hide
+// the photograph under the finger. The WebGPU engine keeps it on its canvas;
+// otherwise the page keeps its bitmap.
+let original = null;          // { side, width, height, presented, bitmap, elapsedMs, stages }
+let originalLoad = null;      // the original being made
+let originals = 0;            // which photograph and engine it's for
+let holding = false;          // asked to show it
+let showingOriginal = false;  // and it shows
+let developed = false;        // the photograph's first frame has shown
+const canShowOriginal = () => !!photo && !loading && !early && developed && !!host;
+
+// Starts making the original at the settled frame's size, if it isn't made
+// or being made: when the pointer reaches the button, so a press usually
+// shows it at once.
+function prepareOriginal() {
+  if (!canShowOriginal() || originalLoad || original?.side === settledSide) return originalLoad;
+  const made = originals, side = settledSide;
+  originalLoad = host.call("original", params(), side, presenting).then(async (r) => {
+    if (made !== originals) return;
+    const bitmap = r.presented ? null : await createImageBitmap(
+      new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height),
+      { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+    if (made !== originals) return bitmap?.close();
+    original?.bitmap?.close();
+    original = { side, width: r.width, height: r.height, presented: r.presented, bitmap, elapsedMs: r.elapsedMs, stages: r.stages };
+    console.log(`original ${r.width}×${r.height} in ${r.elapsedMs.toFixed(0)} ms (${r.stages})`);
+    // A larger one replaces the one showing.
+    if (showingOriginal) showView();
+  }, (e) => {
+    if (made !== originals) return;
+    holding = false;
+    showMessage(`The original couldn't be shown: ${e.message}`, true, 4000);
+  }).finally(() => {
+    if (made !== originals) return;
+    originalLoad = null;
+    updateOriginal();
+  });
+  return originalLoad;
+}
+
+// Hold (or let go of) the original, as macOS holdOriginal.
+function holdOriginal(on) {
+  holding = on && canShowOriginal();
+  updateOriginal();
+}
+
+// Shows the original while it's held and can show, "Loading Original" until
+// it's made; one made for a smaller frame shows smoothed until the new size's
+// is.
+function updateOriginal() {
+  const can = canShowOriginal(), show = holding && can, on = show && !!original;
+  originalBadge = show ? (on ? "Original" : "Loading Original") : null;
+  showBadge();
+  const button = $("original");
+  button.disabled = !can;
+  button.setAttribute("aria-pressed", on);
+  if (on !== showingOriginal) {
+    showingOriginal = on;
+    showView();
+  }
+  // After the switch's display pass, which the engine then draws first.
+  if (show && original?.side !== settledSide) prepareOriginal();
+}
+
+// A new photograph or engine has none.
+function forgetOriginal() {
+  originals++;
+  originalLoad = null;
+  original?.bitmap?.close();
+  original = null;
+  holding = false;
+  updateOriginal();
 }
 
 // macOS EditorModel.percent.
@@ -769,6 +864,7 @@ async function open(name, data) {
   const opening = ++opens, previous = photo;
   let loaded = false;
   loading = true;
+  forgetOriginal();
   // Another photograph's placeholder isn't this one's.
   dropEarly(true);
   $("busy").classList.add("on");
@@ -808,6 +904,7 @@ async function open(name, data) {
     // Nothing of the last photograph shows; the engine forgot its frame.
     frame?.bitmap.close();
     frame = null;
+    developed = false;
     settledSide = 0;
     if (early) {
       // The placeholder stays until the first frame, where it was.
@@ -831,6 +928,7 @@ async function open(name, data) {
     if (opening === opens) loading = false;
     if (!running) $("busy").classList.remove("on");
     if (!loading && wanted) pump();
+    updateOriginal();
   }
 }
 
@@ -1023,6 +1121,14 @@ globalThis.negs = {
   timeline,
   badge: () => !$("badge").hidden && $("badge-text").textContent,
   shown: () => host.call("shownRect"),
+  // Show Original: hold it (or let go), whether it shows, the one made
+  // (size, time, whether the engine keeps it), making it now, and its bytes
+  // at `maxDim` without showing them.
+  original: (on) => holdOriginal(on),
+  showingOriginal: () => showingOriginal,
+  originalMade: () => original && { side: original.side, width: original.width, height: original.height, presented: original.presented, elapsedMs: original.elapsedMs, stages: original.stages },
+  prepareOriginal: () => prepareOriginal(),
+  readOriginal: (maxDim) => host.call("original", params(), maxDim, false),
 };
 
 $("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });
@@ -1037,6 +1143,47 @@ for (const b of [$("open"), $("open-empty")]) b.addEventListener("click", () => 
 $("open-sample").addEventListener("click", openSample);
 $("file").addEventListener("change", () => $("file").files[0] && openFile($("file").files[0]));
 $("export").addEventListener("click", exportJpeg);
+
+// Show Original: a mouse or pen holds the button, a tap (or Return, Space,
+// or a screen reader, which can't hold) toggles it; `\` is held, not while
+// typing in a field.
+{
+  const button = $("original");
+  if (matchMedia("(pointer: coarse)").matches) button.title = "Tap to show the original; tap again to go back";
+  let held = null, pointer = "";
+  button.addEventListener("pointerenter", () => prepareOriginal());
+  button.addEventListener("pointerdown", (ev) => {
+    pointer = ev.pointerType;
+    if (ev.pointerType === "touch" || ev.button !== 0) return;
+    held = ev.pointerId;
+    button.setPointerCapture(ev.pointerId);
+    holdOriginal(true);
+  });
+  const release = (ev) => {
+    if (ev.pointerId !== held) return;
+    held = null;
+    holdOriginal(false);
+  };
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) button.addEventListener(type, release);
+  // The click after a mouse or pen's press is the press's.
+  button.addEventListener("click", (ev) => (ev.detail === 0 || pointer === "touch") && holdOriginal(!holding));
+  const typing = (t) => t instanceof Element && t.matches("textarea, [contenteditable], input:not([type=range], [type=checkbox], [type=radio], [type=file])");
+  let key = false;
+  addEventListener("keydown", (ev) => {
+    if (ev.key !== "\\" || ev.ctrlKey || ev.metaKey || typing(ev.target)) return;
+    ev.preventDefault();
+    if (ev.repeat || key) return;
+    key = true;
+    holdOriginal(true);
+  });
+  const letGo = () => {
+    if (!key) return;
+    key = false;
+    holdOriginal(false);
+  };
+  addEventListener("keyup", (ev) => ev.key === "\\" && letGo());
+  addEventListener("blur", letGo);
+}
 
 $("fit").addEventListener("click", () => view.fit());
 $("actual").addEventListener("click", () => view.actualSize());

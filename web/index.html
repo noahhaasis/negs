@@ -49,11 +49,16 @@
   .badge:not([hidden]) ~ .message { top: 52px; }
   /* The status line wraps between its parts (app.js joins them with
      breakable separators), so the "shown at" notice never gets cut off. */
-  .hud { position: absolute; left: 12px; right: 168px; bottom: 10px; color: var(--faint); font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
+  .hud { position: absolute; left: 12px; right: 200px; bottom: 10px; color: var(--faint); font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
     text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
   .zoom { position: absolute; right: 10px; bottom: 6px; display: flex; align-items: center; gap: 4px; }
   .zoom[hidden] { display: none; }
   .zoom .btn { padding: 2px 8px; font-size: 12px; background: rgb(31 31 31 / .85); }
+  /* Show Original (macOS's square.split.diagonal.fill), tinted while it shows. */
+  .zoom .btn.original { display: flex; align-items: center; align-self: stretch; padding: 0 6px; color: var(--muted);
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .zoom .btn.original svg { width: 14px; height: 14px; }
+  .zoom .btn.original[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
   .zoom-level { min-width: 44px; text-align: right; color: var(--muted); font: 11px ui-monospace, monospace; text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
 
   /* Sidebar */
@@ -130,7 +135,9 @@
     select { padding: 8px 10px; }
     .btn { min-height: 40px; padding: 8px 14px; }
     .zoom .btn { min-height: 36px; padding: 4px 12px; font-size: 14px; }
-    .hud { right: 196px; }
+    .hud { right: 244px; }
+    .zoom .btn.original { padding: 0 12px; }
+    .zoom .btn.original svg { width: 16px; height: 16px; }
     .stock { gap: 14px; }
     .stock label, .hint { font-size: 13px; }
     .section > h2 { font-size: 12px; }
@@ -191,6 +198,9 @@
     <div class="message" id="message" hidden></div>
     <div class="hud" id="hud"></div>
     <div class="zoom" id="zoom" hidden>
+      <button class="btn original" id="original" aria-label="Show Original" aria-pressed="false" title="Hold to show the original (\)" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M14 4.5v7a2.5 2.5 0 0 1-2.5 2.5h-7z" fill="currentColor"/></svg>
+      </button>
       <span class="zoom-level" id="zoom-level"></span>
       <button class="btn" id="fit" title="Fit the photograph in the view (double-click)">Fit</button>
       <button class="btn" id="actual" title="Actual size: a pixel of the photograph on each screen pixel (double-click)">100%</button>

@@ -611,6 +611,96 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    `touch.mjs` and `zoom.mjs` pass unchanged. Nothing in the engine
    changed, so native output and the benchmarks are untouched.
 
+16. **Show Original** (MVP piece 8, the owner's Before/After). Holding the
+   button at the bottom right (before the zoom level), or `\`, shows the
+   photograph before any film in the developed frame's place, with the
+   same view; letting go shows the developed frame again. A tap toggles it
+   on touch screens, where holding would hide the photograph under the
+   finger, and the button stays tinted while it's on. The badge says
+   "Original" ("Loading Original" until it's made).
+
+   **Which original.** The engine's decoded source, as the native helper's
+   `original` (Linux and Windows show it): rawler's develop for a RAW, the
+   file for a JPEG, with no tone curve, so it looks flat and dark next to
+   the film. The owner chose it. macOS shows Apple's RAW develop
+   (`CIRAWFilter`), which looks like the camera's own JPEG; a browser has no
+   such decoder. The camera's embedded preview (piece 7's placeholder) was
+   the other candidate: closer to macOS's look, but about 1620 px (soft at
+   100%), missing from some files and framed a little differently.
+
+   **How.** `original_encoding` (and its `convert_linear`) moved from the
+   helper to `spektrafilm_core::preview`, so the helper and the browser
+   share one copy. `Engine.original(params, maxDim, present)` takes the
+   source at the settled frame's size, resampled as that frame's input is
+   (the same cached resample, `source_at`), and:
+   - for an sRGB display (every output the web offers today), keeps it on
+     the canvas from the input the film chain already has on the GPU
+     (`set_original_from_input`: the resident input by its key, through
+     `make_shown`, the pass a presented frame's scan takes). Resident
+     inputs are now created with `STORAGE` usage for this; no native output
+     changes. Under 1 ms, at any size;
+   - otherwise (another output space, the CPU engine, no canvas) makes the
+     bytes with `preview::display_rgba`, as the helper does, and keeps them
+     on the canvas (`set_original`) or returns them to the page. The card
+     fitted takes 7 ms, 24 MP 290 ms. A first version made every original
+     this way; at 24 MP that held the engine's worker for 330 ms, and a
+     switch queued behind it.
+
+   The canvas keeps the original in its own slot next to the two shown
+   frames (`Canvas.original`), counted in their 256 MB budget (at 24 MP it
+   and the settled frame fill it, so the interactive frame's texture goes).
+   A view with `original` draws it instead of the developed frame, so
+   switching is `show()`: one display pass, no film chain. A render that
+   finishes while it shows (a slider moved with `\` held, a settled frame
+   after a zoom) updates the developed frame underneath without drawing
+   over it. The page keeps one original until the photograph or engine
+   changes; when the settled frame grows (zoomed to 100% while held), the
+   one it has shows smoothed while the new size's is made. The pointer
+   reaching the button makes it ahead of a press, as macOS's hover does.
+   On the CPU engine the page keeps the original's bitmap and paints it
+   (`paint` in `app.js`). Disabled, as macOS's `canShowOriginal`, until the
+   photograph's first frame and while another opens; opening a photograph
+   lets go of it.
+
+   **Measured** (`web/checks/original.mjs`, Chrome on the GTX 1660 SUPER):
+
+   | | Card (2752 × 1536) | Sony ARW (4000 × 6000) |
+   |---|---|---|
+   | Original made, fitted | 686 × 383, 0.9 ms | 686 × 1029, 0.8 ms |
+   | Press / release, fitted | 1 display pass each, 5.9 / 4.7 ms; no render | 8.9 / 4.8 ms; no render |
+   | At 100%, held | made at 2752 × 1536 in 0.5 ms | made at 4000 × 6000 in 0.5 ms; repeated switches 2–3 ms |
+   | Pan while it shows | 20 passes, about 3 ms; no render | the same |
+   | Slider while it shows | 1 render; the canvas still shows the original | the same |
+   | Canvas against the original's bytes | 100% exact, fitted and at 100% | 99.999%, at most 1 |
+   | Full size against the helper's `original` | identical | 15 of 72 million values differ by 1 |
+   | `\` held with key repeat, let go | one pass each; ignored in a value field | the same |
+
+   The view (zoom, rectangle) is the same before and after every switch.
+   The GPU's bytes differ from the CPU's by at most 1 in a few pixels (f32
+   on the GPU, f64 on the CPU), as a presented frame's do. The ARW's 15
+   values come from float differences between the wasm and native builds
+   of the decode; the card's bytes are identical. A switch right after a
+   24 MP read-back took 27–30 ms, the GPU still busy. On a phone
+   (`VIEW=390x844@3m`) a tap turns it on and another off, a pass each (4.5
+   and 4.7 ms). On the CPU engine a switch repaints the page's canvas (0.1
+   ms to issue), the fitted original is exact against its bytes, and at
+   100% it's the 4 MP cap's 2677 × 1494, made in 92 ms and drawn sampled.
+
+   Native output is unchanged: the helper's `original` (card and ARW in
+   sRGB, the card in Display P3, the ARW in ProPhoto at the 12 MP limit)
+   and `render` (the card, an interactive frame, the ARW; wgpu and cpu)
+   are byte-identical before and after, and so is the CLI (the card on
+   Portra, Velvia in Display P3; wgpu and cpu). `cargo check --workspace
+   --all-targets` and the core, gpu, math, model, io and spektrafilm-native
+   tests pass, and `zoom.mjs`, `placeholder.js`, `inspector.js` and
+   `touch.mjs` pass unchanged.
+
+   For piece 5: the page keys its original by size only, since nothing on
+   the web changes how it's shown yet. The output colour space will: add it
+   to the key. A non-sRGB output takes the CPU path, whose bytes are
+   desktop's Rec. 2020 ones, wrong on an sRGB canvas in the same way as
+   today's non-sRGB frames; fix both together.
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
