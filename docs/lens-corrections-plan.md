@@ -17,7 +17,8 @@ against current sources or sample files during the spike.
   - **Sony ARW, Fujifilm RAF, OM/Olympus ORF and Panasonic RW2** embed
     the camera's in-body correction parameters in private or maker-note tags.
     The formats are undocumented but reverse-engineered; darktable's
-    "embedded metadata" lens correction reads them *(verify the exact set)*.
+    "embedded metadata" lens correction reads exactly these four plus DNG
+    (confirmed in its source, see Prior art below).
     rawler already names the Sony (`0x7031–0x7037`) and Fujifilm
     (`0xf00b`, `0xf010`) tags but does not parse them.
   - **Nikon NEF and Canon CR2/CR3** have only partial or undecoded data
