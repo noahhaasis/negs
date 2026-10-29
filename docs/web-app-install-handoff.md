@@ -1,5 +1,12 @@
 # Handoff: Negs on the home screen, and offline
 
+> **Done**, 2026-10-29, in the shared worktree (the owner's choice): see
+> `docs/web-wasm.md` item 19 for what was built, measured and tested,
+> and `docs/web-wasm-handoff.md`, "The service worker in development".
+> The owner said yes to `file_handlers` and to "Save everything". Still
+> open: trying it on an iPhone, iPad and Android phone (the home-screen
+> app, exporting from it, WebGPU in standalone mode, memory).
+
 For the agent who makes the browser version of Negs installable: added to
 an iPhone's or iPad's home screen, or installed as an app from Chrome or
 Edge on a computer, Android phone or tablet. It should then open and

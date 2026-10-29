@@ -9,6 +9,7 @@ import { SECTIONS, POST_SECTIONS, optionTitle, snap, formatValue } from "./contr
 import { createView } from "./view.js";
 import { placeholder } from "./placeholder.js";
 import * as Border from "./border.js";
+import { fetchFailed } from "./engine.js";
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
 // complete RuntimeParams, starting from the engine's defaults. Values a
@@ -849,7 +850,8 @@ function fetchBorderTexture() {
   const get = (path) => download(`data/${path}`, undefined, progress).then((bytes) => ({ path, bytes }));
   const load = get(key)
     .catch((e) => {
-      if (e.status !== 404 || border.style !== "35mm") throw e;
+      // Offline, the generic strip may be saved where the film's isn't.
+      if ((e.status !== 404 && !e.offline) || border.style !== "35mm") throw e;
       return get(Border.genericStrip(Border.filmFormat(photo.width, photo.height)));
     })
     .then(async ({ path, bytes }) => {
@@ -1172,7 +1174,7 @@ function openSample() {
 // says the length.
 async function download(url, signal, progress) {
   const res = await fetch(url, { signal });
-  if (!res.ok) throw Object.assign(new Error(`${url}: ${res.status}`), { status: res.status });
+  if (!res.ok) throw fetchFailed(url, res);
   const total = Number(res.headers.get("Content-Length")) || 0;
   if (!total || !res.body) return new Uint8Array(await res.arrayBuffer());
   const chunks = [];
@@ -1223,13 +1225,18 @@ async function exportJpeg() {
     const canvas = new OffscreenCanvas(r.width, r.height);
     canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height), 0, 0);
     const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
-    const a = Object.assign(document.createElement("a"), {
-      href: URL.createObjectURL(blob),
-      download: `${photo.name.replace(/\.[^.]+$/, "")}-${state.film}.jpg`,
-    });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    hideMessage();
+    const name = `${photo.name.replace(/\.[^.]+$/, "")}-${state.film}.jpg`;
+    const file = new File([blob], name, { type: "image/jpeg" });
+    // A home-screen app on iOS has no downloads; the share sheet saves to
+    // Photos or Files. Sharing needs a fresh tap, which the render outlasted.
+    if (IOS && standalone() && navigator.canShare?.({ files: [file] })) {
+      showMessage("Exported.", false, 60_000, { label: "Save or share…", run: () => navigator.share({ files: [file] }).catch(() => {}) });
+    } else {
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+      hideMessage();
+    }
   } catch (e) {
     await failed(e, "Export failed");
   } finally {
@@ -1254,11 +1261,15 @@ async function exportRender() {
 }
 
 // A message stays until hidden; one shown for `ms` hides itself then, and
-// the renders that follow it leave it up.
+// the renders that follow it leave it up. An `action` ({ label, run }) is a
+// button after the text, which hides the message.
 let messageTimer;
-function showMessage(text, error = false, ms = 0) {
+function showMessage(text, error = false, ms = 0, action = null) {
   const m = $("message");
   m.textContent = text;
+  if (action) {
+    m.append(" ", el("button", { className: "link", textContent: action.label, onclick: () => { m.hidden = true; action.run(); } }));
+  }
   m.classList.toggle("error", error);
   m.hidden = false;
   clearTimeout(messageTimer);
@@ -1290,6 +1301,157 @@ async function balancePrint() {
     sync();
   }
 }
+
+// ---- Installing, and working offline -----------------------------------------
+
+// The service worker (web/sw.js) keeps Negs for offline use, and the
+// footer says how much it keeps, offers to install the app, and tells of
+// a new version. On a computer's own dev server (localhost) it registers
+// only when asked, with ?sw=1 (remembered; ?sw=0 removes it), so checks
+// and benchmarks never meet it; elsewhere ?sw=0 turns it off.
+const ua = navigator.userAgent;
+const IOS = /iP(hone|ad|od)/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const SAFARI = /Safari\//.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|EdgiOS|OPiOS|Android/.test(ua);
+const standalone = () => navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+const mb = (bytes) => `${Math.max(1, Math.round(bytes / 2 ** 20))} MB`;
+
+let registration = null;
+async function startOffline() {
+  if (!("serviceWorker" in navigator)) return;
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+  if (query.has("sw")) remember("sw", query.get("sw") === "1");
+  if (!remembered("sw", !local)) {
+    for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+    return;
+  }
+  // An installed app keeps what it saved when the browser needs room.
+  if (standalone()) navigator.storage?.persist?.();
+  let controlled = !!navigator.serviceWorker.controller, reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloading) return location.reload();
+    // Another window took the new version; this one keeps its own.
+    if (controlled) updateReady("Negs was updated in another window.");
+    controlled = true;
+    offlineStatus();
+  });
+  new BroadcastChannel("negs-offline").onmessage = ({ data }) => {
+    if (data.type !== "progress") return offlineStatus();
+    const what = data.task === "save-all" ? "Saving everything for offline use" : controlled ? "Downloading a new version" : "Saving Negs for offline use";
+    $("offline-text").textContent = `${what}… ${data.total ? Math.floor((data.done / data.total) * 100) : 100}%`;
+    $("offline-all").hidden = $("offline-clear").hidden = true;
+    $("offline").hidden = false;
+  };
+  $("update-reload").addEventListener("click", () => {
+    reloading = true;
+    registration.waiting ? registration.waiting.postMessage({ type: "skip-waiting" }) : location.reload();
+  });
+  $("offline-all").addEventListener("click", async () => {
+    navigator.storage?.persist?.();
+    $("offline-all").disabled = true;
+    const r = await ask("save-all");
+    $("offline-all").disabled = false;
+    if (r?.error) showMessage(`Not everything could be saved for offline use: ${r.error}`, true, 6000);
+    offlineStatus();
+  });
+  $("offline-clear").addEventListener("click", clearOffline);
+  try {
+    registration = await navigator.serviceWorker.register("sw.js", { updateViaCache: "none" });
+  } catch (e) {
+    return console.warn(`Negs can't work offline here: ${e.message}`);
+  }
+  const watch = (w) => w?.addEventListener("statechange", () => w.state === "installed" && navigator.serviceWorker.controller && updateReady());
+  if (registration.waiting && controlled) updateReady();
+  watch(registration.installing);
+  registration.addEventListener("updatefound", () => watch(registration.installing));
+  // An app left open looks for a new version when it comes back, hourly.
+  let checked = Date.now();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || Date.now() - checked < 3600e3) return;
+    checked = Date.now();
+    registration.update().catch(() => {});
+  });
+  offlineStatus();
+}
+
+// A question for the service worker, answered on a channel of its own.
+function ask(type) {
+  const worker = navigator.serviceWorker.controller ?? registration?.active;
+  if (!worker) return Promise.resolve(null);
+  const { port1, port2 } = new MessageChannel();
+  const reply = new Promise((resolve) => (port1.onmessage = ({ data }) => resolve(data)));
+  worker.postMessage({ type }, [port2]);
+  return reply;
+}
+
+// What's saved: "Works offline · 24 MB saved", and the rest on offer.
+async function offlineStatus() {
+  const s = await ask("status");
+  if (!s) return;
+  if (s.shellMissing) {
+    $("offline-text").textContent = "Saving Negs for offline use…";
+    $("offline-all").hidden = $("offline-clear").hidden = true;
+  } else {
+    $("offline-text").textContent = `Works offline · ${mb(s.saved)} saved.`;
+    const rest = s.total - s.saved;
+    $("offline-all").textContent = `Save everything (${mb(rest)} more)`;
+    $("offline-all").title = "Every border and spectral table, and the sample photo, for use offline";
+    $("offline-all").hidden = rest <= 0;
+    $("offline-clear").hidden = false;
+  }
+  $("offline").hidden = false;
+}
+
+async function clearOffline() {
+  for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+  for (const name of await caches.keys()) if (name.startsWith("negs-")) await caches.delete(name);
+  $("offline").hidden = $("update").hidden = true;
+  showMessage("Removed what Negs saved for offline use. It's saved again the next time Negs opens.", false, 6000);
+}
+
+let announced = false;
+function updateReady(text = "A new version of Negs is ready.") {
+  $("update-text").textContent = text;
+  $("update").hidden = false;
+  if (!announced) showMessage(`${text} Reload to use it.`, false, 6000, { label: "Reload", run: () => $("update-reload").click() });
+  announced = true;
+}
+
+// Installing: Chrome and Edge offer it (beforeinstallprompt), Safari has
+// it in its menus. Shown in the footer until installed or dismissed.
+let installPrompt = null;
+addEventListener("beforeinstallprompt", (ev) => {
+  ev.preventDefault();
+  installPrompt = ev;
+  showInstall();
+});
+addEventListener("appinstalled", () => {
+  installPrompt = null;
+  $("install").hidden = true;
+  navigator.storage?.persist?.();
+});
+function showInstall() {
+  if (standalone() || remembered("install-dismissed", false)) return;
+  const macSafari = SAFARI && !IOS && /Macintosh/.test(ua) && Number(ua.match(/Version\/(\d+)/)?.[1]) >= 17;
+  const text = installPrompt ? "Use Negs as an app, offline too."
+    : IOS && SAFARI ? "Use Negs as an app: in Safari's Share menu, choose Add to Home Screen."
+    : macSafari ? "Use Negs as an app: File → Add to Dock."
+    : null;
+  if (!text) return;
+  $("install-text").textContent = text;
+  $("install-app").hidden = !installPrompt;
+  $("install").hidden = false;
+}
+$("install-app").addEventListener("click", async () => {
+  const prompt = installPrompt;
+  installPrompt = null;
+  $("install").hidden = true;
+  await prompt?.prompt();
+});
+$("install-dismiss").addEventListener("click", () => {
+  remember("install-dismissed", true);
+  $("install").hidden = true;
+});
+showInstall();
 
 // ---- Wiring ----------------------------------------------------------------
 
@@ -1435,7 +1597,13 @@ viewport.addEventListener("drop", (ev) => {
 
 const gpu = query.get("backend") ?? (navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)) ? "gpu" : "cpu");
 starting = startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
+// Files opened with the installed app (the manifest's file_handlers).
+if (self.launchQueue) {
+  launchQueue.setConsumer(async ({ files }) => files?.length && openFile(await files[0].getFile()));
+}
 await starting;
+// After the engine, so saving for offline use doesn't slow the first start.
+startOffline();
 
 // Automation: ?image=<url>&name=<result>&runs=<n>&max=<px>[&params=<json>]
 // opens the image, renders it n times at max pixels, shown 1:1, then posts the last image and

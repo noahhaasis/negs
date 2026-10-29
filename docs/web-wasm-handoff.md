@@ -330,10 +330,47 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     `showMessage(text, error, ms)` with `ms` hides itself then and survives
     the renders that follow (`pump` hides other messages after a render);
   - `web/worker.js`: the engine (either build) in a worker;
+  - installing and offline (`docs/web-wasm.md` item 19):
+    `web/manifest.webmanifest` and `web/icons/` (`make-icons.sh` makes
+    them from `assets/negs-icon.svg`); `web/sw.js`, the service worker;
+    `web/offline.mjs`, which says what it saves when (`role`) and writes
+    the file list into it (`serviceWorker`); in `app.js`, "Installing,
+    and working offline" (`startOffline`, `offlineStatus`, `updateReady`,
+    `showInstall`) and the `launchQueue` consumer. `fetchFailed` in
+    `engine.js` turns the worker's 503s into messages;
   - `web/build.sh` and `web/serve.mjs`: build and serve;
   - `web/make-catalog.mjs`, `web/bench.sh`, `web/cdp.mjs` and
     `web/compare.mjs`: the catalog, benchmarks, page driving and image
     comparison.
+
+### The service worker in development
+
+On `localhost` the page registers the service worker only when asked:
+open it once with `?sw=1` (remembered in that browser profile; `?sw=0`
+unregisters it and forgets). Without that, the page unregisters any
+worker it finds, so `web/checks/*` and `web/bench.sh`, which use fresh
+profiles, never meet one. Anywhere else (the LAN's `--https` server, the
+deployed site) it registers by default, and `?sw=0` turns it off.
+
+`serve.mjs` serves `/sw.js` with the list of the files it serves and
+their hashes (`devAssets` in `web/offline.mjs`, hashed again when a file
+changes) and `dev: true`, so the worker takes the network first and uses
+its cache only when the server doesn't answer: a running server always
+wins, and a stale worker can't serve old files. A rebuild changes the
+list, so the browser installs a new worker on the next load.
+
+To try the deployed behaviour (cache first, updates, offline), package
+the app and serve the package as the host would:
+
+```sh
+node web/package-static.mjs <empty dir>
+node web/serve.mjs 8151 --static <that dir>    # http://localhost:8151/?sw=1
+```
+
+Stop the server to go offline: DevTools' Offline switch covers the page
+but not always the worker's own downloads. A new build is a file changed
+in the package and its `sw.js` written again with `serviceWorker` (as
+`package-static.mjs` does). Shift-reload bypasses the worker.
 
 ## Known gotchas
 

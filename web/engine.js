@@ -66,7 +66,17 @@ export function client(wasm, kind) {
 async function fetchData(wasm, paths) {
   await Promise.all(paths.map(async (path) => {
     const res = await fetch(new URL(`data/${path}`, location.origin));
-    if (!res.ok) throw new Error(`${path}: ${res.status}`);
+    if (!res.ok) throw fetchFailed(path, res);
     wasm.registerData(path, new Uint8Array(await res.arrayBuffer()));
   }));
+}
+
+// Why a file didn't arrive: the service worker (web/sw.js) says when it's
+// offline and the file isn't saved, or when a newer Negs replaced it.
+export function fetchFailed(path, res) {
+  const why = res.headers.get("X-Negs-Offline");
+  const message = why === "updated" ? `${path} has changed in a newer Negs; reload to use it`
+    : why ? `${path} isn't saved for offline use; connect to the internet to download it`
+    : `${path}: ${res.status}`;
+  return Object.assign(new Error(message), { status: res.status, offline: !!why });
 }

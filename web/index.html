@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Negs</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#161616">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Negs">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   :root {
     color-scheme: dark;
@@ -31,28 +39,28 @@
   .empty .choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
   .view.dragging::after { content: "Drop to open"; position: absolute; z-index: 2; inset: 12px; display: grid; place-items: center;
     border: 2px dashed var(--accent); border-radius: 10px; background: rgb(22 22 22 / .8); color: var(--accent); font-size: 15px; }
-  .busy { position: absolute; top: 0; left: 0; right: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .15s; }
+  .busy { position: absolute; top: env(safe-area-inset-top); left: 0; right: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .15s; }
   .busy.on { opacity: 1; transition-delay: .12s; }
   .busy::before { content: ""; position: absolute; inset: 0; width: 30%; background: var(--accent); animation: slide 1s ease-in-out infinite; }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
-  .message { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 24px));
+  .message { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 24px));
     padding: 8px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 16px rgb(0 0 0 / .4); }
   .message.error { border-color: var(--danger); color: var(--danger); }
   .message[hidden] { display: none; }
   /* While a photograph opens (macOS ActivityBadge), with a message below it. */
-  .badge { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 12px;
+  .badge { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 12px;
     border-radius: 999px; background: rgb(31 31 31 / .85); border: 1px solid var(--line); font-weight: 500; white-space: nowrap;
     font-variant-numeric: tabular-nums; pointer-events: none; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
   .badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .25; } }
   @media (prefers-reduced-motion: reduce) { .badge::before { animation: none; } }
   .badge[hidden] { display: none; }
-  .badge:not([hidden]) ~ .message { top: 52px; }
+  .badge:not([hidden]) ~ .message { top: calc(52px + env(safe-area-inset-top)); }
   /* The status line wraps between its parts (app.js joins them with
      breakable separators), so the "shown at" notice never gets cut off. */
-  .hud { position: absolute; left: 12px; right: 200px; bottom: 10px; color: var(--faint); font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
+  .hud { position: absolute; left: calc(12px + env(safe-area-inset-left)); right: 200px; bottom: calc(10px + env(safe-area-inset-bottom)); color: var(--faint); font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
     text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
-  .zoom { position: absolute; right: 10px; bottom: 6px; display: flex; align-items: center; gap: 4px; }
+  .zoom { position: absolute; right: 10px; bottom: calc(6px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 4px; }
   .zoom[hidden] { display: none; }
   .zoom .btn { padding: 2px 8px; font-size: 12px; background: rgb(31 31 31 / .85); }
   /* Show Original (macOS's square.split.diagonal.fill), tinted while it shows. */
@@ -144,6 +152,14 @@
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #1b1b1b; font-weight: 600; }
   .btn:disabled { opacity: .5; cursor: default; }
   .hint { color: var(--faint); font-size: 11px; }
+  .hint[hidden] { display: none; }
+  /* The footer's quiet commands: installing, offline use, updates. */
+  .link { padding: 0; border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; }
+  .link:hover { text-decoration: underline; }
+  .link:disabled { color: var(--faint); cursor: default; text-decoration: none; }
+  .dismiss { float: right; padding: 0 2px; border: 0; background: none; color: var(--faint); cursor: pointer; font: inherit; }
+  .dismiss:hover { color: var(--fg); }
+  #offline-all:not([hidden]) ~ #offline-clear::before { content: "· "; color: var(--faint); }
 
   /* Fingers: bigger thumbs, switches and targets, and no hover-only cues.
      Fields stay at 16px, below which iOS zooms the page on focus. */
@@ -174,6 +190,8 @@
     .ctl.choice select { max-width: 65%; }
     .style { min-height: 64px; font-size: 13px; }
     .ctl.color input { width: 56px; height: 34px; }
+    .link, .dismiss { min-height: 32px; }
+    .dismiss { min-width: 32px; }
   }
 
   /* A bottom sheet with a tab per section, where the screen is too narrow
@@ -197,6 +215,8 @@
     .section:not(.titled) > h2 { display: none; }
     .section > .ctl:first-of-type { margin-top: 12px; }
     .bottom { gap: 4px; padding: 10px 14px 16px; }
+    .hud { bottom: 10px; }
+    .zoom { bottom: 6px; }
     .app { transition: grid-template-rows .2s ease; }
     .app.dragging-sheet { transition: none; }
   }
@@ -252,6 +272,12 @@
       <div class="row"><span>Engine</span><select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></div>
       <div class="hint" id="engine-info">Starting…</div>
       <div class="hint" id="value-hint">Click a value to type one.</div>
+      <div class="hint" id="update" role="status" hidden><span id="update-text">A new version of Negs is ready.</span>
+        <button class="link" id="update-reload" title="Reloads Negs; the photograph you have open closes">Reload</button></div>
+      <div class="hint" id="install" hidden><button class="dismiss" id="install-dismiss" aria-label="Don't show again" title="Don't show again">×</button><span id="install-text"></span>
+        <button class="link" id="install-app" hidden>Install app</button></div>
+      <div class="hint" id="offline" hidden><span id="offline-text"></span>
+        <button class="link" id="offline-all" hidden></button> <button class="link" id="offline-clear" title="Remove what Negs saved for offline use" hidden>Clear</button></div>
     </div>
   </aside>
 </div>
