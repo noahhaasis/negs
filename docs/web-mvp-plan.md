@@ -364,6 +364,9 @@ desktop decode.
 
 ### 13. Download and caching
 
+Being done separately as the installable, offline app
+(`docs/web-app-install-handoff.md`); take that work into account here.
+
 A service worker that caches the wasm, JS and data (the LUT is 6 MB, 4 MB
 brotli), with versioned cache names; lazy fetches for the upsampling LUTs
 and anything else optional; it can also set COOP/COEP for hosts that can't
@@ -395,3 +398,22 @@ Everything else in `docs/web-feature-inventory.md`: crop, rotate,
 straighten, Image Size (note: it forces the CPU engine on the web
 until the wasm crate resolves it as the helper does), histogram,
 export formats and options, a preset library, undo, sessions, and so on.
+
+Owner's decision, 2026-10-29: finish the MVP first, then come back to
+these from piece 11 (`docs/web-wasm.md` item 18):
+
+- **Border export memory.** A 24 MP export with 35mm and Instagram peaks
+  at 2.4 GB of wasm memory (f32 copies of the bytes, the bordered and the
+  extended image). Border the 8-bit bytes directly, or the float scan
+  before quantising as native does, and count it in piece 6's budgets.
+- **Module size.** Borders added 524 KB (167 KB gzipped), most of it the
+  35mm renderer and its font; `wasm-opt` hasn't been tried at all.
+- **Accuracy, to revisit as a whole:** the Film and 35mm previews use
+  desktop's textures, not the export's (the strip at 100% matches the
+  export on 5–75% of its pixels); fitted, a bordered frame is sampled
+  rather than drawn 1:1; the 35mm export is one step off native on 23 of
+  37 M pixels; and the 3:4 PNG test photograph agrees with the CLI on only
+  92% of pixels exactly, with or without a border (the card and the ARW:
+  99.8% and 99.96%), which predates piece 11 and is unexplained.
+- Border settings aren't remembered between visits; the owner is fine
+  with that.

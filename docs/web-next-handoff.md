@@ -53,6 +53,13 @@ What piece 7 settled with the owner, which later pieces shouldn't undo:
 - A photograph shows at once from its placeholder (`web/placeholder.js`)
   with a "Developing" badge (`setBadge`), until the first frame.
 
+Owner's decisions, 2026-10-29: finish the MVP first. Optimising and
+accuracy work from piece 11 is listed under "Later" in the plan. Making
+the app installable and offline is a separate agent's work
+(`docs/web-app-install-handoff.md`); expect a `web/sw.js` and a manifest
+to appear, and keep exports and data fetches going through `fetch`, so its
+service worker sees them.
+
 Open items that aren't yours to settle:
 
 - The owner's Cloudflare packager (`web/package-static.mjs`, uncommitted)
