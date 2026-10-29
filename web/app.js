@@ -747,6 +747,16 @@ fillStocks();
 globalThis.negs = {
   state: () => structuredClone(state),
   edit(path, value) { set(path, value); sync(); schedule("settled"); },
+  // A fresh edit: Reset Adjustments, the film (and paper, if given) chosen
+  // as the pickers choose them, then `edits` ({ path: value }).
+  start(film, paper, edits = {}) {
+    resetAdjustments();
+    chooseFilm(film);
+    if (paper) choosePaper(paper);
+    for (const [path, value] of Object.entries(edits)) set(path, value);
+    sync();
+    schedule("settled");
+  },
   renders,
   idle: () => !running && !wanted,
   // The engine's Balance Print for any film, paper and params JSON, without

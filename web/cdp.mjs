@@ -1,6 +1,6 @@
 // Drive the page over the DevTools protocol: node web/cdp.mjs <url> <script.js|-> [waitMs]
 // Opens url in a windowed Chrome with WebGPU (as web/bench.sh), prints console
-// messages and exceptions, then evaluates the script (an async function body)
+// messages, Chrome's log (WebGPU errors land there) and exceptions, then evaluates the script (an async function body)
 // in the page and prints its result. A script ending in .mjs runs in Node
 // instead, as its default export ({ send, evaluate }) => result, for input
 // the page can't make itself, such as touches (Input.dispatchTouchEvent). SHOT=<file.png> also saves a screenshot;
@@ -47,11 +47,13 @@ ws.onmessage = ({ data }) => {
   const m = JSON.parse(data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
   else if (m.method === "Runtime.consoleAPICalled") console.log(`[console.${m.params.type}]`, m.params.args.map((a) => a.value ?? a.description).join(" "));
+  else if (m.method === "Log.entryAdded") console.log(`[log.${m.params.entry.level}]`, m.params.entry.text);
   else if (m.method === "Runtime.exceptionThrown") console.log("[exception]", m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
 };
 const send = (method, params = {}) => new Promise((r) => { waiting.set(++id, r); ws.send(JSON.stringify({ id, method, params })); });
 await send("Runtime.enable");
 await send("Page.enable");
+await send("Log.enable");
 const view = process.env.VIEW?.match(/^(\d+)x(\d+)(?:@([\d.]+))?(m)?$/);
 if (view) {
   const [, width, height, dpr = "1", mobile] = view;

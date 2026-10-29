@@ -90,6 +90,16 @@ Then stop it from filling up again:
 - Keep large renders (the helper's `.rgba` previews are 17 MB each) only as
   long as a comparison needs them.
 
+## Done before piece 5: correctness
+
+`docs/web-wasm.md` item 13: the browser matches native wgpu and the f64
+reference on 63 cases (films, papers, scans, settings, the ARW), and a GPU
+memory leak that blacked out a long session's 24 MP frame is fixed. Piece 5's
+table therefore goes in item 14, not 13. Rerun
+`web/checks/correctness.sh` after engine changes. Add cases for the new
+output spaces once they present, with the reference converted the way the
+display converts them.
+
 ## Ground rules that bite in piece 5
 
 - **Native output must stay byte-identical.** If you change the engine
@@ -305,7 +315,7 @@ the chosen space and its ICC profile:
   browser (`negs.read` and the canvas).
 - **Presenting:** `web/checks/controls.js` (with the new controls):
   every row presented, and which ones rebuild, with times. Put a table in
-  `docs/web-wasm.md` item 13, and update the feature inventory's
+  `docs/web-wasm.md` item 14, and update the feature inventory's
   "Resident" claims you've checked.
 - **LUT download:** a cold Arctic and Mallett render's time, size and the
   progress you show.

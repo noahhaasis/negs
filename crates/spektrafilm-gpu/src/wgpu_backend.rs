@@ -336,6 +336,24 @@ pub struct WgpuBackend {
     resident_inputs: std::sync::Mutex<Vec<(u64, wgpu::Buffer)>>,
     /// The last film chain's TC LUT, by its f64 data.
     tc_lut_cache: std::sync::Mutex<Option<(Vec<f64>, wgpu::Buffer)>>,
+    /// Buffers the chain being encoded made for itself (see `transient`).
+    #[cfg(target_arch = "wasm32")]
+    transient: std::sync::Mutex<Vec<wgpu::Buffer>>,
+}
+
+/// Frees `buffer`'s memory now in browsers. There, dropping a buffer does
+/// nothing (wgpu's WebGPU backend): its memory waits for the garbage
+/// collector to take the JavaScript object, which in the engine's worker can
+/// be many renders later, and full-image buffers left waiting ran a GPU out
+/// of memory (a failed allocation renders black). The browser keeps the
+/// memory until the GPU work already submitted with it is done. Natively a
+/// buffer is freed when dropped, so this does nothing.
+#[cfg(feature = "wgpu-backend")]
+fn release(buffer: &wgpu::Buffer) {
+    #[cfg(target_arch = "wasm32")]
+    buffer.destroy();
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = buffer;
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -487,6 +505,8 @@ impl WgpuBackend {
             image_pool: ImagePool::default(),
             tc_lut_cache: std::sync::Mutex::new(None),
             resident_inputs: std::sync::Mutex::new(Vec::new()),
+            #[cfg(target_arch = "wasm32")]
+            transient: std::sync::Mutex::new(Vec::new()),
             #[cfg(target_arch = "wasm32")]
             canvas: std::sync::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
@@ -1828,6 +1848,7 @@ impl WgpuBackend {
         // creation/uploads, and command encoding.
         let cpu_setup_ms = t_start.elapsed().as_secs_f32() * 1000.0;
         self.queue.submit(Some(encoder.finish()));
+        self.release_transient();
 
         profiler.report();
         // Persist only when new pipelines were compiled. The helper can be
@@ -1939,7 +1960,10 @@ impl WgpuBackend {
             });
             self.queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&data()));
             inputs.insert(0, (key, buffer));
-            inputs.truncate(2);
+            let kept = inputs.len().min(2);
+            for (_, old) in inputs.drain(kept..) {
+                release(&old);
+            }
         }
         inputs[0].1.clone()
     }
@@ -1954,20 +1978,43 @@ impl WgpuBackend {
             return buffer.clone();
         }
         let tc_lut_f32: Vec<f32> = tc_lut.data.iter().map(|&v| v as f32).collect();
-        let buffer = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let buffer = self.new_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("tc_lut"),
             contents: bytemuck::cast_slice(&tc_lut_f32),
             usage: wgpu::BufferUsages::STORAGE,
         });
-        *cached = Some((tc_lut.data.clone(), buffer.clone()));
+        if let Some((_, old)) = cached.replace((tc_lut.data.clone(), buffer.clone())) {
+            release(&old);
+        }
         buffer
+    }
+
+    /// A buffer holding `desc.contents` for the chain being encoded only
+    /// (see `transient`).
+    fn create_buffer_init(&self, desc: &wgpu::util::BufferInitDescriptor<'_>) -> wgpu::Buffer {
+        self.transient(self.new_buffer_init(desc))
+    }
+
+    /// `buffer`, which the chain being encoded made for itself, freed once
+    /// the chain is submitted (`release_transient`; see `release`).
+    fn transient(&self, buffer: wgpu::Buffer) -> wgpu::Buffer {
+        #[cfg(target_arch = "wasm32")]
+        self.transient.lock().unwrap().push(buffer.clone());
+        buffer
+    }
+
+    fn release_transient(&self) {
+        #[cfg(target_arch = "wasm32")]
+        for buffer in self.transient.lock().unwrap().drain(..) {
+            release(&buffer);
+        }
     }
 
     /// A buffer holding `desc.contents`. In browsers, a buffer mapped at
     /// creation costs a shared-memory allocation, about 0.3 ms each in
     /// Chrome, and a render makes dozens of small ones; writing through the
     /// queue costs a few µs.
-    fn create_buffer_init(&self, desc: &wgpu::util::BufferInitDescriptor<'_>) -> wgpu::Buffer {
+    fn new_buffer_init(&self, desc: &wgpu::util::BufferInitDescriptor<'_>) -> wgpu::Buffer {
         #[cfg(not(target_arch = "wasm32"))]
         {
             use wgpu::util::DeviceExt;
@@ -2265,15 +2312,22 @@ impl ImagePool {
         ImageSet { size, free, used: Vec::new() }
     }
 
-    fn put(&self, set: ImageSet) {
+    fn put(&self, mut set: ImageSet) {
         if !cfg!(target_arch = "wasm32") {
             return;
         }
+        // What this render didn't reuse, and the sets that no longer fit,
+        // are freed now (see `release`).
+        let unused = std::mem::take(&mut set.free);
         let mut sets = self.0.lock().unwrap();
         sets.insert(0, set);
-        sets.truncate(2);
+        let kept = sets.len().min(2);
+        let mut evicted = sets.split_off(kept);
         while sets.iter().flat_map(|set| &set.used).map(|(_, b)| b.size()).sum::<u64>() > MAX_POOLED_BYTES {
-            sets.pop();
+            evicted.extend(sets.pop());
+        }
+        for (_, buffer) in unused.iter().chain(evicted.iter().flat_map(|set| &set.used)) {
+            release(buffer);
         }
     }
 }
@@ -3047,12 +3101,12 @@ fn build_ref_blur_channels(
         // The row passes read src and write mid; the column pass filters mid
         // and writes out. The column pass binds a placeholder for src, so out
         // may alias src.
-        let placeholder = device.create_buffer(&wgpu::BufferDescriptor {
+        let placeholder = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label}_iir_unused")),
             size: 16,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
-        });
+        }));
         // Rows: six dispatches of the segmented recursion (zero-state runs,
         // scan over segments, final runs; forward then backward).
         let segments = width.div_ceil(IIR_ROW_SEGMENT).clamp(1, 64);
@@ -3083,12 +3137,12 @@ fn build_ref_blur_channels(
                 }
             }
         }
-        let state_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        let state_buf = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label}_iir_row_state")),
             size: (height as u64) * (segments as u64) * 9 * 4,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
-        });
+        }));
         for mode in 0..6u32 {
             let params = RowParams {
                 width,
@@ -3817,12 +3871,12 @@ fn build_diffusion_state(
     let n_grid = n1 as u64 * n2 as u64;
     let buf_mix = scratch[0].clone();
     let mk = |label: &str, bytes: u64| {
-        device.create_buffer(&wgpu::BufferDescriptor {
+        backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: bytes,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
-        })
+        }))
     };
     let grid_a = mk("diffusion_fft_a", n_grid * 8);
     let grid_b = mk("diffusion_fft_b", n_grid * 8);
@@ -4050,12 +4104,12 @@ fn build_highlight_boost_state(
         .iter()
         .enumerate()
         .map(|(i, &c)| {
-            device.create_buffer(&wgpu::BufferDescriptor {
+            backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("highlight_reduce_{i}")),
                 size: (c as u64) * 4,
                 usage: wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
-            })
+            }))
         })
         .collect();
 
