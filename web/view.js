@@ -197,6 +197,14 @@ export function createView(stage, frame, { changed, settled }) {
       fitting = true;
       update();
     },
+    // The same photograph at another size (a placeholder's, then the
+    // developed one's): it keeps its place on the stage.
+    resize(width, height) {
+      if (!photo) return this.setPhoto(width, height);
+      zoom *= photo.width / width;
+      photo = { width, height };
+      update();
+    },
     fit() {
       if (!photo) return;
       fitting = true;

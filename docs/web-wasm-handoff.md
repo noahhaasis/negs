@@ -112,7 +112,11 @@ finished frame's size, time, stages and whether it presented), `idle()`,
 (the edit rendered and read back as bytes), `balance(film, paper,
 params)` (the engine's Balance Print, without changing the edit), `view`
 (the view: `zoom()`, `fit()`, `actualSize(zoom)`, `rect()`), `views` (each
-display pass's time), `renderSide()`, `photo()` and `shown()` (where the
+display pass's time), `renderSide()`, `photo()`, `placeholder()` (the
+placeholder showing, its size and whether the page's canvas shows it),
+`timeline` (each opening's `open`, `placeholder`, `decoded` and `frame`
+times), `badge()` (the badge's text, or false), `openSample()` and
+`shown()` (where the
 engine drew its frame).
 `web/checks/controls.js` moves every Lab control and reports its frame (a
 `pipeline` stage is a rebuild, `meter` a re-meter);
@@ -135,7 +139,9 @@ memory over a long session (`nvidia-smi`);
 web/checks/touch.mjs 2000` tests the phone layout by touch;
 `web/checks/zoom.mjs` zooms and pans (fit, Actual Size, wheel pans with
 their display passes' times, the canvas against a render read back, 25%,
-Ctrl-wheel, a pinch with `VIEW=…m`, Fit) and logs GPU memory. Chrome fails
+Ctrl-wheel, a pinch with `VIEW=…m`, Fit) and logs GPU memory;
+`web/checks/placeholder.js` tests the placeholder's orientation handling
+and a lossy DNG's preview, and times opening the ARW and the sample. Chrome fails
 `blob()` on a large response in these test profiles; read an
 `arrayBuffer()`.
 
@@ -253,7 +259,21 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     the canvas with the bytes and saves what the canvas shows as
     `<name>-canvas.ppm`; `?present=0` reads the bytes back instead;
   - `web/view.js`: the view (fit, zoom, pan and their gestures), in the
-    stage's device pixels;
+    stage's device pixels; `resize` keeps a placeholder's place when the
+    photograph's real size arrives;
+  - `web/placeholder.js`: what shows while a photograph opens (a RAW's
+    camera preview, or the browser's decode), oriented as Linux
+    `photo.rs`. `open(name, data, { early, quiet })` in `app.js` shows it
+    (`showEarly`) on the page's canvas and drops it at the first frame
+    (`draw`), or restores what it covered if the photograph fails
+    (`dropEarly(true)`); `loading` holds renders and the first frame's
+    swap until the engine has the new photograph. `setBadge` is the
+    "Developing" badge;
+  - the sample: the empty screen's "Try a sample photo" runs
+    `openSample`, which downloads `web/sample/DSC_6377.dng` with progress
+    (`download`); `web/sample/make-dng.py` makes that lossy DNG from the
+    NEF (not in the repository; the owner has it). `openFile` (the Open
+    button, drops, `negs.open`) cancels a download in progress;
   - `web/engine.js`: render-and-fetch loop inside the worker, and the
     same for Balance Print;
   - `controls.js` kind `action` is a command button; `actions` in `app.js`

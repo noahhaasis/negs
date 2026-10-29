@@ -547,6 +547,70 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    and watches it change), and how much of the 12 MP cap's GPU memory an
    iPhone allows.
 
+15. **Placeholder Image and the sample photograph** (MVP piece 7). Whatever
+   opens shows at once from a placeholder, with desktop's "Developing"
+   badge (macOS `ActivityBadge`), until its first developed frame takes its
+   place. The empty screen also offers a sample photograph, which the
+   owner chose (`DSC_6377.NEF`, a Nikon Z f), as a 3.4 MB lossy DNG that
+   downloads only when asked for, so the page's first load is unchanged.
+
+   **The placeholder** (`web/placeholder.js`), as Linux `photo.rs`
+   `decode`: a JPEG or PNG through the browser's `createImageBitmap` (it
+   applies the file's orientation, as the engine does); a RAW through the
+   camera's JPEG preview inside it. The JPEGs are found by walking each
+   candidate's markers to its real end (desktop takes the first end-of-image
+   marker after each start, which an EXIF thumbnail cuts short). Only ones a
+   browser decodes count (SOF0–2, not a CR2's lossless raw data), and not
+   the strips or tiles a TIFF's raw directory (CFA or LinearRaw) points at:
+   a lossy DNG's raw data is JPEG tiles of linear camera RGB. It takes the
+   smallest preview covering the stage's long side, or the largest. A
+   TIFF-based RAW's primary orientation replaces the preview's own EXIF tag
+   (patched to 1 in a copy before decoding), so the orientation is applied
+   once; other containers keep the preview's. The largest preview's size
+   stands in for the photograph's until the engine says, and the view keeps
+   the placeholder's place when it does (`view.resize`). It's drawn on the
+   page's canvas; the GPU canvas shows from the first presented frame.
+
+   **The sample.** The NEF is 31.6 MB and doesn't compress (gzip, zstd,
+   brotli and xz all save under 1%), over Cloudflare Pages' 25 MiB per-file
+   limit and slow on a phone. `web/sample/make-dng.py` makes a lossy DNG of
+   it, as Adobe's DNG Converter would: libraw (`dcraw_emu`, AHD) demosaics
+   it to linear camera RGB with rawler's black and white levels and crop,
+   a 2.2 curve takes it to 8 bits, 512 px JPEG tiles (quality 85) hold it,
+   and a `LinearizationTable` undoes the curve; the camera's 1620 × 1080
+   preview is IFD0 and the raw data a SubIFD, with the Z f's D65 matrix
+   (rawler's) and the as-shot balance (`WB_RBLevels`). rawler's DNG decoder
+   reads it unchanged. Its renders against the NEF's (Portra 400 on
+   Endura, grain off, 1600 px): mean colour within 0.5/255 per channel;
+   pixels differ by the demosaic (libraw's AHD, rawler's own) and the JPEG,
+   and at 100% (the full 6048 × 4032 through the CLI) NEF, quality 85 and
+   quality 92 (5.0 MB) look the same, with no banding in the dark water or
+   the sky. Quality 85 is 3.0 MB, 3.4 MB with the preview. "Try a sample
+   photo" downloads it with "Downloading N%" in the badge (from
+   `Content-Length`, which `serve.mjs` now sends).
+
+   **Measured** (`web/checks/placeholder.js`, localhost, Chrome on the
+   GTX 1660 SUPER, ms after the open):
+
+   | Photograph | Placeholder | Decoded | First frame |
+   |---|---|---|---|
+   | Sony ARW, 24 MP portrait (preview 1616 × 1080) | 104 | 1119 | 2357 |
+   | Sample DNG, by its button (with its download) | 37 | 601 | 1027 |
+   | Sample NEF, for comparison | 98 | 832 | 1400 |
+   | Sample NEF on the CPU engine | 114 | 1394 | 5753 |
+
+   The ARW's preview is 0.25% narrower than its 6000 × 4000 frame, so its
+   swap moves the edge by about 2 device pixels; the sample's matches
+   exactly. With a full 6048 px preview (picked when the stage is wider
+   than 1620 px) a placeholder took 379 ms. The check also ports
+   `photo.rs`'s orientation test (all eight orientations in both byte
+   orders over a conflicting EXIF tag, downscaling, a bare JPEG and an
+   invalid container tag keeping the preview's), checks that the DNG's
+   placeholder is its preview at 256, 600 and 2000 px, and that the page
+   starts on the empty screen with no sample download. `inspector.js`,
+   `touch.mjs` and `zoom.mjs` pass unchanged. Nothing in the engine
+   changed, so native output and the benchmarks are untouched.
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
@@ -584,7 +648,7 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
   (a service-worker shim can). wasm-bindgen-rayon's worker imports the
   package by directory URL, which a bundler or `index.js` naming handles.
 - **Download.** 7.4 MB wasm (1.5 MB brotli; `wasm-opt` not tried) plus the
-  4 MB LUT.
+  4 MB LUT. The sample photograph (3.4 MB) downloads only when asked for.
 - **Not wired.** Export beyond an 8-bit sRGB JPEG from the canvas
   (`spektrafilm_io::save` is path-based; the encoders work in memory), RAW
   white balance, crop, borders, LUT export, presets, EXIF, and the golden
