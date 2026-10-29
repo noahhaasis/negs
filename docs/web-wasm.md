@@ -370,6 +370,77 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    Benchmarks, before / after this piece: card 8–15 / 7–14, 26–30 /
    29–36, 58–71 / 60–72 ms; ARW 71–89 / 74–84 ms.
 
+13. **Correctness against the reference, and GPU memory** (2026-10-29,
+   before piece 5). The browser's WebGPU renders against the f64 CPU
+   engine the desktop apps export with (`spektrafilm-f64`,
+   `SPEKTRAFILM_BACKEND=cpu`) and against native wgpu (Vulkan), with the
+   same params: `web/checks/correctness.sh`. 63 cases on four photographs
+   (the test card at 2752 px; three landscapes at 1600 px, with their ICC
+   profiles) and the 24 MP Sony ARW, all rendered in one page as a viewer
+   would (the pipeline cache carries across them), each presented and then
+   read back at full size:
+
+   | Cases | Browser vs native wgpu | Browser vs f64 reference |
+   |---|---|---|
+   | 20 film/paper pairs: every colour-negative family on Endura, Premier, Supra, Ultra, Edge, Crystal Archive, 2383 and 2393; B&W on 2302 and MGRC | ≥ 99.989% exact, all within 1/255 | worst pixel ΔE00 1.23, at most 0.002% of pixels over 1, at most one 8-bit step |
+   | 7 scanned directly: Velvia, Provia, Ektachrome, Kodachrome, Tri-X reversal; Portra 400 and Vision3 250D as negatives | ≥ 99.990%, all within 1/255 | ΔE00 ≤ 1.23, one step |
+   | 29 settings on Portra 400 / Endura: ±2 EV, auto exposure off, matrix and highlight metering, lens blur, 120 and 16 mm formats, lens diffusion (Black Pro-Mist; Glimmerglass with warmth), print diffusion, halation off and strong, DIR off and strong, film and print curves, film base off and tuned, print base off, enlarger shifts, preflash, print exposure without compensation, scanner black/white correction and blur without sharpening, CAT16 off, output and input gamut compression off, Mallett upsampling, linear output | ≥ 99.986%, all within 1/255 | ΔE00 ≤ 1.23, one step |
+   | ARW 24 MP, Portra 400 and Velvia | ≥ 99.996%, all within 1/255 | ΔE00 ≤ 1.22, one step |
+
+   These ran with grain and both glares off, since those are random. The
+   one-step differences sit in dark tones, where one sRGB code is about
+   1 ΔE00. Native wgpu agrees with the reference just as closely, so the
+   browser adds nothing to the GPU engine's known f32 difference
+   (`docs/gpu-vs-cpu-quality.md`). A linear output is shown with the sRGB
+   curve applied for display on both paths (`preview::display_rgba`), so
+   the reference conversion applies it too.
+
+   With grain and glare on (Portra 400, Velvia, Double-X on 2302, Vision3
+   500T on 2383 on the card, Gold 200 on the ARW), the browser draws the
+   same grain as native wgpu: 99.5–99.97% of pixels exact, 99.99% within
+   1/255, at most 12 steps where a grain count lands on the other side of
+   a threshold. The reference's grain is a different random field, so
+   compare the image averaged over 33×33 px: p99 ΔE00 0.69–1.11, and no
+   colour bias (mean ΔL\*, Δa\*, Δb\* within ±0.004). The reference
+   differs from itself as much when its grain is drawn again (the input
+   shifted one pixel): Vision3 500T p99 1.15 (browser 0.97), Portra 400
+   1.05 (0.90).
+
+   **A memory bug it found.** With 63 cases run in one page, the last one,
+   the ARW with grain at 24 MP, came out black: Chrome logged
+   `vkAllocateMemory failed with VK_ERROR_OUT_OF_DEVICE_MEMORY` and an
+   invalid `effect_scratch_1`, and the page showed the black frame without
+   an error. Rendered alone, the same frame is right. In wgpu 24's WebGPU
+   backend, dropping a buffer does nothing: its memory comes back when the
+   garbage collector takes the JavaScript `GPUBuffer`, which in the
+   engine's worker can be many renders later. So every full-image buffer a
+   render let go of (image-pool sets evicted for size, resident inputs of
+   an earlier photograph, effect buffers such as the diffusion FFT grids)
+   kept its memory. On this 6 GB GPU (1.5 GB of it the desktop's), Chrome's
+   GPU process sat at 2.4–2.9 GB between renders. A phone or iPad has far
+   less.
+
+   The fix destroys them explicitly in browsers (`release` in
+   `wgpu_backend.rs`; natively a dropped buffer is freed and nothing
+   changes):
+   - the buffers a chain makes for itself, once it's submitted
+     (`create_buffer_init` and the effects' own allocations register with
+     `transient`; WebGPU keeps the memory until the submitted work is done);
+   - image-pool buffers a render didn't reuse, and sets the pool lets go;
+   - evicted resident inputs and a replaced TC LUT.
+
+   `web/checks/gpu-memory.mjs` cycles four photographs, the 24 MP ARW and
+   effects, and logs Chrome's GPU memory after each frame. Before, it was
+   2.4–2.9 GB after most frames. After, it follows the frame: 1.7 GB right
+   after a 24 MP render, 0.5–0.8 GB after the others. The 63 cases pass
+   with no allocation error. Native renders are byte-identical: the CLI on
+   wgpu and cpu, in sRGB, Display P3, Adobe RGB and ProPhoto, encoded and
+   linear, with both diffusions and an enlarger shift, and the ARW.
+   Default browser renders are byte-identical to before (card at 200, 1200
+   and 2048 px and the ARW, bytes and canvas), and frames cost the same:
+   card 8–16 / 26–35 / 58–71 ms, ARW 69–87 ms (before: 7–14 / 29–36 /
+   60–72, 74–84).
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
@@ -422,7 +493,10 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    times, and how much memory a tab may use before iPadOS ends it.
 4. Wide-gamut output and post adjustments on the GPU, so they present too
    (they read the scan back now).
-5. Decode an sRGB-encoded input's curve on the GPU (or once per source):
+5. Say so when a GPU allocation fails, rather than presenting a black
+   frame: WebGPU reports it as an uncaptured error (item 13), which the
+   engine doesn't watch yet.
+6. Decode an sRGB-encoded input's curve on the GPU (or once per source):
    inputs read without a profile pay a CPU decode and a full upload every
    frame, 10 ms at 0.6 MP.
 

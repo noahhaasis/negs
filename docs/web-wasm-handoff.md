@@ -99,7 +99,8 @@ baselines `docs/web-wasm.md` quotes (`s0-*` before the frame-cost work,
 `s3-*` and `f-*` after).
 
 `web/cdp.mjs <url> <script.js>` opens the page in the same windowed Chrome,
-prints console messages and exceptions, and runs a script in the page
+prints console messages, Chrome's log (where WebGPU errors land) and
+exceptions, and runs a script in the page
 (`SHOT=x.png` saves a screenshot, `VIEW=390x844@3m` emulates a touch device's
 viewport, with `pointer: coarse`). A script ending in `.mjs` runs in Node
 instead, as `export default async ({ send, evaluate }) => result`, for
@@ -118,6 +119,14 @@ to compare with the same params rendered fresh (`?params=`; its header
 says how); `web/checks/balance.js` runs Balance Print on the cases in
 `web/checks/balance-cases.json` and presses the button (send the same
 cases to the helper's `balance_print` to compare);
+`web/checks/correctness.sh [case,…]` renders
+`web/checks/correctness-cases.json` in the page (`correctness.js`, with
+`negs.start(film, paper, edits)`: Reset Adjustments, the pickers' film and
+paper, then the edits) and the same params with the f64 CPU CLI and native
+wgpu, and compares them (`correctness.py`: 8-bit agreement, CIEDE2000, and
+for grain a 33×33 average; it needs `uv`, and writes to
+`target/web-correctness`); `web/checks/gpu-memory.mjs` logs Chrome's GPU
+memory over a long session (`nvidia-smi`);
 `web/checks/inspector.js` tests the inspector's wiring;
 `VIEW=390x844@3m node web/cdp.mjs http://localhost:8137/
 web/checks/touch.mjs 2000` tests the phone layout by touch. Chrome fails
@@ -175,6 +184,12 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
   `display_rgba8.wgsl` and `display_present.wgsl`. A presented frame reads
   back four bytes as its completion fence: wgpu 24's
   `on_submitted_work_done` panics in browsers.
+- GPU memory in browsers (`docs/web-wasm.md` item 13): a dropped
+  `wgpu::Buffer` keeps its memory until the garbage collector takes its
+  JavaScript object. A buffer made for one render goes through
+  `WgpuBackend::create_buffer_init` or `transient` (destroyed once the
+  chain is submitted), the image pool, or a cache that calls `release`
+  when it lets one go. Never leave a large one to `Drop`.
 - Per-frame cost (see `docs/web-wasm.md`, "WebGPU frame cost"):
   `WgpuBackend::create_buffer_init` (never `device.create_buffer_init` in
   the chain: mapped-at-creation buffers cost 0.3 ms each in Chrome),
