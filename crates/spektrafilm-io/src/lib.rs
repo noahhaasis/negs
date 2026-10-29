@@ -29,6 +29,7 @@ mod white_balance;
 pub use colour::{InputColour, InputInterpretation, InputMode};
 pub use metadata::{ImageMetadata, read_metadata};
 pub use save::save_image;
+pub use raw::LensCorrection;
 pub use white_balance::{RawWhiteBalance, RawWhiteBalanceMode};
 
 use std::path::Path;
@@ -106,39 +107,47 @@ pub fn load_image(path: &Path, formats: Formats) -> Result<ImageBuf> {
 
 /// [`load_image_colour`] with automatic input interpretation, without the report.
 pub fn load_image_with_wb(path: &Path, formats: Formats, wb: RawWhiteBalance) -> Result<ImageBuf> {
-    Ok(load_image_colour(path, formats, wb, &InputInterpretation::default())?.image)
+    Ok(load_image_colour(path, formats, wb, LensCorrection::default(), &InputInterpretation::default())?.image)
 }
 
 /// An input in the engine's representation, and what it was read as.
 pub struct LoadedImage {
     pub image: ImageBuf,
     pub colour: InputColour,
+    /// A RAW whose decoder can apply [`LensCorrection`]; false for other files.
+    pub lens_correction_supported: bool,
 }
 
 /// Shared preview/export loader. RAW WB applies to RAW files only, and the
 /// input interpretation to non-RAW files only: a RAW is always developed by
-/// its decoder. A non-RAW file's white balance is already in its pixels.
+/// its decoder. A non-RAW file's white balance is already in its pixels, as
+/// are its lens corrections.
 pub fn load_image_colour(
     path: &Path,
     formats: Formats,
     wb: RawWhiteBalance,
+    lens: LensCorrection,
     interpretation: &InputInterpretation,
 ) -> Result<LoadedImage> {
     let ext = extension(path);
     if is_raw_extension(&ext) {
         let decoded = raw::decode_raw(
             path,
-            raw::RawDecodeOptions { white_balance: wb, apply_orientation: true },
+            raw::RawDecodeOptions { white_balance: wb, apply_orientation: true, lens_correction: lens },
             raw::RawDecoderPreference::Auto,
         )?;
-        return Ok(LoadedImage { image: decoded.image, colour: InputColour::raw(decoded.decoder) });
+        return Ok(LoadedImage {
+            image: decoded.image,
+            colour: InputColour::raw(decoded.decoder),
+            lens_correction_supported: decoded.lens_correction_supported,
+        });
     }
     if formats == Formats::TiffPngRaw && !matches!(ext.as_str(), "tif" | "tiff" | "png") {
         bail!("unsupported image format: .{ext} (supported: tiff, png, raw)");
     }
     let (img, info, format) = decode_no_limits(path)?;
     let (image, colour) = colour::convert(img, &info, interpretation, format == image::ImageFormat::Png)?;
-    Ok(LoadedImage { image, colour })
+    Ok(LoadedImage { image, colour, lens_correction_supported: false })
 }
 
 /// Decode with the `image` crate's memory limits disabled and apply the
@@ -207,6 +216,7 @@ fn load_raw_impl(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Image
         raw::RawDecodeOptions {
             white_balance: wb,
             apply_orientation: orient,
+            ..Default::default()
         },
         raw::RawDecoderPreference::Auto,
     )?

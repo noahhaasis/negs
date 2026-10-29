@@ -200,7 +200,7 @@ fn the_same_colours_in_any_tagged_space_load_alike() {
                     ..Default::default()
                 };
                 crate::save::save_image_with_options(&buf, &path, None, &options).unwrap();
-                let loaded = crate::load_image_colour(&path, crate::Formats::Any, Default::default(), &InputInterpretation::default()).unwrap();
+                let loaded = crate::load_image_colour(&path, crate::Formats::Any, Default::default(), Default::default(), &InputInterpretation::default()).unwrap();
                 assert_eq!(loaded.colour.source, InputSource::EmbeddedProfile, "{name} {ext}");
                 assert_eq!(loaded.colour.encoding, display_name(cs, linear), "{name} {ext}");
                 let what = format!("{name} linear={linear} {ext}");
@@ -450,12 +450,12 @@ fn loader_reads_png_profiles_and_refuses_cmyk_jpeg() {
     encoder.set_icc_profile(std::fs::read(fixture("lut_rgb.icc")).unwrap()).unwrap();
     let bytes: Vec<u8> = rgb.iter().flatten().flat_map(|v| v.to_ne_bytes()).collect();
     encoder.write_image(&bytes, rgb.len() as u32, 1, image::ExtendedColorType::Rgb16).unwrap();
-    let loaded = crate::load_image_colour(&path, crate::Formats::Any, Default::default(), &InputInterpretation::default()).unwrap();
+    let loaded = crate::load_image_colour(&path, crate::Formats::Any, Default::default(), Default::default(), &InputInterpretation::default()).unwrap();
     assert_eq!(loaded.colour.summary, "Negs test LUT profile (embedded profile)");
     let got: Vec<[f64; 3]> = pixels(&loaded.image).into_iter().map(to_pcs).collect();
     assert_close(&got, &want, LUT_TOLERANCE, "PNG iCCP LUT profile");
 
-    let err = crate::load_image_colour(&fixture("cmyk.jpg"), crate::Formats::Any, Default::default(), &InputInterpretation::default())
+    let err = crate::load_image_colour(&fixture("cmyk.jpg"), crate::Formats::Any, Default::default(), Default::default(), &InputInterpretation::default())
         .err()
         .expect("CMYK refused");
     assert!(err.to_string().contains("CMYK"), "{err}");

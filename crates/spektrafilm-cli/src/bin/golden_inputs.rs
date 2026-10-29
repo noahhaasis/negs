@@ -51,7 +51,8 @@ fn main() -> Result<()> {
         }
         let img = RawlerDecoder
             .decode(path, RawDecodeOptions::default())
-            .with_context(|| format!("decoding {}", path.display()))?;
+            .with_context(|| format!("decoding {}", path.display()))?
+            .image;
         let data: Vec<f64> = img.data.iter().map(|&v| to_f32(v) as f64).collect();
         let (w, h, data) = box_downscale(img.width, img.height, &data, long_edge);
         if w == 0 || h == 0 {

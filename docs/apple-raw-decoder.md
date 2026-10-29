@@ -26,9 +26,12 @@ is needed. The `apple-raw` Cargo feature is on by default but only builds native
 code on macOS. `--no-default-features` builds a portable rawler-only IO crate.
 
 Apple runs at native size with draft mode off. Baseline exposure, exposure,
-shadow bias, global/local tone boosts, gamut mapping, lens correction, noise
-reduction, sharpening, contrast, detail and moire adjustments are explicitly
-disabled where supported. Apple's highlight colour recovery remains enabled:
+shadow bias, global/local tone boosts, gamut mapping, noise reduction,
+sharpening, contrast, detail and moire adjustments are explicitly disabled
+where supported. Lens correction follows `RawDecodeOptions::lens_correction`
+(`io.lens_correction` in params; off unless set) where Apple supports the file,
+and the decoder reports that support; see
+[the lens corrections plan](lens-corrections-plan.md). Apple's highlight colour recovery remains enabled:
 it reconstructs clipped sensor channels and prevented a pink saturated sky in
 the D750 comparison. It is part of the RAW development, not a tone boost.
 Product policy confirmed on 2026-10-19: keep highlight reconstruction enabled
@@ -80,8 +83,8 @@ probe statistics buffers and may omit GPU allocations. Failed HE★ decoding wit
 stock rawler is recorded as unsupported, not represented as a speed comparison.
 
 `--output DIR` stores private float32 linear-RGB data, a display preview and a
-JSON report for closer inspection. `--no-orient`, `--wb`, `--temperature` and
-`--tint` exercise development options. Do not publish personal photographs or
+JSON report for closer inspection. `--no-orient`, `--lens-correction`, `--wb`,
+`--temperature` and `--tint` exercise development options. Do not publish personal photographs or
 their absolute paths when sharing reports.
 
 Tests include fallback classification, malformed WB, existing generated DNG

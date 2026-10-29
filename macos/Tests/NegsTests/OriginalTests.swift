@@ -15,20 +15,23 @@ import XCTest
     func testJPEGIsOrientedAndScaled() throws {
         let fixture = try makeJPEG(orientation: 6)
         defer { try? FileManager.default.removeItem(at: fixture) }
-        let full = try XCTUnwrap(OriginalImage.load(fixture, raw: false, maxPixels: 8192))
+        let full = try XCTUnwrap(OriginalImage.load(fixture, raw: false, lensCorrection: false, maxPixels: 8192))
         XCTAssertEqual([full.width, full.height], [64, 96])
-        let small = try XCTUnwrap(OriginalImage.load(fixture, raw: false, maxPixels: 48))
+        let small = try XCTUnwrap(OriginalImage.load(fixture, raw: false, lensCorrection: false, maxPixels: 48))
         XCTAssertEqual(max(small.width, small.height), 48)
     }
 
-    /// The same framing as the engine's Apple RAW decode, at the preview's size.
+    /// The same framing as the engine's Apple RAW decode, at the preview's
+    /// size, with lens correction off or on (it keeps the extent).
     func testRAWMatchesTheEngineDecodeSize() throws {
         guard let path = ProcessInfo.processInfo.environment["SPEKTRAFILM_RAW_SAMPLE"] else { throw XCTSkip("Set SPEKTRAFILM_RAW_SAMPLE to a RAW file") }
         let url = URL(fileURLWithPath: path)
         let extent = try XCTUnwrap(CIRAWFilter(imageURL: url)?.outputImage).extent
-        let surface = try XCTUnwrap(OriginalImage.load(url, raw: true, maxPixels: 2048))
-        XCTAssertEqual(max(surface.width, surface.height), 2048, accuracy: 2)
-        XCTAssertEqual(Double(surface.width) / Double(surface.height), extent.width / extent.height, accuracy: 0.002)
+        for lensCorrection in [false, true] {
+            let surface = try XCTUnwrap(OriginalImage.load(url, raw: true, lensCorrection: lensCorrection, maxPixels: 2048))
+            XCTAssertEqual(max(surface.width, surface.height), 2048, accuracy: 2)
+            XCTAssertEqual(Double(surface.width) / Double(surface.height), extent.width / extent.height, accuracy: 0.002)
+        }
     }
 
     func testVolatileSurfaceKeepsItsPixelsWithoutPressure() throws {

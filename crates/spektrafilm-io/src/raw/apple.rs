@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use spektrafilm_math::precision::from_f32;
 use spektrafilm_math::{image::ImageBuf, precision::Scalar};
 
-use super::{RawDecodeOptions, RawDecoder, UnsupportedRaw};
+use super::{RawDecodeOptions, RawDecoder, RawImage, UnsupportedRaw};
 
 #[repr(C)]
 struct NativeImage {
@@ -18,6 +18,7 @@ struct NativeImage {
     width: u32,
     height: u32,
     monochrome: u32,
+    lens_correction_supported: u32,
     version: [c_char; 32],
     error: [c_char; 768],
 }
@@ -27,6 +28,7 @@ unsafe extern "C" {
         path: *const c_char,
         orient: i32,
         as_shot: i32,
+        lens_correction: i32,
         output: *mut NativeImage,
     ) -> i32;
     fn sf_apple_raw_free(pixels: *mut f32);
@@ -47,7 +49,7 @@ impl RawDecoder for AppleRawDecoder {
         "apple"
     }
 
-    fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<ImageBuf> {
+    fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
         options.white_balance.validate()?;
         let path = CString::new(path.as_os_str().as_bytes())?;
         let mut native = NativeImage {
@@ -55,6 +57,7 @@ impl RawDecoder for AppleRawDecoder {
             width: 0,
             height: 0,
             monochrome: 0,
+            lens_correction_supported: 0,
             version: [0; 32],
             error: [0; 768],
         };
@@ -63,6 +66,7 @@ impl RawDecoder for AppleRawDecoder {
                 path.as_ptr(),
                 options.apply_orientation.into(),
                 (options.white_balance.mode == crate::RawWhiteBalanceMode::AsShot).into(),
+                options.lens_correction.enabled.into(),
                 &mut native,
             )
         };
@@ -94,6 +98,7 @@ impl RawDecoder for AppleRawDecoder {
             .zip(rgba.par_chunks_exact(4))
             .for_each(|(out, pixel)| out.copy_from_slice(&pixel[..3]));
         let (width, height, monochrome) = (native.width, native.height, native.monochrome != 0);
+        let lens_correction_supported = native.lens_correction_supported != 0;
         drop(native);
         // Unclamped: colours outside sRGB arrive as negative coordinates and
         // the spectral model takes them; only non-finite values are refused.
@@ -102,6 +107,9 @@ impl RawDecoder for AppleRawDecoder {
         let data: Vec<Scalar> = rgb;
         #[cfg(feature = "precision-f64")]
         let data: Vec<Scalar> = rgb.into_par_iter().map(from_f32).collect();
-        Ok(ImageBuf::from_data(width, height, data))
+        Ok(RawImage {
+            image: ImageBuf::from_data(width, height, data),
+            lens_correction_supported,
+        })
     }
 }

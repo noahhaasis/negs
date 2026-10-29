@@ -16,13 +16,14 @@ enum OriginalImage {
 
     /// Decodes `url` with its long edge at most `maxPixels`, upright like the
     /// engine's loader, into a Display P3 IOSurface.
-    nonisolated static func load(_ url: URL, raw: Bool, maxPixels: Int) -> IOSurface? {
+    nonisolated static func load(_ url: URL, raw: Bool, lensCorrection: Bool, maxPixels: Int) -> IOSurface? {
         // Releases the decoder's full-size buffers before returning.
-        autoreleasepool { render(url, raw: raw, maxPixels: maxPixels) }
+        autoreleasepool { render(url, raw: raw, lensCorrection: lensCorrection, maxPixels: maxPixels) }
     }
 
-    private static func render(_ url: URL, raw: Bool, maxPixels: Int) -> IOSurface? {
-        guard let image = (raw ? developed(url, maxPixels: maxPixels) : nil) ?? decoded(url, maxPixels: maxPixels) else { return nil }
+    private static func render(_ url: URL, raw: Bool, lensCorrection: Bool, maxPixels: Int) -> IOSurface? {
+        guard let image = (raw ? developed(url, lensCorrection: lensCorrection, maxPixels: maxPixels) : nil)
+                ?? decoded(url, maxPixels: maxPixels) else { return nil }
         let extent = image.extent.integral
         let width = Int(extent.width), height = Int(extent.height)
         guard width > 0, height > 0, let surface = IOSurface(properties: [
@@ -39,11 +40,11 @@ enum OriginalImage {
         return surface
     }
 
-    /// Apple's default look, without lens correction: the engine's decode
-    /// leaves it off, so the framing matches the developed image.
-    private static func developed(_ url: URL, maxPixels: Int) -> CIImage? {
+    /// Apple's default look, with lens correction as the engine's decode has
+    /// it, so the framing matches the developed image.
+    private static func developed(_ url: URL, lensCorrection: Bool, maxPixels: Int) -> CIImage? {
         guard let filter = CIRAWFilter(imageURL: url) else { return nil }
-        if filter.isLensCorrectionSupported { filter.isLensCorrectionEnabled = false }
+        if filter.isLensCorrectionSupported { filter.isLensCorrectionEnabled = lensCorrection }
         guard let full = filter.outputImage, !full.extent.isEmpty else { return nil }
         let scale = min(1, CGFloat(maxPixels) / max(full.extent.width, full.extent.height))
         guard scale < 1 else { return full }

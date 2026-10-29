@@ -149,15 +149,27 @@ struct Session {
 struct Source {
     path: PathBuf,
     wb: spektrafilm_io::RawWhiteBalance,
+    lens: spektrafilm_io::LensCorrection,
+    lens_correction_supported: bool,
     interpretation: spektrafilm_io::InputInterpretation,
     colour: spektrafilm_io::InputColour,
     image: ImageBuf,
 }
 
 impl Source {
-    fn current(&self, path: &Path, wb: spektrafilm_io::RawWhiteBalance, interpretation: &spektrafilm_io::InputInterpretation) -> bool {
+    fn current(
+        &self,
+        path: &Path,
+        wb: spektrafilm_io::RawWhiteBalance,
+        lens: spektrafilm_io::LensCorrection,
+        interpretation: &spektrafilm_io::InputInterpretation,
+    ) -> bool {
         self.path == path
-            && if spektrafilm_io::is_raw(path) { self.wb == wb } else { &self.interpretation == interpretation }
+            && if spektrafilm_io::is_raw(path) {
+                self.wb == wb && self.lens == lens
+            } else {
+                &self.interpretation == interpretation
+            }
     }
 }
 
@@ -263,7 +275,7 @@ impl Session {
                 params.io.input_interpretation.validate()?;
                 let loaded = spektrafilm_io::load_image_colour(
                     &input, spektrafilm_io::Formats::Any, params.io.raw_white_balance,
-                    &params.io.input_interpretation,
+                    params.io.lens_correction, &params.io.input_interpretation,
                 )?;
                 let source = loaded.image;
                 // Never enlarged: an Image Size target is ignored, and the
@@ -394,10 +406,11 @@ impl Session {
                 // Applied to the display and on save, so the pipeline runs without them.
                 let post = std::mem::take(&mut params.post);
                 let wb = params.io.raw_white_balance;
+                let lens = params.io.lens_correction;
                 let interpretation = params.io.input_interpretation.clone();
                 interpretation.validate()?;
                 let reload = self.source_generation != source_generation
-                    || self.source.as_ref().is_none_or(|source| !source.current(&input, wb, &interpretation));
+                    || self.source.as_ref().is_none_or(|source| !source.current(&input, wb, lens, &interpretation));
                 if reload {
                     // Release the last source's caches before decoding the next.
                     self.source = None;
@@ -408,18 +421,22 @@ impl Session {
                         &input,
                         spektrafilm_io::Formats::Any,
                         wb,
+                        lens,
                         &interpretation,
                     )?;
                     self.source = Some(Source {
                         path: input.clone(),
                         wb,
+                        lens,
+                        lens_correction_supported: loaded.lens_correction_supported,
                         interpretation,
                         colour: loaded.colour,
                         image: loaded.image,
                     });
                     self.source_generation = source_generation;
                 }
-                let Source { image: source, colour: input_colour, .. } = self.source.as_ref().unwrap();
+                let Source { image: source, colour: input_colour, lens_correction_supported, .. } =
+                    self.source.as_ref().unwrap();
                 // RAW and decoded files are the engine's linear sRGB; manual
                 // pass-through keeps the params' input fields, as 0.8 did.
                 params.io.apply_input_colour(input_colour);
@@ -525,6 +542,7 @@ impl Session {
                     "export_resolution": export_resolution,
                     "raw": spektrafilm_io::is_raw(&input), "backend": used_backend,
                     "input_colour": input_colour,
+                    "lens_correction_supported": lens_correction_supported,
                     "output_color_space": encoding.space.name,
                     "display_color_space": DisplaySpace::of(encoding).name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,

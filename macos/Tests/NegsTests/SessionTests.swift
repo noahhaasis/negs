@@ -177,6 +177,52 @@ final class SessionTests: XCTestCase {
         XCTAssertFalse(model.inspectorVisible)
     }
 
+    func testLensCorrectionIsOnForNewEditsAndOffForOlderSessions() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        let photo = try fixture(), next = try fixture()
+        defer { try? FileManager.default.removeItem(at: photo); try? FileManager.default.removeItem(at: next) }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        // Saved before lens correction existed: its crop was framed without it.
+        await model.start(paths: paths, restoration: Task { EditorSession(source: photo, state: EditState()) })
+        XCTAssertEqual(model.value(EditorModel.lensCorrectionPath), .bool(false))
+        model.reset()
+        XCTAssertEqual(model.value(EditorModel.lensCorrectionPath), .bool(true))
+        model.set(EditorModel.lensCorrectionPath, .bool(false))
+        // Per photograph, like its rotation: the next one starts corrected.
+        model.open(next)
+        XCTAssertEqual(model.value(EditorModel.lensCorrectionPath), .bool(true))
+        let deadline = Date().addingTimeInterval(30)
+        while !model.previewCurrent && model.error == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(model.previewCurrent)
+        XCTAssertFalse(model.lensCorrectionSupported, "a PNG has no RAW lens data")
+    }
+
+    /// The toggle shows only for a file Apple can correct; switching it
+    /// re-develops the photograph at the same size.
+    func testRAWReportsLensCorrectionSupport() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        guard let path = ProcessInfo.processInfo.environment["SPEKTRAFILM_RAW_SAMPLE"] else { throw XCTSkip("Set SPEKTRAFILM_RAW_SAMPLE to a RAW file Apple can lens-correct") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths, restoration: Task { nil })
+        func developed() async throws {
+            let deadline = Date().addingTimeInterval(60)
+            while !model.previewCurrent && model.error == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+            XCTAssertNil(model.error)
+            XCTAssertTrue(model.previewCurrent)
+        }
+        model.open(URL(fileURLWithPath: path))
+        try await developed()
+        XCTAssertTrue(model.lensCorrectionSupported)
+        let corrected = model.imageSize
+        model.set(EditorModel.lensCorrectionPath, .bool(false))
+        XCTAssertFalse(model.previewCurrent)
+        try await developed()
+        XCTAssertTrue(model.lensCorrectionSupported)
+        XCTAssertEqual(model.imageSize, corrected)
+    }
+
     func testExplicitOpenWinsWhileSessionIsLoading() async throws {
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
         let previous = try fixture(), chosen = try fixture()
