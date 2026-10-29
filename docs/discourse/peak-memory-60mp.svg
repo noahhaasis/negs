@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1236" viewBox="0 0 720 1236" role="img" aria-labelledby="title desc">
+<title id="title">Peak memory: 60 MP benchmark</title>
+<desc id="desc">M1 Pro MacBook Pro, 32 GB RAM. Full-resolution renders of the same photo with Kodak Gold 200 and Portra Endura. Lower is better. All seven processing modes, followed by an enlarged GPU comparison. Negs, GPU · full-resolution render: 5.0 GB; spektrafilm-rs, GPU · full-resolution render: 8.9 GB; Negs Reference, CPU · 64-bit: 13.9 GB; Negs Reference, CPU · Use less memory: 9.7 GB; Negs, CPU · 64-bit · LUTs: 10.7 GB; spektrafilm-rs, CPU · 64-bit · LUTs: 17.2 GB; Python spektrafilm, CPU · 64-bit · LUTs: 27.8 GB</desc>
+<rect width="100%" height="100%" fill="#fdfcf8"/>
+<g font-family="Noto Sans, sans-serif" font-weight="700">
+<line x1="38.00" y1="29" x2="38.00" y2="772" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="199.00" y1="29" x2="199.00" y2="772" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="360.00" y1="29" x2="360.00" y2="772" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="521.00" y1="29" x2="521.00" y2="772" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="682.00" y1="29" x2="682.00" y2="772" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<text x="38" y="43" font-size="28" fill="#c85331" text-anchor="start">Negs</text>
+<text x="682" y="43" font-size="29" fill="#c85331" text-anchor="end">5.0 GB</text>
+<text x="38" y="74" font-size="23" fill="#62685b" text-anchor="start">GPU · full-resolution render</text>
+<line x1="38.00" y1="97" x2="682.00" y2="97" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="97" x2="145.33" y2="97" stroke="#c85331" stroke-width="7" stroke-linecap="round"/>
+<circle cx="145.333" cy="97" r="8" fill="#c85331"/>
+<text x="38" y="148" font-size="28" fill="#272b25" text-anchor="start">spektrafilm-rs</text>
+<text x="682" y="148" font-size="29" fill="#272b25" text-anchor="end">8.9 GB</text>
+<text x="38" y="179" font-size="23" fill="#62685b" text-anchor="start">GPU · full-resolution render</text>
+<line x1="38.00" y1="202" x2="682.00" y2="202" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="202" x2="229.05" y2="202" stroke="#747d66" stroke-width="7" stroke-linecap="round"/>
+<circle cx="229.053" cy="202" r="8" fill="#747d66"/>
+<text x="38" y="253" font-size="28" fill="#c85331" text-anchor="start">Negs Reference</text>
+<text x="682" y="253" font-size="29" fill="#c85331" text-anchor="end">13.9 GB</text>
+<text x="38" y="284" font-size="23" fill="#62685b" text-anchor="start">CPU · 64-bit</text>
+<line x1="38.00" y1="307" x2="682.00" y2="307" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="307" x2="336.39" y2="307" stroke="#c85331" stroke-width="7" stroke-linecap="round"/>
+<circle cx="336.387" cy="307" r="8" fill="#c85331"/>
+<text x="38" y="358" font-size="28" fill="#c85331" text-anchor="start">Negs Reference</text>
+<text x="682" y="358" font-size="29" fill="#c85331" text-anchor="end">9.7 GB</text>
+<text x="38" y="389" font-size="23" fill="#62685b" text-anchor="start">CPU · Use less memory</text>
+<line x1="38.00" y1="412" x2="682.00" y2="412" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="412" x2="246.23" y2="412" stroke="#c85331" stroke-width="7" stroke-linecap="round"/>
+<circle cx="246.227" cy="412" r="8" fill="#c85331"/>
+<text x="38" y="463" font-size="28" fill="#c85331" text-anchor="start">Negs</text>
+<text x="682" y="463" font-size="29" fill="#c85331" text-anchor="end">10.7 GB</text>
+<text x="38" y="494" font-size="23" fill="#62685b" text-anchor="start">CPU · 64-bit · LUTs</text>
+<line x1="38.00" y1="517" x2="682.00" y2="517" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="517" x2="267.69" y2="517" stroke="#c85331" stroke-width="7" stroke-linecap="round"/>
+<circle cx="267.693" cy="517" r="8" fill="#c85331"/>
+<text x="38" y="568" font-size="28" fill="#272b25" text-anchor="start">spektrafilm-rs</text>
+<text x="682" y="568" font-size="29" fill="#272b25" text-anchor="end">17.2 GB</text>
+<text x="38" y="599" font-size="23" fill="#62685b" text-anchor="start">CPU · 64-bit · LUTs</text>
+<line x1="38.00" y1="622" x2="682.00" y2="622" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="622" x2="407.23" y2="622" stroke="#747d66" stroke-width="7" stroke-linecap="round"/>
+<circle cx="407.227" cy="622" r="8" fill="#747d66"/>
+<text x="38" y="673" font-size="28" fill="#272b25" text-anchor="start">Python spektrafilm</text>
+<text x="682" y="673" font-size="29" fill="#272b25" text-anchor="end">27.8 GB*</text>
+<text x="38" y="704" font-size="23" fill="#62685b" text-anchor="start">CPU · 64-bit · LUTs</text>
+<line x1="38.00" y1="727" x2="682.00" y2="727" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="727" x2="634.77" y2="727" stroke="#747d66" stroke-width="7" stroke-linecap="round"/>
+<circle cx="634.773" cy="727" r="8" fill="#747d66"/>
+<text x="38.0" y="806" font-size="23" fill="#62685b" text-anchor="start">0</text>
+<text x="199.0" y="806" font-size="23" fill="#62685b" text-anchor="middle">7.5</text>
+<text x="360.0" y="806" font-size="23" fill="#62685b" text-anchor="middle">15</text>
+<text x="521.0" y="806" font-size="23" fill="#62685b" text-anchor="middle">22.5</text>
+<text x="682.0" y="806" font-size="23" fill="#62685b" text-anchor="end">30 GB</text>
+<rect x="18" y="846" width="684" height="352" rx="12" fill="#f7efe4" stroke="#e4d0b9" stroke-width="2"/>
+<text x="38" y="886" font-size="25" fill="#272b25" text-anchor="start">GPU detail · enlarged scale</text>
+<line x1="38.00" y1="908" x2="38.00" y2="1138" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="199.00" y1="908" x2="199.00" y2="1138" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="360.00" y1="908" x2="360.00" y2="1138" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="521.00" y1="908" x2="521.00" y2="1138" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="682.00" y1="908" x2="682.00" y2="1138" stroke="#e3e2d8" stroke-width="1.5" stroke-linecap="round"/>
+<text x="38" y="937" font-size="28" fill="#c85331" text-anchor="start">Negs</text>
+<text x="682" y="937" font-size="29" fill="#c85331" text-anchor="end">5.0 GB</text>
+<text x="38" y="968" font-size="23" fill="#62685b" text-anchor="start">GPU · full-resolution render</text>
+<line x1="38.00" y1="991" x2="682.00" y2="991" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="991" x2="360.00" y2="991" stroke="#c85331" stroke-width="7" stroke-linecap="round"/>
+<circle cx="360.000" cy="991" r="8" fill="#c85331"/>
+<text x="38" y="1052" font-size="28" fill="#272b25" text-anchor="start">spektrafilm-rs</text>
+<text x="682" y="1052" font-size="29" fill="#272b25" text-anchor="end">8.9 GB</text>
+<text x="38" y="1083" font-size="23" fill="#62685b" text-anchor="start">GPU · full-resolution render</text>
+<line x1="38.00" y1="1106" x2="682.00" y2="1106" stroke="#e8e8df" stroke-width="3" stroke-linecap="round"/>
+<line x1="38.00" y1="1106" x2="611.16" y2="1106" stroke="#747d66" stroke-width="7" stroke-linecap="round"/>
+<circle cx="611.160" cy="1106" r="8" fill="#747d66"/>
+<text x="38.0" y="1173" font-size="23" fill="#62685b" text-anchor="start">0</text>
+<text x="199.0" y="1173" font-size="23" fill="#62685b" text-anchor="middle">2.5</text>
+<text x="360.0" y="1173" font-size="23" fill="#62685b" text-anchor="middle">5</text>
+<text x="521.0" y="1173" font-size="23" fill="#62685b" text-anchor="middle">7.5</text>
+<text x="682.0" y="1173" font-size="23" fill="#62685b" text-anchor="end">10 GB</text>
+</g></svg>
