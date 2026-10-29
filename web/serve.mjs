@@ -24,6 +24,8 @@ async function serve(req, res) {
   // Cross-origin isolation, which SharedArrayBuffer (wasm threads) needs.
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  // Revalidate every file, so a tab never mixes a rebuild's files with older ones.
+  res.setHeader("Cache-Control", "no-cache");
   if (req.method === "POST" && url.pathname === "/result") {
     const chunks = [];
     for await (const c of req) chunks.push(c);
