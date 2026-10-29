@@ -82,6 +82,11 @@ Then stop it from filling up again:
   created, not a `$BENCH_PROFILE` or `$CDP_TMP` directory the caller
   passed). Then piece 4's `rm -rf <scratch>/bench/*` after every run isn't
   needed. Commit that with a line in the handoff doc.
+  **Done:** both now delete the profile they made once Chrome has exited
+  (`cdp.mjs` also on a failed run). The cleanup freed 5.0 GB (`/tmp` went
+  from 5.6 GB used to 586 MB). `ba7e0e5e-…/tasks` and `56b14bc1-…` were
+  left: live Claude sessions hold them. `f4cba253-…` and
+  `/tmp/negs-upstream-ui-review` are untouched, waiting on the owner.
 - Keep large renders (the helper's `.rgba` previews are 17 MB each) only as
   long as a comparison needs them.
 

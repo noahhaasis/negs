@@ -6,10 +6,11 @@
 // the page can't make itself, such as touches (Input.dispatchTouchEvent). SHOT=<file.png> also saves a screenshot;
 // VIEW=<w>x<h>[@<dpr>][m] emulates that viewport (m: a touch phone or tablet).
 // The page exposes `negs` for this (web/app.js). Chrome profiles
-// go in $CDP_TMP (default: the system temp dir); $CHROME_FLAGS adds flags
-// (for example --ignore-certificate-errors for serve.mjs --https).
+// go in $CDP_TMP (default: the system temp dir) and are deleted when Chrome
+// exits; $CHROME_FLAGS adds flags (for example --ignore-certificate-errors
+// for serve.mjs --https).
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,6 +23,16 @@ const chrome = spawn("/opt/google/chrome/chrome", [
   "--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist", `--remote-debugging-port=${port}`,
   ...(process.env.CHROME_FLAGS?.split(" ").filter(Boolean) ?? []), "about:blank",
 ], { stdio: "ignore" });
+const exited = new Promise((r) => chrome.once("exit", r));
+// Stops Chrome, waits for it to let go of its profile, and deletes it.
+async function quit(code) {
+  chrome.kill();
+  await exited;
+  rmSync(profile, { recursive: true, force: true });
+  process.exit(code);
+}
+process.on("uncaughtException", (e) => { console.log(`[cdp failed] ${e.stack ?? e}`); quit(1); });
+process.on("unhandledRejection", (e) => { console.log(`[cdp failed] ${e?.stack ?? e}`); quit(1); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let targets;
 for (let i = 0; i < 100; i++) {
@@ -71,5 +82,4 @@ if (process.env.SHOT) {
   (await import("node:fs")).writeFileSync(process.env.SHOT, Buffer.from(shot.result.data, "base64"));
 }
 ws.close();
-chrome.kill();
-process.exit(0);
+await quit(0);
