@@ -10,11 +10,25 @@ Read first: `docs/web-wasm.md` (what exists, measurements, limits),
 `docs/web-wasm-handoff.md` (code map, build and test, gotchas) and
 `docs/web-feature-inventory.md` (the feature inventory; the owner's "Do
 now", "second stage" and "research" lists at its top are this plan's scope,
-the rest is later or never).
+the rest is later or never). `docs/web-next-handoff.md` says where the work
+stands and what to do first.
+
+## Order of work
+
+The pieces are numbered as first planned; work in this order:
+
+1. Pieces 1–4: done.
+2. Piece 6 (resident scan, zoom): done ahead of piece 5 at the owner's
+   request, waiting for the owner's review 🛑.
+3. **The owner's features, next and in this order:** 7 Placeholder Image,
+   8 Before/After toggle, 9 Export LUT, 10 Export Preset, 11 Borders and
+   Fit for Instagram. They come before everything else left in the plan.
+4. Piece 5 (colour management), then the Stage 1 checkpoint 🛑.
+5. Stage 2 (pieces 12–14), and the HEIC research.
 
 ## Ground rules
 
-- Work in the order below. Each piece ends at a checkpoint: everything in
+- Work in the order above. Each piece ends at a checkpoint: everything in
   its "Done when" holds, `docs/web-wasm.md` and `docs/web-wasm-handoff.md`
   are updated, and the piece is committed on `wasm-investigation`. **Don't
   push, and don't merge to `main`**, until the owner says so.
@@ -138,29 +152,9 @@ Balance Print: export the helper's `balance_print`
 Done when: a shift slider moves at frame rate with no rebuild in the stage
 list; the rebuilt-vs-updated comparison is in the docs.
 
-### 5. Colour management and output colour space
-
-Controls for output gamut, input gamut, CAT16 and the spectral upsampling
-method. Arctic and Mallett need their 6 MB LUTs: fetch them only when
-chosen, with progress.
-
-Output colour space (sRGB, Display P3, Adobe RGB, ProPhoto) and the
-encoding toggle: today any non-sRGB output reads the scan back. Extend the
-GPU display pass (`display_rgba8.wgsl`, `display_present.wgsl`,
-`Pipeline::display_on_gpu`) to show such a scan on the sRGB canvas: decode
-its curve (Adobe and ProPhoto are pure gammas; the chain encodes only sRGB
-on the GPU, `gpu_encodes_output`), convert to sRGB, clip, encode. Decide and
-document what the web preview of a wide-gamut output should be: an sRGB
-rendition here, a P3 canvas later (unverified in wgpu; see research), and
-how it relates to desktop's Rec. 2020 display path
-(`preview::display_rgba_with_post`). Export keeps encoding the chosen space
-from a readback.
-
-Done when: every output space presents (no readback) and matches a CPU
-reference conversion of the read-back scan within 1/255; export still
-produces the chosen space.
-
 ### 6. The resident scan, zoom and true-resolution preview
+
+Done (`docs/web-wasm.md` item 14), waiting for the owner's review.
 
 The architecture piece. Desktop applies display-only changes without
 re-rendering; the web should too, and zoom needs it.
@@ -188,7 +182,7 @@ shows the export's pixels (compare a crop with an export render), the
 notice is right, and memory stays within the caps on an emulated phone.
 🛑 Owner review.
 
-### 7. Placeholder while developing
+### 7. Placeholder Image (owner's list)
 
 Show something at once instead of a blank view for ~1.8 s (24 MP ARW):
 for JPEG/PNG/TIFF the browser's decode (`createImageBitmap`) on the main
@@ -199,6 +193,139 @@ test in `photo.rs` covers it). A "Developing" badge as on desktop.
 Done when: opening the ARW shows the placeholder in well under a second and
 the developed frame replaces it in place.
 
+### 8. Before/After toggle (owner's list)
+
+Desktop calls it Show Original: macOS holds it on a button in the canvas
+(`macos/Sources/NegsApp/NegsApp.swift`, the view around line 288;
+`EditorModel.swift` `canShowOriginal`, `loadOriginal`, which starts the
+decode when the pointer arrives) and on `\`; Linux has the `original`
+action (`linux/src/actions.rs`). It shows the source without film: the
+helper's `original` (rawler's develop without film for RAW).
+
+- On the web: hold the button or `\` on desktop, as macOS; a tap toggles
+  on touch, where holding hides the photograph under the finger. The HUD
+  says "Original" while it shows.
+- Through piece 6's display pass: the original becomes a shown texture
+  next to the developed one (`Canvas.shown` keeps two), drawn with the
+  same view, so switching is a `show()` and needs no film render. Make it
+  from the resident input (already uploaded by key) or from piece 7's
+  decode, whichever matches desktop's original; say which.
+- Zoom and pan keep working, and stay where they were across the switch.
+
+Done when: switching either way is one display frame (measure it), the
+stage list shows no render, the original matches desktop's (the helper's
+`original` for the card and the ARW, within 1/255 or the difference
+explained), and it works by keyboard, mouse and touch.
+
+### 9. Export LUT (owner's list)
+
+Desktop: File ▸ Export LUT… (⇧⌘L, `macos/Sources/NegsApp/MainMenu.swift`;
+`EditorModel.swift` `exportLUTPanel`, `exportLUT`), the helper's
+`export_lut` (`crates/spektrafilm-native/src/main.rs`), and the engine's
+`spektrafilm_core::lut_export::cube`: a 33×33×33 `.cube`, sRGB in and out,
+one spectral pipeline over the grid on the CPU. It needs no photograph
+(`canExportLUT`).
+
+- Export `cube` from wasm and run it in the worker. It takes a data
+  directory and loads the profiles by name; give it the profiles the wasm
+  engine already holds (a variant over loaded profiles that `cube` itself
+  calls), not a copy of the function. The native helper's output must not
+  change.
+- Download it as `<film>_<paper>.cube` (`<film>_direct_scan.cube` when
+  scanning film directly), and show desktop's explanation of what the LUT
+  leaves out (the panel's message in `exportLUTPanel`).
+- It must not disturb the resident chain or a render in flight.
+
+Done when: the web's `.cube` is byte-identical to the helper's for the same
+film, paper and params (a colour negative, a slide, direct scan and a B&W
+stock), its time is measured, and the button is disabled while it runs.
+
+### 10. Export Preset (owner's list)
+
+Desktop's design is `docs/presets-design.md`: the file is Python
+spektrafilm's GUI preset JSON. The engine does the translation, once, in
+`crates/spektrafilm-core/src/presets.rs` (`export`, `import`, `apply`;
+the helper's `preset_export` and `preset_import`). macOS: Import Preset…
+(⇧⌘O) and the presets panel's Export… (`docs/presets-design.md` "Menus").
+
+- Export Preset: the current film, paper and params through `export`, as a
+  `.json` download. Like `cube`, `export` and `import` take a data
+  directory; give them the engine's loaded profiles the same way.
+- Import Preset in the same piece, since an exported preset is only useful
+  if it comes back: a file input and dropping a `.json` on the page,
+  through `import` and `apply` (the excluded settings, `presets::KEPT`,
+  stay the photograph's own). Film and paper are set without the film
+  change's resets, as desktop.
+- A preset library (list, rename, delete, stored in IndexedDB or OPFS) is
+  not in this piece; ask the owner whether they want it.
+
+Done when: the web's export is the helper's `preset_export` text for the
+same state; importing it renders identically (compare renders, not raw
+params, as the design doc says); presets exported by the desktop apps
+import; a malformed file shows the engine's error.
+
+### 11. Borders and Fit for Instagram (owner's list)
+
+Desktop: solid, keyline, 120 film and 35mm strip, with the mat width (3%),
+the black around film, the keyline width (0.4%), the mat and line colours,
+"also on export", and Fit for Instagram, which extends the bordered canvas
+to a 3:4 portrait (the mat's colour around a mat, white around film).
+Sources: macOS `macos/Sources/NegsApp/Border.swift` (`BorderSettings`,
+`canvas`, `instagramCanvas`, the background colours near line 275) and its
+inspector controls; the engine's `crates/spektrafilm-io/src/border.rs`
+(`add_border`, `instagram_canvas`, `extend_for_instagram`) and `film35.rs`
+(the 35mm strip and its edge print, which depends on the film); textures
+in `data/borders/` (`film.png` MIT, the 35mm material CC BY-SA; see its
+README); `docs/linux-border-performance.md`. Borders are composited after
+the film, so a border change never re-renders.
+
+- Preview: in piece 6's display pass, so a border change is a `show()`.
+  The view places the bordered canvas (the photograph inside it), Fit fits
+  the whole canvas (with Instagram, the whole 3:4), and 100% is still one
+  photograph pixel per device pixel. Solid, keyline and the Instagram
+  extension are colours and rectangles in `fs_view`; the 120 and 35mm
+  borders need their textures, composited at the shown size.
+- Textures: fetch them only when a film style is chosen (the inventory
+  puts them at 17 MB in all), with progress as for piece 5's LUTs.
+- Export: `add_border` (and the Instagram extension) on the export's bytes
+  in the worker, on the CPU, as the CLI does; measure it at 24 MP against
+  the memory caps.
+- Styles that don't fit the photograph (35mm only fits 3:2 and 3:4) are
+  disabled, as desktop. The licences of the textures go in the About
+  panel (piece 14, or the credits page if that comes first).
+
+Done when: exports are byte-identical to the CLI's (`--border <style>`,
+`--border-width`, `--keyline-width`, `--border-color`, `--keyline-color`,
+`--instagram`) for every style with and without Instagram, on the card and
+the ARW; the preview at 100% matches the export's pixels (as
+`web/checks/zoom.mjs` compares the canvas); a border change shows with no
+film render; the textures download only when used. 🛑 Owner review of
+pieces 7–11.
+
+### 5. Colour management and output colour space
+
+After piece 11 (see "Order of work"); numbered as first planned.
+
+Controls for output gamut, input gamut, CAT16 and the spectral upsampling
+method. Arctic and Mallett need their 6 MB LUTs: fetch them only when
+chosen, with progress.
+
+Output colour space (sRGB, Display P3, Adobe RGB, ProPhoto) and the
+encoding toggle: today any non-sRGB output reads the scan back. Extend the
+GPU display pass (`display_rgba8.wgsl`, `display_present.wgsl`,
+`Pipeline::display_on_gpu`) to show such a scan on the sRGB canvas: decode
+its curve (Adobe and ProPhoto are pure gammas; the chain encodes only sRGB
+on the GPU, `gpu_encodes_output`), convert to sRGB, clip, encode. Decide and
+document what the web preview of a wide-gamut output should be: an sRGB
+rendition here, a P3 canvas later (unverified in wgpu; see research), and
+how it relates to desktop's Rec. 2020 display path
+(`preview::display_rgba_with_post`). Export keeps encoding the chosen space
+from a readback.
+
+Done when: every output space presents (no readback) and matches a CPU
+reference conversion of the read-back scan within 1/255; export still
+produces the chosen space.
+
 ### Stage 1 checkpoint 🛑
 
 Full benchmark table (test card, ARW, a slide, 24 MP export; Chrome and, if
@@ -207,14 +334,7 @@ Owner review of the whole MVP before stage 2.
 
 ## Stage 2
 
-### 8. Show Original
-
-Hold (desktop: a button or `\`) or a toggle on touch: the source without
-film, through the display pass of piece 6 from the resident input (a new
-small output; the input is already uploaded by key). Desktop shows rawler's
-develop without film on Linux and Windows (the helper's `original`).
-
-### 9. RAW white balance
+### 12. RAW white balance
 
 As Shot, Daylight, Tungsten 2850 K, Custom (1667–25000 K, tint 0.01–4), as
 desktop (`docs/raw-white-balance.md`, `spektrafilm-io/src/white_balance.rs`).
@@ -224,7 +344,7 @@ frame rate) or whether it needs a re-decode (about 0.8 s at 24 MP; then
 debounce, keep the previous frame, and watch memory). Byte-compare with the
 desktop decode.
 
-### 10. Download and caching
+### 13. Download and caching
 
 A service worker that caches the wasm, JS and data (the LUT is 6 MB, 4 MB
 brotli), with versioned cache names; lazy fetches for the upsampling LUTs
@@ -232,7 +352,7 @@ and anything else optional; it can also set COOP/COEP for hosts that can't
 (GitHub Pages; `coi-serviceworker`-style). Measure first-visit and
 repeat-visit start-up.
 
-### 11. About and licences
+### 14. About and licences
 
 An About panel: Negs and spektrafilm credits, the profile attributions (in
 `linux/catalog.json`), and the licences of what the page ships (rawler
@@ -254,6 +374,6 @@ read by rawler? Recommend one approach.
 ## Later (not scheduled)
 
 Everything else in `docs/web-feature-inventory.md`: crop, rotate,
-straighten, borders, Image Size (note: it forces the CPU engine on the web
+straighten, Image Size (note: it forces the CPU engine on the web
 until the wasm crate resolves it as the helper does), Post, histogram,
-export formats and options, presets, undo, sessions, and so on.
+export formats and options, a preset library, undo, sessions, and so on.

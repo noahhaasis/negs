@@ -1,10 +1,11 @@
-# Web MVP: handoff for piece 5
+# Web MVP: handoff for the next agent
 
-For the agent picking up the browser version of Negs at piece 5 of
-`docs/web-mvp-plan.md`. Read the plan, `docs/web-wasm.md`,
-`docs/web-wasm-handoff.md` (build, serve, tools, gotchas) and
-`docs/web-feature-inventory.md` first. This file adds where things stand,
-a `/tmp` cleanup to do before anything else, and what piece 5 touches.
+For the agent picking up the browser version of Negs. Read, in this order:
+`docs/web-mvp-plan.md` (the pieces, their order and their "Done when"),
+`docs/web-wasm.md` (what exists, measurements, limits),
+`docs/web-wasm-handoff.md` (code map, build, serve, tools, gotchas) and
+`docs/web-feature-inventory.md`. This file adds where things stand, what
+the next pieces touch, and notes for piece 5, which now comes later.
 
 ## Where things stand
 
@@ -21,19 +22,55 @@ branch). Commits end with
 | HTTPS for device testing | `d350950` | done |
 | 3. iPad and phone layout | `842da9c` | done |
 | 4. Enlarger shifts without a rebuild, Balance Print | `adcee97` | done (`docs/web-wasm.md` item 12) |
-| **5. Colour management and output colour space** | | **next** |
-| 6. Resident scan, zoom, true-resolution preview | see `git log` | done first, at the owner's request (`docs/web-wasm.md` item 14); 🛑 owner review |
-| 7. Placeholder while developing | | Stage 1 🛑 after it |
+| 6. Resident scan, zoom, true-resolution preview | `fc6322d` | done ahead of piece 5, at the owner's request (`docs/web-wasm.md` item 14); 🛑 waiting for the owner's review |
+| **7. Placeholder Image** | | **next**, once the owner has reviewed piece 6 |
+| 8. Before/After toggle | | owner's list |
+| 9. Export LUT | | owner's list |
+| 10. Export Preset | | owner's list |
+| 11. Borders and Fit for Instagram | | owner's list; 🛑 owner review of 7–11 |
+| 5. Colour management and output colour space | | after 11; notes below |
+| Stage 1 checkpoint | | 🛑 |
 
-Piece 6 is done (it came first, at the owner's request), so after piece 5
-go on to piece 7, once the owner has reviewed piece 6.
+The owner asked for pieces 7–11 (their features) ahead of everything else
+left, so piece 5 moved after them. The plan's "Order of work" has it.
 
 Still open from piece 3: nobody has opened the page on a real iPad or
 iPhone (ufw blocks ports 8137 and 8443 from the LAN; the owner's call), and
 the 24 MP ARW takes 954 MiB in the engine at a phone's preview size
 (piece 6).
 
-## First: clean up `/tmp`
+## Pieces 7–11: what they touch
+
+The plan has each piece's desktop sources and "Done when". Notes from
+reading the code:
+
+- **Piece 6's display pass is the base for 8 and 11.** The canvas keeps
+  the frame's bytes as a texture (`Canvas.shown` in
+  `crates/spektrafilm-gpu/src/wgpu_backend.rs`, the last two kept) and
+  draws it with a `View` (`fs_view` in
+  `crates/spektrafilm-shaders/wgsl/display_present.wgsl`); `Engine.show`
+  redraws without the film chain. The original (piece 8) is another shown
+  texture; a border (piece 11) is drawn around the photograph in
+  `fs_view`, and the view in `web/view.js` then places the bordered
+  canvas, not the photograph alone.
+- **Engine entry points that read the data directory.**
+  `lut_export::cube` (piece 9), `presets::export`/`import` (piece 10) and
+  `border::add_border` (piece 11, the textures) take a `data_dir: &Path`.
+  The browser has no directory: the wasm engine fetches files and holds
+  them. Find how the wasm crate already hands profiles to the pipeline,
+  and add variants that take what it holds, keeping the path-based
+  functions as wrappers so native output doesn't change.
+- **Exports go through the worker.** `exportJpeg` in `web/app.js`
+  renders without presenting and encodes in an `OffscreenCanvas`. A
+  border on export needs the bytes back in the worker for `add_border`
+  first; measure memory at 24 MP.
+- **Licences.** The film border textures are MIT (`film.png`) and
+  CC BY-SA (35mm); see `data/borders/README.md`. The owner has uncommitted
+  credits work in the worktree (`web/credits.html`,
+  `web/package-static.mjs`, `web/static/`, `docs/cloudflare.md`, two lines
+  in `web/index.html`): leave it alone and don't commit it.
+
+## `/tmp` cleanup (done in piece 4)
 
 Piece 4 hit `Disk quota exceeded` partway through: `/tmp` is a 7.8 GB
 tmpfs, and `/tmp/claude-1000` had reached 5.4 GB. Its symptom is quiet. A
@@ -90,7 +127,9 @@ Then stop it from filling up again:
 - Keep large renders (the helper's `.rgba` previews are 17 MB each) only as
   long as a comparison needs them.
 
-## Done before piece 5: correctness
+## Piece 5 (after piece 11)
+
+### Done before piece 5: correctness
 
 `docs/web-wasm.md` item 13: the browser matches native wgpu and the f64
 reference on 63 cases (films, papers, scans, settings, the ARW), and a GPU
