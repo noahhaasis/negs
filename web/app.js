@@ -97,6 +97,8 @@ async function startEngine(engineKind) {
     sync(); // Commands that need the engine.
     await attachCanvas();
   } catch (e) {
+    // A newer selection replaced this engine; that start owns the page.
+    if (e.restarted) return false;
     if (kind === "gpu") {
       showMessage(`WebGPU isn't available here (${e.message}); using the CPU engine.`);
       return startEngine("cpu");
@@ -105,8 +107,12 @@ async function startEngine(engineKind) {
   }
   if (photo) {
     $("busy").classList.add("on");
-    await host.call("load", photo.bytes, 0).finally(() => running || $("busy").classList.remove("on"));
+    const loaded = await host.call("load", photo.bytes, 0)
+      .then(() => true, (e) => { if (e.restarted) return false; throw e; })
+      .finally(() => running || $("busy").classList.remove("on"));
+    if (!loaded) return false;
   }
+  return true;
 }
 
 // The WebGPU engine presents on a canvas it owns, with nothing read back. A
@@ -1533,7 +1539,8 @@ $("paper").addEventListener("change", () => { choosePaper($("paper").value); syn
 $("reset").addEventListener("click", () => { resetAdjustments(); sync(); schedule("settled"); });
 $("scan-film").addEventListener("change", () => { set("io.scan_film", $("scan-film").checked); sync(); schedule("settled"); });
 $("engine").addEventListener("change", async () => {
-  await startEngine($("engine").value).catch((e) => showMessage(e.message, true));
+  // A superseded start leaves rendering to the selection that replaced it.
+  if (await startEngine($("engine").value).catch((e) => showMessage(e.message, true)) === false) return;
   schedule("settled");
 });
 for (const b of [$("open"), $("open-empty")]) b.addEventListener("click", () => $("file").click());
