@@ -31,7 +31,7 @@ Pick a film, pick a paper, drag a slider, and watch the picture change as you mo
 
 - Opens RAW files from most cameras, including Nikon HE★ (Mac only) and 60 MP medium format, plus JPEG, TIFF and PNG
 - Reads JPEG, PNG and TIFF colour profiles and previews in the chosen export colour space
-- Save, apply and share film and Lab presets, including Python spektrafilm community presets (Mac and Windows)
+- Save, apply and share film and Lab presets, including Python spektrafilm community presets
 - Crop, straighten, and add borders with each stock's real edge print
 - Image Size enlarges a photo *before* the film, so grain and halation form at print size instead of being stretched afterwards
 - Undo, keyboard shortcuts, pinch to zoom: it feels at home on Mac, Windows and Linux
