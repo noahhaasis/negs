@@ -25,7 +25,7 @@ The pieces are numbered as first planned; work in this order:
    Fit for Instagram. They come before everything else left in the plan.
    On 2026-10-29 the owner asked for the whole Post tab next: its Tone and
    Color sections (piece 15, below) and its Border section (piece 11), so
-   those two come first, then 9 and 10.
+   those two come first (both done), then 9 and 10.
 4. Piece 5 (colour management), then the Stage 1 checkpoint 🛑.
 5. Stage 2 (pieces 12–14), and the HEIC research.
 

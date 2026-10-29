@@ -25,6 +25,8 @@ pub const FILM_WIDTH: f32 = 35.0;
 pub const PERF_PITCH: f32 = 4.75;
 /// Length of film the scanned material covers: one full frame.
 pub const MATERIAL_LENGTH: f32 = 8.0 * PERF_PITCH;
+/// The scanned material, in the data directory.
+pub const MATERIAL: &str = "borders/35mm/material.png";
 /// Resolution of `data/borders/35mm/material.png`.
 pub const MATERIAL_PX_PER_MM: f32 = 125.0;
 
@@ -204,15 +206,28 @@ impl Strip {
 
     /// The strip for `film` with the scanned material from `data_dir`.
     pub fn load(data_dir: &Path, film: &str, format: FilmFormat) -> Result<Self> {
-        let path = data_dir.join("borders/35mm/material.png");
-        let material = image::open(&path)
-            .with_context(|| format!("loading border material {}", path.display()))?
-            .to_luma_alpha8();
+        Self::load_with(
+            &|name| {
+                let path = data_dir.join(name);
+                image::open(&path).with_context(|| format!("loading border material {}", path.display()))
+            },
+            film,
+            format,
+        )
+    }
+
+    /// [`Self::load`] with the material from `load`, which decodes a file by
+    /// its path in the data directory.
+    pub fn load_with(
+        load: &dyn Fn(&str) -> Result<image::DynamicImage>,
+        film: &str,
+        format: FilmFormat,
+    ) -> Result<Self> {
+        let material = load(MATERIAL)?.to_luma_alpha8();
         ensure!(
             material.width() == (MATERIAL_LENGTH * MATERIAL_PX_PER_MM).round() as u32
                 && material.height() == (FILM_WIDTH * MATERIAL_PX_PER_MM).round() as u32,
-            "{} has the wrong size",
-            path.display()
+            "{MATERIAL} has the wrong size"
         );
         Ok(Self { material: Some(material), ..Self::new(film, format) })
     }

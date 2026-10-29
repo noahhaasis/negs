@@ -9,6 +9,9 @@ const toggle = (label, path) => ({ kind: "toggle", label, path });
 const choice = (label, path, options) => ({ kind: "choice", label, path, options });
 // A command rather than a value: app.js runs `action`.
 const action = (label, action, help) => ({ kind: "action", label, action, help });
+// A border width (macOS borderSlider): a fraction of the photograph's long
+// edge, shown and typed in percent.
+const borderSlider = (label, border, min, max, step, styles, help) => ({ kind: "slider", label, border, percent: true, min, max, step, styles, help });
 // One lane of a grain array that stays null until edited, so the film's
 // preset from the catalog applies. B&W films have one emulsion: they show
 // the lane under `bw`, or hide it when that is null.
@@ -151,6 +154,22 @@ export const POST_SECTIONS = [
   ], footer: "Adjusts the finished scan/print. To recover a clipped highlight, use exposure in the Lab." },
   { title: "Color", tab: "Post", controls: [
     slider("Saturation", "post.saturation", -100, 100, 1),
+  ] },
+  // macOS Inspector `Section("Border")`: the border's settings
+  // (web/border.js), outside the edit's params, so Reset Adjustments keeps
+  // them. Everything after "Add border" is off while it is; `styles` shows a
+  // control for those styles only.
+  { title: "Border", tab: "Post", controls: [
+    { kind: "toggle", label: "Add border", border: "enabled" },
+    { kind: "styles", label: "Style", border: "style" },
+    borderSlider("Width", "width", 0, 15, 0.1, ["solid", "keyline"]),
+    borderSlider("Line width", "line", 0.05, 2, 0.05, ["keyline"]),
+    { kind: "color", label: "Color", border: "color", styles: ["solid", "keyline"] },
+    { kind: "color", label: "Line color", border: "lineColor", styles: ["keyline"] },
+    borderSlider("Width", "filmWidth", 0, 15, 0.1, ["film"], "Adds black around the film frame."),
+    { kind: "toggle", label: "Extend to 3:4 for Instagram", border: "instagram",
+      help: "Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post." },
+    { kind: "toggle", label: "Include in export", border: "export", help: "Adds the border to exported photographs and saved previews." },
   ] },
 ];
 

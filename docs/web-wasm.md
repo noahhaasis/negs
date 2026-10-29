@@ -760,6 +760,135 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    done; say if Post at 100% on large photographs should be a display pass
    too.
 
+18. **Borders and Fit for Instagram** (MVP piece 11, the Post tab's
+   Border section). macOS `Inspector.swift`'s `Section("Border")`: Add
+   border; the style picker's four drawn swatches in macOS's order (Solid,
+   Film, Keyline, 35mm; `buildStyles` in `web/app.js`, with the current mat
+   and line colours, `aria-pressed`, macOS's help texts); per style Width
+   (0–15%, step 0.1), Line width (0.05–2%, step 0.05), Color and Line color
+   (`<input type="color">`, `#rrggbb` sRGB as the exporter takes it), the
+   film frame's Width ("Adds black around the film frame."), nothing for
+   35mm; Extend to 3:4 for Instagram and Include in export with their help
+   texts. Everything after Add border is off while it is. 35mm is off for a
+   photograph that isn't 3:2 or 3:4, with "35mm needs a 3:2 or 3:4
+   photograph. This one is 16:9." (macOS's note without its advice to crop:
+   the web has no crop). Defaults are `BorderSettings`'s. The settings live
+   beside the edit (`border` in `app.js`), not in its params, so Reset
+   Adjustments keeps them, as on macOS, and no render ever sees them.
+   Desktop keeps the border in the session; the page doesn't remember it.
+
+   **Geometry in one place.** `web/border.js` mirrors `border.rs` and
+   `film35.rs` (margin, keyline, the film frame's inset and nine-patch,
+   the strip's canvas and turn, from its millimetre sizes as the exporter
+   computes them rather than `frames.json`, which holds the same window;
+   Instagram's canvas) and lays out the canvas, the photograph's corner,
+   the mat, the ring, the fill and where the texture goes.
+   `web/checks/border.mjs` proves it against the engine: 228 cases
+   (16 sizes from 1 × 1 to 3000 × 2000, landscape, portrait, square, 3:2,
+   3:4, odd; every style that fits; default and other widths; with and
+   without Instagram) give the canvas size `add_border` and
+   `extend_for_instagram` make, and in 215 of them the photograph's offset
+   read back from an image whose pixels name their coordinates; in the
+   other 13 (1 px edges, 1 × 1) the output's centre isn't the photograph,
+   so only the size is checked.
+
+   **The view fits the canvas.** `view.js` takes the canvas around the
+   photograph (`around`): Fit fits it (with Instagram the whole 3:4),
+   panning keeps it in view, `canvasRect()` gives it, and `rect()` stays
+   the photograph's. 100% is still one photograph pixel per device pixel.
+   A border change re-fits a fitted view and leaves a zoomed one's
+   photograph where it is. Fitted, `renderSide` renders the size the
+   photograph would fill without a border, so a border change never
+   renders: the settled frame is drawn a little smaller than its size,
+   sampled from its mip levels, instead of 1:1.
+
+   **The preview is in the display pass.** The `View` uniform carries a
+   `BorderView` (`wgpu_backend.rs`; 36 numbers from `border.js`'s
+   `viewOf`, sent with `show`). Per device pixel `fs_view` finds the
+   photograph pixel it covers, then from the bottom up: Instagram's fill,
+   the mat (black for the film styles), the keyline's ring, the
+   photograph (shown or original, sampled as before), and the texture
+   with its alpha: the 120 frame as border.rs's nine-patch (`patch_axis`,
+   corners `pad` canvas pixels, laid out landscape and `rotate270`'d for
+   portrait), or the 35mm strip turned as `Renderer` turns it. The texture
+   is one more binding (9; a transparent 1 × 1 when there's none), uploaded
+   once per choice with its mip levels (`set_border_texture`,
+   `Engine.borderTexture`). Show Original keeps the border, as on macOS.
+   The page's own canvas (the CPU engine) draws the same with 2D canvas
+   calls (`paintUnder`, `paintOver`: rectangles, nine `drawImage`s, a
+   rotated one for the strip); the placeholder shows without it. WGSL
+   reserves `patch`, so the field is `texture_fit`.
+
+   **Textures.** None on the first load. Choosing Film fetches
+   `data/borders/film.png` (170 KB), 35mm the film's preview strip
+   (`35mm/{full,half}/<film>.png`, 280–430 KB; `generic.png` on a 404),
+   through `download` with progress in the message line, once per session;
+   a film change with 35mm on fetches that film's strip and shows the last
+   one of the format until it's there (as macOS keeps its strip). Until
+   the first arrives the border shows without its texture (the 35mm
+   canvas is the photograph alone, as on macOS). The same bytes are
+   registered in the worker for exports; an export's 35mm border also
+   reads `35mm/material.png` (498 KB), which the worker fetches then.
+
+   **The export.** After the full-size render, `addBorder` (wasm) turns the
+   bytes into an `ImageBuf` of encoded sRGB values (byte / 255), runs
+   `add_border_with` and, with Instagram, `extend_for_instagram`, and rounds
+   back. "Include in export" off, or a style that doesn't fit, skips it.
+   `spektrafilm-io` gained `add_border_with` and `Strip::load_with`, which
+   take a loader for their textures; `add_border` and `Strip::load` wrap
+   them with `image::open` from the data directory, so native output is
+   byte-identical (the CLI, each `--border` style with and without
+   `--instagram`, wgpu and cpu, before and after).
+
+   **Measured** (`web/checks/border.mjs` and `border-native.sh`; Chrome on
+   the GTX 1660 SUPER):
+
+   | | Card 2752 × 1536 (16:9) | Sony ARW 4000 × 6000 (3:2) | 3:4 crop 1152 × 1536, other widths and colours |
+   |---|---|---|---|
+   | Any border change, fitted | no render; display passes 3–5 ms median, up to 47 ms | no render; 4 ms median, up to 20 ms | no render; 4–5 ms median, up to 23 ms |
+   | The same on a phone (`VIEW=390x844@3m`, card) | no render; 3–12 ms median, up to 52 ms | | |
+   | First pass with a new 35mm strip (its upload and mips) | | 49 ms | 28 ms |
+   | Export size and offset against the layout | all equal | all equal | all equal |
+   | Export against native `add_border` on its own unbordered bytes | exact | exact; 35mm: 23 of 37 M pixels one step off | exact; 35mm: 3 pixels one step off |
+   | Export against the CLI's `--border` export | 99.60–99.93% exact, max 10 (unbordered: 99.81%, max 10) | 99.68–99.97%, max 14 (unbordered: 99.96%, max 14) | 93.5–96.5%, max 6 (unbordered: 91.9%, max 6) |
+   | Canvas at 100% against the export, both corners, Solid, Keyline and every Instagram fill | exact | exact | exact |
+   | Bordering time in the worker | 120–490 ms | 0.6–2.1 s (35mm with Instagram) | 50–280 ms |
+
+   The 35mm pixels one step apart are the strip's float maths (`powf`) in
+   wasm against native. The CLI's agreement is the unbordered render's:
+   the border adds no disagreement of its own. Where the 120 frame's
+   alpha edge blends over the photograph the web blends bytes and the CLI
+   floats before quantising; the share within one step stays that of the
+   unbordered render. The 3:4 PNG's 92% exact against the CLI predates
+   this piece (its unbordered render is the same) and is worth a look.
+
+   Film and 35mm previews follow desktop's textures, not the export's
+   (settled with the owner): the nine-patch is sampled from mip levels
+   rather than the exporter's shrunken texture, and the 35mm strip is the
+   pre-rendered 100 px/mm PNG, where the export draws the strip at its own
+   resolution with grain. At 100% where the texture shows, the 120 frame
+   is 93–99% exact (max 21 steps) and the strip 5–75% (max 76); the
+   geometry matches (screenshots at fit and 100% with `SHOTS=1`, and the
+   turned strip faces the export's way).
+
+   **Memory.** The wasm memory's high-water mark after the ARW's 35mm
+   export with Instagram (6211 × 8282, 51 MP out of 24 MP) is 2,415 MiB,
+   against 1,826 MiB for the other ARW borders and 954 MiB before any
+   export: the f32 copy of the bytes, the bordered and the extended one,
+   and the output bytes. That's within the 4 GB cap at 24 MP, but a 40 MP
+   photograph with 35mm and Instagram would come close; piece 6's
+   budgets should count it (bordering the bytes directly, without floats,
+   would save most of it).
+
+   The module grew by 524 KB (7.59 → 8.12 MB; gzip 2.25 → 2.42 MB; the
+   threaded build 9.25 → 9.83 MB), with the edge print's font (107 KB),
+   ab_glyph and the strip renderer.
+
+   `post.mjs`, `zoom.mjs`, `original.mjs`, `placeholder.js`, `touch.mjs`
+   and `inspector.js` pass as before (`post.mjs` now names the Border
+   rows too). `cargo check --workspace --all-targets` and the core, gpu,
+   math, model, io and spektrafilm-native tests pass.
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
@@ -796,11 +925,12 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
 - **Hosting.** Threads need COOP/COEP headers, which GitHub Pages can't set
   (a service-worker shim can). wasm-bindgen-rayon's worker imports the
   package by directory URL, which a bundler or `index.js` naming handles.
-- **Download.** 7.4 MB wasm (1.5 MB brotli; `wasm-opt` not tried) plus the
-  4 MB LUT. The sample photograph (3.4 MB) downloads only when asked for.
+- **Download.** 8.1 MB wasm (2.4 MB gzip; `wasm-opt` not tried) plus the
+  4 MB LUT. The sample photograph (3.4 MB) and the border textures
+  download only when asked for.
 - **Not wired.** Export beyond an 8-bit sRGB JPEG from the canvas
   (`spektrafilm_io::save` is path-based; the encoders work in memory), RAW
-  white balance, crop, borders, LUT export, presets, EXIF, and the golden
+  white balance, crop, LUT export, presets, EXIF, and the golden
   suite in a browser.
 
 ## Next steps

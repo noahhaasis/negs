@@ -2155,6 +2155,10 @@ struct Canvas {
     /// The photograph before any film (`set_original`), which a view with
     /// `original` draws in the shown image's place.
     original: Option<Shown>,
+    /// The border's texture (`set_border_texture`), with its mip levels, and
+    /// the transparent texel drawn without one.
+    border_texture: Option<wgpu::Texture>,
+    blank: wgpu::Texture,
 }
 
 /// A frame's display bytes, kept in a texture with mip levels so that a new
@@ -2193,6 +2197,36 @@ pub struct View {
     pub background: [f32; 3],
     /// Draw the original instead of the developed frame, when there is one.
     pub original: bool,
+    /// The border around the photograph, if any.
+    pub border: BorderView,
+}
+
+/// A presentation border as the view draws it around the photograph
+/// (`Border` in `display_present.wgsl`; the page's `web/border.js` lays it
+/// out as `spektrafilm-io::border` does). Rectangles are left, top, width,
+/// height in the photograph's own pixels, from its top-left corner; colours
+/// are RGB from 0 to 1, stored as is.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct BorderView {
+    /// The photograph's width and height; zero for no border.
+    pub photo: [f32; 4],
+    /// The whole canvas: with Instagram's extension, the 3:4 one.
+    pub canvas: [f32; 4],
+    /// The bordered canvas, in `mat`; outside it, `fill`.
+    pub frame: [f32; 4],
+    /// The keyline's ring, in `line_color`, inside the mat.
+    pub line: [f32; 4],
+    pub fill: [f32; 4],
+    pub mat: [f32; 4],
+    pub line_color: [f32; 4],
+    /// Where the texture lies over everything.
+    pub texture: [f32; 4],
+    /// The texture's kind (0 none, 1 the 120 frame's nine-patch, 2 the 35mm
+    /// strip), whether it's turned a quarter, and the nine-patch's corner
+    /// size and scale (canvas pixels per texel).
+    pub texture_fit: [f32; 4],
 }
 
 /// Where a view draws a shown image: its top-left corner on the canvas,
@@ -2294,6 +2328,27 @@ impl WgpuBackend {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let blank = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("no_border"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: CANVAS_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &blank,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[0; 4],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
         let canvas = Canvas {
             surface,
             size: (0, 0),
@@ -2304,13 +2359,55 @@ impl WgpuBackend {
             view: None,
             shown: Vec::new(),
             original: None,
+            border_texture: None,
+            blank,
         };
         if let Some(old) = self.canvas.lock().unwrap().replace(canvas) {
             for shown in old.shown.into_iter().chain(old.original) {
                 shown.texture.destroy();
             }
+            for texture in old.border_texture.into_iter().chain([old.blank]) {
+                texture.destroy();
+            }
         }
         Ok(())
+    }
+
+    /// Keep straight-alpha sRGB RGBA8 `rgba` as the border's texture, with
+    /// its mip levels, for views with a border texture to draw; none clears
+    /// it. Nothing is drawn now. False without a canvas or when a texture
+    /// can't be that large.
+    pub fn set_border_texture(&self, texture: Option<(u32, u32, &[u8])>) -> bool {
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        if let Some(old) = canvas.border_texture.take() {
+            old.destroy();
+        }
+        let Some((width, height, rgba)) = texture else {
+            return true;
+        };
+        if width.max(height) > self.device.limits().max_texture_dimension_2d {
+            return false;
+        }
+        let texture = self.shown_image(width, height);
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.encode_mips(&mut encoder, canvas, &texture);
+        self.queue.submit(Some(encoder.finish()));
+        canvas.border_texture = Some(texture);
+        true
     }
 
     /// Keep RGBA8 display bytes of the photograph before any film, for views
@@ -2536,6 +2633,7 @@ impl WgpuBackend {
             rect: [0.0, 0.0, width as f32, height as f32],
             background: [0.0; 3],
             original: false,
+            border: BorderView::default(),
         })
     }
 
@@ -2673,6 +2771,7 @@ impl WgpuBackend {
             lod: f32,
             exact: u32,
             background: [f32; 4],
+            border: BorderView,
         }
         let texture = Self::drawn(canvas)?.texture.clone();
         let (width, height) = (texture.width(), texture.height());
@@ -2693,10 +2792,12 @@ impl WgpuBackend {
                 lod: place.lod,
                 exact: place.exact as u32,
                 background: [r, g, b, 1.0],
+                border: view.border,
             }),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let shown = texture.create_view(&Default::default());
+        let border = canvas.border_texture.as_ref().unwrap_or(&canvas.blank).create_view(&Default::default());
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bg_view"),
             layout: &canvas.draw.get_bind_group_layout(0),
@@ -2704,6 +2805,7 @@ impl WgpuBackend {
                 wgpu::BindGroupEntry { binding: 3, resource: params.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&shown) },
                 wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&canvas.sampler) },
+                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&border) },
             ],
         });
         let target = frame.texture.create_view(&Default::default());

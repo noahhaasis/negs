@@ -120,7 +120,10 @@ times), `badge()` (the badge's text, or false), `openSample()`,
 engine drew its frame), and Show Original's `original(on)` (hold it or
 let go), `showingOriginal()`, `originalMade()` (its size, time and whether
 the engine keeps it), `prepareOriginal()` and `readOriginal(maxDim)` (its
-bytes, shown nowhere). `views` also counts the page's own paint as a
+bytes, shown nowhere), and the border's `border(settings)` (change, as
+the controls do; no argument reads), `borderLayout()`, `borderTexture()`,
+`borderTextures()`, `canvasRect()`, `exportBytes()` (the export's
+bytes, bordered, and `unbordered`) and `addBorder(…)`. `views` also counts the page's own paint as a
 display pass when the engine doesn't present.
 `web/checks/controls.js` moves every Lab control and reports its frame (a
 `pipeline` stage is a rebuild, `meter` a re-meter);
@@ -146,6 +149,15 @@ their display passes' times, the canvas against a render read back, 25%,
 Ctrl-wheel, a pinch with `VIEW=…m`, Fit) and logs GPU memory;
 `web/checks/placeholder.js` tests the placeholder's orientation handling
 and a lossy DNG's preview, and times opening the ARW and the sample;
+`web/checks/border.mjs` tests borders (the geometry against the engine,
+each style with and without Instagram on the card, the ARW and
+`web/results/card-34.png` (a 3:4 crop of the card, `magick card.jpg
+-gravity center -crop 1152x1536+0+0 +repage card-34.png`): no render, the
+display passes, the export's size and offset, the canvas at 100% against
+the export, texture downloads; `QUICK=1` for the display passes only,
+`SHOTS=1` for screenshots), and `web/checks/border-native.sh` compares the
+exports it saved with native `add_border` (`examples/border_bytes.rs`) and
+the CLI's `--border` exports;
 `web/checks/original.mjs` tests Show Original by mouse, keyboard and (with
 `VIEW=…m`) touch: each switch's display passes and no render, the view
 kept, the canvas against the original's bytes, and with
@@ -177,6 +189,11 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     (from the resident input on the GPU for an sRGB display) or returned as
     a `Rendered`'s bytes; `show(…, original)` draws it in the developed
     frame's place (`docs/web-wasm.md` item 16);
+  - `show(…, original, border)` takes a `BorderView`'s 36 numbers;
+    `borderTexture(path)` decodes a registered border PNG onto the canvas;
+    `addBorder(rgba, width, height, style, options, instagram, film)`
+    borders an export's bytes as the CLI does (`add_border_with`), as
+    `Bordered` with `missing` (`docs/web-wasm.md` item 18);
   - `setInstance` and the panic hook, which broadcasts panics on
     `negs-engine-panic`;
   - `Rendered` carries the RGBA, backend, `elapsedMs`, `stages` and
@@ -278,7 +295,15 @@ SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_BACKEND=wgpu|cpu target/release/spektrafilm pr
     `<name>-canvas.ppm`; `?present=0` reads the bytes back instead;
   - `web/view.js`: the view (fit, zoom, pan and their gestures), in the
     stage's device pixels; `resize` keeps a placeholder's place when the
-    photograph's real size arrives;
+    photograph's real size arrives; `around` gives the canvas around the
+    photograph (a border's), which Fit fits (`canvasRect()`), and
+    `refresh()` lays it out again;
+  - `web/border.js`: the border's settings, styles and geometry
+    (`layout`, mirroring `border.rs`/`film35.rs`), the view's
+    `BorderView` numbers (`viewOf`) and the page canvas's drawing of it;
+    in `app.js`, "The border" section (`borderLayout`, the textures'
+    downloads, `sendBorderTexture`, `borderChanged`), `buildStyles` (the
+    style picker) and `exportRender` (render, then `addBorder`);
   - `web/placeholder.js`: what shows while a photograph opens (a RAW's
     camera preview, or the browser's decode), oriented as Linux
     `photo.rs`. `open(name, data, { early, quiet })` in `app.js` shows it

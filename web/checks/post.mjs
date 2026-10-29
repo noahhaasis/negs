@@ -66,7 +66,7 @@ export default async ({ evaluate }) => {
     const side = document.getElementById("side");
     const shown = [...document.querySelectorAll(".stock, .section")].filter((e) => e.offsetParent).map((e) => e.querySelector("h2")?.textContent ?? e.className);
     return { ...frameOf(negs.renders.at(-1)), pane: side.dataset.pane, tabs: [...document.querySelectorAll("#tabs button")].filter((b) => b.offsetParent).map((b) => b.textContent), visible: shown,
-      controls: [...document.querySelectorAll("#post-sections .ctl")].filter((e) => e.offsetParent).map((e) => e.querySelector(".label")?.textContent),
+      controls: [...document.querySelectorAll("#post-sections .ctl")].filter((e) => e.offsetParent).map((e) => e.querySelector(".label, label > span")?.textContent ?? e.querySelector("[aria-label]")?.getAttribute("aria-label")),
       footer: document.querySelector("#post-sections .footer")?.textContent };`);
   out.drags = {};
   for (const [label, values] of [["Brightness", [5, 15, 25, 35, 45]], ["Contrast", [10, 20, 30, 40]], ["Whites", [-5, -10, -15]], ["Blacks", [5, 10]], ["Saturation", [10, 20, 30, 40, 50]]]) {

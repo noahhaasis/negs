@@ -5,8 +5,8 @@ For the agent picking up the browser version of Negs. Read, in this order:
 `docs/web-wasm.md` (what exists, measurements, limits; items 14 to 17
 are the last four pieces), `docs/web-wasm-handoff.md` (code map, build,
 serve, tools, gotchas) and `docs/web-feature-inventory.md`. This file
-says where things stand and how to build piece 11, **Borders**, which is
-next. Short notes for pieces 9 and 10 follow it; notes for piece 5, which
+says where things stand and what to know for pieces 9 and 10, **Export
+LUT** and **Export Preset**, which are next; notes for piece 5, which
 comes later, are at the end.
 
 ## Where things stand
@@ -28,8 +28,8 @@ branch). Commits end with
 | 7. Placeholder Image, sample photo | `9d4f4b4` | done (item 15) |
 | 8. Before/After toggle (Show Original) | `3aa412c` | done (item 16) |
 | 15. Post: Tone and Color | `7ee6e80` | done (item 17) |
-| **11. Borders and Fit for Instagram** | | **next**: the Post tab's Border section; below |
-| 9. Export LUT | | after 11 |
+| 11. Borders and Fit for Instagram | (this commit) | done (item 18) |
+| **9. Export LUT** | | **next**; below |
 | 10. Export Preset | | after 9 |
 | 🛑 | | owner review of 7–11 and 15, after 10 |
 | 5. Colour management and output colour space | | after the review; notes at the end |
@@ -38,9 +38,9 @@ branch). Commits end with
 The owner asked for pieces 7–11 (their features) ahead of everything else
 left, so piece 5 moved after them. On 2026-10-29 they asked for the whole
 Post tab next: piece 15 (Tone and Color) is done, and its Border section
-is piece 11. Then 9 and 10, then one 🛑 review of them all. Carry on
-through 11, 9 and 10 unless the owner says otherwise; report at the end of
-each piece all the same.
+is piece 11, done too. Then 9 and 10, then one 🛑 review of them all.
+Carry on through 9 and 10 unless the owner says otherwise; report at the
+end of each piece all the same.
 
 What piece 7 settled with the owner, which later pieces shouldn't undo:
 
@@ -56,7 +56,10 @@ What piece 7 settled with the owner, which later pieces shouldn't undo:
 Open items that aren't yours to settle:
 
 - The owner's Cloudflare packager (`web/package-static.mjs`, uncommitted)
-  doesn't copy `web/sample/` yet; the owner knows.
+  doesn't copy `web/sample/` yet; the owner knows. At the owner's request
+  piece 11 made it copy `data/borders/` with its licences, and added the
+  border textures' and the font's licences to `web/credits.html`; both
+  stay uncommitted with the rest of the owner's work.
 - Nobody has opened the page on a real iPad or iPhone (ufw blocks ports
   8137 and 8443 from the LAN; the owner's call).
 
@@ -119,233 +122,32 @@ unstaged.
   (`tab: "Post"`); sections that share a tab keep their titles (`titled`).
   Sections take `controls`, optional `groups` and an optional `footer`.
 
-## Piece 11: Borders and Fit for Instagram
+## What piece 11 settled
 
-The Post tab's third section, after Tone and Color. Read the plan's piece 11
-first (`docs/web-mvp-plan.md`); this section settles its open points and
-says where things are.
+- **A border lives beside the edit** (`border` in `app.js`), never in
+  `state.params`, so it never reaches `look_key`, the film chain or Reset
+  Adjustments. A border change is `borderChanged()`: `sync()` and
+  `view.refresh()`, a display pass. Keep new display state that way.
+- **Geometry is `web/border.js`**, which mirrors `border.rs`/`film35.rs`;
+  change them together and rerun `web/checks/border.mjs` (its geometry
+  grid) and `web/checks/border-native.sh`.
+- **The view's canvas isn't the photograph any more.** `view.js` takes
+  `around`; `rect()` is still the photograph, `canvasRect()` the canvas.
+  Fitted, `renderSide` uses `fitZoom(true)` (the photograph alone), so a
+  bordered fitted frame is sampled, not 1:1. Checks that expect 1:1 at
+  fit (`zoom.mjs`, `post.mjs`, `original.mjs`) run without a border.
+- **The view uniform has a `BorderView` and binding 9** (the border
+  texture). Anything new in `fs_view` keeps them; WGSL reserves `patch`.
+- **Exports go through `exportRender()`** (render, then `addBorder` in the
+  worker). Pieces 9 and 10 don't change the image, so they don't touch it.
+- **Memory:** a 24 MP 35mm export with Instagram peaks at 2.4 GB of wasm
+  memory (item 18); count it in piece 6's budgets.
+- **Data entry points take loaders.** `add_border_with` and
+  `Strip::load_with` take `&dyn Fn(&str) -> Result<DynamicImage>`; the
+  wasm side's `load_data_image` reads `data_fs`, so a missing file comes
+  back in `missing`. Pieces 9 and 10 can follow the same pattern.
 
-### What desktop does (macOS is the reference)
-
-`macos/Sources/NegsApp/Inspector.swift` `post`, the `Section("Border")`:
-
-- **Add border** (toggle; everything below is disabled while it's off).
-- **Style picker**: four drawn swatches, Solid, Keyline, Film, 35mm
-  (`BorderStylePicker`, `BorderSwatch` in `Border.swift`; their help texts
-  are `BorderStyle.help`). The swatches use the current mat and line
-  colours. 35mm is disabled when the photograph isn't 3:2 or 3:4
-  (`FilmFormat`, within 1%), with the note "35mm needs a 3:2 or 3:4
-  photograph. This one is 16:9; crop it to 3:2 or 4:3 to use it."
-  (`Inspector.ratio` names the ratio). The web has no crop yet: keep the
-  note's first two sentences and drop the advice to crop.
-- **Per style** (`borderControls`): Solid: Width (0–15%, step 0.1) and
-  Color. Keyline: Width, Line width (0.05–2%, step 0.05), Color, Line
-  color. Film: Width (0–15%, step 0.1; help "Adds black around the film
-  frame."). 35mm: nothing.
-- **Extend to 3:4 for Instagram** (help: "Adds white above and below, or
-  at the sides, so Instagram shows the whole photograph in a 3:4 portrait
-  post.") and **Include in export** (help: "Adds the border to exported
-  photographs and saved previews.").
-- `BorderSettings` defaults: off, Solid, export on, Instagram off, width
-  0.03, film width 0, line 0.004, colour `#ffffff`, line colour `#000000`.
-  Widths are fractions of the photograph's long edge; the sliders show
-  percent. Solid and Keyline share the width and the colour.
-- **The border isn't part of the edit's params.** Reset Adjustments keeps
-  it (macOS `reset`, and the button's help text). A border change never
-  renders: on macOS it only lays out layers.
-
-Linux and Windows have the same section (`linux/src/border_ui.rs`,
-`windows/src/ui/inspector.rs` `BorderToggle`); follow macOS where they
-differ, and note it.
-
-### Settled for this piece (2026-10-29)
-
-The first point was put to the owner on 2026-10-29, who didn't object; if
-they say otherwise in review, the preview's textures change, not the rest.
-
-- **The preview follows desktop's textures, not the export's.** macOS
-  previews the 120 frame as a nine-patch of `film.png` and the 35mm strip
-  as the pre-rendered `35mm/{full,half}/<film>.png` (100 px/mm, no grain,
-  downsampled to 4096 px), while the exporter draws the strip at the
-  export's resolution (`film35::Renderer`). So the 35mm preview at 100%
-  won't match the export pixel for pixel, and the 120 frame may differ
-  slightly in its alpha edge. The plan's "preview at 100% matches the
-  export" holds exactly for **Solid, Keyline, the Instagram extension and
-  where the photograph sits**; for Film and 35mm, check the geometry and
-  look at screenshots.
-- **The photograph's pixels can't be byte-identical to the CLI's**: the
-  web's own render already differs from native within 1/255 on about
-  0.01% of pixels (item 13). Read the plan's "exports byte-identical to
-  the CLI's" as: (1) the export's size and the photograph's offset equal
-  the CLI's for every style, with and without Instagram; (2) the border's
-  pixels equal `add_border` (and `extend_for_instagram`) run natively on
-  the web's own unbordered export; (3) against the CLI's bordered export,
-  item 13's agreement. Say what differs where the film and 35mm textures
-  blend over the photograph (see Export below).
-
-### Where the code is
-
-- **Geometry and export**: `crates/spektrafilm-io/src/border.rs`
-  (`add_border`, `margin`, `keyline_width`, `film_geometry`,
-  `instagram_canvas`, `extend_for_instagram`, `FilmFormat`, the nine-patch
-  in `overlay_nine_patch`/`axis`) and `film35.rs` (`Strip::load`, `canvas`,
-  `turned`, `window`, `Renderer`; the edge print per stock is a table
-  there, `STOCKS`). The native order, which the web should keep: render,
-  Post, (crop, rotate: not on the web yet), border, Instagram, resize
-  (`spektrafilm-native` `main.rs` around line 300; CLI flags `--border`,
-  `--border-width`, `--border-color`, `--keyline-width`,
-  `--keyline-color`, `--instagram` in `spektrafilm-cli`).
-- **Preview geometry**: `Border.swift` mirrors border.rs
-  (`canvas(for:)`, `instagramCanvas`, `keyline`, `BorderStyle.film(for:)`,
-  `FilmStrip.canvas/turned`, and `BorderLayers.layout`, which says what's
-  drawn where: the canvas's background is the mat's colour, or black
-  around film, or white under Instagram's extension around film).
-- **Textures**, `data/borders/` (see its README and licences):
-  `film.png` 2518 × 1550, 170 KB, MIT; `35mm/material.png` 4750 × 4375,
-  498 KB, the export's dust and base density; `35mm/frames.json`, the
-  window as fractions; `35mm/full/<film>.png` 3800 × 3500 (≈ 430 KB) and
-  `35mm/half/<film>.png` 1900 × 3500 (≈ 280 KB), the preview strips,
-  `generic.png` for films without an edge print. Both 35mm sets are
-  CC BY-SA 4.0. The export's 35mm font (`BarlowCondensed-SemiBold.ttf`,
-  107 KB, OFL) is `include_bytes!`'d into `spektrafilm-io`, so the wasm
-  grows by at least that once `add_border` is linked: measure the
-  module's size before and after.
-- **The web side**: `web/view.js` (the view: `fitZoom`, `clamp`, `rect()`
-  is where the photograph is drawn), `fs_view` in
-  `crates/spektrafilm-shaders/wgsl/display_present.wgsl` and its `View`
-  uniform (`WgpuBackend::encode_view`, `View::place`, `Engine::show` in the
-  wasm crate), `paint()` in `web/app.js` (the page's own canvas: the CPU
-  engine, the placeholder, an unpresented frame), `exportJpeg` in
-  `app.js`, `download` in `app.js` (fetch with progress), and
-  `POST_SECTIONS`/`buildControls` (sections) in `controls.js`/`app.js`.
-
-### How to build it
-
-**1. Settings and controls.** Keep a `border` object in the page beside
-`state` (not in `state.params`), with macOS's fields and defaults. The
-controls bind to `state.params` paths today (`binding(c)`); add a kind of
-binding for border fields (sliders showing percent of a fraction, as
-`borderSlider` does; `<input type="color">` gives `#rrggbb` sRGB, which is
-what the exporter takes). The style picker is new UI: four buttons with
-small drawn swatches (CSS or inline SVG) after macOS's, `aria-pressed`,
-disabled with the note when 35mm doesn't fit. Add the section to
-`POST_SECTIONS` (`tab: "Post"`, title "Border") so it lands on the Post
-pane and the phone's Post tab. A border change calls the view's change
-path (a display pass), never `schedule()`. Check the section at desktop
-and phone sizes (`SHOT=`, `VIEW=390x844@3m`), and that the picker's
-buttons are big enough to tap.
-
-**2. Geometry in one place on the page.** Write `web/border.js` mirroring
-`Border.swift`'s geometry (canvas, Instagram canvas, keyline, film inset
-and nine-patch pad, the strip's canvas and turn, from `frames.json`), as
-macOS mirrors border.rs. Prove it against the engine: for a grid of
-photograph sizes (landscape, portrait, square, 3:2, 3:4, odd sizes, 1 px
-edges) and every style and Instagram, the canvas size and the
-photograph's offset equal what `add_border`/`extend_for_instagram`
-produce (`web/node-test.mjs` runs the wasm engine in Node; or a native
-test that prints the sizes for the page to compare).
-
-**3. The view fits the canvas.** `view.js` places a photograph today. Give
-it the bordered canvas's size and the photograph's offset in it:
-`fitZoom` and `clamp` use the canvas (with Instagram, the whole 3:4);
-`rect()` stays the photograph's rectangle (the engine's `show`, `paint`,
-`renderSide` and the checks rely on it); add `canvasRect()`. 100% is still
-one photograph pixel per device pixel. Turning the border on or off, or
-changing its width, re-fits a fitted view and keeps a zoomed one's centre.
-
-**4. The preview in the display pass** (the plan: "a border change is a
-`show()`"). Extend `View` (Rust `View`, the `View` WGSL uniform,
-`Engine::show`'s arguments, `sendView`/`viewKey` in `app.js`) with the
-canvas rectangle and the border: style, mat colour, line rectangle and
-colour, the Instagram fill, and for the textures their placement. In
-`fs_view`, per device pixel: page background outside the canvas; inside
-it the Instagram fill, then the mat (or black), the keyline ring, the
-photograph (shown or original, sampled as today), then the texture over
-everything with its alpha (the 120 frame overlaps the photograph's edge;
-the strip covers all but its window). The textures: upload `film.png` or
-the film's strip once per choice, with mip levels (the shown images'
-`fs_mip` pass makes them), and bind a 1 × 1 texture when there's none.
-The nine-patch: corners keep `pad` canvas pixels (`film_geometry`), edges
-and centre stretch, laid out landscape and turned for portrait, as
-`BorderLayers.layout` does. The strip: scaled so its window covers the
-photograph, turned when `turned`. Show Original keeps the border (macOS
-does). The page's own `paint()` draws the same with 2D canvas calls
-(`fillRect`; nine `drawImage`s for the nine-patch; a rotated `drawImage`
-for the strip) for the CPU engine; the placeholder may skip it. The
-canvas outside the photograph is then no longer `BACKGROUND`, so check
-`zoom.mjs` and `original.mjs`, which compare inside the photograph only.
-
-**5. Fetching textures.** Nothing on the first load (piece 7's rule):
-fetch `film.png` when Film is chosen and the film's strip (on 404,
-`generic.png`) when 35mm is chosen, with progress through `download`, and
-keep them for the session. A film change with 35mm on fetches that film's
-strip. Show the border once its texture is there; until then, the
-canvas with no texture (macOS shows the photograph alone until the strip
-loads).
-
-**6. Export.** In the worker, after the `Rgba8` render (which has Post):
-a new wasm entry point takes the bytes and the border, makes an
-`ImageBuf` of the encoded sRGB values (byte / 255; `Encoding` sRGB,
-encoded), runs `add_border` and, with Instagram, `extend_for_instagram`,
-and rounds back to bytes. "Include in export" off skips it.
-- `add_border` and `Strip::load` read their textures with `image::open`
-  from a `data_dir`. `spektrafilm-io` can't use `spektrafilm_core::data_fs`
-  (core depends on io), so split them: a variant that takes the decoded
-  textures (or a loader closure), with the path functions as thin
-  wrappers so native output doesn't change. The wasm side reads the bytes
-  with `data_fs::read` under `/data/borders/...`, so a missing texture
-  comes back in `missing` and `engine.js` fetches it and calls again, as
-  renders do. The export also needs `35mm/material.png`.
-- The native exporter borders the float scan before quantising; the web
-  borders 8-bit bytes. Inside the photograph and in flat border areas the
-  two agree exactly; where the 120 frame's alpha edge or the strip blends
-  over the photograph, expect at most one step. Measure and report it.
-- Memory: at 24 MP the bytes become a 288 MB `ImageBuf` (f32), the
-  bordered copy is larger, Instagram larger again, and the output bytes
-  follow. Measure the wasm memory's high-water mark on the ARW for 35mm
-  with Instagram against the 4 GB cap (and note it for piece 6's
-  budgets). If it's too much, border the bytes directly instead of going
-  through floats.
-- Name the file as today; the JPEG still comes from the `OffscreenCanvas`.
-
-### Done when
-
-- Every style, with and without Instagram, on the card (2752 × 1536,
-  16:9: 35mm is disabled), the ARW (4000 × 6000, 3:2) and a 3:4 photograph
-  (make one in `web/results/` with `magick`, e.g. a 3:4 crop of the card):
-  the export's size and offset equal the CLI's, its border equals native
-  `add_border` on the same unbordered bytes, and the whole file agrees
-  with the CLI's within item 13's tolerance.
-- The canvas at 100% matches the export pixel for pixel for Solid,
-  Keyline and Instagram (a `compareCanvas` over the whole canvas, not only
-  the photograph); Film and 35mm sit where the export puts them
-  (screenshots at fit and 100%, landscape and portrait).
-- Any border change is display passes only: no new entry in
-  `negs.renders` (a `negs.border(settings)` hook for checks, like
-  `negs.edit`). Times in a table, desktop and phone.
-- Textures download only when chosen, with progress, and once.
-- Native output unchanged: the CLI with each `--border` style, with and
-  without `--instagram`, byte-identical before and after the
-  `spektrafilm-io` split; `cargo check --workspace --all-targets` and the
-  core, gpu, math, model, io and spektrafilm-native tests pass.
-- `post.mjs`, `zoom.mjs`, `original.mjs`, `placeholder.js`, `touch.mjs`
-  and `inspector.js` still pass; a new `web/checks/border.mjs` covers the
-  above.
-- `docs/web-wasm.md` item 18, the feature inventory's Borders row, and
-  this handoff updated for pieces 9 and 10.
-
-### For the owner, not for you to change
-
-- **Licences.** The textures' licences (`film.png` MIT, the 35mm material
-  and strips CC BY-SA 4.0 with the attribution in `data/borders/README.md`,
-  the font OFL) belong on the credits page, which is the owner's
-  uncommitted `web/credits.html`. Don't edit it; list what it needs in
-  your report.
-- The owner's packager (`web/package-static.mjs`, uncommitted) copies
-  `data/profiles`, `data/filters` and the spectral LUTs, not
-  `data/borders/`. Say so in the report.
-
-## Pieces 9 and 10 (after 11)
+## Pieces 9 and 10 (next)
 
 - **Engine entry points that read the data directory.**
   `lut_export::cube` (piece 9) and `presets::export`/`import` (piece 10)
