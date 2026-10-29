@@ -3866,6 +3866,7 @@ dependencies = [
  "getrandom 0.3.4",
  "image",
  "js-sys",
+ "rayon",
  "serde_json",
  "spektrafilm-core",
  "spektrafilm-gpu",

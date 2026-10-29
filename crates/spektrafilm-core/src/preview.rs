@@ -6,6 +6,54 @@ use spektrafilm_io::encoding::Encoding;
 use spektrafilm_math::colorspace::{self, RgbColourspace, SRGB};
 use spektrafilm_math::precision::{from_f32, to_f32};
 
+/// Largest exact CPU diffusion FFT buffer required by this edit. The camera
+/// and print filters run in sequence. Query the model's PSF so this follows
+/// its family, sizes, physical sampling, and no-op rules without duplicating
+/// the filter tables. Browser callers use this before allocating a frame.
+pub fn cpu_diffusion_fft_buffer_bytes(params: &RuntimeParams, width: u32, height: u32) -> u64 {
+    let pitch = crate::stages::filming::pixel_size_um(params.camera.film_format_mm, width, height);
+    [
+        Some(&params.camera.diffusion_filter),
+        (!params.io.scan_film).then_some(&params.enlarger.diffusion_filter),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|filter| filter.active)
+    .filter_map(|filter| {
+        spektrafilm_model::diffusion::diffusion_psf_spec(&filter.to_model(), pitch as f64, width, height)
+    })
+    .map(|spec| spektrafilm_math::fft_conv::reflect_fft_buffer_bytes(height as usize, width as usize, spec.radius))
+    .max()
+    .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod diffusion_memory_tests {
+    use super::*;
+
+    #[test]
+    fn measures_the_ipad_export_allocation_without_allocating_it() {
+        let mut params = RuntimeParams::default();
+        params.camera.film_format_mm = 4.0;
+        params.camera.diffusion_filter.active = true;
+        params.camera.diffusion_filter.spatial_scale = 3.0;
+        params.camera.diffusion_filter.bloom_size = 3.0;
+        assert_eq!(cpu_diffusion_fft_buffer_bytes(&params, 6240, 4160), 2_916_000_000);
+        assert!(cpu_diffusion_fft_buffer_bytes(&params, 1512, 1008) < 512 * 1024 * 1024);
+        params.camera.diffusion_filter.strength = 0.0;
+        assert_eq!(cpu_diffusion_fft_buffer_bytes(&params, 6240, 4160), 0);
+    }
+
+    #[test]
+    fn print_diffusion_is_only_budgeted_when_printing() {
+        let mut params = RuntimeParams::default();
+        params.enlarger.diffusion_filter.active = true;
+        assert!(cpu_diffusion_fft_buffer_bytes(&params, 6240, 4160) > 0);
+        params.io.scan_film = true;
+        assert_eq!(cpu_diffusion_fft_buffer_bytes(&params, 6240, 4160), 0);
+    }
+}
+
 /// What a built [`crate::pipeline::Pipeline`] can't change: the params its
 /// calibration reads. The enlarger's M/Y shifts, preflash and print exposure
 /// normalization aren't here: [`crate::pipeline::Pipeline::with_params`]

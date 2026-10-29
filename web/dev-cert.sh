@@ -35,7 +35,14 @@ fi
 # This machine's names and addresses: localhost, <hostname>.local and every
 # private IPv4 address it has now.
 alt="DNS:localhost,DNS:$(hostname).local,IP:127.0.0.1"
-for ip in $(ip -4 -o addr show scope global | awk '{ split($4, a, "/"); print a[1] }'); do
+for ip in $(node --input-type=module -e '
+  import { networkInterfaces } from "node:os";
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) console.log(address.address);
+    }
+  }
+'); do
   case "$ip" in 10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) alt+=",IP:$ip" ;; esac
 done
 

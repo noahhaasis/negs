@@ -339,6 +339,10 @@ pub struct WgpuBackend {
     /// Buffers the chain being encoded made for itself (see `transient`).
     #[cfg(target_arch = "wasm32")]
     transient: std::sync::Mutex<Vec<wgpu::Buffer>>,
+    /// The most a diffusion filter's FFT grid may take, in bytes, 0 for no
+    /// limit: past it the glow is made from a smaller copy of the image
+    /// (`set_diffusion_grid_budget`).
+    diffusion_grid_budget: std::sync::atomic::AtomicU64,
 }
 
 /// Frees `buffer`'s memory now in browsers. There, dropping a buffer does
@@ -512,6 +516,10 @@ impl WgpuBackend {
             resident_inputs: std::sync::Mutex::new(Vec::new()),
             #[cfg(target_arch = "wasm32")]
             transient: std::sync::Mutex::new(Vec::new()),
+            // SPEKTRAFILM_DIFFUSION_GRID_BUDGET (bytes) tries a limit natively.
+            diffusion_grid_budget: std::sync::atomic::AtomicU64::new(
+                std::env::var("SPEKTRAFILM_DIFFUSION_GRID_BUDGET").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+            ),
             #[cfg(target_arch = "wasm32")]
             canvas: std::sync::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
@@ -1531,6 +1539,7 @@ impl WgpuBackend {
                 image.height,
                 &buf_b,
                 &scratch,
+                &mut |label, bytes| images.buffer(&self.device, &format!("camera_{label}"), bytes, wgpu::BufferUsages::STORAGE),
                 self,
             )
         });
@@ -1665,6 +1674,7 @@ impl WgpuBackend {
                         image.height,
                         &buf_b,
                         &scratch,
+                        &mut |label, bytes| images.buffer(&self.device, &format!("enlarger_{label}"), bytes, wgpu::BufferUsages::STORAGE),
                         self,
                     )
                 });
@@ -2607,6 +2617,15 @@ impl WgpuBackend {
 
     /// Free what the GPU keeps of the photograph: its shown images, its
     /// original and its inputs, before another opens (see `release`).
+    /// Limit a diffusion filter's FFT grid to `bytes` (0: no limit). A
+    /// larger one convolves the image shrunk by the smallest whole factor
+    /// that fits and blends the glow back at full size: for a device short
+    /// of memory, where the exact grid, several times the image, doesn't fit.
+    /// The narrowest parts of the glow soften a little.
+    pub fn set_diffusion_grid_budget(&self, bytes: u64) {
+        self.diffusion_grid_budget.store(bytes, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn forget_photograph(&self) {
         if let Some(canvas) = self.canvas.lock().unwrap().as_mut() {
             for shown in canvas.shown.drain(..).chain(canvas.original.take()) {
@@ -4530,25 +4549,35 @@ fn build_diffusion_state(
     height: u32,
     buf_b: &wgpu::Buffer,
     scratch: &[wgpu::Buffer],
+    grid: &mut dyn FnMut(&str, u64) -> wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> DiffusionState {
     let psf = &plan.psf;
-    let r = psf.radius;
-    let n1 = fft_size(height + 2 * r);
-    let n2 = fft_size(width + 2 * r);
+    let (full_w, full_h) = (width, height);
+    // Its grid two complex planes and a real one: 20 bytes a cell. Past the
+    // backend's budget, the image is shrunk k times for the convolution and
+    // the glow drawn back at full size (fft_conv.wgsl's modes 5 and 6).
+    let size_at = |k: u32| {
+        let (w, h) = (full_w.div_ceil(k), full_h.div_ceil(k));
+        let r = psf.radius.div_ceil(k).min(w.min(h).saturating_sub(1));
+        (w, h, r, fft_size(h + 2 * r), fft_size(w + 2 * r))
+    };
+    let budget = backend.diffusion_grid_budget.load(std::sync::atomic::Ordering::Relaxed);
+    let fits = |k: u32| {
+        let (.., n1, n2) = size_at(k);
+        budget == 0 || n1 as u64 * n2 as u64 * 20 <= budget
+    };
+    let k = (1..=16).find(|&k| fits(k)).unwrap_or(16);
+    let (width, height, r, n1, n2) = size_at(k);
     let n_grid = n1 as u64 * n2 as u64;
     let buf_mix = scratch[0].clone();
-    let mk = |label: &str, bytes: u64| {
-        backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: bytes,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        }))
-    };
-    let grid_a = mk("diffusion_fft_a", n_grid * 8);
-    let grid_b = mk("diffusion_fft_b", n_grid * 8);
-    let kspec = mk("diffusion_kspec", n_grid * 4);
+    // The FFT grids, several times the image, from the render's pooled
+    // buffers (`grid`): iOS Safari holds a destroyed buffer's memory until
+    // the garbage collector takes it, so new ones each render added up until
+    // the tab was killed.
+    let grid_a = grid("diffusion_fft_a", n_grid * 8);
+    let grid_b = grid("diffusion_fft_b", n_grid * 8);
+    let kspec = grid("diffusion_kspec", n_grid * 4);
     // exp(−2πi·m/n), m < n, in f64 then rounded.
     let twiddles = |n: u32| -> Vec<f32> {
         (0..n)
@@ -4567,12 +4596,14 @@ fn build_diffusion_state(
     };
     let tw1 = storage("diffusion_tw1", &twiddles(n1));
     let tw2 = storage("diffusion_tw2", &twiddles(n2));
+    // Each decay length in the grid's pixels; the kernel is normalized to
+    // unit sum, so the amplitudes keep their ratios as they are.
     let mut comps = vec![0.0f32; 3 * 16 * 2];
     for c in 0..3 {
         assert!(psf.components[c].len() <= 16, "diffusion PSF has more than 16 exponentials");
-        for (k, &(lambda, amp)) in psf.components[c].iter().enumerate() {
-            comps[(c * 16 + k) * 2] = lambda as f32;
-            comps[(c * 16 + k) * 2 + 1] = amp as f32;
+        for (i, &(lambda, amp)) in psf.components[c].iter().enumerate() {
+            comps[(c * 16 + i) * 2] = (lambda / k as f64) as f32;
+            comps[(c * 16 + i) * 2 + 1] = amp as f32;
         }
     }
     let comps_buf = storage("diffusion_psf_components", &comps);
@@ -4600,7 +4631,9 @@ fn build_diffusion_state(
         channel: u32,
         n_comp: u32,
         p_s: f32,
-        _pad: [u32; 3],
+        k: u32,
+        full_h: u32,
+        full_w: u32,
     }
     let mut owned = vec![grid_a.clone(), grid_b.clone(), kspec.clone(), tw1.clone(), tw2.clone(), comps_buf.clone()];
     let mut job = |mode: u32, channel: u32, grid: &wgpu::Buffer| {
@@ -4614,7 +4647,9 @@ fn build_diffusion_state(
             channel,
             n_comp: psf.components[channel as usize].len() as u32,
             p_s: plan.p_s,
-            _pad: [0; 3],
+            k,
+            full_h,
+            full_w,
         };
         let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("diffusion_fft_conv_params"),
@@ -4634,7 +4669,11 @@ fn build_diffusion_state(
             ],
         });
         owned.push(params_buf);
-        let threads = if mode == 4 { width * height } else { (n_grid) as u32 };
+        let threads = match mode {
+            4 => width * height,
+            6 => full_w * full_h,
+            _ => n_grid as u32,
+        };
         (bg, linear_dispatch_grid(threads, pipeline.workgroup_size))
     };
     let grid = |in_a: bool| if in_a { &grid_a } else { &grid_b };
@@ -4652,17 +4691,17 @@ fn build_diffusion_state(
             psf: job(0, c, &grid_a),
             kernel_fft,
             kspec: job(1, c, grid(k_in_a)),
-            pad: job(2, c, &grid_a),
+            pad: job(if k > 1 { 5 } else { 2 }, c, &grid_a),
             image_fft,
             mul: job(3, c, grid(x_in_a)),
             inverse_fft,
-            extract: job(4, c, grid(y_in_a)),
+            extract: job(if k > 1 { 6 } else { 4 }, c, grid(y_in_a)),
         });
     }
     DiffusionState {
         channels,
         pipeline,
-        n_full: width * height,
+        n_full: full_w * full_h,
         buf_mix,
         _owned: owned,
     }
@@ -6216,7 +6255,7 @@ mod grain_tests {
     }
 
     /// The Metal threadgroup query must agree with what Apple GPUs are known
-    /// to run: every shader's default size. (The earlier single-pass grain shader
+    /// to run: each single-entry compute shader's default size. (The earlier single-pass grain shader
     /// could not run 1024 threads, hence grain's default of 256; the
     /// per-sub-layer shader that replaced it can, and keeps 256.)
     #[cfg(target_os = "macos")]
@@ -6237,6 +6276,13 @@ mod grain_tests {
         for path in paths {
             let source = std::fs::read_to_string(&path).unwrap();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            // This query mirrors the single `main` compute pipeline helper.
+            // Display shaders also contain render/multiple named entries,
+            // which use their own pipeline layouts and are not this helper.
+            let module = wgpu::naga::front::wgsl::parse_str(&source).unwrap();
+            if !matches!(module.entry_points.as_slice(), [entry] if entry.stage == wgpu::naga::ShaderStage::Compute && entry.name == "main") {
+                continue;
+            }
             let entries = layout_from_wgsl(&source);
             let declared = declared_workgroup_size(&source);
             let limit = metal_threadgroups::max_threads(&device, &source, &entries, declared)
@@ -6845,7 +6891,10 @@ mod grain_tests {
             let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
             let img = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("img"), contents: bytemuck::cast_slice(&data), usage });
             let scratch = vec![backend.device.create_buffer(&wgpu::BufferDescriptor { label: Some("s"), size: (w * h * 12) as u64, usage, mapped_at_creation: false })];
-            let state = build_diffusion_state(&backend.device, &plan, w as u32, h as u32, &img, &scratch, &backend);
+            let mut grid = |label: &str, size| {
+                backend.device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false })
+            };
+            let state = build_diffusion_state(&backend.device, &plan, w as u32, h as u32, &img, &scratch, &mut grid, &backend);
             let got = run_and_read(&backend, &img, w * h * 12, |e| state.encode_passes(e, &img));
             let k = 2 * r + 1;
             let mut worst = 0.0f64;

@@ -10,7 +10,7 @@
 import { createServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { readFileSync } from "node:fs";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, appendFile, mkdir } from "node:fs/promises";
 import { join, extname, normalize, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -28,11 +28,30 @@ const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/ja
 
 async function serve(req, res) {
   const url = new URL(req.url, "http://x");
+  // A device reload must use the JS and WASM from the same local build.
+  res.setHeader("Cache-Control", "no-store");
   // Cross-origin isolation, which SharedArrayBuffer (wasm threads) needs.
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
-  // Revalidate every file, so a tab never mixes a rebuild's files with older ones.
-  res.setHeader("Cache-Control", "no-cache");
+  // An on-device test logs before every action, so a tab termination leaves
+  // its last action on the Mac even when the USB debugger disconnects.
+  if (req.method === "POST" && url.pathname === "/device-log") {
+    const run = url.searchParams.get("run") ?? "";
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(run)) return res.writeHead(400).end();
+    const chunks = [];
+    let length = 0;
+    for await (const chunk of req) {
+      length += chunk.length;
+      if (length > 1024 * 1024) return res.writeHead(413).end();
+      chunks.push(chunk);
+    }
+    let record;
+    try { record = JSON.parse(Buffer.concat(chunks).toString()); } catch { return res.writeHead(400).end(); }
+    if (!record || typeof record !== "object" || Array.isArray(record)) return res.writeHead(400).end();
+    await mkdir(join(web, "results"), { recursive: true });
+    await appendFile(join(web, "results", `device-${run}.jsonl`), JSON.stringify({ ...record, receivedAt: new Date().toISOString() }) + "\n");
+    return res.end("ok");
+  }
   if (req.method === "POST" && url.pathname === "/result") {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -79,4 +98,5 @@ async function serve(req, res) {
 const server = https
   ? createSecureServer({ key: readFileSync(join(certs, "server.key")), cert: readFileSync(join(certs, "server.crt")) }, serve)
   : createServer(serve);
-server.listen(port, () => console.log(`${https ? "https" : "http"}://localhost:${port}/`));
+const bind = process.env.NEGS_DEV_HOST;
+server.listen(port, bind, () => console.log(`${https ? "https" : "http"}://${bind ?? "localhost"}:${port}/`));

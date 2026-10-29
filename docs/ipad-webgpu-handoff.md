@@ -16,10 +16,9 @@ The commit that adds this handoff also fixes two engine-switch races in
 not pushed. Results and the fix are written up in
 `docs/apple-device-testing.md`, section "Physical iPad WebGPU runs".
 
-**The open problem:** memory builds up across engine lifetimes in one Safari
-tab until WebGPU fails with `Out of memory`. Closing the tab recovers. This is
-the most promising lead for the iPhone's automatic reloads, but it is not
-confirmed.
+**Update:** the memory build-up across engines is found and fixed (uncommitted;
+see "Cause and fix" below). A separate WebContent crash in Safari's Wasm
+compiler is now the leading lead for the iPhone's reloads.
 
 ## Device and connection
 
@@ -119,25 +118,110 @@ navigated pages apparently don't release that memory promptly within the same
 tab or WebContent process. `negs.engineInstances()` counts engines started,
 not live ones.
 
-Suggested next steps:
+### Cause and fix (later the same day, uncommitted)
 
-1. Measure: in a fresh tab, switch engines N times slowly, or navigate N times
-   and open the RAW each time, until it fails. Record N for each pattern, and
-   whether waiting (seconds to minutes) helps.
-2. Check whether the GPU engine destroys its `GPUDevice`/buffers before the
-   worker is terminated. `kill()` in `web/app.js` just calls
-   `worker.terminate()`; a graceful `dispose` call (destroy device and buffers,
-   drop the source) before terminating may release memory sooner. See the
-   buffer lifetimes in `crates/spektrafilm-gpu/src/wgpu_backend.rs` and
-   `Engine.load`/`source_at` in `crates/spektrafilm-wasm/src/lib.rs`.
-3. Relate it to the iPhone: its two reloads happened with **one** engine
-   instance, so retained memory across engines doesn't explain them directly.
-   It does show the GPU path's memory headroom is thin. Measuring per-engine
-   GPU allocation and comparing it against the 6 GB phone remains open.
-4. Not yet done on iPadOS 26: forced CPU (`?backend=cpu`) and `?threads=0`
-   comparisons. The outer Wi-Fi runner still doesn't forward these parameters
-   to its iframe; the `safari.mjs` route navigates directly, so it can pass
-   them.
+With Developer Mode on, `pymobiledevice3 developer dvt sysmon process single`
+samples per-process memory over USB (no tunnel needed on this iPad). A
+sampler logged every WebKit process to `target/ipad26-tests/memory.jsonl`
+while a script switched engines slowly (CPU, settle, GPU, settle, ...):
+
+- **Threaded build, before the fix:** WebContent's footprint grew about 1 GB
+  per engine (1456, 2434, 3653 MiB) and never dropped while idle; the fourth
+  engine's worker died at start and the page showed `Out of memory`. The GPU
+  process stayed near 20 MiB, so this is WASM memory, not WebGPU buffers.
+- **`?threads=0`:** flat at about 1.2 GB through 9 engines.
+- **Terminating rayon's pool workers** before the engine worker (a `dispose`
+  message): no change. The page can't reach them; `worker.js` now records
+  the workers the pool makes and ends them itself.
+- **Terminating them and then waking them** (`wakeThreadPool`, a
+  `rayon::spawn_broadcast` of an empty job): flat at 1.2 to 1.5 GB through
+  17 engines in one tab. Idle pool threads wait in `memory.atomic.wait`; the
+  likely mechanism is that Safari doesn't end a terminated worker parked
+  there, so the shared memory stays referenced until the tab closes.
+  Lifecycle and smoke pass with the fix.
+
+The fix is in `web/worker.js` (pool tracking, `dispose`), `kill()` in
+`web/app.js` (sends `dispose`, terminates after 10 s if the worker is still
+busy), and `wakeThreadPool` in `crates/spektrafilm-wasm` (lib.rs, Cargo.toml:
+`rayon` under the `threads` feature). `web/pkg*` were rebuilt with
+`PATH=$PWD/target/ipad-tools/bin:$PATH bash web/build.sh --threads`. That
+build also picked up the working tree's other uncommitted Rust changes.
+
+### New: WebContent crashes in JSC's Wasm tier-up
+
+Three WebContent crashes, all `EXC_BREAKPOINT` (PAC exception) on the "Wasm
+Worklist Helper Thread" in `JSC::Wasm::CalleeGroup::installOptimizedCallee`
+from `BBQPlan::work()`: Safari's background compiler installing optimized
+code, not memory. Reports: `target/ipad26-tests/crashes/com.apple.WebKit.WebContent-*.ips`
+(`pymobiledevice3 crash pull`). In Safari a WebContent crash shows as a page
+reload, which is **what the iPhone did**; its reports were never pulled.
+
+- All three fell within 4 minutes right after the reboot that enabled
+  Developer Mode (14:45 to 14:49 UTC); none in 13 sessions after.
+- One happened with a **single engine** while opening the RAW, so it doesn't
+  need an engine teardown. The other two were during switches, with the fix
+  or `dispose` alone.
+- Tally: wake fix 2 of 5 runs crashed (both early), `dispose` without wake 1
+  of 4, the pre-session code 0 of 3 (it fails with the leak instead).
+
+Next steps:
+
+1. Pull the iPhone's crash reports when it's connected
+   (`pymobiledevice3 crash ls`/`pull --udid 00008110-000240403AD1801E`) and
+   look for this signature at its reload times. If it matches, the iPhone
+   reloads are this JSC bug, not memory.
+   Done partly: the owner AirDropped the phone's 2026-10-29 reports. Today
+   had only one event, five `ExcUserFault_com.apple.WebKit.GPU` files from
+   10:45:18 +0100 (simulated, non-fatal `EXC_GUARD`, coalition
+   `com.atebits.Tweetie2`, the X app's web view). It is unrelated, about three
+   hours before the reloads at 12:53:35Z and 12:54:19Z. The one
+   `JetsamEvent` (01:18:46 +0100) killed SpringBoard at its per-process
+   limit, also unrelated. No report covers the reloads, so neither the JSC
+   crash nor a memory kill is confirmed on the phone. Copies are in
+   `target/iphone-tests/crashes-2026-10-29/`.
+   Rerun on the phone with the leak fix (16:56 to 16:58 +0100, runs
+   `mvtq7hak`, `mvtq8svl`, `mvtq9m40` in `web/results/`): all three still
+   reloaded, twice during "rapid exposure inputs" in smoke and once in
+   extremes at the glimmerglass diffusion case. Each had **one engine**
+   (`engineInstances: 1`, WebGPU, 1044 MiB WASM), so the reloads don't need an
+   engine replacement and the leak fix can't address them. The owner's
+   `?threads=0` run actually ran 4 threads: the Wi-Fi runner dropped the
+   page's query when loading the app frame. `web/checks/ipad-runner.mjs` now
+   forwards `threads`, `backend` and `present`.
+   With that, smoke at 17:01 to 17:04 +0100: `?threads=0` (WebGPU, 1 thread,
+   run `mvtqd7xk`) reloaded in "rapid exposure inputs" as before;
+   `?backend=cpu` (4 threads, `mvtqg5bz`) passed. So threads and the JSC
+   tier-up crash are not needed; WebGPU is. The CPU run is not equal load
+   (4 s per frame, one interactive frame during the rapid inputs). No report
+   is written for these reloads, which fits WebKit ending WebContent itself
+   (e.g. over its memory limit) rather than jetsam or a crash; unconfirmed.
+   `?present=0` (WebGPU, 4 threads, the page draws the engine's bytes),
+   17:07 to 17:08: 2 of 4 runs passed smoke (`mvtqlq0c`, `mvtqmoi6`), and
+   2 reloaded while **opening** the RAW (`mvtqljgb`, `mvtqmfod`), not in the
+   rapid inputs. `mvtqmd8j` failed with "Can't find variable: negs": a Start
+   tapped while the previous run's frame was still loaded, a runner race,
+   not counted. So turning off presentation moves the reload rather than
+   removing it, which fits a footprint limit more than a presentation bug.
+   (`mvtqh4xc` stopped at startup, "Editor reloaded or lost its monitor", a
+   tap right after the CPU pass; not counted.)
+   **Confirmed over USB (19:20 to 19:34Z, Developer Mode on, logs in
+   `target/iphone-usb/`, syslog in `target/iphone-usb/syslog.txt`):** the
+   reload is the kernel killing WebContent at its per-process limit:
+   `killing_highwater_process pid 523 [com.apple.WebKit.WebContent]
+   (highwater 100 ...) 2718659KB` (about 2.6 GiB), which Safari logs as
+   `processDidTerminate: reason=Crash`. No jetsam report was written. That
+   process had served three navigations in one tab (`card.jpg` smoke, RAW
+   smoke, then the RAW open of the third), so memory from earlier pages in
+   the tab counts. In a fresh tab per run, RAW smoke plus extremes passed
+   3 of 3 (`usb6` to `usb8`; WASM memory 1044 MiB, against 126 MiB for
+   `card.jpg`). Next: sample WebContent's footprint per step (a mounted DDI
+   and `dvt sysmon`, or the syslog), then reduce the RAW's resident memory
+   (full-resolution GPU buffers, decoded copies) so one tab has headroom.
+2. Reproduce the tier-up crash on purpose: reboot, then run sessions
+   immediately. Compare fewer pool threads and `?threads=0`, since each pool
+   worker instantiates the same module.
+3. Report it to WebKit with the `.ips` files if it reproduces.
+4. Not yet done on iPadOS 26: forced CPU (`?backend=cpu`) comparisons.
 
 ## Evidence
 

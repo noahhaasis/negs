@@ -10,7 +10,7 @@ const [image, film, paper, maxDim, out, paramsFile] = process.argv.slice(2);
 
 await init({ module_or_path: readFileSync(join(here, "pkg/spektrafilm_wasm_bg.wasm")) });
 const engine = Engine.newCpu();
-engine.load(readFileSync(image), Number(maxDim));
+engine.load(readFileSync(image), Number(maxDim), 0);
 const params = paramsFile ? readFileSync(paramsFile, "utf8") : "";
 let rendered;
 for (;;) {
