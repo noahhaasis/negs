@@ -4,11 +4,17 @@
 #   web/bench.sh card-1200 'image=results/card.jpg&backend=gpu&max=1200&runs=8'
 # Needs web/serve.mjs running. Writes web/results/<name>.{json,ppm} (and
 # <name>-canvas.ppm when the frame was presented). A Chrome profile goes in
-# $BENCH_PROFILE (default: a temp dir); $BENCH_PAGE picks another page than index.html.
+# $BENCH_PROFILE (default: a temp dir, deleted when Chrome exits); $BENCH_PAGE
+# picks another page than index.html.
 set -euo pipefail
 web=$(cd "$(dirname "$0")" && pwd)
 name=$1 query=$2
-profile=${BENCH_PROFILE:-$(mktemp -d)}
+if [[ -n ${BENCH_PROFILE-} ]]; then
+  profile=$BENCH_PROFILE
+else
+  profile=$(mktemp -d)
+  trap 'pkill -f "^/opt/google/chrome/chrome .*$profile" || true; while pgrep -f "^/opt/google/chrome/chrome .*$profile" >/dev/null; do sleep 0.1; done; rm -rf "$profile"' EXIT
+fi
 rm -f "$web/results/$name.json"
 # x11: on Wayland, Vulkan breaks 2D canvas uploads. The binary directly: the
 # google-chrome-stable wrapper adds the user's flags.
