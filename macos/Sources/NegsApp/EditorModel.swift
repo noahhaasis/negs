@@ -59,6 +59,9 @@ import UniformTypeIdentifiers
     /// How the engine read the photograph's colours: the last render's
     /// `input_colour` (summary, automatic reading, warning).
     private(set) var inputColour: JSONValue = .null
+    /// Whether the last render's RAW decoder can apply the camera's lens
+    /// corrections to this photograph (`io.lens_correction`).
+    private(set) var lensCorrectionSupported = false
     private(set) var ready = false
     private(set) var rendering = false
     private(set) var previewCurrent = false
@@ -222,6 +225,9 @@ import UniformTypeIdentifiers
         self.catalog = catalog
         stocks = catalog["profiles"].array.map(Stock.init)
         defaults = catalog["defaults"]
+        // The engine leaves lens correction off for params from before it, so
+        // their crops keep their place; the app corrects every new edit.
+        defaults[Self.lensCorrectionPath] = .bool(true)
         // Keep anything already applied to the photograph, such as its rotation.
         let rotation = state.params["io.rotate_cw"]
         var next = state
@@ -595,7 +601,10 @@ import UniformTypeIdentifiers
         let generation = sourceGeneration
         if let session {
             var restored = session.state
+            let lensCorrection = restored.params[Self.lensCorrectionPath]
             restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
+            // A session from before lens correction was developed without it.
+            if lensCorrection == .null { restored.params[Self.lensCorrectionPath] = .bool(false) }
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = defaults[ImageSize.factorPath]
             if factor != .null { restored.params[ImageSize.factorPath] = factor }
@@ -606,6 +615,7 @@ import UniformTypeIdentifiers
             // How one file's colours are read never carries over to the next.
             let interpretation = defaults["io.input_interpretation"]
             if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
+            state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
             state.crop = CropSettings()
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
@@ -618,7 +628,7 @@ import UniformTypeIdentifiers
         // Try the exact developed frame before decoding the raw placeholder,
         // so a cache hit never flashes the unprocessed photograph.
         let snapshot = renderState, paths = engine?.paths, cache = previewCache
-        inputColour = .null
+        inputColour = .null; lensCorrectionSupported = false
         Task { [weak self] in
             if session != nil, let paths,
                let cached = await cache.load(source: url, state: snapshot, paths: paths) {
@@ -672,7 +682,15 @@ import UniformTypeIdentifiers
     /// Decodes the original ahead of a press, such as when the pointer
     /// reaches the button.
     func prepareOriginal() {
+        dropStaleOriginal()
         if canShowOriginal, originalCache == nil { loadOriginal() }
+    }
+
+    static let lensCorrectionPath = "io.lens_correction.enabled"
+    /// The original is framed like the developed image only with the same lens correction.
+    @ObservationIgnored private var originalLensCorrection = false
+    private func dropStaleOriginal() {
+        if originalLensCorrection != value(Self.lensCorrectionPath).bool { originalCache = nil }
     }
 
     /// Shows the original in place of the developed photograph while held.
@@ -693,6 +711,7 @@ import UniformTypeIdentifiers
         }
         guard !holdingOriginal else { return }
         holdingOriginal = true
+        dropStaleOriginal()
         if let cached = originalCache {
             if cached.makeNonVolatile() { original = cached; return }
             originalCache = nil
@@ -707,12 +726,14 @@ import UniformTypeIdentifiers
         // Never above the source's own resolution: Image Size can enlarge the preview.
         let sourceLong = Int(max(sourceSize.width, sourceSize.height))
         let raw = isRaw, maxPixels = sourceLong > 0 ? min(max(image.width, image.height), sourceLong) : max(image.width, image.height), generation = sourceGeneration
+        let lensCorrection = value(Self.lensCorrectionPath).bool
         originalLoad = Task { [weak self] in
             let surface = await Task.detached(priority: .userInitiated) {
-                OriginalImage.load(source, raw: raw, maxPixels: maxPixels)
+                OriginalImage.load(source, raw: raw, lensCorrection: lensCorrection, maxPixels: maxPixels)
             }.value
             guard let self, generation == self.sourceGeneration, !Task.isCancelled else { return }
             self.originalLoad = nil
+            self.originalLensCorrection = lensCorrection
             guard let surface else {
                 if self.holdingOriginal {
                     self.holdingOriginal = false
@@ -808,6 +829,7 @@ import UniformTypeIdentifiers
             updateFilmStrip()
             isRaw = result["raw"].bool
             if inputColour != result["input_colour"] { inputColour = result["input_colour"] }
+            lensCorrectionSupported = result["lens_correction_supported"].bool
             if revision == currentRevision, interactiveScale == nil {
                 renderID = id; previewCurrent = true; hideActivity()
                 showingCachedPreview = false

@@ -506,6 +506,10 @@ struct AdjustmentInspector: View {
                         control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
                     }
                 }
+                if model.lensCorrectionSupported {
+                    control(.toggle("Lens corrections", EditorModel.lensCorrectionPath))
+                        .help("Corrects distortion and vignetting with the data the camera recorded for its lens.")
+                }
             }
             groups(.camera)
         }

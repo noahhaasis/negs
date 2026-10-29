@@ -472,9 +472,10 @@ impl App {
             path,
             spektrafilm_io::Formats::Any,
             self.params.io.raw_white_balance,
+            self.params.io.lens_correction,
             &self.params.io.input_interpretation,
         ) {
-            Ok(spektrafilm_io::LoadedImage { image: img, colour }) => {
+            Ok(spektrafilm_io::LoadedImage { image: img, colour, .. }) => {
                 // The loader decodes to the engine's representation; tell the
                 // pipeline so it doesn't decode the values a second time.
                 self.params.io.apply_input_colour(&colour);

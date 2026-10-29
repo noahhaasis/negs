@@ -371,6 +371,7 @@ fn cmd_process(
         input,
         spektrafilm_io::Formats::Any,
         params.io.raw_white_balance,
+        params.io.lens_correction,
         &params.io.input_interpretation,
     )?;
     eprintln!("Input colour: {}", loaded.colour.summary);
