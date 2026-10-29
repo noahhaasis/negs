@@ -2,12 +2,11 @@
 
 For the agent picking up the browser version of Negs. Read, in this order:
 `docs/web-mvp-plan.md` (the pieces, their order and their "Done when"),
-`docs/web-wasm.md` (what exists, measurements, limits; items 14 and 15
-are the last two pieces), `docs/web-wasm-handoff.md` (code map, build,
+`docs/web-wasm.md` (what exists, measurements, limits; items 14 to 16
+are the last three pieces), `docs/web-wasm-handoff.md` (code map, build,
 serve, tools, gotchas) and `docs/web-feature-inventory.md`. This file
-says where things stand, and what the next piece, **8: Before/After**,
-touches and needs decided. Notes for piece 5, which comes later, are at
-the end.
+says where things stand and what pieces 9 to 11 touch. Notes for piece
+5, which comes later, are at the end.
 
 ## Where things stand
 
@@ -26,8 +25,8 @@ branch). Commits end with
 | 4. Enlarger shifts without a rebuild, Balance Print | `adcee97` | done (`docs/web-wasm.md` item 12) |
 | 6. Resident scan, zoom, true-resolution preview | `fc6322d` | done (item 14); approved |
 | 7. Placeholder Image, sample photo | `9d4f4b4` | done (item 15) |
-| **8. Before/After toggle** | | **next**; below |
-| 9. Export LUT | | owner's list |
+| 8. Before/After toggle (Show Original) | `3aa412c` | done (item 16) |
+| **9. Export LUT** | | **next**; notes below |
 | 10. Export Preset | | owner's list |
 | 11. Borders and Fit for Instagram | | owner's list; 🛑 owner review of 7–11 |
 | 5. Colour management and output colour space | | after 11; notes below |
@@ -35,7 +34,7 @@ branch). Commits end with
 
 The owner asked for pieces 7–11 (their features) ahead of everything else
 left, so piece 5 moved after them. Pieces 7–11 end at one 🛑 review, after
-piece 11, so carry on from 8 to 11 unless the owner says otherwise; report
+piece 11, so carry on from 9 to 11 unless the owner says otherwise; report
 at the end of each piece all the same.
 
 What piece 7 settled with the owner, which later pieces shouldn't undo:
@@ -74,129 +73,27 @@ git update-index --cacheinfo 100644,$(git hash-object -w <scratch>/index.html),w
 Then `git diff web/index.html` must show exactly those two lines left
 unstaged.
 
-## Piece 8: Before/After (Show Original)
+## What piece 8 settled
 
-The plan's text is under "8. Before/After toggle". What I found reading
-the desktop apps and the engine:
+- **The original is the engine's decoded source** (the helper's
+  `original`), as the owner chose: flat next to the film, unlike macOS's
+  Apple develop. Don't swap in the camera preview without asking.
+- **The canvas has a third image**, `Canvas.original`, counted in the
+  shown images' 256 MB budget; a `View` with `original` draws it. A new
+  display state (piece 11's border) has to draw on the original too, or
+  say why not: macOS's original keeps the border.
+- **The page's original is keyed by size only.** Piece 5 must add the
+  output colour space to that key, and fix the non-sRGB original's bytes
+  along with the frames' (item 16, last paragraph).
+- **The badge has two owners**: `setBadge` (opening: "Downloading",
+  "Developing") and `originalBadge` over it. Anything new that shows a
+  state in the badge picks one, or adds one to `showBadge`.
+- **A long job in the engine's worker blocks its display passes**, whose
+  fences resolve only when the worker yields. Piece 8's first CPU-made
+  24 MP original held a switch for 330 ms; the GPU path fixed it. Keep
+  that in mind for exports and LUTs (pieces 9–11): a pan during one stalls.
 
-### What desktop does
-
-- **macOS** (`macos/Sources/NegsApp/NegsApp.swift` `OriginalButton`, around
-  line 289; `EditorModel.swift` "MARK: Original", around line 670;
-  `EditorWindowController.swift` `holdOriginal`, around line 107):
-  - a button in the status bar, beside the zoom controls (line 278), with
-    the `square.split.diagonal.fill` symbol; held, it shows the original,
-    released, the developed photograph. Help text: "Hold to show the
-    original (\\)";
-  - holding `\` does the same, without Command or Control, not while
-    typing in a text field, ignoring key repeat;
-  - the decode starts when the pointer reaches the button
-    (`prepareOriginal` on hover), so the press usually shows it at once;
-  - the badge (`ActivityBadge`) says "Original" while it shows, and
-    "Loading Original" while held before the decode is done;
-  - `canShowOriginal`: there is a developed image and it isn't cropping;
-  - it decodes at the developed preview's resolution (never above the
-    source's), so it's as sharp at 100%; the canvas keeps the view, crop,
-    rotation and border;
-  - VoiceOver can't hold, so activating the button toggles it.
-- **Linux** has a toggling `original` action (`linux/src/actions.rs`
-  line 85, `runtime.rs` `show_original`); Windows a similar view.
-- **The helper's `original`** (`crates/spektrafilm-native/src/main.rs`,
-  `Command::Original`, around line 236), which Linux and Windows show:
-  the engine's decoded source (rawler's develop for a RAW, the file for a
-  JPEG), resampled to the preview size, encoded by `original_encoding`
-  (a linear-sRGB decode to the output space without its curve flag,
-  otherwise the stored values in the input space) and turned into bytes by
-  `display_rgba_with_post` with no Post.
-
-### Decide first: which original
-
-macOS's original is **Apple's RAW develop** (`Original.swift`,
-`CIRAWFilter`), a different look from the engine's. A browser has no such
-decoder. Two candidates:
-
-1. **The engine's source, as the helper's `original`** (Linux and Windows,
-   and what the plan says). Exact framing, any resolution, and it's what
-   the film simulation starts from. Its look is flat (rawler's develop,
-   no tone curve), so "before" can look dull next to the film.
-2. **The camera's embedded preview** (piece 7's placeholder): the camera's
-   own look, closest in spirit to macOS's, free, already decoded. But it's
-   1620 px or so (soft at 100%), absent for some files, and framed a
-   little differently (the ARW's is 0.25% narrower).
-
-I recommend 1, matching the plan, the helper and two of three desktop apps,
-and saying in the report that macOS differs and why. If you think 2 is
-better, ask the owner before building it.
-
-### How it could fit the code
-
-- **Engine (wasm).** A new `Engine.original(maxDim, present)` beside
-  `render` in `crates/spektrafilm-wasm/src/lib.rs`: take the loaded source
-  (`state.source`, a `Keyed` image; `state.input_colour` says whether it's
-  linear sRGB), resample it to the size of the developed frame on screen
-  (reuse the settled resample, `state.scaled`), encode it as
-  `original_encoding` does, and make the bytes with the same display
-  function the helper uses, so they compare within 1/255. Move
-  `original_encoding` (and `convert_linear`) from the helper into
-  `spektrafilm-core` or `spektrafilm-io` so both use one copy; the
-  helper's output must not change (render its `original` before and after
-  and compare the `.rgba` files).
-- **Canvas (`wgpu_backend.rs`, wasm only).** `Canvas.shown` holds the
-  developed frames (the last two sizes). Give the original its own slot
-  (say `original: Option<Shown>` and a `showing_original` flag that
-  `encode_view` reads to pick the texture), written like `present_rgba`
-  writes bytes. Then switching is a `show()`: one display pass, no film
-  chain, the same `View`, so zoom and pan stay put. `forget_photograph`
-  must free the slot too. Budget its memory with the shown images (a 24 MP
-  RGBA texture with mips is about 128 MB). Keep the slot after release
-  while the photograph and its size stay the same, so the next press is
-  instant, like macOS's cache.
-- **While it shows:** a render that finishes (a slider moved with `\`
-  held, or a settled frame after a zoom) updates the developed texture
-  but must not draw over the original; `encode_view` taking the flag
-  handles that. If a zoom needs a bigger developed frame, the original
-  needs remaking at that size too (or show the old one smoothed until it
-  is).
-- **The CPU engine** draws bytes on the page's canvas (`paint` in
-  `web/app.js`): keep the original's bitmap beside `frame` and paint it
-  while showing.
-- **The page (`web/app.js`, `web/index.html`).** A button in the `.zoom`
-  bar, before Fit (macOS puts it beside its zoom controls). Mouse and pen:
-  hold (`pointerdown` shows; `pointerup`, `pointercancel` and
-  `lostpointercapture` hide). Touch: a tap toggles (the plan: holding
-  hides the photograph under the finger), and the button shows it's on.
-  `\` keydown/keyup on `window`, not in inputs or when Ctrl/Meta is held,
-  ignoring `repeat`. `pointerenter` on the button prepares the original,
-  as macOS's hover. The badge says "Original" while it shows ("Loading
-  Original" while waiting); `setBadge` from piece 7 is there, but it's
-  also the "Developing" badge, so don't clear one with the other. Disabled
-  while `loading` or a placeholder (`early`) shows, or without a photo:
-  macOS's `canShowOriginal`.
-- **Automation.** Add hooks to `negs` (for example `original(on)` and
-  whether it's showing) and a check, `web/checks/original.js`: switch both
-  ways, measure the display pass (`negs.views`) and that `negs.renders`
-  didn't grow, read the canvas while showing (as `checks/zoom.mjs` reads
-  it) and compare with the helper's `original` for the card and the ARW;
-  then by keyboard (`Input.dispatchKeyEvent` in a `.mjs` check), mouse
-  and touch (`VIEW=390x844@3m`).
-
-### Done when (from the plan)
-
-Switching either way is one display frame (measure it), the stage list
-shows no render, the original matches the helper's `original` for the card
-and the ARW within 1/255 (or the difference explained), it works by
-keyboard, mouse and touch, and zoom and pan stay where they were across the
-switch. Update `docs/web-wasm.md` (item 16), `docs/web-wasm-handoff.md`
-(code map, `negs` hooks, the new check) and this file, then commit.
-
-If the engine changes (moving `original_encoding`, the canvas slot), the
-plan's ground rules apply: the CLI and the helper before and after
-(byte-identical, `SPEKTRAFILM_BACKEND=wgpu` and `cpu`),
-`cargo check --workspace --all-targets`, and the core, gpu, math, model,
-io and spektrafilm-native tests. Rerun `web/checks/zoom.mjs`,
-`placeholder.js`, `inspector.js` and `touch.mjs` after.
-
-## After piece 8: pieces 9–11
+## Pieces 9–11
 
 - **Piece 6's display pass is the base for 11 too.** A border is drawn
   around the photograph in `fs_view`
@@ -217,7 +114,7 @@ io and spektrafilm-native tests. Rerun `web/checks/zoom.mjs`,
 - **Licences.** The film border textures are MIT (`film.png`) and
   CC BY-SA (35mm); see `data/borders/README.md`.
 
-## Lessons from piece 7
+## Lessons from pieces 7 and 8
 
 - **Keep the first load light.** Anything big (samples, textures, LUTs)
   downloads when it's asked for, with progress (`download` in `app.js`
@@ -233,6 +130,10 @@ io and spektrafilm-native tests. Rerun `web/checks/zoom.mjs`,
 - **A lossy DNG's raw data is JPEG tiles.** Any code that looks for JPEGs
   in a RAW must skip the raw directories' strips and tiles
   (`rawData` in `placeholder.js`).
+- **Don't time a click by `setTimeout`.** Show Original first suppressed
+  the click after a mouse press with a flag cleared on a timeout, and a
+  check failed once in five runs. It now goes by the press's
+  `pointerType`, and `detail === 0` for keyboard and screen readers.
 - **Don't run a compressor on a user's file without `-c`** (or `-k`):
   `gzip file` replaces it. Piece 7 did that to the owner's NEF by mistake
   and had to restore it. Work on copies in your scratchpad.
@@ -492,15 +393,17 @@ the chosen space and its ICC profile:
   how), `balance.js`, `inspector.js` (desktop wiring; its `fieldFocused`
   is false in this unfocused window, before piece 4 too) and `touch.mjs`
   (phone layout), `zoom.mjs` (zoom and pan) and `placeholder.js`
-  (piece 7). Rerun the last four after UI changes.
+  (piece 7), `original.mjs` (piece 8). Rerun the last five after UI changes.
 - `negs` in the page: `state()`, `edit(path, value)`, `renders`, `idle()`,
   `open(url)`, `read(maxDim)` (render, read back the bytes),
-  `balance(...)`, `view`, `views`, `placeholder()`, `timeline`, `badge()`
-  and `openSample()`; `docs/web-wasm-handoff.md` lists them all.
+  `balance(...)`, `view`, `views`, `placeholder()`, `timeline`, `badge()`,
+  `openSample()` and Show Original's `original(on)`, `showingOriginal()`,
+  `originalMade()`, `prepareOriginal()` and `readOriginal(maxDim)`;
+  `docs/web-wasm-handoff.md` lists them all.
 - Messages: `showMessage(text, error, ms)` with `ms` stays up through the
   renders that follow and hides itself after `ms`; without it, the next
   finished render hides it. The badge (`setBadge`) is for states the
-  photograph is in (downloading, developing; the original next).
+  photograph is in (downloading, developing, the original).
 - Controls that need the engine read `host` in `sync()`. `startEngine`
   calls `sync()` once the engine is up.
 - Keep temporary files in your scratchpad; use
