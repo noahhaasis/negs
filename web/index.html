@@ -24,11 +24,12 @@
   .stage { position: absolute; inset: 0; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
   .photo { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
   .photo[hidden] { display: none; }
-  .empty { position: relative; text-align: center; color: var(--muted); padding: 24px; max-width: 360px; }
+  /* Above the stage, which would otherwise take its buttons' clicks. */
+  .empty { position: relative; z-index: 1; text-align: center; color: var(--muted); padding: 24px; max-width: 360px; }
   .empty h1 { font-size: 15px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
   .empty p { margin: 0 0 16px; }
   .empty .choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-  .view.dragging::after { content: "Drop to open"; position: absolute; inset: 12px; display: grid; place-items: center;
+  .view.dragging::after { content: "Drop to open"; position: absolute; z-index: 2; inset: 12px; display: grid; place-items: center;
     border: 2px dashed var(--accent); border-radius: 10px; background: rgb(22 22 22 / .8); color: var(--accent); font-size: 15px; }
   .busy { position: absolute; top: 0; left: 0; right: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .15s; }
   .busy.on { opacity: 1; transition-delay: .12s; }
