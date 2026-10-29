@@ -422,6 +422,11 @@ impl WgpuBackend {
         limits.max_compute_workgroups_per_dimension =
             adapter_limits.max_compute_workgroups_per_dimension;
         limits.max_bind_groups = adapter_limits.max_bind_groups.max(limits.max_bind_groups);
+        // A browser shows a full-size frame as a texture (`Shown`).
+        #[cfg(target_arch = "wasm32")]
+        {
+            limits.max_texture_dimension_2d = adapter_limits.max_texture_dimension_2d;
+        }
         // Our per-pixel shaders use `@workgroup_size(1024)`; the default
         // Limits cap workgroup invocations at 256, so lift that here too.
         // Large images wrap the dispatch grid into y (`linear_dispatch_grid`)
@@ -2084,14 +2089,82 @@ impl WgpuBackend {
 struct Canvas {
     surface: wgpu::Surface<'static>,
     size: (u32, u32),
-    pipeline: wgpu::RenderPipeline,
+    /// `display_present.wgsl`'s passes: a scan's bytes into the shown image,
+    /// a mip level from the one above it, and the view on the canvas.
+    make_shown: wgpu::ComputePipeline,
+    mip: wgpu::RenderPipeline,
+    draw: wgpu::RenderPipeline,
+    sampler: wgpu::Sampler,
+    /// Where the page shows the photograph, once it has said.
+    view: Option<View>,
+    /// The shown image first, and the one before it if it was another size:
+    /// a slider's interactive frames and the settled frame take turns.
+    shown: Vec<Shown>,
+}
+
+/// A frame's display bytes, kept in a texture with mip levels so that a new
+/// view draws it again without the film chain.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+struct Shown {
+    texture: wgpu::Texture,
+    /// Whether its mip levels hold it: made when a view first shrinks it.
+    mipped: bool,
+}
+
+/// Where the canvas shows the photograph.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct View {
+    /// The canvas's size in device pixels.
+    pub width: u32,
+    pub height: u32,
+    /// The whole photograph's rectangle on it, in device pixels: left, top,
+    /// width, height. A frame rendered smaller fills it too.
+    pub rect: [f32; 4],
+    /// The canvas around the photograph, RGB from 0 to 1, stored as is.
+    pub background: [f32; 3],
+}
+
+/// Where a view draws a shown image: its top-left corner on the canvas,
+/// device pixels per texel, the mip level it samples, and whether it's
+/// drawn 1:1.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+struct Placement {
+    origin: [f32; 2],
+    scale: [f32; 2],
+    lod: f32,
+    exact: bool,
+}
+
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+impl View {
+    /// An image within a pixel of the rectangle's size is drawn 1:1, centred
+    /// on it at whole pixels: the settled frame at fit, rendered to that
+    /// size, and a full-size frame at 100%. Any other is sampled.
+    fn place(&self, width: u32, height: u32) -> Placement {
+        let [x, y, w, h] = self.rect;
+        let (iw, ih) = (width as f32, height as f32);
+        if (w - iw).abs() <= 1.0 && (h - ih).abs() <= 1.0 {
+            let origin = [(x + (w - iw) / 2.0).round(), (y + (h - ih) / 2.0).round()];
+            return Placement { origin, scale: [1.0; 2], lod: 0.0, exact: true };
+        }
+        let scale = [w / iw, h / ih];
+        let lod = (-scale[0].min(scale[1]).log2()).max(0.0);
+        Placement { origin: [x, y], scale, lod, exact: false }
+    }
 }
 
 /// Canvases are 8-bit and unencoded: a pixel holds the display bytes as
 /// they are, and RGBA bytes can be written straight in. Every browser
-/// supports it, if not always as its preferred format.
+/// supports it, if not always as its preferred format. Shown images are
+/// kept in it too.
 #[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
 const CANVAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// At most this much of shown images stays on the GPU; the older one goes
+/// first.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+const MAX_SHOWN_BYTES: u64 = 256 << 20;
 
 #[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
 impl WgpuBackend {
@@ -2107,32 +2180,55 @@ impl WgpuBackend {
                 "../../spektrafilm-shaders/wgsl/display_present.wgsl"
             ))),
         });
-        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("display_present"),
+        let make_shown = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("make_shown"),
             layout: None,
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: CANVAS_FORMAT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
+            module: &module,
+            entry_point: Some("make_shown"),
+            compilation_options: Default::default(),
             cache: None,
         });
-        *self.canvas.lock().unwrap() = Some(Canvas { surface, size: (0, 0), pipeline });
+        let render = |entry_point: &str| {
+            self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry_point),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(entry_point),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: CANVAS_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
+                cache: None,
+            })
+        };
+        let (mip, draw) = (render("fs_mip"), render("fs_view"));
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shown"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let canvas = Canvas { surface, size: (0, 0), make_shown, mip, draw, sampler, view: None, shown: Vec::new() };
+        if let Some(old) = self.canvas.lock().unwrap().replace(canvas) {
+            for shown in old.shown {
+                shown.texture.destroy();
+            }
+        }
         Ok(())
     }
 
@@ -2140,12 +2236,15 @@ impl WgpuBackend {
     /// (the CPU engine). False without a canvas.
     pub fn present_rgba(&self, width: u32, height: u32, rgba: &[u8]) -> bool {
         let mut canvas = self.canvas.lock().unwrap();
-        let Some(frame) = canvas.as_mut().and_then(|c| self.canvas_frame(c, width, height)) else {
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        let Some(texture) = self.shown_texture(canvas, width, height) else {
             return false;
         };
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &frame.texture,
+                texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -2154,9 +2253,285 @@ impl WgpuBackend {
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
-        self.queue.submit(None);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        let frame = self.encode_view(&mut encoder, canvas);
+        self.queue.submit(Some(encoder.finish()));
+        self.release_transient();
+        frame.map(|frame| frame.present()).is_some()
+    }
+
+    /// Show the photograph where `view` says from now on, and draw the shown
+    /// image there now: a display pass, without the film chain. `on_drawn`
+    /// runs once the GPU has drawn it. False with nothing to draw, though
+    /// the next frame presented takes the view.
+    pub fn show(&self, view: View, on_drawn: Box<dyn FnOnce()>) -> bool {
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        canvas.view = Some(view);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        let Some(frame) = self.encode_view(&mut encoder, canvas) else {
+            return false;
+        };
+        // One texel copied after the drawing says when the GPU is done, as a
+        // presented frame's fence does.
+        let fence = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("view_fence"),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &canvas.shown[0].texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &fence,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None },
+            },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        self.queue.submit(Some(encoder.finish()));
+        self.release_transient();
         frame.present();
+        let mapped = fence.clone();
+        fence.slice(..).map_async(wgpu::MapMode::Read, move |_| {
+            release(&mapped);
+            on_drawn();
+        });
         true
+    }
+
+    /// The shown image's size and where its view draws it, in the canvas's
+    /// device pixels: `[width, height, left, top, drawn width, drawn height]`.
+    pub fn shown(&self) -> Option<[f32; 6]> {
+        let canvas = self.canvas.lock().unwrap();
+        let canvas = canvas.as_ref()?;
+        let texture = &canvas.shown.first()?.texture;
+        let (width, height) = (texture.width(), texture.height());
+        let place = self.view_of(canvas, width, height).place(width, height);
+        let (w, h) = (width as f32 * place.scale[0], height as f32 * place.scale[1]);
+        Some([width as f32, height as f32, place.origin[0], place.origin[1], w, h])
+    }
+
+    /// Free what the GPU keeps of the photograph: its shown images and its
+    /// inputs, before another opens (see `release`).
+    pub fn forget_photograph(&self) {
+        if let Some(canvas) = self.canvas.lock().unwrap().as_mut() {
+            for shown in canvas.shown.drain(..) {
+                shown.texture.destroy();
+            }
+        }
+        for (_, input) in self.resident_inputs.lock().unwrap().drain(..) {
+            release(&input);
+        }
+    }
+
+    /// The largest frame this GPU renders and shows: the longest side a
+    /// texture may have, and the pixels an image buffer may hold.
+    pub fn image_limits(&self) -> (u32, u64) {
+        let pixels = self.capacity.max_binding.min(self.capacity.max_buffer) / 12;
+        (self.device.limits().max_texture_dimension_2d, pixels)
+    }
+
+    /// The canvas's view, or by default the image 1:1 on a canvas of its size.
+    fn view_of(&self, canvas: &Canvas, width: u32, height: u32) -> View {
+        canvas.view.unwrap_or(View {
+            width,
+            height,
+            rect: [0.0, 0.0, width as f32, height as f32],
+            background: [0.0; 3],
+        })
+    }
+
+    /// The shown image for a `width` × `height` frame, the last of that size
+    /// or a new one, now first. None when a texture can't be that large.
+    fn shown_texture(&self, canvas: &mut Canvas, width: u32, height: u32) -> Option<wgpu::Texture> {
+        if width.max(height) > self.device.limits().max_texture_dimension_2d {
+            return None;
+        }
+        let same = canvas.shown.iter().position(|s| (s.texture.width(), s.texture.height()) == (width, height));
+        let shown = match same {
+            Some(i) => canvas.shown.remove(i),
+            None => Shown {
+                texture: self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("shown"),
+                    size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                    mip_level_count: width.max(height).ilog2() + 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: CANVAS_FORMAT,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                }),
+                mipped: false,
+            },
+        };
+        let texture = shown.texture.clone();
+        canvas.shown.insert(0, Shown { mipped: false, ..shown });
+        // With its mip levels, a third more than its bytes.
+        let bytes = |s: &Shown| u64::from(s.texture.width()) * u64::from(s.texture.height()) * 16 / 3;
+        let kept = if canvas.shown.iter().take(2).map(bytes).sum::<u64>() <= MAX_SHOWN_BYTES { 2 } else { 1 };
+        for old in canvas.shown.drain(kept.min(canvas.shown.len())..) {
+            old.texture.destroy();
+        }
+        Some(texture)
+    }
+
+    /// Encode making `rgb`'s display bytes the shown image and drawing it on
+    /// the canvas; the frame to present once submitted. `None` without a
+    /// canvas.
+    fn encode_present(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        rgb: &wgpu::Buffer,
+        width: u32,
+        height: u32,
+        encoded: bool,
+    ) -> Option<wgpu::SurfaceTexture> {
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Params {
+            width: u32,
+            height: u32,
+            encoded: u32,
+            _pad: u32,
+        }
+        let mut canvas = self.canvas.lock().unwrap();
+        let canvas = canvas.as_mut()?;
+        let texture = self.shown_texture(canvas, width, height)?;
+        let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("make_shown_params"),
+            contents: bytemuck::bytes_of(&Params { width, height, encoded: encoded as u32, _pad: 0 }),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let target = texture.create_view(&wgpu::TextureViewDescriptor { mip_level_count: Some(1), ..Default::default() });
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bg_make_shown"),
+            layout: &canvas.make_shown.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: rgb.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&target) },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("make_shown"), timestamp_writes: None });
+        pass.set_pipeline(&canvas.make_shown);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.dispatch_workgroups(width.div_ceil(16), height.div_ceil(16), 1);
+        drop(pass);
+        self.encode_view(encoder, canvas)
+    }
+
+    /// Encode drawing the shown image where the view says, its mip levels
+    /// first if the view shrinks it and they don't hold it yet; the frame to
+    /// present once submitted. `None` with nothing shown.
+    fn encode_view(&self, encoder: &mut wgpu::CommandEncoder, canvas: &mut Canvas) -> Option<wgpu::SurfaceTexture> {
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Params {
+            origin: [f32; 2],
+            scale: [f32; 2],
+            size: [f32; 2],
+            lod: f32,
+            exact: u32,
+            background: [f32; 4],
+        }
+        let texture = canvas.shown.first()?.texture.clone();
+        let (width, height) = (texture.width(), texture.height());
+        let view = self.view_of(canvas, width, height);
+        let place = view.place(width, height);
+        if place.lod > 0.0 && !canvas.shown[0].mipped {
+            self.encode_mips(encoder, canvas, &texture);
+            canvas.shown[0].mipped = true;
+        }
+        let frame = self.canvas_frame(canvas, view.width, view.height)?;
+        let [r, g, b] = view.background;
+        let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("view_params"),
+            contents: bytemuck::bytes_of(&Params {
+                origin: place.origin,
+                scale: place.scale,
+                size: [width as f32, height as f32],
+                lod: place.lod,
+                exact: place.exact as u32,
+                background: [r, g, b, 1.0],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let shown = texture.create_view(&Default::default());
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bg_view"),
+            layout: &canvas.draw.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 3, resource: params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&shown) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&canvas.sampler) },
+            ],
+        });
+        let target = frame.texture.create_view(&Default::default());
+        let background = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("view"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &target,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(background), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&canvas.draw);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        Some(frame)
+    }
+
+    /// Encode filling `texture`'s mip levels, each from the one above.
+    fn encode_mips(&self, encoder: &mut wgpu::CommandEncoder, canvas: &Canvas, texture: &wgpu::Texture) {
+        let layout = canvas.mip.get_bind_group_layout(0);
+        let level = |base_mip_level| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        for i in 1..texture.mip_level_count() {
+            let (finer, target) = (level(i - 1), level(i));
+            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg_mip"),
+                layout: &layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&canvas.sampler) },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&finer) },
+                ],
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mip"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&canvas.mip);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
 
     /// The canvas's next frame, sized `width` × `height`.
@@ -2178,58 +2553,6 @@ impl WgpuBackend {
             canvas.size = (width, height);
         }
         canvas.surface.get_current_texture().ok()
-    }
-
-    /// Encode drawing `rgb`'s display bytes on the canvas; the frame to
-    /// present once submitted. `None` without a canvas.
-    fn encode_present(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        rgb: &wgpu::Buffer,
-        width: u32,
-        height: u32,
-        encoded: bool,
-    ) -> Option<wgpu::SurfaceTexture> {
-        #[repr(C)]
-        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-        struct Params {
-            width: u32,
-            encoded: u32,
-            _pad: [u32; 2],
-        }
-        let mut canvas = self.canvas.lock().unwrap();
-        let canvas = canvas.as_mut()?;
-        let frame = self.canvas_frame(canvas, width, height)?;
-        let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("display_present_params"),
-            contents: bytemuck::bytes_of(&Params { width, encoded: encoded as u32, _pad: [0; 2] }),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bg_display_present"),
-            layout: &canvas.pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: rgb.as_entire_binding() },
-            ],
-        });
-        let view = frame.texture.create_view(&Default::default());
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("display_present"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        pass.set_pipeline(&canvas.pipeline);
-        pass.set_bind_group(0, &bg, &[]);
-        pass.draw(0..3, 0..1);
-        drop(pass);
-        Some(frame)
     }
 }
 

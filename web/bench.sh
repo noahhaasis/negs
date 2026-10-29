@@ -2,8 +2,9 @@
 # Render through the app's automation hook in a fresh windowed Chrome with
 # real WebGPU, and print the timings: web/bench.sh <name> '<query>'
 #   web/bench.sh card-1200 'image=results/card.jpg&backend=gpu&max=1200&runs=8'
-# Needs web/serve.mjs running. Writes web/results/<name>.{json,ppm} (and
-# <name>-canvas.ppm when the frame was presented). A Chrome profile goes in
+# Needs web/serve.mjs running. Writes web/results/<name>.{json,ppm} (and,
+# when the frame was presented, <name>-canvas.ppm: the part of it the canvas
+# shows, which the page compares with the image). A Chrome profile goes in
 # $BENCH_PROFILE (default: a temp dir, deleted when Chrome exits); $BENCH_PAGE
 # picks another page than index.html.
 set -euo pipefail
@@ -30,4 +31,5 @@ if (d.error) { console.log("ERROR", d.error); process.exit(1); }
 const f = (xs) => (xs ?? []).slice(1).map((x) => x.toFixed(0)).join(" ");
 console.log(`${process.argv[2]} ${d.backend} ${d.width}x${d.height} presenting=${d.presenting} first ${d.times[0].toFixed(0)} warm ${f(d.times)} frames ${f(d.frames)}`);
 console.log(`  last: ${d.stages.at(-1)}`);
+if (d.canvas) console.log(`  canvas: ${d.canvas.oneToOne ? "1:1" : "scaled"}, ${d.canvas.pixels} px, ${(d.canvas.exact * 100).toFixed(3)}% exact, max ${d.canvas.max}`);
 ' "$web/results/$name.json" "$name"

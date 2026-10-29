@@ -9,6 +9,12 @@ export function client(wasm, kind) {
     backend: () => engine.backend(),
     // An OffscreenCanvas the WebGPU engine presents renders on.
     setCanvas: (canvas) => engine.setCanvas(canvas),
+    // Where that canvas shows the photograph, drawn again at once without
+    // the film chain; and where it drew the last frame.
+    show: (width, height, rect, background) => engine.show(width, height, rect, background),
+    shownRect: () => [...engine.shownRect()],
+    // The largest frame the WebGPU engine renders and shows.
+    limits: () => [...engine.limits()],
     load(bytes, maxDim) {
       const t = performance.now();
       const [width, height] = engine.load(bytes, maxDim);

@@ -113,7 +113,9 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    - A submit says what to make of the scan (`ChainOutput`): the scan itself,
      as native; sRGB display bytes (`display_rgba8.wgsl`), read back at a
      quarter of the float scan's size; or those bytes drawn on a canvas
-     (`display_present.wgsl`), with nothing read back.
+     (`display_present.wgsl`), with nothing read back. Since piece 6 the
+     canvas keeps them as a texture and draws them where the view puts
+     the photograph (item 14).
      `Pipeline::display_on_gpu` says when the bytes are what
      `preview::display_rgba` makes of the scan (sRGB output, no post
      adjustments), and they are, bit for bit.
@@ -271,8 +273,9 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    with no jump on touch), a vertical one scrolls, and a mouse or pen there
    (an iPad's trackpad) sets the value under it. Sliders are filled from
    the minimum, as on desktop. The photograph's area takes pinch and pan
-   for itself (`touch-action: none`) for piece 6, and the page doesn't
-   zoom; the inspector keeps `manipulation` (no double-tap zoom). Safe-area
+   for itself (`touch-action: none`; piece 6 zooms and pans it, item 14),
+   and the page doesn't zoom; the inspector keeps `manipulation` (no
+   double-tap zoom). Safe-area
    insets pad the sheet and the sidebar. Which groups are open, the tab
    and the sheet's height are remembered in `localStorage` (wrapped, so a
    private window still works).
@@ -291,7 +294,8 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    Not seen on a device yet: Safari's handling of the slider tracks,
    `100dvh` with its toolbars, the safe areas, and whether WebGPU runs in
    its worker. The 24 MP ARW takes 954 MiB in the engine at a phone's
-   preview size, which iOS may not allow a tab (piece 6's memory caps).
+   preview size, which iOS may not allow a tab (piece 6 caps what it
+   renders, item 14, but not the decoded source).
 
 12. **Enlarger shifts without a rebuild, and Balance Print** (MVP
    piece 4). The magenta and yellow shifts, the preflash (exposure and its
@@ -441,6 +445,108 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    card 8–16 / 26–35 / 58–71 ms, ARW 69–87 ms (before: 7–14 / 29–36 /
    60–72, 74–84).
 
+14. **Zoom, pan and true resolution** (MVP piece 6, done before piece 5
+   at the owner's request). The canvas fills the view at its device
+   pixels, and the photograph moves on it without the film chain.
+
+   **What stays on the GPU.** A presented frame's display bytes become the
+   *shown image*: an RGBA8 texture with mip levels (`Shown` in
+   `wgpu_backend.rs`), written by `make_shown` in `display_present.wgsl`
+   from the scan, or from the bytes a CPU-displayed frame read back
+   (`present_rgba`). A *view* (`View`: the canvas's size and the whole
+   photograph's rectangle on it, in device pixels) says where to draw it,
+   and `WgpuBackend::show` (the wasm `Engine.show`) draws it there again:
+   one render pass, no chain. The plan said to keep the scan; I kept the
+   bytes instead, because an sRGB preview needs nothing else, they're a
+   third of the memory (4 bytes a pixel, 128 MB with mips at 24 MP, against
+   288 MB of f32), and drawn 1:1 they are exactly the bytes, so no image
+   pool buffer has to outlive its render. Display-only Post adjustments
+   (later) will need the scan, or the adjusted bytes made in the chain. The
+   last two sizes stay (a slider's interactive and settled frames), within
+   256 MB; opening another photograph frees them and its uploaded inputs
+   (`forget_photograph`).
+
+   **Drawing.** An image within a pixel of its rectangle is drawn 1:1 at
+   whole pixels (`View::place`): the fitted frame, rendered to the fitted
+   size, and a full frame at 100%. Anything else is sampled as macOS's
+   canvas layer filters: trilinear below 1, from mip levels made the first
+   time a view shrinks that image, bilinear above. Around the photograph is
+   the page's background. Without presenting (the CPU engine,
+   `?present=0`) the page draws the bytes on its own canvas the same way
+   (`paint` in `app.js`).
+
+   **The view** (`web/view.js`), as desktop's canvas
+   (`PreviewCanvas.swift`): fitted until zoomed, and fitted again on
+   resize; pinch, and Ctrl/⌘- or Option-wheel (a trackpad's pinch arrives
+   as Ctrl-wheel) zoom around the pointer; a drag or a plain scroll pans; a
+   photograph smaller than the view is centred and a larger one can't leave
+   it; zoom runs from 0.5% to 1600% in CSS pixels, as macOS's
+   magnification. 100% is one photograph pixel per device pixel (desktop's
+   Actual Size). Fit and 100% buttons sit at the bottom right with the zoom
+   level. Two differences from macOS, both from the plan: a double-click or
+   double-tap toggles fit and 100% around the point (macOS double-click only
+   fits), and Fit still stops at 100% in CSS pixels, as the web did before
+   (macOS enlarges a small photograph to fit). No ⌘0/⌘1: browsers keep ⌘1
+   for their tabs. No pan momentum.
+
+   **What renders.** A settled frame has as many pixels as the view covers
+   (`renderSide`), so all of them from 100% on: true resolution, the
+   whole photograph. That's desktop's interactive-frame rule; desktop's
+   settled frame is the export size unless "Limit preview to 12 MP" is on.
+   It's capped at 40 MP, 12 MP on touch screens, by the GPU's buffer
+   limits, and by its largest texture (the device now asks for the
+   adapter's, 16384 here, not WebGPU's default 8192). The CPU engine
+   renders at most 4 MP, or the fitted size where that's more, since every
+   frame takes seconds there. A zoom or resize renders 200 ms after it stops, and only
+   when the view needs more pixels than the last settled frame or, fitted,
+   other ones. Zooming out and panning never render. Interactive frames
+   keep the 90 ms budget, so while a slider moves at 100% they're shown
+   magnified. When the frame has fewer pixels than the photograph, the
+   status line says so as desktop's does: "4000 × 6000 · shown at 71% · …"
+   (with desktop's Image Size hint as its tooltip), and it wraps rather
+   than cut that off on a phone.
+
+   `web/checks/zoom.mjs` drives it with wheel events (and a two-finger
+   pinch on a touch screen), the 24 MP ARW, Chrome, GPU memory from
+   `nvidia-smi`:
+
+   | | Desktop (750×1235 view) | Phone (390×844 @3, touch) |
+   |---|---|---|
+   | Fitted | 686×1029, 1:1, "shown at 17%" | 964×1446, 1:1, "shown at 24%" |
+   | Actual Size | renders 4000×6000, 1.29 s (the first full-size render: 0.4 s uploading it) | the 12 MP cap: 2828×4242, 0.60 s, "shown at 71%" |
+   | 60 wheel pans in 1 s | 59 display passes, 4.0 ms median, 4.3 ms p90 (call to GPU done); no render | 60 passes, 3.9 / 4.2 ms; no render |
+   | Canvas against a render read back | at 100%, the export: 100% of the 750×1235 shown pixels exact | at 71%, where the capped frame is 1:1, against a render at that size: 100% exact |
+   | Zoom out to 25% | no render; 41 ms the first time (mips of 24 MP) | no render; 23 ms |
+   | Ctrl-wheel to 502% | no render | no render |
+   | Pinch, fingers 240 → 80 px apart | | zoom × 0.333 |
+   | Fit again | renders 686×1029 in 32 ms, 1:1 | 964×1446 in 167 ms |
+   | Chrome's GPU memory | 112 MiB fitted, 1644 after the 100% render, 551 fitted again | 228 fitted, 973 at 100%, 389 fitted again |
+
+   The engine's wasm memory stays 954 MiB throughout (the decoded ARW; no
+   frame adds to it). On the CPU engine, the card fitted is 1:1 and exact,
+   Actual Size renders the 4 MP cap (2677×1494, "shown at 97%", 11 s), and
+   wheel pans redraw the page's canvas without rendering.
+
+   The automation (`?image=…`) now shows its frame 1:1 and compares the
+   canvas with the image read back (`canvas` in its JSON, a line in
+   `web/bench.sh`): 100% exact at 200, 1200 and 2048 px and on the ARW.
+   Benchmarks, before / after: card 7–13 / 6–10, 30–34 / 27–36,
+   57–70 / 56–69 ms; ARW 71–88 / 72–83 ms. `web/checks/controls.js`: all
+   99 rows presented, none rebuilt, 24–74 ms. `inspector.js` and
+   `touch.mjs` pass (a pinch on the photograph now zooms it 6×; the page
+   stays at scale 1).
+
+   Native output is unchanged: everything new is browser-only. The CLI
+   before and after renders byte-identical files (card default, both
+   diffusions with a magenta shift, Display P3, on wgpu and cpu; the ARW on
+   wgpu), `cargo check --workspace --all-targets` passes, and so do the
+   core, gpu, math, model, io and spektrafilm-native tests.
+
+   Not seen on a device yet: pinch and double-tap on iOS, Safari without
+   Chrome's device-pixel box (the view sizes from `devicePixelRatio` there
+   and watches it change), and how much of the 12 MP cap's GPU memory an
+   iPhone allows.
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
@@ -448,7 +554,8 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
   reading back floats, before that). The CPU path needs 2.8 GB at 24 MP, so it can't
   render much past 30 MP. Most of this is copies: source, decoded clone, f32
   upload, readback, output and RGBA. Memory64 is not usable with
-  wgpu/wasm-bindgen yet.
+  wgpu/wasm-bindgen yet. Preview frames are capped at 40 MP, 12 MP on
+  touch screens (item 14); the decoded source and an export aren't.
 - **Panics abort.** On this target a panic is `unreachable`, which kills the
   module. `catch_unwind` around rawler's develop doesn't help. A panic on one
   of rayon's threads is worse: it aborts that thread and leaves the engine
@@ -490,7 +597,8 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
 2. Upstream the rawler `web-time` change and drop `vendor/rawler`.
 3. Try it on an iPad (Safari 26), over `serve.mjs --https` (see the
    handoff): that WebGPU runs in the worker and presents there, the frame
-   times, and how much memory a tab may use before iPadOS ends it.
+   times, pinch and double-tap, and how much memory a tab may use before
+   iPadOS ends it (at the 12 MP cap's 100%, about 1 GB of GPU memory here).
 4. Wide-gamut output and post adjustments on the GPU, so they present too
    (they read the scan back now).
 5. Say so when a GPU allocation fails, rather than presenting a black
@@ -513,5 +621,6 @@ the page is cross-origin isolated, the single-threaded one otherwise or with
 `?threads=0`. `?backend=cpu` picks the CPU engine. The page also takes
 `?image=<url>&max=<px>&runs=<n>&name=<n>[&interactive=1][&params=<json>][&present=0]`,
 renders, and posts the image and timings to `web/results/` (`frames` are
-whole frames as the page sees them; with presenting, `<name>-canvas.ppm` is
-what the canvas shows).
+whole frames as the page sees them). It shows the frame 1:1; with
+presenting, `<name>-canvas.ppm` is the part of it the canvas shows, and
+`canvas` in the timings says how much of that matches the image.

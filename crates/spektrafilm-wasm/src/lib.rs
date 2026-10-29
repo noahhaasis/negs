@@ -7,7 +7,11 @@
 #![cfg(target_arch = "wasm32")]
 
 use spektrafilm_core::{data_fs, params::RuntimeParams, pipeline::Pipeline, preview, profile};
-use spektrafilm_gpu::{ChainOutput, ChainResult, ComputeBackend, cpu_backend::CpuBackend, wgpu_backend::WgpuBackend};
+use spektrafilm_gpu::{
+    ChainOutput, ChainResult, ComputeBackend,
+    cpu_backend::CpuBackend,
+    wgpu_backend::{View, WgpuBackend},
+};
 use spektrafilm_io::encoding::Encoding;
 use spektrafilm_math::image::ImageBuf;
 use std::{
@@ -225,6 +229,57 @@ impl Engine {
         self.state.borrow().backend.name().to_owned()
     }
 
+    /// Show the photograph on the canvas where the page puts it, from now
+    /// on and at once, from the frame on it: a display pass, without the
+    /// film chain. `width` × `height` is the canvas in device pixels, `rect`
+    /// the whole photograph's left, top, width and height on it, and
+    /// `background` the RGB around it, 0 to 1. Resolves to the milliseconds
+    /// until the GPU had drawn it, or -1 with no frame to draw yet.
+    pub fn show(&self, width: u32, height: u32, rect: Vec<f32>, background: Vec<f32>) -> js_sys::Promise {
+        let gpu = {
+            let state = self.state.borrow();
+            state.gpu.clone().filter(|_| state.canvas)
+        };
+        let (Some(gpu), &[x, y, w, h], &[r, g, b]) = (gpu, &rect[..], &background[..]) else {
+            return js_sys::Promise::resolve(&JsValue::from(-1.0));
+        };
+        let started = web_time::Instant::now();
+        let view = View { width, height, rect: [x, y, w, h], background: [r, g, b] };
+        let (drawn_tx, drawn_rx) = futures_channel::oneshot::channel();
+        let drawing = gpu.show(
+            view,
+            Box::new(move || {
+                let _ = drawn_tx.send(());
+            }),
+        );
+        wasm_bindgen_futures::future_to_promise(async move {
+            if !drawing {
+                return Ok(JsValue::from(-1.0));
+            }
+            drawn_rx.await.map_err(|_| JsValue::from("GPU drawing was cancelled"))?;
+            Ok(JsValue::from(started.elapsed().as_secs_f64() * 1000.0))
+        })
+    }
+
+    /// The frame on the canvas and where it's drawn, in the canvas's device
+    /// pixels: `[width, height, left, top, drawn width, drawn height]`, or
+    /// empty.
+    #[wasm_bindgen(js_name = shownRect)]
+    pub fn shown_rect(&self) -> Vec<f32> {
+        let gpu = self.state.borrow().gpu.clone();
+        gpu.and_then(|gpu| gpu.shown()).map_or(Vec::new(), |shown| shown.to_vec())
+    }
+
+    /// The largest frame the WebGPU engine renders and shows: `[longest
+    /// side, pixels]`; empty for the CPU engine.
+    pub fn limits(&self) -> Vec<f64> {
+        let gpu = self.state.borrow().gpu.clone();
+        gpu.map_or(Vec::new(), |gpu| {
+            let (side, pixels) = gpu.image_limits();
+            vec![side as f64, pixels as f64]
+        })
+    }
+
     /// Decode a PNG, JPEG or TIFF (with its embedded profile) or a camera
     /// RAW (with rawler, as shot), at most `max_dim` pixels on the longer
     /// side (0: full size), resolving to its `[width, height]`.
@@ -261,6 +316,9 @@ impl Engine {
         };
         let size = vec![image.width, image.height];
         let mut state = self.state.borrow_mut();
+        if let Some(gpu) = &state.gpu {
+            gpu.forget_photograph();
+        }
         state.source = None;
         state.scaled.clear();
         state.metering = None;
