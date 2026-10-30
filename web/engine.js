@@ -36,19 +36,21 @@ export function client(wasm, kind) {
     // The largest frame the WebGPU engine renders and shows.
     limits: () => [...engine.limits()],
     // `width` × `height` as decoded; the engine keeps `kept` × `keptHeight`,
-    // within `maxDim` and `maxPixels` (0: no limit).
-    load(bytes, maxDim, maxPixels = 0) {
+    // within `maxDim` and `maxPixels` (0: no limit). A RAW develops at
+    // `whiteBalance` (io.raw_white_balance as JSON; omitted: As Shot);
+    // `colour` is what the loader read the photograph as (InputColour JSON).
+    load(bytes, maxDim, maxPixels = 0, whiteBalance) {
       const t = performance.now();
       engine.forget();
-      const [kept, keptHeight, width, height] = engine.load(bytes, maxDim, maxPixels);
-      return { width, height, kept, keptHeight, decodeMs: performance.now() - t };
+      const [kept, keptHeight, width, height] = engine.load(bytes, maxDim, maxPixels, whiteBalance);
+      return { width, height, kept, keptHeight, colour: engine.inputColour(), decodeMs: performance.now() - t };
     },
     // A photograph web/decoder.js decoded, as `load` keeps one. The last
     // goes before its pixels are copied in, which then take its room.
     loadDecoded({ pixels, width, height, fullWidth, fullHeight, colour }) {
       engine.forget();
       engine.loadDecoded(pixels, width, height, colour);
-      return { width: fullWidth, height: fullHeight, kept: width, keptHeight: height };
+      return { width: fullWidth, height: fullHeight, kept: width, keptHeight: height, colour };
     },
     async render(film, paper, params, maxDim, interactive, present = false) {
       for (;;) {
@@ -81,6 +83,11 @@ export function client(wasm, kind) {
       const r = engine.original(params, maxDim, present);
       return { width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, elapsedMs: r.elapsedMs, stages: r.stages };
     },
+    // A preset file applied to `current` params (crates/spektrafilm-wasm
+    // importPreset): { film, paper, params } as JSON, or the reason it can't.
+    importPreset: (text, current) => preset(wasm, () => wasm.importPreset(text, current), (r) => ({ film: r.film, paper: r.paper, params: r.text })),
+    // The edit as a desktop-compatible preset file's text.
+    exportPreset: (film, paper, params) => preset(wasm, () => wasm.exportPreset(film, paper, params), (r) => r.text),
     // The M/Y shifts that print a mid-grey neutral (Balance Print).
     async balancePrint(film, paper, params) {
       for (;;) {
@@ -90,6 +97,28 @@ export function client(wasm, kind) {
       }
     },
   };
+}
+
+// A preset call, after fetching the stock profiles it asks for. A profile
+// that doesn't exist (404) is an unknown stock: the call's own reason.
+async function preset(wasm, call, result) {
+  for (;;) {
+    const r = call();
+    const { missing, error } = r;
+    const value = error ? null : result(r);
+    r.free();
+    if (missing.length) {
+      try {
+        await fetchData(wasm, missing);
+      } catch (e) {
+        if (e.status === 404 && error) throw new Error(error);
+        throw e;
+      }
+      continue;
+    }
+    if (error) throw new Error(error);
+    return value;
+  }
 }
 
 async function fetchData(wasm, paths) {

@@ -12,7 +12,9 @@ import * as Border from "./border.js";
 import * as Crop from "./crop.js";
 import { createCropEditor } from "./crop-editor.js";
 import { fetchFailed } from "./engine.js";
-import { createSamplePicker } from "./samples.js";
+import { DEFAULT_SAMPLE, createSamplePicker } from "./samples.js";
+import { createPresets } from "./preset-ui.js";
+import { RAW_WB_PATH, createSourceQueue, isRawColour, sameWb } from "./raw-wb.js";
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
 // complete RuntimeParams, starting from the engine's defaults. Values a
@@ -27,7 +29,11 @@ const PRESET_PATHS = [
   "film_render.dir_couplers.gamma_interlayer_g_to_rb", "film_render.dir_couplers.gamma_interlayer_b_to_rg",
   "film_render.halation.halation_strength", "film_render.halation.halation_first_sigma_um",
 ];
-let photo = null;             // { name, bytes, width, height }
+// { name, bytes, width, height, exportWidth, exportHeight, sampleId,
+//   colour, raw, wb }: `colour` is what the loader read it as (InputColour),
+// `raw` whether that is a camera RAW, `wb` the RAW white balance the
+// engine's pixels of it were developed at (see "RAW white balance" below).
+let photo = null;
 // The presentation border (web/border.js), beside the edit as desktop keeps
 // it: not in its params, so it never renders the film.
 const border = { ...Border.DEFAULT_BORDER };
@@ -133,10 +139,12 @@ async function startEngine(engineKind) {
   }
   if (photo) {
     $("busy").classList.add("on");
-    const loaded = await loadPhoto(photo.bytes)
+    // At the WB its last development used; one the edit wants since follows.
+    const loaded = await reloadSource({ unlessOpening: true })
       .then(() => true, (e) => { if (e.restarted) return false; throw e; })
-      .finally(() => running || $("busy").classList.remove("on"));
+      .finally(() => running || developing || $("busy").classList.remove("on"));
     if (!loaded) return false;
+    redevelop();
   }
   return true;
 }
@@ -279,6 +287,10 @@ function resetButton(title, b, after) {
   return button;
 }
 
+// A control's `when`: shown while that path is true, or `[path, value]`
+// while it has that value.
+const shownWhen = (when) => !when || (Array.isArray(when) ? get(when[0]) === when[1] : !!get(when));
+
 // Commands the controls' `action` buttons run, with whether each may run now.
 const actions = {
   balancePrint: { run: balancePrint, busy: () => balancing, busyLabel: "Balancing…", enabled: () => !balancing && !!host && !get("io.scan_film") },
@@ -339,7 +351,7 @@ function buildRow(c) {
       select.value = b.get();
       reset.hidden = !b.modified();
       row.classList.toggle("changed", b.modified());
-      if (c.when) row.hidden = !get(c.when);
+      row.hidden = !shownWhen(c.when);
     });
     return row;
   }
@@ -380,7 +392,7 @@ function buildRow(c) {
   });
   syncs.push(() => {
     const bw = c.kind === "stock" && filmIsBW();
-    row.hidden = bw && !c.bw;
+    row.hidden = (bw && !c.bw) || !shownWhen(c.when);
     title.textContent = bw ? c.bw : c.label;
     // Sync never writes back: a value outside the slider's window stays.
     range.value = b.get();
@@ -526,6 +538,9 @@ function buildControls() {
         summary.append(sw);
       }
       details.append(summary, controls);
+      // RAW-only settings (RAW White Balance) hide for developed rasters, as
+      // on desktop; the edit keeps them for the next RAW.
+      if (group.raw) syncs.push(() => { details.hidden = !photo?.raw; });
       body.append(details);
     }
     if (section.print) {
@@ -585,6 +600,8 @@ function fillStocks() {
   };
   fill($("film"), filmGroups());
   fill($("paper"), paperGroups());
+  developmentTime("film", "film_render.development_time", () => state.film);
+  developmentTime("paper", "print_render.development_time", () => state.paper);
   state.params = structuredClone(catalog.defaults);
   state.paper = "kodak_portra_endura";
   chooseFilm(stock(query.get("film"))?.paper === false ? query.get("film") : "kodak_portra_400");
@@ -597,6 +614,33 @@ function fillStocks() {
     $("paper-row").hidden = get("io.scan_film");
   });
   sync();
+}
+
+// A stock's development time picker (macOS Inspector developmentTime): the
+// times its family lists, shown when there's a choice. Profile default is
+// null; a stock change unsets it (chooseFilm, choosePaper).
+const minutes = (t) => `${Number(t.toFixed(4))} min`;
+function developmentTime(which, path, id) {
+  const row = $(`${which}-time-row`), select = $(`${which}-time`);
+  let listed = null;
+  select.addEventListener("change", () => {
+    set(path, select.value === "" ? null : Number(select.value));
+    sync();
+    schedule("settled");
+  });
+  syncs.push(() => {
+    const times = stock(id())?.development_times ?? [];
+    row.hidden = times.length <= 1 || (which === "paper" && get("io.scan_film"));
+    const key = times.join();
+    if (key !== listed) {
+      listed = key;
+      select.replaceChildren(new Option("Profile default", ""), ...times.map((t) => new Option(minutes(t), String(t))));
+    }
+    const time = get(path);
+    // An imported time is one the family lists; match it as a number.
+    const i = time === null ? -1 : times.findIndex((t) => Math.abs(t - time) <= 1e-6 * Math.max(1, Math.abs(t)));
+    select.value = i < 0 ? "" : String(times[i]);
+  });
 }
 
 // ---- Phone and iPad layout -------------------------------------------------
@@ -703,6 +747,9 @@ let wanted = null, running = false, settleTimer = 0, exporting = false;
 const renders = [];
 
 function schedule(mode) {
+  // Every change comes here, so a WB the photograph wasn't developed at
+  // develops it again, whatever changed it (a control, Reset, `negs`).
+  requestDevelop(mode);
   if (!photo) return;
   clearTimeout(settleTimer);
   // A slider that stops without a change event (keyboard, wheel) settles anyway.
@@ -715,7 +762,9 @@ async function pump() {
   if (running || exporting) return;
   running = true;
   $("busy").classList.add("on");
-  while (wanted && photo && !loading) {
+  // Not while the engine's photograph is being replaced: the next frame is
+  // of the new one.
+  while (wanted && photo && !loading && !source.busy) {
     const interactive = wanted === "interactive";
     wanted = null;
     const side = renderSide();
@@ -754,14 +803,24 @@ let limits = null;       // the WebGPU engine's: { side, pixels }
 // exports every pixel. The same budget as renderSide's, so its largest frame
 // is this copy at 1:1.
 const keptPixels = () => (matchMedia("(pointer: coarse)").matches ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
-async function loadPhoto(bytes) {
+// The engine's photograph from `bytes`, a RAW developed at `wb` (the edit's
+// io.raw_white_balance). Only through `source` (below). A decode made in
+// web/decoder.js is dropped instead of kept when `stale()` says by then it
+// isn't wanted; the engine's own load keeps what it decodes. A failure of
+// the engine's call (`forgot`) has let the last photograph go.
+const superseded = () => Object.assign(new Error("superseded"), { stale: true });
+const forgot = (e) => { throw Object.assign(e, { forgot: true }); };
+async function loadPhoto(bytes, wb, { stale = () => false } = {}) {
+  if (stale()) throw superseded();
+  const whiteBalance = JSON.stringify(wb ?? {});
   const pixels = keptPixels();
-  if (!pixels) return host.call("load", bytes, 0, 0);
+  if (!pixels) return host.call("load", bytes, 0, 0, whiteBalance).catch(forgot);
   // Decoded in a worker that then ends, so the engine's memory holds only
   // the copy it keeps, never the decode's peak.
   const t = performance.now();
-  const decoded = await decodeKept(bytes, pixels);
-  const size = await host.call("loadDecoded", decoded);
+  const decoded = await decodeKept(bytes, pixels, whiteBalance);
+  if (stale()) throw superseded();
+  const size = await host.call("loadDecoded", decoded).catch(forgot);
   console.log(`decoded in a worker in ${decoded.decodeMs.toFixed(0)} ms (ready after ${decoded.readyMs.toFixed(0)} ms), ${decoded.memoryMiB} MiB; kept after ${(performance.now() - t).toFixed(0)} ms; RAW develop: ${decoded.bounded ? "bounded" : "legacy"}`);
   return { ...size, decodeMs: decoded.decodeMs };
 }
@@ -774,7 +833,7 @@ function startDecoder() {
   worker.postMessage({ threads });
   return worker;
 }
-function decodeKept(bytes, maxPixels) {
+function decodeKept(bytes, maxPixels, whiteBalance) {
   const worker = decoder ?? startDecoder();
   decoder = null;
   // A panic on one of its rayon threads says so here, as the engine's do;
@@ -784,7 +843,7 @@ function decodeKept(bytes, maxPixels) {
     worker.onmessage = ({ data: { result, error } }) => error ? reject(new Error(error)) : resolve(result);
     worker.onerror = (ev) => reject(new Error(ev.message || "the decoder stopped"));
     panics.onmessage = ({ data }) => data.instance === 0 && reject(new Error(`the decoder crashed: ${data.message}`));
-    worker.postMessage({ bytes, maxDim: 0, maxPixels, rawDevelop: query.get("rawDevelop") });
+    worker.postMessage({ bytes, maxDim: 0, maxPixels, rawDevelop: query.get("rawDevelop"), whiteBalance });
   }).finally(() => {
     panics.close();
     worker.terminate();
@@ -904,6 +963,7 @@ function cropMode() {
   $("crop").setAttribute("aria-pressed", on);
   for (const id of ["crop-cancel", "crop-done", "crop-inspector"]) $(id).hidden = !on;
   $("export").hidden = on;
+  presets.sync();
   updateOriginal();
   cropEditor.refresh();
 }
@@ -1156,11 +1216,17 @@ function updateOriginal() {
 
 // A new photograph or engine has none.
 function forgetOriginal() {
+  holding = false;
+  invalidateOriginal();
+}
+// Nor does a photograph developed again (at another RAW white balance):
+// the one made goes, and one still being made is dropped when it comes. One
+// held is made again from the new development.
+function invalidateOriginal() {
   originals++;
   originalLoad = null;
   original?.bitmap?.close();
   original = null;
-  holding = false;
   updateOriginal();
 }
 
@@ -1188,6 +1254,133 @@ function hud(r, interactive) {
   el.title = shown < 1 && !interactive
     ? `The preview shows ${percent(shown)} of these pixels. ${exportNote()}; inspect grain in an exported file.\n${r.stages}`
     : r.stages;
+}
+
+// ---- RAW white balance ---------------------------------------------------------
+
+// A RAW's input white balance (io.raw_white_balance) is in the engine's
+// decoded pixels, developed by spektrafilm-io from the original bytes; the
+// film render can't change it afterwards. So `photo.wb` is the WB the
+// engine's pixels were developed at, the edit's is the one wanted, and a RAW
+// whose two differ develops again from `photo.bytes`, never from the last
+// development. Crop, rotation, view, border, sample and every other setting
+// stay as they are: this isn't an opening.
+//
+// Everything that replaces the engine's photograph goes through `source`, one
+// at a time: an opening, a development, a reload after an engine restart.
+// Each development checks it's still for this photograph, at the WB still
+// wanted, on the same engine before its pixels are installed (or, where the
+// engine decodes them itself, records what it installed), so a stale one never
+// installs or is taken for the WB shown. A failed one is reported, the edit's
+// WB returns to the photograph's (nothing else of it), and the
+// development stays what it was; trying again may succeed.
+//
+// Programmatic changes (Reset, `negs`, a preset) take the same path: change
+// state.params, then `settingsChanged()`; `sourceReady()` resolves once the
+// engine's photograph matches the edit's WB, or rejects if that failed.
+const source = createSourceQueue();
+const sourceOp = (operation) => source.run(operation).finally(() => { if (wanted && !source.busy) pump(); });
+const wantedWb = () => structuredClone(get(RAW_WB_PATH) ?? defaultValue(RAW_WB_PATH) ?? { mode: "as_shot" });
+// What a load says the photograph was read as, and the WB it developed at.
+function developedAs(size, wb) {
+  let colour = null;
+  try { colour = size.colour ? JSON.parse(size.colour) : null; } catch {}
+  return { colour, raw: isRawColour(colour), wb: structuredClone(wb) };
+}
+const needsDevelop = () => !!photo?.raw && !sameWb(wantedWb(), photo.wb);
+// The engine has the photograph the edit develops: nothing replacing it or
+// about to.
+const sourceCurrent = () => !!photo && !loading && !source.busy && !needsDevelop();
+let developTimer = 0, developing = false, developFailures = 0;
+
+// A change asks for a development after a short pause, so a burst of them (a
+// typed value, Reset's) is one; a slider's interactive frames wait for it to
+// settle (or let go), as a RAW develops in a second or more.
+function requestDevelop(mode) {
+  clearTimeout(developTimer);
+  if (mode === "interactive" || !needsDevelop()) return;
+  developTimer = setTimeout(redevelop, 150);
+}
+
+// Develops the photograph at the edit's WB until the two agree: one at a
+// time, the newest WB next.
+async function redevelop() {
+  clearTimeout(developTimer);
+  if (developing) return;
+  developing = true;
+  try {
+    while (photo && !loading && needsDevelop()) {
+      const target = photo, wb = wantedWb(), opening = opens, engine = host;
+      const current = () => photo === target && opening === opens;
+      setBadge("Developing");
+      $("busy").classList.add("on");
+      try {
+        const outcome = await sourceOp(async () => {
+          if (!current() || !sameWb(wb, wantedWb())) return "stale";
+          try {
+            const size = await loadPhoto(target.bytes, wb, { stale: () => !current() || host !== engine || !sameWb(wb, wantedWb()) });
+            // The engine has it, even if a newer WB or photograph is wanted
+            // by now: that one replaces it next.
+            if (!current()) return "stale";
+            Object.assign(target, developedAs(size, wb));
+            return "developed";
+          } catch (e) {
+            if (e.stale) return "stale";
+            if (e.restarted) return "restarted";
+            // The engine's own load let the last development go: back to it.
+            if (e.forgot && current()) await loadPhoto(target.bytes, target.wb).catch((again) => console.error(again));
+            throw e;
+          }
+        });
+        if (outcome === "restarted") break; // The new engine reloads it, then develops.
+        if (outcome === "developed") {
+          console.log(`developed ${target.name} again at RAW white balance ${JSON.stringify(wb)}`);
+          invalidateOriginal();
+          schedule("settled");
+        }
+      } catch (e) {
+        developFailures++;
+        // The failed WB, only, returns to the one developed; a newer one is
+        // tried next.
+        if (photo === target && sameWb(wantedWb(), wb)) set(RAW_WB_PATH, structuredClone(target.wb));
+        sync();
+        setBadge(null);
+        const what = "The RAW white balance couldn't be applied";
+        // Shown for a while: the frames that follow (of the development
+        // restored) leave it up. A crash restarts the engine, as for a render.
+        if (e.crashed) await failed(e, what);
+        else {
+          console.error(e);
+          showMessage(`${what}: ${e.message}`, true, 10_000);
+        }
+      }
+    }
+  } finally {
+    developing = false;
+    if (activity === "Developing" && !loading && !running && !wanted) setBadge(null);
+    if (!running && !loading) $("busy").classList.remove("on");
+    if (wanted) pump();
+  }
+}
+
+// Resolves once the engine's photograph is the edit's (its RAW at the edit's
+// WB); rejects if a development fails meanwhile.
+async function sourceReady() {
+  const failures = developFailures;
+  for (;;) {
+    if (developFailures !== failures) throw new Error("the RAW white balance couldn't be applied");
+    if (sourceCurrent()) return;
+    if (!photo) throw new Error("no photograph is open");
+    if (needsDevelop() && !developing && !loading) redevelop();
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+// After anything changes the edit outside its controls: the inspector shows
+// it, and it renders (and develops again, if its RAW WB changed).
+function settingsChanged(mode = "settled") {
+  sync();
+  schedule(mode);
 }
 
 // ---- Opening and exporting -------------------------------------------------
@@ -1224,24 +1417,27 @@ async function open(name, data, sampleId = null) {
     if (opening !== opens) return;
     setBadge("Developing");
     const t = performance.now();
-    let size;
     await starting;
-    // Switching engines restarts the worker under a load: load again.
-    for (;;) {
-      try {
-        await host.ready;
-        size = await loadPhoto(bytes);
-        break;
-      } catch (e) {
-        if (!e.restarted) throw e;
+    // After any other change of the engine's photograph, at the edit's RAW
+    // white balance then. Switching engines restarts the worker under a
+    // load: load again.
+    const { size, wb } = await sourceOp(async () => {
+      for (;;) {
+        try {
+          await host.ready;
+          const wb = wantedWb();
+          return { size: await loadPhoto(bytes, wb, { stale: () => opening !== opens }), wb };
+        } catch (e) {
+          if (!e.restarted) throw e;
+        }
       }
-    }
+    });
     loaded = true;
     mark("decoded", name);
     // A newer photograph is opening; the engine loads it next.
     if (opening !== opens) return;
     // Its size as decoded, whatever the engine keeps.
-    photo = { ...opened(name, bytes, size), sampleId };
+    photo = { ...opened(name, bytes, size), sampleId, ...developedAs(size, wb) };
     crop = Crop.defaults();
     set("io.rotate_cw", 0);
     console.log(`decoded ${name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
@@ -1266,7 +1462,7 @@ async function open(name, data, sampleId = null) {
     schedule("settled");
   } catch (e) {
     loaded = true;
-    if (opening !== opens || e.name === "AbortError") return;
+    if (opening !== opens || e.name === "AbortError" || e.stale) return;
     setBadge(null);
     photo = previous;
     dropEarly(true);
@@ -1281,6 +1477,9 @@ async function open(name, data, sampleId = null) {
     updateOriginal();
     $("edit-tools").hidden = !photo || !developed;
     samplePicker.sync();
+    presets.sync();
+    // The WB changed while it opened.
+    if (!loading && needsDevelop()) redevelop();
   }
 }
 
@@ -1315,6 +1514,31 @@ const samplePicker = createSamplePicker({
   },
 });
 const openSample = () => samplePicker.open();
+
+// ---- Presets ---------------------------------------------------------------------
+
+// The ⋯ menu's Import and Export preset, and incoming preset links
+// (web/preset-ui.js). Applying replaces the film, paper and params at once,
+// as desktop applies a preset (no film pairing), through the same change path
+// as Reset, so a RAW develops again at the preset's white balance.
+const presets = createPresets({
+  ready: () => !!catalog.profiles.length && !!host && !loading && !exporting && !cropSession,
+  engineReady: () => starting,
+  call: (method, ...args) => host.call(method, ...args),
+  state: () => structuredClone(state),
+  hasPhoto: () => !!photo,
+  stockName: (id) => stock(id)?.name,
+  install({ film, paper, params }) {
+    Object.assign(state, { film, paper, params });
+    settingsChanged();
+  },
+  // Sample 1, whichever photograph or sample is open; nothing if it is.
+  openSample: () => samplePicker.open(DEFAULT_SAMPLE.id),
+  developed: () => (photo?.raw ? sourceReady() : Promise.resolve()),
+  cropping: () => !!cropSession,
+  shareFiles: () => IOS && standalone(),
+  message: (text, error, ms) => showMessage(text, error, ms),
+});
 for (const event of ["online", "offline"]) addEventListener(event, () => samplePicker.sync());
 
 // `url`'s bytes, telling `progress` the fraction so far when the server
@@ -1404,6 +1628,10 @@ async function exportJpeg() {
 // add_border on the bytes, in the engine's worker).
 async function exportRender() {
   if (cropSession) throw new Error("Apply or cancel the crop before exporting");
+  // Never the last development's pixels with a newly chosen RAW white
+  // balance: wait for the matching one. The render is asked for in the same
+  // turn as the check, so the engine renders it before any later change.
+  do await sourceReady(); while (!sourceCurrent());
   const settings = structuredClone(crop), turn = rotation();
   const rendered = await host.call("render", state.film, state.paper, params(), Math.max(photo.exportWidth, photo.exportHeight), false);
   const r = { ...rendered, ...await host.call("finishPhoto", rendered.rgba, rendered.width, rendered.height, settings, turn) };
@@ -1418,10 +1646,19 @@ async function exportRender() {
 // Loads the photograph again, after the engine let it go: nothing of it shows
 // there until it renders again.
 async function reloadPhoto() {
-  await loadPhoto(photo.bytes);
+  await reloadSource();
   forgetOriginal();
   settledSide = 0;
   schedule("settled");
+}
+// The photograph again, at the WB its last development used, unless an
+// opening photograph will replace it (`unlessOpening`).
+function reloadSource({ unlessOpening = false } = {}) {
+  return sourceOp(async () => {
+    if (!photo || (unlessOpening && loading)) return;
+    const p = photo;
+    await loadPhoto(p.bytes, p.wb);
+  });
 }
 
 // A message stays until hidden; one shown for `ms` hides itself then, and
@@ -1630,7 +1867,22 @@ fillStocks();
 globalThis.negs = {
   engineInstances: () => instances,
   state: () => structuredClone(state),
-  edit(path, value) { set(path, value); sync(); schedule("settled"); },
+  edit(path, value) { set(path, value); settingsChanged(); },
+  // Replaces the film, paper and params at once, as a preset's apply
+  // would, through the same change path as the controls (settingsChanged).
+  replaceSettings({ film = state.film, paper = state.paper, params = state.params }) {
+    Object.assign(state, { film, paper, params: structuredClone(params) });
+    settingsChanged();
+  },
+  reset: () => $("reset").click(),
+  // The engine's photograph: what it was read as, the RAW WB it developed
+  // at, and whether it is the edit's; `whenDeveloped` waits until it is.
+  source: () => photo && { raw: photo.raw, colour: photo.colour, wb: structuredClone(photo.wb),
+    current: sourceCurrent(), busy: source.busy, developing, needsDevelop: needsDevelop(), failures: developFailures },
+  whenDeveloped: () => sourceReady(),
+  // Applies preset text as Import preset does; resolves to whether it did.
+  applyPreset: (text, name = "Preset", options) => presets.apply(text, name, options),
+  presetBusy: () => presets.busy(),
   // Desktop's Lab | Post switch.
   pane: (pane) => showPane(pane),
   // A fresh edit: Reset Adjustments, the film (and paper, if given) chosen
@@ -1711,6 +1963,8 @@ for (const b of [$("open"), $("open-empty")]) b.addEventListener("click", () => 
 $("open-sample").addEventListener("click", openSample);
 $("file").addEventListener("change", () => $("file").files[0] && openFile($("file").files[0]));
 $("export").addEventListener("click", exportJpeg);
+// The presets' dialogs take the keyboard: no crop, rotate or original keys.
+const dialogOpen = () => !!document.querySelector("dialog[open]");
 
 // Show Original: a mouse or pen holds the button, a tap (or Return, Space,
 // or a screen reader, which can't hold) toggles it; `\` is held, not while
@@ -1738,7 +1992,7 @@ $("export").addEventListener("click", exportJpeg);
   const typing = (t) => t instanceof Element && t.matches("textarea, [contenteditable], input:not([type=range], [type=checkbox], [type=radio], [type=file])");
   let key = false;
   addEventListener("keydown", (ev) => {
-    if (ev.key !== "\\" || ev.ctrlKey || ev.metaKey || typing(ev.target)) return;
+    if (ev.key !== "\\" || ev.ctrlKey || ev.metaKey || typing(ev.target) || dialogOpen()) return;
     ev.preventDefault();
     if (ev.repeat || key) return;
     key = true;
@@ -1759,6 +2013,7 @@ $("crop-cancel").addEventListener("click", () => endCrop(false));
 $("rotate-left").addEventListener("click", () => rotate(-1));
 $("rotate-right").addEventListener("click", () => rotate(1));
 addEventListener("keydown", (ev) => {
+  if (dialogOpen()) return;
   if (ev.target instanceof Element && ev.target.matches("select, textarea, [contenteditable], input:not([type=range], [type=checkbox], [type=radio])")) return;
   const key = ev.key.toLowerCase();
   if (cropSession && (key === "escape" || key === "enter")) { ev.preventDefault(); endCrop(key === "enter"); return; }
@@ -1783,6 +2038,10 @@ viewport.addEventListener("drop", (ev) => {
 
 const gpu = query.get("backend") ?? (navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)) ? "gpu" : "cpu");
 starting = startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
+starting.then(() => presets.sync());
+presets.sync();
+// A shared preset link (#preset=…) shows its dialog over the editor.
+void presets.arrive();
 // Files opened with the installed app (the manifest's file_handlers).
 if (self.launchQueue) {
   launchQueue.setConsumer(async ({ files }) => files?.length && openFile(await files[0].getFile()));
@@ -1812,9 +2071,10 @@ if (query.get("image")) {
   try {
     const bytes = new Uint8Array(await (await fetch(query.get("image"))).arrayBuffer());
     const t = performance.now();
-    const size = await loadPhoto(bytes);
+    const wb = wantedWb();
+    const size = await sourceOp(() => loadPhoto(bytes, wb));
     const loadMs = performance.now() - t;
-    photo = opened("automation", bytes, size);
+    photo = { ...opened("automation", bytes, size), ...developedAs(size, wb) };
     const max = Number(query.get("max") ?? 2048);
     // The frame 1:1, so the canvas shows its pixels (or those that fit).
     const long = Math.max(photo.width, photo.height);

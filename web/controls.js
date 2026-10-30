@@ -18,6 +18,7 @@ const borderSlider = (label, border, min, max, step, styles, help) => ({ kind: "
 const stock = (label, path, index, min, max, step, bw) => ({ kind: "stock", label, path, index, min, max, step, bw });
 
 const METERING = ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"];
+export const RAW_WB_MODES = ["as_shot", "daylight", "tungsten", "custom"];
 const DIFFUSION_FILTERS = ["black_pro_mist", "glimmerglass", "pro_mist", "cinebloom"];
 const curves = (at) => [
   slider("Gamma", `${at}.gamma_factor`, 0.5, 2, 0.01),
@@ -30,7 +31,8 @@ const curves = (at) => [
 ];
 
 // Sections hold loose controls (`controls`, each shown while its `when`
-// path is true) and then their effect groups, if any. A group's `enable` is the
+// path is true, or `[path, value]` has that value) and then their effect
+// groups, if any; a `raw` group shows for camera RAWs only. A group's `enable` is the
 // switch in its header; `print` sections are skipped while scanning film.
 // `tab` names a section's tab on phones when its title is too long.
 export const SECTIONS = [
@@ -41,6 +43,14 @@ export const SECTIONS = [
     slider("Film format (mm)", "camera.film_format_mm", 4, 120, 0.1),
     slider("Lens blur (µm)", "camera.lens_blur_um", 0, 100, 0.1),
   ], groups: [
+    // macOS Inspector's RAW White Balance disclosure: a camera RAW's input
+    // white balance, which develops it again from its bytes (app.js). Shown
+    // for RAWs only (`raw`); Custom's fields only while it's chosen.
+    { title: "RAW White Balance", raw: true, controls: [
+      choice("White balance", "io.raw_white_balance.mode", RAW_WB_MODES),
+      { ...slider("Temperature (K)", "io.raw_white_balance.temperature", 1667, 25000, 1), when: ["io.raw_white_balance.mode", "custom"] },
+      { ...slider("Tint", "io.raw_white_balance.tint", 0.01, 4, 0.01), when: ["io.raw_white_balance.mode", "custom"] },
+    ] },
     { title: "Lens Diffusion", enable: "camera.diffusion_filter.active", controls: [
       choice("Filter", "camera.diffusion_filter.filter_family", DIFFUSION_FILTERS),
       slider("Strength", "camera.diffusion_filter.strength", 0, 2, 0.01),
@@ -140,6 +150,13 @@ export const SECTIONS = [
       toggle("Black correction", "scanner.black_correction"),
       slider("Black level", "scanner.black_level", 0, 0.5, 0.01),
     ] },
+    // macOS Inspector's Color Management, less CAT16 (not a preset setting).
+    // Only the algorithms: their other settings stay as they are.
+    { title: "Color Management", controls: [
+      choice("Output gamut", "io.output_gamut_compress.algorithm", ["off", "oklch", "oklrab", "cam16ucs", "aces_rgc"]),
+      choice("Input gamut", "io.input_gamut_compress.algorithm", ["off", "xy"]),
+      choice("Spectral upsampling", "settings.rgb_to_raw_method", ["hanatos2025", "arctic2026beta04", "mallett2019"]),
+    ] },
   ] },
 ];
 
@@ -177,7 +194,7 @@ export const POST_SECTIONS = [
 const TITLES = {
   average: "Average", median: "Median", center_weighted: "Center-Weighted", partial: "Partial",
   matrix: "Matrix", multi_zone: "Multi-Zone", highlight_weighted: "Highlight-Weighted",
-  as_shot: "As Shot", daylight: "Daylight", tungsten: "Tungsten", custom: "Custom",
+  as_shot: "As Shot", daylight: "Daylight", tungsten: "Tungsten (2850 K)", custom: "Custom",
   black_pro_mist: "Black Pro-Mist", glimmerglass: "Glimmerglass", pro_mist: "Pro-Mist", cinebloom: "CineBloom",
   off: "Off", oklch: "OKLCh", oklrab: "OKLrab", cam16ucs: "CAM16-UCS", aces_rgc: "ACES RGC", xy: "xy Chromaticity",
   hanatos2025: "Hanatos 2025", arctic2026beta04: "Arctic 2026 (Beta 04)", mallett2019: "Mallett 2019",
