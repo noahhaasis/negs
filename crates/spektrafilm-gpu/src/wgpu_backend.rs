@@ -4540,6 +4540,28 @@ struct DiffusionChannel {
     extract: (wgpu::BindGroup, (u32, u32)),
 }
 
+/// Discrete 2D exponential's mass relative to its continuum integral.
+/// Reducing lambda without this correction overweights subpixel cores:
+/// their central sample stays 1 while a broad component loses k² samples.
+#[cfg(feature = "wgpu-backend")]
+fn exponential_sampling_moments(lambda: f64) -> (f64, f64) {
+    if lambda >= 8.0 {
+        // Poisson summation: first lattice correction, residual O(lambda^-5).
+        // Broad components have negligible response at the pixel Nyquist.
+        return (1.0 + 0.036414 / lambda.powi(3), 0.0);
+    }
+    let r = (20.0 * lambda).ceil() as i32;
+    let (mut sum, mut nyquist) = (0.0, 0.0);
+    for y in -r..=r {
+        for x in -r..=r {
+            let v = (-((x * x + y * y) as f64).sqrt() / lambda).exp();
+            sum += v;
+            nyquist += if x % 2 == 0 { v } else { -v };
+        }
+    }
+    (sum / (2.0 * std::f64::consts::PI * lambda * lambda), nyquist)
+}
+
 #[cfg(feature = "wgpu-backend")]
 #[allow(clippy::too_many_arguments)]
 fn build_diffusion_state(
@@ -4596,14 +4618,28 @@ fn build_diffusion_state(
     };
     let tw1 = storage("diffusion_tw1", &twiddles(n1));
     let tw2 = storage("diffusion_tw2", &twiddles(n2));
-    // Each decay length in the grid's pixels; the kernel is normalized to
-    // unit sum, so the amplitudes keep their ratios as they are.
+    // Decay lengths in grid pixels. Preserve each component's discrete
+    // mass when reducing, rather than overweighting the subpixel cores.
     let mut comps = vec![0.0f32; 3 * 16 * 2];
+    let mut masses = std::collections::HashMap::new();
+    let mut moments = |lambda: f64| *masses.entry(lambda.to_bits()).or_insert_with(|| exponential_sampling_moments(lambda));
+    let mut detail = [0.0f32; 3];
     for c in 0..3 {
         assert!(psf.components[c].len() <= 16, "diffusion PSF has more than 16 exponentials");
+        let (mut total_mass, mut nyquist_mass) = (0.0, 0.0);
         for (i, &(lambda, amp)) in psf.components[c].iter().enumerate() {
-            comps[(c * 16 + i) * 2] = (lambda / k as f64) as f32;
-            comps[(c * 16 + i) * 2 + 1] = amp as f32;
+            let reduced = lambda / k as f64;
+            let correction = if k > 1 {
+                let (mass, nyquist) = moments(lambda);
+                total_mass += amp * mass * 2.0 * std::f64::consts::PI * lambda * lambda;
+                nyquist_mass += amp * nyquist;
+                mass / moments(reduced).0
+            } else { 1.0 };
+            comps[(c * 16 + i) * 2] = reduced as f32;
+            comps[(c * 16 + i) * 2 + 1] = (amp * correction) as f32;
+        }
+        if total_mass > 0.0 {
+            detail[c] = (nyquist_mass / total_mass).clamp(0.0, 1.0) as f32;
         }
     }
     let comps_buf = storage("diffusion_psf_components", &comps);
@@ -4634,6 +4670,8 @@ fn build_diffusion_state(
         k: u32,
         full_h: u32,
         full_w: u32,
+        detail: f32,
+        _pad: [f32; 3],
     }
     let mut owned = vec![grid_a.clone(), grid_b.clone(), kspec.clone(), tw1.clone(), tw2.clone(), comps_buf.clone()];
     let mut job = |mode: u32, channel: u32, grid: &wgpu::Buffer| {
@@ -4650,6 +4688,8 @@ fn build_diffusion_state(
             k,
             full_h,
             full_w,
+            detail: detail[channel as usize],
+            _pad: [0.0; 3],
         };
         let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("diffusion_fft_conv_params"),
@@ -6274,8 +6314,16 @@ mod grain_tests {
         let mut paths: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
         paths.sort();
         for path in paths {
-            let source = std::fs::read_to_string(&path).unwrap();
+            let mut source = std::fs::read_to_string(&path).unwrap();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            // Post is a shared fragment, not a standalone shader. Assemble
+            // its callers exactly as the production display pipelines do.
+            if name == "display_post.wgsl" {
+                continue;
+            }
+            if matches!(name.as_str(), "display_rgba8.wgsl" | "display_present.wgsl") {
+                source.push_str(include_str!("../../spektrafilm-shaders/wgsl/display_post.wgsl"));
+            }
             // This query mirrors the single `main` compute pipeline helper.
             // Display shaders also contain render/multiple named entries,
             // which use their own pipeline layouts and are not this helper.
@@ -6861,6 +6909,30 @@ mod grain_tests {
         for n in [97u32, 1000, 6061, 13540] {
             let m = fft_size(n);
             assert!(m >= n && fft_radices(m).iter().product::<u32>() == m);
+        }
+    }
+
+    #[test]
+    fn reduced_diffusion_preserves_component_mass_ratios() {
+        let discrete_sum = |lambda: f64| {
+            let r = (20.0 * lambda).ceil() as i32;
+            let mut sum = 0.0;
+            for y in -r..=r {
+                for x in -r..=r {
+                    sum += (-((x * x + y * y) as f64).sqrt() / lambda).exp();
+                }
+            }
+            sum
+        };
+        for lambda in [0.2, 0.7, 3.0, 8.0, 16.0] {
+            for k in [2.0, 3.0, 4.0] {
+                let reduced = lambda / k;
+                let corrected_mass = discrete_sum(reduced) * k * k
+                    * exponential_sampling_moments(lambda).0 / exponential_sampling_moments(reduced).0;
+                let exact_mass = discrete_sum(lambda);
+                let error = (corrected_mass / exact_mass - 1.0).abs();
+                assert!(error < 2e-7, "lambda {lambda}, k {k}: mass error {error}");
+            }
         }
     }
 

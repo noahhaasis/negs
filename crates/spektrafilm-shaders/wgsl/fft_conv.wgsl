@@ -37,6 +37,10 @@ struct Params {
     k: u32,        // 1, or the reduction (modes 5 and 6)
     full_h: u32,
     full_w: u32,
+    detail: f32,   // full-resolution PSF's response at the pixel Nyquist
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -54,6 +58,22 @@ fn reflect(s: i32, n: i32) -> u32 {
         return u32(2 * (n - 1) - s);
     }
     return u32(s);
+}
+
+// Unblurred reduced sample, for restoring the narrow core's high-frequency
+// response lost by the box reduction. No extra full-sized buffer is needed.
+fn block_mean(y: u32, x: u32) -> f32 {
+    let y0 = y * params.k;
+    let x0 = x * params.k;
+    let y1 = min(y0 + params.k, params.full_h);
+    let x1 = min(x0 + params.k, params.full_w);
+    var sum = 0.0;
+    for (var yy = y0; yy < y1; yy++) {
+        for (var xx = x0; xx < x1; xx++) {
+            sum += image[(yy * params.full_w + xx) * 3u + params.channel];
+        }
+    }
+    return sum / f32((y1 - y0) * (x1 - x0));
 }
 
 // Threads per workgroup; the host may lower it to what the GPU's
@@ -87,8 +107,11 @@ fn main(
         // `mix` is the output here, not the builtin.
         let top = grid[(i0 + r) * n2 + j0 + r].x * (1.0 - fv) + grid[(i0 + r) * n2 + j1 + r].x * fv;
         let bottom = grid[(i1 + r) * n2 + j0 + r].x * (1.0 - fv) + grid[(i1 + r) * n2 + j1 + r].x * fv;
-        let blurred = top * (1.0 - fu) + bottom * fu;
+        let base_top = block_mean(i0, j0) * (1.0 - fv) + block_mean(i0, j1) * fv;
+        let base_bottom = block_mean(i1, j0) * (1.0 - fv) + block_mean(i1, j1) * fv;
+        let base = base_top * (1.0 - fu) + base_bottom * fu;
         let k = idx * 3u + params.channel;
+        let blurred = top * (1.0 - fu) + bottom * fu + params.detail * (image[k] - base);
         mix[k] = (1.0 - params.p_s) * image[k] + params.p_s * blurred;
         return;
     }

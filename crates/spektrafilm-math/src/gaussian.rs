@@ -205,22 +205,24 @@ fn iir_blur_1d(
     sigma: Scalar,
     horizontal: bool,
 ) {
-    // Compute IIR coefficients (Young-van Vliet, 3rd order)
-    let q = if sigma >= from_f64(2.5) {
-        from_f64(0.98711) * sigma - from_f64(0.96330)
+    // Keep coefficients AND recurrence state in f64 even for f32 pixels.
+    // The poles approach 1 at large sigma: cancellation in 1-b1-b2-b3
+    // and accumulated f32 roundoff bias even a constant image (notably the
+    // wide DIR tail). Different native/WASM libm rounding then amplified
+    // into visible differences. Pixel buffers remain in Scalar precision.
+    let sigma = sigma as f64;
+    let q = if sigma >= 2.5 {
+        0.98711 * sigma - 0.96330
     } else {
-        from_f64(3.97156) - from_f64(4.14554) * (from_f64(1.0) - from_f64(0.26891) * sigma).sqrt()
+        3.97156 - 4.14554 * (1.0 - 0.26891 * sigma).sqrt()
     };
-
     let q2 = q * q;
     let q3 = q2 * q;
-
-    let b0 =
-        from_f64(1.57825) + from_f64(2.44413) * q + from_f64(1.4281) * q2 + from_f64(0.422205) * q3;
-    let b1 = (from_f64(2.44413) * q + from_f64(2.85619) * q2 + from_f64(1.26661) * q3) / b0;
-    let b2 = -(from_f64(1.4281) * q2 + from_f64(1.26661) * q3) / b0;
-    let b3 = (from_f64(0.422205) * q3) / b0;
-    let a = from_f64(1.0) - b1 - b2 - b3;
+    let b0 = 1.57825 + 2.44413 * q + 1.4281 * q2 + 0.422205 * q3;
+    let b1 = (2.44413 * q + 2.85619 * q2 + 1.26661 * q3) / b0;
+    let b2 = -(1.4281 * q2 + 1.26661 * q3) / b0;
+    let b3 = (0.422205 * q3) / b0;
+    let a = 1.0 - b1 - b2 - b3;
 
     if horizontal {
         dst.par_chunks_exact_mut(w)
@@ -255,10 +257,10 @@ fn iir_blur_1d(
 fn iir_filter_row(
     src: &[Scalar],
     dst: &mut [Scalar],
-    a: Scalar,
-    b1: Scalar,
-    b2: Scalar,
-    b3: Scalar,
+    a: f64,
+    b1: f64,
+    b2: f64,
+    b3: f64,
 ) {
     let n = src.len();
     if n == 0 {
@@ -285,24 +287,24 @@ fn iir_filter_row(
     // n-3..0). The previous Rust code zeroed the state and skipped the
     // last three positions in the backward pass — which produced a
     // small but visible edge bias vs. Python at every halation σ.
-    let x0 = src[0];
+    let x0 = src[0] as f64;
     let mut w1 = x0;
     let mut w2 = x0;
     let mut w3 = x0;
     for j in 0..n {
-        let w = a * src[j] + b1 * w1 + b2 * w2 + b3 * w3;
-        dst[j] = w;
+        let w = a * src[j] as f64 + b1 * w1 + b2 * w2 + b3 * w3;
+        dst[j] = from_f64(w);
         w3 = w2;
         w2 = w1;
         w1 = w;
     }
-    let xn = dst[n - 1];
+    let xn = dst[n - 1] as f64;
     w1 = xn;
     w2 = xn;
     w3 = xn;
     for j in (0..n).rev() {
-        let w = a * dst[j] + b1 * w1 + b2 * w2 + b3 * w3;
-        dst[j] = w;
+        let w = a * dst[j] as f64 + b1 * w1 + b2 * w2 + b3 * w3;
+        dst[j] = from_f64(w);
         w3 = w2;
         w2 = w1;
         w1 = w;
@@ -348,6 +350,16 @@ mod tests {
         let got: Vec<usize> = (-9..13).map(|i| reflect_index(i, 4)).collect();
         assert_eq!(got, expected);
         assert!((-5..6).all(|i| reflect_index(i, 1) == 0));
+    }
+
+    #[test]
+    fn wide_iir_preserves_dc_gain() {
+        for sigma in [3.0, 10.0, 30.0, 60.0] {
+            let input = vec![from_f64(0.42); 97 * 61];
+            let out = gaussian_blur_channel(&input, 97, 61, sigma);
+            let worst = out.iter().map(|&x| (x as f64 - input[0] as f64).abs()).fold(0.0, f64::max);
+            assert!(worst < 1e-7, "sigma {sigma}: DC error {worst}");
+        }
     }
 
     #[test]

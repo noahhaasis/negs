@@ -10,7 +10,7 @@
 // exits; $CHROME_FLAGS adds flags (for example --ignore-certificate-errors
 // for serve.mjs --https).
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -18,9 +18,13 @@ import { pathToFileURL } from "node:url";
 const [url, scriptFile, waitMs = "4000"] = process.argv.slice(2);
 const profile = mkdtempSync(join(process.env.CDP_TMP ?? tmpdir(), "cdp-"));
 const port = 9333 + Math.floor(Math.random() * 500);
-const chrome = spawn("/opt/google/chrome/chrome", [
-  "--ozone-platform=x11", "--window-size=1440,900", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-  "--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist", `--remote-debugging-port=${port}`,
+const chromePath = process.env.CHROME ?? (process.platform === "darwin"
+  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/google/chrome/chrome");
+if (!existsSync(chromePath)) throw new Error(`Chrome not found: ${chromePath} (set CHROME)`);
+const chrome = spawn(chromePath, [
+  ...(process.platform === "linux" ? ["--ozone-platform=x11", "--enable-features=Vulkan"] : []),
+  "--window-size=1440,900", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
+  "--enable-unsafe-webgpu", "--ignore-gpu-blocklist", `--remote-debugging-port=${port}`,
   ...(process.env.CHROME_FLAGS?.split(" ").filter(Boolean) ?? []), "about:blank",
 ], { stdio: "ignore" });
 const exited = new Promise((r) => chrome.once("exit", r));
@@ -69,6 +73,7 @@ async function evaluate(body) {
   if (failed) throw new Error(failed.exception?.description ?? failed.text);
   return r.result?.result?.value;
 }
+let scriptFailed = false;
 if (scriptFile && scriptFile !== "-") {
   try {
     const result = scriptFile.endsWith(".mjs")
@@ -76,6 +81,7 @@ if (scriptFile && scriptFile !== "-") {
       : await evaluate(readFileSync(scriptFile, "utf8"));
     console.log(JSON.stringify(result, null, 1));
   } catch (e) {
+    scriptFailed = true;
     console.log(`[script failed] ${e.message}`);
   }
 }
@@ -84,4 +90,4 @@ if (process.env.SHOT) {
   (await import("node:fs")).writeFileSync(process.env.SHOT, Buffer.from(shot.result.data, "base64"));
 }
 ws.close();
-await quit(0);
+await quit(scriptFailed ? 1 : 0);

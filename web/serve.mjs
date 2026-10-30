@@ -57,9 +57,13 @@ async function serve(req, res) {
     for await (const c of req) chunks.push(c);
     const body = Buffer.concat(chunks);
     const name = url.searchParams.get("name") ?? "result";
+    if (!/^[a-zA-Z0-9_-]{1,180}$/.test(name)) return res.writeHead(400).end();
     const [w, h] = ["w", "h"].map((k) => Number(url.searchParams.get(k)));
     await mkdir(join(web, "results"), { recursive: true });
-    if (w && h) {
+    if (url.searchParams.get("format") === "f32") {
+      if (!Number.isSafeInteger(w) || !Number.isSafeInteger(h) || w <= 0 || h <= 0 || body.length !== w * h * 3 * 4) return res.writeHead(400).end();
+      await writeFile(join(web, "results", `${name}.f32`), body);
+    } else if (w && h) {
       const rgb = Buffer.alloc(w * h * 3);
       for (let i = 0; i < w * h; i++) body.copy(rgb, i * 3, i * 4, i * 4 + 3);
       await writeFile(join(web, "results", `${name}.ppm`), Buffer.concat([Buffer.from(`P6\n${w} ${h}\n255\n`), rgb]));
