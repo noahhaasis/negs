@@ -191,11 +191,41 @@
   .dismiss:hover { color: var(--fg); }
   #offline-all:not([hidden]) ~ #offline-clear::before { content: "· "; color: var(--faint); }
 
+  /* The ⋯ menu after Export (presets), and the presets' dialogs. */
+  .menu-anchor { position: relative; }
+  .btn.more { padding-inline: 9px; letter-spacing: .05em; }
+  .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: grid; min-width: 170px; padding: 4px;
+    border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px rgb(0 0 0 / .45); }
+  .menu[hidden] { display: none; }
+  .menu button { padding: 7px 10px; border: 0; border-radius: 5px; background: none; color: var(--fg); text-align: left; font: inherit; cursor: pointer; }
+  .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--field); outline: none; }
+  .menu button:disabled { color: var(--faint); cursor: default; }
+  .dialog { width: min(420px, calc(100vw - 32px)); padding: 0; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--fg);
+    box-shadow: 0 12px 40px rgb(0 0 0 / .5); }
+  .dialog::backdrop { background: rgb(0 0 0 / .55); }
+  .dialog form { display: grid; gap: 8px; padding: 16px 18px 18px; }
+  .dialog header { display: flex; align-items: center; margin-bottom: 4px; }
+  .dialog h2 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
+  .dialog .dismiss { float: none; font-size: 18px; line-height: 1; padding: 2px 6px; }
+  .dialog label { color: var(--muted); font-size: 12px; }
+  .dialog input[type=text] { width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: inherit; }
+  .dialog input[type=text]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dialog input[readonly] { color: var(--muted); }
+  .dialog-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+  .dialog-row .hint { margin-right: auto; }
+  .dialog-stack { display: grid; gap: 8px; margin: 6px 0; }
+  .dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  .dialog p { margin: 0; }
+  .dialog .preset-name { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  .dialog .problem { color: var(--danger); }
+  .dialog [hidden] { display: none; }
+
   /* Fingers: bigger thumbs, switches and targets, and no hover-only cues.
      Fields stay at 16px, below which iOS zooms the page on focus. */
   @media (pointer: coarse) {
     body { font-size: 15px; }
-    select, .value-field, .crop-inspector input[type=number] { font-size: 16px; }
+    select, .value-field, .crop-inspector input[type=number], .dialog input[type=text] { font-size: 16px; }
+    .menu button { min-height: 40px; }
     select { padding: 8px 10px; }
     .btn { min-height: 40px; padding: 8px 14px; }
     .zoom .btn { min-height: 36px; padding: 4px 12px; font-size: 14px; }
@@ -293,6 +323,13 @@
       <strong>Negs</strong>
       <button class="btn" id="open">Open…</button>
       <button class="btn" id="export" disabled>Export</button>
+      <div class="menu-anchor" id="preset-menu-anchor">
+        <button class="btn more" id="more" aria-haspopup="menu" aria-expanded="false" aria-controls="preset-menu" aria-label="More" title="Presets">⋯</button>
+        <div class="menu" id="preset-menu" role="menu" aria-label="Presets" hidden>
+          <button type="button" role="menuitem" id="import-preset" tabindex="-1">Import preset…</button>
+          <button type="button" role="menuitem" id="export-preset" tabindex="-1">Export preset…</button>
+        </div>
+      </div>
       <button class="btn" id="crop-cancel" hidden>Cancel</button>
       <button class="btn primary" id="crop-done" hidden>Done</button>
     </div>
@@ -320,8 +357,10 @@
     <div class="scroll" id="scroll">
       <div class="stock" data-tab="stock" data-pane="lab">
         <label>Film <select id="film"></select></label>
+        <label id="film-time-row" hidden>Development <select id="film-time"></select></label>
         <label class="row" title="Skip printing and scan the developed film, as for slides.">Scan film directly <input type="checkbox" class="switch" id="scan-film"></label>
         <label id="paper-row">Paper <select id="paper"></select></label>
+        <label id="paper-time-row" hidden>Print development <select id="paper-time"></select></label>
       </div>
       <div id="sections"></div>
       <div id="post-sections"></div>
@@ -340,6 +379,38 @@
     </div>
   </aside>
 </div>
+<input type="file" id="preset-file" hidden accept=".json,application/json">
+<dialog class="dialog" id="export-dialog" aria-labelledby="export-title">
+  <form method="dialog">
+    <header><h2 id="export-title">Export preset</h2><button class="dismiss" value="close" aria-label="Close">×</button></header>
+    <label for="preset-name">Name</label>
+    <input type="text" id="preset-name" autocomplete="off" spellcheck="false" maxlength="240" aria-describedby="preset-name-problem">
+    <p class="hint problem" id="preset-name-problem" role="alert" hidden></p>
+    <label for="preset-link">Preset link</label>
+    <input type="text" id="preset-link" readonly aria-describedby="preset-link-status">
+    <div class="dialog-row"><span class="hint" id="preset-link-status" role="status"></span><button type="button" class="btn" id="copy-link" disabled>Copy link</button></div>
+    <p class="hint">Includes Lab settings only. Your photo, Post adjustments, crop and border are not included.</p>
+    <footer><button class="btn" value="close">Close</button><button type="button" class="btn primary" id="download-preset">Download preset</button></footer>
+  </form>
+</dialog>
+<dialog class="dialog" id="incoming-dialog" aria-labelledby="incoming-title">
+  <form method="dialog">
+    <header><h2 id="incoming-title">Shared preset</h2><button class="dismiss" value="close" aria-label="Close">×</button></header>
+    <div id="incoming-preset">
+      <p class="preset-name" id="incoming-name"></p>
+      <p class="hint" id="incoming-stocks"></p>
+      <div class="dialog-stack">
+        <button type="button" class="btn primary" id="incoming-try">Try on a sample photo</button>
+        <button type="button" class="btn" id="incoming-download">Download preset</button>
+      </div>
+      <p class="hint">No photograph is included in this link.</p>
+    </div>
+    <div id="incoming-problem" hidden>
+      <p class="problem" id="incoming-reason" role="alert"></p>
+      <footer><button class="btn" value="close">Continue to the editor</button></footer>
+    </div>
+  </form>
+</dialog>
 <input type="file" id="file" hidden accept="image/png,image/jpeg,image/tiff,.dng,.nef,.arw,.cr2,.cr3,.raf,.orf,.rw2,.pef,.srw">
 <script type="module" src="app.js"></script>
 </body>

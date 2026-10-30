@@ -135,6 +135,57 @@ pub struct Balanced {
     pub missing: Vec<String>,
 }
 
+/// A preset file's settings applied to the edit's params (`current`, as
+/// JSON), as desktop applies one: [`spektrafilm_core::presets::import`] and
+/// [`spektrafilm_core::presets::apply`], so the [`presets::KEPT`] values stay
+/// the edit's. The stocks' profiles must be registered; until they are,
+/// `missing` names them (and `error` says the stock is unknown, which is
+/// the reason should they not exist).
+///
+/// [`presets::KEPT`]: spektrafilm_core::presets::KEPT
+#[wasm_bindgen(js_name = importPreset)]
+pub fn import_preset(text: &str, current_json: &str) -> Result<PresetResult, JsError> {
+    let current = parse_params(current_json).map_err(js_error)?;
+    data_fs::take_missing();
+    let imported = spektrafilm_core::presets::import(text, Path::new(DATA_DIR));
+    let missing = missing();
+    Ok(match imported {
+        Ok(preset) => {
+            let params = spektrafilm_core::presets::apply(&preset.params, &current);
+            let params = serde_json::to_string(&params).map_err(|e| JsError::new(&e.to_string()))?;
+            PresetResult { film: preset.film, paper: preset.paper, text: params, error: String::new(), missing }
+        }
+        Err(error) => PresetResult { error, missing, ..Default::default() },
+    })
+}
+
+/// The edit as a preset file Python spektrafilm and desktop Negs load
+/// ([`spektrafilm_core::presets::export`]), in `text`; `missing` and `error`
+/// as for [`import_preset`].
+#[wasm_bindgen(js_name = exportPreset)]
+pub fn export_preset(film: &str, paper: &str, params_json: &str) -> Result<PresetResult, JsError> {
+    let params = parse_params(params_json).map_err(js_error)?;
+    data_fs::take_missing();
+    let exported = spektrafilm_core::presets::export(film, paper, &params, Path::new(DATA_DIR));
+    let missing = missing();
+    Ok(match exported {
+        Ok(text) => PresetResult { text, missing, ..Default::default() },
+        Err(error) => PresetResult { error, missing, ..Default::default() },
+    })
+}
+
+#[wasm_bindgen(getter_with_clone)]
+#[derive(Default)]
+pub struct PresetResult {
+    pub film: String,
+    pub paper: String,
+    /// The applied params as JSON (import), or the preset file (export).
+    pub text: String,
+    /// Why it failed, for the user; empty if it didn't.
+    pub error: String,
+    pub missing: Vec<String>,
+}
+
 /// A presentation border around an exported frame's sRGB RGBA8 bytes, as
 /// the CLI adds one (`spektrafilm-io::border`): `style` (`solid`, `keyline`,
 /// `film` or `35mm`) with `options` (a `BorderOptions` object), and with
@@ -444,16 +495,22 @@ impl Engine {
     }
 
     /// Decode a PNG, JPEG or TIFF (with its embedded profile) or a camera
-    /// RAW (with rawler, as shot), keeping it at most `max_dim` pixels on the
-    /// longer side and `max_pixels` in all (0: no limit), resolving to its
-    /// `[width, height]` as kept and as decoded. A device short of memory
-    /// keeps a smaller working copy so; exports load it again in full.
-    pub fn load(&self, bytes: &[u8], max_dim: u32, max_pixels: f64) -> Result<Vec<u32>, JsError> {
+    /// RAW (with rawler, developed at `white_balance`), keeping it at most
+    /// `max_dim` pixels on the longer side and `max_pixels` in all (0: no
+    /// limit), resolving to its `[width, height]` as kept and as decoded. A
+    /// device short of memory keeps a smaller working copy so; exports load
+    /// it again in full. `white_balance` is a `RawWhiteBalance` JSON object
+    /// (`io.raw_white_balance`); omitted or empty means As Shot. It applies
+    /// to RAWs only, as spektrafilm-io's loaders apply it; an invalid active
+    /// Custom value fails a RAW's load. [`Engine::input_colour`] then says
+    /// what the photograph was read as.
+    pub fn load(&self, bytes: &[u8], max_dim: u32, max_pixels: f64, white_balance: Option<String>) -> Result<Vec<u32>, JsError> {
+        let wb = parse_white_balance(white_balance.as_deref())?;
         // The last photograph goes first, so its memory holds the new one's
         // decode: wasm's memory never shrinks, so its peak is what stays.
         // A failed load leaves none.
         self.forget();
-        let (image, colour, full) = decode_photo(bytes, max_dim, max_pixels)?;
+        let (image, colour, full) = decode_photo(bytes, max_dim, max_pixels, wb)?;
         let size = vec![image.width, image.height, full.0, full.1];
         self.keep(image, colour);
         Ok(size)
@@ -471,6 +528,15 @@ impl Engine {
         let colour = serde_json::from_str(colour).map_err(|e| js_error(e.into()))?;
         self.keep(ImageBuf::from_data(width, height, pixels), colour);
         Ok(())
+    }
+
+    /// What the loaded photograph was read as (spektrafilm-io's
+    /// `InputColour`, as JSON: `source` is `"raw"` for a camera RAW), or
+    /// none without one.
+    #[wasm_bindgen(js_name = inputColour)]
+    pub fn input_colour(&self) -> Option<String> {
+        let state = self.state.borrow();
+        state.input_colour.as_ref().and_then(|c| serde_json::to_string(c).ok())
     }
 
     fn keep(&self, image: ImageBuf, colour: spektrafilm_io::InputColour) {
@@ -624,10 +690,12 @@ impl Decoded {
     }
 }
 
-/// Decode a photograph as [`Engine::load`] does, without an engine.
+/// Decode a photograph as [`Engine::load`] does, without an engine,
+/// developing a RAW at `white_balance` as `load` does.
 #[wasm_bindgen(js_name = decode)]
-pub fn decode_kept(bytes: &[u8], max_dim: u32, max_pixels: f64) -> Result<Decoded, JsError> {
-    let (image, colour, (full_width, full_height)) = decode_photo(bytes, max_dim, max_pixels)?;
+pub fn decode_kept(bytes: &[u8], max_dim: u32, max_pixels: f64, white_balance: Option<String>) -> Result<Decoded, JsError> {
+    let wb = parse_white_balance(white_balance.as_deref())?;
+    let (image, colour, (full_width, full_height)) = decode_photo(bytes, max_dim, max_pixels, wb)?;
     let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
     let (width, height) = (image.width, image.height);
     Ok(Decoded { pixels: image.data, width, height, full_width, full_height, colour, bounded: false })
@@ -637,13 +705,14 @@ pub fn decode_kept(bytes: &[u8], max_dim: u32, max_pixels: f64) -> Result<Decode
 /// `force` also selects small Bayer files; neither mode affects rasters or
 /// uncapped desktop loads. Unsupported selected RAWs fail before full RGB.
 #[wasm_bindgen(js_name = decodeBounded)]
-pub fn decode_bounded(bytes: &[u8], max_dim: u32, max_pixels: f64, force: bool) -> Result<Decoded, JsError> {
+pub fn decode_bounded(bytes: &[u8], max_dim: u32, max_pixels: f64, force: bool, white_balance: Option<String>) -> Result<Decoded, JsError> {
+    let wb = parse_white_balance(white_balance.as_deref())?;
     let mode = (max_pixels > 0.0).then_some(if force {
         spektrafilm_io::bounded::Mode::ForceBayer
     } else {
         spektrafilm_io::bounded::Mode::LargeBayer
     });
-    let (image, colour, (full_width, full_height), bounded) = decode_photo_mode(bytes, max_dim, max_pixels, mode)?;
+    let (image, colour, (full_width, full_height), bounded) = decode_photo_mode(bytes, max_dim, max_pixels, mode, wb)?;
     let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
     Ok(Decoded { width: image.width, height: image.height, pixels: image.data, full_width, full_height, colour, bounded })
 }
@@ -653,8 +722,9 @@ fn decode_photo(
     bytes: &[u8],
     max_dim: u32,
     max_pixels: f64,
+    wb: spektrafilm_io::RawWhiteBalance,
 ) -> Result<(ImageBuf, spektrafilm_io::InputColour, (u32, u32)), JsError> {
-    let (image, colour, full, _) = decode_photo_mode(bytes, max_dim, max_pixels, None)?;
+    let (image, colour, full, _) = decode_photo_mode(bytes, max_dim, max_pixels, None, wb)?;
     Ok((image, colour, full))
 }
 
@@ -663,6 +733,7 @@ fn decode_photo_mode(
     max_dim: u32,
     max_pixels: f64,
     mode: Option<spektrafilm_io::bounded::Mode>,
+    wb: spektrafilm_io::RawWhiteBalance,
 ) -> Result<(ImageBuf, spektrafilm_io::InputColour, (u32, u32), bool), JsError> {
     // A RAW turns upright after it shrinks: a smaller copy to turn.
     let mut orientation = 1;
@@ -673,15 +744,17 @@ fn decode_photo_mode(
             spektrafilm_io::colour::convert(image, &info, &interpretation, png).map_err(js_error)?
         }
         Err(not_an_image) => {
+            // An invalid active Custom WB is the reason, not a damaged image.
+            wb.validate().map_err(js_error)?;
             if let Some(mode) = mode {
-                let kept = spektrafilm_io::bounded::load_raw_bytes_kept(bytes, Default::default(), max_dim, max_pixels, mode).map_err(js_error)?;
+                let kept = spektrafilm_io::bounded::load_raw_bytes_kept(bytes, wb, max_dim, max_pixels, mode).map_err(js_error)?;
                 let (width, height) = kept.full_size;
                 let full = if (5..=8).contains(&kept.orientation) { (height, width) } else { (width, height) };
                 return Ok((kept.image.oriented(kept.orientation), spektrafilm_io::InputColour::raw("rawler"), full, kept.bounded));
             }
             // A camera RAW the decoder knows but can't read says so;
             // anything else may have been a damaged image.
-            let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented(bytes, Default::default()).map_err(|raw| {
+            let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented(bytes, wb).map_err(|raw| {
                 let raw = format!("{raw:#}");
                 match raw.split_once("DecoderFailed(\"") {
                     Some((_, reason)) => JsError::new(reason.split('"').next().unwrap_or(&raw)),
@@ -1054,6 +1127,16 @@ fn missing() -> Vec<String> {
         .into_iter()
         .map(|path| path.strip_prefix(DATA_DIR).unwrap_or(&path).to_string_lossy().into_owned())
         .collect()
+}
+
+/// A RAW's input white balance, `io.raw_white_balance` as JSON: none or
+/// empty is As Shot, missing fields take their defaults (serde). The shared
+/// loaders validate it, for RAWs only: a developed raster ignores it.
+fn parse_white_balance(json: Option<&str>) -> Result<spektrafilm_io::RawWhiteBalance, JsError> {
+    match json.map(str::trim) {
+        None | Some("") => Ok(Default::default()),
+        Some(json) => serde_json::from_str(json).map_err(|e| JsError::new(&format!("RAW white balance: {e}"))),
+    }
 }
 
 fn parse_params(json: &str) -> anyhow::Result<RuntimeParams> {

@@ -44,6 +44,23 @@ pub fn read(path: &Path) -> io::Result<Vec<u8>> {
     std::fs::read(path)
 }
 
+/// Whether `path` is a readable file. In the browser that means registered;
+/// an unregistered path is remembered as missing, as for [`read`], so the page
+/// can fetch it and ask again.
+pub fn is_file(path: &Path) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let files = store::FILES.read().unwrap();
+        if files.as_ref().is_some_and(|files| files.contains_key(path)) {
+            return true;
+        }
+        store::MISSING.write().unwrap().push(path.to_owned());
+        false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    path.is_file()
+}
+
 pub fn read_to_string(path: &Path) -> io::Result<String> {
     String::from_utf8(read(path)?).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
