@@ -57,6 +57,21 @@ export function client(wasm, kind) {
         await fetchData(wasm, r.missing);
       }
     },
+    // Unquantised scan for golden tests; normal renders keep their byte-only
+    // readback/presentation path. Free the wasm wrapper after copying its fields.
+    async renderRaw(film, paper, params, maxDim) {
+      for (;;) {
+        const r = await engine.renderRaw(film, paper, params, maxDim);
+        const missing = r.missing;
+        if (!missing.length) {
+          const out = { width: r.width, height: r.height, scan: r.scan, rgba: r.rgba, backend: r.backend, stages: r.stages };
+          r.free();
+          return out;
+        }
+        r.free();
+        await fetchData(wasm, missing);
+      }
+    },
     // The photograph before any film, kept on the canvas to show in the
     // developed frame's place when `present`; otherwise its bytes.
     original(params, maxDim, present = false) {

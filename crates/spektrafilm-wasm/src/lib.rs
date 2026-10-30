@@ -224,6 +224,9 @@ pub struct Rendered {
     pub height: u32,
     /// sRGB RGBA8, empty when `missing` isn't or the frame was presented.
     pub rgba: Vec<u8>,
+    /// Unclipped scan RGB, only for the diagnostic `renderRaw` entry point.
+    /// Normal rendering never allocates or reads back this extra buffer.
+    pub scan: Vec<f32>,
     /// Drawn on the engine's canvas (`Engine.setCanvas`) instead.
     pub presented: bool,
     /// Data files the render read but nobody registered, relative to the data
@@ -545,7 +548,21 @@ impl Engine {
     ) -> js_sys::Promise {
         let state = self.state.clone();
         wasm_bindgen_futures::future_to_promise(async move {
-            render(&state, &film, &paper, &params_json, max_dim, interactive, present)
+            render(&state, &film, &paper, &params_json, max_dim, interactive, present, false)
+                .await
+                .map(JsValue::from)
+                .map_err(JsValue::from)
+        })
+    }
+
+    /// Diagnostic counterpart of `render`: returns the unclipped scan before
+    /// display quantisation, for the native golden harness's numeric gates.
+    /// Uses the same pipeline and resident GPU chain, not a CPU substitute.
+    #[wasm_bindgen(js_name = renderRaw)]
+    pub fn render_raw(&self, film: String, paper: String, params_json: String, max_dim: u32) -> js_sys::Promise {
+        let state = self.state.clone();
+        wasm_bindgen_futures::future_to_promise(async move {
+            render(&state, &film, &paper, &params_json, max_dim, false, false, true)
                 .await
                 .map(JsValue::from)
                 .map_err(JsValue::from)
@@ -711,6 +728,7 @@ async fn render(
     max_dim: u32,
     interactive: bool,
     present: bool,
+    raw: bool,
 ) -> Result<Rendered, JsError> {
     let started = web_time::Instant::now();
     let mut params = parse_params(params_json).map_err(js_error)?;
@@ -797,7 +815,7 @@ async fn render(
     // them when there's a canvas.
     let encoded = params.io.output_cctf_encoding;
     let post = || pipeline.display_post().map(std::sync::Arc::new);
-    let output = match (pipeline.display_on_gpu(backend.as_ref()), gpu.is_some()) {
+    let output = match (!raw && pipeline.display_on_gpu(backend.as_ref()), gpu.is_some()) {
         (true, true) => ChainOutput::Present { encoded, post: post() },
         (true, false) => ChainOutput::Rgba8 { encoded, post: post() },
         (false, _) => ChainOutput::Scan,
@@ -828,8 +846,12 @@ async fn render(
     if !missing.is_empty() {
         return Ok(Rendered::missing(missing));
     }
+    let mut scan = Vec::new();
     let (width, height, mut rgba, mut presented) = match result {
         ChainResult::Scan(output) => {
+            if raw {
+                scan = output.data.clone();
+            }
             let encoding = Encoding::new(&params.io.output_color_space, encoded);
             let (width, height, rgba) = preview::display_rgba(&output, usize::MAX, encoding);
             (width as u32, height as u32, rgba, false)
@@ -856,6 +878,7 @@ async fn render(
         width,
         height,
         rgba,
+        scan,
         presented,
         missing,
         backend: used_backend,
@@ -914,6 +937,7 @@ async fn repost(
         width,
         height,
         rgba: Vec::new(),
+        scan: Vec::new(),
         presented: true,
         missing: Vec::new(),
         backend: gpu.name().to_owned(),
@@ -956,7 +980,7 @@ impl Stages {
 impl Rendered {
     fn missing(missing: Vec<String>) -> Self {
         let (backend, stages) = (String::new(), String::new());
-        Rendered { width: 0, height: 0, rgba: Vec::new(), presented: false, missing, backend, elapsed_ms: 0.0, stages }
+        Rendered { width: 0, height: 0, rgba: Vec::new(), scan: Vec::new(), presented: false, missing, backend, elapsed_ms: 0.0, stages }
     }
 
     /// An original's ([`Engine::original`]).
@@ -973,6 +997,7 @@ impl Rendered {
             width,
             height,
             rgba,
+            scan: Vec::new(),
             presented,
             missing: Vec::new(),
             backend: state.backend.name().to_owned(),

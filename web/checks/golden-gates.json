@@ -1,0 +1,8 @@
+{
+ "phone_diffusion": {
+  "description": "ONLY the phone's budgeted diffusion vs the exact native GPU convolution on the same 12 MP working source, with grain/glare off. Explicit proposed bound for the accepted approximation: max DeltaE00 0.5 (below 1), p99 0.1, at most 2 8-bit steps. The prior default Pro-Mist measurement was max 0.45. This does not relax any non-diffusion gate, or the browser-vs-native-budgeted GPU gate.",
+  "de00_max": 0.5,
+  "de00_p99": 0.1,
+  "code8_max": 2
+ }
+}

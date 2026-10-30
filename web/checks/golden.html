@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Negs WASM golden checks</title>
+<p>Uses the production engine worker. Float readback adds diagnostic memory overhead;
+this is a correctness test, not a phone memory/stability test.</p>
+<button id="run">Run golden checks</button>
+<pre id="status">Ready. Run here, with web/cdp.mjs, or with web/safari.mjs.</pre>
+<script type="module">
+// No service worker or app UI: the production engine worker and decoder APIs.
+globalThis.startGolden = async () => {
+  const body = await (await fetch('golden.js')).text();
+  return new (Object.getPrototypeOf(async function() {}).constructor)(body)();
+};
+document.getElementById('run').onclick = async () => {
+  document.getElementById('run').disabled = true;
+  try { document.getElementById('status').textContent = JSON.stringify(await startGolden(), null, 2); }
+  catch (e) { document.getElementById('status').textContent = `FAILED: ${e.stack ?? e}`; }
+};
+</script>

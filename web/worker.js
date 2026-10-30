@@ -38,7 +38,7 @@ onmessage = async ({ data: { id, method, args } }) => {
     // Calls sent while the engine starts wait for it.
     await started;
     const result = await engine[method](...args);
-    postMessage({ id, result }, result?.rgba ? [result.rgba.buffer] : []);
+    postMessage({ id, result }, [result?.rgba?.buffer, result?.scan?.buffer].filter(Boolean));
   } catch (e) {
     postMessage({ id, error: String(e?.message ?? e), crashed: e instanceof WebAssembly.RuntimeError });
   }
