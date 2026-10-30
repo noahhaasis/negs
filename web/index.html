@@ -29,7 +29,7 @@
      at its device pixels, and draw the photograph where the view puts it. */
   .view { position: relative; display: grid; place-items: center; overflow: hidden; min-height: 0; touch-action: none;
     padding: env(safe-area-inset-top) 0 0 env(safe-area-inset-left); }
-  .stage { position: absolute; inset: 0; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  .stage { position: absolute; inset: 0; isolation: isolate; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
   .photo { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
   .photo[hidden] { display: none; }
   /* Above the stage, which would otherwise take its buttons' clicks. */
@@ -69,6 +69,29 @@
   .zoom .btn.original svg { width: 14px; height: 14px; }
   .zoom .btn.original[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
   .zoom-level { min-width: 44px; text-align: right; color: var(--muted); font: 11px ui-monospace, monospace; text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
+
+  /* Non-destructive crop mode replaces the inspector and locks zoom. */
+  [hidden] { display: none !important; }
+  .edit-tools { position: absolute; top: calc(10px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); display: flex; gap: 4px; }
+  .edit-tools .btn { padding: 4px 9px; background: rgb(31 31 31 / .85); }
+  #crop[aria-pressed=true], .crop-orientation [aria-pressed=true] { color: var(--accent); border-color: var(--accent); }
+  .crop-overlay { z-index: 1; }
+  .edit-tools, .crop-dial-wrap { z-index: 2; }
+  .badge, .message { z-index: 3; }
+  .busy { z-index: 4; }
+  .crop-dial-wrap { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: min(340px, calc(100% - 32px)); padding: 6px 14px; border: 1px solid var(--line); border-radius: 12px; background: rgb(31 31 31 / .9); text-align: center; }
+  #crop-dial { display: block; width: 100%; height: 24px; cursor: ew-resize; touch-action: none; }
+  #crop-dial-value { font-variant-numeric: tabular-nums; }
+  .view.cropping { padding-top: calc(44px + env(safe-area-inset-top)); padding-bottom: 80px; }
+  .view.cropping .zoom, .view.cropping .hud { display: none; }
+  .side.cropping > .scroll, .side.cropping > .panes, .side.cropping > .tabs, .side.cropping > .bottom { display: none; }
+  .crop-inspector { overflow-y: auto; flex: 1; padding: 14px; display: grid; align-content: start; gap: 14px; }
+  .crop-inspector label { display: grid; gap: 6px; color: var(--muted); }
+  .crop-inspector input[type=number] { width: 72px; padding: 4px 6px; background: var(--field); border: 1px solid var(--line); border-radius: 5px; }
+  .crop-orientation { display: flex; gap: 6px; }
+  .crop-orientation .btn { flex: 1; }
+  #crop-custom { display: flex; gap: 8px; align-items: center; }
+  .crop-angle-head { display: flex; align-items: center; justify-content: space-between; }
 
   /* Sidebar */
   .side { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
@@ -165,7 +188,7 @@
      Fields stay at 16px, below which iOS zooms the page on focus. */
   @media (pointer: coarse) {
     body { font-size: 15px; }
-    select, .value-field { font-size: 16px; }
+    select, .value-field, .crop-inspector input[type=number] { font-size: 16px; }
     select { padding: 8px 10px; }
     .btn { min-height: 40px; padding: 8px 14px; }
     .zoom .btn { min-height: 36px; padding: 4px 12px; font-size: 14px; }
@@ -234,7 +257,13 @@
         <button class="btn" id="open-sample" title="A Nikon Z f RAW of Rome at dusk (3.4 MB)">Try a sample photo</button>
       </div>
     </div>
-    <div class="stage" id="stage"><canvas class="photo" id="canvas" hidden></canvas></div>
+    <div class="stage" id="stage"><canvas class="photo" id="canvas" hidden></canvas><canvas class="photo crop-overlay" id="crop-overlay" aria-label="Drag crop corners or edges to resize; drag inside to move" hidden></canvas></div>
+    <div class="edit-tools" id="edit-tools" hidden>
+      <button class="btn" id="rotate-left" aria-label="Rotate counterclockwise" title="Turn left (Shift+R)">↶</button>
+      <button class="btn" id="rotate-right" aria-label="Rotate clockwise" title="Turn right (R)">↷</button>
+      <button class="btn" id="crop" aria-pressed="false" title="Crop and straighten (C or ⌘/Ctrl+K)">Crop</button>
+    </div>
+    <div class="crop-dial-wrap" id="crop-dial-wrap" hidden><div id="crop-dial-value"></div><canvas id="crop-dial" tabindex="0" role="slider" aria-label="Straighten photograph" aria-valuemin="-45" aria-valuemax="45" aria-valuenow="0" title="Drag to level the horizon; double-click to reset"></canvas></div>
     <div class="badge" id="badge" role="status" hidden><span id="badge-text"></span></div>
     <div class="message" id="message" hidden></div>
     <div class="hud" id="hud"></div>
@@ -253,6 +282,18 @@
       <strong>Negs</strong>
       <button class="btn" id="open">Open…</button>
       <button class="btn" id="export" disabled>Export</button>
+      <button class="btn" id="crop-cancel" hidden>Cancel</button>
+      <button class="btn primary" id="crop-done" hidden>Done</button>
+    </div>
+    <div class="crop-inspector" id="crop-inspector" hidden>
+      <label>Aspect Ratio<select id="crop-aspect" aria-label="Crop aspect ratio"></select></label>
+      <div id="crop-custom"><label>Width<input id="crop-width" type="number" min="0.1" max="1000" step="0.1" aria-label="Custom ratio width"></label><span>×</span><label>Height<input id="crop-height" type="number" min="0.1" max="1000" step="0.1" aria-label="Custom ratio height"></label></div>
+      <div class="crop-orientation" role="group" aria-label="Crop orientation"><button class="btn" id="crop-landscape">Landscape</button><button class="btn" id="crop-portrait">Portrait</button></div>
+      <div class="crop-angle-head" title="Level a crooked horizon. The crop shrinks to stay on the photograph."><label for="crop-angle-value">Straighten</label><span><button class="reset" id="crop-angle-reset" aria-label="Reset angle">↺</button><input type="number" id="crop-angle-value" min="-45" max="45" step="0.1" aria-label="Straightening angle in degrees">°</span></div>
+      <div class="ctl slider"><div class="track" id="crop-angle-track"><input type="range" id="crop-angle" min="-45" max="45" step="0.1" value="0" aria-label="Straighten"></div></div>
+      <div class="row"><span>Size</span><output id="crop-size"></output></div>
+      <button class="btn" id="crop-reset">Reset Crop</button>
+      <p class="hint">Drag corners or edges to resize, or drag inside to move. Drag the dial below the photograph to level it. Return applies; Escape cancels. Borders are added after cropping.</p>
     </div>
     <div class="panes" id="panes" role="tablist" aria-label="Inspector">
       <button type="button" role="tab" data-pane="lab">Lab</button><button type="button" role="tab" data-pane="post">Post</button>

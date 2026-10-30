@@ -55,6 +55,11 @@ struct View {
     exact: u32,
     background: vec4<f32>,
     border: Border,
+    // Source size, output clipping (off while editing), padding. Affine
+    // rows map normalized output coordinates back into the whole scan.
+    source: vec4<f32>,
+    map_x: vec4<f32>,
+    map_y: vec4<f32>,
 }
 
 // A presentation border around the photograph (`BorderView` in
@@ -91,11 +96,18 @@ fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
 }
 
+fn source_at(t: vec2<f32>) -> vec2<f32> {
+    let p = vec3<f32>(t / view.size, 1.0);
+    return vec2<f32>(dot(view.map_x.xyz, p), dot(view.map_y.xyz, p));
+}
+
 fn photo_at(t: vec2<f32>) -> vec4<f32> {
+    let uv = source_at(t);
     if view.exact == 1u {
-        return textureLoad(shown, vec2<i32>(t), 0);
+        let pixel = clamp(vec2<i32>(floor(uv * view.source.xy)), vec2<i32>(0), vec2<i32>(view.source.xy) - vec2<i32>(1));
+        return textureLoad(shown, pixel, 0);
     }
-    return textureSampleLevel(shown, bilinear, t / view.size, view.lod);
+    return textureSampleLevel(shown, bilinear, uv, view.lod);
 }
 
 fn inside(p: vec2<f32>, r: vec4<f32>) -> bool {
@@ -140,7 +152,9 @@ fn border_texel(d: vec2<f32>, s: f32) -> vec4<f32> {
 @fragment
 fn fs_view(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let t = (pos.xy - view.origin) / view.scale;
-    let in_photo = all(t >= vec2<f32>(0.0)) && all(t < view.size);
+    let uv = source_at(t);
+    let in_output = all(t >= vec2<f32>(0.0)) && all(t < view.size);
+    let in_photo = all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0)) && (view.source.z < 0.5 || in_output);
     let b = view.border;
     if b.photo.x == 0.0 {
         if !in_photo {

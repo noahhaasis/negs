@@ -771,8 +771,8 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    35mm; Extend to 3:4 for Instagram and Include in export with their help
    texts. Everything after Add border is off while it is. 35mm is off for a
    photograph that isn't 3:2 or 3:4, with "35mm needs a 3:2 or 3:4
-   photograph. This one is 16:9." (macOS's note without its advice to crop:
-   the web has no crop). Defaults are `BorderSettings`'s. The settings live
+   photograph. This one is 16:9." The note uses the cropped, turned
+   photograph's shape. Defaults are `BorderSettings`'s. The settings live
    beside the edit (`border` in `app.js`), not in its params, so Reset
    Adjustments keeps them, as on macOS, and no render ever sees them.
    Desktop keeps the border in the session; the page doesn't remember it.
@@ -1007,6 +1007,51 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
    iOS and Android devices (the home-screen app, its export, WebGPU in
    standalone mode), Firefox, and a real install prompt.
 
+## Crop, leveling and turning
+
+The photograph's top-left toolbar offers counterclockwise/clockwise turns
+(`Shift+R` / `R`) and Crop (`C` or ⌘/Ctrl+K). Crop replaces the inspector:
+Original, Freeform, Square, 16:9, 3:2, 4:3, 5:4, 7:5 and Custom ratios;
+landscape/portrait orientation; draggable corners, edges and interior; and
+straightening from −45° to 45° in 0.1° steps. The dial below the photograph
+also straightens (arrow keys adjust it; double-click resets it). The crop
+shrinks to stay on the turned photograph, growing back when the same
+straightening gesture returns to zero. Done/Return commits the draft and
+any turns; Cancel/Escape restores the previous crop and rotation.
+
+`web/crop.js` ports `macos/Sources/NegsApp/Crop.swift`'s geometry, aspect
+locks and constraints, and `spektrafilm-io::crop`'s pixel rounding and inverse
+pixel-centre sampling. Settings remain in the unrotated frame. Borders are
+hidden while cropping; zoom, Show Original and export are unavailable until
+Done or Cancel. Reset Adjustments keeps finishing edits; opening another
+photograph resets its crop and rotation.
+
+These are presentation edits: no film render. The CPU canvas and WebGPU
+shader use the same inverse affine map, with clipping disabled while drawing
+the crop draft. Show Original retains the committed crop, leveling and turn.
+Exports finish the web engine's 8-bit sRGB bytes in its worker: crop/level,
+then lossless quarter turn, then border/Instagram extension. As with the web
+border, leveling interpolates encoded display bytes, not the native
+exporter's higher-precision pre-encoding pixels. Crop-size and border
+readouts use the finished photograph's dimensions (the retained export
+copy's dimensions for crop size on a phone/tablet).
+
+Checks:
+
+```sh
+node --test web/checks/crop.test.mjs
+node web/cdp.mjs http://localhost:8137/ web/checks/crop.mjs 2000
+node web/cdp.mjs 'http://localhost:8137/?backend=cpu&threads=0' web/checks/crop.mjs 2000
+VIEW=390x844@3m node web/cdp.mjs 'http://localhost:8137/?threads=0' web/checks/crop.mjs 2000
+```
+
+The unit cases mirror native crop tests, including random straightened
+rectangles and byte turns. Browser assertions cover real mouse/touch handle,
+interior and dial drags; Done/Cancel; no film renders; original geometry;
+crop-before-turn exports; border sizing; new-photo reset; and pixel-exact
+100% cropped/turned previews. Also checked with threaded WebGPU and
+`?present=0`.
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
@@ -1048,7 +1093,7 @@ on WebGPU matches native wgpu within 1/255 (99.4% exact).
   download only when asked for.
 - **Not wired.** Export beyond an 8-bit sRGB JPEG from the canvas
   (`spektrafilm_io::save` is path-based; the encoders work in memory), RAW
-  white balance, crop, LUT export, presets, EXIF, and the golden
+  white balance, LUT export, presets, EXIF, and the golden
   suite in a browser.
 
 ## Next steps
