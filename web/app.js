@@ -762,7 +762,7 @@ async function loadPhoto(bytes) {
   const t = performance.now();
   const decoded = await decodeKept(bytes, pixels);
   const size = await host.call("loadDecoded", decoded);
-  console.log(`decoded in a worker in ${decoded.decodeMs.toFixed(0)} ms (ready after ${decoded.readyMs.toFixed(0)} ms), ${decoded.memoryMiB} MiB; kept after ${(performance.now() - t).toFixed(0)} ms`);
+  console.log(`decoded in a worker in ${decoded.decodeMs.toFixed(0)} ms (ready after ${decoded.readyMs.toFixed(0)} ms), ${decoded.memoryMiB} MiB; kept after ${(performance.now() - t).toFixed(0)} ms; RAW develop: ${decoded.bounded ? "bounded" : "legacy"}`);
   return { ...size, decodeMs: decoded.decodeMs };
 }
 
@@ -784,7 +784,7 @@ function decodeKept(bytes, maxPixels) {
     worker.onmessage = ({ data: { result, error } }) => error ? reject(new Error(error)) : resolve(result);
     worker.onerror = (ev) => reject(new Error(ev.message || "the decoder stopped"));
     panics.onmessage = ({ data }) => data.instance === 0 && reject(new Error(`the decoder crashed: ${data.message}`));
-    worker.postMessage({ bytes, maxDim: 0, maxPixels });
+    worker.postMessage({ bytes, maxDim: 0, maxPixels, rawDevelop: query.get("rawDevelop") });
   }).finally(() => {
     panics.close();
     worker.terminate();

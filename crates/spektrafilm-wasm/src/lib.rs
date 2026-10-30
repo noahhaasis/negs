@@ -605,6 +605,8 @@ pub struct Decoded {
     #[wasm_bindgen(js_name = fullHeight)]
     pub full_height: u32,
     colour: String,
+    /// Benchmark routing evidence, not inferred from the query flag.
+    pub bounded: bool,
 }
 
 #[wasm_bindgen]
@@ -628,7 +630,22 @@ pub fn decode_kept(bytes: &[u8], max_dim: u32, max_pixels: f64) -> Result<Decode
     let (image, colour, (full_width, full_height)) = decode_photo(bytes, max_dim, max_pixels)?;
     let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
     let (width, height) = (image.width, image.height);
-    Ok(Decoded { pixels: image.data, width, height, full_width, full_height, colour })
+    Ok(Decoded { pixels: image.data, width, height, full_width, full_height, colour, bounded: false })
+}
+
+/// Benchmark-only opt-in. Default `decode`/Engine::load remain legacy.
+/// `force` also selects small Bayer files; neither mode affects rasters or
+/// uncapped desktop loads. Unsupported selected RAWs fail before full RGB.
+#[wasm_bindgen(js_name = decodeBounded)]
+pub fn decode_bounded(bytes: &[u8], max_dim: u32, max_pixels: f64, force: bool) -> Result<Decoded, JsError> {
+    let mode = (max_pixels > 0.0).then_some(if force {
+        spektrafilm_io::bounded::Mode::ForceBayer
+    } else {
+        spektrafilm_io::bounded::Mode::LargeBayer
+    });
+    let (image, colour, (full_width, full_height), bounded) = decode_photo_mode(bytes, max_dim, max_pixels, mode)?;
+    let colour = serde_json::to_string(&colour).map_err(|e| js_error(e.into()))?;
+    Ok(Decoded { width: image.width, height: image.height, pixels: image.data, full_width, full_height, colour, bounded })
 }
 
 /// The kept image, how to read it and its size as decoded, upright.
@@ -637,6 +654,16 @@ fn decode_photo(
     max_dim: u32,
     max_pixels: f64,
 ) -> Result<(ImageBuf, spektrafilm_io::InputColour, (u32, u32)), JsError> {
+    let (image, colour, full, _) = decode_photo_mode(bytes, max_dim, max_pixels, None)?;
+    Ok((image, colour, full))
+}
+
+fn decode_photo_mode(
+    bytes: &[u8],
+    max_dim: u32,
+    max_pixels: f64,
+    mode: Option<spektrafilm_io::bounded::Mode>,
+) -> Result<(ImageBuf, spektrafilm_io::InputColour, (u32, u32), bool), JsError> {
     // A RAW turns upright after it shrinks: a smaller copy to turn.
     let mut orientation = 1;
     let (image, colour) = match decode(bytes) {
@@ -646,6 +673,12 @@ fn decode_photo(
             spektrafilm_io::colour::convert(image, &info, &interpretation, png).map_err(js_error)?
         }
         Err(not_an_image) => {
+            if let Some(mode) = mode {
+                let kept = spektrafilm_io::bounded::load_raw_bytes_kept(bytes, Default::default(), max_dim, max_pixels, mode).map_err(js_error)?;
+                let (width, height) = kept.full_size;
+                let full = if (5..=8).contains(&kept.orientation) { (height, width) } else { (width, height) };
+                return Ok((kept.image.oriented(kept.orientation), spektrafilm_io::InputColour::raw("rawler"), full, kept.bounded));
+            }
             // A camera RAW the decoder knows but can't read says so;
             // anything else may have been a damaged image.
             let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented(bytes, Default::default()).map_err(|raw| {
@@ -670,7 +703,7 @@ fn decode_photo(
         small
     };
     let full = if (5..=8).contains(&orientation) { (height, width) } else { (width, height) };
-    Ok((image.oriented(orientation), colour, full))
+    Ok((image.oriented(orientation), colour, full, false))
 }
 
 #[derive(Clone, Copy, PartialEq)]
