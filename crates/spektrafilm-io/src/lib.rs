@@ -14,6 +14,7 @@
 //! over the source file's camera metadata read by [`read_metadata`].
 
 pub mod border;
+pub mod bounded;
 pub mod colour;
 pub mod crop;
 pub mod encoding;
@@ -239,14 +240,21 @@ pub fn load_raw_bytes_unoriented(bytes: &[u8], wb: RawWhiteBalance) -> Result<(I
 }
 
 fn develop_rawler(src: &rawler::rawsource::RawSource, orient: bool, wb: RawWhiteBalance) -> Result<ImageBuf> {
-    use rawler::{
-        decoders::RawDecodeParams,
-        imgop::develop::{ProcessingStep, RawDevelop},
-    };
+    use rawler::decoders::RawDecodeParams;
     let decode_params = RawDecodeParams::default();
-    let mut raw = rawler::decode(src, &decode_params)
+    let raw = rawler::decode(src, &decode_params)
         .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
+    let img = develop_decoded(raw, wb)?;
+    if !orient {
+        return Ok(img);
+    }
+    // rawler still sets RawImage::orientation to Normal: read EXIF ourselves.
+    Ok(img.oriented(raw_exif_orientation(src, &decode_params)))
+}
 
+/// Develop an already decoded sensor; shared with the opt-in bounded loader.
+fn develop_decoded(mut raw: rawler::RawImage, wb: RawWhiteBalance) -> Result<ImageBuf> {
+    use rawler::imgop::develop::{ProcessingStep, RawDevelop};
     let mut dev = RawDevelop::default();
     // Our `calibrate` replaces rawler's, which clips (see there).
     dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb | ProcessingStep::Calibrate));
@@ -269,14 +277,7 @@ fn develop_rawler(src: &rawler::rawsource::RawSource, orient: bool, wb: RawWhite
     }))
     .map_err(|p| anyhow::anyhow!("RAW develop failed: panicked: {}", panic_message(&p)))?
     .context("RAW develop failed")?;
-    let img = intermediate_to_image_buf(intermediate);
-    if !orient {
-        return Ok(img);
-    }
-    // rawler 0.8 still always sets `RawImage::orientation` to Normal (an
-    // upstream TODO), so read the EXIF tag ourselves.
-    let orientation = raw_exif_orientation(src, &decode_params);
-    Ok(img.oriented(orientation))
+    Ok(intermediate_to_image_buf(intermediate))
 }
 
 /// A copy of `raw` without its sensor data.

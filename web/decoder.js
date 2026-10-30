@@ -27,16 +27,19 @@ async function start(threads) {
   return wasm;
 }
 
-onmessage = async ({ data: { threads, bytes, maxDim, maxPixels } }) => {
+onmessage = async ({ data: { threads, bytes, maxDim, maxPixels, rawDevelop } }) => {
   if (!wasm) return void (wasm = start(threads));
   let message;
   try {
     const module = await wasm;
     const t = performance.now();
-    const decoded = module.decode(bytes, maxDim, maxPixels);
+    // Explicit benchmark switch only; the shipping/default route is unchanged.
+    const decoded = rawDevelop === "bounded" || rawDevelop === "force"
+      ? module.decodeBounded(bytes, maxDim, maxPixels, rawDevelop === "force")
+      : module.decode(bytes, maxDim, maxPixels);
     const pixels = decoded.takePixels();
     message = [{ result: { pixels, width: decoded.width, height: decoded.height, fullWidth: decoded.fullWidth, fullHeight: decoded.fullHeight,
-      colour: decoded.colour, decodeMs: performance.now() - t, readyMs, memoryMiB: Math.round(module.memoryBytes() / 2 ** 20) } }, [pixels.buffer]];
+      colour: decoded.colour, bounded: decoded.bounded, decodeMs: performance.now() - t, readyMs, memoryMiB: Math.round(module.memoryBytes() / 2 ** 20) } }, [pixels.buffer]];
     decoded.free();
   } catch (e) {
     message = [{ error: String(e?.message ?? e) }];
