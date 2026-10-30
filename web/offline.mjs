@@ -6,15 +6,21 @@ import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 
 // The app's own files, at the site's root as in web/.
-export const SHELL = ["index.html", "credits.html", "app.js", "border.js", "crop.js", "crop-editor.js", "controls.js", "engine.js", "view.js", "placeholder.js",
+export const SHELL = ["index.html", "credits.html", "app.js", "border.js", "crop.js", "crop-editor.js", "controls.js", "engine.js", "view.js", "placeholder.js", "samples.js",
   "worker.js", "decoder.js", "catalog.json", "manifest.webmanifest", "icons", "pkg", "pkg-threads"];
 // The spectral table the defaults use; the others are downloaded when chosen.
 const DEFAULT_LUT = "data/luts/spectral_upsampling/hanatos2025_irradiance_xy_tc";
 
+// One fixed sample is enough offline. Other photographs remain online-only,
+// including when the viewer explicitly asks to "save everything".
+export const OFFLINE_SAMPLE = "sample/DSC_6377.dng";
+
 // How a file at `path` (relative to the site's root) is kept: saved when
 // the worker installs ("install"), when first used ("use"), or never
-// (null: the worker itself, the host's files, the build's record).
+// (null: host/build files, generators, or online-only sample photographs).
 export function role(path) {
+  if (path.startsWith("sample/") && path.endsWith(".dng") && path !== OFFLINE_SAMPLE) return null;
+  if (path.endsWith(".py")) return null;
   if (["sw.js", "build-info.json", "_headers", "_redirects", "404.html", "robots.txt"].includes(path)) return null;
   if (path.endsWith(".d.ts") || path.endsWith(".sh")) return null;
   const top = path.split("/")[0];
@@ -65,5 +71,5 @@ export function devAssets(web, data) {
       files.push(asset(`data/${relative(data, file)}`, file));
     }
   }
-  return files.filter((a) => !a.path.endsWith("make-dng.py"));
+  return files.filter((a) => !a.path.endsWith(".py"));
 }

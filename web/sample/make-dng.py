@@ -1,30 +1,31 @@
-# Make the web page's sample photograph, a lossy DNG, from the camera's NEF:
-#   uv run --with numpy --with pillow web/sample/make-dng.py DSC_6377.NEF web/sample/DSC_6377.dng [quality]
-# (needs libraw's dcraw_emu and exiv2). The web page uses quality 85: 3 MB,
-# where the NEF is 31.6 MB; rendered, it matches the NEF's mean colour within
-# 0.5/255, with no difference visible at 100% (docs/web-wasm.md item 15).
+# Prepare a small, lossy DNG that rawler can develop without Adobe opcodes:
+#   python make-dng.py INPUT OUTPUT [quality=85] [long-edge=0]
+# Needs numpy, pillow, rawpy and exiv2 (or dcraw_emu for the original Z f path).
+# See README.md for the supported cameras and sample provenance.
 #
-# A lossy DNG (as Adobe's DNG Converter makes them) holds demosaiced, linear
-# camera RGB, curved to 8 bits and JPEG-compressed in tiles; its
-# LinearizationTable undoes the curve. rawler reads it (DngDecoder,
-# compression 34892), so it develops as the NEF does, at a quarter of the
-# size. libraw's dcraw_emu demosaics (AHD), with rawler's black and white
-# levels and crop for the Nikon Z f (vendor/rawler/data/cameras/nikon/z_f.toml)
-# and no white balance; the DNG carries the camera's as-shot balance
-# (the NEF's WB_RBLevels) and rawler's D65 colour matrix. As in Adobe's
-# DNGs, the first directory is the camera's preview JPEG (which the web page
-# shows while the DNG develops) and the raw data is in a SubIFD.
+# Demosaiced camera RGB is resized in linear light, curved to 8 bits and
+# JPEG-compressed in tiles. A LinearizationTable undoes the curve; the
+# camera's as-shot balance and D65 matrix remain available for development.
+# This is not a display-referred JPEG wrapped in a DNG. The main directory
+# holds a camera-preview JPEG, the SubIFD holds linear camera RGB.
+# The original full-resolution Nikon Z f generation path is retained
+# (docs/web-wasm.md item 15); the smaller samples also support D800 DNG,
+# Canon EOS 6D and EOS 2000D.
 import io
+from pathlib import Path
+import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 import numpy as np
 from PIL import Image
 
 nef, out = sys.argv[1], sys.argv[2]
 quality = int(sys.argv[3]) if len(sys.argv) > 3 else 85
+long_edge = int(sys.argv[4]) if len(sys.argv) > 4 else 0
 
 BLACK, WHITE = 1008, 15892
 CROP_X, CROP_Y = 8, 4  # rawler's crop_area: 6064 × 4040 to 6048 × 4032
@@ -37,29 +38,88 @@ def exiv2(key):
     return subprocess.run(["exiv2", "-K", key, "-Pv", nef], capture_output=True, text=True, check=True).stdout.split()
 
 
-# The as-shot balance: red and blue multipliers over green.
-levels = [int(a) / int(b) for a, b in (v.split("/") for v in exiv2("Exif.Nikon3.WB_RBLevels")[:2])]
-neutral = [1 / levels[0], 1.0, 1 / levels[1]]
+make = " ".join(exiv2("Exif.Image.Make"))
+model = " ".join(exiv2("Exif.Image.Model"))
+orientation = int(exiv2("Exif.Image.Orientation")[0])
+artist = " ".join(exiv2("Exif.Image.Artist"))
+assert model in ("NIKON Z f", "NIKON D800", "Canon EOS 6D", "Canon EOS 2000D"), f"Unsupported camera: {model}"
+
+if model != "NIKON Z f":
+    import rawpy
+
+    with rawpy.imread(nef) as raw:
+        sizes = raw.sizes
+        wb = raw.camera_whitebalance
+        neutral = [wb[1] / wb[0], 1.0, wb[1] / wb[2]]
+        linear = raw.postprocess(
+            gamma=(1, 1), no_auto_bright=True, output_bps=16,
+            output_color=rawpy.ColorSpace.raw, user_wb=[1, 1, 1, 1],
+            user_flip=0, demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD,
+        )
+        thumb = raw.extract_thumb()
+        shown = (Image.open(io.BytesIO(thumb.data)) if thumb.format == rawpy.ThumbFormat.JPEG
+                 else Image.fromarray(thumb.data)).convert("RGB")
+    # LibRaw's suggested crop is relative to the full sensor; postprocess
+    # has already removed the active-area margins. Do not crop twice.
+    x, y = sizes.crop_left_margin - sizes.left_margin, sizes.crop_top_margin - sizes.top_margin
+    assert x >= 0 and y >= 0 and sizes.crop_width > 0 and sizes.crop_height > 0
+    linear = linear[y:y + sizes.crop_height, x:x + sizes.crop_width]
+    if model == "NIKON D800":
+        D65 = [int(a) / int(b) for a, b in (v.split("/") for v in exiv2("Exif.Image.ColorMatrix2"))]
+    else:
+        profile = "6d" if model == "Canon EOS 6D" else "2000d"
+        path = Path(__file__).resolve().parents[2] / f"vendor/rawler/data/cameras/canon/{profile}.toml"
+        D65 = tomllib.loads(path.read_text())["cameras"]["color_matrix"]["D65"]
+else:
+    # The original Z f calibration uses rawler's crop and white level.
+    levels = [int(a) / int(b) for a, b in (v.split("/") for v in exiv2("Exif.Nikon3.WB_RBLevels")[:2])]
+    neutral = [1 / levels[0], 1.0, 1 / levels[1]]
 
 with tempfile.TemporaryDirectory() as tmp:
-    ppm = f"{tmp}/linear.ppm"
-    subprocess.run(["dcraw_emu", "-4", "-o", "0", "-r", "1", "1", "1", "1", "-k", str(BLACK), "-S", str(WHITE), "-q", "3", "-t", "0", "-Z", ppm, nef], check=True)
-    data = open(ppm, "rb").read()
-    # The camera's largest preview up to 2048 px wide, re-encoded smaller.
-    sizes = subprocess.run(["exiv2", "-pp", nef], capture_output=True, text=True, check=True).stdout.splitlines()
-    jpegs = [(int(l.split(",")[1].split("x")[0]), l.split(":")[0].split()[-1]) for l in sizes if "image/jpeg" in l]
-    number = max((w, n) for w, n in jpegs if w <= 2048)[1]
-    subprocess.run(["exiv2", f"-ep{number}", "-l", tmp, nef], check=True, capture_output=True)
-    shown = Image.open(next(__import__("glob").iglob(f"{tmp}/*-preview{number}.jpg"))).convert("RGB")
+    if model == "NIKON Z f" and shutil.which("dcraw_emu"):
+        ppm = f"{tmp}/linear.ppm"
+        subprocess.run(["dcraw_emu", "-4", "-o", "0", "-r", "1", "1", "1", "1", "-k", str(BLACK), "-S", str(WHITE), "-q", "3", "-t", "0", "-Z", ppm, nef], check=True)
+        header = open(ppm, "rb").read().split(b"\n", 3)
+        width, height = map(int, header[1].split())
+        assert header[2] == b"65535"
+        linear = np.frombuffer(header[3], ">u2").reshape(height, width, 3)
+    elif model == "NIKON Z f":
+        import rawpy
+
+        with rawpy.imread(nef) as raw:
+            linear = raw.postprocess(
+                gamma=(1, 1), no_auto_bright=True, output_bps=16,
+                output_color=rawpy.ColorSpace.raw, user_wb=[1, 1, 1, 1],
+                user_black=BLACK, user_sat=WHITE, user_flip=0,
+                demosaic_algorithm=rawpy.DemosaicAlgorithm.AHD,
+            )
+        height, width = linear.shape[:2]
+    if model == "NIKON Z f":
+        assert (width, height) == (6064, 4040), "Unexpected Z f sensor dimensions"
+        linear = linear[CROP_Y : height - CROP_Y, CROP_X : width - CROP_X]
+        # The camera's largest preview up to 2048 px wide.
+        sizes = subprocess.run(["exiv2", "-pp", nef], capture_output=True, text=True, check=True).stdout.splitlines()
+        jpegs = [(int(l.split(",")[1].split("x")[0]), l.split(":")[0].split()[-1]) for l in sizes if "image/jpeg" in l]
+        number = max((w, n) for w, n in jpegs if w <= 2048)[1]
+        subprocess.run(["exiv2", f"-ep{number}", "-l", tmp, nef], check=True, capture_output=True)
+        shown = Image.open(next(__import__("glob").iglob(f"{tmp}/*-preview{number}.jpg"))).convert("RGB")
+    if long_edge:
+        shown.thumbnail((1280, 1280), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
     shown.save(buf, "JPEG", quality=85)
     preview = buf.getvalue()
-header = data.split(b"\n", 3)
-width, height = map(int, header[1].split())
-assert header[2] == b"65535"
-linear = np.frombuffer(header[3], ">u2").reshape(height, width, 3)
-linear = linear[CROP_Y : height - CROP_Y, CROP_X : width - CROP_X]
 height, width = linear.shape[:2]
+if long_edge and max(width, height) > long_edge:
+    scale = long_edge / max(width, height)
+    width, height = round(width * scale), round(height * scale)
+    # Resample linear light, before the encoding curve; Pillow's RGB mode
+    # would silently reduce this to 8 bits. Float planes retain RAW latitude.
+    linear = np.stack([
+        np.asarray(Image.fromarray(linear[:, :, c].astype(np.float32)).resize(
+            (width, height), Image.Resampling.LANCZOS))
+        for c in range(3)
+    ], axis=2)
+    linear = np.clip(np.rint(linear), 0, 65535).astype(np.uint16)
 
 curve = np.round(255 * (np.arange(65536) / 65535) ** (1 / GAMMA)).astype(np.uint8)
 encoded = curve[linear]
@@ -155,10 +215,10 @@ main_entries = {
     258: (SHORT, [8, 8, 8]),
     259: (SHORT, [7]),
     262: (SHORT, [6]),
-    271: (ASCII, "NIKON CORPORATION"),
-    272: (ASCII, "NIKON Z f"),
+    271: (ASCII, make),
+    272: (ASCII, model),
     273: (LONG, [preview_at]),
-    274: (SHORT, [1]),
+    274: (SHORT, [orientation]),
     277: (SHORT, [3]),
     278: (LONG, [shown.height]),
     279: (LONG, [len(preview)]),
@@ -167,11 +227,13 @@ main_entries = {
     330: (LONG, [raw_at]),
     50706: (BYTE, [1, 4, 0, 0]),
     50707: (BYTE, [1, 1, 0, 0]),
-    50708: (ASCII, "Nikon Z f"),
+    50708: (ASCII, model),
     50721: (SRATIONAL, rationals(D65)),
     50728: (RATIONAL, rationals(neutral)),
     50778: (SHORT, [21]),  # CalibrationIlluminant1: D65
 }
+if artist:
+    main_entries[315] = (ASCII, artist)
 main_at = len(body)
 body += directory(main_entries, main_at)
 struct.pack_into("<I", body, 4, main_at)
