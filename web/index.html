@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Negs</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="tutorial.css">
 <link rel="icon" href="icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="theme-color" content="#161616">
@@ -287,11 +288,19 @@
   <main class="view" id="view">
     <div class="busy" id="busy"></div>
     <div class="empty" id="empty">
-      <h1>Open a photograph</h1>
-      <p>A camera RAW, JPEG, PNG or TIFF. Drop it here, or choose one.</p>
-      <div class="choices">
-        <button class="btn primary" id="open-empty">Choose photo…</button>
-        <button class="btn" id="open-sample">Try a sample photo</button>
+      <div class="tutorial-invitation" id="tutorial-invitation" hidden>
+        <h1>Your photo, through film</h1>
+        <p>Negs simulates exposing film, developing it, and making a print. This quick tour shows how each stage shapes your photo. You can skip it or leave at any time.</p>
+        <div class="choices"><button type="button" class="btn primary" id="start-tutorial">Start tutorial</button><button type="button" class="btn" id="dismiss-tutorial">Not now</button></div>
+      </div>
+      <div id="empty-normal" hidden>
+        <h1>Open a photograph</h1>
+        <p>A camera RAW, JPEG, PNG or TIFF. Drop it here, or choose one.</p>
+        <p>Your photo stays in your browser.</p>
+        <div class="choices">
+          <button class="btn primary" id="open-empty">Choose photo…</button>
+          <button class="btn" id="open-sample">Try a sample photo</button>
+        </div>
       </div>
     </div>
     <div class="stage" id="stage"><canvas class="photo" id="canvas" hidden></canvas><canvas class="photo crop-overlay" id="crop-overlay" aria-label="Drag crop corners or edges to resize; drag inside to move" hidden></canvas></div>
@@ -321,6 +330,7 @@
     <div class="grabber" id="grabber" title="Drag to resize, or tap"></div>
     <div class="top">
       <strong>Negs</strong>
+      <button type="button" class="btn" id="tutorial">Tutorial</button>
       <button class="btn" id="open">Open…</button>
       <button class="btn" id="export" disabled>Export</button>
       <div class="menu-anchor" id="preset-menu-anchor">
@@ -354,7 +364,14 @@
       <button type="button" role="tab" data-pane="lab">Lab</button><button type="button" role="tab" data-pane="post">Post</button>
     </div>
     <nav class="tabs" id="tabs" role="tablist" aria-label="Inspector"></nav>
+    <div class="tour-heading" id="tutorial-heading" hidden><span id="tour-progress"></span><button type="button" class="link" id="tour-end">End tour</button></div>
     <div class="scroll" id="scroll">
+      <section class="tour-guide" id="tutorial-guide" aria-labelledby="tour-title" hidden>
+        <h2 id="tour-title" tabindex="-1"></h2>
+        <p id="tour-copy"></p>
+        <p class="hint" id="tour-hint" hidden></p>
+        <button type="button" class="btn" id="tour-retry" hidden>Retry</button>
+      </section>
       <div class="stock" data-tab="stock" data-pane="lab">
         <label>Film <select id="film"></select></label>
         <label id="film-time-row" hidden>Development <select id="film-time"></select></label>
@@ -366,6 +383,11 @@
       <div id="post-sections"></div>
       <div class="actions" data-tab="stock"><button class="btn" id="reset" title="Restore the defaults while keeping the film, paper and rotation.">Reset Adjustments</button></div>
     </div>
+    <nav class="tour-nav" id="tutorial-nav" aria-label="Tutorial navigation" hidden>
+      <button type="button" class="link" id="tour-reset">Reset step</button><span class="spacer"></span>
+      <button type="button" class="btn" id="tour-back">Back</button><button type="button" class="btn primary" id="tour-next">Next</button>
+    </nav>
+    <div class="tour-status" id="tour-status" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="bottom" id="bottom" data-tab="stock">
       <div class="row"><span>Engine</span><select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></div>
       <div id="engine-info" hidden>Starting…</div>
@@ -379,6 +401,14 @@
     </div>
   </aside>
 </div>
+<dialog class="dialog" id="tutorial-confirm" aria-labelledby="tutorial-confirm-title">
+  <form method="dialog">
+    <header><h2 id="tutorial-confirm-title">Take a quick tour?</h2><button class="dismiss" value="cancel" aria-label="Close">×</button></header>
+    <p>The tutorial uses a sample photo and default settings. Your current photo and edits will be restored when you leave.</p>
+    <p class="hint">Try the controls as you go. Each step starts fresh.</p>
+    <footer><button class="btn" value="cancel">Cancel</button><button type="button" class="btn primary" id="confirm-tutorial">Start tutorial</button></footer>
+  </form>
+</dialog>
 <input type="file" id="preset-file" hidden accept=".json,application/json">
 <dialog class="dialog" id="export-dialog" aria-labelledby="export-title">
   <form method="dialog">

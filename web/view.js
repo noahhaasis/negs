@@ -239,6 +239,15 @@ export function createView(stage, frame, { changed, settled, enabled = () => tru
     zoom: () => zoom,
     fitZoom: (bare = false) => (photo ? fitZoom(bare) : 1),
     fitting: () => fitting,
+    // A temporary tutorial can replace the photo without losing its view.
+    snapshot: () => ({ zoom, x, y, fitting, width: size.width, height: size.height }),
+    restore(saved) {
+      if (!photo || !saved) return;
+      ({ zoom, x, y, fitting } = saved);
+      x += (size.width - saved.width) / 2;
+      y += (size.height - saved.height) / 2;
+      update();
+    },
     atFit,
   };
 }

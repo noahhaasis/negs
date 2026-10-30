@@ -87,6 +87,7 @@ export function createPresets(app) {
     applying = new Promise((r) => { done = r; });
     sync();
     try {
+      await app.beforeApply?.();
       // Over the edit as it is when the result arrives: an edit meanwhile
       // (a Post slider) is what the preset keeps.
       let r, current;

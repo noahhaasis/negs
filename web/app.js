@@ -15,6 +15,9 @@ import { fetchFailed } from "./engine.js";
 import { DEFAULT_SAMPLE, createSamplePicker } from "./samples.js";
 import { createPresets } from "./preset-ui.js";
 import { RAW_WB_PATH, createSourceQueue, isRawColour, sameWb } from "./raw-wb.js";
+import { createTutorial } from "./tutorial.js";
+
+let tutorial = null, tutorialPresentation = false, tutorialRestoring = false;
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
 // complete RuntimeParams, starting from the engine's defaults. Values a
@@ -298,6 +301,7 @@ const actions = {
 
 function buildControl(c) {
   const row = buildRow(c);
+  if (c.path) row.dataset.tutorialPath = c.path;
   if (c.help) row.title = c.help;
   // A border setting: shown for its styles, off while the border is.
   if (c.border && c.border !== "enabled") {
@@ -458,6 +462,7 @@ function remembered(key, fallback) {
   try { return JSON.parse(localStorage.getItem(`negs.${key}`)) ?? fallback; } catch { return fallback; }
 }
 function remember(key, value) {
+  if ((tutorialPresentation || tutorialRestoring) && ["groups", "pane", "tab", "sheet"].includes(key)) return;
   try { localStorage.setItem(`negs.${key}`, JSON.stringify(value)); } catch {}
 }
 
@@ -523,6 +528,7 @@ function buildControls() {
     for (const group of section.groups ?? []) {
       const key = `${section.title}/${group.title}`;
       const details = el("details", { open: opened[key] ?? group.open ?? false });
+      details.dataset.tutorialGroup = key;
       details.addEventListener("toggle", () => remember("groups", { ...remembered("groups", {}), [key]: details.open }));
       const summary = el("summary", {}, el("span", { textContent: group.title }));
       const controls = el("fieldset", { className: "controls" }, ...group.controls.map(buildControl));
@@ -666,6 +672,7 @@ const SNAPS = ["low", "mid", "high"];
 let sheet = remembered("sheet", "mid");
 function snapHeight(snap) {
   const side = $("side"), height = $("app").clientHeight, width = $("app").clientWidth;
+  if (tutorialPresentation) return Math.max(0, Math.min(height - 96, height * (snap === "high" ? 0.74 : 0.59)));
   if (snap === "low") return (cropSession ? $("grabber").offsetHeight + side.querySelector(".top").offsetHeight
     : $("scroll").offsetTop - side.offsetTop) + parseFloat(getComputedStyle(side).paddingBottom);
   if (snap === "high") return 0.8 * height;
@@ -677,6 +684,7 @@ function snapHeight(snap) {
 }
 function setSheet(snap) {
   sheet = SNAPS.includes(snap) ? snap : "mid";
+  if (tutorialPresentation && sheet === "low") sheet = "mid";
   $("app").style.setProperty("--sheet", `${Math.round(snapHeight(sheet))}px`);
   remember("sheet", sheet);
 }
@@ -719,7 +727,7 @@ function buildSheet() {
     if (!drag) return;
     const dy = drag.y - ev.clientY;
     drag.moved ||= Math.abs(dy) > 4;
-    const max = 0.9 * $("app").clientHeight;
+    const max = tutorialPresentation ? Math.max(0, $("app").clientHeight - 96) : 0.9 * $("app").clientHeight;
     $("app").style.setProperty("--sheet", `${Math.min(max, Math.max(snapHeight("low"), drag.height + dy))}px`);
   });
   const end = () => {
@@ -745,6 +753,7 @@ const BUDGET_MS = 90;
 let interactiveScale = 0.5, minScale = 0.15;
 let wanted = null, running = false, settleTimer = 0, exporting = false;
 const renders = [];
+let renderFailures = 0;
 
 function schedule(mode) {
   // Every change comes here, so a WB the photograph wasn't developed at
@@ -782,6 +791,7 @@ async function pump() {
       renders.push({ interactive, width: r.width, height: r.height, elapsedMs: r.elapsedMs, stages: r.stages, presented: r.presented, backend: r.backend, memoryMiB: r.memoryMiB });
       hideMessage();
     } catch (e) {
+      renderFailures++;
       await failed(e, "Render failed");
     }
   }
@@ -1383,6 +1393,180 @@ function settingsChanged(mode = "settled") {
   schedule(mode);
 }
 
+// ---- Tutorial adapter ------------------------------------------------------
+
+// Polling is only used at session boundaries, not on slider interaction.
+// Wait for presentation, not just RAW decode or scheduling a render.
+async function tourWait(test, signal, failures = renderFailures) {
+  const deadline = performance.now() + 120000;
+  for (;;) {
+    signal?.throwIfAborted();
+    if (renderFailures !== failures) throw new Error("The sample couldn't be rendered. Try again or return to the editor.");
+    if (test()) return;
+    if (performance.now() > deadline) throw new Error("The photo took too long to develop. Try again or return to the editor.");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+}
+const tourIdle = () => !loading && !running && !wanted && !source.busy && !developing;
+const layoutSettled = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+function tutorialAdapter() {
+  let sampleShown = false;
+  function baseline() {
+    state.params = structuredClone(catalog.defaults);
+    state.paper = "kodak_portra_endura";
+    chooseFilm("kodak_portra_400");
+    crop = Crop.defaults();
+    Object.assign(border, Border.DEFAULT_BORDER);
+    holdOriginal(false);
+  }
+  function reveal(step) {
+    for (const node of document.querySelectorAll(".tour-control, .tour-group, .tour-section, .tour-stock")) {
+      node.classList.remove("tour-control", "tour-group", "tour-section", "tour-stock");
+    }
+    $("app").dataset.tourStep = step.id;
+    showPane("lab");
+    showTab(step.tab);
+    $("preset-menu").hidden = true;
+    $("more").setAttribute("aria-expanded", "false");
+    if (step.target === "film" || step.target === "paper") {
+      $(step.target).closest("label").classList.add("tour-control");
+      $(step.target).closest(".stock").classList.add("tour-stock");
+    }
+    for (const path of step.paths ?? []) {
+      const row = [...document.querySelectorAll("[data-tutorial-path]")].find((n) => n.dataset.tutorialPath === path);
+      if (!row) throw new Error(`Missing tutorial control: ${path}`);
+      row.classList.add("tour-control");
+      row.closest(".section").classList.add("tour-section");
+    }
+    if (step.group) {
+      const group = [...document.querySelectorAll("[data-tutorial-group]")].find((n) => n.dataset.tutorialGroup === step.group);
+      if (!group) throw new Error(`Missing tutorial group: ${step.group}`);
+      group.classList.add("tour-group");
+      group.open = true;
+    }
+    $("scroll").scrollTop = 0;
+    setSheet(sheet);
+  }
+  return {
+    read: () => remembered("tutorial", null),
+    remember: (value) => remember("tutorial", value),
+    hasPhoto: () => !!photo,
+    launchIntent: () => new URLSearchParams(location.hash.slice(1)).has("preset") || query.has("image") || query.has("film") || query.has("paper"),
+    unavailable: () => cropSession ? "Finish or cancel your crop before starting the tutorial."
+      : loading || exporting || presets.busy() || dialogOpen() ? "Finish the current operation before starting the tutorial." : null,
+    message: showMessage,
+    resize: () => setSheet(sheet),
+    capture() {
+      return { edit: structuredClone(state), photo, crop: structuredClone(crop), border: { ...border }, view: view.snapshot(),
+        pane: $("side").dataset.pane, tab: $("side").dataset.tab, sheet, scroll: $("scroll").scrollTop,
+        groups: [...document.querySelectorAll("[data-tutorial-group]")].map((node) => [node, node.open]) };
+    },
+    async enter(signal) {
+      tutorialPresentation = true;
+      sampleShown = false;
+      setSheet("mid");
+      await starting;
+      signal.throwIfAborted();
+      await host.ready;
+      await tourWait(tourIdle, signal);
+      baseline();
+      sync();
+      samplePicker.cancel();
+      setBadge("Downloading");
+      const first = renders.length;
+      const data = download(DEFAULT_SAMPLE.url, signal, (fraction) => !signal.aborted && setBadge(`Downloading ${Math.floor(fraction * 100)}%`));
+      const opened = await open("Sample 1.dng", data, DEFAULT_SAMPLE.id);
+      signal.throwIfAborted();
+      if (!opened) throw new Error("Couldn't open the sample. Check your connection, or save Sample 1 for offline use.");
+      await tourWait(() => developed && renders.length > first && tourIdle(), signal);
+      sampleShown = true;
+    },
+    async step(step, signal) {
+      await tourWait(tourIdle, signal);
+      baseline();
+      reveal(step);
+      sync();
+      view.fit();
+      await layoutSettled();
+      signal.throwIfAborted();
+      const first = renders.length;
+      settingsChanged();
+      await tourWait(() => developed && renders.length > first && tourIdle(), signal);
+    },
+    cancel() {
+      samplePicker.cancel();
+      ++opens; // Any sample open/decode still in progress is now stale.
+      loading = false;
+    },
+    async restore(saved, { completed = false } = {}) {
+      if (!saved) return;
+      await tourWait(tourIdle);
+      tutorialRestoring = true;
+      tutorialPresentation = false;
+      $("app").classList.add("tutorial-restoring");
+      $("app").classList.remove("tutorial-mode", "tutorial-busy");
+      delete $("app").dataset.tourStep;
+      $("tutorial-guide").hidden = true;
+      $("tutorial-heading").hidden = true;
+      $("tutorial-nav").hidden = true;
+      $("preset-menu").hidden = true;
+      $("more").setAttribute("aria-expanded", "false");
+      for (const [node, opened] of saved.groups) node.open = opened;
+      showPane(saved.pane);
+      showTab(saved.tab);
+      setSheet(saved.sheet);
+      if (saved.photo) {
+        Object.assign(state, structuredClone(saved.edit));
+        const first = renders.length;
+        if (!await open(saved.photo.name, Promise.resolve(saved.photo.bytes), saved.photo.sampleId)) throw new Error("Couldn't reopen your photograph. Please retry.");
+        await tourWait(() => developed && renders.length > first && tourIdle());
+        // open() resets finishing geometry; put the user's geometry back.
+        Object.assign(state, structuredClone(saved.edit));
+        crop = structuredClone(saved.crop);
+        Object.assign(border, saved.border);
+        presentationChanged();
+        await layoutSettled();
+        view.restore(saved.view);
+        sync();
+        const restored = renders.length;
+        settingsChanged();
+        await tourWait(() => renders.length > restored && tourIdle());
+      } else if (!sampleShown || completed) {
+        Object.assign(state, structuredClone(saved.edit));
+        crop = structuredClone(saved.crop);
+        Object.assign(border, saved.border);
+        dropEarly();
+        photo = null;
+        frame?.bitmap.close();
+        frame = null;
+        wanted = null;
+        developed = false;
+        forgetOriginal();
+        for (const canvas of document.querySelectorAll(".photo")) canvas.hidden = true;
+        $("empty").hidden = false;
+        $("zoom").hidden = true;
+        $("edit-tools").hidden = true;
+        $("export").disabled = true;
+        $("hud").textContent = "";
+        setBadge(null);
+        sync();
+      } else {
+        // First-run users can carry on experimenting with the sample.
+        view.fit();
+        sync();
+      }
+      await layoutSettled(); // Disclosure toggle events must stay transient.
+      $("scroll").scrollTop = saved.scroll;
+      tutorialRestoring = false;
+      $("app").classList.remove("tutorial-restoring");
+      samplePicker.sync();
+      presets.sync();
+    },
+    completed: () => showMessage("You’re ready. Film and paper shape the look; Print exposure sets the final brightness. Reopen Tutorial whenever you like.", false, 8000),
+  };
+}
+
 // ---- Opening and exporting -------------------------------------------------
 
 // What an export of the photograph develops.
@@ -1460,6 +1644,7 @@ async function open(name, data, sampleId = null) {
     loading = false;
     sync();
     schedule("settled");
+    return true;
   } catch (e) {
     loaded = true;
     if (opening !== opens || e.name === "AbortError" || e.stale) return;
@@ -1470,6 +1655,7 @@ async function open(name, data, sampleId = null) {
     if (photo) await reloadPhoto().catch(() => {});
     $("empty").hidden = !!photo;
     await failed(e, `Couldn't open ${name}`);
+    return false;
   } finally {
     if (opening === opens) loading = false;
     if (!running) $("busy").classList.remove("on");
@@ -1492,7 +1678,9 @@ function longSide() {
 
 // A photograph the viewer chose; it replaces the sample if that's still
 // downloading.
-function openFile(file) {
+async function openFile(file) {
+  tutorial?.suppressInvitation();
+  if (tutorial && tutorial.state().phase !== "idle") await tutorial.end();
   samplePicker.cancel();
   return open(file.name, file.arrayBuffer().then((b) => new Uint8Array(b)));
 }
@@ -1513,7 +1701,11 @@ const samplePicker = createSamplePicker({
     return open(`Sample ${number}.dng`, data, entry.id);
   },
 });
-const openSample = () => samplePicker.open();
+const openSample = async () => {
+  tutorial?.suppressInvitation();
+  if (tutorial && tutorial.state().phase !== "idle") await tutorial.end();
+  return samplePicker.open();
+};
 
 // ---- Presets ---------------------------------------------------------------------
 
@@ -1524,6 +1716,10 @@ const openSample = () => samplePicker.open();
 const presets = createPresets({
   ready: () => !!catalog.profiles.length && !!host && !loading && !exporting && !cropSession,
   engineReady: () => starting,
+  async beforeApply() {
+    tutorial?.suppressInvitation();
+    if (tutorial && tutorial.state().phase !== "idle") await tutorial.end();
+  },
   call: (method, ...args) => host.call(method, ...args),
   state: () => structuredClone(state),
   hasPhoto: () => !!photo,
@@ -1866,6 +2062,7 @@ fillStocks();
 // edit, edits through the path the controls take, and the renders so far.
 globalThis.negs = {
   engineInstances: () => instances,
+  tutorial: () => tutorial?.state(),
   state: () => structuredClone(state),
   edit(path, value) { set(path, value); settingsChanged(); },
   // Replaces the film, paper and params at once, as a preset's apply
@@ -2013,7 +2210,7 @@ $("crop-cancel").addEventListener("click", () => endCrop(false));
 $("rotate-left").addEventListener("click", () => rotate(-1));
 $("rotate-right").addEventListener("click", () => rotate(1));
 addEventListener("keydown", (ev) => {
-  if (dialogOpen()) return;
+  if (dialogOpen() || tutorialPresentation || tutorialRestoring) return;
   if (ev.target instanceof Element && ev.target.matches("select, textarea, [contenteditable], input:not([type=range], [type=checkbox], [type=radio])")) return;
   const key = ev.key.toLowerCase();
   if (cropSession && (key === "escape" || key === "enter")) { ev.preventDefault(); endCrop(key === "enter"); return; }
@@ -2039,6 +2236,7 @@ viewport.addEventListener("drop", (ev) => {
 const gpu = query.get("backend") ?? (navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)) ? "gpu" : "cpu");
 starting = startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
 starting.then(() => presets.sync());
+tutorial = createTutorial(tutorialAdapter());
 presets.sync();
 // A shared preset link (#preset=…) shows its dialog over the editor.
 void presets.arrive();

@@ -1,0 +1,75 @@
+/* A lesson inside the inspector, never a coachmark over the photograph. */
+.tutorial-invitation h1 { font-size: 22px; line-height: 1.2; }
+.tutorial-invitation .btn, #confirm-tutorial { min-height: 44px; }
+#tutorial { padding-inline: 9px; }
+.side.cropping .top { flex-wrap: wrap; }
+.tour-guide { padding: 14px; }
+.app.tutorial-mode { height: var(--tutorial-height, 100dvh); }
+.app.tutorial-mode, .app.tutorial-restoring { transition: none; }
+.tour-heading { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 0 14px; color: var(--muted); font-size: 12px; }
+.tour-heading .link { flex: none; }
+.tour-guide h2 { margin: 0 0 8px; font-size: 19px; line-height: 1.25; }
+.tour-guide h2:focus { outline: none; }
+.tour-guide p { font-size: 14px; line-height: 1.5; margin: 0 0 10px; }
+.tour-guide .hint { font-size: 12px; }
+.tour-nav { display: flex; flex-wrap: wrap; flex: none; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.tour-nav .spacer { flex: 1; }
+.tour-nav .btn { min-height: 44px; }
+#tour-next { margin-left: auto; }
+.tour-nav .link, .tour-heading .link { min-height: 44px; }
+.tour-nav .link { text-align: left; }
+.tour-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.btn:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tutorial-mode .side { min-width: 0; }
+.tutorial-mode .sample-picker, .tutorial-mode .panes, .tutorial-mode .tabs,
+.tutorial-mode .bottom, .tutorial-mode .actions, .tutorial-mode .edit-tools { display: none !important; }
+.tutorial-mode .top { padding-block: 8px; }
+.tutorial-mode #open, .tutorial-mode #export, .tutorial-mode #preset-menu-anchor { display: none; }
+.tutorial-mode[data-tour-step=preset] #preset-menu-anchor { display: block; }
+.tutorial-mode[data-tour-step=preset] #import-preset { display: none; }
+.tutorial-mode[data-tour-step=preset] #more { border-color: var(--accent); }
+.tutorial-mode[data-tour-step=preset] #export-preset { background: rgb(224 164 88 / .12); }
+.tutorial-mode .stock:not(.tour-stock),
+.tutorial-mode .stock > label:not(.tour-control),
+.tutorial-mode .section:not(.tour-section),
+.tutorial-mode .section > .ctl:not(.tour-control),
+.tutorial-mode .section > details:not(.tour-group),
+.tutorial-mode .section > .footer,
+.tutorial-mode .controls > .ctl:not(.tour-control),
+.tutorial-mode #post-sections { display: none !important; }
+.tutorial-mode .section > h2 { display: none; }
+.tutorial-mode .controls { padding-left: 14px; }
+.tutorial-mode .tour-control { border-radius: 7px; background: rgb(224 164 88 / .07); box-shadow: 0 0 0 1px rgb(224 164 88 / .55); padding: 10px !important; }
+.tutorial-mode .stock { border: 0; padding-top: 2px; }
+.tutorial-mode .section { border: 0; }
+.tutorial-mode .section > .ctl { margin: 4px 14px 14px; }
+.tutorial-busy .stock, .tutorial-busy #sections { display: none !important; }
+.tutorial-mode .scroll { scroll-behavior: auto; }
+@media (min-width: 1000px) { .app.tutorial-mode { grid-template-columns: minmax(0, 1fr) 360px; } }
+@media (pointer: coarse) {
+  #tutorial { min-height: 44px; }
+  .tour-heading { font-size: 13px; }
+  .tour-guide p { font-size: 15px; }
+  .tour-guide .hint { font-size: 13px; }
+}
+@media (max-width: 899px) and (orientation: portrait), (max-width: 639px) {
+  .app.tutorial-welcome { grid-template-rows: minmax(0, 1fr) auto; }
+  .tutorial-welcome .side > :not(.top) { display: none !important; }
+  .tutorial-welcome .top { padding-top: 10px; }
+  .tutorial-welcome .empty { max-height: 100%; overflow-y: auto; }
+  .top { flex-wrap: wrap; }
+  .top strong { flex: 1 0 calc(100% - 100px); }
+  .top #tutorial { margin-left: auto; }
+  .tutorial-mode .top { display: none; }
+  .tutorial-mode[data-tour-step=preset] .top { display: flex; }
+  .tutorial-mode .side { padding-bottom: env(safe-area-inset-bottom); }
+  .tutorial-mode .tour-nav { padding-block: 8px; }
+  .tutorial-mode .grabber { height: 18px; }
+  .tutorial-mode .tour-guide { padding-top: 4px; }
+  .tutorial-mode .stock, .tutorial-mode .section > .ctl:first-of-type { margin-top: 0; }
+  .tutorial-mode .hud { display: none; }
+  .tutorial-mode .zoom { gap: 2px; }
+  .tutorial-mode .zoom .btn { padding-inline: 8px; }
+  .tutorial-mode .zoom-level { min-width: 32px; }
+}
+@media (prefers-reduced-motion: reduce) { .app.tutorial-mode { transition: none; } }
