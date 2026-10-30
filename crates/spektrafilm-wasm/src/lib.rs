@@ -326,12 +326,13 @@ impl Engine {
     /// Show the photograph on the canvas where the page puts it, from now
     /// on and at once, from the frame on it: a display pass, without the
     /// film chain. `width` × `height` is the canvas in device pixels, `rect`
-    /// the whole photograph's left, top, width and height on it, and
+    /// the finished photograph's left, top, width and height on it, and
     /// `background` the RGB around it, 0 to 1. `original` draws the
     /// original ([`Engine::original`]) in the developed frame's place, when
     /// there is one. `border` is a [`BorderView`]'s 36 numbers, as
-    /// `web/border.js` lays it out, or empty for none. Resolves to the
-    /// milliseconds until the GPU had drawn it, or -1 with no frame to draw
+    /// `web/border.js` lays it out, or empty for none. `transform` is the
+    /// inverse normalized affine map and output extent from `web/crop.js`
+    /// (12 numbers), or empty for identity. Resolves to the milliseconds until the GPU had drawn it, or -1 with no frame to draw
     /// yet.
     pub fn show(
         &self,
@@ -341,6 +342,7 @@ impl Engine {
         background: Vec<f32>,
         original: bool,
         border: Vec<f32>,
+        transform: Vec<f32>,
     ) -> js_sys::Promise {
         let gpu = {
             let state = self.state.borrow();
@@ -367,7 +369,10 @@ impl Engine {
             }
             _ => BorderView::default(),
         };
-        let view = View { width, height, rect: [x, y, w, h], background: [r, g, b], original, border };
+        // Inverse normalized affine rows, output/source extents, clipping
+        // and whether leveling requires filtered sampling (web/crop.js).
+        let transform = transform.try_into().unwrap_or([1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
+        let view = View { width, height, rect: [x, y, w, h], background: [r, g, b], original, border, transform };
         let (drawn_tx, drawn_rx) = futures_channel::oneshot::channel();
         let drawing = gpu.show(
             view,

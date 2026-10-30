@@ -9,6 +9,8 @@ import { SECTIONS, POST_SECTIONS, optionTitle, snap, formatValue } from "./contr
 import { createView } from "./view.js";
 import { placeholder } from "./placeholder.js";
 import * as Border from "./border.js";
+import * as Crop from "./crop.js";
+import { createCropEditor } from "./crop-editor.js";
 import { fetchFailed } from "./engine.js";
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
@@ -28,6 +30,14 @@ let photo = null;             // { name, bytes, width, height }
 // The presentation border (web/border.js), beside the edit as desktop keeps
 // it: not in its params, so it never renders the film.
 const border = { ...Border.DEFAULT_BORDER };
+let crop = Crop.defaults(), cropSession = null, presentationOnly = false;
+const rotation = () => Crop.turns(get("io.rotate_cw") ?? 0);
+function photoGeometry() {
+  if (early) return Crop.presentation(Crop.defaults(), 0, early.width, early.height);
+  if (!photo) return null;
+  return Crop.presentation(cropSession?.settings ?? crop, cropSession?.rotation ?? rotation(), photo.width, photo.height, !!cropSession);
+}
+const photoSize = () => photoGeometry() ?? photo;
 let host = null;              // the engine worker
 let kind = "gpu";
 
@@ -69,7 +79,8 @@ function startHost(engineKind) {
   };
   const call = (method, ...args) => dead ? Promise.reject(dead) : new Promise((resolve, reject) => {
     pending.set(++next, [resolve, reject]);
-    worker.postMessage({ id: next, method, args }, args.flatMap((a) => a instanceof OffscreenCanvas ? [a] : a?.pixels instanceof Float32Array ? [a.pixels.buffer] : []));
+    worker.postMessage({ id: next, method, args }, args.flatMap((a, i) => a instanceof OffscreenCanvas ? [a]
+      : a?.pixels instanceof Float32Array ? [a.pixels.buffer] : method === "finishPhoto" && i === 0 ? [a.buffer] : []));
   });
   const ready = call("init", engineKind, threads, instance);
   const kill = () => {
@@ -175,7 +186,8 @@ function isModified(path) {
   return JSON.stringify(a) !== JSON.stringify(b);
 }
 
-const params = () => JSON.stringify(state.params);
+// Rotation is finishing only, not part of the film's render/cache key.
+const params = () => JSON.stringify({ ...state.params, io: { ...state.params.io, rotate_cw: 0 } });
 
 // A new film brings its own grain, DIR and halation presets, as upstream
 // applies them (macOS EditorModel.chooseFilm).
@@ -397,7 +409,7 @@ function buildStyles(c) {
   row.querySelector(".picker").setAttribute("aria-label", c.label);
   let colours = "";
   syncs.push(() => {
-    const size = photo ?? early;
+    const size = photoSize() ?? early;
     for (const { style, button } of buttons) {
       button.setAttribute("aria-pressed", border.style === style.id);
       button.dataset.fits = !size || Border.fits(style.id, size.width, size.height);
@@ -609,9 +621,10 @@ const SNAPS = ["low", "mid", "high"];
 let sheet = remembered("sheet", "mid");
 function snapHeight(snap) {
   const side = $("side"), height = $("app").clientHeight, width = $("app").clientWidth;
-  if (snap === "low") return $("scroll").offsetTop - side.offsetTop + parseFloat(getComputedStyle(side).paddingBottom);
+  if (snap === "low") return (cropSession ? $("grabber").offsetHeight + side.querySelector(".top").offsetHeight
+    : $("scroll").offsetTop - side.offsetTop) + parseFloat(getComputedStyle(side).paddingBottom);
   if (snap === "high") return 0.8 * height;
-  const shape = photo ?? early;
+  const shape = photoSize() ?? early;
   if (!shape) return 0.45 * height;
   const pad = width < 500 ? 12 : 32, hud = 28;
   const view = ((width - 2 * pad) * shape.height) / shape.width + 2 * pad + hud;
@@ -801,9 +814,13 @@ function renderSide() {
 
 // Around the photograph, as the page's background (index.html --bg).
 const BACKGROUND = [0x16 / 255, 0x16 / 255, 0x16 / 255];
-const view = createView($("stage"), $("view"), { changed: showView, settled: viewSettled, around: (w, h) => borderLayout(w, h) ?? { width: w, height: h, x: 0, y: 0 } });
+const view = createView($("stage"), $("view"), { changed: showView, settled: viewSettled, enabled: () => !cropSession,
+  around: (w, h) => !cropSession && borderLayout(w, h) || { width: w, height: h, x: 0, y: 0 } });
+const cropEditor = createCropEditor({ session: () => cropSession, view, changed: showView,
+  exportSize: () => ({ width: photo.exportWidth, height: photo.exportHeight }) });
 let frame = null;        // the last frame drawn from bytes: { bitmap, width, height }
 let settledSide = 0;     // the longest side of the last settled frame asked for
+let lastHud = null;
 const views = [];        // display passes' times (the engine's, or the page's paint), for checks
 
 // Draw the photograph where the view now puts it: the engine draws its
@@ -813,6 +830,7 @@ let showing = false, showAgain = false, sentView = "";
 function showView() {
   if (!photo && !early) return;
   zoomLevel();
+  cropEditor.refresh();
   if (!presenting || early) {
     const t = performance.now();
     paint();
@@ -831,17 +849,19 @@ function showView() {
       }
     });
 }
-const viewKey = () => JSON.stringify([view.size(), view.rect(), showingOriginal, borderView()]);
+const viewKey = () => JSON.stringify([view.size(), view.rect(), showingOriginal, borderView(), photoGeometry()?.matrix]);
 function sendView() {
   const { width, height } = view.size(), r = view.rect();
   sentView = viewKey();
   sendBorderTexture();
-  return host.call("show", width, height, [r.x, r.y, r.width, r.height], BACKGROUND, showingOriginal, borderView());
+  return host.call("show", width, height, [r.x, r.y, r.width, r.height], BACKGROUND, showingOriginal, borderView(), photoGeometry()?.matrix ?? []);
 }
 
 // Once a zoom, pan or resize stops: render again when the view needs more
 // pixels than the frame has, or, fitted, other ones.
 function viewSettled() {
+  if (cropSession) return;
+  if (presentationOnly) { presentationOnly = false; return; }
   if (!photo) return;
   const side = renderSide();
   if (side > settledSide + 1 || (view.fitting() && side !== settledSide)) schedule("settled");
@@ -858,19 +878,55 @@ function paint() {
   ctx.fillRect(0, 0, width, height);
   const shown = early ?? (photo && (showingOriginal && original?.bitmap ? original : frame));
   if (!shown) return;
-  const r = view.rect(), { width: w, height: h } = shown.bitmap;
-  // The border around the photograph's frame, not the placeholder's.
-  const l = !early && borderLayout(photo.width, photo.height);
-  if (l) Border.paintUnder(ctx, l, r, photo.width);
-  if (Math.abs(r.width - w) <= 1 && Math.abs(r.height - h) <= 1) {
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(shown.bitmap, Math.round(r.x + (r.width - w) / 2), Math.round(r.y + (r.height - h) / 2));
-  } else {
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(shown.bitmap, r.x, r.y, r.width, r.height);
-  }
-  if (l) Border.paintOver(ctx, l, r, photo.width, borderTexture()?.bitmap);
+  const r = view.rect(), size = photoSize();
+  const l = !early && !cropSession && borderLayout(size.width, size.height);
+  if (l) Border.paintUnder(ctx, l, r, size.width);
+  Crop.paint(ctx, shown.bitmap, r, photoGeometry());
+  if (l) Border.paintOver(ctx, l, r, size.width, borderTexture()?.bitmap);
+}
+
+// ---- Crop, leveling and quarter turns ----------------------------------------
+
+function presentationChanged() {
+  if (!photo) return;
+  presentationOnly = true;
+  const size = photoSize();
+  view.setPhoto(size.width, size.height);
+  if (lastHud) hud(...lastHud);
+  sync();
+  setSheet(sheet);
+}
+function cropMode() {
+  const on = !!cropSession;
+  $("view").classList.toggle("cropping", on);
+  $("side").classList.toggle("cropping", on);
+  $("crop").setAttribute("aria-pressed", on);
+  for (const id of ["crop-cancel", "crop-done", "crop-inspector"]) $(id).hidden = !on;
+  $("export").hidden = on;
+  updateOriginal();
+  cropEditor.refresh();
+}
+function beginCrop() {
+  if (cropSession || !photo || loading || early || !developed || exporting) return;
+  holdOriginal(false);
+  cropSession = new Crop.Session(crop, photo.width, photo.height, rotation());
+  cropMode();
+  if (sheet === "low") setSheet("mid");
+  presentationChanged();
+}
+function endCrop(apply) {
+  if (!cropSession) return;
+  if (apply) { crop = cropSession.committed(); set("io.rotate_cw", cropSession.rotation); }
+  cropSession = null;
+  cropMode();
+  presentationChanged();
+  $("crop").focus({ preventScroll: true });
+}
+function rotate(quarterTurns) {
+  if (!photo || loading || early || !developed || exporting) return;
+  if (cropSession) cropSession.rotate(quarterTurns);
+  else set("io.rotate_cw", Crop.turns(rotation() + quarterTurns));
+  presentationChanged();
 }
 
 // ---- The border --------------------------------------------------------------
@@ -894,7 +950,7 @@ function textureFor(w, h) {
 // That texture, once it's here. Until another film's strip arrives, the
 // last strip of the same format stands in (as on macOS).
 let lastStrip = null;
-function borderTexture(w = photo?.width, h = photo?.height) {
+function borderTexture(w = photoSize()?.width, h = photoSize()?.height) {
   const key = w && textureFor(w, h);
   const t = key && textures.get(key);
   if (t && !(t instanceof Promise)) return t;
@@ -908,14 +964,15 @@ function borderLayout(w, h) {
 }
 // The layout as the engine's view takes it.
 function borderView() {
-  const l = photo && borderLayout(photo.width, photo.height);
-  return l ? Border.viewOf(l, photo.width, photo.height) : [];
+  const size = photoSize(), l = photo && !cropSession && borderLayout(size.width, size.height);
+  return l ? Border.viewOf(l, size.width, size.height) : [];
 }
 
 // Fetch the texture the border needs, with progress, once: a film without
 // an edge print takes the generic strip.
 function fetchBorderTexture() {
-  const key = photo && textureFor(photo.width, photo.height);
+  const size = photoSize();
+  const key = photo && !cropSession && textureFor(size.width, size.height);
   if (!key || textures.has(key)) return;
   const style = Border.STYLES.find((s) => s.id === border.style).title;
   const progress = (f) => showMessage(`Downloading the ${style} border… ${Math.floor(f * 100)}%`);
@@ -924,11 +981,11 @@ function fetchBorderTexture() {
     .catch((e) => {
       // Offline, the generic strip may be saved where the film's isn't.
       if ((e.status !== 404 && !e.offline) || border.style !== "35mm") throw e;
-      return get(Border.genericStrip(Border.filmFormat(photo.width, photo.height)));
+      return get(Border.genericStrip(Border.filmFormat(size.width, size.height)));
     })
     .then(async ({ path, bytes }) => {
       const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
-      const format = key === Border.FILM_TEXTURE.path ? null : Border.filmFormat(photo.width, photo.height);
+      const format = key === Border.FILM_TEXTURE.path ? null : Border.filmFormat(size.width, size.height);
       const t = { path, format, bytes, width: bitmap.width, height: bitmap.height, bitmap };
       textures.set(key, t);
       if (format) lastStrip = t;
@@ -976,6 +1033,7 @@ async function draw(r) {
   if (gpu) gpu.hidden = !r.presented;
   $("empty").hidden = true;
   $("zoom").hidden = false;
+  $("edit-tools").hidden = false;
   updateOriginal();
 }
 
@@ -1007,7 +1065,7 @@ function dropEarly(restore = false) {
   $("empty").hidden = !!photo;
   for (const [c, hidden] of covered.canvases) c.hidden = hidden;
   $("hud").textContent = covered.hud;
-  if (photo) view.setPhoto(photo.width, photo.height);
+  if (photo) { const size = photoSize(); view.setPhoto(size.width, size.height); }
   else paint();
 }
 
@@ -1040,7 +1098,7 @@ let originals = 0;            // which photograph and engine it's for
 let holding = false;          // asked to show it
 let showingOriginal = false;  // and it shows
 let developed = false;        // the photograph's first frame has shown
-const canShowOriginal = () => !!photo && !loading && !early && developed && !!host;
+const canShowOriginal = () => !!photo && !loading && !early && developed && !!host && !cropSession;
 
 // Starts making the original at the settled frame's size, if it isn't made
 // or being made: when the pointer reaches the button, so a press usually
@@ -1117,12 +1175,13 @@ function zoomLevel() {
 // pixels the frame shows when it has fewer (exports develop all of them, or
 // on a phone or tablet the copy it keeps).
 function hud(r, interactive) {
-  const el = $("hud");
+  lastHud = [r, interactive];
+  const size = photoSize(), el = $("hud");
   const ms = `${r.elapsedMs.toFixed(0)} ms`;
   const shown = Math.max(r.width, r.height) / Math.max(photo.width, photo.height);
   const parts = interactive
     ? ["Preview", `${r.width} × ${r.height}`, ms]
-    : [`${photo.width} × ${photo.height}`, ...(shown < 1 ? [`shown at ${percent(shown)}`] : []), ms, `${r.memoryMiB} MiB`];
+    : [`${size.width} × ${size.height}`, ...(shown < 1 ? [`shown at ${percent(shown)}`] : []), ms, `${r.memoryMiB} MiB`];
   // Each part on one line; the line breaks between them.
   el.textContent = parts.map((p) => p.replaceAll(" ", "\u00a0")).join("\u00a0· ");
   el.title = shown < 1 && !interactive
@@ -1141,8 +1200,10 @@ const exportNote = () => photo.exportWidth < photo.width
 // placeholder from the bytes shows.
 let opens = 0, loading = false, starting = null;
 async function open(name, data) {
+  endCrop(false);
   const opening = ++opens, previous = photo;
   let loaded = false;
+  $("edit-tools").hidden = true;
   loading = true;
   forgetOriginal();
   // Another photograph's placeholder isn't this one's.
@@ -1180,6 +1241,8 @@ async function open(name, data) {
     if (opening !== opens) return;
     // Its size as decoded, whatever the engine keeps.
     photo = opened(name, bytes, size);
+    crop = Crop.defaults();
+    set("io.rotate_cw", 0);
     console.log(`decoded ${name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
     $("export").disabled = false;
     $("export").title = photo.exportWidth < photo.width ? `${exportNote()}.` : "";
@@ -1187,6 +1250,7 @@ async function open(name, data) {
     frame?.bitmap.close();
     frame = null;
     developed = false;
+    lastHud = null;
     settledSide = 0;
     if (early) {
       // The placeholder stays until the first frame, where it was.
@@ -1214,6 +1278,7 @@ async function open(name, data) {
     if (!running) $("busy").classList.remove("on");
     if (!loading && wanted) pump();
     updateOriginal();
+    $("edit-tools").hidden = !photo || !developed;
   }
 }
 
@@ -1301,7 +1366,7 @@ async function failed(e, what) {
 }
 
 async function exportJpeg() {
-  if (!photo || exporting) return;
+  if (!photo || exporting || cropSession) return;
   exporting = true;
   $("export").disabled = true;
   showMessage(`Rendering ${photo.exportWidth}×${photo.exportHeight} for export…`);
@@ -1338,7 +1403,10 @@ async function exportJpeg() {
 // and includes it, as the CLI adds it (`addBorder`: spektrafilm-io's
 // add_border on the bytes, in the engine's worker).
 async function exportRender() {
-  const r = await host.call("render", state.film, state.paper, params(), Math.max(photo.exportWidth, photo.exportHeight), false);
+  if (cropSession) throw new Error("Apply or cancel the crop before exporting");
+  const settings = structuredClone(crop), turn = rotation();
+  const rendered = await host.call("render", state.film, state.paper, params(), Math.max(photo.exportWidth, photo.exportHeight), false);
+  const r = { ...rendered, ...await host.call("finishPhoto", rendered.rgba, rendered.width, rendered.height, settings, turn) };
   const b = Border.exported(border, r.width, r.height);
   if (!b) return r;
   sendBorderTexture();
@@ -1379,7 +1447,7 @@ function hideMessage() {
 // bases, paper and enlarger, set as one change (macOS EditorModel.balancePrint).
 let balancing = false;
 async function balancePrint() {
-  if (!actions.balancePrint.enabled()) return;
+  if (!actions.balancePrint.enabled() || cropSession) return;
   const film = state.film, paper = state.paper, edit = params();
   balancing = true;
   sync();
@@ -1554,6 +1622,7 @@ showInstall();
 buildControls();
 buildPanes();
 buildSheet();
+touchSlider($("crop-angle-track"), $("crop-angle"));
 if (matchMedia("(pointer: coarse)").matches) $("value-hint").textContent = "Tap a value to type one.";
 catalog = await (await fetch("catalog.json")).json();
 fillStocks();
@@ -1614,7 +1683,11 @@ globalThis.negs = {
     }
     return { ...border };
   },
-  borderLayout: () => photo && borderLayout(photo.width, photo.height),
+  borderLayout: () => { const size = photoSize(); return photo && borderLayout(size.width, size.height); },
+  crop: () => structuredClone(cropSession?.settings ?? crop),
+  cropSession: () => cropSession && { settings: structuredClone(cropSession.settings), rotation: cropSession.rotation, shown: cropSession.shown },
+  beginCrop, endCrop, rotate,
+  photoGeometry,
   borderTexture: () => { const t = borderTexture(); return t && { path: t.path, width: t.width, height: t.height }; },
   borderTextures: () => [...textures.keys()],
   canvasRect: () => view.canvasRect(),
@@ -1680,6 +1753,21 @@ $("export").addEventListener("click", exportJpeg);
   addEventListener("keyup", (ev) => ev.key === "\\" && letGo());
   addEventListener("blur", letGo);
 }
+
+$("crop").addEventListener("click", () => cropSession ? endCrop(true) : beginCrop());
+$("crop-done").addEventListener("click", () => endCrop(true));
+$("crop-cancel").addEventListener("click", () => endCrop(false));
+$("rotate-left").addEventListener("click", () => rotate(-1));
+$("rotate-right").addEventListener("click", () => rotate(1));
+addEventListener("keydown", (ev) => {
+  if (ev.target instanceof Element && ev.target.matches("select, textarea, [contenteditable], input:not([type=range], [type=checkbox], [type=radio])")) return;
+  const key = ev.key.toLowerCase();
+  if (cropSession && (key === "escape" || key === "enter")) { ev.preventDefault(); endCrop(key === "enter"); return; }
+  if (ev.repeat || ev.altKey) return;
+  if ((key === "k" && (ev.metaKey || ev.ctrlKey)) || (key === "c" && !ev.metaKey && !ev.ctrlKey)) {
+    ev.preventDefault(); cropSession ? endCrop(true) : beginCrop();
+  } else if (key === "r" && !ev.metaKey && !ev.ctrlKey) { ev.preventDefault(); rotate(ev.shiftKey ? -1 : 1); }
+});
 
 $("fit").addEventListener("click", () => view.fit());
 $("actual").addEventListener("click", () => view.actualSize());

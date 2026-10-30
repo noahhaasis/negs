@@ -2200,8 +2200,8 @@ pub struct View {
     /// The canvas's size in device pixels.
     pub width: u32,
     pub height: u32,
-    /// The whole photograph's rectangle on it, in device pixels: left, top,
-    /// width, height. A frame rendered smaller fills it too.
+    /// The finished photograph's rectangle on it, in device pixels: left,
+    /// top, width, height. A frame rendered smaller fills it too.
     pub rect: [f32; 4],
     /// The canvas around the photograph, RGB from 0 to 1, stored as is.
     pub background: [f32; 3],
@@ -2209,6 +2209,9 @@ pub struct View {
     pub original: bool,
     /// The border around the photograph, if any.
     pub border: BorderView,
+    /// Inverse normalized affine rows, output/source extents, clip and filter.
+    /// The page's crop.js maps crop, leveling and rotation without a render.
+    pub transform: [f32; 12],
 }
 
 /// A presentation border as the view draws it around the photograph
@@ -2257,8 +2260,8 @@ impl View {
     /// size, and a full-size frame at 100%. Any other is sampled.
     fn place(&self, width: u32, height: u32) -> Placement {
         let [x, y, w, h] = self.rect;
-        let (iw, ih) = (width as f32, height as f32);
-        if (w - iw).abs() <= 1.0 && (h - ih).abs() <= 1.0 {
+        let (iw, ih) = (width as f32 * self.transform[8], height as f32 * self.transform[9]);
+        if self.transform[11] == 0.0 && (w - iw).abs() <= 1.0 && (h - ih).abs() <= 1.0 {
             let origin = [(x + (w - iw) / 2.0).round(), (y + (h - ih) / 2.0).round()];
             return Placement { origin, scale: [1.0; 2], lod: 0.0, exact: true };
         }
@@ -2610,9 +2613,11 @@ impl WgpuBackend {
         let canvas = canvas.as_mut()?;
         let texture = &Self::drawn(canvas)?.texture;
         let (width, height) = (texture.width(), texture.height());
-        let place = self.view_of(canvas, width, height).place(width, height);
-        let (w, h) = (width as f32 * place.scale[0], height as f32 * place.scale[1]);
-        Some([width as f32, height as f32, place.origin[0], place.origin[1], w, h])
+        let view = self.view_of(canvas, width, height);
+        let place = view.place(width, height);
+        let (iw, ih) = (width as f32 * view.transform[8], height as f32 * view.transform[9]);
+        let (w, h) = (iw * place.scale[0], ih * place.scale[1]);
+        Some([iw, ih, place.origin[0], place.origin[1], w, h])
     }
 
     /// Free what the GPU keeps of the photograph: its shown images, its
@@ -2653,6 +2658,7 @@ impl WgpuBackend {
             background: [0.0; 3],
             original: false,
             border: BorderView::default(),
+            transform: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0],
         })
     }
 
@@ -2791,6 +2797,9 @@ impl WgpuBackend {
             exact: u32,
             background: [f32; 4],
             border: BorderView,
+            source: [f32; 4],
+            map_x: [f32; 4],
+            map_y: [f32; 4],
         }
         let texture = Self::drawn(canvas)?.texture.clone();
         let (width, height) = (texture.width(), texture.height());
@@ -2807,11 +2816,14 @@ impl WgpuBackend {
             contents: bytemuck::bytes_of(&Params {
                 origin: place.origin,
                 scale: place.scale,
-                size: [width as f32, height as f32],
+                size: [width as f32 * view.transform[8], height as f32 * view.transform[9]],
                 lod: place.lod,
                 exact: place.exact as u32,
                 background: [r, g, b, 1.0],
                 border: view.border,
+                source: [width as f32, height as f32, view.transform[10], 0.0],
+                map_x: view.transform[0..4].try_into().unwrap(),
+                map_y: view.transform[4..8].try_into().unwrap(),
             }),
             usage: wgpu::BufferUsages::UNIFORM,
         });

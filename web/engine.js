@@ -1,3 +1,5 @@
+import { applyRgba } from "./crop.js";
+
 // The engine inside the worker (web/worker.js): fetch whatever data files a
 // render asks for, then retry.
 export function client(wasm, kind) {
@@ -12,7 +14,8 @@ export function client(wasm, kind) {
     setCanvas: (canvas) => engine.setCanvas(canvas),
     // Where that canvas shows the photograph, drawn again at once without
     // the film chain; and where it drew the last frame.
-    show: (width, height, rect, background, original = false, border = []) => engine.show(width, height, rect, background, original, border),
+    show: (width, height, rect, background, original = false, border = [], transform = []) => engine.show(width, height, rect, background, original, border, transform),
+    finishPhoto: (rgba, width, height, crop, rotation) => applyRgba(rgba, width, height, crop, rotation),
     // A border texture's PNG at its data path, kept for exports, and on the
     // canvas for views whose border has one.
     borderTexture(path, bytes) {

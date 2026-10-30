@@ -20,7 +20,7 @@ const WHEEL_ZOOM = 0.01, WHEEL_MAX = 50;
 // after every change, `settled` once the view stops changing. `around`
 // gives the canvas around a `width` × `height` photograph, in its pixels:
 // `{ width, height, x, y }`, the photograph's top-left corner at x, y.
-export function createView(stage, frame, { changed, settled, around = (width, height) => ({ width, height, x: 0, y: 0 }) }) {
+export function createView(stage, frame, { changed, settled, enabled = () => true, around = (width, height) => ({ width, height, x: 0, y: 0 }) }) {
   let photo = null, canvas = null;
   let size = { width: 1, height: 1, dpr: 1 };
   // Device pixels per photograph pixel, and the photograph's top-left corner.
@@ -139,7 +139,7 @@ export function createView(stage, frame, { changed, settled, around = (width, he
   // Wheel: Ctrl/⌘ (a trackpad's pinch arrives so) or Option zooms, else pans.
   stage.addEventListener("wheel", (ev) => {
     ev.preventDefault();
-    if (!photo) return;
+    if (!photo || !enabled()) return;
     const unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? stage.clientHeight : 1;
     if (ev.ctrlKey || ev.metaKey || ev.altKey) {
       const dy = Math.max(-WHEEL_MAX, Math.min(WHEEL_MAX, ev.deltaY * unit));
@@ -159,7 +159,7 @@ export function createView(stage, frame, { changed, settled, around = (width, he
     return { mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], distance: Math.hypot(a[0] - b[0], a[1] - b[1]) };
   };
   stage.addEventListener("pointerdown", (ev) => {
-    if (!photo || (ev.pointerType === "mouse" && ev.button !== 0)) return;
+    if (!photo || !enabled() || (ev.pointerType === "mouse" && ev.button !== 0)) return;
     stage.setPointerCapture(ev.pointerId);
     pointers.set(ev.pointerId, at(ev));
     pinch = pointers.size === 2 ? pair() : null;
@@ -167,6 +167,7 @@ export function createView(stage, frame, { changed, settled, around = (width, he
     cursor();
   });
   stage.addEventListener("pointermove", (ev) => {
+    if (!enabled()) return;
     const last = pointers.get(ev.pointerId);
     if (!last) return;
     const now = at(ev);
@@ -197,7 +198,7 @@ export function createView(stage, frame, { changed, settled, around = (width, he
   stage.addEventListener("pointerup", end);
   stage.addEventListener("pointercancel", end);
   // Mouse and pen; a browser may also send one after a double tap.
-  stage.addEventListener("dblclick", (ev) => ev.timeStamp - lastTouch > 600 && toggle(...at(ev)));
+  stage.addEventListener("dblclick", (ev) => enabled() && ev.timeStamp - lastTouch > 600 && toggle(...at(ev)));
 
   return {
     // A new photograph, fitted.
