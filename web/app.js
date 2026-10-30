@@ -1623,7 +1623,6 @@ buildControls();
 buildPanes();
 buildSheet();
 touchSlider($("crop-angle-track"), $("crop-angle"));
-if (matchMedia("(pointer: coarse)").matches) $("value-hint").textContent = "Tap a value to type one.";
 catalog = await (await fetch("catalog.json")).json();
 fillStocks();
 // For automation over the DevTools protocol (web/cdp.mjs): a copy of the

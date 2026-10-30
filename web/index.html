@@ -74,6 +74,7 @@
   [hidden] { display: none !important; }
   .edit-tools { position: absolute; top: calc(10px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); display: flex; gap: 4px; }
   .edit-tools .btn { padding: 4px 9px; background: rgb(31 31 31 / .85); }
+  .edit-tools .btn svg { display: block; width: 16px; height: 16px; }
   #crop[aria-pressed=true], .crop-orientation [aria-pressed=true] { color: var(--accent); border-color: var(--accent); }
   .crop-overlay { z-index: 1; }
   .edit-tools, .crop-dial-wrap { z-index: 2; }
@@ -259,8 +260,12 @@
     </div>
     <div class="stage" id="stage"><canvas class="photo" id="canvas" hidden></canvas><canvas class="photo crop-overlay" id="crop-overlay" aria-label="Drag crop corners or edges to resize; drag inside to move" hidden></canvas></div>
     <div class="edit-tools" id="edit-tools" hidden>
-      <button class="btn" id="rotate-left" aria-label="Rotate counterclockwise" title="Turn left (Shift+R)">↶</button>
-      <button class="btn" id="rotate-right" aria-label="Rotate clockwise" title="Turn right (R)">↷</button>
+      <button class="btn" id="rotate-left" aria-label="Rotate counterclockwise" title="Turn left (Shift+R)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2.6 8.4M3 4v6h6"/></svg>
+      </button>
+      <button class="btn" id="rotate-right" aria-label="Rotate clockwise" title="Turn right (R)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10a9 9 0 1 0-2.6 8.4M21 4v6h-6"/></svg>
+      </button>
       <button class="btn" id="crop" aria-pressed="false" title="Crop and straighten (C or ⌘/Ctrl+K)">Crop</button>
     </div>
     <div class="crop-dial-wrap" id="crop-dial-wrap" hidden><div id="crop-dial-value"></div><canvas id="crop-dial" tabindex="0" role="slider" aria-label="Straighten photograph" aria-valuemin="-45" aria-valuemax="45" aria-valuenow="0" title="Drag to level the horizon; double-click to reset"></canvas></div>
@@ -311,8 +316,7 @@
     </div>
     <div class="bottom" id="bottom" data-tab="stock">
       <div class="row"><span>Engine</span><select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></div>
-      <div class="hint" id="engine-info">Starting…</div>
-      <div class="hint" id="value-hint">Click a value to type one.</div>
+      <div id="engine-info" hidden>Starting…</div>
       <div class="hint" id="update" role="status" hidden><span id="update-text">A new version of Negs is ready.</span>
         <button class="link" id="update-reload" title="Reloads Negs; the photograph you have open closes">Reload</button></div>
       <div class="hint" id="install" hidden><button class="dismiss" id="install-dismiss" aria-label="Don't show again" title="Don't show again">×</button><span id="install-text"></span>
