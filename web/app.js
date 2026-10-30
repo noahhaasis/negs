@@ -12,6 +12,7 @@ import * as Border from "./border.js";
 import * as Crop from "./crop.js";
 import { createCropEditor } from "./crop-editor.js";
 import { fetchFailed } from "./engine.js";
+import { createSamplePicker } from "./samples.js";
 
 // The edit, as desktop keeps it (macOS EditState): the film, the paper and a
 // complete RuntimeParams, starting from the engine's defaults. Values a
@@ -1199,7 +1200,7 @@ const exportNote = () => photo.exportWidth < photo.width
 // Opens `name`, whose bytes `data` resolves to. Until its first frame, a
 // placeholder from the bytes shows.
 let opens = 0, loading = false, starting = null;
-async function open(name, data) {
+async function open(name, data, sampleId = null) {
   endCrop(false);
   const opening = ++opens, previous = photo;
   let loaded = false;
@@ -1240,7 +1241,7 @@ async function open(name, data) {
     // A newer photograph is opening; the engine loads it next.
     if (opening !== opens) return;
     // Its size as decoded, whatever the engine keeps.
-    photo = opened(name, bytes, size);
+    photo = { ...opened(name, bytes, size), sampleId };
     crop = Crop.defaults();
     set("io.rotate_cw", 0);
     console.log(`decoded ${name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
@@ -1279,6 +1280,7 @@ async function open(name, data) {
     if (!loading && wanted) pump();
     updateOriginal();
     $("edit-tools").hidden = !photo || !developed;
+    samplePicker.sync();
   }
 }
 
@@ -1292,30 +1294,28 @@ function longSide() {
 // A photograph the viewer chose; it replaces the sample if that's still
 // downloading.
 function openFile(file) {
-  sample?.abort();
+  samplePicker.cancel();
   return open(file.name, file.arrayBuffer().then((b) => new Uint8Array(b)));
 }
 
-// ---- The sample photograph ---------------------------------------------------
+// ---- Sample photographs ------------------------------------------------------
 
-// A photograph to try Negs on without one of your own, offered on the empty
-// screen and downloaded only when asked for: a Nikon Z f NEF made into a
-// 3.4 MB lossy DNG (web/sample/make-dng.py), whose camera preview shows
-// while it develops.
-const SAMPLE = { name: "DSC_6377.dng", url: "sample/DSC_6377.dng" };
-let sample = null;
-function openSample() {
-  sample = new AbortController();
-  const { signal } = sample;
-  setBadge("Downloading");
-  $("empty").hidden = true;
-  // open() counts this opening as the next.
-  const opening = opens + 1;
-  const data = download(SAMPLE.url, signal, (f) => opens === opening && setBadge(`Downloading ${Math.floor(f * 100)}%`));
-  return open(SAMPLE.name, data).finally(() => {
-    if (sample?.signal === signal) sample = null;
-  });
-}
+// A single click starts the default immediately. The picker loads its small
+// catalog only after that click; no other RAWs or thumbnails are prefetched.
+const samplePicker = createSamplePicker({
+  container: $("samples"), select: $("sample-select"), next: $("sample-next"), note: $("sample-offline"),
+  current: () => photo?.sampleId,
+  onError: (e) => showMessage(`Couldn't load sample choices: ${e.message}`, true),
+  load: (entry, number, signal) => {
+    setBadge("Downloading");
+    $("empty").hidden = true;
+    const opening = opens + 1;
+    const data = download(entry.url, signal, (f) => opens === opening && setBadge(`Downloading ${Math.floor(f * 100)}%`));
+    return open(`Sample ${number}.dng`, data, entry.id);
+  },
+});
+const openSample = () => samplePicker.open();
+for (const event of ["online", "offline"]) addEventListener(event, () => samplePicker.sync());
 
 // `url`'s bytes, telling `progress` the fraction so far when the server
 // says the length.

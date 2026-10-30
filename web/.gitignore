@@ -1,4 +1,4 @@
 pkg/
 pkg-threads/
 results/
-catalog.json
+/catalog.json
