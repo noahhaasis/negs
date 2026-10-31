@@ -3859,7 +3859,7 @@ dependencies = [
 
 [[package]]
 name = "spektrafilm-wasm"
-version = "0.9.1"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
