@@ -43,13 +43,15 @@ On another machine, copy the Mac's `target/golden/inputs` rather than
 regenerating: `compare` refuses manifests whose input hashes differ.
 Regenerating and diffing the hashes separately tests rawler.
 
-## Matrix (184 cases, 484 renders)
+## Matrix (188 cases, 496 renders)
 
 - every input × 7 stock pairs, default params (grain on): f64, f32 CPU, GPU;
 - every input × 7 stock pairs, grain and glare off (`det`): f64, GPU — this is
   what `quality` uses to check the GPU against the reference pixel by pixel;
 - one photo and the noise pattern × every preset in
   `scripts/gpu_cpu_quality/params` (grain, colour, every effect): all engines;
+  `preflash_exposure` and `preflash_white` have grain off, so `quality` also
+  checks the GPU preflash against the reference (the 09a66ad bug);
 - one photo × 35mm border, keyline + Instagram, crop with rotation, resize.
 
 The matrix is fixed in `run.py`, not discovered from the input folder.
@@ -103,6 +105,37 @@ NaN/Inf and size differences always fail. ΔE00 is computed like
 `scripts/gpu_cpu_quality/compare.py` (agrees with colour-science to about 4
 significant digits). Statuses other than PASS/IDENTICAL are printed with their
 counts so a relaxed gate is never silent.
+
+## Results on 2026-10-31 (M1 Pro, after the web merge, 53186e4)
+
+`macos-arm64.json` is a fresh run of 53186e4 (clean tree): main at 0.12.0 plus
+the browser app, with the matrix grown to 188 cases. **The photo inputs
+changed.** Decoding has differed since 33bc69d (input colour interpretation),
+so every other machine must copy the Mac's new `target/golden/inputs`. The
+other macOS manifests (`macos-ui`, `-backend-report`, `-capacity-guard`,
+`-pipeline-cache`, `macos-x86_64-rosetta`) and the Windows and Linux ones
+predate this and can't be compared with it. See
+[handoff-merge-windows.md](../../docs/handoff-merge-windows.md) and
+[handoff-merge-linux.md](../../docs/handoff-merge-linux.md).
+
+**GPU vs f64 (`quality`): 80/80 pass**, including the four new preflash
+cases (ΔE00 ≤ 0.0003). Worst ΔE00 0.0018 (`photo_DSC_4997` Velvia scan,
+`det`), p99 ≤ 0.0003, at most 2 16-bit codes and 1 8-bit step. Main's GPU
+fails all four preflash cases, by up to 61 ΔE00 (`synth_noise`, white
+correction).
+
+**Main (5ac8200) vs the merge, same inputs, 184 old cases:**
+
+| Engine | Result |
+|---|---|
+| f64 | 184 IDENTICAL |
+| GPU | 184 IDENTICAL |
+| f32 CPU | 10 IDENTICAL, 2 PASS, 104 FAIL-GRAIN |
+
+The f32 CPU change is the IIR blur's f64 coefficients (3314c3e). With grain
+off it is closer to f64 in all 54 cases checked (3 inputs × 2 stocks × 9
+effects). The largest gain is `dir_wide`, from 0.03–0.28 to ≤ 0.0017 ΔE00.
+With grain on, the more accurate pre-grain values re-roll the f32 CPU grain.
 
 ## Results on 2026-10-26: Linux after ticket 16 (a22437e)
 
