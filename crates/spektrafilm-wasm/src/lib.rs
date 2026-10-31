@@ -174,12 +174,30 @@ pub fn export_preset(film: &str, paper: &str, params_json: &str) -> Result<Prese
     })
 }
 
+/// The edit's film/paper look as a `size`³ CUBE file, as desktop's Export
+/// LUT ([`spektrafilm_core::lut_export::cube`]), in `text`; image-
+/// independent, on the CPU. `missing` and `error` as for [`import_preset`]:
+/// a missing data file can fall back silently, so register the `missing`
+/// files and export again even when it succeeded.
+#[wasm_bindgen(js_name = exportLut)]
+pub fn export_lut(film: &str, paper: &str, params_json: &str, size: u32) -> Result<PresetResult, JsError> {
+    let params = parse_params(params_json).map_err(js_error)?;
+    data_fs::take_missing();
+    let exported = spektrafilm_core::lut_export::cube(Path::new(DATA_DIR), film, paper, params, size);
+    let missing = missing();
+    Ok(match exported {
+        Ok(text) => PresetResult { text, missing, ..Default::default() },
+        Err(error) => PresetResult { error, missing, ..Default::default() },
+    })
+}
+
 #[wasm_bindgen(getter_with_clone)]
 #[derive(Default)]
 pub struct PresetResult {
     pub film: String,
     pub paper: String,
-    /// The applied params as JSON (import), or the preset file (export).
+    /// The applied params as JSON (import), the preset file (export) or the
+    /// CUBE file (LUT export).
     pub text: String,
     /// Why it failed, for the user; empty if it didn't.
     pub error: String,

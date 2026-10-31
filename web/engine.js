@@ -72,6 +72,9 @@ export function client(wasm, kind) {
     importPreset: (text, current) => preset(wasm, () => wasm.importPreset(text, current), (r) => ({ film: r.film, paper: r.paper, params: r.text })),
     // The edit as a desktop-compatible preset file's text.
     exportPreset: (film, paper, params) => preset(wasm, () => wasm.exportPreset(film, paper, params), (r) => r.text),
+    // The edit's film/paper look as a `size`³ CUBE file's text (desktop's
+    // Export LUT).
+    exportLut: (film, paper, params, size) => preset(wasm, () => wasm.exportLut(film, paper, params, size), (r) => r.text),
     // The M/Y shifts that print a mid-grey neutral (Balance Print).
     async balancePrint(film, paper, params) {
       return dataResult(wasm, () => wasm.balancePrint(film, paper, params), (r) =>

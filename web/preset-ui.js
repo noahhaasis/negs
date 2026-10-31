@@ -15,6 +15,8 @@ export function createPresets(app) {
   let applying = null, applies = 0;
   // The name of the preset last imported, to name an export after.
   let importedName = null;
+  // A LUT export is running (one at a time).
+  let lutting = false;
 
   const ready = () => app.ready() && !applying;
 
@@ -66,11 +68,16 @@ export function createPresets(app) {
     closeMenu(false);
     void showExport();
   });
+  $("export-lut").addEventListener("click", () => {
+    closeMenu();
+    void exportLut();
+  });
 
   function sync() {
     $("preset-menu-anchor").hidden = app.cropping();
     more.disabled = !app.ready();
     for (const b of items()) b.disabled = !ready();
+    $("export-lut").disabled ||= lutting;
   }
 
   // ---- Applying ---------------------------------------------------------------------
@@ -140,12 +147,13 @@ export function createPresets(app) {
 
   // ---- Saving a file ------------------------------------------------------------------
 
-  // Downloads `text` as `name`.json; a home-screen app on iOS, which has no
-  // downloads, shares the file instead (as exports do).
-  function save(name, text) {
-    const file = new File([text], `${name}.json`, { type: "application/json" });
+  // Downloads `text` as `name`.json (or `filename` of `type`); a home-screen
+  // app on iOS, which has no downloads, shares the file instead (as exports
+  // do).
+  function save(name, text, { filename = `${name}.json`, type = "application/json", what = "the preset" } = {}) {
+    const file = new File([text], filename, { type });
     if (app.shareFiles() && navigator.canShare?.({ files: [file] })) {
-      navigator.share({ files: [file] }).catch((e) => e.name !== "AbortError" && app.message(`Couldn’t save the preset: ${e.message}`, true));
+      navigator.share({ files: [file] }).catch((e) => e.name !== "AbortError" && app.message(`Couldn’t save ${what}: ${e.message}`, true));
       return;
     }
     const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(file), download: file.name });
@@ -153,6 +161,29 @@ export function createPresets(app) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  }
+
+  // ---- LUT export --------------------------------------------------------------------------
+
+  // The edit's film/paper look as desktop's Export LUT writes it
+  // (spektrafilm_core::lut_export): 33³, sRGB in and out, image-independent.
+  async function exportLut() {
+    if (!ready() || lutting) return;
+    const { film, paper, params } = app.state();
+    const filename = `${film}_${params.io?.scan_film ? "direct_scan" : paper}.cube`;
+    lutting = true;
+    sync();
+    app.message("Exporting LUT…");
+    try {
+      const text = await app.call("exportLut", film, paper, JSON.stringify(params), 33);
+      save(filename, text, { filename, type: "application/octet-stream", what: "the LUT" });
+      app.message(`Exported ${filename}.`, false, 4000);
+    } catch (e) {
+      app.message(`Couldn’t export the LUT: ${e.message}`, true);
+    } finally {
+      lutting = false;
+      sync();
+    }
   }
 
   // ---- Export dialog --------------------------------------------------------------------

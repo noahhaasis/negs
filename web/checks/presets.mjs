@@ -1,5 +1,5 @@
 // Presets in a real page (docs/web-presets-design.md): the step-2 controls
-// (development times, Color Management), the ⋯ menu, importing a file with
+// (development times, Color Management), the ⋯ menu (and its Export LUT), importing a file with
 // and without a photograph, refusals, Reset after an import, the export
 // dialog's file and link, and an incoming link (arrival, Download, Close,
 // Try, with Sample 1 open already, keyboard). Each step reports; any failed
@@ -38,7 +38,7 @@ export default async ({ send, evaluate }) => {
   const start = await ev(`await engineReady(); await wait(200);
     return { samples: samples(), more: !$("more").disabled, items: [...$("preset-menu").querySelectorAll("button")].map((b) => b.textContent) };`);
   check("no sample request on page load", start.samples.length === 0, start.samples);
-  check("⋯ menu has exactly Import preset and Export preset", JSON.stringify(start.items) === JSON.stringify(["Import preset…", "Export preset…"]), start.items);
+  check("⋯ menu has exactly Import preset, Export preset and Export LUT", JSON.stringify(start.items) === JSON.stringify(["Import preset…", "Export preset…", "Export LUT…"]), start.items);
   check("menu enabled without a photograph", start.more);
   const keys = await ev(`
     $("more").focus(); key("ArrowDown", $("more")); await wait(20);
@@ -52,6 +52,21 @@ export default async ({ send, evaluate }) => {
   check("menu keyboard: ArrowDown opens on first item, moves, Escape closes and restores focus",
     keys.open && keys.first === "import-preset" && keys.second === "export-preset" && keys.closed && keys.back === "more", keys);
   check("menu closes on an outside press", keys.reopened && keys.outside && keys.expanded === "false", keys);
+
+  // Export LUT: desktop's 33³ CUBE of the film/paper look, downloaded as
+  // <film>_<paper>.cube, with or without a photograph.
+  const lut = await ev(`
+    downloads.length = 0; messages.length = 0;
+    $("more").click(); await wait(20); $("export-lut").click();
+    const busy = $("export-lut").disabled;
+    await until(() => downloads.length, 60000);
+    const [file] = await Promise.all(downloads);
+    const rows = file?.text.split("\\n").filter((l) => /^[0-9]/.test(l)).length;
+    const s = negs.state();
+    return { busy, name: file?.name, expected: s.film + "_" + s.paper + ".cube", size: /^LUT_3D_SIZE 33$/m.test(file?.text ?? ""), rows,
+             messages: [...messages], enabled: !$("export-lut").disabled };`);
+  check("Export LUT downloads <film>_<paper>.cube, 33³ rows", lut.name === lut.expected && lut.size && lut.rows === 33 ** 3, lut);
+  check("Export LUT is disabled while it runs and reports when done", lut.busy && lut.enabled && lut.messages.some((m) => m.startsWith("Exported ")), lut);
 
   // Step 2: development times and Color Management.
   const controls = await ev(`
