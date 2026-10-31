@@ -24,7 +24,7 @@ const packaged = args.includes("--static") ? resolve(args[args.indexOf("--static
 const port = Number(args.find((a, i) => /^\d+$/.test(a) && args[i - 1] !== "--static") ?? (https ? 8443 : 8137));
 const certs = process.env.NEGS_DEV_CERTS ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "negs-dev-certs");
 const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".css": "text/css", ".jpg": "image/jpeg",
-  ".png": "image/png", ".webmanifest": "application/manifest+json", ".txt": "text/plain", ".md": "text/plain" };
+  ".png": "image/png", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json", ".txt": "text/plain", ".md": "text/plain" };
 
 async function serve(req, res) {
   const url = new URL(req.url, "http://x");

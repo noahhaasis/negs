@@ -16,6 +16,9 @@
 <meta name="apple-mobile-web-app-title" content="Negs">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
+  /* The website's wordmark face, cut down to its four letters (fonts/). */
+  @font-face { font-family: "Negs Wordmark"; font-style: italic; font-display: block;
+    src: url("fonts/instrument-serif-italic-wordmark.woff2") format("woff2"); }
   :root {
     color-scheme: dark;
     --bg: #161616; --panel: #1f1f1f; --line: #2e2e2e; --field: #2a2a2a;
@@ -46,19 +49,25 @@
   .busy.on { opacity: 1; transition-delay: .12s; }
   .busy::before { content: ""; position: absolute; inset: 0; width: 30%; background: var(--accent); animation: slide 1s ease-in-out infinite; }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
-  .message { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 24px));
+  /* The website's nav wordmark (negs-site), glowing like a highlight on
+     film: centred above the photograph, at the right on a phone. */
+  .wordmark { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+    padding: 2px 6px; border-radius: 6px; font: italic 28px/1 "Negs Wordmark", "Iowan Old Style", Georgia, serif; text-decoration: none;
+    color: #fff6ea; text-shadow: 0 0 1px #fff, 0 0 10px rgb(255 90 54 / .7), 0 0 26px rgb(255 90 54 / .35); }
+  .wordmark:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .message { position: absolute; top: calc(52px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 24px));
     padding: 8px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 16px rgb(0 0 0 / .4); }
   .message.error { border-color: var(--danger); color: var(--danger); }
   .message[hidden] { display: none; }
   /* While a photograph opens (macOS ActivityBadge), with a message below it. */
-  .badge { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 12px;
+  .badge { position: absolute; top: calc(52px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 12px;
     border-radius: 999px; background: rgb(31 31 31 / .85); border: 1px solid var(--line); font-weight: 500; white-space: nowrap;
     font-variant-numeric: tabular-nums; pointer-events: none; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
   .badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .25; } }
   @media (prefers-reduced-motion: reduce) { .badge::before { animation: none; } }
   .badge[hidden] { display: none; }
-  .badge:not([hidden]) ~ .message { top: calc(52px + env(safe-area-inset-top)); }
+  .badge:not([hidden]) ~ .message { top: calc(92px + env(safe-area-inset-top)); }
   /* The status line wraps between its parts (app.js joins them with
      breakable separators), so the "shown at" notice never gets cut off. */
   .hud { position: absolute; left: calc(12px + env(safe-area-inset-left)); right: 200px; bottom: calc(10px + env(safe-area-inset-bottom)); color: var(--faint); font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
@@ -81,7 +90,7 @@
   #crop[aria-pressed=true], .crop-orientation [aria-pressed=true] { color: var(--accent); border-color: var(--accent); }
   .crop-overlay { z-index: 1; }
   .edit-tools, .crop-dial-wrap { z-index: 2; }
-  .badge, .message { z-index: 3; }
+  .badge, .message, .wordmark { z-index: 3; }
   .busy { z-index: 4; }
   .crop-dial-wrap { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: min(340px, calc(100% - 32px)); padding: 6px 14px; border: 1px solid var(--line); border-radius: 12px; background: rgb(31 31 31 / .9); text-align: center; }
   #crop-dial { display: block; width: 100%; height: 24px; cursor: ew-resize; touch-action: none; }
@@ -101,9 +110,6 @@
   .side { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
     touch-action: manipulation; user-select: none; -webkit-user-select: none; padding-right: env(safe-area-inset-right); }
   .top { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  .top .brand { font-size: 14px; font-weight: 700; letter-spacing: .02em; margin-right: auto; color: inherit; text-decoration: none; border-radius: 4px; }
-  .top .brand:hover { color: var(--accent); }
-  .top .brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .sample-picker { padding: 8px 14px; border-bottom: 1px solid var(--line); }
   .sample-choices { display: flex; align-items: center; gap: 8px; }
   .sample-choices select { flex: 1; min-width: 0; }
@@ -282,6 +288,7 @@
     .bottom { gap: 4px; padding: 10px 14px 16px; }
     .hud { bottom: 10px; }
     .zoom { bottom: 6px; }
+    .wordmark { left: auto; right: calc(10px + env(safe-area-inset-right)); transform: none; }
     .app { transition: grid-template-rows .2s ease; }
     .app.dragging-sheet { transition: none; }
   }
@@ -291,6 +298,7 @@
 <div class="app" id="app">
   <main class="view" id="view">
     <div class="busy" id="busy"></div>
+    <a class="wordmark" id="brand" href="/" title="Back to the Negs website">negs</a>
     <div class="empty" id="empty">
       <div class="tutorial-invitation" id="tutorial-invitation" hidden>
         <h1>Your photo, through film</h1>
@@ -333,7 +341,6 @@
   <aside class="side" id="side">
     <div class="grabber" id="grabber" title="Drag to resize, or tap"></div>
     <div class="top">
-      <a class="brand" id="brand" href="/" title="Back to the Negs website">Negs</a>
       <button type="button" class="help-button" id="tutorial" aria-label="Start tutorial" title="Start tutorial">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .25c0 1.75-2.5 2-2.5 3.75"/><path d="M12 16.5h.01"/></svg>
       </button>
