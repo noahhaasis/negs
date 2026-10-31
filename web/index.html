@@ -101,7 +101,9 @@
   .side { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
     touch-action: manipulation; user-select: none; -webkit-user-select: none; padding-right: env(safe-area-inset-right); }
   .top { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  .top strong { font-size: 14px; letter-spacing: .02em; margin-right: auto; }
+  .top .brand { font-size: 14px; font-weight: 700; letter-spacing: .02em; margin-right: auto; color: inherit; text-decoration: none; border-radius: 4px; }
+  .top .brand:hover { color: var(--accent); }
+  .top .brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .sample-picker { padding: 8px 14px; border-bottom: 1px solid var(--line); }
   .sample-choices { display: flex; align-items: center; gap: 8px; }
   .sample-choices select { flex: 1; min-width: 0; }
@@ -331,7 +333,7 @@
   <aside class="side" id="side">
     <div class="grabber" id="grabber" title="Drag to resize, or tap"></div>
     <div class="top">
-      <strong>Negs</strong>
+      <a class="brand" id="brand" href="/" title="Back to the Negs website">Negs</a>
       <button type="button" class="help-button" id="tutorial" aria-label="Start tutorial" title="Start tutorial">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .25c0 1.75-2.5 2-2.5 3.75"/><path d="M12 16.5h.01"/></svg>
       </button>
@@ -411,6 +413,13 @@
     <p>The tutorial uses a sample photo and default settings. Your current photo and edits will be restored when you leave.</p>
     <p class="hint">Try the controls as you go. Each step starts fresh.</p>
     <footer><button class="btn" value="cancel">Cancel</button><button type="button" class="btn primary" id="confirm-tutorial">Start tutorial</button></footer>
+  </form>
+</dialog>
+<dialog class="dialog" id="leave-confirm" aria-labelledby="leave-confirm-title">
+  <form method="dialog">
+    <header><h2 id="leave-confirm-title">Leave without exporting?</h2><button class="dismiss" value="cancel" aria-label="Close">×</button></header>
+    <p>Your edits to this photo haven't been exported. Negs doesn't keep them, so leaving discards them.</p>
+    <footer><button type="button" class="btn" id="confirm-leave">Leave</button><button class="btn primary" value="cancel" autofocus>Stay</button></footer>
   </form>
 </dialog>
 <input type="file" id="preset-file" hidden accept=".json,application/json">
