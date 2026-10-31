@@ -194,6 +194,19 @@ impl PostProcess {
         }
     }
 
+    /// These adjustments for the GPU display pass, which applies them as
+    /// [`Self::apply_rgb`] does.
+    pub fn display(&self) -> spektrafilm_gpu::DisplayPost {
+        spektrafilm_gpu::DisplayPost {
+            luma: self.luma,
+            saturation: self.saturation,
+            encoded: self.encoded,
+            decode: self.decode.clone(),
+            encode: self.encode.clone(),
+            tone: self.tone.clone(),
+        }
+    }
+
     pub fn apply(&self, image: &mut ImageBuf) {
         image.data.par_chunks_exact_mut(3).for_each(|px| {
             let out = self.apply_rgb([to_f32(px[0]), to_f32(px[1]), to_f32(px[2])]);

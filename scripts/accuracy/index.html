@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local RAW / preset accuracy</title><link rel="icon" href="data:,"><link rel="stylesheet" href="site.css"></head>
+<body><header><h1>RAW / preset accuracy <small>local review · not published</small></h1><p id="run"></p>
+<nav><a href="REPORT.md">Summary</a><a href="report.json" download>All metrics JSON</a><a href="metrics.csv" download>CSV</a><a href="provenance.json">Provenance / hashes</a><a href="parameter-audit.json">Parameter import audit</a></nav></header>
+<main><section class="controls">
+<label>Track<select id="track"><option value="application">A · Application RAW → full preset</option><option value="same-input">B · Identical developed input · original effects</option><option value="deterministic">B · Identical input · grain & glare off ONLY</option></select></label>
+<label>Image<select id="image"></select></label><label>Preset<select id="preset"></select></label>
+<label>Native mode<select id="native"><option value="gpu">Fast · GPU f32</option><option value="cpu">Reference · CPU f64</option><option value="both">Both</option></select></label>
+<label><input id="source" type="checkbox"> Include preserved source build</label>
+<label><input id="web" type="checkbox" checked> Web</label><label><input id="python" type="checkbox" checked> Python</label><label><input id="installed" type="checkbox" checked> Installed macOS</label>
+</section><p id="scope" class="notice"></p>
+<nav id="fixtureLinks"></nav>
+<section class="controls"><button id="previous" aria-label="Previous preset">←</button><button id="next" aria-label="Next preset">→</button><button id="fit">Fit</button><button id="actual">1:1 source pixels</button><button id="zoomout">−</button><button id="zoomin">+</button><span id="position"></span><span>Drag to pan · wheel to zoom · synchronized across views</span></section>
+<div id="panels"></div>
+<section class="controls"><label>Pair A<select id="pairA"></select></label><label>Pair B<select id="pairB"></select></label><label>Difference gain<select id="gain"><option value="1">1× (unscaled)</option><option value="4">4×</option><option value="16" selected>16×</option></select></label><label>View<select id="diffmode"><option value="diff">Absolute error</option><option value="blink">Blink A / B</option></select></label><button id="downloadDiff">Download unscaled RGB difference crop</button></section>
+<div class="diffgrid"><article><h2 id="differenceTitle">Difference</h2><canvas id="difference" aria-label="Synchronized difference view"></canvas><p id="legend"></p></article><article><h2>Pair metrics · every unmodified pixel</h2><div id="numbers"></div></article></div>
+<details><summary>Case metadata, effective parameters, errors</summary><pre id="metadata"></pre></details>
+<details><summary>Method / limits</summary><pre id="method"></pre></details>
+<p>No supplied RAWs or presets are included as downloads. Lossless outputs are private local artifacts. No tolerance replaces strict equality. Statistical similarity of grain is not an equality pass. Browsers color-manage sRGB previews; numerical metrics use the stored RGB8 codes, not monitor screenshots.</p>
+</main><script type="module" src="site.js"></script></body></html>

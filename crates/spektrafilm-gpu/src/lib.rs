@@ -5,17 +5,30 @@ pub mod cuda_backend;
 pub mod wgpu_backend;
 #[cfg(feature = "wgpu-backend")]
 mod pipeline_cache;
-#[cfg(all(feature = "wgpu-backend", any(target_os = "windows", target_os = "linux", test)))]
+#[cfg(all(feature = "wgpu-backend", any(target_os = "windows", target_os = "linux", target_arch = "wasm32", test)))]
 mod capacity;
 
 use spektrafilm_math::image::ImageBuf;
+use std::sync::Arc;
+
+/// `Send + Sync`, except in browsers: there WebGPU objects belong to the
+/// thread that made them, so a backend stays on one thread (wgpu's
+/// `WasmNotSendSync`).
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSendSync: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + Sync + ?Sized> MaybeSendSync for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSendSync {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSendSync for T {}
 
 /// Compute backend abstraction. Each method corresponds to a GPU-friendly
 /// operation in the film simulation pipeline.
 ///
 /// Default implementations fall back to CPU. GPU backends override the
 /// spectral methods for massive speedups.
-pub trait ComputeBackend: Send + Sync {
+pub trait ComputeBackend: MaybeSendSync {
     /// Reject work before allocating GPU images. The pipeline routes the
     /// entire render through CpuBackend on rejection, including stage paths.
     fn image_capacity(&self, _width: u32, _height: u32) -> Result<(), String> {
@@ -156,6 +169,19 @@ pub trait ComputeBackend: Send + Sync {
         None
     }
 
+    /// [`Self::try_run_film_chain`] without waiting for the GPU: submits the
+    /// chain, made into `output`, and calls `on_mapped` once
+    /// [`PendingFilmChain::finish`] can read it. For browsers, where a
+    /// readback can't block.
+    fn submit_film_chain(
+        &self,
+        _params: &FilmChainParams<'_>,
+        _output: ChainOutput,
+        _on_mapped: Box<dyn FnOnce() + Send>,
+    ) -> Option<Box<dyn PendingFilmChain>> {
+        None
+    }
+
     /// True when `try_run_film_chain` returns the same post-scan output that
     /// `Pipeline::apply_post_scan` would produce (the optional sRGB
     /// encoding, unclipped). Backends default to returning linear RGB and letting
@@ -174,11 +200,61 @@ pub trait ComputeBackend: Send + Sync {
     fn name(&self) -> &str;
 }
 
+/// A film chain submitted by [`ComputeBackend::submit_film_chain`].
+pub trait PendingFilmChain {
+    /// The chain's output. Waits for the GPU natively; in a browser call it
+    /// after `on_mapped` has run.
+    fn finish(self: Box<Self>) -> ChainResult;
+}
+
+/// What [`ComputeBackend::submit_film_chain`] makes of the scan.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ChainOutput {
+    /// The scan itself, as `try_run_film_chain` returns it.
+    Scan,
+    /// sRGB display bytes, as `preview::display_rgba` makes them from an
+    /// sRGB scan: clipped, adjusted by `post` if any, encoded unless
+    /// `encoded` says the scan is, and rounded to 8 bits.
+    Rgba8 { encoded: bool, post: Option<Arc<DisplayPost>> },
+    /// Those bytes drawn on the backend's canvas, with nothing read back.
+    Present { encoded: bool, post: Option<Arc<DisplayPost>> },
+}
+
+/// Post adjustments for the display pass, as
+/// `spektrafilm_core::post::PostProcess` tabulates them: the display pass
+/// applies them to the clipped scan with the same tables and arithmetic.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DisplayPost {
+    /// The output space's luminance weights.
+    pub luma: [f32; 3],
+    /// From -1 to 1.
+    pub saturation: f32,
+    /// Whether the scan is encoded with the output space's curve; the tables
+    /// below are that curve's.
+    pub encoded: bool,
+    /// Encoded → linear, on [0, 1].
+    pub decode: Vec<f32>,
+    /// Linear → encoded, sampled on √x.
+    pub encode: Vec<f32>,
+    /// Linear luminance → adjusted linear luminance, sampled on √Y.
+    pub tone: Vec<f32>,
+}
+
+/// A finished [`PendingFilmChain`], by its [`ChainOutput`].
+pub enum ChainResult {
+    Scan(ImageBuf),
+    Rgba8 { width: u32, height: u32, rgba: Vec<u8> },
+    Presented { width: u32, height: u32 },
+}
+
 /// All inputs to the GPU-resident film chain. Bundled into a struct so the
 /// trait method stays object-safe and adding more optional stages (halation,
 /// DIR couplers, …) doesn't churn every callsite.
 pub struct FilmChainParams<'a> {
     pub image: &'a ImageBuf,
+    /// The caller's name for `image`'s pixels, if it renders them again: a
+    /// backend may keep them uploaded for the next chain with the same key.
+    pub image_key: Option<u64>,
     /// RGB → film-raw front pass (the configured upsampler).
     pub front: FrontPass<'a>,
     pub film_log_exposure: &'a [f64],

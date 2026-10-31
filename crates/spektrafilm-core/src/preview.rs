@@ -6,6 +6,58 @@ use spektrafilm_io::encoding::Encoding;
 use spektrafilm_math::colorspace::{self, RgbColourspace, SRGB};
 use spektrafilm_math::precision::{from_f32, to_f32};
 
+/// Largest exact CPU diffusion FFT buffer required by this edit. The camera
+/// and print filters run in sequence. Query the model's PSF so this follows
+/// its family, sizes, physical sampling, and no-op rules without duplicating
+/// the filter tables. Browser callers use this before allocating a frame.
+pub fn cpu_diffusion_fft_buffer_bytes(params: &RuntimeParams, width: u32, height: u32) -> u64 {
+    let pitch = crate::stages::filming::pixel_size_um(params.camera.film_format_mm, width, height);
+    [
+        Some(&params.camera.diffusion_filter),
+        (!params.io.scan_film).then_some(&params.enlarger.diffusion_filter),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|filter| filter.active)
+    .filter_map(|filter| {
+        spektrafilm_model::diffusion::diffusion_psf_spec(&filter.to_model(), pitch as f64, width, height)
+    })
+    .map(|spec| spektrafilm_math::fft_conv::reflect_fft_buffer_bytes(height as usize, width as usize, spec.radius))
+    .max()
+    .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod diffusion_memory_tests {
+    use super::*;
+
+    #[test]
+    fn measures_the_ipad_export_allocation_without_allocating_it() {
+        let mut params = RuntimeParams::default();
+        params.camera.film_format_mm = 4.0;
+        params.camera.diffusion_filter.active = true;
+        params.camera.diffusion_filter.spatial_scale = 3.0;
+        params.camera.diffusion_filter.bloom_size = 3.0;
+        assert_eq!(cpu_diffusion_fft_buffer_bytes(&params, 6240, 4160), 2_916_000_000);
+        assert!(cpu_diffusion_fft_buffer_bytes(&params, 1512, 1008) < 512 * 1024 * 1024);
+        params.camera.diffusion_filter.strength = 0.0;
+        assert_eq!(cpu_diffusion_fft_buffer_bytes(&params, 6240, 4160), 0);
+    }
+
+    #[test]
+    fn print_diffusion_is_only_budgeted_when_printing() {
+        let mut params = RuntimeParams::default();
+        params.enlarger.diffusion_filter.active = true;
+        assert!(cpu_diffusion_fft_buffer_bytes(&params, 6240, 4160) > 0);
+        params.io.scan_film = true;
+        assert_eq!(cpu_diffusion_fft_buffer_bytes(&params, 6240, 4160), 0);
+    }
+}
+
+/// What a built [`crate::pipeline::Pipeline`] can't change: the params its
+/// calibration reads. The enlarger's M/Y shifts, preflash and print exposure
+/// normalization aren't here: [`crate::pipeline::Pipeline::with_params`]
+/// re-filters the enlarger and renormalizes for them, as a new pipeline would.
 pub fn preview_pipeline_cache_key(
     film_name: &str,
     print_name: &str,
@@ -37,13 +89,6 @@ pub fn preview_pipeline_cache_key(
             "c_filter_neutral": params.enlarger.c_filter_neutral,
             "m_filter_neutral": params.enlarger.m_filter_neutral,
             "y_filter_neutral": params.enlarger.y_filter_neutral,
-            "m_filter_shift": params.enlarger.m_filter_shift,
-            "y_filter_shift": params.enlarger.y_filter_shift,
-            "preflash_exposure": params.enlarger.preflash_exposure,
-            "preflash_m_filter_shift": params.enlarger.preflash_m_filter_shift,
-            "preflash_y_filter_shift": params.enlarger.preflash_y_filter_shift,
-            "normalize_print_exposure": params.enlarger.normalize_print_exposure,
-            "print_exposure_compensation": params.enlarger.print_exposure_compensation,
         },
     })
     .to_string()
@@ -353,6 +398,43 @@ pub fn display_rgba_with_post(
             }
         });
     (w, h, rgba)
+}
+
+/// How the original view shows the source, before any film: the encoding to
+/// display it in and, when the source must be converted for that, the
+/// converted copy. A decoded source, linear sRGB that may lie outside sRGB's
+/// gamut, is converted to the preview space, so the original and the render
+/// are clipped to the same gamut. Manual pass-through shows the stored values
+/// in the space the params name.
+pub fn original_encoding(
+    params: &RuntimeParams,
+    colour: &spektrafilm_io::InputColour,
+    image: &ImageBuf,
+) -> (Encoding, Option<ImageBuf>) {
+    if !colour.linear_srgb {
+        let space = RgbColourspace::input(&params.io.input_color_space);
+        return (Encoding { space, encoded: params.io.input_cctf_decoding }, None);
+    }
+    let encoding = Encoding::new(&params.io.output_color_space, false);
+    let converted = (encoding.space.name != "sRGB").then(|| {
+        let mut converted = image.clone();
+        convert_linear(&mut converted, encoding.space);
+        converted
+    });
+    (encoding, converted)
+}
+
+/// Linear sRGB → linear `to`, unclipped (the display clips).
+fn convert_linear(image: &mut ImageBuf, to: &RgbColourspace) {
+    use spektrafilm_math::colorspace::{icc_rgb_to_rgb, mat3_vec_f64};
+    use spektrafilm_math::precision::{from_f64, to_f64};
+    let m = icc_rgb_to_rgb(&SRGB, to);
+    for px in image.data.chunks_exact_mut(3) {
+        let rgb = mat3_vec_f64(&m, [to_f64(px[0]), to_f64(px[1]), to_f64(px[2])]);
+        for (v, out) in rgb.into_iter().zip(px) {
+            *out = from_f64(v);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,144 @@
+import { applyRgba } from "./crop.js";
+
+// The engine inside the worker (web/worker.js): fetch whatever data files a
+// render asks for, then retry.
+export function client(wasm, kind) {
+  let engine;
+  return {
+    async start() {
+      engine = kind === "gpu" ? await wasm.Engine.newGpu() : wasm.Engine.newCpu();
+    },
+    backend: () => engine.backend(),
+    setDiffusionGridBudget: (bytes) => engine.setDiffusionGridBudget(bytes),
+    releaseRenderBuffers: () => engine.releaseRenderBuffers(),
+    // An OffscreenCanvas the WebGPU engine presents renders on.
+    setCanvas: (canvas) => engine.setCanvas(canvas),
+    // Where that canvas shows the photograph, drawn again at once without
+    // the film chain; and where it drew the last frame.
+    show: (width, height, rect, background, original = false, border = [], transform = []) => engine.show(width, height, rect, background, original, border, transform),
+    finishPhoto: (rgba, width, height, crop, rotation) => applyRgba(rgba, width, height, crop, rotation),
+    // A border texture's PNG at its data path, kept for exports, and on the
+    // canvas for views whose border has one.
+    borderTexture(path, bytes) {
+      wasm.registerData(path, bytes);
+      return [...engine.borderTexture(path)];
+    },
+    // A border around an export's bytes, as the CLI adds one.
+    async addBorder(rgba, width, height, style, options, instagram, film) {
+      return dataResult(wasm, () => wasm.addBorder(rgba, width, height, style, options, instagram, film), (r) =>
+        ({ width: r.width, height: r.height, rgba: r.rgba, elapsedMs: r.elapsedMs, memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) }));
+    },
+    shownRect: () => [...engine.shownRect()],
+    // The largest frame the WebGPU engine renders and shows.
+    limits: () => [...engine.limits()],
+    // `width` × `height` as decoded; the engine keeps `kept` × `keptHeight`,
+    // within `maxDim` and `maxPixels` (0: no limit). A RAW develops at
+    // `whiteBalance` (io.raw_white_balance as JSON; omitted: As Shot);
+    // `colour` is what the loader read the photograph as (InputColour JSON).
+    load(bytes, maxDim, maxPixels = 0, whiteBalance) {
+      const t = performance.now();
+      engine.forget();
+      const [kept, keptHeight, width, height] = engine.load(bytes, maxDim, maxPixels, whiteBalance);
+      return { width, height, kept, keptHeight, colour: engine.inputColour(), decodeMs: performance.now() - t };
+    },
+    // A photograph web/decoder.js decoded, as `load` keeps one. The last
+    // goes before its pixels are copied in, which then take its room.
+    loadDecoded({ pixels, width, height, fullWidth, fullHeight, colour }) {
+      engine.forget();
+      engine.loadDecoded(pixels, width, height, colour);
+      return { width: fullWidth, height: fullHeight, kept: width, keptHeight: height, colour };
+    },
+    async render(film, paper, params, maxDim, interactive, present = false) {
+      return dataResult(wasm, () => engine.render(film, paper, params, maxDim, interactive, present), (r) =>
+        ({ width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, backend: r.backend, elapsedMs: r.elapsedMs, stages: r.stages,
+          memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) }));
+    },
+    // Unquantised scan for golden tests; normal renders keep their byte-only
+    // readback/presentation path. Free the wasm wrapper after copying its fields.
+    async renderRaw(film, paper, params, maxDim) {
+      return dataResult(wasm, () => engine.renderRaw(film, paper, params, maxDim), (r) =>
+        ({ width: r.width, height: r.height, scan: r.scan, rgba: r.rgba, backend: r.backend, stages: r.stages }));
+    },
+    // The photograph before any film, kept on the canvas to show in the
+    // developed frame's place when `present`; otherwise its bytes.
+    original(params, maxDim, present = false) {
+      const r = engine.original(params, maxDim, present);
+      try {
+        return { width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, elapsedMs: r.elapsedMs, stages: r.stages };
+      } finally { r.free(); }
+    },
+    // A preset file applied to `current` params (crates/spektrafilm-wasm
+    // importPreset): { film, paper, params } as JSON, or the reason it can't.
+    importPreset: (text, current) => preset(wasm, () => wasm.importPreset(text, current), (r) => ({ film: r.film, paper: r.paper, params: r.text })),
+    // The edit as a desktop-compatible preset file's text.
+    exportPreset: (film, paper, params) => preset(wasm, () => wasm.exportPreset(film, paper, params), (r) => r.text),
+    // The edit's film/paper look as a `size`³ CUBE file's text (desktop's
+    // Export LUT).
+    exportLut: (film, paper, params, size) => preset(wasm, () => wasm.exportLut(film, paper, params, size), (r) => r.text),
+    // The M/Y shifts that print a mid-grey neutral (Balance Print).
+    async balancePrint(film, paper, params) {
+      return dataResult(wasm, () => wasm.balancePrint(film, paper, params), (r) =>
+        ({ m: r.mFilterShift, y: r.yFilterShift, elapsedMs: r.elapsedMs }));
+    },
+  };
+}
+
+// wasm-bindgen's getters copy Vecs into JS; the Rust result still owns the
+// originals. Free it before the next render/fetch instead of waiting for GC
+// in a busy worker (an export alone can otherwise retain another RGBA image).
+async function dataResult(wasm, call, read) {
+  for (;;) {
+    const r = await call();
+    let missing, value;
+    try {
+      missing = r.missing;
+      if (!missing.length) value = read(r);
+    } finally { r.free(); }
+    if (!missing.length) return value;
+    await fetchData(wasm, missing);
+  }
+}
+
+// A preset call, after fetching the stock profiles it asks for. A profile
+// that doesn't exist (404) is an unknown stock: the call's own reason.
+async function preset(wasm, call, result) {
+  for (;;) {
+    const r = call();
+    let missing, error, value;
+    try {
+      ({ missing, error } = r);
+      value = error ? null : result(r);
+    } finally { r.free(); }
+    if (missing.length) {
+      try {
+        await fetchData(wasm, missing);
+      } catch (e) {
+        if (e.status === 404 && error) throw new Error(error);
+        throw e;
+      }
+      continue;
+    }
+    if (error) throw new Error(error);
+    return value;
+  }
+}
+
+async function fetchData(wasm, paths) {
+  await Promise.all(paths.map(async (path) => {
+    // Beside this file, not the origin root: the app may be served under a
+    // path (getnegs.com/try/).
+    const res = await fetch(new URL(`data/${path}`, import.meta.url));
+    if (!res.ok) throw fetchFailed(path, res);
+    wasm.registerData(path, new Uint8Array(await res.arrayBuffer()));
+  }));
+}
+
+// Why a file didn't arrive: the service worker (web/sw.js) says when it's
+// offline and the file isn't saved, or when a newer Negs replaced it.
+export function fetchFailed(path, res) {
+  const why = res.headers.get("X-Negs-Offline");
+  const message = why === "updated" ? `${path} has changed in a newer Negs; reload to use it`
+    : why ? `${path} isn't saved for offline use; connect to the internet to download it`
+    : `${path}: ${res.status}`;
+  return Object.assign(new Error(message), { status: res.status, offline: !!why });
+}

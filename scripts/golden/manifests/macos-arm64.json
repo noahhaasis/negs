@@ -6,34 +6,34 @@
   "cpu": "Apple M1 Pro",
   "cpu_count": 10,
   "threads": "all",
-  "git_rev": "dd870f01539246cc5236dc165e29e93ec0481626",
+  "git_rev": "53186e40fb0caf92c1d26d2cbc3eba7757fce30a",
   "git_dirty_hash": null,
-  "cargo_lock": "ca036cfd8ed5a1d7f71e835b4465127f65e27b97b888a630d8ca9fb6fbb158a2",
+  "cargo_lock": "8bb3a7d2fefc5001a5db6ab2fa8f851a1830810aba369ee8c930ba722c8b156d",
   "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: aarch64-apple-darwin\nrelease: 1.93.1\nLLVM version: 21.1.8",
   "binaries": {
    "f64": {
-    "sha256": "f9e02b274f72500ac126b4bcb002e9a917c50d5dfcc596ac19c37bc24289a9c0",
+    "sha256": "bc602f6eb1cb196186378d712b5b8f95ac028be1b7c3ac0a2ece90b7c5e25778",
     "arch": "arm64"
    },
    "f32cpu": {
-    "sha256": "dd8d783d0f44797c506215be76f304c082a7ea2a0b864724f6a331400aed2d31",
+    "sha256": "14d603ab2f9bfcea50a122f525e12faface378963305bc03d066e7ecb37c99b4",
     "arch": "arm64"
    },
    "gpu": {
-    "sha256": "dd8d783d0f44797c506215be76f304c082a7ea2a0b864724f6a331400aed2d31",
+    "sha256": "14d603ab2f9bfcea50a122f525e12faface378963305bc03d066e7ecb37c99b4",
     "arch": "arm64"
    }
   },
-  "data_dir": "6400e4b53a5841585677dd25d5d56bdedce29ede2302f77ef8e4cdde1b65fc5e",
-  "presets_dir": "4c9fa55e767c217b46fbb34d26ed1409229c2dc4cf2e78c77dc66e938ce831b6"
+  "data_dir": "bf81e149b4d08013e9bd5893f7635cc7d810b63241154ec8f25f5c065446f05e",
+  "presets_dir": "f171a3c0fe0b3e661955b81d9b5949f282a7fe2bf5ecbdb034cd66d022e47610"
  },
  "inputs": {
-  "photo_7858115920": "7a2fdb5a5ea112f2e379957e581b9c0f7d91b97b4fae25c8f14944e628094873",
-  "photo_DSC_4985": "3d8583be77dc25d89246ef294c514d0171380874a95b5cc5abc7dd64f4be8b7c",
-  "photo_DSC_4990": "2c557fd848bd43a10fd3cef811485c922be56c742b7b2dc8c6378222958972c7",
-  "photo_DSC_4997": "e9c57ff94f9f459bc7ddccf0692d20f45dd00086c1c31386190317b8468f563c",
-  "photo_DSC_5003": "36463c26944a81b62181cb39f6935bfdc08807d4226e27fbce02f55e33214365",
-  "photo_DSC_5009": "dab56be9624532b44eaf3505bcdd5df66a0e5150d4c0b1d21135982c2e61dbc0",
+  "photo_7858115920": "7c0e66f58117dca6ac43bc33976ae88f81dafdc7bf7550f5131bf1184111f6aa",
+  "photo_DSC_4985": "3d7c8023a47d8da63fe483150e5bc4afb809ca35625e6815d90c712ed49c9b81",
+  "photo_DSC_4990": "43e9fce7595548cea5f51328adf3339c7121a9d7554251cb8d053f573c1bbc66",
+  "photo_DSC_4997": "c81e62345ea11e03d9f475de94fb44e3b274d4301febb9e6099cab5b1764a055",
+  "photo_DSC_5003": "1c2686d4c2ef65df6a2edfd9044129c5b977857947730aab02b562e2b05c7809",
+  "photo_DSC_5009": "1a80e9f114203f1a6c85bb9084c6059f2840404fcf10188d5252fe1bf375ebe2",
   "synth_edges": "44413d95af4ae18cb4147ad0d9124a237bd2f5dc89f6a0dcfd6e89fa7986e70f",
   "synth_gamut": "86dabdb3058aab0751852db1d12c0cb01c86a40e0fe22cc803d17c1ce6006e05",
   "synth_noise": "28698e3f8e8c4b3b606547bcd3f596f4346ef54385f81c1ca9510bbe4504aae4",
@@ -367,6 +367,58 @@
     "preflash_y_filter_shift": -5.0
    }
   },
+  "preflash_exposure": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   },
+   "enlarger": {
+    "preflash_exposure": 0.2,
+    "preflash_m_filter_shift": 10.0,
+    "preflash_y_filter_shift": -5.0,
+    "print_exposure": 0.7
+   }
+  },
+  "preflash_white": {
+   "io": {
+    "input_color_space": "sRGB",
+    "input_cctf_decoding": false
+   },
+   "film_render": {
+    "grain": {
+     "active": false
+    },
+    "glare": {
+     "active": false
+    }
+   },
+   "print_render": {
+    "glare": {
+     "active": false
+    }
+   },
+   "enlarger": {
+    "preflash_exposure": 0.2,
+    "preflash_m_filter_shift": 10.0,
+    "preflash_y_filter_shift": -5.0
+   },
+   "scanner": {
+    "white_correction": true
+   }
+  },
   "unsharp_iir": {
    "io": {
     "input_color_space": "sRGB",
@@ -402,24 +454,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "6e307c9fc194ffd19b54c82a4201a7cc141b7208dd87e6d3e9709de6033b92f4",
-     "tiff": "4c40fa47f25f01ecc72128f024ae2941c5ac8c752029119ca501ee316b0911e2",
+     "f64": "7f6ed854cd40240a12be5b3fd106fe72cc253e49012841f6010976cafc2d0b40",
+     "tiff": "9ddab4cfe4c68b489938d58b3e3c72b59177fc8cc2652362ebd603ecc53828c9",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "068a525893ef65247190808fb95262b1d3ec34307165c903d4977b8049efc1a7",
-     "tiff": "80a375613af9617222638238a2bba3da26efc97489eb8b6d1f13bbbb80226b12",
+     "f64": "4c409dd992ad7d7d9d9e539f298c8debf444fdcfc3827b01d5964c1ab9dad4b4",
+     "tiff": "4eb355c29399ef1bca3c85670113c9efdc6d2b4fe53e00d62d030a90a5bb8816",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "2c1b662c73eb1d3d7fedf7fc84520f67e5ecf766fc757fbf27a09b248b7f203c",
-     "tiff": "e0f213421fdb04dfb21bb04312ece4619c46ae4a6517c5c7c4660d9b5b38c519",
+     "f64": "d846930131df354928032fbd8ab6ee1672d4c2fa126fbc10efa84f8f910d4da9",
+     "tiff": "2de6738b1d4cfa7e0049bdcfb2ab7905861c6a969245c0397d96156bc9906efc",
      "size": [
       952,
       633
@@ -439,16 +491,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "e24f6e2171575e1cd60dee6960f712df572a3c5443a1979ea3ef45bde17f8d13",
-     "tiff": "04515c178574891aa69f9f0fff7ae41db566175e0f3b6006bb3fd6c97e480fec",
+     "f64": "bb3f76fb360ba666f22ab4d453f810e020fb3906f9208a735dda833ed5e768b1",
+     "tiff": "c2d6e53afc82860f358d06dcf7dff2105c3a1d583bf46200e32028236cb3464f",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "b3c5c3bd9dbe8ee7858519098f3d212a37f262bad8a26514a84a334be8ea2c0f",
-     "tiff": "9043883b9bbc3f978c31f81c6e61749d5818dbb95fdea4dc10741f4f4fff3a56",
+     "f64": "a14d4a84774d25d6c2fef1590a9870faa8f09f3644c5344e691d8a3ad49461f8",
+     "tiff": "71f1c85d639aee836a39d50385a3995177372b85a661cf9cc7c21d16ab395fef",
      "size": [
       952,
       633
@@ -468,24 +520,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "0f8164939c2972e031e0776f40d5e78217fd4472bbee979c1a02b8c5c657a9b1",
-     "tiff": "72c21f8bce1443c1ebe9b54ae8b47429b39ccf4779de81fccd80a697bc0a706e",
+     "f64": "b59b889890699329169a605a7f3b00a94fe5c93454cf6cbdde68fda0c2b2ea9e",
+     "tiff": "7197d5e5ad527dd13e8883a43d419bab1a8619b1a0ca92981d642baa0e58e876",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "0749daeb9e3e461a0a5b6d2ad658115caab0c51223dc71414d521561f4817b2b",
-     "tiff": "f17004469bf57c068dc990641aba6a7a29efb0d691f84c380df67b9e862cc563",
+     "f64": "6b14bb12fe4d160f419915ead95ef6f069c01344ba659bf5cc9c40c23fabb757",
+     "tiff": "f2ef86eae121ddbf8e4a17bc150bb088be32225270d7119ca9573969933c57c4",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "a69a83c4b70a583b5f3fee2bb418b18d19dcfb1188380433bc5b5c949280af9f",
-     "tiff": "b1fc9311c53cabd438534f818846e547868c5651ec1aab56186c7ba23c7fab38",
+     "f64": "9ad21432d457a052849af39a89f87592a8b88004b47eead47cd888856e997852",
+     "tiff": "f816d0b18afb3c0ac52db769ce982a348c6541bca5a4cddce9aed1152308c4cd",
      "size": [
       952,
       633
@@ -505,16 +557,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "14bb60da35ba9ea84950fbf51327d9ffc706f18e4e41386ba041a843e9891065",
-     "tiff": "59d245adbf7048c48eb25d3de59a62f82ae74d96b917323eb9d9880d6adce9cd",
+     "f64": "5df42e043f303467d35cbda81ad7ab7e700d6a0283a2d62bffaed2ac6cf96e32",
+     "tiff": "5803b21455c1d2b4e619f946a556dfaabf097fab4ed5679d54f98b8eb5c465fa",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "46aa45b3a9a3b1adec05d6c647ccbaa269cfd7dd8cffc7c3b282f2be22828fff",
-     "tiff": "b06ae5873fca4ed4f18563c50e521f7164255ac4251dcad088137a423f5ec77f",
+     "f64": "ba1e107d9bd5675a81b9721e69d92c1e3ec1e2e01a1d5d71849319182bb58466",
+     "tiff": "299af7a289ddf1773d15dc23564be04067ca57023a621b65a3896f2cef4f04de",
      "size": [
       952,
       633
@@ -534,24 +586,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "508918ee3b478bad0c872d11eb8d9253d3ed2da88ec96f4c2e668aed48059635",
-     "tiff": "6133b9a696d23cc6098e9ba8cad4dcbc0fc20e6d0e6a961de008f26ee0bfeb4f",
+     "f64": "081d946077a4819cc77e143a31c253504d150037c9e412257e0e9b0383b4e6eb",
+     "tiff": "b4b60f5b9e5dd9edd2e7ad49901ac6a20517a9592308e57f41fc3db51decb032",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "f0c4af9b9e6e25e329faed26f9593e6864556c85f6d0d64778c9988d72d0f62f",
-     "tiff": "55be23278efb5d3b2023a0cee7d5c7e915238b744efc29bf3bbd5ed3a22f49b9",
+     "f64": "36e5b5448a258f88278ab78fefa84d4666b02222957ca8d1f81b0a37edf7c63c",
+     "tiff": "65220b82b12684a1c967ba4ae0bd496657326b23339c304834cee16b3a57a693",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "00d1fe7b73a22bb775fdd0eb784d98f3d244660a6a1cffc299d3896718a41ae9",
-     "tiff": "f840825d42384d7cfa0d139401276b398a528dca0a126a5dbfc68d7b4942e71e",
+     "f64": "085ed2a3690c966e75d3527015d1e9d85ce699de047e74e9e0f6734df4dbf061",
+     "tiff": "a4ad4e149c7e5e3108655325642bd9ea65775399fb18f9852297a18c4773cbb5",
      "size": [
       952,
       633
@@ -571,16 +623,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "42d43762cd41ce40c5c1f004b27c844f17730fb037aae91e91282239a7ee8499",
-     "tiff": "5ac4c8f0dbfc6c6d1a4325a715b5c649e452f6feb3dcfc8b6c7deb117e3ebb03",
+     "f64": "2399c452dba3d1c6858599ef9c86def852a1a9be7ba48379b4a73c0259390a0e",
+     "tiff": "e29a198e3d48b0ac5f339f2b0ff481ba7f274f615e1544ee9cfe867a550a8fd0",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "c3c7024f5f868e39bab6c50cd37dfc9a4817d0d6b9c965a76ac2a8407630dca1",
-     "tiff": "ea0af87eef6aa72d7caa25547ca2074be864f2bf2f9ee6fd5ee4f500f1a73cbe",
+     "f64": "e1075efadb2afb6fa71368b86f0f71e1cccd34d6edd7feb7bacb96625a4ffae0",
+     "tiff": "ccc93612bebeec7cdb03cb7ca0d7c346fa750adb4efdee94b596f2627177226e",
      "size": [
       952,
       633
@@ -600,24 +652,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "3a91d40638153b1c38ca185a0ed20e4bb8009b7b198c5f38135ff8a052035111",
-     "tiff": "915fe526538ea19b8c50370bf988facde41fd1f7baf4159a68645c47a68d434c",
+     "f64": "3ee2152072f92509d9bd8b744b904aa36a46e2728972cbce341febfed7c86ec6",
+     "tiff": "ebd71a734fdf85f37abc702c520878887b6e67d9120d0b9d97762f8de8f6a4da",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "8e21cde9eaa03ec06310a197f6a9c05dbaf2b24615f801c8af8ab8baa3ccfc9c",
-     "tiff": "25e7e1c0f79eb1b222f9631b59c9e23ef56b704386ac408fbc5b5566a8f35496",
+     "f64": "11fcc4273c3c15bbf30c7ba904626b0576af8c31d5ea96b1f652dc3fa3dc0fa4",
+     "tiff": "d713b87dc35afede21f915f7d12476aafb48c5134ca15ef9330c9f4a8580a5f6",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "62e65b8c16342725f4a84f93d2c24a9e3bf64b7083235e2202d6c6af65492c10",
-     "tiff": "07891efed57c3787a5e036afaa2eb3a48d1f4148490b1cf500303e98ac60065f",
+     "f64": "336b002d71ce69f7bcc6681b29bf29391bbdf1562e59533cfcdf091acc3a0f01",
+     "tiff": "237e5f8a757e24b2a41e87532800149084b073b825b5fc488f391e2d452bea57",
      "size": [
       952,
       633
@@ -637,16 +689,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "f0a5ec565bfa79a0db7d77595631ec992c06dfc3553da1870c859d9e939c5dce",
-     "tiff": "1323ee255536d5ca130aa9393389a470cfd37026810e3c54c792f9360f42827b",
+     "f64": "ee0c378a763c806a199e9b881156133c8259334d780e3383a44fdf79c3376f56",
+     "tiff": "976e473a9fcdf887e5439e6e0736981bbce9144b493e2c9da19e3b098b5a120f",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "fd3566efdd70d226ba5acf8b6dfdc8361c98c6521a23c6b312238f6b875c6254",
-     "tiff": "f89a5718038640a957b62fd11c3ea664f2b05a9781605c9dfa352e8f59c41019",
+     "f64": "c36bdc8f4520cc626dca40717ffa0881695c85630b237ab9e492697bb6c4e939",
+     "tiff": "72a97a1dba8a3ccdf270d3ec3d36b37a754843794c8993e5322f38c7ee298732",
      "size": [
       952,
       633
@@ -666,24 +718,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "ba18059293c68b22fc2b3329e76b111cad4c3fbfa45cfccce89a94513aea5843",
-     "tiff": "1934e6319cd31c438c54a0f9aa03433dc4cae00309eea87ed9dfc4d02986eebf",
+     "f64": "adae7f29198994f63110d408a75d078f6cea9a0d6127099433e11f49e9cf287b",
+     "tiff": "cb71472266d4edeb479b59d8a87b4aaafbcbd886ed6f54d43e27dc4dee9b1586",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "03a1fa44db9e2d8246ed382c0dafd178962e2753c05a59fe19788557e17cae46",
-     "tiff": "5e08f5356da8719086b518bd27c713370b36cb6d7af72d9367aadeee5e698a07",
+     "f64": "9503f6be141f4fd0b30b03aad821aa54b50b22b42d7f96cbefeecb9b4389f9cb",
+     "tiff": "5b231f81529e430c531cafa76388401de2574b9e2056e5121465c5ed0c3b12ac",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "1c35f126816e84675b3640aafef0a2905f1ba750a5549e3637e930ccfa4afbcf",
-     "tiff": "11fc18960e0289cc3a48578fb493c89820ad4730be5484378d2346327347970b",
+     "f64": "c1b42a54cf4a91b8bef7611ee3c0786c4b3414bbe9300ba51f6ab7ff28554c24",
+     "tiff": "5b4cc485d34b7f2ce93c55d8ae072e8217e01080df605d2216417d5651eccfae",
      "size": [
       952,
       633
@@ -703,24 +755,24 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "9ef11a47833d548a6456a64b346bdfc23c07f0d5d4edb807388b09590f758253",
-     "tiff": "0b3abc9114557aaf072f327b6db8fa028456a9cfa96d9492234ffd1fb0ec2561",
+     "f64": "1e5ec4dbcc4e672d3ca9a7e6def1f4d6e2b617f3bded1b9a0ef2e5cfa36c39a4",
+     "tiff": "671533dd244e615b8c21d6f49caba43e353f2712f8541316be493961e3867ca4",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "68e820ea76c2a963b95715a5faccf75901efaeef6cd67dcb873301cca6077856",
-     "tiff": "2934e8403639a010a212ead1bf400fc11ba5fa7442148f24a7bed7ec9abdd62b",
+     "f64": "28d80096609cc9fe9af247d8957f324174ed3b42fabd63627334809388d3b0b2",
+     "tiff": "00a51ad5150e7ec80d185206a25b0f1b5d2e5cf1f18f4491d71836135e73c38c",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "011aa1e3b81038d8ba1edb6556917abbe6ee2d70efcf8cd80c3acd986a30493d",
-     "tiff": "cef2b61ea5ddcf7699d138a6474a7c5d0e4cf65fe4963b4df9ab418b7546f1e8",
+     "f64": "2efdb00c6cf48c44704cd1cf7424e2921a40f8a53559a6a0a0883da4a242b07f",
+     "tiff": "f0704a7a72c8ac303e9fab90d00a7742b462dd53e06cceca011950fae4214697",
      "size": [
       952,
       633
@@ -740,24 +792,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "2103bf493cf50fe5aea6a112671d17b190ee1e1245a3f1105e9fc851f8bce56e",
-     "tiff": "9f39005df58a8ce8651a5483b507203f3424093ec8375d77415857e14ea09606",
+     "f64": "24dc4f00233df4fde2869c63899148872221087afda094115a4ad6952b5311a1",
+     "tiff": "a32e20ca6a37e2dc0cafb20f4e28f9407d361946441d7ccd74327c3e73ab90f3",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "0de64e8f72c8ff266ec4c7f4bb2734602940a571dbb3cf12eedf82a35e707b4d",
-     "tiff": "d899bef144bc33ad1e3bf301720a519c83d92acc447106f630ddb6b7fc658544",
+     "f64": "c83f6994b0b0a817fedd4a52563fcb0675c9c6e1cb4a9df95e3e0ceb67c6028a",
+     "tiff": "4e50772c3c696162550329ef1f93e421864d6ff6818160913356fd269acc25e7",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "e50082ada9299bbd3a8412b208cf97219c09b3fe6cf7e0fd4167c91b2a2c1efb",
-     "tiff": "d8e2c73884ca7e923ba845616f0084e5a9bdb51ae532c484d1ff7bf753554e7f",
+     "f64": "40433deb6bcdb13d97da2ca7746f174d964f9ae0dfc304ca4aeffe8cb733eac5",
+     "tiff": "7df2a13cc87872c2bba90eb0c029c681ba2a7ae0b2ad5850d120c54e81272a56",
      "size": [
       952,
       633
@@ -777,24 +829,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "d09ad176f78b3a420452d29e1b1caf60d3d80fe5851da777a57b9b44c7c644e2",
-     "tiff": "245e586bc442773b74f7660b6d74da07fc99d36a8ea86a1c9bc883d5b22c0450",
+     "f64": "2f7fd4166b813b14f0edb3c3402d4277ba568c641c18094f279f0728099ed3b0",
+     "tiff": "590bf7cff0c39997a9b63e4f27f5ddc509822a248ccf72bd91b3eb348e5ec88f",
      "size": [
       1005,
       926
      ]
     },
     "f32cpu": {
-     "f64": "14291e946c3d6060180f25bbd155dc3f4926b67344d309a9339649ec28b99925",
-     "tiff": "aed18efaf15f1fb66137c8670e9a03bf3f4ed78ad3412bbb8bab9cff7595c086",
+     "f64": "6fc1773d8cb0bb4972e0d8f06b7ccfc1b45c382fe8ce781bccf6171534736f14",
+     "tiff": "2ad08f2f65e5713eac98940452627a1b008f2dbf6e1a7cd67a81a8e10cf63083",
      "size": [
       1005,
       926
      ]
     },
     "gpu": {
-     "f64": "b1d9f39ed6eaf9246972b74e7ab876d191323e80bde2a809d0d7c6b8f24ed738",
-     "tiff": "73943f184e8dc4bdbc1c061dea466ab085e75178eaa95ce921669f792d456f75",
+     "f64": "3150ef34336f77d0d141d2b3853840fc27376f60cd39dc979dfcb42114ac73b4",
+     "tiff": "64e1c06098e3b8646bd5d88c77ff29221f9ba47cc8cf7ccbbad88207b44f2e70",
      "size": [
       1005,
       926
@@ -814,24 +866,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "4c6998ae6a1021946fa9feaf804ee4a35d987b77e028ef254b6c42b7de41e723",
-     "tiff": "36466600e5739a413a92bae3558b1f161c606aac6d21c9c6494d4a76cb10d790",
+     "f64": "f7612104552d4632a930a7e41dc85818754cc944938d8d9e9367e7b3a40a124d",
+     "tiff": "1d62dc1e5cc3c29d6375956c8be779762c261f5b4241825c78f509a805b0c21e",
      "size": [
       1016,
       1355
      ]
     },
     "f32cpu": {
-     "f64": "127e6f9f1601a8b3465f7e2a8869ec9d6e9d242653dfc7a43ee7d5ee6f8ca956",
-     "tiff": "90eb8896ab13de66c1b7faa6f3a437fbd51eff2e1c4badb82151d51bd8e7a0e0",
+     "f64": "278d3abe4ac427adb4b4b4caacee246610f6aed1a9275a5dadce4746aba6d2b2",
+     "tiff": "d3736cd22ac372ac3488270b725f872f078d7fb6137af573ceb83a42146f124a",
      "size": [
       1016,
       1355
      ]
     },
     "gpu": {
-     "f64": "acbae36c8100e351139e96b12c7f1e5d0c6dc79bf81b382cf431edf49551fc05",
-     "tiff": "0f76fff5a1c298f6945b26133534be58347568d1b0d9a5c8541716483194ed4f",
+     "f64": "29d211f50edf5c94443982a8212301e9109e13aa6552c2dafaf06df6f8394f6a",
+     "tiff": "e6e5f78b8964ae3d7886d5b373ac78d1c8dab89a9f99cfa40c5d0c251c2cb909",
      "size": [
       1016,
       1355
@@ -851,24 +903,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "8de3c77fa6d1754e7535748518bf7a8961492fb57a7cf04061184822667cdb7a",
-     "tiff": "7055ef6befdd8db43ad6b0e5674a2b3ce3cb5db34996217380193f53db4f4b18",
+     "f64": "8b84ae83be2a280d454c9d6d7205d1fcf92764e23ede5710157c7d23cea06fc5",
+     "tiff": "41362dac8d7692dcd2e5de74a3a6ba6b083ede3a1c8c8eb8880316ef8f08abb6",
      "size": [
       762,
       538
      ]
     },
     "f32cpu": {
-     "f64": "6d34d79dd722b3b85a2c77eca587098a0c31d2f86b136cb1d17021547c59a6d6",
-     "tiff": "7fd026a5897bfede7bd99c426a87048a57996c2c2426ea1847859c7c733718ca",
+     "f64": "549799d2774d5ebafee498bc1382aed05b1d22eb40851093e56ce03ad10f7df1",
+     "tiff": "bf0fa73b62b7e5890200d434f42644da4253c21823aa861b2e954a8e4ad34114",
      "size": [
       762,
       538
      ]
     },
     "gpu": {
-     "f64": "99b6722cd78bb7e85fbba4286d8acc36c4c18c2af7373821c150cbafa901d135",
-     "tiff": "512708a1bcc06eeced885db71a32a4c7b7493cb4ba75392d2fd19edbfe210676",
+     "f64": "0b9d6d35faaefb2be4e635c92368bde4a96e4b1fd32132a604d812118e7bf8a7",
+     "tiff": "a40fb874611741a5a77dcd5a002714201240e4b3f59f9fc2061166a3c265ee77",
      "size": [
       762,
       538
@@ -888,24 +940,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "4bc2ddce94ecf08495e643c356a30fe03d893bcec2650532f2f4835761592997",
-     "tiff": "c08b0e302c87d074ae156a2d135b11ddbc01d3fd0f83916b3c9371f0df97db81",
+     "f64": "d113183afcc45cd7228c391929cc2c674ba7febc5427933b24042e9d503065a8",
+     "tiff": "1af20f6d7f3538f6da7fd749d13d965ce71c10ddd8dc80e5de397b7601f751ef",
      "size": [
       600,
       399
      ]
     },
     "f32cpu": {
-     "f64": "0bf72dc7d26955c62a50e8e5f6d2b38004e86f91d2ec1d4d411b954ff2d86652",
-     "tiff": "90a175abb4bc681ccb9ddac0d765b70a68583348b65d6a3ec877e715be61e2fb",
+     "f64": "f7d211605505d1b2530b8d44c11ba3db8a76a4d39e14bafb012a47ef98c160e4",
+     "tiff": "76fd65db084a978c1a1ae88ea6bfeecc6b476120fdb62ed534259be0d0c0778c",
      "size": [
       600,
       399
      ]
     },
     "gpu": {
-     "f64": "8255d5bebfeceffa33effb9c611cc9459cd9743ae8a45252b819d590ea5661ec",
-     "tiff": "bdd8ea7d8042f3aa18875538598c9f77001d4a3fdd8335935030c2d1705fa8a0",
+     "f64": "90dd8ab9c3bc390c6b17953c47031678627adb497af4fe3ec18e76ce49334884",
+     "tiff": "0ff283e87a48c114229f563e641608440d8e146902cc09b25045e0d114c822d3",
      "size": [
       600,
       399
@@ -925,24 +977,24 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "a25fe04bcf0b737f3958ce5605f53935892024308d5800c752e941c827e51f92",
-     "tiff": "3cdbe6b1e01e71194e80de9929873e6af3e242aa0a8205b6fa5b43478dd9e5f4",
+     "f64": "bc9cda27ee31d50f6f3eddf560f89404ab2ba990f537e2fd1b3a6f668e81127a",
+     "tiff": "143691dd393321b0b4a0151560f004f6e09312e7319e17062195b6a42a592ad1",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "03c19cf29bcd5dd26ab0a343fc57645214b3075d26f6d85188788d3e094dfcee",
-     "tiff": "ca9f981ada0b878fb2dd14c454e8cce99e39dedfedcb4f65df22a486104f27e6",
+     "f64": "19e910ecfeecf99541f173fb3ab97d3d5577bef52f79d6db992f75eff3145a9d",
+     "tiff": "85a4284ef7d0c77395bfd0cd8dc27558299a6dcaba486c99a5d1e6bb18c765e8",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "c391066174429e7aab03b3762692c83316b9fa7abca34a0b1e0fc4a720003a52",
-     "tiff": "76258d8e14edc5db9ae98787d9066b17a96b8ec043d92c4d8a0ae1133738511d",
+     "f64": "076b5be12a13d78c55e8731bbdfcef8182e357d2c081dd575b0878cc884a3107",
+     "tiff": "61abe70ec6be3908bd790d1c836226130da161a2a6163721e3cd6916018fe822",
      "size": [
       952,
       633
@@ -962,24 +1014,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "1f82efee6cd630b18b5733df97bd2c8b6c5e085335a0aa93dcba3427552b56c8",
-     "tiff": "7272c555134cabb1a89308b15dd25036ebb7f86935ed4eaa04a43c0e910d014e",
+     "f64": "319f339f317c767a98c31b685025a123d6a4890c188fa4f6b60ee5832b015a09",
+     "tiff": "6dde4f792c0dbfdb7929b1b78a6932f2c0b94a2d02ffad23d0445be74b81563e",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "9abc96e30577ca8d850283b0c97599358745246b49fb2cc6f825394ebdff8b40",
-     "tiff": "25f04ce194be7810a490acdb921cf33ab7d8ce544f1d35f58d4390ffaa4f5f46",
+     "f64": "0d51374df8af7a5595ebf84c04283a9bb088d3aa9d9466d92a859e795acbd88e",
+     "tiff": "0a8c125029c0e8e4d5076a8b4f16e958ef007fb3b991c94b10c1fbce8ce07d74",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "f2ccdeb0bd5ca9f4fabdc0bb1d97dcd5889ce868a102b7e0949375fc7229d128",
-     "tiff": "d2f33092f90a0e00fdc862f6271f8f58d5df2153fa013acd4f423bbc4ad92ae3",
+     "f64": "f639c467f32a786c115d355390963a6759e84c1512f8c46fb3ac518c2f10a203",
+     "tiff": "8e268c748e83a01b3d2bf3a1e7025b3b98ee33e1619cd75f8feaa3a32b959841",
      "size": [
       952,
       633
@@ -999,24 +1051,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "fd926f0509e9130b70bb4b5042c5a02f85e39b7bc2a40aed93fa0de32d3f0ddd",
-     "tiff": "ce03ca4dd74c7ff987673f4728ae652d2510b9cda214cd8d57549cb22b744eb3",
+     "f64": "3086a2b6ba5946d7c8af341a1040b17bc261bf5b8dfaba856123782011f3a29c",
+     "tiff": "8f30b19957fa23d55795010c5bb4adc321c14d93d3d244a70c82120149b6e720",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "25ec3cc9a13b10a80dff664a6453d23639e8c7c58f22d9695c28defea887b44d",
-     "tiff": "a74543e267eaeefc0c9fe80663ed03497bf21ae6ed955e0f1a034acc2d0fdc83",
+     "f64": "f81fbf65704644c54ac89383ef428f402621bb12b6864f6d93cd21a2041fdf5e",
+     "tiff": "4fdb1e6f0048d286bfc85ca0bf4fc3e78d506b3a883bea881bbaec3775887c81",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "c155f9c412d07b1d831c209b39b7c647e0ca41ab86e22d304e5c82af08e9efcb",
-     "tiff": "08b1e68e29358b806a4cf208ad4f659a642f0b69d545b60fb7fb2fba8405a2f7",
+     "f64": "90684b4425273e05d2de77c6bb5904a56cbaf80b1eeeeac28ea911eb0cbec034",
+     "tiff": "61f65f7e5df688d0432fd1d8e4d59dfea6c404d8eec84ded528bff0c3d3f084d",
      "size": [
       952,
       633
@@ -1036,24 +1088,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "ec7c7ad2d09db1598483629f93cc5556cefb81b13db726753bf4e099bcdb3d98",
-     "tiff": "b5364c3f3e9be88c85f0736f9e1a2b327c9433a6d489f4014b94880a6d89120f",
+     "f64": "d85f2b36ab3723c6e57c4f04a254a2f31c9e3cefe0b3b80f5dcd413752017f40",
+     "tiff": "0415f082e09223b12e6e970e566c1073b25f354b48fd381158605055831b351d",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "84ab77cb6e8470c8819f751f2b656e0c2ea31d66cf10633a3ea8c62b007f0171",
-     "tiff": "f8f65b1ff48a4b6c4e14d327a27592af71e0fcc91563e157b7c4ce295a3b36ce",
+     "f64": "410b55d8fe8cdcdf123b7acaa50dfdc406ab02a7f7d3514ecd527efc89317b85",
+     "tiff": "1e47239c1492b693cf94c136531acdd80e5c45df2e8c3a068c58de167a8ffc03",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "a8a9af8424c49a1a9945d05e2bdc56433e1ec34239b9a23f903292e0bb606db5",
-     "tiff": "f336c13ba26e5f5a47d99ce3f9013728eabec5fc9ffdcc58b129314340fae3b1",
+     "f64": "1786727983930cac2ddd973f65f554474867276365051291ba176e1cea051374",
+     "tiff": "e38221d387b75c5a5e69dc0380c4f30f9777bc46babb6fbfcc3f9cf77ec9b138",
      "size": [
       952,
       633
@@ -1073,24 +1125,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "c63ad75b09e9ac1a1113b54ac083b25621f5c163d0eb2e3815fae3ab9b7bdea8",
-     "tiff": "3b74b4d2c4e06b1355f54f4bef9769b2cedb90e1e117149990396d08ca4f8fd5",
+     "f64": "8ea85e708ad200ab6005503aa5439c7373183ac8cd89e8082a7b44b6674869b9",
+     "tiff": "b2d95e9bfc856d4c60ada78f85d47c0f45e6f8de6a6efbd71cc1e053e3e8293b",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "ef1df5d400db0b3aac777c61925e32a263aff023dc2cad8fba0dad2031e68828",
-     "tiff": "a6d5d9b7c452c625614675a24080a09746de3509337644d255c019c88701ab81",
+     "f64": "59483f843ce306b2fc38f2757fd8439301d8b8c36f0ee33cafbc54e114bb6050",
+     "tiff": "099682571899b8478b4c16cd4ffb4e1ee04b613e4d93b2d9f4e15e2ca9a4bc65",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "7d68806fe0141bb6038e75e1a48fd41ef4a64375a46f310460098971f817c3f2",
-     "tiff": "f482ce92a7806a0013fbb6594372d3379a71f2bf30e018989284c3e04f452267",
+     "f64": "0d54fbd19426f83ef9ce735d96e08500d3860fc4baa057317fa12494b88de234",
+     "tiff": "9afd02c7fcfe5c88771fd36a56bedd4fa416827bc4a5f6de0e4755288def4621",
      "size": [
       952,
       633
@@ -1110,24 +1162,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "1bbce6fd516697e172dbda882c8ecf870eb4d4a69068fe558cf9fc7db058547d",
-     "tiff": "f062c615e0ebbee466740dae88be441dda8cc77463d676672e8eb0061879b2c4",
+     "f64": "de57da26fff296c534e643fa57dbcca485eaf3e4ad5db4188834d3d4fd3105a2",
+     "tiff": "706ef2692b66c8eacc665f07710d22b0b0b4f27637eaee539848c6426e9f104b",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "d90c1dbda7e58ee7bebef710d79d229d1f4e57232d07ec37482e0c5b4de7f52d",
-     "tiff": "767cd7bb3c500a5708d50570a7a85d7aeb63de21dc42263621445cc0fcd3452f",
+     "f64": "6cbe49d912ef5496cf35fcb5aa720c9d40ecc7a5993d3aa35c2e8d6c5307f955",
+     "tiff": "e67897c3c4d72e04a44d1fd325569c4de3c607f587e8fb9e8ad7aaaf0ffb8a11",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "00c4c39a0d2bb0fedfc1b2205704bdd38cc1ef827c9aa6cc6914554a05f686fb",
-     "tiff": "75d35359cfd3b9dbfa1ae9310f11ad65e69d6f018252807f06827e1fa9395dc6",
+     "f64": "5446508978b79290695782b44b1058ca3750da4a1a8f98a6d1ce9e6101c536ce",
+     "tiff": "d2f3ed00b601fffae29f578bc56c97fc59533d4e924fd0525414d1957e1e239c",
      "size": [
       952,
       633
@@ -1147,24 +1199,24 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "9ef11a47833d548a6456a64b346bdfc23c07f0d5d4edb807388b09590f758253",
-     "tiff": "0b3abc9114557aaf072f327b6db8fa028456a9cfa96d9492234ffd1fb0ec2561",
+     "f64": "1e5ec4dbcc4e672d3ca9a7e6def1f4d6e2b617f3bded1b9a0ef2e5cfa36c39a4",
+     "tiff": "671533dd244e615b8c21d6f49caba43e353f2712f8541316be493961e3867ca4",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "68e820ea76c2a963b95715a5faccf75901efaeef6cd67dcb873301cca6077856",
-     "tiff": "2934e8403639a010a212ead1bf400fc11ba5fa7442148f24a7bed7ec9abdd62b",
+     "f64": "28d80096609cc9fe9af247d8957f324174ed3b42fabd63627334809388d3b0b2",
+     "tiff": "00a51ad5150e7ec80d185206a25b0f1b5d2e5cf1f18f4491d71836135e73c38c",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "011aa1e3b81038d8ba1edb6556917abbe6ee2d70efcf8cd80c3acd986a30493d",
-     "tiff": "cef2b61ea5ddcf7699d138a6474a7c5d0e4cf65fe4963b4df9ab418b7546f1e8",
+     "f64": "2efdb00c6cf48c44704cd1cf7424e2921a40f8a53559a6a0a0883da4a242b07f",
+     "tiff": "f0704a7a72c8ac303e9fab90d00a7742b462dd53e06cceca011950fae4214697",
      "size": [
       952,
       633
@@ -1184,24 +1236,24 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "9ef11a47833d548a6456a64b346bdfc23c07f0d5d4edb807388b09590f758253",
-     "tiff": "0b3abc9114557aaf072f327b6db8fa028456a9cfa96d9492234ffd1fb0ec2561",
+     "f64": "1e5ec4dbcc4e672d3ca9a7e6def1f4d6e2b617f3bded1b9a0ef2e5cfa36c39a4",
+     "tiff": "671533dd244e615b8c21d6f49caba43e353f2712f8541316be493961e3867ca4",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "68e820ea76c2a963b95715a5faccf75901efaeef6cd67dcb873301cca6077856",
-     "tiff": "2934e8403639a010a212ead1bf400fc11ba5fa7442148f24a7bed7ec9abdd62b",
+     "f64": "28d80096609cc9fe9af247d8957f324174ed3b42fabd63627334809388d3b0b2",
+     "tiff": "00a51ad5150e7ec80d185206a25b0f1b5d2e5cf1f18f4491d71836135e73c38c",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "011aa1e3b81038d8ba1edb6556917abbe6ee2d70efcf8cd80c3acd986a30493d",
-     "tiff": "cef2b61ea5ddcf7699d138a6474a7c5d0e4cf65fe4963b4df9ab418b7546f1e8",
+     "f64": "2efdb00c6cf48c44704cd1cf7424e2921a40f8a53559a6a0a0883da4a242b07f",
+     "tiff": "f0704a7a72c8ac303e9fab90d00a7742b462dd53e06cceca011950fae4214697",
      "size": [
       952,
       633
@@ -1221,24 +1273,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "a901e70a3f60fb851b2e76c5090084f1af57ebba57a96b514cde5f1af4a5f285",
-     "tiff": "ece8da43b0e1c1adb82c7de314d793cd6553c917e439910b6c344240e73cd16c",
+     "f64": "3ccf9b95f434b3a8afe0e3207ee9fc287ae57435555657d108f7657d03db7264",
+     "tiff": "88c01de7e612a6df4dc9fedd3949652a9565d4d7fbe57b4a932675996978b1a1",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "3c7d63a075efd904bd6eb056053e1af5ae5fe2f33806d2c62e209afbe2a3c3c5",
-     "tiff": "838e2babf91196362e351ae064a622316da3f24393768cb646b503ed3b8d345b",
+     "f64": "b608d1ce7b9f246c7cd0a3cc54564b3168453fcd757095738ed4f05660cea29c",
+     "tiff": "543ec3cb5fc1030398619154d1485b015e385a94583c78fa903946fa224a7e04",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "bdf0909ba1c4e208ed685d29f210faffdb655a21e5f5a4aec47af4dddd00d476",
-     "tiff": "4091fcbeb7fd836b9a0634c9e01067e5a91cb7ff51e41653c94c2c30ead565f0",
+     "f64": "7f24d01a50f0becded1bff18f9b7a90c624b36f227bfecfc2abb587ae1ad4d37",
+     "tiff": "c08558f936a1861021c8a96625491260055b1c9af87517e9d09331dc01b83d5b",
      "size": [
       952,
       633
@@ -1258,24 +1310,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "02e5b2046277d28479b80d326e08753a16c1ee91fd62d0782e6d388a8ae7942d",
-     "tiff": "0eed3229c0866f3487029bfb16d775c15694f9b3ff70231f77da3defa8d9ee9b",
+     "f64": "e4f218d6a4cdf61c1e377ff5e290489486fbb88a3920379b970f095064415e12",
+     "tiff": "9645245920ae8a1d1eca9e34ad7128a1969ed4ab0d6cbfd33bedae34fcc0d7d0",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "0200deca8c5c7293568dd33779ef5339a4dc07ff08c172553ee7a11009216352",
-     "tiff": "2d99bfab38e8073951e038496e124d33b3c7c55f97b09cf9bca245622c597735",
+     "f64": "ec760fade9b876ce5c1423767a76429a002067ba3c07e00526fbfd0058e8ab81",
+     "tiff": "755679cd8f884ec398726a3644430cff3c25685c15f15334f791107ef470b22d",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "3b8cf06846cd10175ba6741fd0da070adce22a909d891d6dc192dfa97f678c7b",
-     "tiff": "e168f6914727a42efd98aefec01b4340f0914f6e798db37520187a0236a8cf8c",
+     "f64": "3e14a32dd3d568a3328176f36ea654159c7fe4e173c0a7b8844d95c780a63c6f",
+     "tiff": "c4370d1f793872b938a96d036a410c30b4fa6eeb1a21bbcb8e7b2d08cb7eb76d",
      "size": [
       952,
       633
@@ -1295,24 +1347,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "80ddd0fe2d61b279c0b8fe548f07864a34b77adafdcc47b5ae8bcbace0c6acd6",
-     "tiff": "4f9798f4825d3d9545f90c7453a8b276e524353591b58cc75ab0c58e03bf07b1",
+     "f64": "53c6500bf8215f537e21e64133b4fc930193ed1c59324090b76b6616a74c692d",
+     "tiff": "cd4a8cea49bc12b75541c8dc20b900822455e9736232acb93c71fc171ff63b4e",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "8a98ad58d3dbff762f6918c709b47eb6acb8d6d23cea0b5c31bfa5e0fd61b5e9",
-     "tiff": "dbfac46397266a921c5c60f46559e146e7eaa02cfe8ac3477180404730601287",
+     "f64": "fe4e3355a25dc12d6a764df66769e44ae76b616d214c5d2e2bf859b577e40b6c",
+     "tiff": "c1cf4094ed77f17704406f179c7e0b9bad97c65c6e8900f891e5b9e6a00ab611",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "acad8561b15b6f50af5b9f2cf9748407b726eb2b0df07cd6392e61811fa7dad1",
-     "tiff": "f0cf7870223073316840cdc015ef95ec062ec77b88a436c4077ad027bcc0c300",
+     "f64": "ce6380814a1004e8d2d56f7007919e8acafeece20bea39025e08b0555c535ccb",
+     "tiff": "c46155f983bd151a53e69d3fc0604ed85e17083121292a8cb72ee2d8b31b6618",
      "size": [
       952,
       633
@@ -1332,24 +1384,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "58ec6771f23e88a77981a5edba93b954948fc42409d65844810d7dee15df43da",
-     "tiff": "b2b312f7b5bc3a7024ec60c0f57f903327bc6fd14405805e2312ac0d9d3263bc",
+     "f64": "8ed12f8c3b4887afd6e9b84617e482abc525dfc593ebbb064c826c2901e52a9b",
+     "tiff": "f89603452cf72753a7d03e77f7c1c0f7fe102cce910986a99a1b05ab112c3112",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "f7df3bafd87f4f3d1b0b9a636b7b17b7ea6e74fb60abb322a31cf4fc6770026f",
-     "tiff": "cbbe3ffdc15902ce03c4eb333762100af145a8546bb9aeba06204f9efd485458",
+     "f64": "bbc11aafba69498afd3eafe149e7bda32461ccda84374327adcf1a6d8a85ba0c",
+     "tiff": "74c9855a2094999a52bc1be3b0bdd1b6f04a3f70536bc5cd0166a3e8ae320b07",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "0d4682ece3c9f67b75f8304768c76578c5eceb5babaa6ce90f0fd6f17bb56614",
-     "tiff": "8e98c8ec6118ffe94887d278fa20c14a9108405dae8d36fbd8b2910b3a6c45fd",
+     "f64": "3c219c31246a743dfd681808a9b33d6dde5250ff9640ecde02d8d3e07dfcae66",
+     "tiff": "8956630c5afbb00e11cd7cb87d01b48f0665c7c08c66f496f0793da86096a904",
      "size": [
       952,
       633
@@ -1369,24 +1421,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "1a1d5047e7070cc3af51541a6009ad3eb41dbb89e4903bd3e7d6138615b8b6b0",
-     "tiff": "3b59e089b1bf543cd2d52d8ed00f1d8e692cb309afddea346248f56082160e24",
+     "f64": "b6134b31d444b1b128b6a698bb5171232355ba94f83cfd415567e0f9c26a48c8",
+     "tiff": "56a8b19741dd7df634728558cec752617681d35d1a4a65bc425e09677987d64e",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "d625b9aaa60063b51e93ecc808a01bb6b0e3a10429e370cb017c3a932b6dadbc",
-     "tiff": "e505ef5212a2b30a5a09415d76801f08741c8ff781198bf3ae7ae2293b6370fe",
+     "f64": "960ee47fe61858f62ab3c80a9597e1311994286de9f1c22a9a07be26e230d026",
+     "tiff": "9de27c87c2eb28f343036b2bd47ec70d9b14095def18cbadd2f84c6c3f897d21",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "3958e43d7e1805abb6b21b68a405a40ccd53e63f6e22bb929e56c9b7a4976efa",
-     "tiff": "955e2068dd7834fe11d276cab886d9fbd624202efb16497d19dd1d37ac48434c",
+     "f64": "6ff8197034c22483f9f561eab88ec90e50ff4287b9e5c0ab6b6a9350534cc857",
+     "tiff": "9ca624acfa6865c09ea0e226166a9ed47154cc3c1d805acf2252a991a34c26b6",
      "size": [
       952,
       633
@@ -1406,24 +1458,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "94b2fcc02ef0d3beb75c90b978ffaf81b69bb15b22e3e2f74783417b59e613df",
-     "tiff": "77c6dedcaf67bfd51ba0ff5d13c114ad33cdaf084e87a612f376baa9cf802e92",
+     "f64": "6e9c609725624f5c770e9d75c4c75e70796f4236a7c8f8438763d965ff877077",
+     "tiff": "c251185352ef9590fbce4876d5e120c0060bda3bf3a5fd84bab884ae94830027",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "57d5e3897578ee82c0cd7897662743d3fccd6eaedac80b1a12b7fab8542f8196",
-     "tiff": "3049be008e67ef990a550afe2f82bc51af8338e469bd159f2b63bf324efed0f6",
+     "f64": "091eb60bc98f149d4dbadc828f7cb8f2b0ff345b7e72c3156cbcf8853743f568",
+     "tiff": "8b9513f64bd403e1a47a603795d8bfe9f22e3db9208f3a2fba9477f7f7ff79f8",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "1540e6c8573fd5a9009ff8a8da5a311b64b64294abb7ddcb2ed442002b78699f",
-     "tiff": "7608c1a3511385822a0dec301ac989fbd8cf0f4893ab5212c9f36ee3a938fda3",
+     "f64": "f089d3c13985050bfe5908f0327afada47407ec1d78b6212c1c1a8491b9093bf",
+     "tiff": "112b2bd3e61adc79cedfcf784286187a0f0d42858a40b12e131cecf5254c41e2",
      "size": [
       952,
       633
@@ -1443,24 +1495,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "a0b67a63abaa3e13f7ad7e5f1940b327be805e583de7463162982766805947d0",
-     "tiff": "6249650f0d3d21c2ee219cf4e02fd9a8505241cfa0cb8a2bb20019b735012325",
+     "f64": "31dea4dfd1400b4f5a8e9cfd4bfa8cfef2b69cdf58a0d8ee2215cd1214c947a5",
+     "tiff": "b63b3dd9bb36b21f15e1b893c5a3f3056f01a056606f5720d827f8c3c003b84e",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "fb5df5351c9499953746860b915efe4a9d9cc0379474ef6cc9a69948cf010221",
-     "tiff": "f36339ffbc89a42930def16938ce0f1bb3c658660ea304328642347b66982e3a",
+     "f64": "1399cb3dc9bfe06499e58d6426d98a85dc7a4d8d6c14bfbad7850038787ed586",
+     "tiff": "4bf6825cd4cf8efb7013e913f2045d439e3dbcadc294e30e02f49d62c5b6f921",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "5ce7bbd4cea6c0a1867dc06875c46332952e8e2ebe528d05a7948b5f2deff2bc",
-     "tiff": "5d38b643c8656c533edf2cc0eb4edc37c81bafeedba5d6967a8ac015c5ad1a9f",
+     "f64": "53ff4cbabb1d11023bd007bd4a5879432ee2b3035eef4111dadeef9e24c3bbf2",
+     "tiff": "9d53b57ee256a7057ffa888a3d882e41bde869825a7a98a01532da5019f58f23",
      "size": [
       952,
       633
@@ -1480,24 +1532,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "21b5b4c1ee0428a3c0ab47ea01d40e0e3c4c7b248af42c34d68e4276d7b5e05e",
-     "tiff": "218a3768448b2e3663f1942d794f045ba016c125c65c81bc0a7a04d200df37d7",
+     "f64": "b94a70b3b77c95037150e5386aef88a0b3b46a34dbc546baa5019a7fa6f00937",
+     "tiff": "2c9f4274f551c7e1e8007daa0e88051795a7fa5642b9f5825cc740b34958b4a6",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "c4eb0b1005ee57de4bc91c028853f98e7347a768168cd70ecc9b447f226ada54",
-     "tiff": "3bcaf59e6f72e04260bcae46b59582ffe92057c76a36bed7ed9fe71191a6e0c0",
+     "f64": "dcb11e1c7cb58047597a39093d44f2771eb10e45b627186c383c6d60fe313476",
+     "tiff": "c612d711397c57bd657dc32e847d60f0e881bce0c40c710468acb2a8c6b3398f",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "f0351206dbbe020f7ed75499e4ff49881ea774a15416c31bc9a0e3f5a80121e0",
-     "tiff": "c1b96f1bf716490f38e41a8314f122dfd9cf7c1b2d854c2b451069c9bd4adb62",
+     "f64": "c918b24f76f528652db85cc83c2d445b47a8869942c0b6229aa3704945e59dba",
+     "tiff": "7bd6cb7905f93d8972e532d842fd3a5082bc48871910b2a155b32a079cf8adb1",
      "size": [
       952,
       633
@@ -1517,24 +1569,98 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "aa225b7b34b6d9054dc80f72cb66513e4514a4cebe563175f448cfbeeedf866a",
-     "tiff": "d74ef2a744dd6b03ccbbdc89e80dd0e83bbf9468af6ef9f8e14fb74dff7b6cfa",
+     "f64": "1c65d686691a658426217f9c581e16e38ea9bc85f5280b8855a7c18ce998147e",
+     "tiff": "b95827c2f6061128c4a3cf2c0ff61251a03480e43455a64a7874b283e1d10a52",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "ac6b46fd68a4782bd8c0be4c3e1f63dd718cd78eba45299f3cec281be341b6f1",
-     "tiff": "ee906fe4e7733938bfbff2b8e7fe0c9a86681ca5f32c3aa07d12da95b5f047aa",
+     "f64": "77881684b8e3700ce944951569b68fc9cb19ce67cb692cc36424b482d4956f03",
+     "tiff": "4dd5eb46fba2ec0b0e590c5e4764e6ad1e9ac2ba1b043b3b07daf9ef2ac2d478",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "40ebb13a0087f8dcdd5a740bb6693c31325c48a6c9ff4f4ccf5784ebaadd0274",
-     "tiff": "c0f77413b689781a6b658ea583023578ff95a38b3b861cda427d88b0be7c1849",
+     "f64": "cd5a67dbb72b1e797f7bbff8b388e1cd70deb8f9a722372ffad8b52df9410ecf",
+     "tiff": "70ab0565f601fc4d893a29562e6f6b950b4a619477b13d265c2811f5c29328c5",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__preflash_exposure": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "preflash_exposure",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "2de95ca78c850ad193906207d454e4a5390e1f931a8138f300e423f248379202",
+     "tiff": "e56a1bda51f87e2e4807cb8c75994959b56c9f9de985a4ac49513113d106ec9a",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "cafcdb10ab6106745cde71c96064df709155743b6022e66874223bbaf935b915",
+     "tiff": "1b77b05d6c547a698fbd4ff96ab081791bfdc4c4cfad9565746b8553b38e5fec",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "11bc8b3121ce29608b851b0a3457e689e0bfa17fdb9038a9d2b38232780a6378",
+     "tiff": "3cb2a78cff862348457c3d6e131bcc9adf0bd3bd73ac75487dffc70a588b1dfb",
+     "size": [
+      952,
+      633
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "photo_7858115920__kodak_portra_400__kodak_portra_endura__preflash_white": {
+   "input": "photo_7858115920",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "preflash_white",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "224ac067c2ba4568cc6e3c9ade6def6d3aead7de14e7738ad5ba1ebaf1f1aa46",
+     "tiff": "9f1537c1e12bb45b4e259325beb4006e5ef09f5bf1823eddf46f42b61190dde2",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "f32cpu": {
+     "f64": "7d508db39e3d25032060c93cdafefdd203a21ec5aa736b6a185b926675509f9f",
+     "tiff": "adf7d12d993921c3525f6d6de11b85435f082667678739049533bfdc02471df6",
+     "size": [
+      952,
+      633
+     ]
+    },
+    "gpu": {
+     "f64": "e8fed62e68ebff65fdc3fd50990fe5000c9a4a8f3fa8ccbb857ea763c8a9aa0f",
+     "tiff": "aa145805da11e62ca971110238795e009bdb011e10f3101c56a73d81ca14e041",
      "size": [
       952,
       633
@@ -1554,24 +1680,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "38496f7f6434c0a5857eb5aa44d83016f25bda6875634d11f5afc4786709ebca",
-     "tiff": "0deb5c376153d17ca27c5ad99275492c09c36074dfc6679696697eb1c2f752a1",
+     "f64": "36a23e1c434194c206e51eb6db6e6e46ce5fe1b560b177228e8d277a00b99888",
+     "tiff": "a92d5954497bb353bbbd241bbcb4ba5d207ac7a4810d2b9264795cbffb5ef579",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "84149bdfb50efdc5f480568535caa4ee2b354db54cb654d2fbfbfcd14f017eaa",
-     "tiff": "73285babed5322f04fb44556f4afe96556fca8b67beed74396b7e1974faad439",
+     "f64": "fe2592ee5c61f9def94ecc6c3ba273bf5c2dc539a08a0bb9a5a885c1f6170fdc",
+     "tiff": "9508f37d45accad97011a7d6e0fdd6218be537f9c81a32fdca05edd51dd85143",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "c1276f66c7e8a99526c693c797b7f17cf9120a996c485276060cbeb93f5c5719",
-     "tiff": "18732190ba4b4ff62b372c2a917152f3b9e649ab5a40a36002be3334c78eda5c",
+     "f64": "e0ad11ea4cfa1bb30534de51bd9c68ae38faac6bc9d08ba4e6b99a6fd621f949",
+     "tiff": "fdf80a70b1829d53884ae266e30351d838b6ac19bca0069eec38957bf8e058b9",
      "size": [
       952,
       633
@@ -1591,24 +1717,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "a7c3bada806c7adcff8940265a05f94c720a1c427140b92c082dc964295d9749",
-     "tiff": "2cb91ba16f095bf546e219eddd63e0ec6bec463bfb54d89042a7f06ba0b049ae",
+     "f64": "0d233601dbdcbbd8d5c9c94e0b890a9d659261126817bd517a5b0ae943b22d63",
+     "tiff": "1f2b6e4f6efab671179fe45cf0df2d35600c3b53f594f6ff3c68c1ae97cbc109",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "02dd3f7b56c2089797af99f8dfb8324e1f45106310d2088cd68ec0f8f708421c",
-     "tiff": "ccab158c5d2c3649316db78e643d98aaad266375ae50dd59624cc1bd0ddeb902",
+     "f64": "43527a2adfc77e85a92589f293c8c68e0ce06219c870834da42da1afe6c7d7fa",
+     "tiff": "6045e4237475e432f0ce516e744d9a21395bc0e7252ea576081c6dd800e6c571",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "bf9f3a49bd9ad0bc9190d4f5076da8d7cbfa19992694738dd8597f30ceb69c36",
-     "tiff": "4f4894c483b7bc0059be79fd7173a2d0ad517f0c645cd9f280827736cc424be6",
+     "f64": "06a2c868a37f813bca7e4e84896ee4de5ad22d58ecacd169d7bac47f3e999973",
+     "tiff": "1f36dda649802454c49df1e36f5886b6129548542ca5e834314b1a8f5423595d",
      "size": [
       952,
       633
@@ -1628,24 +1754,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "2547a24361661656b92ab262510c44fe3b2a14326159186902adacf236a68e60",
-     "tiff": "c1a1ce5d6209a6169ef6d081c910952e911c05152ce693497e2c596f18c55ae3",
+     "f64": "a717e5729fc20e3438eddded75293401fe08f7d5a8e788283190e5a3198e82ae",
+     "tiff": "011782d1a23e52578a6713ad509a144a07fe7b82e52d0653d74be575deadc7ff",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "d3ea1043395c16f71421c11839c77bc31690edce9c9b5600c150ba6e95efe1eb",
-     "tiff": "6c567c8fc58b3bf3f305088ea69eacfc820d568240ac6e1bfc21de2a4e9a545e",
+     "f64": "4ce01aa1912239c5ec9052592e31a18e80943e3cc0f1e96549580ac2500af591",
+     "tiff": "eb6a20125a405d77ae196491f02d5846d70f7f36515e58214cf7405060be7a54",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "ea78fdea2eb2bad78fa55333b94eb3880a2adfb90ab5cf5b5fe565a0ab9bc035",
-     "tiff": "70b974986a0308d37f928bd5113b35b7e7daa16e682dacd03d4575e7035a3713",
+     "f64": "1825439707411d4f49eb7df1ae6e34058022e9c8daeb4bd9a786afeff232c296",
+     "tiff": "4dc0de9168fd7d3bd430ff836e052a8fc617f6c59dee551f19da89fbb1f8d319",
      "size": [
       952,
       633
@@ -1665,16 +1791,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "5d1d23b945f0b9e50705dd9ab24ff20785a938e927b2545081973546bb8af20a",
-     "tiff": "8356d9d511abaee4d22da9e61e3f7947e81dbedf80b191efda503d16cbd3580a",
+     "f64": "41d2ebfe9d8e5dd8d3439dc59b4e872c7257a869fe1325ac2b6deece03d1b3f5",
+     "tiff": "928f31e6e3fdb85520731d3fa4a4dd1e11a71f5f26b0c4312a4816195c8a7311",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "50d817170b9217b548f179275e90d4e14de468a85ed9c121b456e1c3ebfe712a",
-     "tiff": "296537f39d797b39b9fe50f0d7824e52da78a6a0ddbc688b369377ec74b03f36",
+     "f64": "dc27d147ad2239d31cc49bd88bbe5bf8bead678f27adf82a00a35465fe4eecbc",
+     "tiff": "9fbeeab56a288ee84f75069372457236cf19dd48882384ce26a086046e91b819",
      "size": [
       952,
       633
@@ -1694,24 +1820,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "2fef1868e2240538ac85914582451092c1a0c5cb991f59c2e61139429e571586",
-     "tiff": "01bfd2ab4c4be41c0c9d95c0879c940cde5741c2c0008718fa5a3a811bd91679",
+     "f64": "79a4cf9a5bac175dd0d3d6f9efd8e29bb6fc881e1abb2c6103867cad65478e4b",
+     "tiff": "114216a72ccf0f312e9fb30b96817d516a7f52c51fb6288cb30cee369f43d627",
      "size": [
       952,
       633
      ]
     },
     "f32cpu": {
-     "f64": "3fd06a07cce2af39b0be80127c26e35059666051df43b7a6531f941fa277d2c7",
-     "tiff": "561332ae41bed8f8bd510f8372c2bed256520f911bd0b168f2e761f478372b65",
+     "f64": "7f81023fe807c60bfe229b500ba6271741016b77eaf1723440dfc4b8472854b8",
+     "tiff": "26b7cfea527a579907b015bffef87c16f7a99a36a6b0cdd172da92a8c7b24c9e",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "8b97c43e1a00624dfcbb378834a499e42d5a761a7c4ce65b18c03bc3a678b0d6",
-     "tiff": "3a224b6288a4620f65d6b11313e8af4f13630a767dcde32db9a0eb887b912ddb",
+     "f64": "80bfe1592a8554d241950a4b85e725f46ad44c182ec18209bc5f057e60eea099",
+     "tiff": "dbd9145491912bedcd99ccedee373e96d3c63b2fa57f03985aff3d16db3f30a7",
      "size": [
       952,
       633
@@ -1731,16 +1857,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "cd3fb7b40f7f64b1ed754669186294cd4e2e575112df5c96daeb65167e404b23",
-     "tiff": "cd4077e46cd57e3878855b21bad67442031d99016808849abbc69d99baf40c0b",
+     "f64": "4b29b3bca82864fca07bb27ab8608dcda05f11a8640ceb794448647c1ee9a4fe",
+     "tiff": "eb9f4c107ff7c2099601bd61ea82f00c21bee8009a998c494b75c0a922f41795",
      "size": [
       952,
       633
      ]
     },
     "gpu": {
-     "f64": "6719970536623d5d3787aed91110d0cf0c637a9b6dfd416f72cbcdbf3f45117a",
-     "tiff": "47b216c34595eab51828c3a96c012dae2bb2ee7cce582fa25d9e51ee2b6c5d3d",
+     "f64": "a7cc3272fc751f524ac50609758cfa7f324c214f64ead5cd9a36b35b342f535c",
+     "tiff": "b84716d28d3ebb44ed1b979133a83c1362177106e061f2c1377c412149504735",
      "size": [
       952,
       633
@@ -1760,24 +1886,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "40cbd8d249cc174ce8fb6629b5e8523cbd45f9c34a2bfd0f58cc86d31bea1fb2",
-     "tiff": "f077123acc7bdba84d74357377114c20b71a0efaaa68052049fbac5797aff4e2",
+     "f64": "92fbd32fe411792e5123f260bff86ffb00c62f662738064be93bc7e38e36b88f",
+     "tiff": "920aa3cdcc73d864c9bd07fc9ff8608f9525992e672bbdaed4cac810a80e2bd7",
      "size": [
       670,
       1008
      ]
     },
     "f32cpu": {
-     "f64": "0e29cd2dcadc30702e411df06803bfb051b0b5579fcde66576251dbba738d1ac",
-     "tiff": "21b137be5ba4f47cce98f2ff65b3abc3f3b3498c8998558ce04789e01e35f80a",
+     "f64": "584df254bb68547780a3d1c2a26a612653542cbb8999523e9d608cfbbf8911fc",
+     "tiff": "a8f8633d609a8ca66c312aa5988d99359d70d1373b877e7ed7499881ee4f335a",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "04b5d7cc9588acdf7b56e6e220a61d223ed8602695cecc2f7472875e09666a4a",
-     "tiff": "bbde7a5d87746ae78e3ae2976a079eef9134ba27d5f95f92217ef5531cb2f261",
+     "f64": "143e502f34f0314617500649062e1994d87aa9426cbb6f13aba9663ba12c6c9b",
+     "tiff": "fc117339c46c52bc3e22ce3ca2b4f2c011a82dd84f30bc4fc98d023a24722f09",
      "size": [
       670,
       1008
@@ -1797,16 +1923,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "0872aa001ef8e8c5f0c6cd92d0f504826eca3536ec87a4102cf5158edbbad854",
-     "tiff": "a9488dd47e7f4b4e0039c227338306cc45a6c7fdecfbb95bf9ebe258c99d5bc5",
+     "f64": "9798077bac6ba100d87716227aa9b97d29e579718488f16d925ab7e4e72e4134",
+     "tiff": "018bfd9d48cb2af3fcccceb02cb294d8ea8228547b8ecf9e9421e2037ad20440",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "d8010d039c9fb6c8f4d07734b91ef77085d87f3cac897f0e557723b4fa2e3872",
-     "tiff": "dd8bd5f0c897e5a147cf52120648f7c3de09def1c1d9073b9e1cd0847e91e761",
+     "f64": "2228fa9227952d61d77e7a9d855c5c232c6398de400d03e7ceb0a04781ea8185",
+     "tiff": "57fd7e5b7c5771d28c04be6a6eec4f001ba0b8fb8c9764bff7838f32bc8ba3d4",
      "size": [
       670,
       1008
@@ -1826,24 +1952,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "da850b8db1e9df777e30d858022ce9f4f8e314e59a3b64826dc14601939a7507",
-     "tiff": "46ac51034a45933814ebb61b2dab5a83bac07866f05524e3cd822043808560db",
+     "f64": "a9c4af2ded8f78d710ef27a12fa4e3761759b747bb363a88612cf0a5f921db93",
+     "tiff": "5c573ba9e3efcae27efddbcb4fcdab641da03ba2ace6912c52a80f1e2053c237",
      "size": [
       670,
       1008
      ]
     },
     "f32cpu": {
-     "f64": "5a65d61262ed825c1e48dc72890aceaa2afbce80177ce21267fa293b4b64b819",
-     "tiff": "46111509f882184cb3fd0e8eae1b2dfd5057dde5f869f860b07c6ced299cea7a",
+     "f64": "10c92b4a21c377a049d946ed6b96bc750f5f89f5161f7e169ec123e18e35983a",
+     "tiff": "e16fabed86ecc5af17e58cf378418de9cbbc5ade0fa4bbec8e66052b9a2890ad",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "9fb1cdbb7a4486274c5efef49503151c911c946a7f890a9ead048b93403dde66",
-     "tiff": "88b3d0f4bae3a25326603a086a082d7ca45cd47d856bc3b2d4c086c51e280f15",
+     "f64": "2c6191ac494602233f6ed6031aabf5b48f0ea34e0e7f426c01414c77083e17c5",
+     "tiff": "d5662fcb8881064e9f9d17aaaddd63d741f6d0946e1a7174c6aff96adfb8a6e3",
      "size": [
       670,
       1008
@@ -1863,16 +1989,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "40f85493c992c6c931ce1d11b4e31129aa59461722d89b1271780d149c9b2652",
-     "tiff": "6df510e380f9530889e3b0b66ad73a3fdb33cc42f8f313e4bd1ac8be6cac6aa0",
+     "f64": "fc0a1c25b4a32ab3d1d43d4a77d94e99f1fc5c136a3400345f32bd12691b5c35",
+     "tiff": "2e97ca56a33aaa38583cabd9e21cddfbd6b761a70453500a67f420715a7b13a5",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "8f3f8c4c1cd1f6678362ea3cfcbfd5fe6a09455fcb8e53d57b0456fbaa6b3900",
-     "tiff": "ec54ff0d99e3c1c1136e218fc6523521e838dee023faae6ee89e91ac5e832ccf",
+     "f64": "30e94fec1ea0a31c6cbc6a4409897116c866f9334bab9a6b251810a36b10a9cc",
+     "tiff": "7e91eeeb2ef08ce6525b103b102bc560eca4635e06fa8dd188efd01149ca71f4",
      "size": [
       670,
       1008
@@ -1892,24 +2018,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "9317f1385ea0623ad0c08907c8cb8aabb41701a78231fd78fc772e985100c258",
-     "tiff": "5bf32253169997c4cbf616f84b679d9767fdcee06a104f644e6ad951bc6223d6",
+     "f64": "9d494f4dc0c984586ae86ced85dee76b8009cbe2f55ddcddc54d6e36e4445efe",
+     "tiff": "ba5899f3de04f2fdd80fe3e55d9a23bceaa421ebcb4d74ec5e69fbbd7ab30977",
      "size": [
       670,
       1008
      ]
     },
     "f32cpu": {
-     "f64": "3419589bb8f04641da71f457381c5142cdf7360d38383e069028be62ca11b0ee",
-     "tiff": "19521dfd3efa3a86eeb63ae8a3fa9b3ba08c45624bb11e76f1fc293ccd38841b",
+     "f64": "66b70ee36ba4ee276096130c862d5e9e8a3be2f7f6bc6ebe6f8166809c672393",
+     "tiff": "7997a8b65c49cdf6306b4ed657c00a1e6fe319ffd809f1cd7bb8877211701ce5",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "1f0ae1bd40acc3c997a16740d8084d3ba063df3c8fd02b213e7fa1b12e6c5f9e",
-     "tiff": "d36c66bc09cad93452019d96e192a99fd3dab2a5b9fb639de34c3f607d6fffca",
+     "f64": "2477233dd2b6c43090e2c3b9c2e986424ac2709c5757b83d8782da77797aa3a0",
+     "tiff": "e18342ac285a630b16feccfb2fececd3f65f76ec35e79a4029b9774613ddb1d9",
      "size": [
       670,
       1008
@@ -1929,16 +2055,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "173aaf95750f25d8fa03809becd197842dcd3798fdf0ccc88f2c9fbd269d26ae",
-     "tiff": "514b609d5cb0c4f243e18d0af7888ac546dd143f01da54d60bdbb2fe0b17a0d5",
+     "f64": "3184e7376f355c1acb7151e2952b09f2aca7b27acf18c74d33d7a2f8b41ffbae",
+     "tiff": "b0f45078ce726c92cbc2a7bafd011b0f57fc4b6aba1d1e6e3c0f2a35e05ff032",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "6d27ec4d8399b97368d4d1a37bb5214a8ed5f6866f7039699351985dd26d1097",
-     "tiff": "5809c6d54270c1d1c7fd81fcc183bfaa2d2d5030f990769199c167cf9211a02d",
+     "f64": "e8ff0cf09d5ead4ebb8e5e7b0e791365c31968079c5160e0f8675466f7b04d98",
+     "tiff": "4ee29ce473c21ebbe2a292e4ea653195a41f851476fc20594c83f9d57e659527",
      "size": [
       670,
       1008
@@ -1958,24 +2084,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "04e0fc00dcd95515ae8dc068526b6d46721f168826c624c0f764ed2728a24724",
-     "tiff": "200ff02c96fc8fc445beab5004829a7eddb4e4fc8eac555afa3145f3fea02c26",
+     "f64": "d3405f4e0f8cdeabdfe59878ede21fc49a69d4549c0e2be126648038087f6d24",
+     "tiff": "dd8ffc279fdf45e1a9071d3f1ae909973d571e56f3b4edafbf123f89785ac8b0",
      "size": [
       670,
       1008
      ]
     },
     "f32cpu": {
-     "f64": "f0d89992b7fa464122a0b44eade85089a4430d4ee8462e9ab202c8996245088b",
-     "tiff": "78ab87a9154d6cc5af210e105013e3643a40fdacb93916ece6f49e159f832449",
+     "f64": "2046dd6ef716f54b941f84047d591b5e068d0d5e5a3a203429c7d0326864acaf",
+     "tiff": "2508d4568e1d8f656fcdc936233155499eba7599f018bbdd0e3021279274a50d",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "372469adf46fca9e27505b889f326ee208e34cc368ad77307d817bbe5c27f368",
-     "tiff": "2b29009a4869b16b99252c293f92db636c28232214f3064f60497751bb96d70e",
+     "f64": "ee7afc01f6c89b5ce1297e2243d2c12b9625d1138b4468898c77bf8b96dd26a5",
+     "tiff": "924243426bd76417abc61c2ce94becef59259d398c6438e247305c0e97716460",
      "size": [
       670,
       1008
@@ -1995,16 +2121,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "121da9fcc61f7f247a45ca44d204c1685d8f0b2da85787c68fe35a25ad4865e7",
-     "tiff": "6786aee0b81aa4f2101e31cb82485bc16b9b835337be8106a720494e9af5d896",
+     "f64": "0ff347ea421884b762a8e73038f04a12a706ee73441e050cc175db90104568e8",
+     "tiff": "8eaf789472c062149f1df94e4c20c69bf66cbb314efd986b91c0108ab99d3002",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "1ced9b37892420c391a6ab4314b7587a767c13e132908afd86272e2273986a2f",
-     "tiff": "724e9eec15d6e4d49fd4e390a92008d08debdbb96d83b6532b4e7168efaeffa7",
+     "f64": "56df18fea03d6a83b65565e4d3e9d6d91c9399f39800468c85adbe51b1f473e1",
+     "tiff": "d62b0af205feb5cd2df645a6b5684f6ee608c1bcbcc761e094a9f8dce2ca2cbb",
      "size": [
       670,
       1008
@@ -2024,24 +2150,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "1c63d0d0aabe01a585bf12c8d700046ae30bbf107d837e5a66348563b74b8786",
-     "tiff": "991a8709aa5febe585f84b0b75eb8ea112d53417f5c4a04e684fd449393bf191",
+     "f64": "d674b69dfdfb13795ab45f6cf16e15566ed1d0878cc38dfa6db2ef7023c492b7",
+     "tiff": "c45895e085f504c039e96ec3e7f9e758f6bb44bb2a84ec968f3dd7551c6a780e",
      "size": [
       670,
       1008
      ]
     },
     "f32cpu": {
-     "f64": "4f35176a94c9f7e1fd85b6a38649c3fba70fc6123681cf81e2285cf84c15ba61",
-     "tiff": "7504b831140ee7b9542cdc009a112921e1d3ea12e37c90bba456c20d9b3bd013",
+     "f64": "6839eebeb63d149d7e727f44bf04d5c4a61006a78014094885edbd3054a334fc",
+     "tiff": "ffc0ff7db3362505deefe4b543180117ad9ff491232861a35aa7c1774582403e",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "fbafd73a80160b03a5c63e2ed29cec5ac4d03401ed4f54511735cfd6ff3acfdf",
-     "tiff": "a664832653944ddcffb206f10fe5f300b065df97b7c99e47923d6c60207e4cbe",
+     "f64": "8d235f7502d27265af4af4c8d32acc552cbe896fe2fbea92b0ebde611b247f1c",
+     "tiff": "49e679e7b68dbc1d49403c3abf38785d2880811ed2cc94e2e44d097e3cb09248",
      "size": [
       670,
       1008
@@ -2061,16 +2187,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "c812a2ece43ae00ea43266a1a289203f258d7d8e2e67ad8666893107902df41b",
-     "tiff": "2d9c420e83bd4a0d54d0078d84acbcf0e10fd8bb290ecd9a32b3d770c60102d8",
+     "f64": "bc7b4f9bb54a9919dc83ef2cd52995d6fc09654ee9a3d1b6bc8d77a5a655ee99",
+     "tiff": "dadd3283cc63f92b36d25bb7707e96a45185b02878d85bcd1be41f739b821bcb",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "542bf5b855f1f7189172711c55acb1c1ad390246c4db62916d88f8dd97c62d89",
-     "tiff": "5296b6db5e945e3a785143863b6a14dae0a12b78f9e12e7bff61f232b7e445e4",
+     "f64": "9fdbaac4f9eb4ed8831f23ca64d9462794920005ee24d1276522b79cb48ab9b4",
+     "tiff": "6dbf0f6a8b901fdf31a6d1ee571f27ca965008bcae7d1e84596e05fa51174aa0",
      "size": [
       670,
       1008
@@ -2090,24 +2216,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "464d9af28e2533ffd488c376e6e5f01fc75671a5df7d0e2b8deced0854c943eb",
-     "tiff": "aac3c0cea625b5164c9658263c1728049e257ea138dfd042919046c8342381a8",
+     "f64": "0f3f3c7e6b83c45f8598804ca3b5aaf61c9b9aeca9cc53b8e42c09bea703f2f3",
+     "tiff": "f5fb2a20e6ebb3782440539dbb9128a79ac159e69acaeea595940b5290b6c6ed",
      "size": [
       670,
       1008
      ]
     },
     "f32cpu": {
-     "f64": "032183b3b4810ec1bc026b93ea615fe71b3dada1db2753050deb9ed2079164dc",
-     "tiff": "9f315093e76904396b4f6bb58aecc596a6f65e59c6778a5cb083aa5fc4ffb195",
+     "f64": "01e95f31f778585966b8055cff5a6663d58d0a6a61014181cf12afb55a148435",
+     "tiff": "6e217cba8f263f2b81f7ce8eee7e5a3327c27ee5ce69a95b6553774172421bfc",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "61eb9c0c9a331fa99722d3baf85f453fc98fb2e09f9bcd8f491c93965403012e",
-     "tiff": "027f0f887ec78f5f8b04749c7a517b1af47ea6ec6afdb257cb2102a510ccc0b7",
+     "f64": "30e33a4f6ef0414c69b95dac2560e2d4e1f96e299fe9441d51174c4d908e271e",
+     "tiff": "c80a4bcb637d4332c9855ac23b01b003203df8262c8832f1d921f6b0f9fa9c74",
      "size": [
       670,
       1008
@@ -2127,16 +2253,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "a634d5a1a530a0946009e0126b5b2e8829c82a5cd6845501df09c97f9237facb",
-     "tiff": "36515f8fa4f16e4cf7f83cbd2daabaca7fb7bd7ddbd1e75cfc2bb6178f8975ef",
+     "f64": "a58012af2ea9da9d670590843bc8f473b9e76740afe6a629ee5126c7bbf88d22",
+     "tiff": "30cab56a9686734688cb77f328f0c11baaeceee4aead82f49d428eaf64696688",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "d58861c83b8ee43b52c3e6eee2f5867b6e6b0c3ce34d41078d6b303baebb68be",
-     "tiff": "10688c334c2098cba862a11ae79a7a27af418b506465fe00753c20b0c5a753ab",
+     "f64": "0ea23e29568e1573f9b76056e246743c8d501d288ed4eacae5dc05b58eafbee0",
+     "tiff": "b69a36f70c6f6a9c50dea66d8ede960872f7c6b1ee14886db5424247254dfc8a",
      "size": [
       670,
       1008
@@ -2156,24 +2282,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "be401217af7b14f1f3661b46bdd7a7c489bbd0025cc1f60f15ee5797505884dc",
-     "tiff": "a7bbbfe0cbfacb712030aca85bdaf25cbc67e9fde42c6a16be4cbcfd6fd1d077",
+     "f64": "5350b9f54328d5fc83f1882ec3b17ef8c9a1250bbef5c14dd35980a8e0cb8380",
+     "tiff": "4252f77fe292f321369054fbeff6781317b67bdd15327672bb628364b74f422f",
      "size": [
       670,
       1008
      ]
     },
     "f32cpu": {
-     "f64": "1917d572bb6676dde2a03bb1702293693fd25332305cc7f5505d67b477413ff3",
-     "tiff": "33119e35f94b3aefd1f7a48550dddc10d3e365e3d6e13feced228b6cf3097982",
+     "f64": "9f920ecee2825ae20f845c4fcb9e2d9eb775d2c4244f4ce208a42c83767c8211",
+     "tiff": "d5783a861018c9865eb22f7b1852ce4eab893dd12f41d576a129873951214bba",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "f38f987d94070a7d1927d815407099403fb2eaddda96ca61b0a724158df7105d",
-     "tiff": "b81f4ff6292153ccfe79c8a819d11d18ce7a2f26e5a87541c3a49b81725ed50c",
+     "f64": "0ceca120eecfef0cc9dde072d830fc816845c608b8db94fac489aa5132214f3a",
+     "tiff": "e5e89ca042b60c31e4f344f8634bfa19cecc5330af84ffc9de21a3e60ceeab62",
      "size": [
       670,
       1008
@@ -2193,16 +2319,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "b918e9ed05e33c44e1e85bde144b3e2bb6c7e63a23cb1323bdcbfd2667b6b1cf",
-     "tiff": "655af7cc0b6bf263df82739ce2ba6546a0de3fddc97aedf026259ff30444a002",
+     "f64": "2805322f6e9adc9920873aecf72debe8af40615c7839074e190c192708df63e1",
+     "tiff": "80a26b4e0bfbdf079a99601728344a1896fb633b25ea1c72a90fde47d514d47e",
      "size": [
       670,
       1008
      ]
     },
     "gpu": {
-     "f64": "444009fb6590697a543083780a13151f24332f83bd650fc5bf5274f23adae682",
-     "tiff": "06654a59b5865cb6da0075afa13a503bc16cd80b113070b619a1b8894091b302",
+     "f64": "c342e0de52925befae667bdc3f0f6112044273f604599fac61d51ada8049599b",
+     "tiff": "c5262de0e5104c38b48f44b5e5af32ea99548ac8affebb2aaac67dc2a838ec7f",
      "size": [
       670,
       1008
@@ -2222,24 +2348,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "a44b0f26e536dcbd97215cc342fda7745b95ba3801eadfb8ea343346c9fbb5f4",
-     "tiff": "69037aab4775e08e74689df16c09699fce6d5c9936a132da3a93d302adf9191a",
+     "f64": "e921e15c2a48e148ad3ccc9d51569511ac78b19c071c25968ac652d789f67338",
+     "tiff": "10bd8627b009520eb7c893c9ed026a8de38b5ae0d78dcc86248b924fe285edf6",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "006c1c040ad482ed0989ed0b97f8f32942be63ae486320883e241e81ecae6525",
-     "tiff": "1c98e7db5d12ee510d7eaf7266790944970012e5323839c6d6333ded7a2a6b16",
+     "f64": "63683debd7ff0d34f1588fd98298196101c76b949daa7a16fcc767aa194331bf",
+     "tiff": "c0d724c74926220dd19878a5d01f516bef64aed4bd790db04b1f8d218324923e",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "f8bff5596d63e0c8e45b919a95ad410dd33687110662945b4324159cc8074fed",
-     "tiff": "91e4be5322367c8af8fb6fa3f759d49448c4e2e9ce33ae040c12e08e6430f0ec",
+     "f64": "dacb0c678e1aadd1c654153f46f861b4649891b7ca1f00540c42c2e65af47c55",
+     "tiff": "b3ff6a8d58ff0936661dc5ccf4983c871aed01da535199d91a8f6a741fd4fe06",
      "size": [
       1008,
       670
@@ -2259,16 +2385,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "e0e882e443faa2c38eb13c88b3a74ff535c05fda0084d8140002a684d22e776a",
-     "tiff": "7925f6593fce3dc8a5c8e4005ecadfe2ebdc6624f4fb610207e4bf94515af1b0",
+     "f64": "4a079da447d8d2e9c4c61ea6b5c4307dc2333ef3703951019fda55d24dcd0660",
+     "tiff": "2ca7ad296d7804faf104dbb96a93172cdb0ebb887461dc06ec73a6c79a6b0476",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "58827f126877eb0a861396a67863624a61c606a202aa2aef4102198498d2e014",
-     "tiff": "391c82ef246a8598fe823b8e888c55bc068115323eed3b0d66bca0d1557bb86a",
+     "f64": "234d6f03226ddcffa8c7f1a1b89298f9b99b219b47376868119b1f84dd503fed",
+     "tiff": "59edb1a7a62f70c80d6630f06d44e0754563db1ad995bc07aca6856a78e58ec0",
      "size": [
       1008,
       670
@@ -2288,24 +2414,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "ab9f8605ea8e5fed60fbb94eb4facc5ff49c38204cbaec44c8d1fd49b0c3dfe1",
-     "tiff": "b9b7edf38ff838434d563e2b88f74080e1723ffa378cae5e6223778ecfa54d93",
+     "f64": "68d95e0f794131a56498b56bd5ac50233d681f44772b0636d17ce229f8b07e5e",
+     "tiff": "c10663e5e7acd44e69ca879d1bca8f0f93e6d545d74d0e9c0beac668296926b4",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "74b8238a756027a64a2758d87ee152c28badae4d24afbcf7b4404b77cdb60edf",
-     "tiff": "6ee285f07d939f92413a296c1a075a459497587107b71d6750bad8fdc6e80fb0",
+     "f64": "36f2d3caf7834c0904527589852dcc173acca8e948949098d9d2550355959d25",
+     "tiff": "a4179506a2d5d13e396d3ffc6b34849ab01d2ce9f19fffcb1573a00a809b4e5f",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "7ac513ae42db8b3099ecf61e2789add2d2d5e80074672156d65c92258fffd988",
-     "tiff": "e6c5b08f997216b3890fca60c77f39ca68756613cf451ae8e108015339fca55b",
+     "f64": "e2e82456c5a53450da46ef7ae3dff1ede2d0b1bb562fe151d91b3d7d8b501ce2",
+     "tiff": "41b172929efcb53d1f8420e5643f6b09abdf5178cb1b70094e224283a1128cc4",
      "size": [
       1008,
       670
@@ -2325,16 +2451,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "2786ae56bc988e7c20f101cbb72ead310880db87d7d59563e7266984e9a89289",
-     "tiff": "4672be86acebab6cd52d035f72537596745885eb132fdc9cab4707f4c3513409",
+     "f64": "cc79abb518b22aef8bf32817c49b2b128d33f129f7a57eb67ea2dd4e7df22bdf",
+     "tiff": "75da5bbdc64306795979b0f4e6c4488634f79964d14790ea55a85b3932fecd95",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "b2e3a3263a6875f428ac5b23e745953b2f148d05cdb7e84cf2b6bdcb03266970",
-     "tiff": "f79ae670697d2c12c1686fc870799080255294141d9483e4f823d02603b1a5d6",
+     "f64": "d5d251abb3a161eaa39c92fe2be45f3c429a012ca28e107aacd86ed9040ac7f9",
+     "tiff": "ec82b84d4cf7b1a4c0fbbc21e99015b1a23e3850b4df6e1f081c03df3f395414",
      "size": [
       1008,
       670
@@ -2354,24 +2480,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "910b00580101d67373afd0c7305456ab02cfd94854003c093bf885be6e8388ca",
-     "tiff": "b28e459cc10844a5feb52d1f04095be958cfcf5f864332afdd03b71ba848c572",
+     "f64": "fb2b3d94549f431857001c3fd6a4f9739f9374301ffee52fcabe437c1d245889",
+     "tiff": "ce28cf48bf2be21dd19d4c94ad3424735b1fa7b959c87fc21e4a971e244738dd",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "bd197982f2c89fa4cb4cdb5cf21537899c701a21ff05935fb7512ec78b4a399e",
-     "tiff": "392538da6aefd6a10d2f918506ee89c1c3f9b51921ad96301a4e4da360aea20b",
+     "f64": "6f487ae9bdb7832f804d19b4ca454bbd7916f694d97b8755e043c9087ac26953",
+     "tiff": "97f143246b1069ce46e00da74f9ae45646339b876d9dfb719e0f5ce6d85bdc48",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "619173bc027470a854f508718d471b45c086041dcf5298457cb1c4304dba25d2",
-     "tiff": "9c81c7736994f218aacfab48c08173904d50dbb3884ad3daacded4e1d4c29303",
+     "f64": "c9813d0677b4b4436eb5d675baa2f6eefd50e9b9b6a3c468e1bd9b8d9efa2776",
+     "tiff": "6cb6b71f54d64f252c85bac2920ba3337491fc043cd4ed42188d2a907eb99c14",
      "size": [
       1008,
       670
@@ -2391,16 +2517,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "d6eecb75884c503b60f1a685d4e09d05947adc1fff1212e363abe8dd76c4bccf",
-     "tiff": "1f8c0b316e50c5a95b9760c2bed801919e3edb0c4ca8be414c1dbf891ddf592e",
+     "f64": "327a6c4a5a7a06c9f0728927ad540a6985f68652d21df6374d4dfdd117c96ec1",
+     "tiff": "3968fa87798c16e6ecb7d379be9d2ac297d1028f0ef3ce34d2da7debc1b01f6f",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "5da71c71a5c8defd0eb92e2a963a377e322ab8edc00be17ef4dc01c1b36cdfd3",
-     "tiff": "1afb47349f0e1701828922a2c4157e178316679b33af5e0c40a4c74267ca7f46",
+     "f64": "f7119fcc0859d8d248558898bcafffc1029686e8ee6c90e64e195d6adbc701f5",
+     "tiff": "b37f7ee4f722430e2df484aa76a704e10a56d3cdcc28c77a1e4efdf6132c18c8",
      "size": [
       1008,
       670
@@ -2420,24 +2546,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "13147ee58e008703547dccd845c9628fea13cb73af10de8b7afeacecd8584820",
-     "tiff": "d528ae8023fe187878773ee347395f17d8521b7f9111b7d505e3ab96ae53d44d",
+     "f64": "8c614e769260ee2d828f69d55b1729b0d8138289b942743039961d68daae4a48",
+     "tiff": "0e71a1d3976dd1f547f7c7c57c8119a225ae7c45853b53aa16251a74a35d0019",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "b36d663540d9239e00cf5a293dae13b5377ccc61e441a4a01669332871b33b4b",
-     "tiff": "feb0391bfe8182328257ffa95cbc50e1dff2583f132cf0394d7c35f029277808",
+     "f64": "7952b2dea5aece8e3620ff67483218378b9d9dc0a5c032e6b6c45c6f207760f6",
+     "tiff": "370fd9066960b6d8101fe510282f9b6daa7daa84f3b04ebe814ba3ca45ce63ac",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "57374eb8672594f4eb5df4239044d25b5319fdfc5fd6763a395cd2394856f7ce",
-     "tiff": "a6b18f61c7a5c0cab35403d8665b974b1df210219bec5ba951db32af0b54cad8",
+     "f64": "f6023380f79ca2f1480f591172d974caa6cdc099f0e61df47e3421a459c98a7e",
+     "tiff": "1f0a286fdda6a75572a5da1a635edc4bda83be90fe725b2f7983b99853b45a85",
      "size": [
       1008,
       670
@@ -2457,16 +2583,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "344c3099403d3de4aea4ddff5204dae57dbdce1c11273aa5cae09b8442c31c8a",
-     "tiff": "3b6b90091fbff0b782c43cb801e170c73513a43671adf071528f584c5cdff2bd",
+     "f64": "250f93b1feacea0003f3b72dc0137abfe000c55892a09a6b22f9940eadbc320c",
+     "tiff": "9e8a34d920903cb3152ae58dafef11b6fe1e05ef0535f6bc1f892b98af0fa8c8",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "80b8a745644b2743f0a96dcfd6212609d01bb180eae92423690f19f2145b607f",
-     "tiff": "c5056c567846b5f4a1ae3503fb60e3ba292b4f06ecb09371ca6e9dff5470ba38",
+     "f64": "d65e21bbe03c59a2c6a37e2fcd7833a2de8c10d3075762ac8664c84adcc3d976",
+     "tiff": "49edc7ca12792d67329aaf4ab2110e2398d15d18adadf2c0263fd727742b3359",
      "size": [
       1008,
       670
@@ -2486,24 +2612,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "a172c443bb50e71fee39df5f08e7ea037b031849f2d8d68780b9cc49e28eac10",
-     "tiff": "473c0dbc987e039937cddf20cab7d065e4f4e5fb4c9dc3c3d193ef19f7a01d16",
+     "f64": "0b6d6c6a44749091a3786121a050042b5763713257c517ebcb113548ec4ec346",
+     "tiff": "1f64fca83ee3fd49d988e7d440b4a2e85c4dcb904bc827db928de317fa4bd14f",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "28179d0cce17bc50a28484a84da90416075893e1b660a03b836aef715da31c00",
-     "tiff": "f153c690a1d9b1fa5343560f502407f462d905fe82f1104f7a74c11955a2289f",
+     "f64": "461ae928be9062d2f05ee4a3e9b91addc83cec58bea0ee91c1b28f4147368ba7",
+     "tiff": "77ff78d88065a8c102c01e8f618fef9b810cbef94ad1a7e53ea89dfa0bc54c96",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "f868a348239039d2272614ff3a45edf4748fa68cf8676038f76d8ced57b34ab1",
-     "tiff": "69f0b835e202f276c2cebac76d58707b41b94263645e5b86d550dff8ca466995",
+     "f64": "1b6ecb552677a66c9cf656c895cf9db3705c878dbe32f302fccf21b2c2ae3c27",
+     "tiff": "1a2ab6442195a8669d8c07ed9a2d47e5b835c3c76fab34aec389bace5f394a05",
      "size": [
       1008,
       670
@@ -2523,16 +2649,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "b803069c63b27e86402aa171b5d6d09924b2c737ec2c0ea96d48329dab90aef0",
-     "tiff": "628e9ca231ffd09b17a49540df03c79530f1f0c37eaf6b1ad7e974987f78105e",
+     "f64": "897ce3e7cabdc117b24c4538864c64c1d3a6f89f7005860cd0b7a74f46b2199e",
+     "tiff": "6bcdd11e6852a2c48f6f31e6d188307407aee7bac9347dd380f512ae70b3b3bb",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "1dddb3398af45aae1a439e1eb61b1f91d8e8fbab6b510c1dfbfa56274440a921",
-     "tiff": "40d7b385ed8d61e316b421faf77ec651b6abff4c26c4d5951c3e0bdb7825a6d7",
+     "f64": "71d297cf7bba65a9c04ba7fccbbd8b251b751bdaac41402f871d825127a497cf",
+     "tiff": "bf9fa63e391fb410ea12c4f22d305e63137968b929d025f2d77a94276ef9aefd",
      "size": [
       1008,
       670
@@ -2552,24 +2678,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "8ea6b854c29673298fcc8f5d98397eaf4d91dfbdf74237ed31fdb59f9e1ea312",
-     "tiff": "52d80439118ac3ad102a4405cecbec8ffc9ecb9500654b595ff1b5208646069f",
+     "f64": "a1951f0e9e301255785b53283b6633e8849067c91b47aa76c2ca6c9f2206f49e",
+     "tiff": "45940bb42309a45d0f371432f841cd9b2febdb23fd4977f7c3e3d4501a239ada",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "a6f9ba3281234dcf4fbe153807e8328c0a3f68507aa109f24ba9282e538c9f7a",
-     "tiff": "852431bfeae632c258d4bd964d6adda9f964b3315be9abbaef8499b7133eb3e7",
+     "f64": "f04d88e790b48cbac66f4dc18f4ed795e336a28e5e86b475cf7dfd2872d582b0",
+     "tiff": "5cf56528baeb938a7cf3ab33e29753ba6b546cecc1b419e9d81f5962718adf2d",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "de3795b9423fda2a968ec9ca902a2557f50c17434a7dc5bd4a54b799e57dee21",
-     "tiff": "30bd956e447e7da2b511bf08f057fc1c9a39ff47eeefb32aceaaea1db7340d06",
+     "f64": "61620d551d5cffaa5a82a69fb180597f70d0f9b23439a3dcffd4a8b55ab0827a",
+     "tiff": "3b130746a1221363f52008e1a1ddb7a40eb928f7de6f1fa7528794fffd9b30d1",
      "size": [
       1008,
       670
@@ -2589,16 +2715,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "69f7dddecca66582c7ba781de21da142c7d1bcbc8ab2ef1544e3188d8298ea31",
-     "tiff": "41033cc0b71b03b3f38f14c43895d68c05c4f0c97ec832d07576a20bca9f72ea",
+     "f64": "94b49a3a14492d8c96731ffbe6988d952ae8f23207d63f6abc96bd6bca9d4fab",
+     "tiff": "60ea3f8d8086e87d09eafd9b47ee164a32b9575e115d3dd21142513d5003c9e6",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "5101cae29c3c9a2ced5ba84b020bf4c5214a7cc8e8551f1489825a10f00857ec",
-     "tiff": "cea3c0fd5519518da4d0e69e1823485d309823d58a91ab3fba9f7bf65d642554",
+     "f64": "ca7ba507edc2e441fc334c6954b850d07ff7caa27d1a15c3257624c52286734c",
+     "tiff": "a98763b7ff9ff3a8b2e44bec5366edaae2570250bfe7f4dd6638f515ad7966c4",
      "size": [
       1008,
       670
@@ -2618,24 +2744,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "2a0a0ae9f7ad96da4ac6b96e577638f2f2eb1daeb74b18edf9128e50c329c17a",
-     "tiff": "50bacffda6649f0ec5828e776883c0c261c1f2be2437a3291b33fce615c78036",
+     "f64": "f90cbfc8a1812b97ab057b93d563b0d3aa24f54cc1af841db807eda8e9f40c10",
+     "tiff": "fd483c41b8069b39c944b5ab9988b96fae1ebdff2bd4d85f982beba4c6c2998a",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "3a7ce208220cb9f46305781478e5961ca6092bdfc9d2759417e2731185b6c8c3",
-     "tiff": "0a887249ed55cd15cd862dde36ef47976fef14650a5b1c8233e90d4a14927891",
+     "f64": "546f167b5454f88fc504bbc496e7b2ff0935ce41bf1aaf94c684b7601c21dd41",
+     "tiff": "ea2c2c4efcf4fd89a6ed62ab024b49f226afcc245370fba7c7b8c89995bb58e9",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "8e078d14ac5c51f7202503bf247471a79695127452e4cd2102a9a41afbbc34d9",
-     "tiff": "bbfa4cc012babeb861fd911430800c94bf4965c162ba32c1520a633b41792e2c",
+     "f64": "b19c95ab5bd332e55433509d632cfcdf617d65d2b984b6f6034dc2e9b6f47f88",
+     "tiff": "5ef70601c527c35f77b688a359900e46975881a9e704878b8c3ddfc29e8ee3f4",
      "size": [
       1008,
       670
@@ -2655,16 +2781,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "b80dd02a74b5f6413605a1072b196db4179da6c31291e93fc3522b311ee8fd0c",
-     "tiff": "23154f63af13406c7ff533109ddca9eea07410193ef2aec7e4d40e057efcf971",
+     "f64": "811cf4d33a21b29373752283008637f7aae83a523fdf6ee1a31584e48bdfbf65",
+     "tiff": "8fe2788ed92278f3b131e04f87c4704fb95c5ee2f648802e7cc14524872993c7",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "76a35d0f72b92fcd42ef01045b2b3e7e7a8066a180c6b57097126c174579fdb3",
-     "tiff": "45b81fa6c959b7d5ab4293085232f26fd34901b8d1d75301e51e2ef2de1e986c",
+     "f64": "cd61f9b872101f4eae5f85d25a0a91b10bbd17f91d22f923b60b5f4bff0bc034",
+     "tiff": "88510a8bc6ca5c3b407b13165ff63a0970ede50496b77dcb53f50359d2fa29e7",
      "size": [
       1008,
       670
@@ -2684,24 +2810,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "c01fa356dcb739d2ca3ad420575679d96f45445eca0586270c5110b4f6f9d83b",
-     "tiff": "9fbb552ee3420275c40592a15f4893b107ca09382449e0c4e5f76d4f8795dfdb",
+     "f64": "4e9640daff436dbe75c37df31b792b5eb1d8c60bf53bcc4480843927d2cbb7c4",
+     "tiff": "8a7ac4cb52bf7fc4f4da577d7fbc1b34402167ca9169ab47301e15c292c5ca03",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "0dd7acd1a1f090b5319d81cc850901f1b74db14d21cd1f62333c534ddff96879",
-     "tiff": "b42ee4009f29fd83c915010365d900c8a62336a4206b6c237e47de77825dbbf5",
+     "f64": "c156db0f84a0f2b3edf7e57f6793d0c7aa00f5ac41956eded16099b84e2c072e",
+     "tiff": "05a07c91f4900084ae43a5e8ad639d6c772723f995af2cb872b074e0ca0bf6a0",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "adc4045e60b63eb5d622ad2b25b81837d74d577e1983eddc169f36417f953559",
-     "tiff": "f8878dee0ca403322043b53ac8c80504a29dadc86b44ffd4bfc2234563090b90",
+     "f64": "b010d64c9f67831dba1fb39fff63122c8237e0334b0104ec73acc5378366758d",
+     "tiff": "4d5d233aa4c835dfbd575c20a251b3f662f756004e0d74ea836b71b2d17a9c74",
      "size": [
       1008,
       670
@@ -2721,16 +2847,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "ab157a904ea58fcb62d0bac892ebc26a7742ef824f79f8c19892e2ae3bbf1b5e",
-     "tiff": "bae607573ff614e0f0e8d8424f1768cf2ac247cbeb72a3a7fcce33e92028b4c3",
+     "f64": "ffea79193495ec52295e71d63417891cfd3348dbf2afc043680b7daabbd69f05",
+     "tiff": "d90e22dcd377477d8f5d1516b11ab48a9c24c0b12d37c3e4562e68507c63a8ef",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "91ce6487f44b0ad457e92d8c015adf35d8f40bf6d48cade4babef19fa9f7f7c0",
-     "tiff": "01f2f3cb778d0505b784d89c795a28a4e7c1e854ce2168733e85491b8ea40537",
+     "f64": "cae391ce6c9de27f36b1fcf81b6d993d8c5175e80b3dd04b72b909a4c5ceeb9f",
+     "tiff": "5310de8286a6d1fdd552e658fd89bfa2354c095bfaf10c099b72d1eecd5c0956",
      "size": [
       1008,
       670
@@ -2750,24 +2876,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "57d6fdd8d55b3279ac48bf63f04d2d3266de8775fd7be98ead02bc2ce0706bd9",
-     "tiff": "120a8969403866a28a20912c186e3056e81bbc5d99ac29b38c0c734a76117212",
+     "f64": "1187a5efbb883ed326c8967833d8c46450cacea6b3c2733e10a489f7f1a10fa4",
+     "tiff": "ce3d922c8887202689b55d442126f98de1330a73865a7eb446da116f64a89b6e",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "94ee3c590d5edfab8f0048cf2538fc4bf4879894646c9f5554bb7a9ff9a8fc7a",
-     "tiff": "8114f6f9c268405dd9ee590c4d17246c68252c81fd139f832c93e276083cc481",
+     "f64": "0a247825e1ecf066ae111063c23077bf1d135c7b3f292828c9a64935193c3433",
+     "tiff": "7e34ee1f6a70f1e303cc243eadfb7a39e3767f1f613da93c875184ddcee28e5d",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "24a7df80420ba9461e2f00b0b8e0d9318b45d74c39e72c2150a7096b1f708b49",
-     "tiff": "05207a64832581ec225d1ebff5cb98514eb5f90e9a9cf94c8973b11b175c9f65",
+     "f64": "363354bef2740cf44ea28430999db0f833c8ef5f452ae4d593de90ba980f662c",
+     "tiff": "4dd23627d9241887ad6c310764482b5d51d296d6ce9649364471c3ec8e5c54cf",
      "size": [
       1008,
       670
@@ -2787,16 +2913,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "b0e84ade3186b15a8f194ae914e47af26862c89771be6e38fb56e05032bec73b",
-     "tiff": "56d9d914b743d99daeab2836b6b68f5398b7548a6f80c2c62ac63326ff5e203d",
+     "f64": "66b1a9a4719db01b5c98b454794104159f843ca0347c5808f240532af1384c8b",
+     "tiff": "f49dfda571c823656c2c078888bf31410c72ef41251af553b563c96c9c56f05c",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "4b641b650cfa75f7c4a1ffedb0af760bc235e5d54639e7f2e9dc663b28382832",
-     "tiff": "261dc8546ce93a64362e07555dd986c1df0831a86eecb44b1019d40f4fe94790",
+     "f64": "f80ac1939380a08d9aad8b834428857f23360bf67025cb8d820354017d6492f8",
+     "tiff": "1fe2fe338e1233fa837b8b0cb43d6802053a5f7e0e638160f0af54fce75e1305",
      "size": [
       1008,
       670
@@ -2816,24 +2942,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "27aa7048f3d52da27a5357139afdb50a9172a6c3da3f6c6b0265c02760d678b5",
-     "tiff": "eac1bc5c98893449b7b6a9c5585269cc27209884ad47e906245b43b33cca7772",
+     "f64": "ce83ade2579ecb7a61dc9c38a5ba08729a60b6da6e8475753df2a39005b31ebe",
+     "tiff": "0ce38c9d292c7e02f468ab003d70ce85fa11bbb9ff4fe07240ce4748f4785163",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "59be3a5c0351bd65e0dfe0f220b1659d8c14f4b6b82c174d9862d5424a8e9128",
-     "tiff": "e9c2064f562f3e692d9357d0bcaf2b3d65e296097ddbafe195b2e88a5cff1044",
+     "f64": "e045496580881442f3d5a676a2ec59202f1d52783e933b943f01be1a5deff25d",
+     "tiff": "5c98342a207f1aeeb1bf6ef2ddabcf17517361cd61cf5806542f679b7f2a9f4c",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "8706f6a4d51eb243cd0f0a27fea542aabacd3daff44a0e9eb7bf8c47827e86fc",
-     "tiff": "2b671c4b04631e2b360cba2b77a14676fb56ed0e849e3334125b88bdca8027ff",
+     "f64": "a34e8d20536e22e3ff7dc69147303fc8eee5b5e26d534695fbcb283a9e921fa3",
+     "tiff": "e5bdfea7c357c7b68def66b187951a1040373557d04b601ba9923118d844c535",
      "size": [
       1008,
       670
@@ -2853,16 +2979,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "597bc1c1d5408e1e83d4d9b666d92aa365a99f87db6b6484c528d5df2f8411b8",
-     "tiff": "f487ba8b8c29aeca9c51eff5993a62c8858176b00f5bff7eaa816acea2d06de1",
+     "f64": "caf105cbe606faee056a842bac0a9b469421f952f2304cc6535a6818970df9c3",
+     "tiff": "a9a69632dc010753c2d5f1bed99110c9dace65d77445b731b5c339386eb9fcff",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "71ec4a614b7833ce9b6b84d0b86fd2218be504164421641bb98021998718cb83",
-     "tiff": "da4db8c4fb0fda294f31344f96e2c53be3e414c2d8c7132103d2239fceec5e2c",
+     "f64": "f50965bb70484f128c2135f4c5571b321539bb1d099c9253dc5d11a710c57608",
+     "tiff": "cb2bc7f22a457204f47d40a6cd6e931b86f7640de5c1186c487ede8b935385d9",
      "size": [
       1008,
       670
@@ -2882,24 +3008,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "0339f76710bc0e51e1f0e2350c0edfa3eb5fafde01d41c36129a690d7cb1fedf",
-     "tiff": "68229a053c16cfa8478d588763b12caa0f93703f79ca7b59d166c65153ebb98f",
+     "f64": "cc3e3ea0e108f996c364ca2c6fab613cdbcda60520a6c5a656b54422e5843cd6",
+     "tiff": "40f228167eb33d1b576f39844a442ade6985360724b098b1971bd4326bdbedf6",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "930415ab2291224d6936455e8b84373479c2d364642b35ca284053e043aa510d",
-     "tiff": "2ae2b98ed9dfb8f506df889f07491204d81fc1f42e70fff50c8bb36361db9e07",
+     "f64": "e3700461b881d23387bf8db1eecc2b8efa61e956e4625bd02f75c806d574f265",
+     "tiff": "2d1f44783954497cb5ad8b7f08b4573236dd857fc4fb3c73b7d69114b75c2a65",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "38376f9e0a8e3fc6cdf6c30b61702d1f08da64b2e2cca0befe02c8f1cbe5654f",
-     "tiff": "caafb1f4877963df04a55f80b287368d9073bff3943e6625c4df71e2ecac49a7",
+     "f64": "b9cf663faa2a941559266d44e90695b7fba74bc0c0b9cc49b79ac912d0056375",
+     "tiff": "fb7466917c2b5d762690d437701ad960a859ef0b22001125eb5c3b107fdba15c",
      "size": [
       1008,
       670
@@ -2919,16 +3045,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "862b2bc9f84daaa50ecb6b7f3f17dbb146fb600192aff074c678e548cd179cc5",
-     "tiff": "adca6c25572f73228f21a4e9a9d15b68e1491f6f0c1f91b1ee936bdecc9fa3c9",
+     "f64": "465d652a54f914bb9f47dbf6211882250169994af189d91658b5c28360a69d10",
+     "tiff": "343e3145e07ab5ca26bccd9b9ae19309de39e11feb343471ff1ab590e732cbbd",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "c4017f82c64fe467642e67c2a71d8d4de001abbfaeca369bfbccffca4b95dac9",
-     "tiff": "df895c590d12aa5b90b685f7195e877de1cce909c9ad457785696d4888b4a688",
+     "f64": "7f36962b270d0f9e6c17cd53cf857e4bd8a068b785636985734c8f2d72fa31f6",
+     "tiff": "778fca482afe772c952f6e8b0a6b8491e4b5dae5162801697caadc1bfba61044",
      "size": [
       1008,
       670
@@ -2948,24 +3074,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "c50ac1686e3640dd2fc78b1dd7df7e8d6360a449496d5e92dee3b9931ecb6ae6",
-     "tiff": "7a05d7fc46d3c98d88de400be31f809bdbd7e83d6cba1b2813a6f7ee5cf2f824",
+     "f64": "792b8bc017a2ad0adac7d66dbc32cc916171ed9b1b1e291b9579800fd3b2989f",
+     "tiff": "017721fdc00adb2986a1edd94332fad966ac7ceaf212580e8cdb75ec28e4cd7c",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "ff73fa75bfabe2ad85e095e053d91e886050332580c53ccdbe841113296d55db",
-     "tiff": "56cd8736971de54088481efde9c29a623944072ac8e7a5de1a668f2f4e47cc50",
+     "f64": "5fa8deec5c017a43723e97fabb2466843e31514cd23355ff27042b82bdab198b",
+     "tiff": "810fb718547a0fedd6a2c510a53be34eec14c75a91c820d44ee4cae1cc6bf1dc",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "2c38f68448dfabd36c818b93be6629cffaa2a25c0a61ea8c6097af9f5d764548",
-     "tiff": "ff397855c1003eb4da6a2bdd07e400bc01bedbcd7ca2e8318b42888dfc0c1b95",
+     "f64": "b2759560f822398887369230fe8d259659117195d81e5ea03c490cee164dbb27",
+     "tiff": "08417d5181bb369c9476a1a62c0ae007f2eb44c0c6f86a83ae1d78625be69bcb",
      "size": [
       1008,
       670
@@ -2985,16 +3111,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "061ecb55ff45b35dd362d58582bcaee9df042443453cac4e44774b4769394069",
-     "tiff": "8c04e39bbffdf082331702f56d3168062072362b771cdbcd96bc5f9d016be884",
+     "f64": "56f08523a9353ad7aeea017618e9bef24fd467ccaf17ea7ce1802f366460379a",
+     "tiff": "2051e3347134b6e41ea8a4c0407cb6582118776c1924e48eba295339692faf58",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "0a8751144ce3140309a40710a79e0a94d5ddeb18ebea5e83ac2cafd1a9b1cf11",
-     "tiff": "e87a2499cee826012a846275e2cd495e7ade44d5c172a23c0cc38a45d092464c",
+     "f64": "e765e1c9e533bb6a395e4e3a8d95a83ae1cc64219834091b08fe8b46061ab9a1",
+     "tiff": "1328dc4d2b0f1fa162ccb48ec193469c024c2b99e34be844bbd536554a0723aa",
      "size": [
       1008,
       670
@@ -3014,24 +3140,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "f637062b6be4b40ceeb52a4ee694abb43b53b32efe2f4ac2371511ce1ba4a4cf",
-     "tiff": "0b2f6b8a012a47ac7c00f4ff9cf53b083d0ec58bae020f23fbd6bc889607730d",
+     "f64": "7cd0db1a32e4447ec4f2c379bf04bf7507bfe9572d318dc3bdb7107465084e9c",
+     "tiff": "18655c5622d005d45654efa96fb2c6ae6f91767954e75b609ba6d5804c2df32c",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "ce11f1c21aa65da2ffc1041f6ed959a0d12d7d10f959f2783718832bff26ae52",
-     "tiff": "c60dac516d19ba45c19f819e8e6f3a8195354a23efed79bd5cef2398cd00c7c3",
+     "f64": "66c910d4af3f359bba3c6f3ee43658cf4b6d35e59e10215fce500d76332d7c36",
+     "tiff": "b338e292c34dd0ca2d0860dab8cd28c25b6b503f1cc73537b3af65a258064cc1",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "2c834f58462ee44347b025e95cbb39e992893abf48bd8fd522fa19e17a634871",
-     "tiff": "61e2ce28dedef4f5d771611f4dcd1aecac8d667a583712d4af369a7363d67df7",
+     "f64": "7142bde6da24674f09ba065681423cb2a1b92883d164ac8e56eb9903782b9574",
+     "tiff": "5dd03265f79905e277700096972a49dc7e95b762a3098e7076c2c2f6637279bf",
      "size": [
       1008,
       670
@@ -3051,16 +3177,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "9d1a3262a3cb9bb2db11c2dc2b8b2063ebfb278136e3d648b4f4f366af60e173",
-     "tiff": "729af92237a9d0036570cf9f30fabd202c9913621eeccb41aa7887a329e5de25",
+     "f64": "7ef7287c62c4067349a581faebffa80f34bceda8f1981a13734472661bf5ec4c",
+     "tiff": "966670775e0aa845389892fbc2c17dcf253b210d81cfab75da41524f09b79b0a",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "dbc3b34341044809448fa627a5ea12b03f46042335acf1c718ef4ac011261110",
-     "tiff": "0acbacd69efb900f16c231e5cac1cfe253b790e8bb634830139143acf6324aac",
+     "f64": "75a2edccd7d3bb3797d74c1098b59474b436bd7c8a012d8718bb111d18db130f",
+     "tiff": "a1cd0b364300f59b3fe03a84282b53da97c01390270818f4a7fa1169c97d0ced",
      "size": [
       1008,
       670
@@ -3080,24 +3206,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "124c1d765fd9809375ef7fe195c1ab2dae44c3cadde7cb3d5c14995d45887a42",
-     "tiff": "34f71cddfb49fbe2adbeaf4d3fd5c27445b671e3c48cfb4a77735e27952b757f",
+     "f64": "6e475df2a3e7274bd7dd36dd29390a87e663ff4d348bd08383bd0b25dde5ff8d",
+     "tiff": "3bf6e952f49f33aae45c1d393a115688380eaac8b292eda23ee4fdc01e3a3d02",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "7c269c90ce1c9a305a2b0acbf5f4280f70ce62555333128c310fbc800d174eea",
-     "tiff": "2578f750b1aea4886cf78bfbb9333e85cd05851e530159cefe083cb4ce4cdf26",
+     "f64": "db35073a98d439cb00a0644092f4a1f9d6d255f604bc6cd423e525f2c4fa4bfa",
+     "tiff": "2b47c12e7b8bbc58ceaa09368774bc26488695e8a465e6e3d472960463e32ecf",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "7861e3ee6aab44c21a46a112d5256b4a604ce97310f57e5510a739b1402f9fb6",
-     "tiff": "acf6d02c384fd4b953670256875f66cfeba890e814a01f4df973254be24512df",
+     "f64": "2851729b05684185b82dc7e92e1dcb859899b5fde306781fb38106460784f758",
+     "tiff": "4e1a36f74dc3d0ae95f9b5dc0a9b1ac9bfc5494d4995ad272918bdc2c9cb4ae4",
      "size": [
       1008,
       670
@@ -3117,16 +3243,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "fdcafb71a4b0b3512dff825d5f86845ce6bd6e36f5cee859dca7196caa5465b2",
-     "tiff": "821069af800b8461e3223db44a9fefa2a2092508e5864f0c310c945ab4679a46",
+     "f64": "eaf005e6bb59ce84d221a218e75c9d597149602988b0a3939f40d089647f26af",
+     "tiff": "3e52173a9308f7b0e5aead4983c0182cc62737c9a1e914769aa032862b17b9c0",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "157c33523ea5498da2c2e3cf950b91cb8d8c6fcf112bb8e464cba92ef731c054",
-     "tiff": "91dc95d6a0c5844b456547be90f34a54556253d44782b7fe2adb5725d9370c70",
+     "f64": "c247e000df73d1e16d3bd429f2eca781e2be077ae6354a58d5857a3230280e42",
+     "tiff": "c3850b95df782ffc39c7f428d23b0747aa5c76318cd38c517ec5b0521ad9db48",
      "size": [
       1008,
       670
@@ -3146,24 +3272,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "f0d5cfc86fbc45896d5dc41162c52e3c0af552865d55b83ccbf18915e47fbe0e",
-     "tiff": "a94cdfec50652044df29ff1e10eeb1ad9f1718c13c50154d323ea899aa2420e7",
+     "f64": "735750a13df520fcc762b5829cfa52d7d906087fbd1e1a5e9c93403a2642cbe3",
+     "tiff": "a37d51dfd4ebb488b83240b6fa2dde15dd8137ee217e39a9700d4e9093b42d04",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "16badd0ed5d240472770703040548172a17f65166aba0c4a54d35a032367a612",
-     "tiff": "0b21a4c36a2b63dcfd663d58254e774b38d73035044edde289ab340447c7258f",
+     "f64": "cc31da223cf4bb169aa7027128e01916c8ee4a1351838425b0adc4027f2ead69",
+     "tiff": "3805103acf77811ba1a5124ef3e5eda29b4d991616fe8d8ff887f76d214de9dd",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "2689c256f43f8ba6250b4904ccabe859a4005bfd2a8b96230df9af050d8f737d",
-     "tiff": "ef1a3a6fc99e1ac20a1a945996a55905056e308625afe5d5ddd151f4b728e537",
+     "f64": "d67154bfc63d9ff3e01bcd36bd4f879a6383d0fedb242412915902bceb315920",
+     "tiff": "8d90ecee2fec510854f5d6ce8097b5ca98e90e1f6afe3167a83fbff52ed4abb5",
      "size": [
       1008,
       670
@@ -3183,16 +3309,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "e0234b9f98735c1406f0242222a0ba7244d2bb6af7a926af3a0aca791f198874",
-     "tiff": "7722f6aa680f71cfd941c275f4d658d53f6d2d3759491f3b0177eb4786a944a0",
+     "f64": "826c6c542e864c2abeded63e772aaf98b2229c67c52144e2523b34c993d68067",
+     "tiff": "8fb301308d251b29164c45ad908763763743f7755c705a9cd96d9b54cfeadd79",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "4ec02bcc1ee1766a84b1f893bb917a4b5f738b06787ba5ceba2c0f0b2e470eb8",
-     "tiff": "202982a81858521949be5da694c64d3b7fd57d80f77bb155ae486c74e250cedc",
+     "f64": "a1403c3260f78f95ee4e29084c77805dbd6bfb62478921eaaf66e9d9b4d78102",
+     "tiff": "c940b4be96fe75d6075d3cc56e46e9386727c0b27f1a1b9a6c7cc54f282886bb",
      "size": [
       1008,
       670
@@ -3212,24 +3338,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "64dd7401c1492b69fda37b26011f109be5e32eb50774d371ce830fa79c699d8f",
-     "tiff": "d004f311fc9a611f3632c1975e37822d6d01c34a80e159d0273ae6f259ded236",
+     "f64": "8401a59e880df1dbb2a21d2b90e6abc1d3c91dc1312f2bae37cc3629464ac3cd",
+     "tiff": "26980e76151bf10ea9fe5d684b0d2e05c5cc5901637a023505965e8c52478134",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "ed77662487553d39f1515bdc2cb872445a240f2d46e2875f74f1be69c1be503f",
-     "tiff": "72605db3b6258024eaa56e522c647788b0bd0dc78b5833f7a14d87952a6979a1",
+     "f64": "ce9d27e441f01bc5c6ff7f8171880954b67339b5e70cdd795149b517d0b33439",
+     "tiff": "fc0a15da83a4d89e1004d765362043cbc580ea2ead7ad8701f33b46a06427754",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "cd81968d2aa65a77601b9f1c5ca151e011b0669c119f14ca526bb7d24435ac82",
-     "tiff": "2f54d27ef898d40cb00b32736032dbdaa83fa1b3c5a7dec75b60cf669768a104",
+     "f64": "619d4774182792d84a41733f4a21235818a11702c943f423b6b1e93d80ef1200",
+     "tiff": "5ffe3f9bdb07230f03aa240cf0d150c0472be0393bd855d39063f0ae30e7635f",
      "size": [
       1008,
       670
@@ -3249,16 +3375,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "d9e50e87d38728f0a5e9c0042b3f83d9d2f8eab351a221590755f83f648398b6",
-     "tiff": "71cab87154ffc64b7d3530de9ce7fa82b4eb6301ac7ff3f514b6a8ea9e1c486b",
+     "f64": "0f2e8d738f287833077d219a2b7f323315b1cf823031fd9939c1f0a37c23dc86",
+     "tiff": "9bccff2456450f18749c4d906e097391de1a22839b53f9cc397e2e655cdeb11e",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "ae5b11ef973b5fd3dc73c1e5516f56071e13d0d59378838a94725d2d51a1eaf5",
-     "tiff": "9a718085beea0bd329775cfdef4082b3ae1867da2dfcfec6cf108ed15f7f2153",
+     "f64": "84c2d142e0a6102dda6b6fd1fc89a2345d610e11f250f88e77a6ab52526b72ab",
+     "tiff": "349d21b67f71f1c8926ae05e296c4a15bbd3cfe72954bb543be46a6f60476655",
      "size": [
       1008,
       670
@@ -3278,24 +3404,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "fad70057a7b7b6f494003090a8b249181f5dbe502832b8e52a290395ca800607",
-     "tiff": "79a9a7f9683836795ad96a0fcb5c8ed66bc893611cbf910526d1d2b9a23be3e2",
+     "f64": "9fb31299d8f22ac824959339671be257f2bb7bd354e42f3ba108ad261b7084e9",
+     "tiff": "dff1ebaf2d442dd9ea5fb005890771bb4564f4994ac597ac2ad1ef43c34171d1",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "04b8176d5e4126987d413c7e9ce4cfc9b3da3159551d9394a789b2d15ce701e6",
-     "tiff": "8cb73f122af407a9106bbabaa5d1ed9325534796b003913a1d17b3fd72659de9",
+     "f64": "3418e6a8bc9c349c54ffbf7b6770cbc465bfbf330a8773a3a3dbc193e122039a",
+     "tiff": "40754a424c8ad66d9c0770a6d9b76b26c2a062927b967ca0abd4ac2e73e0ca61",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "99eacf83bd84cf7e2c22fa0ba0a87f3393ce95c1133a3d760a1a67e1ca8c1b47",
-     "tiff": "fa839630e284cbaa56154bb7bd3e92d0a2e9d656ca5b1349875ddf9be0586013",
+     "f64": "b3fe49b4908bd18f562b23e84c67b9dd58fa17bc31ce6194044f1339850e299c",
+     "tiff": "44a025ee85c31d445dff13e05be6c51d5af16f1fc29c8f4322860e181cb5bf2f",
      "size": [
       1008,
       670
@@ -3315,16 +3441,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "a8c5766e7eed4e50eb309e13b9b71ee457c56f1cc9c81f688af503fa317dda19",
-     "tiff": "41b26833073dfe7ae544afe2539dcd3d008611548ef2f7eb28ef1e1c2cbba470",
+     "f64": "222db790f2adf4c15f679429af1f61b2e85fc21f14cbea3d88e7aba96b673267",
+     "tiff": "b6cd85eb4aa2d6c1a3413c9b654b7918a3e7c75a5430b5edd972c3af354d523d",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "24fe3b175801494b4ba83f4ffd13bcd0775180569b1c49ee897f3a6a36fa2baf",
-     "tiff": "3d5a8070933aacfe6d9c4663f5152b69e55a6582b29499d1131b986d4b14b5cc",
+     "f64": "13f7dd79b2e4b1aba61d15098d657ac2bfd5858ef5bda4a894c63c5a340c7426",
+     "tiff": "c26d41a115b1b877ab4f788171719dca6a03d070a9bbe0185b1d0017dd5673dc",
      "size": [
       1008,
       670
@@ -3344,24 +3470,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "7133d4b2684c8e73292668ad559484dda4bf8c28ced1276d6fcfe981f43245ab",
-     "tiff": "cd9a7d91031d734b3a762afd70e729fe9dd42d0c9a09ebe8c2e65e718d616855",
+     "f64": "b99a0522fd261983738eaa86a5108980a3067b1db79724ff5806516e88d17c83",
+     "tiff": "ec989b331f237b6888318251b02a031cb4a8c84e26d8131fe0ef2cee01b4c9c3",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "39a908b98d463f338bbe9bda99abf67d7420051769d6edde12a9b211e3fd5399",
-     "tiff": "118cd6600072597e4e7e85ca374b45ffac5f33a884ff744266ae1ff54f49ad35",
+     "f64": "661367cef2a0fb5a7b214319aec86024f2a1bfd5888d5f906dd4136cea03d9b9",
+     "tiff": "819fb17c166967092c33732615753abf7d965d9a9c038cbbdde53b770a37b16b",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "cb43c9fce92348c4d044e3f610295fa03b24aa6ec1c532171b9257de9503d4d8",
-     "tiff": "fd9252b5977305c8e43b6f60ac0021200ad533ff2ece4a5a46a55dfc076c9720",
+     "f64": "350033917ff9b00c115f8fdeae497852d97dcfe489ab896f0b44fa969cbf28e7",
+     "tiff": "ed67571aa978a21921a4e80f6e917497ee75ff5da64c70e8ae442767a5f0c294",
      "size": [
       1008,
       670
@@ -3381,16 +3507,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "749a3281cf4b1a3ff9ee5c36ff8fb906826e06f4b2595aeab4cdc129daf597c9",
-     "tiff": "3d82d4c6400d570f1674c72b65529ad62e89c7141e2dbb17054e99dbc3d0c412",
+     "f64": "8415317a572d03cb44fe9deb90a363e6b075d9ebb493533d57fb82c757a37e5f",
+     "tiff": "002e98b64760267e03c3a31e4cbe65e4097b1f8782a03fa8b2a4bbe7343dc7a9",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "4cfd431c88a82ca0bcba0e4be82b493a47ddc4cb5d4c830b7984abe3630dbcea",
-     "tiff": "53dd301755e931f09fd2404b50c9d1fa6532d63c1e8e44ffaebf7a3194e5acff",
+     "f64": "63a1dd54056e2e70f9aa7d7d33ae895b291141f4d79b1b9ebfff40162576e4f9",
+     "tiff": "586db37035df86f5ed770294999d7e1aab171c3f0f9413c8435bb7ce72309317",
      "size": [
       1008,
       670
@@ -3410,24 +3536,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "37d89c2dc987ca998fe656c174f9320f706144fb6734ba7718d03833d24e73f3",
-     "tiff": "6de09579f5655b04fe3eefb38d27bfce038c6f7fce1bc54d0989c5a2a836356e",
+     "f64": "64444f1e528db6ca0c872997fee09ae91c600cc878ac4db456c22c4da49c1675",
+     "tiff": "368bb42bdb12df0207e4e9bbee2fb221b030efb10e729cc4f46616fb26f69636",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "c59751c0c84496f58a19915b79913d936ed19ffe55fe2aa8e05236c2be273a57",
-     "tiff": "b480ab1ae32935de607d38800e5669e30ccf625b494dd78851756bdc9ea614c6",
+     "f64": "56ef7811e9aac9678536f68c76b74c9487b4cd42dd5eb354978fffc62947ee67",
+     "tiff": "8c946c561310aa134ee36b124dff58dc6378672f4b60a9ffc5dd093b8e192f42",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "77fa68ccaa6569fa36d50a1829cc78c1a52a8e37dafccf63f548f26a776faa8a",
-     "tiff": "5de6bad8dd7ccf631ba39552cb31581dbcc4f00fdf7cba755746c4d6a1049272",
+     "f64": "edceef8b00f434c863b252f548ef74bd2e9262fc55afd20ad83728186cbd9c9e",
+     "tiff": "43a4c7af30755c4d648b247786372b8fc287e29ea9e1bb2025ffcacf49c2c0de",
      "size": [
       1008,
       670
@@ -3447,16 +3573,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "e13c4e8252f671e3be5046d139d721ef86e2820c20c14a924b14e7b2531c82fe",
-     "tiff": "de90ee1f92bd020845e1075d735c0fb1825eadb7fc62c3a22f45824361a3cd87",
+     "f64": "f19e97b57a0997ebf21d557ce2131685cb92ebfccb4fb28bd90913cde254f3bf",
+     "tiff": "1297917c33d61436d1a9eb663160a4b826a4d59941558fc413df2929fd9aebf9",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "aafc36560345be1567a4588f7ebfd7cf07d3921fb23cbae7995e4286ff9b8e7a",
-     "tiff": "fd3d5ecb56d8c8af4339ce2eaa86f2fa5e588ed2db4f8a5fde0a35bfa27de237",
+     "f64": "9c29cba06096afe433b8cc02002f0c3006e42b047f18399e0af5c93b6047836b",
+     "tiff": "b49422257d5310d4a573c119bb928f8b1bd7b0d58f9a574837a8f47d715953d7",
      "size": [
       1008,
       670
@@ -3476,24 +3602,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "2cd94bda73941d540e28737af9a88e1068687145cfcf2a28536208db7f64d8b4",
-     "tiff": "453edbe5ed6a45af9bf7b4241139ccb0293b1968430071d528fd06c4ec08b04f",
+     "f64": "611c18f703f2e1f3c101f629206703d10e83c6c587804bd5f1c784aa576ed8cc",
+     "tiff": "0a8a15fced22a0258d20bfa0f0b774ca55fd9a45daf4a332a65227000406791c",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "ce08fb5d3e708ef2dcdaea5a0f0fda39da1976147ed75873d01cdc1c6627b9a6",
-     "tiff": "14805e42926787cfa62c3c14afe8a6be7c8bba8c6a7ce177b024eac51c709031",
+     "f64": "dec65563eb670a8490ee9f1c51108be01036a22fdc86e4e83b00f7f545d03c7b",
+     "tiff": "2cfaae632ef687ee4a3b56d8524dc43378c41d34e7b38300a84d9c14183fa656",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "881d59a48462a92caacac8541de5b6f087397a0b33ea7d4d30561d23bb2c6083",
-     "tiff": "3e1a61618bb58e356272760ae7af9cab2a7d66ad8f9447a0933f8add63b22c50",
+     "f64": "dc58b8e39a05c357948da03f0ba2dfebf4a4b97df0842f116c06d7e0db82cd6c",
+     "tiff": "d8f905e64486bfbec86d638e59a5de18a1175c786bc713a5332f92c6c73c7257",
      "size": [
       1008,
       670
@@ -3513,16 +3639,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "0ade1df5ff43ad84ee271a168d2efd4b529a220fabbdf9735be36a1051866bba",
-     "tiff": "b23e9106201fce411d6fe96712145ae174c4935dc55a7f86d5796170722e515d",
+     "f64": "726d7969e877f6503da0e4b6118c4398a598f9f50ab09b374439105821f55f19",
+     "tiff": "830ca943d15a887fb30a60dd97c9941fbc4f406eff19bf7ac8f04cb5a1620cae",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "e444b601f32a9f3b53377e691b108883836aff7db1eb9d4043126603efdf198f",
-     "tiff": "2ed0bfe4eff941bbb51332e07d5200cdf30174950a3ee5436f342a6235965d1c",
+     "f64": "3ecce012ebc4f77f7988417131f50adf52f25dfe08b9463631d1d3612ad22a40",
+     "tiff": "4eaa2025a9f7049c8f894eb966a38e17034039ac128806e9b4e80f901a41fa1d",
      "size": [
       1008,
       670
@@ -3542,24 +3668,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "ce842e86161d40d95e45ea3b4cd097eb6ad75f6ba6531dff2f16646c9e45bc01",
-     "tiff": "1b220fc2b49dd8cab2e40e75e27e65d4df0dda017eaf1b84becb7f73408e5822",
+     "f64": "73cebc8ea6beb20809e1f7443a06c9494a6347b3bb7c413ad5d18cebfcd7fbd2",
+     "tiff": "61f908db1688a644d63121de215375a7a86f4dd1149cbdb966561f5c91721a0b",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "d719b29fb498449762736f519e342c65a32e382e48e2ca75ba9d5600f0568e34",
-     "tiff": "b7129295bebe5b3ffec5b67fe4efb6436374afef41988d82cf1fda9d5d87b652",
+     "f64": "e8223f810152057580b1dfede30515275f45618d5fcbbc038b6a806f694cbb26",
+     "tiff": "94d50d92a4542600c70320cac70d8cc6bfc120174f32463835288bca40d7e004",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "df76e2555eb22bd97121b121697f37dbb7b02e92aca1d888b6b22105bd3ec7b7",
-     "tiff": "68690c7edb17c77edc1c814c0659df5fdfac60dac756ae7b23ac9fa7d8e0c5e0",
+     "f64": "b82a42c3c1c202889324549a32d24757fa903963e412d1b9ec5be0dc2fe6f049",
+     "tiff": "b69a4489f2746c7f3ce1c5a20d534ce8224f8663b69a7b5823ae56b145b609f2",
      "size": [
       1008,
       670
@@ -3579,16 +3705,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "e389c5fa886e1f51670577530f37f68d5863406a6fd7b2a732845826a5f2aa91",
-     "tiff": "3cbb12a7e215e6ead727bca1adc81a23888499e1277f719c30f55ac2a80ce366",
+     "f64": "395f1642a105a723d4e1551401efd04cc6541917072ea527e35660bd2d463808",
+     "tiff": "716506239fffa1232bc0b67f2d1d568d3b22ce3c551d686ab6bb2eef2c476b3d",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "64e5fa60c9c6fec7ff87e98f0f232b462075696931a7293f5ee8ea3bf4384356",
-     "tiff": "cefcb54a09c0814584c68a4bf91e618f9935a3ffb7a6a45830090e1e8f538dd8",
+     "f64": "c76bc19d0c211317ff3cde857de8d7dda634f20a24f9fee0f21293233e557495",
+     "tiff": "8b9de28bd93f82dad303d7814b680eabdc3d72555cc734d084fcaa1767b39e69",
      "size": [
       1008,
       670
@@ -3608,24 +3734,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "5807e4546e96884c4e624611533659172d369680acd0777cdbc38d2a2205fe80",
-     "tiff": "23ba7799539c6b498f19d219a096052c270c00293ce83bee98f47eb427b99a4e",
+     "f64": "f17846581c1881653bd1201438aff279e658b2e1eadfb2ac9f68bb14ba5205b0",
+     "tiff": "8a464287a82d94fccea5db53d14dd29d1c9c5c76d69a68b08969e6b07fc393c5",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "8c31a7311b0888d3ae495ef0811c7d73700d9cde0697f6ff2472aac62dbd11bb",
-     "tiff": "37cb29d897645eee207a5d192ef3280bcc94c6e35e6f91249372a6af7b31ccce",
+     "f64": "23892f764cf3d12c507584c37023294091314a3999cb0fff8ef9391677378b30",
+     "tiff": "3a848bcefe634cf29202ec04729c7cacdfefc8421bc35aa1853ae0e62e2b1474",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "f0fa5a30fb8004582bd748481ac6ed71418c60c18243b388f779405eff29a149",
-     "tiff": "b8753da7aff9af5e59e54175afaa172053a2dc2514b7dfd4d2d0383779cd7fdf",
+     "f64": "af37441dbb5b5f8d805748aa3c94d0384c2d2c7c2090a473a78f76013799c43e",
+     "tiff": "28c72ec4f2b2cec611326560dbc49ab8f9585febb9af34398b1e79ab723f2b72",
      "size": [
       1008,
       670
@@ -3645,16 +3771,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "681ef148d8953a6d4135c0945eb863fd482b28bbe55507e50216eb19e399c19e",
-     "tiff": "a852dc156c1d83e1b74ad36449a1f63710ac93c2becb78f4da2caf30c52c330c",
+     "f64": "324a37f8e0317bc9f3dedd99c57176e6e1eb8fbfb58f244f72a937c52a1e79f3",
+     "tiff": "59fad02656ca1b6faa3904528ec2691e9f1358677214c8fc3a94d37ffabb001f",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "1710cd925831458c9dfba7df7eb3eefbc5401c28e5b832251b16e571ea16d9aa",
-     "tiff": "1daee7f3fbaa8f835430c9543541be5ebfb83eaead109c2a2ba3ad8c85b24d02",
+     "f64": "4b5712ea9bba22abc34eb970a548d8d49f93d03189ea609635f973283a80e6e0",
+     "tiff": "a0225b0d5cd96782d4ec138728e102520c8c906b89cef3ae38578fcf5e371aa1",
      "size": [
       1008,
       670
@@ -3674,24 +3800,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "8214ce95c770315115316d91a5988dba87bfebadf4aab9657daa12b3a9cf1653",
-     "tiff": "d653db0808c6b6782dfb23e6b680b466112bf4bec72230c4646dd20a313e824e",
+     "f64": "86b577f95eed3ed0940b02732f261ff96578d9648b165543d599b1367cc5204d",
+     "tiff": "8e6d03afc973c45b60431e0fa40717aa059903ba370cababcddfdc61a0c8087b",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "a54afd1742f5e75df3b0a3a72f336e889c903e103fc1df0e20c041c74badc655",
-     "tiff": "dec477f3ece31eb708121207fc29120259d418ac0f7f20a1189f50246699c17a",
+     "f64": "33abec389171b5116d255b66af0ecf02f8bb018535003dcee008a16eeefd7c81",
+     "tiff": "3e33e77833c99f7f74e689ab9e1a2580d959f61126767792dbf6cbb6e9df217a",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "4958afb31ed6f9b28f684e77b324dda8d3034d78546a4a58783e51b59eaf1fe0",
-     "tiff": "43524d5b256187acffc4b85b76fe360f0bdef6b9c48a81a5b987c2227180d467",
+     "f64": "856fbd19d62ea163a91d2d512b579933b594651e2f2e61b74bce20daadfd344c",
+     "tiff": "21bf22ede2cd789150d0b8607311a77d8212a5ed6c7d3e1aa574946a1f14149f",
      "size": [
       1008,
       670
@@ -3711,16 +3837,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "5ff8c2b99672d11278721ae620f140f72c861b1de9e315d8008a596473ae7ef5",
-     "tiff": "189568b45223648d2c79a4441c712a592892a5da440d3ffb77a9edd064b51397",
+     "f64": "aa3768023ca7afaa2cbf69e1ef0af913ffaba9d3ad41354510774c34da23589a",
+     "tiff": "f228a4f04688e9b333cff6fcfc6da72191cdf169e88de42108b2b6a217a6de84",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "bb58adb0886d43b5eee0839bda7c96356bc4b9b1ee0114dd67054938e531599e",
-     "tiff": "dde4fe3de65b178eebc5c97e2431a887dd99c7e1083b316e030cc0f38f2beb74",
+     "f64": "6f7e84b7aa03fd51b3deda5a441a35b86499da9b845dbf3b530fb9e780942777",
+     "tiff": "658de503025ec1ef592b921e511ea966d978aa600740ea30cca595ada6564d14",
      "size": [
       1008,
       670
@@ -3740,24 +3866,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "75942cd15322f8c55b2fe90a9d2df679f3248d5e33c0301837379af0205b3d6a",
-     "tiff": "27f29c5a57664eb5231e4d5f2a680e157bb8d1574341449ee4d57dd684cbe9ca",
+     "f64": "f44dbf6d770552ed84da1957981fa14370db6f105e9868cd765163ae304a1301",
+     "tiff": "ac7c026a211949f2198928f05bcebf59dafca0f64bf69a568532f685825b56eb",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "576afa1865370ddff299d29e4f2e5c5acb0d1538546aee59b5f8f0731ef2725e",
-     "tiff": "787897f9f320d6a3cabf1df87b8d0703608b971e018e28b7ab47c4b72e7b5375",
+     "f64": "2e6fdecca6896322dc0ed50eb3192a1ae758b01d858377e16393f83dbc0c9ed0",
+     "tiff": "8415f9f49b31891361228425e4d9074aa2847cd82daba0f82838f7a96fc64f14",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "df8f8831b3348c89ee7bbab2828735c7b13bccfce4024b317ec0b41164927a4c",
-     "tiff": "ea186ff470ef94dd25dd468eb468365c2765cc07e57fc4ea3b2b5aeaad7ef903",
+     "f64": "cd0abce0d8eef366e43ec1b217f2a3ecb9c511df9b67202e067dd1e3b979db36",
+     "tiff": "9860f7e87525dc8d6da4b8084752add8aa171c8ee615228cc18647ec198f1543",
      "size": [
       1008,
       670
@@ -3777,16 +3903,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "04f922f03a97ee62f03aa6a66fe55bdc7fa2e443851c66057a750078c3ece075",
-     "tiff": "b07b9a318d9582ad8f51a7153065fcd5bb0259aac4d52e92b6f43d1e4069321a",
+     "f64": "13813e72eacc080b2612660f36a2e06bc24d677a1e44e027ef20d7eb855ef994",
+     "tiff": "af141acbb8b373b0f68a04fd30dfc7049d25d478c17cdd4d9fa6d73b13ea5a19",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "2a98165b1a72b377cdab889fb62972383e793421e3f5cdfda6688521a1baef03",
-     "tiff": "f80f99074ffdfad9b8f42a7f71fc5b843dc70f356aacb226d2cc95d90ecd9c97",
+     "f64": "795d7bc0aa2840e105ea7740c0dace8c4fb9b8091672afd6fefb68425d577f49",
+     "tiff": "f629922014e17cb8c3fbb210ca218bd55bd3ab3ffaa54694386c170964a07791",
      "size": [
       1008,
       670
@@ -3806,24 +3932,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "19279e4f784772b8c07cce05321718a2dabecc8281fbe99147551a3e892fc328",
-     "tiff": "df30745ba3793994d2bfed27b0f97310991708ff552116b8ab214326ad3926a6",
+     "f64": "8c4ff56eaa2563f97ee31fee542f2ad001c2b76c44b6ae581778956585b4d4c0",
+     "tiff": "e47f55f5a143307aa71fc4dc421ce5e4abd4075e9329944c9e874b6a369289b1",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "cd85a0e0c35445365a17c4c118da689a7f8b71fa7555a94fcfad3ddeb6643f97",
-     "tiff": "db8613e8a2efafbe7629dc6133a34884932b6e757b6637065eacf14aeef3b47b",
+     "f64": "2cab5b3cb3447d703188c3d4854c92cb7d930789f598aec5df18b06a8b52c3d3",
+     "tiff": "93fdc569b99eecf736f00acca792f8b3561aca5711f6d3a6bbce5ca3daad1ddc",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "3967cec1cc4e60f0784ecaec6c724a4c1d9aabadd5cab299ad12f5402197589c",
-     "tiff": "7cee09e024c221f6dc4d8bc55e9be0333c523b8567067671a69a6bea7baecfcc",
+     "f64": "3bc7f519aa6d213a946ff1a2bfe104a44799c2cb516eef159a477e4d0e0df812",
+     "tiff": "c7c56fc0836af5c7c5ffbe29bcb518c57c8c0cc03aec82a42cf6a5956ec1e5c5",
      "size": [
       1008,
       670
@@ -3843,16 +3969,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "1f305c8cab8d255938d038e3625be27bd83ddaa6ad4005b1ae4f9048dab69cb7",
-     "tiff": "e32c48a2b18765a208d30f17f2d59eac16d99a76db807f90c8b2c7e67c3fa84d",
+     "f64": "f7439f097f08c2f6f2fe1dd1fa8c5c0e58b59a6a93b809132f86c6c81ad8e17a",
+     "tiff": "20369756030d7f26d26c7b7f9781f719fcc893c0ace04270cdda158a794c7c59",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "b8007ceac75be36e113feffbe321f5f5da8cacc0d93d7416c33cfdf85d6cc5a5",
-     "tiff": "85e6793c0a836a002fc068faa70e372c3d416307a267a9c6b46472a24791f6da",
+     "f64": "8f180efcdcb2ffdfbac90438837dfccc90abc3a1133a24cfac83e066aa8a22cf",
+     "tiff": "dbf5be7e547c4138fce9f878dfdc22c7d54633dbf88fb5a4da54a4a35efe23c2",
      "size": [
       1008,
       670
@@ -3872,24 +3998,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "833855ab514b43b61c2fc3015b2d5fe06d49297365e3d7ee20a44e56bef95eda",
-     "tiff": "e5041d7979aa96d0ae0c1bab6575c00d1ef7c378b457a89dc2597a669d6e1594",
+     "f64": "1461e13ba38433af3f723b69e4800d15fd9c41685771f29b0a16e4585203f7dc",
+     "tiff": "9369026f98075c76fb0d619b1027db8748a062f6bf7d78bfe50c4bf3e4ca9f55",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "0cd1505ab962ea10d8ce42c741c10fae747f06cedba11dfa0558b65487711408",
-     "tiff": "1b3919a84911c33f1149efab2e5873883704a9ccf377c05ace56f7a6c7a7d87e",
+     "f64": "2e2ada164f5741c3c3d3b6b7f2ed2c370a46e4149432724cb91a63c8f6b26cbc",
+     "tiff": "43bb7ef94c7777c8f8fbe731ab34c764fa8d60be7ed599d631b76a898825929d",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "3551351a7287cac65dba9efd80d57824ccd64d3c7812a254b1808499f794e693",
-     "tiff": "6ebdfd757bf9fe4a602f4a943c538b300dfc10ba3d9d36fb6dd719e7acf5c90a",
+     "f64": "d0cdb4d1a1a88d25593aa495af4160998430352786930f43cf16e8586fe322f8",
+     "tiff": "c37c4915559526b746f4ae6df151f7bc0fa0b38fc95959126f3683c4f9504529",
      "size": [
       1008,
       670
@@ -3909,16 +4035,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "f1eed2ce8bc358dd11bbaac5e2acd0fedc508df3df8cadc0d881be6e2c3983e9",
-     "tiff": "9d0ef7e9dd842f4ce780f2aaf5e76307e5dd84b3fea7e98dc2048d2e0387d569",
+     "f64": "b65d4733bd83b33aa137c439eac6bf22da52b28863eaacdb6da897dc67ce61a9",
+     "tiff": "a82f271d05a876f13d22f44ead79b7e506c9ddf4a2f42928ecbe4b20e2b53e80",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "b2b199a1758d4de38acf03e4fc596f223ae6e33b8e2460113c68c09180568515",
-     "tiff": "b8d1375fa86d287c4080e9f7c8ab5c8ed5627a072aea16e1fb6aefe970bd7030",
+     "f64": "2da43bfc7557aaa86fc6632125150e0c1e0a07863b23b971a151c58d7a66de8a",
+     "tiff": "d7e83b04466857a13765eb42410609c1f2e1fff7c967f3f3203020ec5243e95b",
      "size": [
       1008,
       670
@@ -3938,24 +4064,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "e10d86986b901beb5b4b308f151233ad33f0289ebf8ac88e68ea85f3bbc68b5f",
-     "tiff": "08329c9a82f070834b1b566e9de610237894f54551ebe43893cb1ff160c6c4f8",
+     "f64": "73bd07d4f9856f60846ffc5e9152b970de17b79e191906bc12088432fe12f2c0",
+     "tiff": "0295589e6093818a3299664cbbeca86598d79a4085a949ca634642f060a5a38e",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "648dbaeacf37a015483e75445864f9bf435f7d746043f909a467d833ca0e4c47",
-     "tiff": "3fe9552679aeb86ab62aa6e315e16bff93d11431fc43ae0ae3febeec8acd933d",
+     "f64": "7a85536b23c1651c9c1fa81900c7aaeb2c0181bf59a43a860d5554bdde189b23",
+     "tiff": "ffe67b18d8ef2fa01ec57189f978ffa0866799f857940b2b1f5fd2b2b2529b8c",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "3920f6fae2c951e09bbb272ed44c013034b7f2611690705b925cb1bbd8e05197",
-     "tiff": "a2b6ea759d7e7155f9e24b027e1de9e97ba7e26271bb40c701049ca51b9274d1",
+     "f64": "ea8029b3990482829a6c4db73aecaac47ccffdd37ba23123284634c3578f2257",
+     "tiff": "09b094423ccae81eba7ba4a293e6162363e946f2de71e9eb1b0709081e78623c",
      "size": [
       1008,
       670
@@ -3975,16 +4101,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "7a5e024bcf3054596a213d84b9333330b880f7d1cc466b1a4170dae4e0af25c1",
-     "tiff": "af130ba1e8c18095edec2bc1e79425cd2dc3355027c0d919814b752ecca105c6",
+     "f64": "09e27226321bda7800de187edd616ac4170f10db5bcd8c1495a9da9ac5cf3a42",
+     "tiff": "44b1d1b4fea4f35b56d3b46b2bbea2566435f10cf222c401fb3db59ddddfad8d",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "a5c4db1f5ef94ce77369d6fbf89e8eac909056fb9ddd280079416cc66d3e927e",
-     "tiff": "9688dfea9a72f2bf9ebf765369c1be045482d3837cbe2a4842d70e10b09b7c01",
+     "f64": "63384fbf426c27fd9e78e0b3fcb3bd994c6490b622aa35171c88c0148b9c0d50",
+     "tiff": "77d0114d199db50ecf33427730eab9ca54cc17900674d09f34a89db74905eb3b",
      "size": [
       1008,
       670
@@ -4004,24 +4130,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "500380426248dceb4a7c9edcf996a69aa743b7904f58fa3115b5f7f7344d2b86",
-     "tiff": "f9daacfa94c2d5c38fba30a11d67ecf189efaf4c0fd258704fa5d411619bc17d",
+     "f64": "6797f7ff5814ce169d65ccfdd30498e254469c90b86f5889e6b077f74d9070e0",
+     "tiff": "4b75b8d3a31deac9a2bbb6c85747b4b2f3e1544b3104882af2ad67acdcda5b9f",
      "size": [
       1008,
       670
      ]
     },
     "f32cpu": {
-     "f64": "7cb767f56ec3acd706dd6149f1e924d8f565df699d606de53ef34c0662b91ce7",
-     "tiff": "d649ed43ab3bb71d958293a039b1001e13a8a99ae18502859a7f433577ddf776",
+     "f64": "849e7b6ec041274fd6eec6549ad36019d734fb471a82cdcf488f7f4048589b37",
+     "tiff": "71de4a52a5fa229270215b5e59d40d20c8b516144942332bef1f119934b8775d",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "eadb8d589647eb0b00246a95a4ac6f2fe8d2dbd6395c51501c31766e5e0707ce",
-     "tiff": "d9291e0e5935ac2a141ced3a5371336ec86e93ba09f5518db1679c33c059aa37",
+     "f64": "e7618264dbc69452ff551416dc36259f2c89359a656cc7ad68614cc554cd1ef9",
+     "tiff": "814274da9a476b4b208b6a11805beeae5ab205cf2d8144b60dde7bf9f63d224d",
      "size": [
       1008,
       670
@@ -4041,16 +4167,16 @@
    "grain": false,
    "engines": {
     "f64": {
-     "f64": "d692a1ad615913e88ab18268be7ebbdc343b681083f31ed110a78fb17738a26b",
-     "tiff": "1ed2bc3626674209c1b14fa714b3373b6aa6ee686ec8d5d043be9752635e3e57",
+     "f64": "9c960a8854269da9b795f3616820526c88c7f4939640e681769992ad4669958e",
+     "tiff": "f72c3b244d7060ca10bdad08dc361516b191edddbf387e8b32a4f3c053ae6bdc",
      "size": [
       1008,
       670
      ]
     },
     "gpu": {
-     "f64": "96f4c081a768fb5e58ee612c4ba5fcd939f89806578c6f93e5339f1e2370ece1",
-     "tiff": "7a32d19adb6616c8c224e208e0765bfbd92ef52a4600570e274a609bbb7f04f5",
+     "f64": "30ece1ee9a43f987ce700499276fe6255fd2e9b65bb1a11810d3064708b4a380",
+     "tiff": "e22e158d379c787a2bc88ba4f6c2f509e974dd9849e4bb6f074e2bf5311ce1a5",
      "size": [
       1008,
       670
@@ -4071,15 +4197,15 @@
    "engines": {
     "f64": {
      "f64": "0ed5e710c817317b9ca2675b0a09dbece8f2fc29062f6478da31f65efc68c8dd",
-     "tiff": "e34b8123a543c5fe2fc10c6c10ac9ab591ee63ddcd2abdaf6aa8718ff161d7eb",
+     "tiff": "0a061043147e8003466894f244460dcc67204d47744c94e0625defeb3369dd6d",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "a5c5ef21c2ad067aa2b888d00a70a8f57f5920fe3405f9e0e4aee35fad836a64",
-     "tiff": "1d70d3de18eef126190591695ab999bcf45da2c49ef8e51d444bb73b923e817e",
+     "f64": "da72985930af5d573afe8ec8201c241b06b195de874b42419776a0b11eb9668e",
+     "tiff": "ab022a8ecd55f96717f387385389d0dbd4ad716695fa25532ee5836f6120dfa1",
      "size": [
       768,
       512
@@ -4087,7 +4213,7 @@
     },
     "gpu": {
      "f64": "4b265e0c3ea4de268baabf8ed22cb93aaa2c5392b175b2994c4a2dd8bad6c21d",
-     "tiff": "e86a98d6d1973ed8027620c4d94e7a948a532b1af0280c096904f57b3f4954ba",
+     "tiff": "551782137827f6bff917ab727413dd472236fe3934a9dc73b91e603bf23416b6",
      "size": [
       768,
       512
@@ -4108,7 +4234,7 @@
    "engines": {
     "f64": {
      "f64": "4f7b9572d114f824125bf6e8540ba538f816b4c120afe0d2d55d346af3deea64",
-     "tiff": "b7a6d155028afebb877d51c797e886f296dfc20baf7f64e4d2034ceabe0d35c2",
+     "tiff": "bdb15e77171464e4af43841b0a1ed7b1060cd6f5053f5be40094f830db2a0c03",
      "size": [
       768,
       512
@@ -4116,7 +4242,7 @@
     },
     "gpu": {
      "f64": "3d9b8f2de6811a7ea712cb63bdfdf7363af398e5d7d284c877342894549f2f9b",
-     "tiff": "2a3b2bdaf11fbcf5ab5d08db084c8958bf513de127970afaad597002b4d24a66",
+     "tiff": "a9503dea85020dd211806ad7ba65ec237e00071d4b91a0573ebf416b4e903ff6",
      "size": [
       768,
       512
@@ -4137,15 +4263,15 @@
    "engines": {
     "f64": {
      "f64": "04b608e1b49797f0d742d947d37ab4b8f85ff7141482d2140c824613c29fb69f",
-     "tiff": "39963dda7af6574fef976e48087c83627e1447232cb7883ae7e98fc8003492dc",
+     "tiff": "7b280d50278a3a5705ff074042bb8576f098a15d77ff4e8470fe04d3f552c54c",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "370409a93fca70393098a1241d1f4b90461db157dd3f12230d7569c21f86c2d3",
-     "tiff": "330444b943a0cea0613b51e7663965d281c22528217273c81f1b9fbca366ed23",
+     "f64": "ba08cf8ecb5ba1a0d7e6fbc44d7db8519b8fe97d53e6f0f17b42b19c05cf270f",
+     "tiff": "ae8c8e1269a78cc3b8d61ede5401384805b0009a386db5cd3503f479253d9e01",
      "size": [
       768,
       512
@@ -4153,7 +4279,7 @@
     },
     "gpu": {
      "f64": "ffc03a7fc38c0a61a914e6b31b8589c51041e945ded81861e6dff4acbfce370f",
-     "tiff": "2adbbb5e9a25e5240a0de9c13a43138380baf1ba79ac5121675e8d8a13b57c5d",
+     "tiff": "f0e4d61c9457bd1506128f5d4a2b927e7c9f5f994fa15ed9d8d80cc6630a16a3",
      "size": [
       768,
       512
@@ -4174,7 +4300,7 @@
    "engines": {
     "f64": {
      "f64": "e1e1d8b38aaae582dcd283d489a8e833dd46702397771a8f2c4fc901fc41d854",
-     "tiff": "46651bc3b3dda6dd08641b8f22efdc5d7b1b43a5aeaf2897cb3bda23f5f6a111",
+     "tiff": "4c543e2f752b9304fcc0b7c3510d8615367f1962ab185fecf55aed623b47ffbd",
      "size": [
       768,
       512
@@ -4182,7 +4308,7 @@
     },
     "gpu": {
      "f64": "9a0d44d2d406debde97656cdd5fb06bfe99cd988133ebb7d411e9cc7b5959bc8",
-     "tiff": "a2b5dac6aaa1e5207d3facd9df909853f15f84f3f82807233f98f89ff790e9ce",
+     "tiff": "7974191529c469a0a68b21ad74a785c565b8ee22e5f847402e10b4749d07c658",
      "size": [
       768,
       512
@@ -4203,15 +4329,15 @@
    "engines": {
     "f64": {
      "f64": "654027d7c4d5d574460a0648a3adb884cb3660b7aca2ce486ca62f88c16deb73",
-     "tiff": "85a738e39505f6cb10b52070154e79a9a614804d6851e3b7de57b88749511087",
+     "tiff": "7fc5db0287076ebd55147258e5edc177d1b305144ab94577d140684db9e644bb",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "6e2805cb1efe3e864e6c4db6d0743477c95c669591f2158ede855291a76f6493",
-     "tiff": "bc946313dbfc501731cb30e35ff8a00371782700e246609cc23e51cd337837fc",
+     "f64": "4ff4703321bc7987a6128d0aa9465cf84a5ad89b5c7a29ae45c71dfe5e50bed6",
+     "tiff": "4c94787d6f71656f28f7a9de214cb05c698b6e54af1eb7b3731c2497127c7f90",
      "size": [
       768,
       512
@@ -4219,7 +4345,7 @@
     },
     "gpu": {
      "f64": "e1bf2658a0f9a57931fcae7879feea25e3cee0b1a865d9d8a0f32116f612bd37",
-     "tiff": "9d032114c901e85b9ad7c15b1c1aa0e7a4e1a78b310dafba058ffc96113e4700",
+     "tiff": "818b24fc99ad90074c4620cdd422244e5561165e287ffa5d5f439cbdef86fe83",
      "size": [
       768,
       512
@@ -4240,7 +4366,7 @@
    "engines": {
     "f64": {
      "f64": "111005f813db0ba7b50adb54609db19a4edf5d6bc76b5ca3cdb2274f677002a9",
-     "tiff": "77a92174854452ba54c6968478a9c138a766342cf5ad5f92527909f63cb23165",
+     "tiff": "53eff412843aa01c0bf1a7a271af4000f496b709956cf89d6592802fdeb29ed9",
      "size": [
       768,
       512
@@ -4248,7 +4374,7 @@
     },
     "gpu": {
      "f64": "db3ee5692076a6b954b82b62c5d4424ed37f8a3ed94d11401981ce9316fe8bb1",
-     "tiff": "52893426b4b3a7d771585e6c2e6ff1c3ec607f481752948b2af81045aca50ce9",
+     "tiff": "e87732ee13c3374be15f1517a22648d2f007540cd12a3af9f5e3c5e98f6e7852",
      "size": [
       768,
       512
@@ -4269,15 +4395,15 @@
    "engines": {
     "f64": {
      "f64": "487d3f9dd990711c92137a3a9034a119b8eb9cea2d030c19a018da4c788a03b1",
-     "tiff": "abc98bf4e38e901db64557bffa38d449c3289e299b914533310a53818f445f37",
+     "tiff": "7eb8446d907b3c85aa057b70ff5d43bcf9790f6e0979331fdb89f674c3e4fb91",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "d3592ed61d196cbd3d47c354c602a47171ab29b0d03373a39ff76fa2002b7219",
-     "tiff": "547db6c11bb5e5c879a6439c4d8ef267617520c2261aa1d25337f7abec59bc28",
+     "f64": "71fe5da75d4540dac9331dd7529ca27ced29fa9ca10900ff661a89f94ff89ac1",
+     "tiff": "a8eefb841be284448fa281e0458cf5f9a84eeacdeaff3bef8a4d6d0a9a2ed0cd",
      "size": [
       768,
       512
@@ -4285,7 +4411,7 @@
     },
     "gpu": {
      "f64": "61b37c45e3a8a54d1282677c53062e530bb54ef593f5153873514ecbdedea04c",
-     "tiff": "b1fe36e205148b01a04bf2499eb789a489c70548e5f6b975df345d851ec2c02a",
+     "tiff": "c188c1d1eb4216a468c755f29784d355689d0eaadd1bf1d30ad935dba5102ea5",
      "size": [
       768,
       512
@@ -4306,7 +4432,7 @@
    "engines": {
     "f64": {
      "f64": "6304053a34f928e4390f2aa63b3553756c687406b92bc757ddd4e9a63545d38e",
-     "tiff": "0e02695aaaea1b57225d493b1a1dd21bfabdea9868cf5b8712d4fc3665f55fff",
+     "tiff": "8a98cca9715f7f8d555448c84e6d15e0ea68e49f26ab562d8ac11883f76d817c",
      "size": [
       768,
       512
@@ -4314,7 +4440,7 @@
     },
     "gpu": {
      "f64": "fda2c6a35e0eb47ce318e242ebfc5409e7363428e7b7823649e60b82f099af23",
-     "tiff": "794e172cc4ed87720f65b65f5c30bf7a1479479cc925ac67ae75b1a0c1c71427",
+     "tiff": "c79a8456519a195abdf347daeb499f84528b17444b03f61dd2e42bef5568db01",
      "size": [
       768,
       512
@@ -4335,15 +4461,15 @@
    "engines": {
     "f64": {
      "f64": "ade6ba3cda347fba94faa8873d6d094154530cffea3a092a9ff43963e814bc4c",
-     "tiff": "67ac39ef6de1dbc2685b6820b9cd49688654a8d28ca67af9817d4365432d56be",
+     "tiff": "2872c696725f5652a53a32b5eee354202d46c339dd3a1e993163ca39d6cf8174",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "30cd239787ad4ba5d1b20331df86c9c4cd4bd2be45fc20f70c19105c52eeb64c",
-     "tiff": "acf03cb364d4e44960eb37c2fd658b8eaa3a00d21f1453deb4ea86a734d389bc",
+     "f64": "30186721e0008cb02ab6c6e7808be028baef71ff0fd2e97339fa320eaf41ac42",
+     "tiff": "57597be3c7d6f45303e885c815c6816ff1e63e0ca92fc4ac5daa75ffe25c9961",
      "size": [
       768,
       512
@@ -4351,7 +4477,7 @@
     },
     "gpu": {
      "f64": "ab9f57ef9f5de2416fb736cb7007685059e9774a86051151392e9141376e8e64",
-     "tiff": "f08a1112bf67e9ff01da051d25a7c771f7e36f301475442763cacb63b5195b81",
+     "tiff": "c28c4321f3c7d20147c104c21dd442cd9c66a488f928c52ee6ca4d38a76b360e",
      "size": [
       768,
       512
@@ -4372,7 +4498,7 @@
    "engines": {
     "f64": {
      "f64": "365ff05b3c9e127146cbda34740bd7c0666cd266c8a83c70c5384cc5ba7ceaeb",
-     "tiff": "6d69360e0ef8c2bf4369c2a6f869eef33f3daf317b50301a1c06203b0a12033d",
+     "tiff": "17ed1fbd4cf35c3f23881fbb60c3f51d2bc67a77206f10281e80c47775fc01d5",
      "size": [
       768,
       512
@@ -4380,7 +4506,7 @@
     },
     "gpu": {
      "f64": "09eb4642e9bb3cc3d7ab689941448ffe4d4901721eeba3c985a5b28c12bd6a9b",
-     "tiff": "3d1a292fef7cb972d18bfa33e1e3e49064d477d6986000944c13003b015e8b19",
+     "tiff": "78cb334f49e9f3e42c8603b0f3be3d7496a3823f601785d76f3ea6230560d3ea",
      "size": [
       768,
       512
@@ -4401,15 +4527,15 @@
    "engines": {
     "f64": {
      "f64": "b71ea83cf78cfa8200816bb282d162f8b94655d4d4850b3a73ee7e0d40bd7b6d",
-     "tiff": "1424edbc156c69a14aeed7ff5e27b635193134a6da8a1cbd66d30a534d052acc",
+     "tiff": "6d5775227ae929e281ff2daf6e18a40470d583ef57873f5c7076f3e0b8669c85",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "1670b8542c375e8bfea1a703d17281212d911b21c51c73313414261716d18798",
-     "tiff": "5d4f81e8d40121444c948ae9b0786ae24902b2c9c915e691fe4bbf379e05ef57",
+     "f64": "d7f4b6f806a26865ef71adbe7e55e9af51c13cc72baf767cd65b84b223409ddd",
+     "tiff": "c4d1fa6a6fb35c8ce5f3004f5ae150d696005e9097e1a9835d966bdb47eb7efe",
      "size": [
       768,
       512
@@ -4417,7 +4543,7 @@
     },
     "gpu": {
      "f64": "45351297c1e759cee430e61b692998221b95b94bd705303f4f18bc36f4f903ce",
-     "tiff": "9440405e571f65bfaa4114ee277d16373e845e9c4dc4b2efbbe19f61926bab0c",
+     "tiff": "ddce5f279972bca32d3ab0727ae8a744ef9d8f0f2699df18c18ecfabdb17de10",
      "size": [
       768,
       512
@@ -4438,7 +4564,7 @@
    "engines": {
     "f64": {
      "f64": "dc4ce109efaedf2e216918de7f159506b551de890d5a46be276060eb7d05e663",
-     "tiff": "1bd3e99d679077131072adcf772bcdccf70b503137ce8f21ac6e79d97529683a",
+     "tiff": "fd207a48271f54ba5ee254fc0a58127b1be0ff4f0d37cc50fc2615bff284aeb0",
      "size": [
       768,
       512
@@ -4446,7 +4572,7 @@
     },
     "gpu": {
      "f64": "ae6b5cd918b0a11032dde79dba8851b1f1011c1f90ec15cc1c9fa44b2d095c5f",
-     "tiff": "b3c67cfc8712c984f8057359d3b1fe8f6cd4019cd206d573a8d1e6330edeb010",
+     "tiff": "533dfee06dc8e5d1e094a5c95ae6e106d941367ce7a556be87b9e6fd9e102b9b",
      "size": [
       768,
       512
@@ -4467,15 +4593,15 @@
    "engines": {
     "f64": {
      "f64": "7759522339772a082c8c7175739b2636126b3be11b08dda87093a9dce3aee0a4",
-     "tiff": "bfb595fae56fdbc9e09f11c74a54fb0b7d5115ddaec32fd62dfaf2b37e49c3f0",
+     "tiff": "575069525fb45f952955417db8637d4296366ff2202bf419b017b826b30b5aeb",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "30a1d2d90ba55bf374a7d1f786eb80a765c6e98c080ac9906595d40e893b042f",
-     "tiff": "991876cf76c107909bd784740b711c4fcff9459c4360e6151bb8432aadaaed56",
+     "f64": "05ce5b843b93468d412e9b29cfef8348d2f0eb8f804c7a7579bf7c9b1c95f424",
+     "tiff": "f52d89037b4fb708d056336ed38c6bb5a6d02ab003497400a6d54ea980fbe1ce",
      "size": [
       768,
       512
@@ -4483,7 +4609,7 @@
     },
     "gpu": {
      "f64": "9651579ccec2299e4e45ff6e7eca378b209bee7ca633c8382ef7fdea09f8857b",
-     "tiff": "e35b31bd9d90a8aa4e3b2115a282043d85814d9da67a37bb30d071400c648aab",
+     "tiff": "f5251981c6ba701f03c4e7dafd85e267417f57f65fe636e5541dd08d8efe76ce",
      "size": [
       768,
       512
@@ -4504,7 +4630,7 @@
    "engines": {
     "f64": {
      "f64": "3956c9a00d90129919dbe952b586076df31a309a03ac0480063e05e766fceccc",
-     "tiff": "c6edbaf1d6c30f5aaeaa5d2d9013464377559a2be4e695f213633ea9102ba060",
+     "tiff": "4e6e1e7e99f0a052b61ddee3945feae333078807aea3d481d143c7241daf7ddf",
      "size": [
       768,
       512
@@ -4512,7 +4638,7 @@
     },
     "gpu": {
      "f64": "badcb0306a7f5f476dea2e75b3bdbae5e4fd2d0283f8e163469af92015a34bcc",
-     "tiff": "b8c5b55d41c3621dfd123029c048387aede6dff9e8686e26e6c997f7a76edddd",
+     "tiff": "15f563edfad452379ea93263afea18c7d6b297af0ff7853818ba9afdff21d301",
      "size": [
       768,
       512
@@ -4533,15 +4659,15 @@
    "engines": {
     "f64": {
      "f64": "a9ec4204fcbb6cc3c0f3db7158d0e0e93aef34003bf175aba1424eb298d64f53",
-     "tiff": "d7317583d9adf1f1f70d1f1c44d689495fdc7932a391046eb281ec01727cf3b7",
+     "tiff": "74385af6361cf1130cb338bcf498bc3d0ff751d945d3cd9ad1f3e943c85ee95e",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "e19b1d7ebae1fb6e968cd334f40fe29c6a897b51269f686f23415a8465b2e66c",
-     "tiff": "82894a5522e2ae1edbe8e148032ab43672e62a1af5a10b63d7d1f1fed214bfa8",
+     "f64": "c54f5bf8272ee1211850d56dcb3b389e659caae17a2e25ac342538db14fba630",
+     "tiff": "714127ece72f3034c7b0c0f7704def23dd6d0fc06aca02442736439c6dd5b6b6",
      "size": [
       768,
       512
@@ -4549,7 +4675,7 @@
     },
     "gpu": {
      "f64": "94b311d07ffe090b39bb7969405f22e6c91b94a4ce07f96e1ef760dd18d4fe0f",
-     "tiff": "6baef88269374ab60b724df6822c2b5b083adbbcca2611d9f6d3289011ac2e47",
+     "tiff": "b1af67cda1f8100df02a3c7062eb345372d0e2032b3208af9191d35aa59cd727",
      "size": [
       768,
       512
@@ -4570,7 +4696,7 @@
    "engines": {
     "f64": {
      "f64": "cb8c09a9e3705158267cd103f2566687f2191c75e15e40de650373c82d3c6edf",
-     "tiff": "35dcfe4cb369c377ba119cda5a391723626d9ecead982cf1c3e9ef7e497bfee3",
+     "tiff": "2c00e1bddaf4c9e78e2eb276443617e14ce50d1ca763c7b3d9a4cfa2b8dfae24",
      "size": [
       768,
       512
@@ -4578,7 +4704,7 @@
     },
     "gpu": {
      "f64": "24c16937a62062d7d6bf3136ee5081a8a221dcf41de27e1adc431493cde55bb8",
-     "tiff": "899a285c40e123e935fcac1995758d26028e6b4d77a0ee98ea0b4d3823cad4fb",
+     "tiff": "d7f595b5d724ba91b3ba8a741f3d0f2f4c607a8baf3f18b794f6d1c19dad7a42",
      "size": [
       768,
       512
@@ -4599,15 +4725,15 @@
    "engines": {
     "f64": {
      "f64": "bee08ff034b6eceaccce842d847ce5de5e9136a6eed279aaf92ea47099e5f589",
-     "tiff": "1c3afe40085627bc162619709b74c3bb612fbbbd03273ed1c86f513fd697e9c0",
+     "tiff": "249a20d8a07090272ef7f2b4e226e31008436f5e8c9451a00bf6a9b831c6c050",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "48246058ad2dcb844317018ed11baf84cc0ed3e326f14dcee4f25e969d2fc569",
-     "tiff": "2f80588544c263a8ed4384cb8deb19a4153aadf309d3ba091ccec030750d2d21",
+     "f64": "57b9997d78f9e799d3faf82b34911b2048e48de3642ddeba383ff732377071b3",
+     "tiff": "ecace8e93bb23427e832c7c8104d21b2678b10085c548a8c41b64c785c4bd7e1",
      "size": [
       768,
       512
@@ -4615,7 +4741,7 @@
     },
     "gpu": {
      "f64": "a8223dd292c8bfec81f342f08f52cdf1ee0a2c54502d003ff9ec0ecb230a211c",
-     "tiff": "862522b63be77d02af8bed024cfce539f95d31db861e92e026b5a9337029e0d9",
+     "tiff": "b1c600ee2bdfbe251288e1328e01c17cf5cf642b48626470aeadcf656fb92d02",
      "size": [
       768,
       512
@@ -4636,7 +4762,7 @@
    "engines": {
     "f64": {
      "f64": "6d1d3b729f9240a3de0e62f39dadf31cfd32e7cef577c1baf2c3ce07483cd639",
-     "tiff": "f32f178210c579296c6eb42b2d3bcdf5157639031337752290eb497bd5f150b0",
+     "tiff": "579c1dbe373643ac6197ed55701effbb79d5e40cc2daf83f7e032ec9f691e854",
      "size": [
       768,
       512
@@ -4644,7 +4770,7 @@
     },
     "gpu": {
      "f64": "6c06c31b2ef78086f05a164f56d02e9809aeaad69a495373f39beb199f513757",
-     "tiff": "0e7352167fee7add550d76aa022bb517a30c0fec2d02623d17212732c7b900f5",
+     "tiff": "e76d1a07cc17e1a4a1b31e114b99e7a7ada6545b6d17ffcc16b354ad16fbd8cc",
      "size": [
       768,
       512
@@ -4665,15 +4791,15 @@
    "engines": {
     "f64": {
      "f64": "3dff101f8fe22f55de9c8555c8fb97bbc21c15ae9b1b5719bcd5b04bed9a7749",
-     "tiff": "6d8dd81d090d01ab03ceb01a158c432afc28453ca314022729a71ab18eb61c66",
+     "tiff": "83db5b6a30760a3842e5ecf5c5f225718c423750af1cf23e1037461848d27608",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "aff5e4c265092e4254bdd912ab2373b7483d0fbff1d3acb71472cba4b31f68d4",
-     "tiff": "f689d7fc3b39436db82847ed6ce2110f11ed0421ac81111aee1cb0c265648388",
+     "f64": "2cacef17b0649ea42e9cc1df23c9fc97d1721daddedad79a6f5ba18124cd8a0d",
+     "tiff": "12a15d22776ff6a5992212b8cad7ae1ee4b1b1005959cd0e1d5447d19fd0415c",
      "size": [
       768,
       512
@@ -4681,7 +4807,7 @@
     },
     "gpu": {
      "f64": "85b025f5624f1d70b6b1e555d5f4e4b0ea75e0496abbd7c7da98126d1e6dfc1c",
-     "tiff": "6ce4d02eb333126edc4c6d4d45543ffa1702a552aafc4bf43341cbbca9bd3975",
+     "tiff": "10c4d62ba22683b286835beedc29ac8166ca18b997ce71c556de61aeaa3ebe8b",
      "size": [
       768,
       512
@@ -4702,7 +4828,7 @@
    "engines": {
     "f64": {
      "f64": "de5c901e0c4233e2494d82319587fc884641b2f495fee2d508ae122d10db2b5f",
-     "tiff": "9e90751fa25e680d612f94aa055953efc5bc5d7c1e30f9dbb98b1a18ed4f0439",
+     "tiff": "5d4da1bbfe649971fbc42316498176d874c3c21fcea7bf2d77d5a2dbc7dd865f",
      "size": [
       768,
       512
@@ -4710,7 +4836,7 @@
     },
     "gpu": {
      "f64": "ee9c13745309110e6636f2640515b7da7640470054dc8aeb1024f8a71720f20c",
-     "tiff": "cb5bbd2cb02c31b1623301b45efec98d4d0a91e8aad72613e35cd0300cb482cd",
+     "tiff": "61fcda7c57fc8d5524122bb50c7f3c75f38f743985cc8bb5c1bded9417070aab",
      "size": [
       768,
       512
@@ -4731,15 +4857,15 @@
    "engines": {
     "f64": {
      "f64": "6da715bb448096f4150184eded112be34af386af885a34fa52bf106c76f98c19",
-     "tiff": "6eb2a6015bf0e86d03f19c7ac19b01a85e5e9c0d8eb2855ddf1b4017f160fbe6",
+     "tiff": "8df96ee0358082d3feb00967b7dd83aad714973e23eb07329e2dc550d3b39a99",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "055faec4baf833950512b1f380f5214177fcb0f1891c5a4d799381adf3da87e7",
-     "tiff": "f8ddd8f5d4bf046baea71cb96d28626409f85a6867b7f86c0624fb2801546c3e",
+     "f64": "9a17eb700560f0d3d1fba1030fb93e68f0f17cfcd4c8347918f061c73a255f39",
+     "tiff": "8c8a84b865e26852f5168b23d3241f6ace92251b30758cb22bee5c7f52d0a655",
      "size": [
       768,
       512
@@ -4747,7 +4873,7 @@
     },
     "gpu": {
      "f64": "7726eb99bb043e5ecb62868f0fd42b6e51a985c942995a446663fd8426c49ca2",
-     "tiff": "f68b1864e91e9b45e6935ae9fee3b674b88bdba52de921f4455c615759eceed4",
+     "tiff": "62876b496cbb5d674bdaf73666969abb7403f4bc3aa130beb85e47c55a33d47d",
      "size": [
       768,
       512
@@ -4768,7 +4894,7 @@
    "engines": {
     "f64": {
      "f64": "c615026bc27d2403f647098518dab8caebffe6d9550fc07c3af9726122918ca6",
-     "tiff": "9914b831b725896a88c6cc82188b6ef831730763a051f9c270f3cfd1618891b1",
+     "tiff": "8453b8042f0b996e8bdc47044be231c41f4bab2b67c599a3aedd6c8083245ffb",
      "size": [
       768,
       512
@@ -4776,7 +4902,7 @@
     },
     "gpu": {
      "f64": "deba38fd1f559bea4257e84db5bc7cc42431a2f4a4d27d92709eb8c640f5fee3",
-     "tiff": "76e0a7603dfa7c657be61d9276534d11cab26b3bcbc91ee4b021a47e22cb23e2",
+     "tiff": "5c778b3cebc846f7ba2f1f742577d94fa2e0a3431613a7f93ae785f8e09e7a35",
      "size": [
       768,
       512
@@ -4797,15 +4923,15 @@
    "engines": {
     "f64": {
      "f64": "f8bcfa4dba305e678889d6444ffc1c6d5a247a233df793c4d1d7a823daf53699",
-     "tiff": "7b510cb7dcc3451584e3184d631c72e66a1cc681f7d8c50fea25d223d5d139ed",
+     "tiff": "923cf010ad66e85727303b5c2a444294838a27701afe56bc59d6d6136bde102f",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "062193d9b23703789e3d0463de7982237b3024dc66bba227b8316b0559e2e9eb",
-     "tiff": "893143d139847de94d731bde37496262ee347fb2484f2c72ac76922c864f22b6",
+     "f64": "3e968667d6b12c84962afc54a615c05392e18471ea3c4fe47bd44ed161ac0de7",
+     "tiff": "23e60f2f53b01ba42693412236fd38b12357bfd6f33c7f3e8fae66d26c65da7d",
      "size": [
       768,
       512
@@ -4813,7 +4939,7 @@
     },
     "gpu": {
      "f64": "c97c0e0fd80699d840e33c5a4efa5dbe6feeb6b2706f9492c5255c2236c7e416",
-     "tiff": "49bd5ce2fb61a1283352c4439522fd9089e1e75bb547d707f2f2ac9a50a6db1d",
+     "tiff": "a605088927a8531a0e12e9d3757c64d59465b1a2459ac324bfdf1bab95669b6f",
      "size": [
       768,
       512
@@ -4834,7 +4960,7 @@
    "engines": {
     "f64": {
      "f64": "97a5c74a47c29fe1c3bac6c6711fc5f5ac9055cde182a0809d67092bc05f6d28",
-     "tiff": "a1281f1f117c04805aa75396799f6673a3e9b3f6d4cbcf6bc5339e4af182aad2",
+     "tiff": "47bb0ab262a098fd871e9a651de7359eb96143a7e5d091d27c51ee36fc6dee48",
      "size": [
       768,
       512
@@ -4842,7 +4968,7 @@
     },
     "gpu": {
      "f64": "e4f168cf10b9344d0160bf0ce3b8f1aff727d0794e5da074aafa61522327bc9d",
-     "tiff": "aabde4a2369535ecbf94b74d5ffe5763bfec7729d071d168fcbd0bb4ca70e05e",
+     "tiff": "a32cb63145fd88a27c94045c7eb16391233e351fbb61c04a42632b4084ee2df9",
      "size": [
       768,
       512
@@ -4863,15 +4989,15 @@
    "engines": {
     "f64": {
      "f64": "f49e250321fd8eb08e6a6124e8e5621e191745d850e70bba1781d710d4ece8b9",
-     "tiff": "4c16bf2447687fa89ccd66e1d4d32f5cbcbe55674f5b6d3ecbd3d17ffa267424",
+     "tiff": "5673af54ec08b4aba6f5a7dd0a9ab2094a04904bddf6f3d48c3d943c721e0ef7",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "acce7cacd06d4af1de9b052fafce233e90dedd223c7bc4ef1c652bf3141543e4",
-     "tiff": "d4e449dad5a783ee85971e5163df61759d8332a3deadced1d32f0c04588c0197",
+     "f64": "3c04045aa3d6ae270d86925e9bfe503a61c5aa9fa32d33091793c8b98ddd32e6",
+     "tiff": "31f70c07734469e4db63fb48efb3fd58b7c1fce5f083fdd78383ace73c1a5bbe",
      "size": [
       768,
       512
@@ -4879,7 +5005,7 @@
     },
     "gpu": {
      "f64": "1ee9032e357ec6a1185e39c473e9027cf1677efcfb74f6258f347ad5998aabd4",
-     "tiff": "66dfca0f20a1dd111460e213b156be24860095b6669c714995e398dfe5e673fd",
+     "tiff": "85ae71e393c68f3545b4b60cd8d55733ac22b41725baa5416075ef3b509a8423",
      "size": [
       768,
       512
@@ -4900,7 +5026,7 @@
    "engines": {
     "f64": {
      "f64": "8d17b5c2116234393c4c328f178cacacfca7064962062bbf076bca9d0a8cadc5",
-     "tiff": "cb069df2641bb7213bed2f48da458bd6bbf48bfb18c65a1ee8347d7294a6abaf",
+     "tiff": "53392ada8dd4aa823bc816ae64df9d3ceb1f5d25e1a42eb4b3d45d8e6a742e28",
      "size": [
       768,
       512
@@ -4908,7 +5034,7 @@
     },
     "gpu": {
      "f64": "9438f8060a31e7298701a29581be3a27c25037973b18b56beb2a9f34a16c4ad1",
-     "tiff": "ff4fff919e3033ff8df3510392a036ac80c7217f8247a66de429b43688e23c46",
+     "tiff": "0786f57a13b3cdb1469cc2e8a44e311f2108ac995afc8762c2d1380eb133ce66",
      "size": [
       768,
       512
@@ -4929,15 +5055,15 @@
    "engines": {
     "f64": {
      "f64": "aa1c12284b2b82aa12bdd0fe410ec572bba41d984b21a4173a76224bec70218f",
-     "tiff": "79b2968c851c1e2ad984fcfc5332c7385b32299dea132364ac7a2985c69e939f",
+     "tiff": "c9bffefd455b5d40d730cc9d6d21012f0641209df927f27dcba95778546dad19",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "b4a8d1e289f4543236b7083da75104dfde69f7f189bcec0871fe555a46f48b27",
-     "tiff": "fa01dba4297773476c3b747b34c265f982fd99ce5070a2623595ec8698a9de52",
+     "f64": "c850939df2debba2e7960ae2697755b6fa71cdf29f513fa039607923bf021647",
+     "tiff": "b78a2a970147b2f2ca85a423a31f96f9748e7f28c2ad04a2d53430c6d4b332d3",
      "size": [
       768,
       512
@@ -4945,7 +5071,7 @@
     },
     "gpu": {
      "f64": "b4dddeba2dc066d02b0577a9b5b80ae32427ebd099249aa7f4a2ace651e20a8c",
-     "tiff": "1859b22393607d2e7daccb013c2432d5b79ed3f5ba7fb9fc821198cfce8810ea",
+     "tiff": "f052dcc3d6ffb8dc69f281bd220621d713ef096d79d5db42ac9bf0cfd19f1959",
      "size": [
       768,
       512
@@ -4966,7 +5092,7 @@
    "engines": {
     "f64": {
      "f64": "e28e5b3e0c81e50b27cd61d3a4b6d7f3ffd6137d51229ef4209955c64e0426be",
-     "tiff": "329e7d0b7761d3ada79180612966a39d66102baaef9209a8cc3b2fe04e7d6dbf",
+     "tiff": "1f3151cda61ea273fa6c6cc5ab725608305dd117acfec08298e9cd7b702a194b",
      "size": [
       768,
       512
@@ -4974,7 +5100,7 @@
     },
     "gpu": {
      "f64": "dba70a8cc06ef85d61b0e3de26e54aef32179433f825ef7722c1898d645c6814",
-     "tiff": "0bf17b048e1bf244c2ac012793c377b041baa553da4baabb14b7b518726ec358",
+     "tiff": "d9e6e0bf34fd1c32f9421d73843993a7341a885d9baccb23ed66752102417120",
      "size": [
       768,
       512
@@ -4995,15 +5121,15 @@
    "engines": {
     "f64": {
      "f64": "a003a21f1eedae9585fa1d8abc696cbf467e9bc07df91a928467727c71061b75",
-     "tiff": "d12edbbdf856afe650a669fa3ecc6e95b1287dca3f79e03c0a1e60e05cdb43f4",
+     "tiff": "fe4c7f8aef1565a392c46deedc4a54af097c31df1fb167312b6c58a9f938be00",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "8b33f021f6f7d76fec64c891c71360e907212a9380f2931a6d9842f7bb6eded1",
-     "tiff": "9b7b327ae41f35ef4c510c652f78d39a0161c3c4ccb16e19fefae963a0747ebe",
+     "f64": "8e60562b8c7922b4e4e23ceb773eb5de2cf540c7557923abda74e5ba467ebe8f",
+     "tiff": "2d2d73ed0de0a7b5509a9b24ac0dcfde1b44759aa72fb844e9194e71f071bbed",
      "size": [
       768,
       512
@@ -5011,7 +5137,7 @@
     },
     "gpu": {
      "f64": "7357f932199d2f5a8cb4faa0ac4598d57a42e40a465966691e40e1e576acf402",
-     "tiff": "f16133323aea85fe59ccc700143bcfaeeb7e778110b4e9396e7bd0c5e196c866",
+     "tiff": "08b6c3fbf61202dd5f7d03b09021a38ad3e3975fe8f04b317b9bb0eeb93583b5",
      "size": [
       768,
       512
@@ -5032,7 +5158,7 @@
    "engines": {
     "f64": {
      "f64": "d4e1301742e2d6724cd112cd57981e067facd6d7309db8a5dae345faf1739f7a",
-     "tiff": "d1737eefbd7fecb50cc5c3fa901237e9fe8ff09c73b7a9ee12ee94f683d4a98a",
+     "tiff": "07fd08eb1db594070d33b96f2b13ae0fe15a4f95a961fe241ec1f88c7dcfd86f",
      "size": [
       768,
       512
@@ -5040,7 +5166,7 @@
     },
     "gpu": {
      "f64": "b162126482b2913de5719e37b989a2d42df311bd044fc12c8663ece5995220ae",
-     "tiff": "a7b60f2edcab463ba8e3957ad656b27d1f8b0e52c68da568d1e6b4124708b63d",
+     "tiff": "473b7608132e2118dfbc9c18fa1607c08c6d5a8f42c7b39b5b06938d2a48b084",
      "size": [
       768,
       512
@@ -5061,15 +5187,15 @@
    "engines": {
     "f64": {
      "f64": "93617f0e5156d3f13c4a589df907c65fc73641839655d10bc02672296c10855a",
-     "tiff": "2d27d265a9b99f060fd370d3f8dcae30fa354c6f4035c098bf64b6facf13e790",
+     "tiff": "aa43340a9ed74d9cbf88af7a0c6181768f4dd4fcec748d1d7bac34fcffe7ae09",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "b0d003f672e221a1b605a7a008059852f6967a5a68e044ac6099fb6be28ff697",
-     "tiff": "c23734b1dee5dfb4f78891aaa42ee98c7eb6446f094fd45eb89cf1f88c7aa688",
+     "f64": "4199d2e73a7d8c7a7b5dff744d6b0cd698f700113c3bb92305ea0c33ec04fa87",
+     "tiff": "95a97acc2a3b7252512132a3b28e94d37dee0a0236741608392a4d23cfd93dc6",
      "size": [
       768,
       512
@@ -5077,7 +5203,7 @@
     },
     "gpu": {
      "f64": "d34453154f530a47ae95007947f5ee077ba3e5d35a5201f23f3eb2db2ced76e3",
-     "tiff": "3770726890c8b00ea9bbefcc38d6a42b9654a09739273fb8a770348a576fdce2",
+     "tiff": "975e338d4f05485aed42732a86a36d5db256642c679a076b5d948bc0c959165d",
      "size": [
       768,
       512
@@ -5098,7 +5224,7 @@
    "engines": {
     "f64": {
      "f64": "f39463f75ea016759304dac24739ca9908359c44ab939db3f68f1c52b0a3e81f",
-     "tiff": "93a47a647c35bbd8e882f2900845082dc5cb5aa97efc27cfd8d17dd9b09c545c",
+     "tiff": "3956b89c0de1599739db7f764b758571158e963a6d949849fc3ac590946197dc",
      "size": [
       768,
       512
@@ -5106,7 +5232,7 @@
     },
     "gpu": {
      "f64": "8fc9dbf45fc80682f32c8bfd5d6d6564ff390a93008f19f6645512f85e467bcb",
-     "tiff": "33b3cdf8ee815e212f63478f97c6526b4d5c8baaec39b56322cc7aae47640ac4",
+     "tiff": "e134b32ccb67a61f4ff0dfaf36d48dc91ec7dc296d40217b08d82a1738775dbe",
      "size": [
       768,
       512
@@ -5127,15 +5253,15 @@
    "engines": {
     "f64": {
      "f64": "7bc84223167974c85646f1550717531a9735d3a0ad13792ac079e322d38611c1",
-     "tiff": "16bf3da1ab03555e0ee85a726932d8a6d1ce7e4bdd072512164602fa8b8daf65",
+     "tiff": "dec0f169e4d55f0e51143e776ca09d9c33d8e5fa0f0eedb19a12c5f8f32c8142",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "17b1f735059c08ca2fce6f342f91137d0c5bb35d84dd736d016c1b783ce4853a",
-     "tiff": "8df70918adf52f587d747c2166caa51640d356cfabad693ef321d9e483646232",
+     "f64": "390b52fab6f436d1e90d72ef94a04144f3790d3f01d38ed1e5680e462d11f36e",
+     "tiff": "0d13e53562e04068dfb4abcb7b474aa01bd2290caca06db5282033ac778dd9b6",
      "size": [
       768,
       512
@@ -5143,7 +5269,7 @@
     },
     "gpu": {
      "f64": "288954bfb672498e398244921ae61714216c7ea636ab08605fbfaac449206cfd",
-     "tiff": "bf021e447f521793ef01632429a2be4d9aafe66080ea1efd17098ac7c6ce0f5e",
+     "tiff": "90fdcedd411237d2fefa9fe456fec30c010c3fa82c4e0c7320c5b1455db10182",
      "size": [
       768,
       512
@@ -5164,7 +5290,7 @@
    "engines": {
     "f64": {
      "f64": "6f37687703a1ad40e74e078ef3908c88f4475172305178b49c2fcc37037859a6",
-     "tiff": "594c05efcc7f8398dd062269bebf03f63950408629ebb0519c8fa8b01f9fa5a1",
+     "tiff": "50274b73b53f13673af38dae6585bdbe2d36b77ae3f11f234862c77669150a28",
      "size": [
       768,
       512
@@ -5172,7 +5298,7 @@
     },
     "gpu": {
      "f64": "68b37be319ca3a0a2876f53f470bbec83448e163aa672d78b92554e860ece6b4",
-     "tiff": "f72bd07d31f0ad5ee49630d20b34f62a826a323ec67ac2de8065a99be0bccff7",
+     "tiff": "5c9ca8ef5b1e70d4828906d099def70996932f106dbc25578b981541ac8b9142",
      "size": [
       768,
       512
@@ -5193,15 +5319,15 @@
    "engines": {
     "f64": {
      "f64": "7e838acbdf2b756f0c8736c7013a3fc349db14c37aa058de59254157a0a50a5e",
-     "tiff": "d11dbd2f9c7961aa10aa3a0e18ebd905afd4f6a658efdcf948d004edf91e1d67",
+     "tiff": "1a33c522944f92fadaf2e0b4c0d9e407fafaff745f586f731576a266bad0b59f",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "64699cf9b03907061e05f1ba9fab2c42d2f723bae2726e629bae71b062c3315a",
-     "tiff": "b716b7d6f99e765e77985592dd62a147abec7f7dc700c62968a3ba5519cfb763",
+     "f64": "9f0c29c9f0923c2c5b26e6f0fcf7a34f1d7d88cff355f59fc8fc74733c6c57e2",
+     "tiff": "425855b8d88b7cceed9e5c51aa28eedf58f9f25625b3b9cc76f50ebc2c14a9da",
      "size": [
       768,
       512
@@ -5209,7 +5335,7 @@
     },
     "gpu": {
      "f64": "c5fde6bbcddab649f9ac5c315378fc6b9af690a181a029122fb02dbe043c1b29",
-     "tiff": "7ca944a93a61cca6d6627e6b79b37ec9f68d9f42373305270b8726bd32046ec5",
+     "tiff": "1b2d91a3a43bde99cbbbb93cc4ccc8e3f0f3bd76c5513558ddb1f611b4c1e0c7",
      "size": [
       768,
       512
@@ -5230,7 +5356,7 @@
    "engines": {
     "f64": {
      "f64": "9cfbcf0eb6d365e003961edfce2157c749d72d08337de67b3c3f88d4b9c20c45",
-     "tiff": "615ca20ea4a88597239a7d35d9e66a52fe07e3744de64b63fc2c33042b6cd18c",
+     "tiff": "6bb2a2b223070dddb7fc48dc1f2b9df4fa6420f7f61b4c3e27c87ab6511f57f9",
      "size": [
       768,
       512
@@ -5238,7 +5364,7 @@
     },
     "gpu": {
      "f64": "938c2681d56cadb20f362fed9449376e86b864b66b1100f8cf26a1537d554c1c",
-     "tiff": "f78e0c2fc34e2fdc2447bf64b1a8f622a75a754b36dffd6a4f97a2860eca8857",
+     "tiff": "1081f1b653915e28a0832416f58c2ac3aacfd1cb9b74ca7c86d959005547a3ea",
      "size": [
       768,
       512
@@ -5259,15 +5385,15 @@
    "engines": {
     "f64": {
      "f64": "b87cfd09fab260b3b589868a9e782da4638b05feeb8ec1d3beaae8afa5f1c4e0",
-     "tiff": "01ac0154c0b6bed1870d34a6aa020ac5f458a1041aa98fa63afa69192a8917d9",
+     "tiff": "1dbb8a252dd627a49c50dcfc4ecb804f9958f91d7e52e689b42a8e1b59c9228c",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "6facbc3938f3ecd0462e6c4ae7771ad3a0addb61d4c394fd491861c81e15f326",
-     "tiff": "c4d5d7f1ae45a5031b8057e1566716ad94a90b17e83412d7f6ad09d33e9b6359",
+     "f64": "eb93cde3e78f8f38ce46c7bd1b39a60ee8a1b9b8d28ee82301f2360eb9ec15e8",
+     "tiff": "9b8aad70ac034688045d489665c11541f738b981777d51365ecd815ddc8768a0",
      "size": [
       768,
       512
@@ -5275,7 +5401,7 @@
     },
     "gpu": {
      "f64": "44590c114afcfc3b05a9160565b7f127b45068ecb3b593172a65045145652bf0",
-     "tiff": "8894640b7250e1cf3d2827428511acf1478d31ed60f8c4d8cdb4aed15e00211a",
+     "tiff": "9ae5754c6b57e011bdbb7cc417ff0752315e0dc43c4da81d717ecb0b8b034d04",
      "size": [
       768,
       512
@@ -5296,7 +5422,7 @@
    "engines": {
     "f64": {
      "f64": "7f209e3f7fe1eb2e8e7f9f104631a439424eb182f95879cea53269068018249f",
-     "tiff": "3b18b9ae0b10926e0dcd25f417f6db68631a7b174998bd3d28ec28bad0dc8517",
+     "tiff": "7880fcdfb4aad1251daf4fd57b432afaf2d069d109d21862a9989dbc8120ae77",
      "size": [
       768,
       512
@@ -5304,7 +5430,7 @@
     },
     "f32cpu": {
      "f64": "cbde017223f952d9713edbdb79e83d291e51011b287594bf4078a4a298e71e63",
-     "tiff": "7c5a62069fd3189592c606b9d4407ce0127ac007ea59a01397c16d0c19611a41",
+     "tiff": "cfff8c531fa045e9def66d69caf692faa4a22896143da53c0f9b2cee3c87852e",
      "size": [
       768,
       512
@@ -5312,7 +5438,7 @@
     },
     "gpu": {
      "f64": "5aeac2ab272427707deded26f0e790e23047dc4cc3402c62d6d6514eb9507a92",
-     "tiff": "babbb7ea9fa66b07e581f365faf0064b95e6a24ee6ae830ce2831c50a46d084c",
+     "tiff": "2129c157846c9e0fd00cb663f56a8ed8015c257f6eddd7c7f5863da59864bcc9",
      "size": [
       768,
       512
@@ -5333,15 +5459,15 @@
    "engines": {
     "f64": {
      "f64": "ed05fbd40ca74a11ecd5e070bf90e0aef089cb3287de70848c7150efb56092be",
-     "tiff": "d40058f655c4cbcfd1824f8410113f1e4e0086f64b6179874399d28a6d395d54",
+     "tiff": "2ed276e66c46975504fccdea5a9202f0e0007b0292546a144f56038aa96984a9",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "8f668b6e1aa770696e7cebc96d4971a225124a9ac48be94fcd73ba002f6a08fd",
-     "tiff": "d0ffc5c3e5b72d1192ff4ed6fed80fe38db20444689b16a9c983bd7f0138fb83",
+     "f64": "cc58b8b0552335c06af0c6deeb46dea2a27377f3d728b4d1faec6e97716fe08b",
+     "tiff": "7e2881101fbda92ab093336f0157bb3ce866a802f52df061e8c056861520eaf6",
      "size": [
       768,
       512
@@ -5349,7 +5475,7 @@
     },
     "gpu": {
      "f64": "4cdef2b7ee0887fdbc10ecd4e432778322ac7e82824b4bad9433cf5e7140c005",
-     "tiff": "0e0cdbff877d170667669b89303a1998672acf75d4af979797f4764c4cf53dda",
+     "tiff": "26c1c70de9d0f538b0fa8bf4c97b49c5b6f915fe08236402625db913aa9e51b7",
      "size": [
       768,
       512
@@ -5370,15 +5496,15 @@
    "engines": {
     "f64": {
      "f64": "53d398092503e4225666fc80778d4caa8b357d579364405429a0d24725364a3b",
-     "tiff": "9ad21f31dcfe60836b19866d38c9e16b27e5d1c24b2c2487183310fb24b79d70",
+     "tiff": "9daa0989899e69f304a1a61aba67e88006e74bb54c66aa4d69c470021e55a45c",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "e63e397fe9c3b2f6c57e2785d08134f82d432d57d848d7ec7977d30651c462e9",
-     "tiff": "538e93e316033248075b0e2e22f6799970d4ff41ec02f8a0b8a1a00c6bc187a7",
+     "f64": "474e6f2eecbd80ed7cf54214a5ab3e00be516b6c9a51fd391b356831f9dc30d1",
+     "tiff": "90bd332fc6e27213bec248a1568185e75fe20d491c69c4dec282fcdaad8297f9",
      "size": [
       768,
       512
@@ -5386,7 +5512,7 @@
     },
     "gpu": {
      "f64": "49a4357ab70c6bfcd54a4fe7d3a08e1ae355f823a25a645290ad6499c029ebb3",
-     "tiff": "7c5eb1f2fc68487eb597c2bca75fccef15593dc08a8663a4c4b7805f11a09ed9",
+     "tiff": "d14d7d0faac74f64af503c28260d365f0a4de819e6068384d06671c272b885cb",
      "size": [
       768,
       512
@@ -5407,15 +5533,15 @@
    "engines": {
     "f64": {
      "f64": "2c41f2c2a96fdb5dbfafa5f94a9fad147b4fbf30c20e7e1f0f045b69b5fd199e",
-     "tiff": "ec744c37cb71229efbeb2d55f36fac0a4083b9e16f0d2b5639f8c791712d2df9",
+     "tiff": "87fd5d0d72e767449a574d914df380f5d94ecc034d4e8569746942bfa7270a6a",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "5c26577383d084e196e07610ae52387f1fdffd2407553d49a6caae429c1ec388",
-     "tiff": "720546b547018c375f199ff94a857668dadded892c09c2f1ce8c9630d276afd9",
+     "f64": "ebc6df165d615fe4e2e76ae00aa3470914fabe93ee5c159e25cdfd554d0011f9",
+     "tiff": "9ef17b9cac131a06364e97c82d615311c9775803726d81938bbf8531c54169e5",
      "size": [
       768,
       512
@@ -5423,7 +5549,7 @@
     },
     "gpu": {
      "f64": "083ac19a20735a2ae2ad1c63c26aa6ad9e812e5aac4b9ef76ebb8e823b2a5def",
-     "tiff": "5c7a36946023536f9088063d6253a036787ed1bf5888b9a07a5d2e8cbd9b0bd5",
+     "tiff": "f010aeedaa586bbbe8d8e542ffc0ab0cb076e20b333ceeeac960d928dc2f8ac3",
      "size": [
       768,
       512
@@ -5444,15 +5570,15 @@
    "engines": {
     "f64": {
      "f64": "2a0f3ba36c01ed23c6c852d95e0a370351b0d55a84c7861ad6e198232003c6d7",
-     "tiff": "c4276eac7c424fc85d8e23175280ff36599862e1091384f1dee584c1dbaf141d",
+     "tiff": "3bc7f189267c4f4a28617d56dd0eb4b0fec4723c35d548df012ed9bea8419955",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "037690bc303c2aa1dfc00160138ace4aedcd3a830c2e6f39e2f1cc0cee4c8d5b",
-     "tiff": "9ccfa95335e052ebe9ccebda5763550f6cbe76456464d49fcf34fbf77a8bc50e",
+     "f64": "57e33a6600b28c133c50521209e8ffd59f925e8339c0b96f1c5f77d2637cf47a",
+     "tiff": "0dd3816f7d8d1c886ec3aeb2c8acdf1a5b246d9cf6d33bbf28db81a8f6efc01d",
      "size": [
       768,
       512
@@ -5460,7 +5586,7 @@
     },
     "gpu": {
      "f64": "2725f0163f18749c94909ffcfd6a05e1f405d17faf2446e39ea1b7a01892bb83",
-     "tiff": "d72fcc478dda6b277c8cc6e4fcc590a7a54bff3721cf16ade0efda389469c3b6",
+     "tiff": "bd876b8716213ef30c3a7aa65a8600c42dc9673c4fc8ee3d4c9d82f7c5aae1c2",
      "size": [
       768,
       512
@@ -5481,15 +5607,15 @@
    "engines": {
     "f64": {
      "f64": "8d5c099f3785fbcfa598afe1bd243cf5efcde259859f4a4bd2afde609de44f28",
-     "tiff": "7fa0eaaa496e2e8c47037db6316a3d9d17997829a7cc9a207d715660a6db33fe",
+     "tiff": "78d85196dfd0432922e6a1b68537b317e13c73cc45009c609c7a5288eeadacca",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "bc976b37d8b36e5b0f12745fb9a1bbde30813fdf04a44765272dbaf9eb41c447",
-     "tiff": "3295012f750af7676c8bda2926f0322e30a5b83065216983c099e5f072f24515",
+     "f64": "9d102a9e9df58a84db2abd54435677c98d16477194b4e7f883a19f74678a0dec",
+     "tiff": "9ce7d77c435dcdcfc347c1cb8ed184f8e9c231049f21ecf01bba4d55194bd627",
      "size": [
       768,
       512
@@ -5497,7 +5623,7 @@
     },
     "gpu": {
      "f64": "e4894eaaaae68a47084196d99f287bac3224d1363fc99f13d5814765ef618f5f",
-     "tiff": "1d8992753ae96fa240c7bfdcdb2724a3df2d0fafae0201cdddfb9e460e25e483",
+     "tiff": "7482a07b6580fb8d38de3da8467d13b2239e54dc52875a4f5549cd50fa3f7995",
      "size": [
       768,
       512
@@ -5518,15 +5644,15 @@
    "engines": {
     "f64": {
      "f64": "40ffd88824328ddcf6b60753fc1ef0fef1b1d5241f66c1b2a83dc4209ce112b6",
-     "tiff": "b27ac794861f690c0e0796f1536c3404cdf82f19b6a88d7ca0161b6b50d4d42d",
+     "tiff": "07684e48ddf7184cc25c11fecab25770b2e02b9e2cfd4aebfdc1316d8c617e93",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "67e0b2fe451310a47b85ed3086c1efd96b2d815ade113307e83743038713ab27",
-     "tiff": "cff785960bc21386965f98334904772c7ce6266eba0c0dc5c0a9cd2cf0df864a",
+     "f64": "51f78b8051821f39ecea30ccc11c95dbdb50d8cf1186d00b752671b60a753b96",
+     "tiff": "637cad96a0d544ad4ef597757fd911e8bf4f1e652629c85da2bb0eb684e599a0",
      "size": [
       768,
       512
@@ -5534,7 +5660,7 @@
     },
     "gpu": {
      "f64": "07a5a942b67dd50b9b09e409623a6f46c25ea1b022df488e6544c2661017142b",
-     "tiff": "a07df30ba2b714ce1c14ee982870067de13836302b268a02b3a0f02b234ee2ed",
+     "tiff": "cf1c31247ea96e0e03e69be849dce890222ac304e517af53632c012c2cc5fa66",
      "size": [
       768,
       512
@@ -5555,15 +5681,15 @@
    "engines": {
     "f64": {
      "f64": "0dce6d509b8a4f949faa3b5c9dfc67fb8f714cfc316e46ea77b7803c26b6f6d2",
-     "tiff": "596c3134b123816b44c9274be2320603f2335c6ff67e3ebbcd66e4ebcc010dc5",
+     "tiff": "981ab499281a5f828bfd7ac08bd10086de6a041fb47ab77b57a9785231e514b6",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "5edad7da2318e0bd9d1b3a7d6cb2daf40ddbe7cd055c350c65fb1bb6f6e95e54",
-     "tiff": "81d9e973c850cade8a870cb1175d5f89a6626056584b064faaeb0fa4256fc2c1",
+     "f64": "99f1fca88b2763fc025c3d1c2ef0a9130a0de0e7331b874deff656a0f424f2dc",
+     "tiff": "9524aefc441897a7b1555f103be9c4ae08e0a368c35a43d4fc4029253f68b71b",
      "size": [
       768,
       512
@@ -5571,7 +5697,7 @@
     },
     "gpu": {
      "f64": "4f5841107cb372df1b0bee9171364e5ba7fc818a9d751da752bda6c1f7fe25ce",
-     "tiff": "ef1af068ac94003d9a029c5e4c49133c0910afe120a7fcdf9e353a34d1fce06d",
+     "tiff": "3dc10a781276d4621ad7a24d30e0de559911c49ee05cc3b8e871675f0433bc80",
      "size": [
       768,
       512
@@ -5592,7 +5718,7 @@
    "engines": {
     "f64": {
      "f64": "7f209e3f7fe1eb2e8e7f9f104631a439424eb182f95879cea53269068018249f",
-     "tiff": "3b18b9ae0b10926e0dcd25f417f6db68631a7b174998bd3d28ec28bad0dc8517",
+     "tiff": "7880fcdfb4aad1251daf4fd57b432afaf2d069d109d21862a9989dbc8120ae77",
      "size": [
       768,
       512
@@ -5600,7 +5726,7 @@
     },
     "f32cpu": {
      "f64": "cbde017223f952d9713edbdb79e83d291e51011b287594bf4078a4a298e71e63",
-     "tiff": "7c5a62069fd3189592c606b9d4407ce0127ac007ea59a01397c16d0c19611a41",
+     "tiff": "cfff8c531fa045e9def66d69caf692faa4a22896143da53c0f9b2cee3c87852e",
      "size": [
       768,
       512
@@ -5608,7 +5734,7 @@
     },
     "gpu": {
      "f64": "5aeac2ab272427707deded26f0e790e23047dc4cc3402c62d6d6514eb9507a92",
-     "tiff": "babbb7ea9fa66b07e581f365faf0064b95e6a24ee6ae830ce2831c50a46d084c",
+     "tiff": "2129c157846c9e0fd00cb663f56a8ed8015c257f6eddd7c7f5863da59864bcc9",
      "size": [
       768,
       512
@@ -5629,7 +5755,7 @@
    "engines": {
     "f64": {
      "f64": "7f209e3f7fe1eb2e8e7f9f104631a439424eb182f95879cea53269068018249f",
-     "tiff": "3b18b9ae0b10926e0dcd25f417f6db68631a7b174998bd3d28ec28bad0dc8517",
+     "tiff": "7880fcdfb4aad1251daf4fd57b432afaf2d069d109d21862a9989dbc8120ae77",
      "size": [
       768,
       512
@@ -5637,7 +5763,7 @@
     },
     "f32cpu": {
      "f64": "cbde017223f952d9713edbdb79e83d291e51011b287594bf4078a4a298e71e63",
-     "tiff": "7c5a62069fd3189592c606b9d4407ce0127ac007ea59a01397c16d0c19611a41",
+     "tiff": "cfff8c531fa045e9def66d69caf692faa4a22896143da53c0f9b2cee3c87852e",
      "size": [
       768,
       512
@@ -5645,7 +5771,7 @@
     },
     "gpu": {
      "f64": "5aeac2ab272427707deded26f0e790e23047dc4cc3402c62d6d6514eb9507a92",
-     "tiff": "babbb7ea9fa66b07e581f365faf0064b95e6a24ee6ae830ce2831c50a46d084c",
+     "tiff": "2129c157846c9e0fd00cb663f56a8ed8015c257f6eddd7c7f5863da59864bcc9",
      "size": [
       768,
       512
@@ -5666,7 +5792,7 @@
    "engines": {
     "f64": {
      "f64": "177b8b559a0aac5048a2617ba1ba465ce4fa51594cd894d7f74ff46d8e8d5b4c",
-     "tiff": "9d7e0bb61c57258298928f6d381fe2e606ae01136d89de13412e2ca1949d10fb",
+     "tiff": "7142bcc52a4c4c371189a531a9994b50aebf3d58255bfe9e76dbd6c2a40365e9",
      "size": [
       768,
       512
@@ -5674,7 +5800,7 @@
     },
     "f32cpu": {
      "f64": "780953620acbbceb98dcfe8354b7d0f095559836c0ca183071f21adcd074a760",
-     "tiff": "6ca4f69ca432599c64c60e450001eb0df25057745dcf6218af9f755ca0aacedd",
+     "tiff": "6e55bcc79db9559b39c64806e9a6f9b74056112eeb7aa464c5f6dd8d6c0acb39",
      "size": [
       768,
       512
@@ -5682,7 +5808,7 @@
     },
     "gpu": {
      "f64": "658deb0a15c4ac953fbfd226a92e03f102edd65e720aefd657e1e43f990fb621",
-     "tiff": "000f3cd1ed292fbf7729ccbf40ee17d4875415a95a07cd4ddb324a71438e6cb0",
+     "tiff": "9f5569ce806b460abf28fe2e2e6e86e1b423ba641237d9b29e41cbab6be3a960",
      "size": [
       768,
       512
@@ -5703,7 +5829,7 @@
    "engines": {
     "f64": {
      "f64": "af91a3fcb3e7556f50766f4dda7e6462b4838a03becdee9430588cac5aef7bc1",
-     "tiff": "4df5aec85550476b83b2a2d4e7b989659f256497d33bc0a2a9cf4a32654b94dc",
+     "tiff": "1d6fa394fdc6f6f2b9f6360e8bd2dfd187d22cb71ec66f05183f9b62d3c9de96",
      "size": [
       768,
       512
@@ -5711,7 +5837,7 @@
     },
     "f32cpu": {
      "f64": "e393ba49b249fd2d35a612e030549c03d93ff3b4de59535cb9176694cf89dab3",
-     "tiff": "0ce6cc5b9aa6d3a827cd8a66a4881fbc53aa74fae532bce02e776300fe62c3e6",
+     "tiff": "ce88fd6dc0c49967840065a9911a7c21f09eb7a34f937ad525fd8fd158ff9dc2",
      "size": [
       768,
       512
@@ -5719,7 +5845,7 @@
     },
     "gpu": {
      "f64": "5b85b5a29f698b8395ff9e5c6df3a02a44a02762ab06b395db2aafcc6bfa8296",
-     "tiff": "35a7ffad8142890d1919204b94b8a10ad64c6e3f6f94d45a37ca0ee0c0fa6ee4",
+     "tiff": "8f89e89a653830bfe0a597e84be2c67d34481fa3694c26ee3567d7ba51b3f091",
      "size": [
       768,
       512
@@ -5739,24 +5865,24 @@
    "grain": true,
    "engines": {
     "f64": {
-     "f64": "564c2f7cab14b786820c059a475e394f64d0925aab6bcd0d87644dabc73fd6e9",
-     "tiff": "f6d04accef80441dfe3cf312e3c924237174ffbf12f881b5c08abccac81b9ac6",
+     "f64": "6bbc90bc30c26e3688ba9d6e3cab4493a7a1a411cfe7c0c0fa5b47c910337101",
+     "tiff": "25bc7851971a12053489c49fedfeeb9cfca4bb79b0910aca9ff2d65dfe52ad0f",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "1cbe61ad360e1cbc091024a3b258626df14ed578c4fa83714ac6426e671ecf39",
-     "tiff": "ad9e037a1662a7ac2e86c309563c289aef52838ad12eaad3e2d85a73e634017d",
+     "f64": "6b8358f7ef7b5f0b6c33025c0fd54c1341e30e78d4c5a38c47742bffaf7ab93b",
+     "tiff": "8f5e616777a154e11a3a8eff4e1f9e44f978ad99c93ed39264df79bbec7de124",
      "size": [
       768,
       512
      ]
     },
     "gpu": {
-     "f64": "321f23fe739b4bea864028b16e960232a7c3c3bd086cc93ce8ca5d17ee3116b1",
-     "tiff": "b76e0cef5134dd7ba4c53f2891006ba02297fc5ec497e724852e9d31f64f26e9",
+     "f64": "fba6075842232c509c614312f668159552ac21ae10d85b83bd962ee5c40cb401",
+     "tiff": "871db0f1cc2494ecf7c207b0f24ffcf61af76ca4d3ecbec30fcd8dccae538dc6",
      "size": [
       768,
       512
@@ -5777,15 +5903,15 @@
    "engines": {
     "f64": {
      "f64": "8458e05d582f0b430323838ebdccaefa336a7fc96ebfb6f77940105d5650765f",
-     "tiff": "11fd2e4c7f7b74867086c012a891f143e80219fc55c47d2c6efc74c072d2050b",
+     "tiff": "9024d569ff2303637b74a10a635a741cce8788f10c00f6811214a0275c8bfda5",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "2c9bd78d831629d2d1bf250e2be0cb569ebb65469e1981f5f5cdc25269da549d",
-     "tiff": "1b70deb3ab75620925505acdf7e1773cd959393b0a2708aac02346947fe59793",
+     "f64": "cc70c013f014682e5d6b67e2db7e9d3b9806f20e5be4d263947c2bfca4e5e77b",
+     "tiff": "9bb1592b6118d97dca59740b58ce5076c779d0c6308f8f118cca04c02f54f964",
      "size": [
       768,
       512
@@ -5793,7 +5919,7 @@
     },
     "gpu": {
      "f64": "793b504b82a3caa64e38d5549c49a1c629141b91adfa1055bea7df09d189a7f1",
-     "tiff": "6a90d2ec8ad8f882610245fe6f0b5fbd61795627ca679585ba8887a13bf33917",
+     "tiff": "4dacca7c7b2535be8f1a5b35a7db308d16fe7d5fc60711c41c146a5929bb773e",
      "size": [
       768,
       512
@@ -5814,15 +5940,15 @@
    "engines": {
     "f64": {
      "f64": "9becf0510152ab2cfbdd99d4f3b68800ad34e0215d2fdf9ce1054c06e1c45d90",
-     "tiff": "c38889ff5900aa6b9ddc8b54a49980c4e488eb06d7b9379394a98dd08f5c907c",
+     "tiff": "d9b06e5a19e015004e581dbd19a942807f85eda6f280d596287387060c242958",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "1c96dfa4f4a37de2715406d8ffe5eaa50ea14c8467887404a9e524aa0cd32d7a",
-     "tiff": "09d4af24c42ab99acd05c42b86cd4f5fcc211618ad17cd6b0a9134e65136e858",
+     "f64": "58a3ef3df0f6653fec67e6bad9af66c7624657b996d0f0b794452b6d5a2bd8d5",
+     "tiff": "51df589cc6a7e391cb1b7df9f06e26d8ce49e42f88a0aafae85c970220c41b78",
      "size": [
       768,
       512
@@ -5830,7 +5956,7 @@
     },
     "gpu": {
      "f64": "2b9a8fc9866e6e3a00df9c4095ba30de836185078871f6acced46c91a2c064b4",
-     "tiff": "ade592a80869a7368dbcf80100457e2df3086a7178275c76efe4b64fc1262402",
+     "tiff": "d10143f710f8b45b10eb431bd4ab607768a71eb729bd7c8f16a1688abb751a98",
      "size": [
       768,
       512
@@ -5851,15 +5977,15 @@
    "engines": {
     "f64": {
      "f64": "ce467a195c24e7337bce76e957e9ce110ad81f77c7f271c93d2fdb0b855dea6f",
-     "tiff": "8cfacff2a203d16797a9cbda02a7e21758c7a3d030bf605153c8b5c152b8d379",
+     "tiff": "5d36c4f8f9177e45778eed45180471c70a83bee4c9bce0c42de86d1f0542a50b",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "7a8f61200866d2fa76812a47c79677c21c77a1a5501d2e4b5ad55b79b1c40c3f",
-     "tiff": "ec87db201b396d9e7153005e088e42811c6e61f4b91effe47d3f47c65e4ebcf2",
+     "f64": "2dc5f987309e8f9a1436fc97c3728d09f1bcbf864345f299eb0e9881e4515ce8",
+     "tiff": "f4c6cebd96f27a8e15a569f116355961551c7d216149aaa5d50f97f303934147",
      "size": [
       768,
       512
@@ -5867,7 +5993,7 @@
     },
     "gpu": {
      "f64": "2ecf059179c78c3da5dc1dc6defb274f4f0b51536fb1ecd3ade26acd14239448",
-     "tiff": "5406b6cde7b384def75a4315a4a77394c98423b2001f747db2d7ab8a31835142",
+     "tiff": "3eaee511f3ede069ee9d120e0c6e22b975e1cc952c429f6e7eb6b4f98324b8da",
      "size": [
       768,
       512
@@ -5888,15 +6014,15 @@
    "engines": {
     "f64": {
      "f64": "5ccd21f25577d4fc78579a8def491429b251414ca9ec3642cf336e15126b3e69",
-     "tiff": "fb52c9b671c979079477d1e8e9886a9e7f227b453a0ed6f6e83f3cf8ef73c704",
+     "tiff": "7be0b74df81d635e5cb99d856ca60487baf9b95002915eb2c271d2919b4a138d",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "1fbcefdc71548a63fb903b0cda1b9b27c102b3d567974ba4a83989b11b62a683",
-     "tiff": "9f0399023f761e7250453499c8bc916b47bee0447c4829fd4889ce40f8913481",
+     "f64": "73de6c9c3311274f7d376cea226d9cc8489cf8c96256a461ca143b29038b8c56",
+     "tiff": "f396e1f1fdab108bc690c9336b8233cb91b6a4bfe7173a432ce0de2d3e57dfa8",
      "size": [
       768,
       512
@@ -5904,7 +6030,7 @@
     },
     "gpu": {
      "f64": "6f72433b377dca409e297ff070efaa72dbaa20117e8eb00177a2b367ef762c4f",
-     "tiff": "16260e88e9e9440fa84f0e53e99ce4b7ec5a3708aa6fa4db78305e8a8fd88181",
+     "tiff": "5e77cb77b5912ee8ba3cab25cb7e588cee4b6e8e25c12d99732507a657d0275f",
      "size": [
       768,
       512
@@ -5925,15 +6051,15 @@
    "engines": {
     "f64": {
      "f64": "03a61f8fcf13096d086b5b0c02dc09c24528fccdc4924cf1a4801835335c384b",
-     "tiff": "2ce96a28cc22a5ac103682b4d71bc099896a783c6928c1d7aabdff0dcc51370f",
+     "tiff": "05166f33d8a634f04deba2280cf51ae3fa86e0e99010c129c1c4964c8006ec1a",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "dfcacbebb94ff2e26a62c6edea7d248a1634e691c2c92be86325350b18c08add",
-     "tiff": "baf3056169fdb4c44948ca8cb5a9b5abb74161c0453c1acc9d114fb045e43407",
+     "f64": "b6e643c6bfb783dfbb269812e46dde529f6613232a59ba37495a7deb8e9d596f",
+     "tiff": "61b3f2f97253727151259faafaf4a3cd840553295892b8b88657de2dcfaf303a",
      "size": [
       768,
       512
@@ -5941,7 +6067,7 @@
     },
     "gpu": {
      "f64": "be7ae70ea58ed7660c1d088755275c839593ec44439ece9e7b1342a3cdc24238",
-     "tiff": "1d970783d7197c181f47c476e8cda82633f8bb419025999e70a4217e6ee52a63",
+     "tiff": "c958204bdc25622452a48294af5095a21a1596fdb4e3f70dda60a6ac31211f54",
      "size": [
       768,
       512
@@ -5962,15 +6088,15 @@
    "engines": {
     "f64": {
      "f64": "7e2273443d80c839d49cb3ab1416c1a95d2854350f5c698edba1dab2a0c9e4e1",
-     "tiff": "cbf08b63110ee15fa921306efbeabce9fab0ba2cc4ebeb11a13caa0063d31663",
+     "tiff": "14c62c6e9b2838093936b5db9c58ad4da8170fc8c91a6ab4bd05e1e887e18e07",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "3dc5d771fbba816e906c733f63178635781a3e6f34bc24cb915a29ea405e035f",
-     "tiff": "a979952daa36cf5682a507b478e31c622a523a0e1863150b1b8fa015aa670a68",
+     "f64": "bf8a1b3977fcc4d92274a9e73142fdd604147a1d16f6aebfeefddbe0633def20",
+     "tiff": "6bbdf5c54552456c312fd269b1fb44dc408c1201fb5c2a315eb1ceed3c820f74",
      "size": [
       768,
       512
@@ -5978,7 +6104,81 @@
     },
     "gpu": {
      "f64": "7624ed4a3cb35421eeb7fe76bfd6a5eba5c9954c499af3a3aa21b364b07b016f",
-     "tiff": "30e8a123e718de4a48a85029be885af76004ba013458cb6bd94f6ebc7de524ec",
+     "tiff": "a7a9793e11a3b148ee750c0980a721075b8a3bfc1964cc121a7f691363d50128",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__preflash_exposure": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "preflash_exposure",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "d01dc253c00b5cb30be4209df3b0a1a50901849c4c02e5604cbdd78e0a1ac90f",
+     "tiff": "ffb888e88d3528f9cbb1b2d18a8d8b9c038581732557a224cb4c665686b69368",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "ed6c0e174cc39cd5a82f85ce1731c53089f6517cb464f2cdbb43b8d38fe63dc9",
+     "tiff": "41fc31096de5d59d671464190062f21699e117f54f687d764d58eb87cb69cb03",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "2ecd044d26ffcf4b7312d947c03393aa5310a27c2dd8ae15961c396cc71e3d46",
+     "tiff": "97b1ed3695475681191a5264d8697a7b617555c9230c49e69a69e44aa4df8a64",
+     "size": [
+      768,
+      512
+     ],
+     "adapter": "Apple M1 Pro",
+     "gpu_backend": "Metal",
+     "resident": true
+    }
+   }
+  },
+  "synth_noise__kodak_portra_400__kodak_portra_endura__preflash_white": {
+   "input": "synth_noise",
+   "film": "kodak_portra_400",
+   "paper": "kodak_portra_endura",
+   "preset": "preflash_white",
+   "layout": null,
+   "grain": false,
+   "engines": {
+    "f64": {
+     "f64": "391f6ebde79ece1890c0d2c9ee3294d1d41589c131b4cbd0626c32dadaa35dba",
+     "tiff": "4c995bce9718e75f9e84a345b2e8d7365264ba033dba432795abf4893c2a64ca",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "f32cpu": {
+     "f64": "ac7e7b5d98fab958c931bb5a6c07d453f7cbf36cd76fdc6069c7cd31681ddef5",
+     "tiff": "3233b8ea3477e9b5333ecb0edc2871f2a27e2869a36aea1e964ae16c9b1c2158",
+     "size": [
+      768,
+      512
+     ]
+    },
+    "gpu": {
+     "f64": "8dcbe765f75929b202861592388e5cf5b389385349828a2b4c84ae7671ebdbee",
+     "tiff": "37edef52620143089b464c887cbc7f39afde85dc8d04ba452150f47f6d963435",
      "size": [
       768,
       512
@@ -5999,15 +6199,15 @@
    "engines": {
     "f64": {
      "f64": "d6e95c5d2c4710025b76f4d470d5ef609dcebc8d356eaa0366156eece2c79ea2",
-     "tiff": "670ebcee364ba1b2cee8ca568ae71c1c05000db84840e66f32d1bdafd78941b6",
+     "tiff": "d6ea3f9865e08cad05bdc4b3f7cb37d09ad93fb8232fd4d2dd793170caa6b771",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "afb26e5f654b0d9ed0202ca2b9ec409e73e73252a9662c5ef2373388c00fff22",
-     "tiff": "00d3c440cfb0098b931b895a5a26a684d7243b71ec4e33643be9ffe4707d7d67",
+     "f64": "ce396008fc79a06fd0b6ae036f1d165cec122d1855ee7081f2dc9c3b41a6142c",
+     "tiff": "59c857a442f51fb47f3bf41ba0d9f4e4713426d0b8120282fa81606fbd4b7abf",
      "size": [
       768,
       512
@@ -6015,7 +6215,7 @@
     },
     "gpu": {
      "f64": "63175733e9064b2cceff42cefd358bb71ab8853594b99589d3aad7a565eb3892",
-     "tiff": "e6ee1cc86ac0875e27cc6b6254f91dbb0096802c23058d81f385329dee49dcb2",
+     "tiff": "4d77695855f419b08cd67ad5d00a4f864c4d3b4286831a03b6af52deac9d33f1",
      "size": [
       768,
       512
@@ -6036,15 +6236,15 @@
    "engines": {
     "f64": {
      "f64": "928a817b8e0634931e589b9c66b8eca292472a2d9d728c9e49909dbeab9fe2b2",
-     "tiff": "a2b47773bc03311c830f76f0de4435b0c4a1d8edd4ab3bdfb47974132adbe2c8",
+     "tiff": "67ee0e85ee0ad4a11f749f02424ea320248dae1fd112d048c12b27ae5f876d77",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "f74b97bf577ca692e75b680ff6ec19e2c6516898bcb1286c5cf3b0a76fd75053",
-     "tiff": "617702058dda9ef556543ff8cc1c03d4a519e2268ed5ff2f18f2b25e3b60667f",
+     "f64": "93e2c8e87f3c9b687c9146d3b6a22a5c104ad374643db49fd2a0cb43d7416c3e",
+     "tiff": "eb30cb446adbe8a4d19c03bb190d491e8549fb1e5911c989a73f75a534ffce91",
      "size": [
       768,
       512
@@ -6052,7 +6252,7 @@
     },
     "gpu": {
      "f64": "bb3beb83e159790fcc7236dda3511f166bd230c1a97645ce78b38d1d854d0401",
-     "tiff": "5207294e03f3d9a4167c97428021b928873e8c3426ab1f53aae7447b2bdba389",
+     "tiff": "d0de31bf1141994ffbf71907d15f39ada88ada31f25dcbada3594ee07f327b7e",
      "size": [
       768,
       512
@@ -6073,15 +6273,15 @@
    "engines": {
     "f64": {
      "f64": "67b35662441c45571367ce948506636758250e5dc89375e6591e90ef9535bcc9",
-     "tiff": "77ef28250585a419d6547340d727adf452e1b0cf07a55f43f7ad60ee2b8a89c3",
+     "tiff": "0294f498a8b362c35f4fd7a1d3d20958e4c016acc518cf6f880d53bfd3585ec9",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "239a050f0fe492fbca9413b394f47a105050235e2785fc6ec80c196b784168e1",
-     "tiff": "8b54010f05606ccbde84ddd17a6d65542e495b9038a33b189ba40331cf6ab17b",
+     "f64": "a2436df1f41e6011214435e22f96317f0589c2d7618d88c6b4043ca5698e28b9",
+     "tiff": "2184b427f0f8cd4e0a658adb17c1b2d2d266a78bf9af6b1c9184ad731b4dea19",
      "size": [
       768,
       512
@@ -6089,7 +6289,7 @@
     },
     "gpu": {
      "f64": "728445f873d0cb3056521749c51482ffd855d3bfc647efb780d5263c496b42bf",
-     "tiff": "9f71fab5aa3cb53d0a74905fb862de7794135bb8964c7e756688969ed36c8c29",
+     "tiff": "af859cc0d8d17c7d28278017f1f0ff21d3c4f187e914f8ee81133cba2ca0b3d9",
      "size": [
       768,
       512
@@ -6110,7 +6310,7 @@
    "engines": {
     "f64": {
      "f64": "ca9105059bf4e4357fade4fa66825dc1bd94a031c4ac7eef44753aa36e356075",
-     "tiff": "622f5ab3b0412c92bdade2fab79dd53ebcc135bd9fb4daf361f3f351f59032f2",
+     "tiff": "1f164fff7cf043ed7524a86bccc49e7095e2791c488bc65c7992c814caf423d8",
      "size": [
       768,
       512
@@ -6118,7 +6318,7 @@
     },
     "gpu": {
      "f64": "af21ba83de647348414050582e01525d19750530227cf3c07fb1e334ed39ff17",
-     "tiff": "283367f5f341f8d2b867dad91df476c8ae9cd7b0f925c7ab5d25117fad728943",
+     "tiff": "6364bb4a124307128c898232db8f915c72e2dac1cc674b4e3fd5935f1577cd2f",
      "size": [
       768,
       512
@@ -6139,15 +6339,15 @@
    "engines": {
     "f64": {
      "f64": "7ddd9ec229f367677350af4156da0c62f2a8cd8f2982936fa72162d202ad1c82",
-     "tiff": "4ad5e50cc06054bf5ee101d71296d214624f37578477f404f2c17d129cda661c",
+     "tiff": "0f0242da3a9d7e084dc087061a8fcd173447bffe90f80c45957429e61057ad02",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "a2188b8b60daecc70a30aa7cbe729e29c19fed67f970e71035f202cfdb49743d",
-     "tiff": "ada973b412f1d9880265d887995d7d2b2af8db2f7dee85349c084a268733d037",
+     "f64": "86b19360bf3f252260fdeb63a8249262cc9d920c5f49db69f6fb94f2fa6a3246",
+     "tiff": "1f129a0ae281dec2f4951eee64d58c7c7be081e5152f12dfe5cd57832fbc46ac",
      "size": [
       768,
       512
@@ -6155,7 +6355,7 @@
     },
     "gpu": {
      "f64": "af5cb28c17bbbf70a25c0b8605fbc3d68700c17404b27501782bfdccf784770e",
-     "tiff": "44721c07662f03044834bc0829c8ac9654266c9954e33426b56debb5f1b506ab",
+     "tiff": "4250e400b089ad1dee448a6b041b1a5ae129b350e800689a9fad171de12088b6",
      "size": [
       768,
       512
@@ -6176,7 +6376,7 @@
    "engines": {
     "f64": {
      "f64": "527177946582d8b56df5b14a29d8874cc781a05d587cff24a0cb1cd97c08f030",
-     "tiff": "e41963c8f3187c75efc36cbde536f90d4614d0e531c44c66976ba0d7dd3f27ac",
+     "tiff": "bf8690b8ac7b3a73e630ce6a572fa54f16981f1709a9dea64d6ed745588fa3c7",
      "size": [
       768,
       512
@@ -6184,7 +6384,7 @@
     },
     "gpu": {
      "f64": "f66a71baf752c375c2b22dfe8f8617a9ee9b5ba6b3258bbb22af97136deafd5f",
-     "tiff": "ccd8763bc1ed089aed15477b2fe6453ef6c494c57b9f4bd052b1785bec533fd1",
+     "tiff": "0c0b6bba4a07569107151308d885c76f5a6f1e62b8c1aa475627c3ecb17de4e1",
      "size": [
       768,
       512
@@ -6205,15 +6405,15 @@
    "engines": {
     "f64": {
      "f64": "ddcf9296761c8acbde5d69eb3a1081f27b88ce419d35d6109c3be4f7c99634d5",
-     "tiff": "b5de6b4c468e8cdb51fda46a1f55492b0cf2bffb7e16836bb5c12669f454db29",
+     "tiff": "b24038e612f56657ac1aba9d2cb5d6a5337fbea259771f40bdace4a316d16483",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "397b2abfccc0cdeebe08d49cd57d1cee383a99af793068fde062ea7d5c77eed5",
-     "tiff": "a022e01f12ed360868e03b862ae6bff9cae7cedb2c575366e5069987204d1714",
+     "f64": "9969fa6f458cbb2e40b2f0466772a2195ea81815cb941f86c13b9c2b9adeee0d",
+     "tiff": "0603bc5159a2c283588ffde701d76b78fc7e1be103cf823951021f5ff4d3837e",
      "size": [
       768,
       512
@@ -6221,7 +6421,7 @@
     },
     "gpu": {
      "f64": "811123ab9f73d7eebb92fb81de57e8077adf8c229f90113bb9caa0bf69ed6dd3",
-     "tiff": "cafc59ed45b3340734983f853bd6e649524535624774e6cdb9726396f8984d63",
+     "tiff": "7c46d51bc0da9c5f35252091de9d7e957150861c7823eb12905120755aa3d346",
      "size": [
       768,
       512
@@ -6242,7 +6442,7 @@
    "engines": {
     "f64": {
      "f64": "0ca9c6592088551d59d11218e6f8ec0dc3f30c0cc561a210f05ea2250867a0f3",
-     "tiff": "efeaf177db66e4cf0a5b6921713c1fa65cad38d937aaa13be3ee4f2e5499811d",
+     "tiff": "745a339e65e462f48daf17fabf2dbb794532a7f45a7d5da167276a904cbc3da4",
      "size": [
       768,
       512
@@ -6250,7 +6450,7 @@
     },
     "gpu": {
      "f64": "f9f812cde8c57af8d1f8fdba6b3ab22f8df47097e7e51a176b861cbf039f733e",
-     "tiff": "3e7a7813610013052190bbe64cced61ea6cd12d0a63722823dabd7d5b0d18cf6",
+     "tiff": "9c8c38bce809857526c0751e5ef00eb0e7483aa83cf303c41fa10412c6e9d3c3",
      "size": [
       768,
       512
@@ -6271,15 +6471,15 @@
    "engines": {
     "f64": {
      "f64": "5a1292d82f00eb614a431b00e71450771dfffbc3b3029228587d9149a254e3ed",
-     "tiff": "ccf0df4958c60a94c096e611be425906a431fd698af9478cf1b19344d61a842b",
+     "tiff": "545a438c05aa96e9149efeba06aae2ecabc1ba46677ee67085acca827a4245e8",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "93dda9c7216fd566b915a641550338cc2adccd8dc7f6278f36b81001105e615e",
-     "tiff": "e9575fff7ca212b453912546fbbdf5e07875acae25b6500ab0a4c7af040839b6",
+     "f64": "ae9a8fee088f9632c06d414bf31f5fd6f23292a19005d5fc6c2b62fd7fb34439",
+     "tiff": "5be0dfde983b0b1af229d64a196016bd414550081525a4649f301e5c79525c1d",
      "size": [
       768,
       512
@@ -6287,7 +6487,7 @@
     },
     "gpu": {
      "f64": "4338bc264b248d37dae189eefba7e09190d8df2b8211939d589a486b5a80260f",
-     "tiff": "badf93a78954d5e88a3d96d8ad13266213f677172b6f56714a81e5c2d1568ed0",
+     "tiff": "c2fb15e25e467d79b9c79e4880d027c4475a8b4882ac4802aa5dd3fd7cb5cfdc",
      "size": [
       768,
       512
@@ -6308,7 +6508,7 @@
    "engines": {
     "f64": {
      "f64": "ab7504e9617e3d2779a8a5d251011f0130e89808b0091b22d22976d7844b826a",
-     "tiff": "c979c0ff2f84d8e67d5aebd1e4732b6d203017c4e35ae7e9892e4a62ebc6c08e",
+     "tiff": "699ac9228e2919f50f446df5ba4ba8aba9c89701e92a00e6c12982cd0ebc0810",
      "size": [
       768,
       512
@@ -6316,7 +6516,7 @@
     },
     "gpu": {
      "f64": "1bd96070dbd25d735465962da696fddfe553725a0b258fa51eed3639822a7a4a",
-     "tiff": "ada30533787e2f9cef4f9f250c49d4035338932ff1cdbf6ca19864bedadcb9b4",
+     "tiff": "0c6ce53987699bd302417afd1ad37c0154b0495cb6b3a969cc70bcb1771fbd76",
      "size": [
       768,
       512
@@ -6337,15 +6537,15 @@
    "engines": {
     "f64": {
      "f64": "3b868993c451be8e037bf350a9fcacab8e48e444dc243a48a2a9c2c22eb95068",
-     "tiff": "58012173525bec982f8cd704f32e5d807dd6ffba1a77b26aa2ebbc9d3a1671df",
+     "tiff": "78e78f388ccec58eaf669ff0e32825090903c694567f89069b53d5fcb53ec96a",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "227370cc7089c1b0ebda6836e89182aae8a1e5b1f8a0abf682b724a4e0705f21",
-     "tiff": "ab4172b104751f5ca94f6353d23314831e3e2b5b445bb984187be17f02f26fa0",
+     "f64": "81fbc04d3f92f4fda8e07c7b4590dceb6d7f68f8fdebd99b521804b6bf5a9b87",
+     "tiff": "a1945731dc469ec068cc281f42695478a0f3593eb0583ccf8a466096bc0d9c3f",
      "size": [
       768,
       512
@@ -6353,7 +6553,7 @@
     },
     "gpu": {
      "f64": "8e6d0960cd7db380430a0b29aac276f8cc19844fe0170e6c929afd7c46748084",
-     "tiff": "86e14ecd45bf0bda0657077c954807c32ebf734aecbc81fb4da9a6c38607fa4d",
+     "tiff": "e75e85cc875cd0117706e79f28c603aed043f6ea78078c3f6a9413f490cf89ca",
      "size": [
       768,
       512
@@ -6374,7 +6574,7 @@
    "engines": {
     "f64": {
      "f64": "63da49fba770b771f2e157525c7a8565ab7c2aacec8c8a2ef7725808cb82ff70",
-     "tiff": "04829ba66d2c6abbffb4aa49365626580bece765f25e65ef0aedb99613f3b0e0",
+     "tiff": "7265cd14414577509cfeb5fa6feb4897aa12ef891c8bbc0c564a79225ff88c78",
      "size": [
       768,
       512
@@ -6382,7 +6582,7 @@
     },
     "gpu": {
      "f64": "52f16a75bea3b129b7a29cbd194f113f7996639151405ff96f28399561e0724e",
-     "tiff": "a72fc8d1bdd75c771e4b89b4751abf79f7343c8cbec59531557236435f8d9aee",
+     "tiff": "b82045e343b90b1127d4c5caede5626d3ff580034ee9d95ec59e21d722d27313",
      "size": [
       768,
       512
@@ -6403,15 +6603,15 @@
    "engines": {
     "f64": {
      "f64": "b5989ec794587cd26f81b8c96972d10d86deb703641c33b862bfc6eb00d53c52",
-     "tiff": "56deee94d7c5024bbcf5996c0a649b47e3eaced1105ddf019ed6b6a597867dde",
+     "tiff": "bb173fbf48e58a4b48c5c58436223d91391c2b471a29084804e9c08959ec5294",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "a0f4f84d4b099f7e333307b76c9f1725bedd53466e89034c75bf93796a4d7141",
-     "tiff": "a8d63fa42ecd47137171cf361d414c562e71aa244cb65c751d1f4be10a79604f",
+     "f64": "29af72cc5245abac7aa7049a48b3c88e2c753d07c194d41e8349756fc449ddf0",
+     "tiff": "e3ad159f95d1b4f31ad9bb05a658657b619c9cbb4bfc7326ea989faa773dc25e",
      "size": [
       768,
       512
@@ -6419,7 +6619,7 @@
     },
     "gpu": {
      "f64": "3f829ce615446941d3c676f483825a6c2aee964be51c533cfb8fd030c846d478",
-     "tiff": "0fb5e9061fd870799fc3443d27cac63225c600dfe290ec04b2150f34e74d20fd",
+     "tiff": "e90e7c8f451d02d8fd1adf3927b2a89d7f7f7d51cc7f06cd46cf5f6162556bc9",
      "size": [
       768,
       512
@@ -6440,7 +6640,7 @@
    "engines": {
     "f64": {
      "f64": "9d5d47620b86196f6817bc6a9b12d03f24b9e6d027d3ca2b2b733338229e8c35",
-     "tiff": "abb601d033595b73bcc1bbe7ebc378deda1e0f00670a9c289658b25761adac87",
+     "tiff": "d4c3126d2222de9e6a1a1419133adcd6ffec8ce52afefcaadd2bbe373a3db6ea",
      "size": [
       768,
       512
@@ -6448,7 +6648,7 @@
     },
     "gpu": {
      "f64": "88ab7a35862dd2b7fbb5baf17ca6bd93e5f80ab92c6980a58cee00c6a2da9b1e",
-     "tiff": "1eb8ca65625fcf1f7596269e52883a7850acf84ee37e96d2a9a2faef172f4398",
+     "tiff": "fb65b521a8f1e507df51d6096bec836e95d1099d83097afbd1f38b40f43d3bb9",
      "size": [
       768,
       512
@@ -6469,15 +6669,15 @@
    "engines": {
     "f64": {
      "f64": "1d86343bab04095f72055cf1249713b93ff96d951026411479b4d10f0b8f0e7f",
-     "tiff": "b23b7c3f1d09ea116562725e50d6aaba4bf6e430b62471794bb90c15d58b54b2",
+     "tiff": "bc0bf6d0bffb196935cb8ae0728d6a7ca13b7fec4a30d1e185197fefb64044e4",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "5cc0707c615986f85be0757286e27d18ae94c494b05efee6aec81250df919d14",
-     "tiff": "dd47102acaf840dbccb35205fe86179037b7017940ba0157183dc317fe94e9de",
+     "f64": "f5ad35fae184fd0a880d1a93c8ef4033de208db7e0883aaf0a464234bfa8756d",
+     "tiff": "21b84564738af0030fe6f8b05a00b65940af034319cf714e62cb35a44854a698",
      "size": [
       768,
       512
@@ -6485,7 +6685,7 @@
     },
     "gpu": {
      "f64": "65fd06a54d2162b33bbef34c3d4b2473e1e876bb8de9734db56193df1a8508f4",
-     "tiff": "211991e4e982c4f4ac07f555512e4678851fa9f80689f5416f1c1116d93c2eb4",
+     "tiff": "47b3d7b7e8ca065f9d64e38932ba5bd77f00cc26221338778d81ebb4516a098c",
      "size": [
       768,
       512
@@ -6506,7 +6706,7 @@
    "engines": {
     "f64": {
      "f64": "cd002e04701ee4b242e5593a7a6432a8bc48e5b3bbfb821d997ff36c303289c7",
-     "tiff": "087a76843b75f2551a0f6b5e24b94ab639f033471831f957dc57ce939cf27697",
+     "tiff": "a80f6b0d4852d8b37402b0c9b280ecb90718fef64bb8e29225bdf4457d6d0316",
      "size": [
       768,
       512
@@ -6514,7 +6714,7 @@
     },
     "gpu": {
      "f64": "590f3e16b517d5dfe84ef362573df9bbafbb6d580cc61987b8215517e5724fb4",
-     "tiff": "c0d6f9646c3d79b1c4e6b9297825d95613a7a704aaa82465fe760c8dd6b289f1",
+     "tiff": "867a560ff415b1f96ef0813069a669e74188aa1db185d099abb2ece106d28e0c",
      "size": [
       768,
       512
@@ -6535,15 +6735,15 @@
    "engines": {
     "f64": {
      "f64": "32c574320187e0bb6f4527f6ac025697b057e85674c09d5581fc1e0781ff07b6",
-     "tiff": "097c7b7138f658e1e385b1acea9e09997c044748f4fd8f1c0a37f42bb2b946f3",
+     "tiff": "53038e3a679c1d32426a34dcf93f77aa1893683dc4d585021acd7273fb5849a6",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "54be2c9efc7201e907ded00ecc5daf7476b57471f62502e77b903fb1b07d3399",
-     "tiff": "ff131dcbed10434b423b08686ff6f54d2f84dbbfe1378244ad8937b63b6c0147",
+     "f64": "e2ce8147bd886c826b1b92cdfe4ed08fc38f92ae2cf2491c8c6d4a4688594bb2",
+     "tiff": "e2a2b1e90d9b79131112d00accde5027d2e38134bacc78a3de9e33eb3e5bb33f",
      "size": [
       768,
       512
@@ -6551,7 +6751,7 @@
     },
     "gpu": {
      "f64": "52e19b226d4dafb138ff7b194102e417ebe277e4ee26a65dbbc2897606ccfa0b",
-     "tiff": "4e81910ae9b8f0592f7cc40542d9ee4fc8496e30fb7c1b61cd93cc483c5811aa",
+     "tiff": "953d272e244c45378cd0301cd2d10343e71f8af9da255f415bc8b4f09ebbe2bf",
      "size": [
       768,
       512
@@ -6572,7 +6772,7 @@
    "engines": {
     "f64": {
      "f64": "ccc23e4f7029f39d82b86b64955e28b49d54291aa6d82e1dc11d2217e30fa924",
-     "tiff": "51105584fee463a95cb03830355085ea20db17b55a179331ea1f4aa769a42598",
+     "tiff": "4836a77ace014d94b80d2c811b4635e6c3b217de671e5a95a3d2a65428a9d318",
      "size": [
       768,
       512
@@ -6580,7 +6780,7 @@
     },
     "gpu": {
      "f64": "6fd77dd18b766821e63af69980252092749c6e6b1b054c090eb4cb34281bdf0a",
-     "tiff": "1c4cfac645e4f25f6dd604ba6b0b4b81ce35df9af3e6cf20e8e40b397b5c9bec",
+     "tiff": "69fb0b68c6f4d3c568fbd8e16c1e4f1cd131f7218436cc7988ad4d228bc24eb3",
      "size": [
       768,
       512
@@ -6601,15 +6801,15 @@
    "engines": {
     "f64": {
      "f64": "76dc119ad743e75240af8bbbc57fc19043fef968ff438f80ceb6f6b692f2baa2",
-     "tiff": "4e47dd36e8757465adf64001b6ecdd188839adfd70b258b72d20260b58b1758c",
+     "tiff": "0570c9198fa4d896e65d3f17c5f9bc577f2778c6a6008f3984cecdab80ef6ab0",
      "size": [
       768,
       512
      ]
     },
     "f32cpu": {
-     "f64": "337b9c4b3bc6575b3512ee8485b07069960f4f4946742602c1021ab23364e29d",
-     "tiff": "c9d3b5119e30d6f946c60f4ded4c18c705047609eb09512c576d4e47a30ab910",
+     "f64": "8c5ca55a22652075754a0ed930896ab58258512ab73437735b23fa813bba644e",
+     "tiff": "c74560a9141a9ec11306ad37d1b114aef0ce8d715ae1b85fee8289b69fbdb3f1",
      "size": [
       768,
       512
@@ -6617,7 +6817,7 @@
     },
     "gpu": {
      "f64": "1f9d422a24f4f910b48f7c3bda9942ed513b5be34ba3bc4f0fea26b6a60bc49e",
-     "tiff": "48ed0bca574ef00e37edaa7ed4c532c282324a7aa3bb3eb953c54d221fd2e2be",
+     "tiff": "ea6cb62a745a86f8f50bcacadc2706038f980fee6e8bd94a9379b09ebfe46d22",
      "size": [
       768,
       512
@@ -6638,7 +6838,7 @@
    "engines": {
     "f64": {
      "f64": "9a24b8a0af21bccb2f9a401a2aba795e94de5330790786cd8f416716a67cb5e9",
-     "tiff": "1c58bc79c72498332d1c984ca70c3b3a21cf6fa7b66bddb40d1dea64d711f800",
+     "tiff": "5694eaf9e4fca0659b7092354af23864c8e1bbc87abcc3d920f10435cad02650",
      "size": [
       768,
       512
@@ -6646,7 +6846,7 @@
     },
     "gpu": {
      "f64": "1708de2eb3fee4b72fd354ea1c8368ddb499f643311b1cdf152087f9ef160459",
-     "tiff": "98b7e817f724501754923ad331d5c480e8427dc3922ca8e05c305f6f35ef9bdb",
+     "tiff": "3ba3b9dc4d08cb92684caab6d4c6436b3718770c7451c03bf655844665daba46",
      "size": [
       768,
       512

@@ -4,12 +4,14 @@
 
 **Your photos, developed on film.**
 
-Negs is a **free** photo app for Mac, Windows and Linux that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
+Negs is a **free** photo app for your browser, Mac, Windows and Linux that runs your pictures through a **physical simulation of film**: the dyes, the print paper, the glow around highlights, the grain. They come out looking shot on film, not filtered to look like it.
 
-Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in native apps for macOS, Windows and Linux.
+Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https://github.com/andreavolpato/spektrafilm), the spectral film simulation behind every stock, and turbasvin's [spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs), the Rust port that runs it on the GPU. Negs improves on both: the GPU engine now matches the 64-bit reference render closely enough that exports run on the GPU by default, several times faster. It also adds Apple's RAW decoder and lab-style borders, and wraps it all in a web app and native apps for macOS, Windows and Linux.
 
 > [!TIP]
 > **Film simulation that keeps up with you.** Every slider updates live. Faster than spektrafilm-rs; dramatically faster than Python spektrafilm.
+
+**[▶ Try it in your browser](https://getnegs.com/try/)** · nothing to install · your photos stay on your device
 
 **[Download for Mac](https://github.com/noahhaasis/negs/releases/download/v0.12.0/Negs-0.12.0-macos-universal.dmg)** · macOS 14 or later · Apple silicon and Intel · [install steps](#macos)
 
@@ -27,7 +29,7 @@ Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https:
 
 ![The Negs window: a photo of the Colosseum in a 35mm Kodak Ektar 100 frame, with film, camera and print controls on the right](docs/readme/app-window.webp)
 
-Pick a film, pick a paper, drag a slider, and watch the picture change as you move.
+In your browser, or as a native app on Mac, Windows and Linux. Pick a film, pick a paper, drag a slider, and watch the picture change as you move.
 
 - Opens RAW files from most cameras, including Nikon HE★ (Mac only) and 60 MP medium format, plus JPEG, TIFF and PNG
 - Reads JPEG, PNG and TIFF colour profiles and previews in the chosen export colour space
@@ -101,6 +103,12 @@ Method, versions and reproduction: [benchmarks](docs/benchmarks.md).
 Kodak, Fujifilm and Ilford stock names are trademarks of their owners. Negs is not affiliated with them.
 
 ## Install
+
+### In your browser
+
+No install needed: open **[getnegs.com/try](https://getnegs.com/try/)** in any recent browser. Negs runs entirely on your device, on the GPU through WebGPU where the browser supports it, so your photos are never uploaded.
+
+[![Negs running in a browser: a photo of Rome at dusk on Kodak Portra 400, with film, paper and camera controls beside it](docs/readme/web-app.webp)](https://getnegs.com/try/)
 
 ### macOS
 
@@ -202,14 +210,14 @@ Yes, on Intel Macs that run macOS 14 or later. Negs is a universal app, so it ru
 No. Presets and LUTs remap colours. Negs simulates the film, the paper and the light, which is why halation, grain and edge effects come out right.
 
 **Which platforms does it run on?**
-macOS 14 or later (Apple silicon and Intel), Windows x64, and x86_64 Linux. There is a [Mac app](#macos), a [Windows app](#windows) with an installer and a portable build, and a native GTK4 app for [Linux](#linux) as a Flatpak, an AppImage and an Arch package.
+Any recent browser, at [getnegs.com/try](https://getnegs.com/try/): nothing to install, and your photos never leave your device. As a desktop app: macOS 14 or later (Apple silicon and Intel), Windows x64, and x86_64 Linux. There is a [Mac app](#macos), a [Windows app](#windows) with an installer and a portable build, and a native GTK4 app for [Linux](#linux) as a Flatpak, an AppImage and an Arch package.
 
 **Found a bug or have an idea?**
 [Open an issue](https://github.com/noahhaasis/negs/issues).
 
 ## Credits
 
-The film model at the heart of Negs comes from two open-source projects. Negs builds fast, native apps for Mac, Windows and Linux on top of them.
+The film model at the heart of Negs comes from two open-source projects. Negs builds fast apps on top of them: in the browser, and native on Mac, Windows and Linux.
 
 - **[spektrafilm](https://github.com/andreavolpato/spektrafilm)** by Andrea Volpato: the spectral simulation of film and print. The physics and the stock data come from here.
 - **[spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs)** by turbasvin: the Rust port of spektrafilm that Negs started from.
@@ -231,6 +239,10 @@ Third-party components keep their own licenses. Sparkle, the update framework bu
 ## For developers
 
 Building from source, the command-line tools, accuracy against the original Python project, and how the code is laid out: see [docs/development.md](docs/development.md).
+
+### Building the web app
+
+The web app in [`web/`](web/) runs the same Rust film engine compiled to WebAssembly, with the WebGPU engine sharing the desktop apps' shaders. See [docs/web-wasm.md](docs/web-wasm.md) for how it's built and how closely it matches the native renders.
 
 ### Building the Linux app
 

@@ -1,8 +1,10 @@
 pub mod bases;
+pub mod catalog;
 pub mod color_filters;
 pub mod color_reference;
 pub mod couplers_presets;
 pub mod data;
+pub mod data_fs;
 pub mod enlarger;
 pub mod illuminants;
 pub mod gamut_compression;

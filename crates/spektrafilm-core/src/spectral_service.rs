@@ -9,7 +9,7 @@ use spektrafilm_math::spectral::{self, N_WAVELENGTHS, TcLut};
 
 // Pull in BLAS for the spectra→tc_lut contraction (matches Python's
 // opt_einsum + numpy summation pattern bit-for-bit on macOS Accelerate).
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_arch = "wasm32")))]
 #[allow(unused_imports)]
 use blas_src as _;
 
@@ -18,7 +18,7 @@ fn dgemm_no_transpose(a: &[f64], b: &[f64], c: &mut [f64], m: usize, n: usize, k
     assert_eq!(b.len(), k * n, "dgemm_no_transpose: b.len() != k*n");
     assert_eq!(c.len(), m * n, "dgemm_no_transpose: c.len() != m*n");
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_arch = "wasm32")))]
     unsafe {
         cblas::dgemm(
             cblas::Layout::RowMajor,
@@ -38,7 +38,7 @@ fn dgemm_no_transpose(a: &[f64], b: &[f64], c: &mut [f64], m: usize, n: usize, k
         );
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_arch = "wasm32"))]
     {
         for row in 0..m {
             for col in 0..n {
@@ -126,11 +126,10 @@ pub fn load_method_lut(data_dir: &Path, method: &UpsamplingMethod) -> Result<Spe
         .join("spectral_upsampling")
         .join(method.file);
     let id = method.identifier;
-    let file = std::fs::File::open(&path)
+    let bytes = crate::data_fs::read(&path)
         .map_err(|e| format!("opening {id} spectra LUT {}: {e}", path.display()))?;
-    let reader = std::io::BufReader::new(file);
-    let (shape, data) =
-        npy::load_npy_f32(reader).map_err(|e| format!("loading {id} spectra LUT: {e}"))?;
+    let (shape, data) = npy::load_npy_f32(bytes.as_slice())
+        .map_err(|e| format!("loading {id} spectra LUT: {e}"))?;
     if shape.len() != 3 || shape[2] != N_WAVELENGTHS {
         return Err(format!(
             "{id} spectra LUT shape mismatch: expected (N, N, {N_WAVELENGTHS}), got {shape:?}"

@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Negs</title>
+<script data-goatcounter="https://noahhaasis.goatcounter.com/count"
+        async crossorigin="anonymous" src="https://gc.zgo.at/count.js"></script>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="tutorial.css">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#161616">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Negs">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  /* The website's wordmark face, cut down to its four letters (fonts/). */
+  @font-face { font-family: "Negs Wordmark"; font-style: italic; font-display: block;
+    src: url("fonts/instrument-serif-italic-wordmark.woff2") format("woff2"); }
+  :root {
+    color-scheme: dark;
+    --bg: #161616; --panel: #1f1f1f; --line: #2e2e2e; --field: #2a2a2a;
+    --fg: #e8e6e3; --muted: #9a968f; --faint: #6a6762; --accent: #e0a458; --danger: #e5786d;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+  button, select, input { font: inherit; color: inherit; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: 100%; height: 100dvh; }
+
+  /* Viewport. Pinch and drag on the photograph are the page's, not the
+     browser's: they zoom and pan it (view.js). The canvases fill the stage,
+     at its device pixels, and draw the photograph where the view puts it. */
+  .view { position: relative; display: grid; place-items: center; overflow: hidden; min-height: 0; touch-action: none;
+    padding: env(safe-area-inset-top) 0 0 env(safe-area-inset-left); }
+  .stage { position: absolute; inset: 0; isolation: isolate; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+  .photo { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  .photo[hidden] { display: none; }
+  /* Above the stage, which would otherwise take its buttons' clicks. */
+  .empty { position: relative; z-index: 1; text-align: center; color: var(--muted); padding: 24px; max-width: 360px; }
+  .empty h1 { font-size: 15px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
+  .empty p { margin: 0 0 16px; }
+  .empty .choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .view.dragging::after { content: "Drop to open"; position: absolute; z-index: 2; inset: 12px; display: grid; place-items: center;
+    border: 2px dashed var(--accent); border-radius: 10px; background: rgb(22 22 22 / .8); color: var(--accent); font-size: 15px; }
+  .busy { position: absolute; top: env(safe-area-inset-top); left: 0; right: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .15s; }
+  .busy.on { opacity: 1; transition-delay: .12s; }
+  .busy::before { content: ""; position: absolute; inset: 0; width: 30%; background: var(--accent); animation: slide 1s ease-in-out infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  /* The website's nav wordmark (negs-site), glowing like a highlight on
+     film: centred above the photograph, at the right on a phone. */
+  .wordmark { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+    padding: 2px 6px; border-radius: 6px; font: italic 28px/1 "Negs Wordmark", "Iowan Old Style", Georgia, serif; text-decoration: none;
+    color: #fff6ea; text-shadow: 0 0 1px #fff, 0 0 10px rgb(255 90 54 / .7), 0 0 26px rgb(255 90 54 / .35); }
+  .wordmark:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .message { position: absolute; top: calc(52px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 24px));
+    padding: 8px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 16px rgb(0 0 0 / .4); }
+  .message.error { border-color: var(--danger); color: var(--danger); }
+  .message[hidden] { display: none; }
+  /* While a photograph opens (macOS ActivityBadge), with a message below it. */
+  .badge { position: absolute; top: calc(52px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 12px;
+    border-radius: 999px; background: rgb(31 31 31 / .85); border: 1px solid var(--line); font-weight: 500; white-space: nowrap;
+    font-variant-numeric: tabular-nums; pointer-events: none; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  .badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .badge::before { animation: none; } }
+  .badge[hidden] { display: none; }
+  .badge:not([hidden]) ~ .message { top: calc(92px + env(safe-area-inset-top)); }
+  /* The status line wraps between its parts (app.js joins them with
+     breakable separators), so the "shown at" notice never gets cut off. */
+  .hud { position: absolute; left: calc(12px + env(safe-area-inset-left)); right: 200px; bottom: calc(10px + env(safe-area-inset-bottom)); color: var(--faint); font: 11px/1.4 ui-monospace, monospace; pointer-events: none;
+    text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
+  .zoom { position: absolute; right: 10px; bottom: calc(6px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 4px; }
+  .zoom[hidden] { display: none; }
+  .zoom .btn { padding: 2px 8px; font-size: 12px; background: rgb(31 31 31 / .85); }
+  /* Show Original (macOS's square.split.diagonal.fill), tinted while it shows. */
+  .zoom .btn.original { display: flex; align-items: center; align-self: stretch; padding: 0 6px; color: var(--muted);
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .zoom .btn.original svg { width: 14px; height: 14px; }
+  .zoom .btn.original[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .zoom-level { min-width: 44px; text-align: right; color: var(--muted); font: 11px ui-monospace, monospace; text-shadow: 0 1px 2px rgb(0 0 0 / .8); }
+
+  /* Non-destructive crop mode replaces the inspector and locks zoom. */
+  [hidden] { display: none !important; }
+  .edit-tools { position: absolute; top: calc(10px + env(safe-area-inset-top)); left: calc(10px + env(safe-area-inset-left)); display: flex; gap: 4px; }
+  .edit-tools .btn { padding: 4px 9px; background: rgb(31 31 31 / .85); }
+  .edit-tools .btn svg { display: block; width: 16px; height: 16px; }
+  #crop[aria-pressed=true], .crop-orientation [aria-pressed=true] { color: var(--accent); border-color: var(--accent); }
+  .crop-overlay { z-index: 1; }
+  .edit-tools, .crop-dial-wrap { z-index: 2; }
+  .badge, .message, .wordmark { z-index: 3; }
+  .busy { z-index: 4; }
+  .crop-dial-wrap { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: min(340px, calc(100% - 32px)); padding: 6px 14px; border: 1px solid var(--line); border-radius: 12px; background: rgb(31 31 31 / .9); text-align: center; }
+  #crop-dial { display: block; width: 100%; height: 24px; cursor: ew-resize; touch-action: none; }
+  #crop-dial-value { font-variant-numeric: tabular-nums; }
+  .view.cropping { padding-top: calc(44px + env(safe-area-inset-top)); padding-bottom: 80px; }
+  .view.cropping .zoom, .view.cropping .hud { display: none; }
+  .side.cropping > .scroll, .side.cropping > .panes, .side.cropping > .tabs, .side.cropping > .bottom { display: none; }
+  .crop-inspector { overflow-y: auto; flex: 1; padding: 14px; display: grid; align-content: start; gap: 14px; }
+  .crop-inspector label { display: grid; gap: 6px; color: var(--muted); }
+  .crop-inspector input[type=number] { width: 72px; padding: 4px 6px; background: var(--field); border: 1px solid var(--line); border-radius: 5px; }
+  .crop-orientation { display: flex; gap: 6px; }
+  .crop-orientation .btn { flex: 1; }
+  #crop-custom { display: flex; gap: 8px; align-items: center; }
+  .crop-angle-head { display: flex; align-items: center; justify-content: space-between; }
+
+  /* Sidebar */
+  .side { display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none; padding-right: env(safe-area-inset-right); }
+  .top { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .sample-picker { padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  .sample-choices { display: flex; align-items: center; gap: 8px; }
+  .sample-choices select { flex: 1; min-width: 0; }
+  .sample-choices .btn { flex: none; white-space: nowrap; }
+  .sample-picker .hint { margin: 6px 0 0; }
+  .side.cropping > .sample-picker { display: none; }
+  .scroll { overflow-y: auto; flex: 1; overscroll-behavior: contain; }
+  /* Lab | Post, a segmented control as on macOS. */
+  .panes { display: flex; flex: none; margin: 10px 14px; padding: 2px; border-radius: 7px; background: var(--field); }
+  .panes button { flex: 1; padding: 3px 0; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; font-weight: 500; }
+  .panes button[aria-selected=true] { background: var(--line); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / .3); }
+  .side:not(.sheet)[data-pane=lab] .scroll [data-pane=post], .side:not(.sheet)[data-pane=post] .scroll [data-pane=lab] { display: none; }
+  .grabber, .tabs { display: none; }
+  .stock { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
+  .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+  .stock label.row { display: flex; }
+  .stock label[hidden] { display: none; }
+  select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
+  select:disabled { color: var(--faint); }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .section { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .section > h2 { margin: 0; padding: 14px 14px 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .section > .ctl { padding: 0 14px; margin-bottom: 12px; }
+  .section:disabled > :not(h2, .footer) { opacity: .45; }
+  .footer { padding: 0 14px 8px; margin: 0; }
+  .footer[hidden] { display: none; }
+  summary { display: flex; align-items: center; gap: 8px; padding: 8px 14px; cursor: pointer; font-weight: 600; list-style: none; user-select: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▸"; color: var(--faint); font-size: 10px; transition: transform .15s; }
+  details[open] summary::before { transform: rotate(90deg); }
+  summary .switch { margin-left: auto; }
+  .controls { display: grid; gap: 12px; padding: 4px 14px 14px 32px; }
+  .controls:disabled .ctl { opacity: .45; }
+  .ctl[hidden] { display: none; }
+  .ctl .head, .ctl > label { display: flex; flex: 1; align-items: center; gap: 6px; color: var(--muted); }
+  .ctl .head .label, .ctl > label > span { margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctl.changed .head .label, .ctl.changed > label > span { color: var(--fg); }
+  .ctl.choice select { width: auto; max-width: 60%; padding: 3px 6px; }
+  .ctl.action { display: flex; justify-content: flex-end; }
+  .ctl.off { opacity: .45; }
+  .ctl.color input { width: 44px; height: 24px; padding: 0 2px; border: 1px solid var(--line); border-radius: 4px; background: var(--field); cursor: pointer; }
+  /* The border's style picker (macOS BorderStylePicker). */
+  .picker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .style { display: grid; justify-items: center; gap: 4px; padding: 4px 2px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+  .style .swatch { display: block; padding: 2px; border: 2px solid transparent; border-radius: 7px; line-height: 0; }
+  .style svg { outline: .5px solid var(--line); }
+  .style[aria-pressed=true] { color: var(--accent); }
+  .style[aria-pressed=true] .swatch { border-color: var(--accent); }
+  .style:disabled { cursor: default; }
+  .style:disabled .swatch { opacity: .35; }
+  .styles .note { margin: 6px 0 0; }
+  .value { font-variant-numeric: tabular-nums; font-size: 12px; min-width: 40px; text-align: right; padding: 1px 2px; border: 0; border-radius: 4px; background: none; cursor: text; }
+  .value:hover:not(:disabled) { background: var(--field); }
+  .value-field { width: 64px; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; padding: 1px 4px; border: 1px solid var(--accent); border-radius: 4px; background: var(--field); outline: none; }
+  .reset { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 13px; line-height: 1; }
+  .reset:hover:not(:disabled) { color: var(--fg); }
+  .reset[hidden] { display: none; }
+  .ctl.slider .track { margin-top: 4px; touch-action: pan-y; }
+  .row { display: flex; align-items: center; justify-content: space-between; color: var(--muted); }
+  /* Sliders filled from the minimum to the value (--f, 0 to 1), as on desktop. */
+  input[type=range] { --thumb: 14px; --track: 4px; appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 18px; margin: 0;
+    background: none; cursor: pointer; touch-action: pan-y; }
+  input[type=range]::-webkit-slider-runnable-track { height: var(--track); border-radius: var(--track);
+    background: linear-gradient(to right, var(--accent) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--f, 0)), var(--line) 0); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: var(--thumb); height: var(--thumb); border-radius: 50%;
+    margin-top: calc((var(--track) - var(--thumb)) / 2); background: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / .5); }
+  input[type=range]::-moz-range-track { height: var(--track); border-radius: var(--track); background: var(--line); }
+  input[type=range]::-moz-range-progress { height: var(--track); border-radius: var(--track); background: var(--accent); }
+  input[type=range]::-moz-range-thumb { width: var(--thumb); height: var(--thumb); border: 0; border-radius: 50%; background: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / .5); }
+  input[type=range]:disabled { cursor: default; }
+  input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .switch { appearance: none; width: 28px; height: 16px; border-radius: 8px; background: var(--line); position: relative; cursor: pointer; flex: none; margin: 0; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .15s; }
+  .switch:checked { background: var(--accent); }
+  .switch:checked::after { transform: translateX(12px); background: #1b1b1b; }
+  .actions { display: grid; padding: 14px; }
+  .bottom { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); }
+  .bottom .row select { width: auto; }
+  .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); cursor: pointer; }
+  .btn:hover:not(:disabled) { border-color: var(--faint); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #1b1b1b; font-weight: 600; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--faint); font-size: 11px; }
+  .hint[hidden] { display: none; }
+  /* The footer's quiet commands: installing, offline use, updates. */
+  .link { padding: 0; border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; }
+  .link:hover { text-decoration: underline; }
+  .link:disabled { color: var(--faint); cursor: default; text-decoration: none; }
+  .dismiss { float: right; padding: 0 2px; border: 0; background: none; color: var(--faint); cursor: pointer; font: inherit; }
+  .dismiss:hover { color: var(--fg); }
+  #offline-all::before, #offline-clear::before { content: "· "; color: var(--faint); display: inline-block; white-space: pre; }
+
+  /* The ⋯ menu after Export (presets), and the presets' dialogs. */
+  .menu-anchor { position: relative; }
+  .btn.more { padding-inline: 9px; letter-spacing: .05em; }
+  .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: grid; min-width: 170px; padding: 4px;
+    border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px rgb(0 0 0 / .45); }
+  .menu[hidden] { display: none; }
+  .menu button { padding: 7px 10px; border: 0; border-radius: 5px; background: none; color: var(--fg); text-align: left; font: inherit; cursor: pointer; }
+  .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--field); outline: none; }
+  .menu button:disabled { color: var(--faint); cursor: default; }
+  .dialog { width: min(420px, calc(100vw - 32px)); padding: 0; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--fg);
+    box-shadow: 0 12px 40px rgb(0 0 0 / .5); }
+  .dialog::backdrop { background: rgb(0 0 0 / .55); }
+  .dialog form { display: grid; gap: 8px; padding: 16px 18px 18px; }
+  .dialog header { display: flex; align-items: center; margin-bottom: 4px; }
+  .dialog h2 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
+  .dialog .dismiss { float: none; font-size: 18px; line-height: 1; padding: 2px 6px; }
+  .dialog label { color: var(--muted); font-size: 12px; }
+  .dialog input[type=text] { width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: inherit; }
+  .dialog input[type=text]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dialog input[readonly] { color: var(--muted); }
+  .dialog-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+  .dialog-row .hint { margin-right: auto; }
+  .dialog-stack { display: grid; gap: 8px; margin: 6px 0; }
+  .dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  .dialog p { margin: 0; }
+  .dialog .preset-name { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  .dialog .problem { color: var(--danger); }
+  .dialog [hidden] { display: none; }
+
+  /* Fingers: bigger thumbs, switches and targets, and no hover-only cues.
+     Fields stay at 16px, below which iOS zooms the page on focus. */
+  @media (pointer: coarse) {
+    body { font-size: 15px; }
+    select, .value-field, .crop-inspector input[type=number], .dialog input[type=text] { font-size: 16px; }
+    .menu button { min-height: 40px; }
+    select { padding: 8px 10px; }
+    .btn { min-height: 40px; padding: 8px 14px; }
+    .zoom .btn { min-height: 36px; padding: 4px 12px; font-size: 14px; }
+    .hud { right: 244px; }
+    .zoom .btn.original { padding: 0 12px; }
+    .zoom .btn.original svg { width: 16px; height: 16px; }
+    .stock { gap: 14px; }
+    .stock label, .hint { font-size: 13px; }
+    .section > h2 { font-size: 12px; }
+    summary { min-height: 48px; padding: 4px 14px; }
+    .controls { gap: 10px; padding-left: 28px; }
+    .section > .ctl { margin-bottom: 10px; }
+    .ctl .head, .ctl > label, .row { min-height: 36px; }
+    .value { font-size: 14px; min-width: 56px; min-height: 32px; padding: 4px 8px; background: var(--field); border-radius: 6px; }
+    .value-field { width: 84px; min-height: 32px; padding: 4px 8px; }
+    .reset { min-width: 40px; min-height: 36px; font-size: 18px; }
+    input[type=range] { --thumb: 26px; --track: 6px; height: 34px; pointer-events: none; }
+    .ctl.slider .track { margin-top: -2px; padding: 2px 0; cursor: pointer; }
+    .switch { width: 44px; height: 26px; border-radius: 13px; }
+    .switch::after { width: 22px; height: 22px; }
+    .switch:checked::after { transform: translateX(18px); }
+    .ctl.choice select { max-width: 65%; }
+    .style { min-height: 64px; font-size: 13px; }
+    .ctl.color input { width: 56px; height: 34px; }
+    .link, .dismiss { min-height: 32px; }
+    .dismiss { min-width: 32px; }
+  }
+
+  /* A bottom sheet with a tab per section, where the screen is too narrow
+     for a sidebar beside the photograph: phones and iPads upright. The same
+     query is in app.js (SHEET). */
+  @media (max-width: 899px) and (orientation: portrait), (max-width: 639px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) var(--sheet, 45%); }
+    .side { border-left: 0; border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; box-shadow: 0 -4px 24px rgb(0 0 0 / .35);
+      padding-right: 0; padding-bottom: env(safe-area-inset-bottom); }
+    .grabber { display: grid; place-items: center; height: 22px; flex: none; cursor: grab; touch-action: none; }
+    .grabber::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--line); }
+    .grabber:hover::before { background: var(--faint); }
+    .top { padding: 0 14px 10px; border-bottom: 0; }
+    .tabs { display: flex; flex: none; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+    .panes { display: none; }
+    .tabs button { flex: 1 0 auto; min-height: 40px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; background: none;
+      color: var(--muted); cursor: pointer; font-weight: 600; white-space: nowrap; }
+    .tabs button[aria-selected=true] { color: var(--fg); border-bottom-color: var(--accent); }
+    .scroll [data-tab]:not(.shown) { display: none; }
+    .section { border-bottom: 0; }
+    .section:not(.titled) > h2 { display: none; }
+    .section > .ctl:first-of-type { margin-top: 12px; }
+    .bottom { gap: 4px; padding: 10px 14px 16px; }
+    .hud { bottom: 10px; }
+    .zoom { bottom: 6px; }
+    .wordmark { left: auto; right: calc(10px + env(safe-area-inset-right)); transform: none; }
+    .app { transition: grid-template-rows .2s ease; }
+    .app.dragging-sheet { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <main class="view" id="view">
+    <div class="busy" id="busy"></div>
+    <a class="wordmark" id="brand" href="/" title="Back to the Negs website">negs</a>
+    <div class="empty" id="empty">
+      <div class="tutorial-invitation" id="tutorial-invitation" hidden>
+        <h1>Your photo, through film</h1>
+        <p>Negs simulates exposing film, developing it, and making a print. This quick tour shows how each stage shapes your photo. You can skip it or leave at any time.</p>
+        <div class="choices"><button type="button" class="btn primary" id="start-tutorial">Start tutorial</button><button type="button" class="btn" id="dismiss-tutorial">Not now</button></div>
+      </div>
+      <div id="empty-normal" hidden>
+        <h1>Open a photograph</h1>
+        <p>A camera RAW, JPEG, PNG or TIFF. Drop it here, or choose one.</p>
+        <p>Your photo stays in your browser.</p>
+        <div class="choices">
+          <button class="btn primary" id="open-empty">Choose photo…</button>
+          <button class="btn" id="open-sample">Try a sample photo</button>
+        </div>
+      </div>
+    </div>
+    <div class="stage" id="stage"><canvas class="photo" id="canvas" hidden></canvas><canvas class="photo crop-overlay" id="crop-overlay" aria-label="Drag crop corners or edges to resize; drag inside to move" hidden></canvas></div>
+    <div class="edit-tools" id="edit-tools" hidden>
+      <button class="btn" id="rotate-left" aria-label="Rotate counterclockwise" title="Turn left (Shift+R)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2.6 8.4M3 4v6h6"/></svg>
+      </button>
+      <button class="btn" id="rotate-right" aria-label="Rotate clockwise" title="Turn right (R)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10a9 9 0 1 0-2.6 8.4M21 4v6h-6"/></svg>
+      </button>
+      <button class="btn" id="crop" aria-pressed="false" title="Crop and straighten (C or ⌘/Ctrl+K)">Crop</button>
+    </div>
+    <div class="crop-dial-wrap" id="crop-dial-wrap" hidden><div id="crop-dial-value"></div><canvas id="crop-dial" tabindex="0" role="slider" aria-label="Straighten photograph" aria-valuemin="-45" aria-valuemax="45" aria-valuenow="0" title="Drag to level the horizon; double-click to reset"></canvas></div>
+    <div class="badge" id="badge" role="status" hidden><span id="badge-text"></span></div>
+    <div class="message" id="message" hidden></div>
+    <div class="hud" id="hud"></div>
+    <div class="zoom" id="zoom" hidden>
+      <button class="btn original" id="original" aria-label="Show Original" aria-pressed="false" title="Hold to show the original (\)" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M14 4.5v7a2.5 2.5 0 0 1-2.5 2.5h-7z" fill="currentColor"/></svg>
+      </button>
+      <span class="zoom-level" id="zoom-level"></span>
+      <button class="btn" id="fit" title="Fit the photograph in the view (double-click)">Fit</button>
+      <button class="btn" id="actual" title="Actual size: a pixel of the photograph on each screen pixel (double-click)">100%</button>
+    </div>
+  </main>
+  <aside class="side" id="side">
+    <div class="grabber" id="grabber" title="Drag to resize, or tap"></div>
+    <div class="top">
+      <button type="button" class="help-button" id="tutorial" aria-label="Start tutorial" title="Start tutorial">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .25c0 1.75-2.5 2-2.5 3.75"/><path d="M12 16.5h.01"/></svg>
+      </button>
+      <button class="btn" id="open">Open…</button>
+      <button class="btn" id="export" disabled>Export</button>
+      <div class="menu-anchor" id="preset-menu-anchor">
+        <button class="btn more" id="more" aria-haspopup="menu" aria-expanded="false" aria-controls="preset-menu" aria-label="More" title="Presets and LUT">⋯</button>
+        <div class="menu" id="preset-menu" role="menu" aria-label="Presets and LUT" hidden>
+          <button type="button" role="menuitem" id="import-preset" tabindex="-1">Import preset…</button>
+          <button type="button" role="menuitem" id="export-preset" tabindex="-1">Export preset…</button>
+          <button type="button" role="menuitem" id="export-lut" tabindex="-1" title="A 33 × 33 × 33 CUBE file, sRGB in and out, with the current film and paper color settings. Excludes auto exposure, print filter shifts, preflash, grain, halation, glare, diffusion, blur, sharpening, RAW development and Post edits.">Export LUT…</button>
+        </div>
+      </div>
+      <button class="btn" id="crop-cancel" hidden>Cancel</button>
+      <button class="btn primary" id="crop-done" hidden>Done</button>
+    </div>
+    <div class="sample-picker" id="samples" role="group" aria-label="Sample photos" hidden>
+      <div class="sample-choices">
+        <select id="sample-select" aria-label="Sample photo" aria-describedby="sample-offline"></select>
+        <button class="btn" id="sample-next">Next sample →</button>
+      </div>
+      <p class="hint" id="sample-offline" hidden>Only Sample 1 is available offline once saved.</p>
+    </div>
+    <div class="crop-inspector" id="crop-inspector" hidden>
+      <label>Aspect Ratio<select id="crop-aspect" aria-label="Crop aspect ratio"></select></label>
+      <div id="crop-custom"><label>Width<input id="crop-width" type="number" min="0.1" max="1000" step="0.1" aria-label="Custom ratio width"></label><span>×</span><label>Height<input id="crop-height" type="number" min="0.1" max="1000" step="0.1" aria-label="Custom ratio height"></label></div>
+      <div class="crop-orientation" role="group" aria-label="Crop orientation"><button class="btn" id="crop-landscape">Landscape</button><button class="btn" id="crop-portrait">Portrait</button></div>
+      <div class="crop-angle-head" title="Level a crooked horizon. The crop shrinks to stay on the photograph."><label for="crop-angle-value">Straighten</label><span><button class="reset" id="crop-angle-reset" aria-label="Reset angle">↺</button><input type="number" id="crop-angle-value" min="-45" max="45" step="0.1" aria-label="Straightening angle in degrees">°</span></div>
+      <div class="ctl slider"><div class="track" id="crop-angle-track"><input type="range" id="crop-angle" min="-45" max="45" step="0.1" value="0" aria-label="Straighten"></div></div>
+      <div class="row"><span>Size</span><output id="crop-size"></output></div>
+      <button class="btn" id="crop-reset">Reset Crop</button>
+      <p class="hint">Drag corners or edges to resize, or drag inside to move. Drag the dial below the photograph to level it. Return applies; Escape cancels. Borders are added after cropping.</p>
+    </div>
+    <div class="panes" id="panes" role="tablist" aria-label="Inspector">
+      <button type="button" role="tab" data-pane="lab">Lab</button><button type="button" role="tab" data-pane="post">Post</button>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Inspector"></nav>
+    <div class="tour-heading" id="tutorial-heading" hidden><span id="tour-progress"></span><button type="button" class="link" id="tour-end">End tour</button></div>
+    <div class="scroll" id="scroll">
+      <section class="tour-guide" id="tutorial-guide" aria-labelledby="tour-title" hidden>
+        <h2 id="tour-title" tabindex="-1"></h2>
+        <p id="tour-copy"></p>
+        <p class="hint" id="tour-hint" hidden></p>
+        <button type="button" class="btn" id="tour-retry" hidden>Retry</button>
+      </section>
+      <div class="stock" data-tab="stock" data-pane="lab">
+        <label>Film <select id="film"></select></label>
+        <label id="film-time-row" hidden>Development <select id="film-time"></select></label>
+        <label class="row" title="Skip printing and scan the developed film, as for slides.">Scan film directly <input type="checkbox" class="switch" id="scan-film"></label>
+        <label id="paper-row">Paper <select id="paper"></select></label>
+        <label id="paper-time-row" hidden>Print development <select id="paper-time"></select></label>
+      </div>
+      <div id="sections"></div>
+      <div id="post-sections"></div>
+      <div class="actions" data-tab="stock"><button class="btn" id="reset" title="Restore the defaults while keeping the film, paper and rotation.">Reset Adjustments</button></div>
+    </div>
+    <nav class="tour-nav" id="tutorial-nav" aria-label="Tutorial navigation" hidden>
+      <button type="button" class="link" id="tour-reset">Reset step</button><span class="spacer"></span>
+      <button type="button" class="btn" id="tour-back">Back</button><button type="button" class="btn primary" id="tour-next">Next</button>
+    </nav>
+    <div class="tour-status" id="tour-status" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div class="bottom" id="bottom" data-tab="stock">
+      <div class="row"><label>Engine <select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></label>
+        <a class="hint" href="credits.html" target="_blank" rel="noopener">Credits &amp; source</a></div>
+      <div id="engine-info" hidden>Starting…</div>
+      <div class="hint" id="update" role="status" hidden><span id="update-text">A new version of Negs is ready.</span>
+        <button class="link" id="update-reload" title="Reloads Negs; the photograph you have open closes">Reload</button></div>
+      <div class="hint" id="install" hidden><button class="dismiss" id="install-dismiss" aria-label="Don't show again" title="Don't show again">×</button><span id="install-text"></span>
+        <button class="link" id="install-app" hidden>Install app</button></div>
+      <div class="hint" id="offline" hidden><span id="offline-text"></span>
+        <button class="link" id="offline-all" hidden></button> <button class="link" id="offline-clear" title="Remove what Negs saved for offline use" hidden>Clear</button></div>
+    </div>
+  </aside>
+</div>
+<dialog class="dialog" id="tutorial-confirm" aria-labelledby="tutorial-confirm-title">
+  <form method="dialog">
+    <header><h2 id="tutorial-confirm-title">Take a quick tour?</h2><button class="dismiss" value="cancel" aria-label="Close">×</button></header>
+    <p>The tutorial uses a sample photo and default settings. Your current photo and edits will be restored when you leave.</p>
+    <p class="hint">Try the controls as you go. Each step starts fresh.</p>
+    <footer><button class="btn" value="cancel">Cancel</button><button type="button" class="btn primary" id="confirm-tutorial">Start tutorial</button></footer>
+  </form>
+</dialog>
+<dialog class="dialog" id="leave-confirm" aria-labelledby="leave-confirm-title">
+  <form method="dialog">
+    <header><h2 id="leave-confirm-title">Leave without exporting?</h2><button class="dismiss" value="cancel" aria-label="Close">×</button></header>
+    <p>Your edits to this photo haven't been exported. Negs doesn't keep them, so leaving discards them.</p>
+    <footer><button type="button" class="btn" id="confirm-leave">Leave</button><button class="btn primary" value="cancel" autofocus>Stay</button></footer>
+  </form>
+</dialog>
+<input type="file" id="preset-file" hidden accept=".json,application/json">
+<dialog class="dialog" id="export-dialog" aria-labelledby="export-title">
+  <form method="dialog">
+    <header><h2 id="export-title">Export preset</h2><button class="dismiss" value="close" aria-label="Close">×</button></header>
+    <label for="preset-name">Name</label>
+    <input type="text" id="preset-name" autocomplete="off" spellcheck="false" maxlength="240" aria-describedby="preset-name-problem">
+    <p class="hint problem" id="preset-name-problem" role="alert" hidden></p>
+    <label for="preset-link">Preset link</label>
+    <input type="text" id="preset-link" readonly aria-describedby="preset-link-status">
+    <div class="dialog-row"><span class="hint" id="preset-link-status" role="status"></span><button type="button" class="btn" id="copy-link" disabled>Copy link</button></div>
+    <p class="hint">Includes Lab settings only. Your photo, Post adjustments, crop and border are not included.</p>
+    <footer><button class="btn" value="close">Close</button><button type="button" class="btn primary" id="download-preset">Download preset</button></footer>
+  </form>
+</dialog>
+<dialog class="dialog" id="incoming-dialog" aria-labelledby="incoming-title">
+  <form method="dialog">
+    <header><h2 id="incoming-title">Shared preset</h2><button class="dismiss" value="close" aria-label="Close">×</button></header>
+    <div id="incoming-preset">
+      <p class="preset-name" id="incoming-name"></p>
+      <p class="hint" id="incoming-stocks"></p>
+      <div class="dialog-stack">
+        <button type="button" class="btn primary" id="incoming-try">Try on a sample photo</button>
+        <button type="button" class="btn" id="incoming-download">Download preset</button>
+      </div>
+      <p class="hint">No photograph is included in this link.</p>
+    </div>
+    <div id="incoming-problem" hidden>
+      <p class="problem" id="incoming-reason" role="alert"></p>
+      <footer><button class="btn" value="close">Continue to the editor</button></footer>
+    </div>
+  </form>
+</dialog>
+<input type="file" id="file" hidden accept="image/png,image/jpeg,image/tiff,.dng,.nef,.arw,.cr2,.cr3,.raf,.orf,.rw2,.pef,.srw">
+<script type="module" src="app.js"></script>
+</body>
+</html>
