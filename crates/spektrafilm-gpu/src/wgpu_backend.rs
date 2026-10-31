@@ -1156,17 +1156,21 @@ impl WgpuBackend {
         }
         let has_enlarger_diffusion = p.enlarger_diffusion.is_some();
         let print_exposure_scale = p.print_exposure_scale as f32;
-        let print_norm_for_shader = if has_enlarger_diffusion && print_exposure_scale != 0.0 {
-            (print_normalization_factor / p.print_exposure_scale) as f32
-        } else {
-            print_normalization_factor as f32
-        };
+        // CPU order: (raw × factor + preflash) × print_exposure × bw. Without
+        // enlarger diffusion the exposure scale is folded into the shader's
+        // normalization, so the preflash must carry it too.
+        let (print_norm_for_shader, preflash_scale) =
+            if has_enlarger_diffusion && print_exposure_scale != 0.0 {
+                ((print_normalization_factor / p.print_exposure_scale) as f32, 1.0)
+            } else {
+                (print_normalization_factor as f32, p.print_exposure_scale)
+            };
         let print_params = PrintParams {
             width: image.width,
             height: image.height,
             n_wavelengths: film_channel_density.len() as u32,
             normalization_factor: print_norm_for_shader,
-            preflash: [preflash[0] as f32, preflash[1] as f32, preflash[2] as f32],
+            preflash: preflash.map(|v| (v * preflash_scale) as f32),
             _pad: 0.0,
         };
         let print_params_buf = mk_uniform("print_params", bytemuck::bytes_of(&print_params));
