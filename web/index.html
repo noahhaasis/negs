@@ -194,7 +194,7 @@
   .link:disabled { color: var(--faint); cursor: default; text-decoration: none; }
   .dismiss { float: right; padding: 0 2px; border: 0; background: none; color: var(--faint); cursor: pointer; font: inherit; }
   .dismiss:hover { color: var(--fg); }
-  #offline-all:not([hidden]) ~ #offline-clear::before { content: "· "; color: var(--faint); }
+  #offline-all::before, #offline-clear::before { content: "· "; color: var(--faint); display: inline-block; white-space: pre; }
 
   /* The ⋯ menu after Export (presets), and the presets' dialogs. */
   .menu-anchor { position: relative; }
@@ -395,7 +395,8 @@
     </nav>
     <div class="tour-status" id="tour-status" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="bottom" id="bottom" data-tab="stock">
-      <div class="row"><span>Engine</span><select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></div>
+      <div class="row"><label>Engine <select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></label>
+        <a class="hint" href="credits.html" target="_blank" rel="noopener">Credits &amp; source</a></div>
       <div id="engine-info" hidden>Starting…</div>
       <div class="hint" id="update" role="status" hidden><span id="update-text">A new version of Negs is ready.</span>
         <button class="link" id="update-reload" title="Reloads Negs; the photograph you have open closes">Reload</button></div>
@@ -403,7 +404,6 @@
         <button class="link" id="install-app" hidden>Install app</button></div>
       <div class="hint" id="offline" hidden><span id="offline-text"></span>
         <button class="link" id="offline-all" hidden></button> <button class="link" id="offline-clear" title="Remove what Negs saved for offline use" hidden>Clear</button></div>
-      <div class="hint"><a href="credits.html" target="_blank" rel="noopener" style="color: inherit">Credits &amp; source</a></div>
     </div>
   </aside>
 </div>
