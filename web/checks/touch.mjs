@@ -25,7 +25,8 @@ export default async function ({ send, evaluate }) {
 
   await page(`for (let i = 0; i < 150 && !document.querySelector("#engine-info").textContent.includes("·"); i++) await wait(100);
     await negs.open("results/card.jpg"); await settle();`);
-  out.layout = await page(`return { sheet: getComputedStyle(document.querySelector("#tabs")).display !== "none", rows: getComputedStyle(document.querySelector("#app")).gridTemplateRows };`);
+  out.layout = await page(`return { sheet: getComputedStyle(document.querySelector("#tabs")).display !== "none", rows: getComputedStyle(document.querySelector("#app")).gridTemplateRows,
+    footer: document.querySelector("#side").dataset.tab !== "stock" || getComputedStyle(document.querySelector("#bottom")).display !== "none" };`);
 
   // Tabs.
   await tap(await page(`return center([...document.querySelectorAll("#tabs button")].find((b) => b.textContent === "Film"));`));

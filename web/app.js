@@ -660,7 +660,9 @@ const TABS = [{ id: "stock", title: "Stock" }, ...[...SECTIONS, ...POST_SECTIONS
 function showTab(id) {
   if (!TABS.some((t) => t.id === id)) id = "stock";
   $("side").dataset.tab = id;
-  for (const panel of $("scroll").querySelectorAll("[data-tab]")) panel.classList.toggle("shown", panel.dataset.tab === id);
+  // The footer too, wherever it is: buildSheet moves it into the scroll on
+  // the sheet after the first tab is shown.
+  for (const panel of [...$("scroll").querySelectorAll("[data-tab]"), $("bottom")]) panel.classList.toggle("shown", panel.dataset.tab === id);
   for (const button of $("tabs").children) button.setAttribute("aria-selected", button.dataset.tab === id);
   remember("tab", id);
 }
@@ -1993,7 +1995,7 @@ function ask(type) {
   return reply;
 }
 
-// What's saved: "Works offline · 24 MB saved", and the rest on offer.
+// What's saved: "Offline · 24 MB saved · Save all (28 MB) · Clear".
 async function offlineStatus() {
   const s = await ask("status");
   if (!s) return;
@@ -2001,9 +2003,9 @@ async function offlineStatus() {
     $("offline-text").textContent = "Saving Negs for offline use…";
     $("offline-all").hidden = $("offline-clear").hidden = true;
   } else {
-    $("offline-text").textContent = `Works offline · ${mb(s.saved)} saved.`;
+    $("offline-text").textContent = `Offline · ${mb(s.saved)} saved`;
     const rest = s.total - s.saved;
-    $("offline-all").textContent = `Save everything (${mb(rest)} more)`;
+    $("offline-all").textContent = `Save all (${mb(rest)})`;
     $("offline-all").title = "Every border and spectral table, and the sample photo, for use offline";
     $("offline-all").hidden = rest <= 0;
     $("offline-clear").hidden = false;
