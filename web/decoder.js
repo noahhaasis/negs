@@ -5,30 +5,31 @@
 // memory back. The page starts it before it's needed, so a photograph
 // doesn't wait for the module to compile.
 
+import { threadPool } from "./pool.js";
+
 // rayon's pool workers, ended with this one as web/worker.js ends them:
 // Safari keeps a terminated worker waiting in `memory.atomic.wait`, and so
 // the memory it shares.
-const pool = [];
-globalThis.Worker = class extends Worker {
-  constructor(...args) {
-    super(...args);
-    pool.push(this);
-  }
-};
+const pool = threadPool();
 
-// The page's first message says whether to start rayon; then a photograph.
+// The page's first message says whether to start rayon; then a photograph,
+// or `dispose` when the page goes away before one.
 let wasm, readyMs;
 async function start(threads) {
   const begun = performance.now();
   const wasm = threads ? await import("./pkg-threads/index.js") : await import("./pkg/spektrafilm_wasm.js");
   await wasm.default();
-  if (threads) await wasm.initThreadPool(navigator.hardwareConcurrency);
+  if (threads) await pool.start(wasm, navigator.hardwareConcurrency);
   readyMs = performance.now() - begun;
   return wasm;
 }
 
 // `whiteBalance`: io.raw_white_balance as JSON, which a RAW develops at.
-onmessage = async ({ data: { threads, bytes, maxDim, maxPixels, rawDevelop, whiteBalance } }) => {
+onmessage = async ({ data: { dispose, threads, bytes, maxDim, maxPixels, rawDevelop, whiteBalance } }) => {
+  if (dispose) {
+    pool.end(await wasm?.catch(() => null));
+    return close();
+  }
   if (!wasm) return void (wasm = start(threads));
   let message;
   try {
@@ -45,10 +46,7 @@ onmessage = async ({ data: { threads, bytes, maxDim, maxPixels, rawDevelop, whit
   } catch (e) {
     message = [{ error: String(e?.message ?? e) }];
   }
-  for (const worker of pool) worker.terminate();
-  try {
-    (await wasm).wakeThreadPool?.();
-  } catch {}
+  pool.end(await wasm.catch(() => null));
   postMessage(...message);
   close();
 };
