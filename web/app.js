@@ -1792,6 +1792,7 @@ async function failed(e, what) {
 async function exportJpeg() {
   if (!photo || exporting || cropSession) return;
   exporting = true;
+  const edit = editKey();
   $("export").disabled = true;
   showMessage(`Rendering ${photo.exportWidth}×${photo.exportHeight} for export…`);
   $("busy").classList.add("on");
@@ -1820,6 +1821,7 @@ async function exportJpeg() {
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
       hideMessage();
     }
+    exportedEdit = edit;
   } catch (e) {
     await failed(e, "Export failed");
   } finally {
@@ -2069,6 +2071,24 @@ buildSheet();
 touchSlider($("crop-angle-track"), $("crop-angle"));
 catalog = await (await fetch("catalog.json")).json();
 fillStocks();
+// Leaving loses the edit: only an exported JPEG keeps it. While a photograph
+// is open with an edit other than the last exported (at first, the
+// defaults), the Negs link asks first, and the browser asks before a reload,
+// a closed tab or any other way out (except Safari on iOS, which never asks).
+const editKey = () => JSON.stringify([state.film, state.paper, state.params, crop, border]);
+let exportedEdit = editKey(), leaving = false;
+const unexported = () => !!photo && editKey() !== exportedEdit;
+addEventListener("beforeunload", (e) => {
+  if (leaving || !unexported()) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+$("brand").addEventListener("click", (e) => {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0 || !unexported()) return;
+  e.preventDefault();
+  $("leave-confirm").showModal();
+});
+$("confirm-leave").addEventListener("click", () => { leaving = true; location.href = $("brand").href; });
 // For automation over the DevTools protocol (web/cdp.mjs): a copy of the
 // edit, edits through the path the controls take, and the renders so far.
 globalThis.negs = {
