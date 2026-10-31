@@ -29,7 +29,9 @@ run has happened yet.** This handoff runs them.
    `wasm-bindgen` and friends). The new crates are built only for `wasm32`, but the
    offline Flatpak build has to vendor them. The GTK workspace (`linux/Cargo.toml`) is
    unchanged. Check that the Flatpak builds offline and that the AppImage and Arch
-   package still build.
+   package still build. CI's first build of the merge (cfd4757) failed the AppImage
+   and Arch jobs: the release source tarball (`linux/release.py`'s `SOURCE_PATHS`)
+   left out `vendor/`. The follow-up commit adds it.
 2. **Engine changes** (shared through `spektrafilm-native` and the CLIs):
    - **GPU preflash fix** (09a66ad): with a preflash plus print exposure ≠ 1 or scanner
      white correction, the wgpu chain added the preflash unscaled. On the Mac, main's

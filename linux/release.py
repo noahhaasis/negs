@@ -20,6 +20,8 @@ APP_ID = 'io.github.noahhaasis.negs'
 # Exclude private validation material and historical image-heavy review docs.
 SOURCE_PATHS = [
     '.gitattributes', 'Cargo.toml', 'Cargo.lock', 'LICENSE', 'crates', 'data',
+    # The patched rawler the workspace builds with ([patch.crates-io]).
+    'vendor',
     'linux', 'scripts', 'assets/negs-icon.png', 'assets/negs-icon.svg',
     'docs/linux-app.md', 'docs/linux-core-validation.md',
     'docs/linux-ui-parity.md', 'docs/linux-ui-validation.md',
