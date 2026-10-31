@@ -1,0 +1,10 @@
+{
+ "film_render": {"grain": {"active": false}, "glare": {"active": false}},
+ "print_render": {"glare": {"active": false}},
+ "enlarger": {
+  "preflash_exposure": 0.2,
+  "preflash_m_filter_shift": 10.0,
+  "preflash_y_filter_shift": -5.0,
+  "print_exposure": 0.7
+ }
+}

@@ -39,6 +39,9 @@ fn image() -> ImageBuf {
 #[test]
 fn preflash_with_print_exposure_scale_matches_the_cpu() {
     let Some(gpu) = WgpuBackend::new() else {
+        // SPEKTRAFILM_REQUIRE_GPU=1 (the platform handoffs) fails instead, so a
+        // machine whose GPU isn't found can't pass without testing anything.
+        assert!(std::env::var_os("SPEKTRAFILM_REQUIRE_GPU").is_none(), "no GPU adapter, and SPEKTRAFILM_REQUIRE_GPU is set");
         eprintln!("no GPU adapter available; skipping");
         return;
     };
