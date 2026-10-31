@@ -9,6 +9,9 @@ use spektrafilm_math::image::ImageBuf;
 
 use crate::RawWhiteBalance;
 
+mod dng;
+pub use dng::is_dng;
+
 #[cfg(all(target_os = "macos", feature = "apple-raw"))]
 mod apple;
 #[cfg(all(target_os = "macos", feature = "apple-raw"))]

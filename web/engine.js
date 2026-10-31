@@ -125,7 +125,9 @@ async function preset(wasm, call, result) {
 
 async function fetchData(wasm, paths) {
   await Promise.all(paths.map(async (path) => {
-    const res = await fetch(new URL(`data/${path}`, location.origin));
+    // Beside this file, not the origin root: the app may be served under a
+    // path (getnegs.com/try/).
+    const res = await fetch(new URL(`data/${path}`, import.meta.url));
     if (!res.ok) throw fetchFailed(path, res);
     wasm.registerData(path, new Uint8Array(await res.arrayBuffer()));
   }));

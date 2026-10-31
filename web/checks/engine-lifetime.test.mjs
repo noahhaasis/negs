@@ -5,10 +5,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { client } from "../engine.js";
 
-const location = globalThis.location;
-test.before(() => { globalThis.location = { origin: "https://negs.test" }; });
-test.after(() => { if (location === undefined) delete globalThis.location; else globalThis.location = location; });
-
 function result(fields, freed) {
   let alive = true;
   const wrapper = { free() { assert.ok(alive, "not freed twice"); alive = false; freed.push(fields); } };

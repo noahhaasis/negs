@@ -21,9 +21,11 @@ const defaults = JSON.stringify(catalog.defaults);
 
 // Profiles arrive as the page fetches them: count what the bridge asks for.
 const fetched = [];
-globalThis.location = { origin: "http://negs.test" };
+// Data sits beside engine.js, so the app works under a path (getnegs.com/try/).
+const dataDir = new URL("../data/", import.meta.url).href;
 globalThis.fetch = async (url) => {
-  const path = new URL(url).pathname.replace(/^\/data\//, "");
+  assert.ok(String(url).startsWith(dataDir), `${url} is fetched beside engine.js`);
+  const path = String(url).slice(dataDir.length);
   fetched.push(path);
   try {
     const bytes = readFileSync(join(root, "data", path));

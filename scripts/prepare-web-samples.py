@@ -26,11 +26,11 @@ args = parser.parse_args()
 # is retained for offline use; switching to the others will require a network.
 entries = [
     ("DSC_6377", "DSC_6377.NEF", "project", None),
-    ("DSC_6028", "DSC_6028.NEF", "project", None),
-    ("DSC_6426", "DSC_6426.NEF", "project", None),
-    ("DSC_6008", "DSC_6008.NEF", "project", None),
-    ("DSC_2498", "tag @signatureeditsco - free raws from signatureedits.com -DSC_2498.dng", "signature-edits", "Skrypchenko"),
     ("IMG_0316", "tag @signatureeditsco - free raws from signatureedits.com -IMG_0316.CR2", "signature-edits", None),
+    ("DSC_2498", "tag @signatureeditsco - free raws from signatureedits.com -DSC_2498.dng", "signature-edits", "Skrypchenko"),
+    ("DSC_6008", "DSC_6008.NEF", "project", None),
+    ("DSC_6426", "DSC_6426.NEF", "project", None),
+    ("DSC_6028", "DSC_6028.NEF", "project", None),
     ("IMG_4416", "free raws -  credit signatureedits.com - IMG_4416.CR2", "signature-edits", None),
 ]
 

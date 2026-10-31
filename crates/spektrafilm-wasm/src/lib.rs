@@ -1180,6 +1180,12 @@ fn parse_params(json: &str) -> anyhow::Result<RuntimeParams> {
 fn decode(
     bytes: &[u8],
 ) -> anyhow::Result<(image::DynamicImage, spektrafilm_io::colour::FileColour, image::ImageFormat)> {
+    // A DNG's first TIFF image may be an RGB thumbnail. Recognize its
+    // container before raster decoding so every photo entry point reaches
+    // RAW development (and a damaged RAW never succeeds as a thumbnail).
+    if spektrafilm_io::raw::is_dng(bytes) {
+        anyhow::bail!("DNG requires RAW development");
+    }
     use image::ImageDecoder;
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
     reader.no_limits();
