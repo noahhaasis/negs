@@ -1949,6 +1949,12 @@ async function startOffline() {
     offlineStatus();
   });
   new BroadcastChannel("negs-offline").onmessage = ({ data }) => {
+    if (data.type === "failed") {
+      $("offline-text").textContent = controlled ? "The new version couldn't be downloaded" : "Couldn't save Negs for offline use";
+      $("offline-all").hidden = $("offline-clear").hidden = true;
+      $("offline").hidden = false;
+      return showMessage(`${$("offline-text").textContent} (${data.error}). It tries again the next time Negs opens.`, true, 8000);
+    }
     if (data.type !== "progress") return offlineStatus();
     const what = data.task === "save-all" ? "Saving everything for offline use" : controlled ? "Downloading a new version" : "Saving Negs for offline use";
     $("offline-text").textContent = `${what}… ${data.total ? Math.floor((data.done / data.total) * 100) : 100}%`;
