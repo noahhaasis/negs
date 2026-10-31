@@ -10,6 +10,7 @@ export function client(wasm, kind) {
     },
     backend: () => engine.backend(),
     setDiffusionGridBudget: (bytes) => engine.setDiffusionGridBudget(bytes),
+    releaseRenderBuffers: () => engine.releaseRenderBuffers(),
     // An OffscreenCanvas the WebGPU engine presents renders on.
     setCanvas: (canvas) => engine.setCanvas(canvas),
     // Where that canvas shows the photograph, drawn again at once without
@@ -24,13 +25,8 @@ export function client(wasm, kind) {
     },
     // A border around an export's bytes, as the CLI adds one.
     async addBorder(rgba, width, height, style, options, instagram, film) {
-      for (;;) {
-        const r = wasm.addBorder(rgba, width, height, style, options, instagram, film);
-        if (!r.missing.length) {
-          return { width: r.width, height: r.height, rgba: r.rgba, elapsedMs: r.elapsedMs, memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) };
-        }
-        await fetchData(wasm, r.missing);
-      }
+      return dataResult(wasm, () => wasm.addBorder(rgba, width, height, style, options, instagram, film), (r) =>
+        ({ width: r.width, height: r.height, rgba: r.rgba, elapsedMs: r.elapsedMs, memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) }));
     },
     shownRect: () => [...engine.shownRect()],
     // The largest frame the WebGPU engine renders and shows.
@@ -53,35 +49,23 @@ export function client(wasm, kind) {
       return { width: fullWidth, height: fullHeight, kept: width, keptHeight: height, colour };
     },
     async render(film, paper, params, maxDim, interactive, present = false) {
-      for (;;) {
-        const r = await engine.render(film, paper, params, maxDim, interactive, present);
-        if (!r.missing.length) {
-          return { width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, backend: r.backend, elapsedMs: r.elapsedMs, stages: r.stages,
-            memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) };
-        }
-        await fetchData(wasm, r.missing);
-      }
+      return dataResult(wasm, () => engine.render(film, paper, params, maxDim, interactive, present), (r) =>
+        ({ width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, backend: r.backend, elapsedMs: r.elapsedMs, stages: r.stages,
+          memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) }));
     },
     // Unquantised scan for golden tests; normal renders keep their byte-only
     // readback/presentation path. Free the wasm wrapper after copying its fields.
     async renderRaw(film, paper, params, maxDim) {
-      for (;;) {
-        const r = await engine.renderRaw(film, paper, params, maxDim);
-        const missing = r.missing;
-        if (!missing.length) {
-          const out = { width: r.width, height: r.height, scan: r.scan, rgba: r.rgba, backend: r.backend, stages: r.stages };
-          r.free();
-          return out;
-        }
-        r.free();
-        await fetchData(wasm, missing);
-      }
+      return dataResult(wasm, () => engine.renderRaw(film, paper, params, maxDim), (r) =>
+        ({ width: r.width, height: r.height, scan: r.scan, rgba: r.rgba, backend: r.backend, stages: r.stages }));
     },
     // The photograph before any film, kept on the canvas to show in the
     // developed frame's place when `present`; otherwise its bytes.
     original(params, maxDim, present = false) {
       const r = engine.original(params, maxDim, present);
-      return { width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, elapsedMs: r.elapsedMs, stages: r.stages };
+      try {
+        return { width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, elapsedMs: r.elapsedMs, stages: r.stages };
+      } finally { r.free(); }
     },
     // A preset file applied to `current` params (crates/spektrafilm-wasm
     // importPreset): { film, paper, params } as JSON, or the reason it can't.
@@ -90,13 +74,26 @@ export function client(wasm, kind) {
     exportPreset: (film, paper, params) => preset(wasm, () => wasm.exportPreset(film, paper, params), (r) => r.text),
     // The M/Y shifts that print a mid-grey neutral (Balance Print).
     async balancePrint(film, paper, params) {
-      for (;;) {
-        const r = wasm.balancePrint(film, paper, params);
-        if (!r.missing.length) return { m: r.mFilterShift, y: r.yFilterShift, elapsedMs: r.elapsedMs };
-        await fetchData(wasm, r.missing);
-      }
+      return dataResult(wasm, () => wasm.balancePrint(film, paper, params), (r) =>
+        ({ m: r.mFilterShift, y: r.yFilterShift, elapsedMs: r.elapsedMs }));
     },
   };
+}
+
+// wasm-bindgen's getters copy Vecs into JS; the Rust result still owns the
+// originals. Free it before the next render/fetch instead of waiting for GC
+// in a busy worker (an export alone can otherwise retain another RGBA image).
+async function dataResult(wasm, call, read) {
+  for (;;) {
+    const r = await call();
+    let missing, value;
+    try {
+      missing = r.missing;
+      if (!missing.length) value = read(r);
+    } finally { r.free(); }
+    if (!missing.length) return value;
+    await fetchData(wasm, missing);
+  }
 }
 
 // A preset call, after fetching the stock profiles it asks for. A profile
@@ -104,9 +101,11 @@ export function client(wasm, kind) {
 async function preset(wasm, call, result) {
   for (;;) {
     const r = call();
-    const { missing, error } = r;
-    const value = error ? null : result(r);
-    r.free();
+    let missing, error, value;
+    try {
+      ({ missing, error } = r);
+      value = error ? null : result(r);
+    } finally { r.free(); }
     if (missing.length) {
       try {
         await fetchData(wasm, missing);

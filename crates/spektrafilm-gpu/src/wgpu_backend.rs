@@ -914,9 +914,27 @@ impl WgpuBackend {
         let n_pixels = image.pixel_count() as u32;
         let img_bytes = n_pixels as usize * 3 * 4;
 
+        // Effects share up to two full-image scratch buffers. Plan these
+        // before taking the pool: a render already too large to retain must
+        // evict old sizes BEFORE allocating its buffers, not after its peak.
+        let scratch_count = if p.dir_couplers.is_some()
+            || p.halation.is_some()
+            || p.unsharp.is_some()
+            || p.grain.is_some()
+        {
+            2
+        } else if p.glare.is_some()
+            || p.diffusion.is_some()
+            || (!p.scan_film && p.enlarger_diffusion.is_some())
+        {
+            1
+        } else {
+            0
+        };
         // Ping-pong image buffers (each holds H*W*3 f32 values), the last
         // render's in browsers (see `ImagePool`).
-        let mut images = self.image_pool.take((image.width, image.height));
+        let minimum_bytes = img_bytes as u64 * (2 + scratch_count as u64);
+        let mut images = self.image_pool.take((image.width, image.height), minimum_bytes);
         let mut make_img_buf = |label: &str| {
             images.buffer(
                 &self.device,
@@ -1474,20 +1492,6 @@ impl WgpuBackend {
         // full-image storage, but keep every input/output of a dispatch distinct.
         // See docs/memory-scratch-reuse.md for the pass/lifetime table.
         // This pool is per-render: no full images enter the backend cache.
-        let scratch_count = if p.dir_couplers.is_some()
-            || p.halation.is_some()
-            || p.unsharp.is_some()
-            || p.grain.is_some()
-        {
-            2
-        } else if p.glare.is_some()
-            || p.diffusion.is_some()
-            || (!p.scan_film && p.enlarger_diffusion.is_some())
-        {
-            1
-        } else {
-            0
-        };
         let scratch: Vec<_> = (0..scratch_count)
             .map(|i| make_img_buf(&format!("effect_scratch_{i}")))
             .collect();
@@ -2620,8 +2624,6 @@ impl WgpuBackend {
         Some([iw, ih, place.origin[0], place.origin[1], w, h])
     }
 
-    /// Free what the GPU keeps of the photograph: its shown images, its
-    /// original and its inputs, before another opens (see `release`).
     /// Limit a diffusion filter's FFT grid to `bytes` (0: no limit). A
     /// larger one convolves the image shrunk by the smallest whole factor
     /// that fits and blends the glow back at full size: for a device short
@@ -2631,14 +2633,24 @@ impl WgpuBackend {
         self.diffusion_grid_budget.store(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Release render scratch and uploaded inputs before a separate decoder
+    /// starts. Keep display textures so a failed decode can still show the
+    /// old photograph; the engine also keeps its CPU source for recovery.
+    pub fn release_render_buffers(&self) {
+        self.image_pool.clear();
+        for (_, input) in self.resident_inputs.lock().unwrap().drain(..) {
+            release(&input);
+        }
+    }
+
+    /// Free the photograph's shown images, original, inputs AND pooled
+    /// render buffers before another opens (see `release`).
     pub fn forget_photograph(&self) {
+        self.release_render_buffers();
         if let Some(canvas) = self.canvas.lock().unwrap().as_mut() {
             for shown in canvas.shown.drain(..).chain(canvas.original.take()) {
                 shown.texture.destroy();
             }
-        }
-        for (_, input) in self.resident_inputs.lock().unwrap().drain(..) {
-            release(&input);
         }
     }
 
@@ -2988,15 +3000,34 @@ const MAX_POOLED_BYTES: u64 = 512 << 20;
 impl ImagePool {
     /// The pooled buffers for an image of `size`, which a render in flight
     /// doesn't hold, since it took them.
-    fn take(&self, size: (u32, u32)) -> ImageSet {
+    fn take(&self, size: (u32, u32), minimum_bytes: u64) -> ImageSet {
         static GENERATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let mut sets = self.0.lock().unwrap();
         let free = match sets.iter().position(|set| set.size == size) {
             Some(i) => sets.remove(i).used,
             None => Vec::new(),
         };
+        // Reuse this size's partial set even when the complete render would
+        // exceed the pool budget. Only other sizes go before a large render.
+        if minimum_bytes > MAX_POOLED_BYTES {
+            for set in sets.drain(..) {
+                for (_, buffer) in set.used.iter().chain(&set.free) {
+                    release(buffer);
+                }
+            }
+        }
         let generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         ImageSet { size, generation, free, used: Vec::new() }
+    }
+
+    /// Explicitly destroy buffers rather than waiting for worker-side JS GC.
+    /// Includes unused buffers defensively, even though put() drains those.
+    fn clear(&self) {
+        for set in self.0.lock().unwrap().drain(..) {
+            for (_, buffer) in set.used.iter().chain(&set.free) {
+                release(buffer);
+            }
+        }
     }
 
     /// The scan (`img_b`) of render `generation`, of `size`, while the pool
@@ -3019,13 +3050,30 @@ impl ImagePool {
         let mut sets = self.0.lock().unwrap();
         sets.insert(0, set);
         let kept = sets.len().min(2);
-        let mut evicted = sets.split_off(kept);
-        while sets.iter().flat_map(|set| &set.used).map(|(_, b)| b.size()).sum::<u64>() > MAX_POOLED_BYTES {
-            evicted.extend(sets.pop());
-        }
+        let evicted = sets.split_off(kept);
+        Self::trim(&mut sets, MAX_POOLED_BYTES);
         for (_, buffer) in unused.iter().chain(evicted.iter().flat_map(|set| &set.used)) {
             release(buffer);
         }
+    }
+
+    /// Keep partial sets, newest first, within the SAME byte budget. A 12 MP
+    /// frame's four RGB buffers alone exceed 512 MiB: evicting the entire set
+    /// made every zoom edit allocate all four again before Safari reclaimed
+    /// the old ones. Keep the buffers that fit (including img_b for Post).
+    fn trim(sets: &mut Vec<ImageSet>, mut bytes: u64) {
+        for set in sets.iter_mut() {
+            set.used.retain(|(_, buffer)| {
+                if buffer.size() <= bytes {
+                    bytes -= buffer.size();
+                    true
+                } else {
+                    release(buffer);
+                    false
+                }
+            });
+        }
+        sets.retain(|set| !set.used.is_empty());
     }
 }
 
@@ -3043,10 +3091,15 @@ struct ImageSet {
 impl ImageSet {
     /// The last render's buffer `label`, or a new one.
     fn buffer(&mut self, device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
-        let pooled = self.free.iter().position(|(l, b)| l == label && b.size() == size && b.usage() == usage);
+        let pooled = self.free.iter().position(|(l, _)| l == label).map(|i| self.free.swap_remove(i).1);
         let buffer = match pooled {
-            Some(i) => self.free.swap_remove(i).1,
-            None => device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false }),
+            Some(buffer) if buffer.size() == size && buffer.usage() == usage => buffer,
+            old => {
+                // E.g. an FFT grid whose radius changed: free the old grid
+                // before allocating its replacement, not at render completion.
+                if let Some(old) = old { release(&old); }
+                device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
+            }
         };
         self.used.push((label.to_owned(), buffer.clone()));
         buffer
@@ -6210,12 +6263,12 @@ fn build_grain_state(
         let mut level = 0;
         loop {
             let blocks = values.div_ceil(2048).max(1);
-            let out = device.create_buffer(&wgpu::BufferDescriptor {
+            let out = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("grain_sums_{level}")),
                 size: blocks as u64 * 6 * 4,
                 usage: wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
-            });
+            }));
             let params = ReduceParams { n_values: values, mode: (level > 0) as u32, _pad: [0; 2] };
             let reduce = if level == 0 {
                 job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[cur, other, &out])
@@ -6234,12 +6287,12 @@ fn build_grain_state(
         // 5. Renormalize and remove the floor.
         passes.push(finalize(true, other, buffers.last().expect("sums")));
     } else {
-        let unused = device.create_buffer(&wgpu::BufferDescriptor {
+        let unused = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("grain_sums_unused"),
             size: 32,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
-        });
+        }));
         passes.push(finalize(false, cur, &unused));
         buffers.push(unused);
     }
@@ -6290,6 +6343,41 @@ fn is_uniform(xs: &[f64]) -> bool {
 mod grain_tests {
     use super::*;
     use wgpu::util::DeviceExt;
+
+    #[test]
+    fn image_pool_preserves_small_reuse_but_evicts_before_oversized_renders() {
+        let pool = ImagePool::default();
+        let set = |size, generation| ImageSet { size, generation, free: Vec::new(), used: Vec::new() };
+        pool.0.lock().unwrap().extend([set((100, 100), 1), set((200, 200), 2)]);
+        let small = pool.take((100, 100), 100 * 100 * 48);
+        assert_eq!(small.size, (100, 100));
+        assert_eq!(pool.0.lock().unwrap().len(), 1, "other small size remains reusable");
+        let large = pool.take((4242, 2828), 4242 * 2828 * 48);
+        assert_eq!(large.size, (4242, 2828));
+        assert!(pool.0.lock().unwrap().is_empty(), "old sizes gone before large buffers allocate");
+        pool.0.lock().unwrap().push(set((200, 200), 3));
+        pool.clear();
+        assert!(pool.0.lock().unwrap().is_empty(), "forget clears the pool too");
+    }
+
+    #[test]
+    fn image_pool_keeps_partial_oversized_sets_within_budget() {
+        let Some(backend) = WgpuBackend::new() else { return };
+        let buffer = |label: &str, size| (label.to_owned(), backend.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label), size, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false,
+        }));
+        let large = ImageSet { size: (4242, 2828), generation: 9, free: Vec::new(),
+            used: ["img_a", "img_b", "effect_scratch_0", "effect_scratch_1"].map(|l| buffer(l, 144)).into() };
+        let small = ImageSet { size: (100, 100), generation: 10, free: Vec::new(), used: vec![buffer("img_b", 64)] };
+        let pool = ImagePool::default();
+        pool.0.lock().unwrap().extend([large, small]);
+        ImagePool::trim(&mut pool.0.lock().unwrap(), 512);
+        assert_eq!(pool.0.lock().unwrap().iter().flat_map(|s| &s.used).map(|(_, b)| b.size()).sum::<u64>(), 496);
+        assert!(pool.scan(9, (4242, 2828)).is_some(), "retained scan still supports Post");
+        let next = pool.take((4242, 2828), MAX_POOLED_BYTES + 1);
+        assert_eq!(next.free.len(), 3, "large render reuses its partial set");
+        assert!(pool.0.lock().unwrap().is_empty(), "other size evicted before allocating");
+    }
 
     #[test]
     fn linear_dispatch_grid_covers_every_thread_within_limits() {

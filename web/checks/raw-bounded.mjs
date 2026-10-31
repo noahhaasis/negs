@@ -3,13 +3,19 @@
 //   RAW_FIXTURE=results/3980774776.dng node web/safari.mjs run web/checks/raw-bounded.mjs
 // Open includes a URL download, NOT the native Files picker. `timeline` measures
 // import-to-first-frame separately from that download and driver polling.
-// RAW_SCREENSHOTS=0 skips ipad.mjs's end-of-phase captures: on this iPhone
+// RAW_PHASES=open-1,smoke runs a short batch instead of the full sequence.
+// SAFARI_SCREENSHOTS=0 disables all controller captures (including on failure).
+// RAW_SCREENSHOTS=0 also skips ipad.mjs's end-of-phase captures: on this iPhone
 // webinspectord was killed while taking those screenshots, not while rendering.
 import editorSuite from "./ipad.mjs";
 
 export default async function (test) {
   const fixture = process.env.RAW_FIXTURE;
   if (!fixture) throw new Error("Set RAW_FIXTURE to a served RAW URL");
+  const allowed = ["open-1", "open-2", "smoke", "zoom", "export", "after-export", "open-3", "open-4", "original"];
+  const phases = process.env.RAW_PHASES?.split(",").map(p => p.trim())
+    ?? allowed.filter(p => p !== "smoke");
+  if (!phases.length || phases.some(p => !allowed.includes(p))) throw new Error("Invalid RAW_PHASES; choose from " + allowed.join(","));
   const initial = await test.probe();
   async function capture(label) {
     const state = await test.probe();
@@ -28,7 +34,7 @@ export default async function (test) {
       resources: performance.getEntriesByType('resource').filter(r => ['.wasm', '.js', '.mjs'].some(ext => r.name.split('?')[0].endsWith(ext))).map(r => r.name)
     };`) });
   }
-  for (const phase of ["open-1", "open-2", "zoom", "export", "after-export", "open-3", "open-4", "original"]) {
+  for (const phase of phases) {
     if (phase.startsWith("open")) {
       await test.step(`${phase} ${fixture}`, () => test.execute("negs.open(arguments[0]).catch(e => console.error(e));", fixture));
     } else if (phase === "original") {
@@ -48,5 +54,5 @@ export default async function (test) {
     }
     await capture(phase);
   }
-  return { fixture };
+  return { fixture, phases };
 }

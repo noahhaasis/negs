@@ -7,6 +7,8 @@
 //   node web/safari.mjs probe
 //   node web/safari.mjs run web/checks/ipad.mjs
 // SAFARI_TEST_DIR holds session.json, host-side JSONL logs, and screenshots.
+// SAFARI_SCREENSHOTS=0 disables ALL captures, including failure screenshots
+// (important on devices where screenshot capture kills webinspectord).
 // The upload uses the page's file input change path; the native Files picker
 // and system gestures must be checked separately.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
@@ -115,6 +117,10 @@ async function waitFor(expression, { timeout = 180000, healthy = true } = {}) {
   }
 }
 async function screenshot(name) {
+  if (process.env.SAFARI_SCREENSHOTS === "0") {
+    log("screenshot-skipped", { name, reason: "SAFARI_SCREENSHOTS=0" });
+    return null;
+  }
   const data = await call("GET", "/screenshot");
   const path = join(root, `${name.replace(/[^a-zA-Z0-9_-]/g, "-")}.png`);
   writeFileSync(path, Buffer.from(data, "base64"));

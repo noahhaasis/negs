@@ -545,6 +545,15 @@ impl Engine {
         state.input_colour = Some(colour);
     }
 
+    /// Release GPU render buffers before a short-lived worker decodes the
+    /// next RAW. Keep the loaded source and display for failed-load recovery.
+    #[wasm_bindgen(js_name = releaseRenderBuffers)]
+    pub fn release_render_buffers(&self) {
+        if let Some(gpu) = &self.state.borrow().gpu {
+            gpu.release_render_buffers();
+        }
+    }
+
     /// Drop the loaded photograph and everything made from it. Before a
     /// [`Engine::load`], whose bytes the call copies into the module's memory
     /// first: then they and the decode have the photograph's room too.
