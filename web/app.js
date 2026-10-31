@@ -67,7 +67,7 @@ function startHost(engineKind) {
     for (const [, [, reject]] of pending) reject(error);
     pending.clear();
   };
-  worker.onmessage = ({ data: { id, result, error, crashed } }) => {
+  worker.onmessage = ({ data: { id, result, error, code, crashed } }) => {
     if (!pending.has(id)) return;
     if (crashed) {
       // The panic's message follows on the channel; wait for it briefly.
@@ -75,7 +75,7 @@ function startHost(engineKind) {
     }
     const [resolve, reject] = pending.get(id);
     pending.delete(id);
-    error ? reject(new Error(error)) : resolve(result);
+    error ? reject(Object.assign(new Error(error), { code })) : resolve(result);
   };
   worker.onerror = (ev) => fail(Object.assign(new Error(ev.message || "the engine stopped"), { crashed: true }));
   // A panic on one of rayon's threads leaves the engine waiting forever;
@@ -134,7 +134,9 @@ async function startEngine(engineKind) {
   } catch (e) {
     // A newer selection replaced this engine; that start owns the page.
     if (e.restarted) return false;
-    if (kind === "gpu") {
+    // rayon's threads not starting (web/pool.js) isn't WebGPU's doing, and
+    // the CPU engine would start them the same way.
+    if (kind === "gpu" && e.code !== "pool") {
       showMessage(`WebGPU isn't available here (${e.message}); using the CPU engine.`);
       return startEngine("cpu");
     }
@@ -2084,6 +2086,18 @@ addEventListener("beforeunload", (e) => {
   if (leaving || !unexported()) return;
   e.preventDefault();
   e.returnValue = "";
+});
+// Leaving ends the engine's and the decoder's thread pools, as replacing an
+// engine does: Safari otherwise keeps their memory past the page, and a
+// reload, online or offline, then ran out of it. A page Safari keeps to come
+// back to starts a new engine when it's shown again.
+addEventListener("pagehide", () => {
+  host?.kill();
+  decoder?.postMessage({ dispose: true });
+  decoder = null;
+});
+addEventListener("pageshow", (e) => {
+  if (e.persisted) starting = startEngine(kind).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
 });
 $("brand").addEventListener("click", (e) => {
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0 || !unexported()) return;
