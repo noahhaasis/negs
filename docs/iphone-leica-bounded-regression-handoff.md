@@ -1,5 +1,13 @@
 # Bounded RAW regression follow-up — PAUSED, 2026-10-30
 
+**2026-10-31 continuation:** the user subsequently authorized device work and
+connected an iPad. See [the stability follow-up](iphone-ipad-stability-followup.md)
+for local memory fixes, an actual 24 MP iPad pass, an incomplete iPad Leica
+sequence, and later **short physical iPhone passes** on the final candidate
+(24 MP default route and Leica bounded, including export/reopen). These are
+not a full reliability sign-off. No default enablement or deployment was made.
+The historical pause below is preserved rather than rewritten as successful testing.
+
 **User requested a pause after reporting that they could not unlock their phone.**
 Do not start device automation again until they explicitly confirm the phone is
 usable and ready. Stop short of claiming no regressions or a reliability pass.

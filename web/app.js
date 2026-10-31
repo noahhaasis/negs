@@ -827,6 +827,10 @@ async function loadPhoto(bytes, wb, { stale = () => false } = {}) {
   if (!pixels) return host.call("load", bytes, 0, 0, whiteBalance).catch(forgot);
   // Decoded in a worker that then ends, so the engine's memory holds only
   // the copy it keeps, never the decode's peak.
+  // Leave the old source/display intact for failed-decode recovery, but do
+  // not overlap its cached GPU working buffers with the new RAW decoder.
+  await host.call("releaseRenderBuffers");
+  if (stale()) throw superseded();
   const t = performance.now();
   const decoded = await decodeKept(bytes, pixels, whiteBalance);
   if (stale()) throw superseded();
@@ -1795,8 +1799,15 @@ async function exportJpeg() {
     while (running) await new Promise((r) => setTimeout(r, 20));
     const r = await exportRender();
     const canvas = new OffscreenCanvas(r.width, r.height);
-    canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height), 0, 0);
-    const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+    let blob;
+    try {
+      canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(r.rgba.buffer, r.rgba.byteOffset, r.rgba.length), r.width, r.height), 0, 0);
+      blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+    } finally {
+      // The JPEG owns its encoded bytes now. Release the full export-sized
+      // backing store even if encoding failed, rather than wait for page GC.
+      canvas.width = canvas.height = 1;
+    }
     const name = `${photo.name.replace(/\.[^.]+$/, "")}-${state.film}.jpg`;
     const file = new File([blob], name, { type: "image/jpeg" });
     // A home-screen app on iOS has no downloads; the share sheet saves to
