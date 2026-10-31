@@ -118,10 +118,15 @@ async function saveAll(wanted, task) {
   }));
 }
 
+// A file that can't be had fails the install; the pages say so (the
+// browser tries again when one next opens) instead of waiting at its percent.
 self.addEventListener("install", (event) => event.waitUntil((async () => {
   await (await caches.open(META)).put(`${scope}manifest/${BUILD.version}`, Response.json(BUILD.files));
   await saveAll(Object.entries(BUILD.files).filter(([, [, , precache]]) => precache), "install");
-})()));
+})().catch((e) => {
+  offline.postMessage({ type: "failed", task: "install", error: e.message });
+  throw e;
+})));
 
 self.addEventListener("activate", (event) => event.waitUntil((async () => {
   // Pages that opened before any worker came from the network, which
