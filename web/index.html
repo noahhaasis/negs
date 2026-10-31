@@ -347,10 +347,11 @@
       <button class="btn" id="open">Open…</button>
       <button class="btn" id="export" disabled>Export</button>
       <div class="menu-anchor" id="preset-menu-anchor">
-        <button class="btn more" id="more" aria-haspopup="menu" aria-expanded="false" aria-controls="preset-menu" aria-label="More" title="Presets">⋯</button>
-        <div class="menu" id="preset-menu" role="menu" aria-label="Presets" hidden>
+        <button class="btn more" id="more" aria-haspopup="menu" aria-expanded="false" aria-controls="preset-menu" aria-label="More" title="Presets and LUT">⋯</button>
+        <div class="menu" id="preset-menu" role="menu" aria-label="Presets and LUT" hidden>
           <button type="button" role="menuitem" id="import-preset" tabindex="-1">Import preset…</button>
           <button type="button" role="menuitem" id="export-preset" tabindex="-1">Export preset…</button>
+          <button type="button" role="menuitem" id="export-lut" tabindex="-1" title="A 33 × 33 × 33 CUBE file, sRGB in and out, with the current film and paper color settings. Excludes auto exposure, print filter shifts, preflash, grain, halation, glare, diffusion, blur, sharpening, RAW development and Post edits.">Export LUT…</button>
         </div>
       </div>
       <button class="btn" id="crop-cancel" hidden>Cancel</button>
