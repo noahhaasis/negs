@@ -511,6 +511,10 @@ pub fn apply(state: &mut State, film: &str, paper: &str, params: &Value) -> Resu
         next.values.insert(key, value);
     }
     for &(key, path) in parameters::TOGGLES {
+        // Per photograph, like the crop (`presets::KEPT` in the engine).
+        if key == parameters::LENS_CORRECTIONS {
+            continue;
+        }
         let value = parameters::get(params, path)
             .as_bool()
             .ok_or_else(|| format!("The preset has no value for {key}."))?;

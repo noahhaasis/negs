@@ -601,7 +601,14 @@ pub fn build(ui: &Rc<Editor>) {
             }
         }));
     }
-    let raw_caption = gtk::Label::new(Some("RAW white balance · changes re-decode the photograph"));
+    // Shown only when the decoder found corrections in this file.
+    let lens = toggle(ui, &raw, crate::parameters::LENS_CORRECTIONS, true);
+    lens.set_subtitle("Distortion, vignetting and colour fringing, from the camera’s data in the file");
+    {
+        let owner = Rc::downgrade(ui);
+        visible(ui, &lens, move |_| owner.upgrade().is_some_and(|ui| ui.lens_supported.get()));
+    }
+    let raw_caption = gtk::Label::new(Some("RAW development · changes re-decode the photograph"));
     raw_caption.set_wrap(true);
     raw_caption.add_css_class("caption");
     lab.append(&raw_caption);

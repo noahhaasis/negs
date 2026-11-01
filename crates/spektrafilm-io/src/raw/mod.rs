@@ -94,11 +94,13 @@ impl RawDecoder for RawlerDecoder {
     fn name(&self) -> &'static str {
         "rawler"
     }
-    /// No lens corrections yet (plan Phase 1b).
+    /// Applies the corrections in DNG opcodes and Sony and Fujifilm
+    /// metadata ([`crate::lens`]).
     fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
+        let raw = crate::load_raw_rawler(path, options.apply_orientation, options.white_balance, options.lens_correction)?;
         Ok(RawImage {
-            image: crate::load_raw_rawler(path, options.apply_orientation, options.white_balance)?,
-            lens_correction_supported: false,
+            image: raw.image,
+            lens_correction_supported: raw.lens.is_some(),
         })
     }
 }

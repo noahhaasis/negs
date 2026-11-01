@@ -114,7 +114,11 @@ impl Editor {
                         ui.engine_error(&error);
                         return;
                     }
-                    let defaults = catalog["defaults"].clone();
+                    let mut defaults = catalog["defaults"].clone();
+                    // The engine leaves lens corrections off for params from
+                    // before them, so their crops keep their place; the app
+                    // corrects every new edit (as on macOS).
+                    parameters::set(&mut defaults, parameters::LENS_CORRECTION_PATH, json!(true));
                     parameters::set_nullable_paths(&catalog);
                     {
                         let mut h = ui.history.borrow_mut();
@@ -263,9 +267,10 @@ impl Editor {
             r.current_revision = None;
             r.showing_original = false;
             r.desired = Value::Null;
+            self.lens_supported.set(false);
         }
         // The original view follows the decode and the preview space.
-        let original_key = json!([params["io"]["raw_white_balance"], desired["limit_preview"],
+        let original_key = json!([params["io"]["raw_white_balance"], params["io"]["lens_correction"], desired["limit_preview"],
             params["io"]["input_interpretation"], params["io"]["input_color_space"],
             params["io"]["input_cctf_decoding"], params["io"]["output_color_space"]]);
         let release_original = r.showing_original && r.original_key != original_key;
@@ -385,6 +390,7 @@ impl Editor {
                 Ok(Ok((id,frame,cache_key))) if current => {
                     r.set_developed(frame.clone(), interactive.is_some());
                     ui.input_summary.set_text(&input_summary(&frame.result["input_colour"]));
+                    ui.lens_supported.set(frame.result["lens_correction_supported"] == true);
                     if interactive.is_none() && revision == r.revision { r.retained_id = Some(id); r.current_revision = Some(revision); r.cached_restoring=false;ui.perf.mark("saveable_render_ready_ms");if let Some(key)=cache_key {ui.cache.save(key,frame.clone());} }
                     if interactive.is_some() { r.interactive_frames += 1; ui.perf.detail("interactive_frames_presented", r.interactive_frames); }
                     let show = !r.showing_original;

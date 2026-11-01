@@ -499,6 +499,7 @@ impl Editor {
             requested.crop = None;
             requested.rotation = 0;
             requested.straighten = 0.;
+            requested.choices.insert(crate::parameters::LENS_CORRECTIONS.into(), "true".into());
         }
         let requested_identity =
             crate::preview_cache::identity(&requested, &self.runtime.borrow().defaults);
@@ -545,6 +546,8 @@ impl Editor {
                         state.crop = None;
                         state.rotation = 0;
                         state.straighten = 0.;
+                        // Lens corrections are per photograph: on for a new one.
+                        state.choices.insert(crate::parameters::LENS_CORRECTIONS.into(), "true".into());
                         ui.history.replace(crate::model::History::new(state));
                     }
                     if matches!(opened, Opened::Cached(_))

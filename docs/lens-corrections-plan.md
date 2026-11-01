@@ -4,7 +4,9 @@ Prepared 2026-10-29 against Negs `17e8a8c`, on branch `lens-corrections`
 (worktree `~/Work/Negs-lens`).
 
 **Status:** Phases 0 and 1a (macOS via Apple) implemented on 2026-10-29;
-see "Phase 0 results". Phases 1b–3 are not started.
+see "Phase 0 results". Phase 1b and the Sony/Fujifilm half of Phase 2
+implemented for Linux on 2026-11-01 (see "Phase 1b/2 results"). Windows UI,
+OM/Olympus, Panasonic and Phase 3 are not started.
 
 **Decided 2026-10-29 (Noah):** macOS first, using Apple's built-in
 correction (Phases 0 and 1a). Windows/Linux later, as a Rust port of
@@ -341,19 +343,53 @@ The old egui app (`crates/spektrafilm-gui`) is not maintained; skip it.
 The rawler fallback reports no support, so the toggle stays hidden for files
 Apple cannot open. The CLI and Windows/Linux keep it off unless params set it.
 
-### Phase 1b — DNG opcodes and the shared pipeline (1–1.5 weeks)
+### Phase 1b — DNG opcodes and the shared pipeline (done for Linux 2026-11-01)
 
-1. `lens` module: model, `WarpRectilinear`, `FixVignetteRadial`, `GainMap`
-   parsers (big-endian opcode blobs, per the DNG 1.6 spec; port from
-   darktable's `dng_opcode.c`), renderer.
-2. Rawler path: remove `CropDefault`, apply correction, crop, orient.
-3. Settings sub-flags, native helper, CLI flag (`--lens-correction on|off`).
-4. UI on Windows and Linux; on macOS the same toggle drives the Rust stage
-   when the file fell back to rawler.
-5. Tests (below).
+What was built (differs from the plan where noted):
 
-Ship after Phase 1b: it is already useful for phone DNGs on Windows/Linux, and
-it puts every cross-cutting piece in place.
+1. `spektrafilm-io/src/lens/`: `Profile` (source + model), `read_profile`,
+   `apply`. DNG `WarpRectilinear` (radial + tangential, per plane, so lateral
+   CA) and `FixVignetteRadial` written from the DNG spec (`dng.rs`). Sony and
+   Fujifilm ported from darktable (`vendor.rs`, with darktable's notice).
+   `GainMap` is **not** handled: it lives in `OpcodeList2` (pre-demosaic) and
+   none of the local samples carry one.
+2. Rawler's `CropDefault` was **kept**: rawler reports the active area and
+   crop, so the DNG frame is offset onto the developed image instead
+   (`lib.rs::lens_area`). The stage runs after calibration, before
+   orientation.
+3. One `enabled` flag only (no sub-flags), matching macOS. The helper's
+   existing `lens_correction_supported` now comes from the rawler path too.
+4. Linux: "Lens corrections" switch in the RAW group, shown only when the last
+   render reports support; on for each newly opened photo and on Reset; off
+   for sessions saved before it (session schema 3); kept when a preset is
+   applied; the press-and-hold original follows it.
+5. Tests: unit tests in `lens/tests.rs`; `real_files_have_profiles`
+   (`#[ignore]`, `SPEKTRAFILM_LENS_TEST_FILES`).
+
+Rendering: vignetting is an in-place linear gain; distortion/CA is one
+Catmull-Rom resample into a new buffer, then a zoom about the centre so no
+border pixel samples outside the image (DNG: only zoom in, never out;
+vendor curves: darktable's fitted scale, which may zoom out slightly).
+
+## Phase 1b/2 results (2026-11-01, Linux, 12 threads, machine under load)
+
+| File | Data found | Decode off | Lens stage |
+| --- | --- | --- | --- |
+| Leica Q3 DNG, 60 MP | warp with lateral CA | ~1.5 s | +0.7 s (up to 2 s under memory pressure) |
+| Sony ARW, 24 MP | distortion, CA, vignetting | ~0.45 s | +0.45 s |
+| Fujifilm X100V RAF, 26 MP | CA, vignetting (fixed lens: no distortion) | ~0.6 s | +0.5 s |
+
+- Synthetic 24 MP: ~165 ms without CA (one sample per pixel), ~440 ms with
+  CA (three). Only on decode (open, WB or lens change, export), not per slider.
+- Peak memory unchanged (60 MP: 1.82 GB off and on): the extra buffer is
+  smaller than rawler's own decode peak.
+- The Q3's corrected framing matches Leica's full-size in-camera preview.
+  Leica's in-camera vignetting correction is not in the DNG opcodes, so the
+  corners stay darker than the camera's JPEG.
+- Fujifilm 1.25× crop modes are not detected (knots should scale by 1.25).
+- Still open: Windows UI; OM/Olympus and Panasonic parsers (darktable has
+  them; no local samples); DNG `GainMap`; Apple-decoded files on macOS keep
+  Apple's correction.
 
 ### Phase 2 — vendor embedded data (3–5 days)
 

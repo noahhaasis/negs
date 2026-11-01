@@ -60,6 +60,8 @@ pub(crate) struct Editor {
     dimensions: gtk::Label,
     /// How the photograph's colours were read (Input Colour).
     input_summary: gtk::Label,
+    /// The last render's RAW carries lens corrections the decoder can apply.
+    lens_supported: Cell<bool>,
     status: gtk::Label,
     badge: gtk::Label,
     export_progress: gtk::Box,
@@ -397,6 +399,7 @@ impl Editor {
             title,
             dimensions,
             input_summary: gtk::Label::new(None),
+            lens_supported: Cell::new(false),
             status,
             badge,
             export_progress,

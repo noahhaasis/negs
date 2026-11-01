@@ -208,6 +208,10 @@ pub fn clear_grain_lanes(state: &mut State) {
     state.values.retain(|k, _| grain_lane(k).is_none());
 }
 
+/// The camera's own lens corrections for a RAW (`io.lens_correction`). Per
+/// photograph: on for each newly opened one, never taken from a preset.
+pub const LENS_CORRECTIONS: &str = "Lens corrections";
+pub const LENS_CORRECTION_PATH: &str = "io.lens_correction.enabled";
 pub const TOGGLES: &[(&str, &str)] = &[
     ("Auto exposure", "camera.auto_exposure"),
     ("Scan film directly", "io.scan_film"),
@@ -235,6 +239,7 @@ pub const TOGGLES: &[(&str, &str)] = &[
     ("CAT16 adaptation", "settings.use_cat16"),
     ("Encode output as sRGB", "io.output_cctf_encoding"),
     ("Linear input", "io.input_interpretation.linear"),
+    (LENS_CORRECTIONS, LENS_CORRECTION_PATH),
     ("Decode input curve", "io.input_cctf_decoding"),
     ("Use less memory for export", "settings.serial_grain"),
 ];
@@ -497,13 +502,18 @@ pub const STOCK_PRESET_PATHS: [&str; 10] = [
 /// set, and a set value beats the film's preset. Schema 1 stored values for
 /// them that the engine ignored and nothing could set, so restoring drops
 /// them (the last six of `STOCK_PRESET_PATHS`).
-pub const SESSION_SCHEMA: u64 = 2;
+/// Schema 3: lens corrections. Earlier photographs were developed without
+/// them, so they stay off and a saved crop keeps its place.
+pub const SESSION_SCHEMA: u64 = 3;
 
 pub fn migrate_session(schema: u64, state: &mut State) {
     if schema < 2 {
         for path in &STOCK_PRESET_PATHS[4..] {
             set(&mut state.params, path, Value::Null);
         }
+    }
+    if schema < 3 {
+        state.choices.insert(LENS_CORRECTIONS.into(), "false".into());
     }
 }
 

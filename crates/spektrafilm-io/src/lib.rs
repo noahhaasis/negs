@@ -20,6 +20,7 @@ pub mod encoding;
 pub mod film35;
 pub mod icc;
 pub mod image_size;
+pub mod lens;
 pub mod metadata;
 pub mod raw;
 pub mod resize;
@@ -223,7 +224,13 @@ fn load_raw_impl(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Image
     .image)
 }
 
-fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<ImageBuf> {
+/// A RAW developed by rawler, and the lens corrections it carries.
+pub(crate) struct RawlerImage {
+    pub image: ImageBuf,
+    pub lens: Option<lens::Source>,
+}
+
+fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance, lens_correction: LensCorrection) -> Result<RawlerImage> {
     use rawler::{
         decoders::RawDecodeParams,
         imgop::develop::{ProcessingStep, RawDevelop},
@@ -254,16 +261,48 @@ fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance) -> Result<Ima
     }))
     .map_err(|p| anyhow::anyhow!("RAW develop failed: panicked: {}", panic_message(&p)))?
     .context("RAW develop failed")?;
+    let area = lens_area(&raw);
     // The developed pixels no longer depend on the sensor buffer.
     drop(raw);
-    let img = intermediate_to_image_buf(intermediate);
+    let mut img = intermediate_to_image_buf(intermediate);
+    // Lens corrections are defined in sensor coordinates: before orientation.
+    let profile = lens::read_profile_from(&src);
+    if lens_correction.enabled && let Some(profile) = &profile {
+        let area = area.filter(|a| a.developed == (img.width as usize, img.height as usize)).map(|a| a.area);
+        lens::apply(&mut img, profile, area);
+    }
+    let lens = profile.map(|p| p.source);
     if !orient {
-        return Ok(img);
+        return Ok(RawlerImage { image: img, lens });
     }
     // rawler 0.8 still always sets `RawImage::orientation` to Normal (an
     // upstream TODO), so read the EXIF tag ourselves.
     let orientation = raw_exif_orientation(&src, &decode_params);
-    Ok(img.oriented(orientation))
+    Ok(RawlerImage { image: img.oriented(orientation), lens })
+}
+
+/// The active area (where DNG lens opcodes are defined) relative to the image
+/// rawler develops: the default crop within it.
+struct LensArea {
+    area: lens::Area,
+    developed: (usize, usize),
+}
+
+fn lens_area(raw: &rawler::RawImage) -> Option<LensArea> {
+    let active = raw.active_area?;
+    let crop = raw.crop_area.unwrap_or(active);
+    if crop.p.x < active.p.x || crop.p.y < active.p.y {
+        return None;
+    }
+    Some(LensArea {
+        area: [
+            active.p.x as f64 - crop.p.x as f64,
+            active.p.y as f64 - crop.p.y as f64,
+            active.d.w as f64,
+            active.d.h as f64,
+        ],
+        developed: (crop.d.w, crop.d.h),
+    })
 }
 
 /// Text of a caught panic payload (`panic!` with a literal or a format).
