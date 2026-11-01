@@ -32,21 +32,21 @@ import SwiftUI
         // session restores before the window is built, so its saved frame and
         // adjustments are in the window's first frames; the main actor's tasks
         // only run after AppKit's launch passes. Without a cached catalog, or
-        // if the session can't be read now, it restores once the helper
+        // if the session isn't read within 0.1 s, it restores once the helper
         // answers and reports any error then. Benchmarks and explicit
         // launches must not reopen a previous photograph.
         model.launch()
         let benchmark = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] != nil
-        var restoration: Task<EditorSession?, Error>?
-        if !benchmark, Self.pathArgument != nil || !((try? sessions.read()).flatMap { $0 }.map(model.restoreAtLaunch) ?? false) {
-            restoration = Task { try await sessions.load() }
-        }
+        var store: SessionStore? = benchmark ? nil : sessions
         #if SPEKTRAFILM_BENCHMARK
         if let path = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_SESSION"] {
-            let store = SessionStore(file: URL(fileURLWithPath: path))
-            restoration = Task { try await store.load() }
+            store = SessionStore(file: URL(fileURLWithPath: path))
         }
         #endif
+        var restoration: Task<EditorSession?, Error>?
+        if let store, Self.pathArgument != nil || !(Self.readSession(store, timeout: 0.1).map(model.restoreAtLaunch) ?? false) {
+            restoration = Task { try await store.load() }
+        }
         Task { await model.start(restoration: restoration) }
         menu = MainMenu(model: model, updates: updates) { [weak self] in self?.removeAllAppData() }
         NSApp.mainMenu = menu?.menu
@@ -55,8 +55,10 @@ import SwiftUI
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         // The saved frame has usually been read while AppKit built the
-        // window; waiting briefly puts it in the window's first frame.
-        model.showLaunchFrame(waitingUpTo: 0.15)
+        // window; waiting briefly puts it in the window's first frame. A
+        // Finder open may have undone the restore that titled the window.
+        model.finishLaunching(waitingUpTo: 0.15)
+        editor?.refresh()
         editor?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         // Finder opens arrive through application(_:open:); a path argument is for `swift run`.
@@ -65,6 +67,19 @@ import SwiftUI
         InteractionBenchmark.start(model)
         #endif
         updates.schedule(afterStartupOf: model)
+    }
+    /// The session, read on another thread and waited for at most `timeout`,
+    /// so a photograph on an unresponsive volume never holds up launch. Nil
+    /// if there's none, it can't be read, or it takes longer.
+    private static func readSession(_ store: SessionStore, timeout: TimeInterval) -> EditorSession? {
+        final class Result: @unchecked Sendable { var session: EditorSession? }
+        let result = Result(), done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            result.session = try? store.read()
+            done.signal()
+        }
+        // The semaphore orders the write before this read.
+        return done.wait(timeout: .now() + timeout) == .success ? result.session : nil
     }
     private static var pathArgument: String? {
         CommandLine.arguments.dropFirst().first { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }
