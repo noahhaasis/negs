@@ -172,8 +172,8 @@ import UniformTypeIdentifiers
     var interacting: Bool { interactionStart != nil }
 
     @ObservationIgnored let presetLibrary: PresetLibrary
-    /// Film and paper preview grids (`StockPreviews.swift`).
-    @ObservationIgnored let stockPreviews = StockPreviews()
+    /// Film and paper preview grids (`Previews.swift`).
+    @ObservationIgnored let previews = Previews()
 
     init(previewCache: RenderedPreviewCache = RenderedPreviewCache(), presetLibrary: PresetLibrary = PresetLibrary()) {
         self.previewCache = previewCache
@@ -245,9 +245,9 @@ import UniformTypeIdentifiers
         if rotation != .null { next.params["io.rotate_cw"] = rotation }
         if !films.contains(where: { $0.id == next.film }), let first = films.first { next.film = first.id }
         if !papers.contains(where: { $0.id == next.paper }), let first = papers.first { next.paper = first.id }
-        StockPreviewRules.pairFilm(in: &next, stocks: stocks)
+        PreviewRules.pairFilm(in: &next, stocks: stocks)
         state = next
-        stockPreviews.update(stocks: stocks)
+        previews.update(stocks: stocks)
     }
 
     private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }
@@ -397,14 +397,14 @@ import UniformTypeIdentifiers
         if start != state { registerUndo(restoring: start, action: action) }
         if showingInteractiveFrame, ready, source != nil, !closing { scheduleRender() }
         if !previewCurrent { scheduleActivity() }
-        pumpStockPreviews()
+        pumpPreviews()
     }
 
     func chooseFilm(_ stock: String) {
-        apply(StockPreviewRules.choosing(stock, paper: false, in: state, stocks: stocks), action: "Change Film")
+        apply(PreviewRules.choosing(stock, paper: false, in: state, stocks: stocks), action: "Change Film")
     }
     func choosePaper(_ stock: String) {
-        apply(StockPreviewRules.choosing(stock, paper: true, in: state, stocks: stocks), action: "Change Paper")
+        apply(PreviewRules.choosing(stock, paper: true, in: state, stocks: stocks), action: "Change Paper")
     }
     func limitPreview(_ enabled: Bool) {
         var next = state; next.limitPreview = enabled; apply(next, action: "Change Preview Resolution")
@@ -459,7 +459,7 @@ import UniformTypeIdentifiers
         let render = next.rendered != state.rendered
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
-        if render { changed() } else { pumpStockPreviews() }
+        if render { changed() } else { pumpPreviews() }
     }
     private func registerUndo(restoring previous: EditState, action: String) {
         undoManager?.registerUndo(withTarget: self) { model in
@@ -770,7 +770,7 @@ import UniformTypeIdentifiers
         revision += 1; previewCurrent = false
         if renderFailed { renderFailed = false }
         // Dims the thumbnails now, or blanks them for a new photograph.
-        pumpStockPreviews()
+        pumpPreviews()
         guard ready, source != nil, !closing else { return }
         scheduleRender()
         scheduleActivity()
@@ -784,7 +784,7 @@ import UniformTypeIdentifiers
             self.pendingRender = nil
             await self.render()
             // The main preview goes first; thumbnails follow once it's current.
-            self.pumpStockPreviews()
+            self.pumpPreviews()
         }
     }
     private func render() async {
@@ -896,15 +896,15 @@ import UniformTypeIdentifiers
         if showsActivity { showsActivity = false }
     }
 
-    // MARK: Film and paper previews
+    // MARK: Film, paper and preset previews
 
     /// Settings › Film, paper and preset previews. Off shows the menus and
     /// the plain preset list, and frees the thumbnails here and in the helper.
-    func setStockPreviews(_ enabled: Bool) {
-        guard enabled != stockPreviews.enabled else { return }
-        stockPreviews.enabled = enabled
-        if enabled { pumpStockPreviews(); return }
-        if stockPreviews.clear(), let engine {
+    func setPreviews(_ enabled: Bool) {
+        guard enabled != previews.enabled else { return }
+        previews.enabled = enabled
+        if enabled { pumpPreviews(); return }
+        if previews.clear(), let engine {
             Task.detached(priority: .utility) { _ = try? await engine.request(["command": .string("release_thumbnails")]) }
         }
     }
@@ -913,8 +913,7 @@ import UniformTypeIdentifiers
     /// and requests the next one of an open grid or the Presets list: one
     /// helper request at a time, and only while the main preview is current
     /// and nothing is dragged.
-    func pumpStockPreviews() {
-        let previews = stockPreviews
+    func pumpPreviews() {
         guard previews.enabled, !closing, let source else { return }
         let scanning = state.params["io.scan_film"].bool
         let rendered = renderState, generation = sourceGeneration
@@ -924,17 +923,17 @@ import UniformTypeIdentifiers
         if previews.filmOpen, previews.filmShown { entries += previews.films }
         if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papers }
         for entry in entries {
-            let command = StockPreviewRules.request(for: entry.stock, state: rendered, stocks: stocks, source: source, generation: generation)
+            let command = PreviewRules.request(for: entry.stock, state: rendered, stocks: stocks, source: source, generation: generation)
             wanted.append((entry.tile, PreviewTile.Key(generation: generation, request: command), command, entry.stock.id))
         }
         if previews.presetsShown, checkingPresets == 0 {
             let kept = catalog["preset_kept"].array.map(\.string)
-            let ordered = StockPreviewRules.renderOrder(presets, raw: isRaw, whiteBalance: { self.presetWhiteBalances[$0] },
+            let ordered = PreviewRules.renderOrder(presets, raw: isRaw, whiteBalance: { self.presetWhiteBalances[$0] },
                                                         photo: rendered.params["io.raw_white_balance"])
             for preset in ordered {
                 guard case .valid = presetStatus[preset], let text = presetTexts[preset], let tile = previews.tile(preset: preset.url) else { continue }
-                let command = StockPreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation)
-                wanted.append((tile, StockPreviewRules.presetKey(command, kept: kept.isEmpty ? nil : kept, generation: generation), command, preset.name))
+                let command = PreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation)
+                wanted.append((tile, PreviewRules.presetKey(command, kept: kept.isEmpty ? nil : kept, generation: generation), command, preset.name))
             }
         }
         guard !wanted.isEmpty else { return }
@@ -949,7 +948,7 @@ import UniformTypeIdentifiers
                 let ms = Date().timeIntervalSince(batch.started) * 1000
                 previews.lastBatch = (batch.count, ms)
                 if ProcessInfo.processInfo.environment["NEGS_STOCK_THUMB_LOG"] != nil {
-                    FileHandle.standardError.write(Data(String(format: "stock thumbnails: %d in %.0f ms (%.0f ms each)\n", batch.count, ms, ms / Double(max(batch.count, 1))).utf8))
+                    FileHandle.standardError.write(Data(String(format: "thumbnails: %d in %.0f ms (%.0f ms each)\n", batch.count, ms, ms / Double(max(batch.count, 1))).utf8))
                 }
             }
             return
@@ -957,7 +956,7 @@ import UniformTypeIdentifiers
         let started = previews.batch?.started ?? Date()
         previews.batch = (started, (previews.batch?.count ?? 0) + 1)
         previews.busy = true
-        let buffer = engine.directory.appendingPathComponent("stock-\(UUID().uuidString).rgba")
+        let buffer = engine.directory.appendingPathComponent("thumbnail-\(UUID().uuidString).rgba")
         var command = request
         command["preview_path"] = .string(buffer.path)
         Task { [weak self] in
@@ -979,12 +978,12 @@ import UniformTypeIdentifiers
                 image = nil
             }
             guard let self else { return }
-            self.stockPreviews.busy = false
-            guard !self.closing, self.stockPreviews.enabled else { return }
+            self.previews.busy = false
+            guard !self.closing, self.previews.enabled else { return }
             // The photograph changed meanwhile: drop it, the next pump retries.
             // A failure stays blank until the next edit, so nothing spins.
             if key.generation == self.sourceGeneration { tile.show(image, for: key) }
-            self.pumpStockPreviews()
+            self.pumpPreviews()
         }
     }
 
@@ -1273,10 +1272,10 @@ import UniformTypeIdentifiers
         presetStatus = presetStatus.filter { presets.contains($0.key) }
         presetTexts = presetTexts.filter { presets.contains($0.key) }
         presetWhiteBalances = presetWhiteBalances.filter { presets.contains($0.key) }
-        stockPreviews.update(presets: presets)
+        previews.update(presets: presets)
         guard let engine else { return }
         checkingPresets += 1
-        defer { checkingPresets -= 1; pumpStockPreviews() }
+        defer { checkingPresets -= 1; pumpPreviews() }
         for preset in presets where presetStatus[preset] == nil {
             do {
                 let text = try Self.presetText(try await presetLibrary.read(preset))
@@ -1422,7 +1421,7 @@ import UniformTypeIdentifiers
             do {
                 let renamed = try await presetLibrary.rename(preset, to: name)
                 // Same file, same thumbnail: no blank tile while it's renamed.
-                stockPreviews.moveTile(preset: preset.url, to: renamed.url)
+                previews.moveTile(preset: preset.url, to: renamed.url)
             } catch { report(error) }
             await refreshPresets()
         }

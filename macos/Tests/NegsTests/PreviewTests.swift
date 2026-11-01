@@ -1,7 +1,7 @@
 import XCTest
 @testable import NegsApp
 
-final class StockPreviewTests: XCTestCase {
+final class PreviewTests: XCTestCase {
     private let stocks: [Stock] = [
         Stock(.object(["id": .string("gold"), "name": .string("Gold 200"), "paper": .bool(false), "positive": .bool(false),
                        "bw": .bool(false), "target_print": .string("endura"), "development_times": .array([])])),
@@ -27,7 +27,7 @@ final class StockPreviewTests: XCTestCase {
     }
 
     func testChoosingAFilmPairsItsPaperAndResetsItsPresets() {
-        let state = StockPreviewRules.choosing("trix", paper: false, in: edited(), stocks: stocks)
+        let state = PreviewRules.choosing("trix", paper: false, in: edited(), stocks: stocks)
         XCTAssertEqual(state.film, "trix")
         XCTAssertEqual(state.paper, "ilford")
         XCTAssertEqual(state.params["film_render.development_time"], .null)
@@ -37,7 +37,7 @@ final class StockPreviewTests: XCTestCase {
         // Every other setting carries over.
         XCTAssertEqual(state.params["camera.exposure_compensation_ev"], .number(0.7))
 
-        let slide = StockPreviewRules.choosing("velvia", paper: false, in: edited(), stocks: stocks)
+        let slide = PreviewRules.choosing("velvia", paper: false, in: edited(), stocks: stocks)
         XCTAssertEqual(slide.params["io.scan_film"], .bool(true))
         // Its own paper is the current one, so the print development time stays.
         XCTAssertEqual(slide.paper, "endura")
@@ -45,7 +45,7 @@ final class StockPreviewTests: XCTestCase {
     }
 
     func testChoosingAPaperKeepsTheFilm() {
-        let state = StockPreviewRules.choosing("ilford", paper: true, in: edited(), stocks: stocks)
+        let state = PreviewRules.choosing("ilford", paper: true, in: edited(), stocks: stocks)
         XCTAssertEqual(state.film, "gold")
         XCTAssertEqual(state.paper, "ilford")
         XCTAssertEqual(state.params["print_render.development_time"], .null)
@@ -56,7 +56,7 @@ final class StockPreviewTests: XCTestCase {
     func testTheTileKeyFollowsTheCropAndThePhotograph() {
         let photo = URL(fileURLWithPath: "/photos/a.jpg"), trix = stocks[2]
         func key(_ state: EditState, _ source: URL = photo, generation: Int = 1) -> PreviewTile.Key {
-            PreviewTile.Key(generation: generation, request: StockPreviewRules.request(for: trix, state: state, stocks: stocks, source: source, generation: generation))
+            PreviewTile.Key(generation: generation, request: PreviewRules.request(for: trix, state: state, stocks: stocks, source: source, generation: generation))
         }
         let base = key(edited())
         XCTAssertNil(base.request["crop"])
@@ -82,10 +82,10 @@ final class StockPreviewTests: XCTestCase {
         let photo = URL(fileURLWithPath: "/photos/a.jpg"), text = #"{"simulation": {"film_stock": "kodak_portra_400"}}"#
         let kept = ["io.output_color_space", "io.crop", "post"]
         func command(_ state: EditState, text: String = text, generation: Int = 1) -> [String: JSONValue] {
-            StockPreviewRules.presetCommand(text: text, state: state, source: photo, generation: generation)
+            PreviewRules.presetCommand(text: text, state: state, source: photo, generation: generation)
         }
         func key(_ state: EditState, text: String = text, generation: Int = 1) -> PreviewTile.Key {
-            StockPreviewRules.presetKey(command(state, text: text, generation: generation), kept: kept, generation: generation)
+            PreviewRules.presetKey(command(state, text: text, generation: generation), kept: kept, generation: generation)
         }
         var state = edited()
         state.params["io.output_color_space"] = .string("sRGB")
@@ -100,7 +100,7 @@ final class StockPreviewTests: XCTestCase {
         // The preset replaces the Lab settings and the stocks, so they don't count.
         var exposed = state; exposed.params["camera.exposure_compensation_ev"] = .number(2)
         XCTAssertEqual(key(exposed), base)
-        XCTAssertEqual(key(StockPreviewRules.choosing("trix", paper: false, in: state, stocks: stocks)), base)
+        XCTAssertEqual(key(PreviewRules.choosing("trix", paper: false, in: state, stocks: stocks)), base)
         // What it keeps, the crop, the photograph and the file's text do.
         var space = state; space.params["io.output_color_space"] = .string("Display P3")
         XCTAssertNotEqual(key(space), base)
@@ -111,8 +111,8 @@ final class StockPreviewTests: XCTestCase {
         XCTAssertNotEqual(key(state, generation: 2), base)
         XCTAssertNotEqual(key(state, text: #"{"simulation": {"film_stock": "kodak_gold_200"}}"#), base)
         // An older helper doesn't list what presets keep: every setting counts.
-        let everything = StockPreviewRules.presetKey(command(exposed), kept: nil, generation: 1)
-        XCTAssertNotEqual(everything, StockPreviewRules.presetKey(command(state), kept: nil, generation: 1))
+        let everything = PreviewRules.presetKey(command(exposed), kept: nil, generation: 1)
+        XCTAssertNotEqual(everything, PreviewRules.presetKey(command(state), kept: nil, generation: 1))
     }
 
     func testPresetsNeedingTheirOwnRawDecodeComeLast() {
@@ -122,15 +122,15 @@ final class StockPreviewTests: XCTestCase {
         let custom: JSONValue = .object(["mode": .string("custom"), "temperature": .number(5500), "tint": .number(1)])
         var customOther = custom; customOther["temperature"] = .number(6500)
         // Temperature and tint count only for a custom white balance.
-        XCTAssertFalse(StockPreviewRules.needsOwnDecode(preset: daylightOther, photo: daylight))
-        XCTAssertTrue(StockPreviewRules.needsOwnDecode(preset: daylight, photo: asShot))
-        XCTAssertTrue(StockPreviewRules.needsOwnDecode(preset: customOther, photo: custom))
-        XCTAssertFalse(StockPreviewRules.needsOwnDecode(preset: custom, photo: custom))
+        XCTAssertFalse(PreviewRules.needsOwnDecode(preset: daylightOther, photo: daylight))
+        XCTAssertTrue(PreviewRules.needsOwnDecode(preset: daylight, photo: asShot))
+        XCTAssertTrue(PreviewRules.needsOwnDecode(preset: customOther, photo: custom))
+        XCTAssertFalse(PreviewRules.needsOwnDecode(preset: custom, photo: custom))
 
         // Quick ones first, then each decode followed by the presets it serves.
         let balances = ["a": daylight, "b": asShot, "c": custom, "d": asShot, "e": daylightOther]
         let order = { (raw: Bool) in
-            StockPreviewRules.renderOrder(["a", "b", "c", "d", "e", "unknown"], raw: raw, whiteBalance: { balances[$0] }, photo: asShot)
+            PreviewRules.renderOrder(["a", "b", "c", "d", "e", "unknown"], raw: raw, whiteBalance: { balances[$0] }, photo: asShot)
         }
         XCTAssertEqual(order(true), ["b", "d", "unknown", "a", "e", "c"])
         XCTAssertEqual(order(false), ["a", "b", "c", "d", "e", "unknown"])
@@ -139,10 +139,10 @@ final class StockPreviewTests: XCTestCase {
     func testStaleTilesDimForTheSamePhotographAndBlankForAnother() {
         let request: [String: JSONValue] = ["film": .string("gold")]
         let shown = PreviewTile.Key(generation: 3, request: request)
-        XCTAssertEqual(StockPreviewRules.display(shown: shown, wanted: shown), .current)
-        XCTAssertEqual(StockPreviewRules.display(shown: shown, wanted: .init(generation: 3, request: ["film": .string("trix")])), .dimmed)
-        XCTAssertEqual(StockPreviewRules.display(shown: shown, wanted: .init(generation: 4, request: request)), .placeholder)
-        XCTAssertEqual(StockPreviewRules.display(shown: nil, wanted: shown), .placeholder)
+        XCTAssertEqual(PreviewRules.display(shown: shown, wanted: shown), .current)
+        XCTAssertEqual(PreviewRules.display(shown: shown, wanted: .init(generation: 3, request: ["film": .string("trix")])), .dimmed)
+        XCTAssertEqual(PreviewRules.display(shown: shown, wanted: .init(generation: 4, request: request)), .placeholder)
+        XCTAssertEqual(PreviewRules.display(shown: nil, wanted: shown), .placeholder)
     }
 
     @MainActor func testTilesKeepTheirPictureOnlyForTheSamePhotograph() throws {
@@ -163,11 +163,11 @@ final class StockPreviewTests: XCTestCase {
     }
 
     @MainActor func testMissingSettingMeansPreviewsOn() {
-        let suite = "negs-stock-previews-\(UUID().uuidString)", defaults = UserDefaults(suiteName: suite)!
+        let suite = "negs-previews-\(UUID().uuidString)", defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let previews = StockPreviews(defaults: defaults)
+        let previews = Previews(defaults: defaults)
         XCTAssertTrue(previews.enabled)
         previews.enabled = false
-        XCTAssertFalse(StockPreviews(defaults: defaults).enabled)
+        XCTAssertFalse(Previews(defaults: defaults).enabled)
     }
 }

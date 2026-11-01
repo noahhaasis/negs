@@ -121,29 +121,29 @@ The script needed a macOS memory fallback (`ps` + `footprint`); `/proc` doesn't 
 
 ### Implementation
 
-- `macos/Sources/NegsApp/StockPreviews.swift`: `StockPreviewRules` (the pure "state with this
+- `macos/Sources/NegsApp/Previews.swift`: `PreviewRules` (the pure "state with this
   stock chosen", now also used by `chooseFilm` / `choosePaper`; the thumbnail request; the
-  current / dimmed / placeholder decision), `StockTile` (one observable per tile, so a
-  thumbnail arriving redraws only its tile), `StockPreviews` (tiles, open state, setting in
-  UserDefaults `stockPreviews`, missing = on) and the SwiftUI foldout and grid.
-- `EditorModel.pumpStockPreviews()`: the Linux `pump`. Called after every render finishes,
+  current / dimmed / placeholder decision), `PreviewTile` (one observable per tile, so a
+  thumbnail arriving redraws only its tile), `Previews` (tiles, open state, setting in
+  UserDefaults `previews`, missing = on) and the SwiftUI foldout and grid.
+- `EditorModel.pumpPreviews()`: the Linux `pump`. Called after every render finishes,
   on every edit (dims at once; a new photograph blanks at once), when a crop changes (no
   main render, but the thumbnails change), when a drag ends and when a grid opens or
   appears. It sends one `thumbnail` at a time, only when the preview is current, nothing is
   rendering or pending and no slider is dragged. Thumbnails become sRGB- or
   Rec. 2020-tagged `CGImage`s, the same colour handling as the main preview.
 - `Inspector.swift` shows the foldouts or the Pickers; `Updates.swift` (Settings window) has
-  the toggle (`EditorModel.setStockPreviews`; off clears the tiles and sends
+  the toggle (`EditorModel.setPreviews`; off clears the tiles and sends
   `release_thumbnails`). SwiftUI builds only the visible control, which is cheap here: a
   collapsed foldout builds no tiles, and the pop-up it replaces is the expensive control.
-- Tests: `macos/Tests/NegsTests/StockPreviewTests.swift` (choosing a film pairs its paper and
+- Tests: `macos/Tests/NegsTests/PreviewTests.swift` (choosing a film pairs its paper and
   resets presets, a paper keeps the film, the tile key follows crop/straighten/photograph/
   edits but not the border, dim vs blank, failures aren't retried, missing setting = on).
   The full suite passes except the two `InspectorLayoutTests` that fail on `main` too.
 
 **Experiment-only hooks to remove with the Linux ones:** `NEGS_STOCK_EXPAND` (opens the
-grids at launch, `StockPreviews.init`), `NEGS_STOCK_THUMB_LOG` (stderr timings in
-`pumpStockPreviews`), `StockPreviews.lastBatch`, and
+grids at launch, `Previews.init`), `NEGS_STOCK_THUMB_LOG` (stderr timings in
+`pumpPreviews`), `Previews.lastBatch`, and
 `macos/Sources/NegsApp/StockPreviewBenchmark.swift` (`NEGS_STOCK_MEASURE=PHOTO`, compiled
 only with `-DSPEKTRAFILM_BENCHMARK`), plus the macOS memory fallback in
 `linux/bench_stock_previews.py`.
@@ -156,7 +156,7 @@ MACOSX_DEPLOYMENT_TARGET=14.0 swift build --package-path macos -c release \
   --scratch-path target/swift-bench -Xswiftc -DSPEKTRAFILM_BENCHMARK
 HOME=$TMP CFFIXED_USER_HOME=$TMP SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_F64_CLI=/usr/bin/true \
   NEGS_STOCK_MEASURE=~/Downloads/DSC_0144.jpg NEGS_STOCK_EXPAND=film,paper \
-  target/swift-bench/release/NegsApp -inspectorTab lab   # add -stockPreviews '<false/>' for "off"
+  target/swift-bench/release/NegsApp -inspectorTab lab   # add -previews '<false/>' for "off"
 ```
 
 Startup and drags used the existing `SPEKTRAFILM_BENCHMARK_PHOTO` drag benchmark on both
@@ -187,9 +187,9 @@ runs (~1.5 s, once per white balance per photograph) the helper is busy, so a sl
 started then waits for it. The extra memory stays (mimalloc would likely return it; see
 the macOS malloc notes).
 
-Implementation: `StockPreviewRules.presetCommand` / `presetKey`, `PreviewTile` (shared by
-stock and preset tiles), `StockPreviews.presets` / `moveTile`, `EditorModel.presetTexts`,
-the preset part of `pumpStockPreviews`, `PresetThumbnail` in `PresetInspector.swift`,
-`StockPreviewRules.renderOrder`; the helper's `thumbnail` (`preset`, `own_decode`, `WbSource`),
+Implementation: `PreviewRules.presetCommand` / `presetKey`, `PreviewTile` (shared by
+stock and preset tiles), `Previews.presets` / `moveTile`, `EditorModel.presetTexts`,
+the preset part of `pumpPreviews`, `PresetThumbnail` in `PresetInspector.swift`,
+`PreviewRules.renderOrder`; the helper's `thumbnail` (`preset`, `own_decode`, `WbSource`),
 `RawWhiteBalance::effective` and its test
 `preset_thumbnails_apply_the_preset_like_preset_import`.

@@ -18,7 +18,7 @@ import Darwin
         Task { @MainActor in
             await until { model.ready }
             report("ready \(ms(launched)) ms after launch")
-            let previews = model.stockPreviews
+            let previews = model.previews
             previews.lastBatch = nil
             model.open(URL(fileURLWithPath: photo))
             let opened = Date()
@@ -57,7 +57,7 @@ import Darwin
     private static func until(_ condition: () -> Bool) async {
         while !condition() { try? await Task.sleep(for: .milliseconds(2)) }
     }
-    private static func batch(_ previews: StockPreviews, _ label: String, since: Date) async {
+    private static func batch(_ previews: Previews, _ label: String, since: Date) async {
         await until { previews.lastBatch != nil }
         let batch = previews.lastBatch!
         report("\(label): \(batch.count) thumbnails in \(Int(batch.ms)) ms (\(Int(batch.ms / Double(max(batch.count, 1)))) ms each), \(ms(since)) ms after the change")

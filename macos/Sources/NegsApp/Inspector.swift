@@ -472,7 +472,7 @@ struct AdjustmentInspector: View {
         let scanning = model.value("io.scan_film").bool
         Section("Film & Paper") {
             // Preview grids, or the plain menus when Settings turns them off.
-            if model.stockPreviews.enabled {
+            if model.previews.enabled {
                 StockFoldout(model: model, paper: false)
             } else {
                 Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
@@ -485,7 +485,7 @@ struct AdjustmentInspector: View {
             Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
                 .help("Skip printing and scan the developed film, as for slides.")
             if !scanning {
-                if model.stockPreviews.enabled {
+                if model.previews.enabled {
                     StockFoldout(model: model, paper: true)
                 } else {
                     Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {

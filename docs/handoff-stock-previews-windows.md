@@ -5,6 +5,29 @@ Prepared 2026-11-01 for an agent on Noah's Windows test box (checkout
 [stock-previews.md](stock-previews.md) (read that first; it's the spec) to the Win32 app in
 `windows/`. A macOS agent may be porting it at the same time on the same branch.
 
+## Update 2026-11-02: presets too, and you finish the feature
+
+Since this was written, the Mac app got **preset previews** (a thumbnail of the photograph
+with each preset applied, in the Presets panel), the setting was renamed to cover them, and
+the code names went neutral. Please:
+
+1. **Build preset previews on Windows as well** (`ui/presets.rs`), after or together with
+   the film/paper grids. Spec: [Preset previews](stock-previews.md#preset-previews-macos-done-linux-and-windows-to-follow).
+   The helper side is done (`thumbnail` takes `"preset"`; the catalog lists `preset_kept`).
+   Reference: the Mac app (`macos/Sources/NegsApp/Previews.swift`: `PreviewRules.presetCommand`
+   / `presetKey` / `renderOrder`; the preset part of `EditorModel.pumpPreviews`;
+   `PresetThumbnail` in `PresetInspector.swift`) and [its results](handoff-stock-previews-macos.md#preset-previews-macos).
+   Key points: key preset tiles on the kept settings only (Lab edits mustn't redraw them),
+   wait until the engine has checked every preset file, and on a RAW render presets with
+   another white balance last, grouped by white balance.
+2. **Setting:** label "Film, paper and preset previews", subtitle "Show each film, paper and
+   preset on your photograph. Turn off to use simple menus and lists on slower computers."
+   (let it wrap). Name the preference neutrally: `previews` (the Mac uses the key
+   `previews`), not `stock_previews`. Off also gives the plain preset list.
+3. **You're the last agent on this branch, so finish it** (section
+   [Finishing the feature](#finishing-the-feature-last-agent) at the end of this file):
+   remove every experiment-only hook on all three platforms and tell Noah what's left.
+
 ## Where to work
 
 - Branch: `stock-previews` on `origin` (github.com/noahhaasis/negs). Check `git status`
@@ -56,9 +79,10 @@ Prepared 2026-11-01 for an agent on Noah's Windows test box (checkout
    when stale). Tiles need keyboard focus and Enter/Space to choose, with accessible
    names. Keep the combo path for the setting-off case.
 4. **Setting:** Windows has no real Settings dialog yet (`dialogs::settings` only covers
-   updates). Add the "Film and paper previews" checkbox there with the subtitle text from the
-   spec, persisted in `session::Preferences` with `#[serde(default)]` → on. Off: show the
-   combos, free the bitmaps, send `release_thumbnails`.
+   updates). Add the "Film, paper and preset previews" checkbox there with the subtitle text
+   from the spec, persisted in `session::Preferences` as `previews` with
+   `#[serde(default)]` → on. Off: show the combos and the plain preset list, free the
+   bitmaps, send `release_thumbnails`.
 5. **Tests** (`cargo test --locked --manifest-path windows/Cargo.toml`): the pure "state
    with this stock chosen" function (film pairs its paper and resets presets; paper keeps the
    film), the tile key changing with crop and with the photograph, the stale-vs-placeholder
@@ -78,3 +102,44 @@ to this file with the numbers and screenshots' paths, commit, push the branch, a
 Watch for: on Windows the BLAS-free `dgemm` fallback and the DX12/Vulkan backend may change
 calibration and `process` times. If first open is much slower than ~2 s, report it before
 tuning.
+
+## Finishing the feature (last agent)
+
+Do this after the Windows results are committed, as its own commit.
+
+**Remove the experiment-only hooks** (measurement aids, not product features; the spec
+lists them too). Keep the per-thumbnail *error* line on stderr, it's ordinary diagnostics.
+
+- Linux: `NEGS_STOCK_EXPAND`, `NEGS_STOCK_THUMB_PX`, `NEGS_STOCK_THUMB_LOG`,
+  `NEGS_WIDGET_CAPTURE_MS` (grep `linux/src`), and the scripts `linux/bench_stock_previews.py`
+  and `linux/measure_stock_browser.py`.
+- macOS:
+  - `NEGS_STOCK_EXPAND` (the grids opened at launch in `Previews.init`; they start
+    collapsed without it).
+  - `NEGS_STOCK_THUMB_LOG`: both log lines in `EditorModel.pumpPreviews`, with the
+    `Previews.batch` / `lastBatch` bookkeeping that only feeds them.
+  - `macos/Sources/NegsApp/StockPreviewBenchmark.swift` and its
+    `StockPreviewBenchmark.start(model)` call in `NegsApp.swift`. The file compiles only
+    with `-DSPEKTRAFILM_BENCHMARK`, so a plain build won't notice if you miss the call.
+- Windows: whatever hooks you added while measuring.
+- Docs: drop the "Experiment-only hooks" paragraphs in [stock-previews.md](stock-previews.md)
+  and [the Mac handoff](handoff-stock-previews-macos.md), and the "measure with" tool
+  mentions that point at the removed scripts.
+
+**Verify what you can't build:**
+- Linux: run the Linux workflow on the branch, `gh workflow run linux.yml --ref
+  stock-previews`, and check that it passes.
+- macOS: there is no CI for branch pushes. Keep the Swift edits to plain deletions and
+  tell Noah they need a Mac build: `swift build --package-path macos`, the benchmark-flag
+  build (`-Xswiftc -DSPEKTRAFILM_BENCHMARK`), and
+  `swift test --package-path macos --filter PreviewTests`.
+
+**Linux, while you're there** (mechanical; Linux CI checks it): rename the preference
+`stock_previews` → `previews` in `linux/src/preferences.rs` and `stock_browser.rs`, like
+the other platforms. Leave its label "Film and paper previews" until Linux has preset
+previews.
+
+**Tell Noah what's left.** Unless someone has done it since, that's **preset previews on
+Linux** (needs a Linux session: reference is the Mac implementation and the spec's preset
+section; then the label becomes "Film, paper and preset previews"). Also say which
+platforms' builds you couldn't run. Don't merge into main; Noah decides that.

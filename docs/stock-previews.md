@@ -1,8 +1,11 @@
 # Film and paper previews
 
-Branch `stock-previews`. The Linux app is done and is the reference. macOS is done too
-([handoff and results](handoff-stock-previews-macos.md#macos-results)); Windows
-([handoff](handoff-stock-previews-windows.md)) follows.
+Branch `stock-previews`. Film and paper previews: the Linux app is done and is the
+reference; macOS is done too ([handoff and results](handoff-stock-previews-macos.md#macos-results)).
+[Preset previews](#preset-previews-macos-done-linux-and-windows-to-follow): macOS only so
+far. Windows ([handoff](handoff-stock-previews-windows.md)) does both, then
+[finishes the feature](handoff-stock-previews-windows.md#finishing-the-feature-last-agent)
+(removes the experiment hooks everywhere). Still open after that: preset previews on Linux.
 
 ## Behaviour (all platforms)
 
@@ -93,7 +96,7 @@ calibration from ~140 ms to ~45 ms, which also makes ordinary film changes faste
   match a full-resolution reduction to within 1/255. Noah chose exact thumbnails over
   using the photograph's white balance (2026-11-02).
 - **Order:** on a RAW, the app renders the presets that need their own decode last,
-  grouped by white balance (`StockPreviewRules.renderOrder`); preset tiles wait while the
+  grouped by white balance (`PreviewRules.renderOrder`); preset tiles wait while the
   engine is still checking the preset files, so the order covers all of them.
 
 ## Linux reference implementation

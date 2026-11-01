@@ -166,9 +166,9 @@ struct Session {
     metering: Option<ImageBuf>,
     pipeline: Option<(String, Pipeline)>,
     output: Option<Rendered>,
-    /// The source reduced for stock thumbnails.
+    /// The source reduced for stock and preset thumbnails.
     thumbnail_source: Option<((u32, u32), ImageBuf)>,
-    /// Calibrated pipelines for stock thumbnails, most recent last. A stock's
+    /// Calibrated pipelines for thumbnails, most recent last. A stock's
     /// pipeline outlives edits that don't change its key (exposure, grain…).
     thumbnail_pipelines: Vec<(String, Pipeline)>,
     /// Reduced sources for preset thumbnails whose RAW white balance isn't

@@ -71,7 +71,7 @@ struct PresetInspector: View {
             List(selection: $selection) {
                 ForEach(model.presets) { preset in
                     PresetRow(model: model, preset: preset, status: model.presetStatus[preset],
-                              tile: model.stockPreviews.enabled ? model.stockPreviews.tile(preset: preset.url) : nil)
+                              tile: model.previews.enabled ? model.previews.tile(preset: preset.url) : nil)
                         .tag(preset.url)
                         .id(preset.url)
                 }
@@ -112,8 +112,8 @@ struct PresetInspector: View {
 
     /// Thumbnails are made only while the list is on screen.
     private func setShown(_ shown: Bool) {
-        model.stockPreviews.presetsShown = shown
-        model.pumpStockPreviews()
+        model.previews.presetsShown = shown
+        model.pumpPreviews()
     }
 
     private static func fileURLs(_ providers: [NSItemProvider]) async -> [URL] {

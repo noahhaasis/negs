@@ -5,9 +5,9 @@ import SwiftUI
 
 /// Film and paper as foldouts of thumbnails: the photograph developed with
 /// each stock and the current settings; and each preset's thumbnail in the
-/// Presets panel. `EditorModel` schedules them (`pumpStockPreviews`); this
+/// Presets panel. `EditorModel` schedules them (`pumpPreviews`); this
 /// file holds the pure rules, the tiles and the grid.
-enum StockPreviewRules {
+enum PreviewRules {
     /// The thumbnail's long edge: two columns of a ~340 pt inspector at 2×.
     static let longSide = 320
 
@@ -139,7 +139,7 @@ enum StockPreviewRules {
 
     /// Updates the look for `wanted`; true when the tile needs a new thumbnail.
     func mark(wanted: Key) -> Bool {
-        switch StockPreviewRules.display(shown: shown, wanted: wanted) {
+        switch PreviewRules.display(shown: shown, wanted: wanted) {
         case .current: if dimmed { dimmed = false }; return false
         case .dimmed: if !dimmed { dimmed = true }
         case .placeholder:
@@ -160,8 +160,8 @@ struct StockEntry {
 }
 
 /// The tiles, the foldouts' open state and the setting.
-@MainActor @Observable final class StockPreviews {
-    static let defaultsKey = "stockPreviews"
+@MainActor @Observable final class Previews {
+    static let defaultsKey = "previews"
     /// Settings › Film, paper and preset previews; a missing value means on.
     var enabled: Bool { didSet { defaults.set(enabled, forKey: Self.defaultsKey) } }
     @ObservationIgnored private let defaults: UserDefaults
@@ -230,12 +230,12 @@ struct StockFoldout: View {
     let paper: Bool
 
     var body: some View {
-        let previews = model.stockPreviews
+        let previews = model.previews
         let isExpanded = Binding(
             get: { paper ? previews.paperOpen : previews.filmOpen },
             set: { open in
                 if paper { previews.paperOpen = open } else { previews.filmOpen = open }
-                model.pumpStockPreviews()
+                model.pumpPreviews()
             })
         DisclosureGroup(isExpanded: isExpanded) {
             StockGrid(model: model, paper: paper)
@@ -257,7 +257,7 @@ private struct StockGrid: View {
     let paper: Bool
 
     var body: some View {
-        let previews = model.stockPreviews
+        let previews = model.previews
         let selected = paper ? model.paper : model.film
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), spacing: 8, alignment: .top)],
                   alignment: .leading, spacing: 8) {
@@ -282,8 +282,8 @@ private struct StockGrid: View {
     }
 
     private func setShown(_ shown: Bool) {
-        if paper { model.stockPreviews.paperShown = shown } else { model.stockPreviews.filmShown = shown }
-        model.pumpStockPreviews()
+        if paper { model.previews.paperShown = shown } else { model.previews.filmShown = shown }
+        model.pumpPreviews()
     }
 }
 
