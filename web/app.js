@@ -157,6 +157,14 @@ async function startEngine(engineKind) {
 // The WebGPU engine presents on a canvas it owns, with nothing read back. A
 // canvas transfers to one worker only, so each engine gets a new one.
 let presenting = false;
+// Where presenting crashed the engine, it draws the read-back frames
+// instead, remembered per adapter. Seen with two GPUs: WebGPU rendered on the
+// idle one while the other drove the display, and presenting lost the device
+// (VK_ERROR_OUT_OF_DEVICE_MEMORY); reading back worked. ?present=0 and
+// ?present=1 force either way.
+const adapterKey = () => { const i = adapter?.info ?? {}; return [i.vendor, i.architecture, i.device, i.description].join("|"); };
+const presentCrashed = () => remembered("presentCrashed", []).includes(adapterKey());
+const mayPresent = () => query.get("present") === "1" || (query.get("present") !== "0" && !presentCrashed());
 async function attachCanvas() {
   presenting = false;
   sentView = "";
@@ -164,7 +172,7 @@ async function attachCanvas() {
   $("gpu-canvas")?.remove();
   // The page's canvas keeps the bytes' frame, or a placeholder.
   $("canvas").hidden = !frame && !early;
-  if (kind !== "gpu" || !self.OffscreenCanvas || !HTMLCanvasElement.prototype.transferControlToOffscreen || query.get("present") === "0") return;
+  if (kind !== "gpu" || !self.OffscreenCanvas || !HTMLCanvasElement.prototype.transferControlToOffscreen || !mayPresent()) return;
   const canvas = Object.assign(document.createElement("canvas"), { id: "gpu-canvas", className: "photo", hidden: true });
   $("canvas").after(canvas);
   try {
@@ -1802,13 +1810,24 @@ async function failed(e, what) {
   showMessage(`${what}: ${e.message}`, true);
   if (e.crashed) {
     // A WebGPU engine that crashed usually lost its device (out of GPU
-    // memory, the GPU process restarting), and a new one on the same GPU
-    // tends to crash the same way on the next render. Carry on with the CPU
-    // engine; the Engine menu can switch back.
-    const fallback = kind === "gpu";
-    const message = fallback ? `${what}: ${e.message}. Switched to the CPU engine.` : $("message").textContent;
-    await startEngine(fallback ? "cpu" : kind).catch(() => {});
+    // memory, the GPU process restarting), and a new one the same way tends
+    // to crash the same way on the next render. One that was presenting
+    // starts again drawing read-back frames instead (see mayPresent); one
+    // that wasn't gives way to the CPU engine, which the Engine menu can
+    // switch back from. Either way the frame renders again.
+    let next = kind, note = "";
+    if (kind === "gpu" && presenting) {
+      remember("presentCrashed", [...new Set([...remembered("presentCrashed", []), adapterKey()])]);
+      console.warn(`Presenting from the WebGPU engine crashed on this GPU (${adapterKey()}); drawing its frames instead from now on.`);
+      note = " Trying again without presenting from the GPU.";
+    } else if (kind === "gpu") {
+      next = "cpu";
+      note = " Switched to the CPU engine.";
+    }
+    const message = note ? `${what}: ${e.message}.${note}` : $("message").textContent;
+    await startEngine(next).catch(() => {});
     showMessage(message, true);
+    if (note) schedule("settled");
   }
 }
 
