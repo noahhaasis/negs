@@ -1120,8 +1120,14 @@ impl Pipeline {
         // The front pass expects linear RGB. Decoded pixels aren't the
         // caller's, so they have no key.
         let decoded;
-        let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding);
-        let image = if self.params.io.input_cctf_decoding {
+        let prep_active = !self.params.prep.is_identity();
+        // Prep changes the upload, including through its whole-frame spatial base.
+        // A source-image cache key cannot identify these newly prepared pixels.
+        let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active);
+        let image = if prep_active {
+            decoded = stages::filming::prepare_input(image.clone(), &self.params, autoexposure_ev)?;
+            &decoded
+        } else if self.params.io.input_cctf_decoding {
             let mut d = image.clone();
             stages::filming::decode_input_cctf(&mut d, &self.params);
             decoded = d;
@@ -1136,11 +1142,13 @@ impl Pipeline {
         // pass at the head of the chain. The auto exposure is metered on the
         // CPU, on the ≤256 px metering frame, by the caller.
         let mut exposure_scale_f64 = 1.0f64;
-        if autoexposure_ev != 0.0 {
-            exposure_scale_f64 *= autoexposure_ev.exp2();
-        }
-        if self.params.camera.exposure_compensation_ev != 0.0 {
-            exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
+        if !prep_active {
+            if autoexposure_ev != 0.0 {
+                exposure_scale_f64 *= autoexposure_ev.exp2();
+            }
+            if self.params.camera.exposure_compensation_ev != 0.0 {
+                exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
+            }
         }
         // B&W/slide filming exposure correction is a linear scale on the raw
         // film exposure (CPU: `raw *= factor` before log10). Since the

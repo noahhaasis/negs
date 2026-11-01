@@ -79,6 +79,18 @@ fn write_fixture() -> TempFile {
 }
 
 #[test]
+fn unsupported_tiny_dng_falls_through_to_rawler_with_orientation_intact() {
+    let file = write_fixture();
+    let options = raw::RawDecodeOptions::default();
+    let automatic = raw::decode_raw(&file.0, options, raw::RawDecoderPreference::Auto).unwrap();
+    let portable = raw::decode_raw(&file.0, options, raw::RawDecoderPreference::Rawler).unwrap();
+    assert_eq!(automatic.decoder, "rawler");
+    assert_eq!(automatic.decoder_version, None);
+    assert_eq!((automatic.image.width, automatic.image.height), (3, 4));
+    assert_eq!(automatic.image.data, portable.image.data);
+}
+
+#[test]
 fn selection_reloads_raw_and_export_json_reproduces_preview_pixels() {
     let file = write_fixture();
     let default = load_image(&file.0, Formats::Any).unwrap();

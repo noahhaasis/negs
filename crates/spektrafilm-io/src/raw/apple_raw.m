@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <dlfcn.h>
 
 typedef struct {
     float *pixels; // RGBA float32, top row first, malloc-owned until release.
@@ -22,12 +23,30 @@ static int fail(SFAppleRaw *out, int code, NSString *message) {
     return code;
 }
 
-// 0 success, 1 unsupported format, 2 I/O/render failure. The caller always frees
+// Core Image's identifiers for one decoder generation. Version 9's constants
+// don't exist before macOS 15.4-era Core Image and carry no availability
+// annotation, so a direct reference would be a strong import that stops the
+// helper loading on older systems. Look them up instead: a missing symbol just
+// means this macOS has no RAW 9, and the caller moves on to RAW 8.
+static NSArray<CIRAWDecoderVersion> *decoder_versions(int major) {
+    if (major != 9) return @[CIRAWDecoderVersion8, CIRAWDecoderVersion8DNG];
+    NSMutableArray<CIRAWDecoderVersion> *found = [NSMutableArray array];
+    const char *names[] = {"CIRAWDecoderVersion9", "CIRAWDecoderVersion9DNG"};
+    for (size_t i = 0; i < 2; i++) {
+        CIRAWDecoderVersion __unsafe_unretained *symbol =
+            (CIRAWDecoderVersion __unsafe_unretained *)dlsym(RTLD_DEFAULT, names[i]);
+        if (symbol && *symbol) [found addObject:*symbol];
+    }
+    return found;
+}
+
+// 0 success, 1 incompatible decoder, 2 fatal I/O/resource failure. The caller always frees
 // pixels, including on exceptions. No exception crosses the C ABI.
 // `defer_orientation` leaves a file Apple cannot lens-correct unoriented, so the
 // caller can correct it in sensor coordinates first and orient it afterwards.
-int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_correction,
-                        int defer_orientation, SFAppleRaw *out) {
+// `decoder_major` (9 or 8) selects that Core Image decoder generation.
+int sf_apple_raw_decode(const char *path, int decoder_major, int orient, int as_shot,
+                        int lens_correction, int defer_orientation, SFAppleRaw *out) {
     @autoreleasepool {
         @try {
             NSURL *url = CFBridgingRelease(CFURLCreateFromFileSystemRepresentation(
@@ -36,6 +55,22 @@ int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_corr
                 return fail(out, 2, @"Cannot read RAW file");
             CIRAWFilter *raw = [CIRAWFilter filterWithImageURL:url];
             if (!raw) return fail(out, 1, @"Apple RAW does not support this file on this macOS version");
+            // Query this file, not an extension/camera allowlist. DNG uses its
+            // own version identifiers, selected from the filter's actual list.
+            NSArray<CIRAWDecoderVersion> *candidates = decoder_versions(decoder_major);
+            CIRAWDecoderVersion selected = nil;
+            for (CIRAWDecoderVersion candidate in candidates) {
+                if ([raw.supportedDecoderVersions containsObject:candidate]) {
+                    selected = candidate;
+                    break;
+                }
+            }
+            if (!selected) return fail(out, 1, [NSString stringWithFormat:
+                @"Apple RAW %d is not supported for this file (available: %@)",
+                decoder_major, [raw.supportedDecoderVersions componentsJoinedByString:@", "]]);
+            raw.decoderVersion = selected;
+            if (![raw.decoderVersion isEqualToString:selected])
+                return fail(out, 1, @"Apple RAW did not accept the requested decoder version");
             raw.draftModeEnabled = NO;
             raw.scaleFactor = 1;
             out->orientation = (uint32_t)raw.orientation;
@@ -123,10 +158,10 @@ int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_corr
             CIRenderTask *task = [context startTaskToRender:image fromRect:bounds
                 toDestination:destination atPoint:CGPointZero error:&error];
             if (!task || ![task waitUntilCompletedAndReturnError:&error])
-                return fail(out, 2, error.localizedDescription ?: @"Apple RAW rendering failed");
+                return fail(out, 1, error.localizedDescription ?: @"Apple RAW rendering failed");
             return 0;
         } @catch (NSException *exception) {
-            return fail(out, 2, exception.reason ?: @"Apple RAW raised an exception");
+            return fail(out, 1, exception.reason ?: @"Apple RAW raised an exception");
         }
     }
 }

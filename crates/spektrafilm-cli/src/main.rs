@@ -267,7 +267,9 @@ fn read_params(path: &Path) -> Result<RuntimeParams> {
     let text = std::fs::read_to_string(path).with_context(|| format!("opening params file: {}", path.display()))?;
     let mut value: serde_json::Value = serde_json::from_str(&text).context("parsing params file")?;
     spektrafilm_core::params::infer_input_interpretation(&mut value);
-    serde_json::from_value(value).context("parsing params file")
+    let params: RuntimeParams = serde_json::from_value(value).context("parsing params file")?;
+    params.prep.validate().map_err(anyhow::Error::msg)?;
+    Ok(params)
 }
 
 /// `--input-colour`: auto, manual, or a colour space to assume.

@@ -155,7 +155,8 @@ final class SessionTests: XCTestCase {
         saved.film = "kodak_trix"
         // The old working-resolution factor is dropped on restore: the photograph develops at Original.
         saved.params = .object(["io": .object(["scan_film": .bool(true), "rotate_cw": .number(1), "upscale_factor": .number(0.5)]),
-                                "camera": .object(["exposure_compensation_ev": .number(1.5)])])
+                                "camera": .object(["exposure_compensation_ev": .number(1.5)]),
+                                "prep": .object(["highlights": .number(-65)])])
         saved.crop.rect = CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
         saved.border = BorderSettings(enabled: true, style: .keyline, export: false)
         let session = EditorSession(source: photo, state: saved, inspectorVisible: false)
@@ -174,6 +175,7 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(model.border, saved.border)
         XCTAssertTrue(model.value("io.scan_film").bool)
         XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
+        XCTAssertEqual(model.value("prep.highlights"), .number(-65), "Relaunch restores the current photograph's Prep")
         XCTAssertFalse(model.inspectorVisible)
     }
 

@@ -8,7 +8,7 @@ use crate::{params::RuntimeParams, pipeline::Pipeline, profile};
 
 /// Keep color and tone controls, removing operations that depend on an image's
 /// dimensions, other pixels, or random noise. DIR's color inhibition is retained;
-/// only its spatial diffusion is removed. Post-tab edits are outside the film look.
+/// only its spatial diffusion is removed. Prep/Post edits are outside the film look.
 ///
 /// Mirrors Python's `digest_params(lut_mode)` (experimental 28bf883,
 /// `runtime/params_builder.py:103-138`) with one deliberate difference: the
@@ -55,6 +55,7 @@ pub fn per_pixel_params(mut params: RuntimeParams) -> RuntimeParams {
     params.io.rotate_cw = 0;
     params.settings.preview_mode = false;
     params.post = Default::default();
+    params.prep = Default::default();
     params
 }
 
@@ -107,7 +108,7 @@ pub fn cube(
          # Input: sRGB encoded, range 0..1. Output: sRGB encoded.\n\
          # Uses the current film/paper color and tone settings, including manual exposure.\n\
          # Excludes auto exposure, grain, halation, scatter, highlight boost, glare,\n\
-         # diffusion, lens blur, sharpening, RAW development, resizing and Post-tab edits.\n\
+         # diffusion, lens blur, sharpening, RAW development, resizing and Prep/Post edits.\n\
          # Print filter shifts, preflash and scanner white/black correction are neutral.\n\
          # DIR color inhibition is retained without spatial diffusion.\n\
          TITLE \"{title}\"\nLUT_3D_SIZE {size}\n\

@@ -943,6 +943,9 @@ impl Default for SettingsParams {
 /// Top-level runtime parameters. Combines all sub-parameter groups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeParams {
+    /// Scene preparation before the film model; see [`crate::prep`].
+    #[serde(default)]
+    pub prep: crate::prep::PrepParams,
     #[serde(default)]
     pub camera: CameraParams,
     #[serde(default)]
@@ -965,6 +968,7 @@ pub struct RuntimeParams {
 impl Default for RuntimeParams {
     fn default() -> Self {
         Self {
+            prep: crate::prep::PrepParams::default(),
             camera: CameraParams::default(),
             enlarger: EnlargerParams::default(),
             scanner: ScannerParams::default(),

@@ -4,6 +4,42 @@ import XCTest
 @testable import NegsApp
 
 @MainActor final class LifecycleTests: XCTestCase {
+    func testNewPhotographResetsAdjustmentsAndIndividualResetIsUndoable() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        await model.start(paths: paths(), restoration: Task { nil })
+        let first = try makeFixture(), second = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: first); try? FileManager.default.removeItem(at: second) }
+        model.open(first)
+        model.chooseFilm("kodak_portra_400")
+        let film = model.film, paper = model.paper
+        model.set("prep.highlights", .number(-80))
+        model.set("prep.color_boost", .number(35))
+        model.set("camera.exposure_compensation_ev", .number(1.5))
+        model.set("post.contrast", .number(40))
+        model.set("io.raw_white_balance.mode", .string("custom"))
+        model.set("io.raw_white_balance.temperature", .number(3200))
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        undo.beginUndoGrouping()
+        model.resetValue("prep.highlights")
+        undo.endUndoGrouping()
+        XCTAssertEqual(model.value("prep.highlights"), .number(0))
+        undo.undo()
+        XCTAssertEqual(model.value("prep.highlights"), .number(-80))
+
+        model.open(second)
+        for path in ["prep.highlights", "prep.color_boost", "camera.exposure_compensation_ev", "post.contrast", "io.raw_white_balance.temperature", "io.raw_white_balance.mode"] {
+            XCTAssertEqual(model.value(path), model.defaultValue(path), path)
+        }
+        XCTAssertEqual(model.film, film)
+        XCTAssertEqual(model.paper, paper)
+        XCTAssertFalse(undo.canUndo, "A new photograph cannot undo edits from the previous one")
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
+        XCTAssertTrue(model.previewCurrent)
+    }
+
     private func paths() -> EnginePaths {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         return EnginePaths(helper: root.appendingPathComponent("target/release/spektrafilm-native"), exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: root.appendingPathComponent("data"))

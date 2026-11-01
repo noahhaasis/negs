@@ -24,10 +24,25 @@ enum InspectorSection: String, CaseIterable {
     case camera = "Camera", film = "Film", print = "Print", scan = "Scan & Color"
 }
 
-/// The inspector's two tabs: developing the film, then finishing the scan.
+/// Prepare the photograph, develop the film, then finish the scan.
 enum InspectorTab: String, CaseIterable {
-    case lab = "Lab", post = "Post"
+    case prep = "Prep", lab = "Lab", post = "Post"
 }
+
+let prepToneControls: [Adjustment] = [
+    .slider("Highlights", "prep.highlights", -180...100, 1),
+    .slider("Shadows", "prep.shadows", -100...100, 1),
+    .slider("Contrast", "prep.contrast", -100...100, 1),
+    .slider("Lift", "prep.lift", -100...100, 1),
+    .slider("Gain", "prep.gain", -100...100, 1)
+]
+let prepColorControls: [Adjustment] = [
+    .slider("Color Boost", "prep.color_boost", -100...100, 1),
+    .slider("Saturation", "prep.saturation", -100...100, 1)
+]
+let prepDetailControls: [Adjustment] = [
+    .slider("Midtone Detail", "prep.midtone_detail", -100...100, 1)
+]
 
 struct AdjustmentGroup: Identifiable {
     let title: String
@@ -525,7 +540,7 @@ struct AdjustmentInspector: View {
         // The histogram and tab switch stay put above the tab's scrolling sections.
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                HistogramView(histogram: model.histogram).frame(height: 88)
+                ScopePanelView(histogram: model.histogram, waveform: model.waveform)
                 Picker("Tab", selection: $tab) {
                     ForEach(InspectorTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
@@ -537,6 +552,7 @@ struct AdjustmentInspector: View {
             Divider()
             Form {
                 switch tab {
+                case .prep: prep
                 case .lab: lab
                 case .post: post
                 }
@@ -547,11 +563,26 @@ struct AdjustmentInspector: View {
                 Text("Reset Adjustments").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.extraLarge)
-            .help("Restore defaults on both tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.")
+            .help("Restore defaults on all tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.")
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
         .disabled(!model.hasCatalog)
+    }
+
+    @ViewBuilder private var prep: some View {
+        Section("Brightness") {
+            SliderRow(model: model, title: "Exposure (EV)", path: "prep.exposure_ev", range: -3...3, step: 0.05)
+            Button(model.placingExposure ? "Matching…" : "Match camera brightness", action: model.matchCameraBrightness)
+                .disabled(!model.canMatchCameraBrightness)
+            Toggle("Match new RAWs to camera brightness", isOn: Binding(get: { model.autoPlaceNewImages }, set: { model.autoPlaceNewImages = $0 }))
+            if let message = model.exposurePlacementMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        Section("Tone") { ForEach(prepToneControls) { control($0) } }
+        Section("Color") { ForEach(prepColorControls) { control($0) } }
+        Section("Detail") { ForEach(prepDetailControls) { control($0) } }
     }
 
     @ViewBuilder private var lab: some View {
