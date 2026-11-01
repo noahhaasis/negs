@@ -3,8 +3,9 @@
 //!
 //! - DNG: `WarpRectilinear` and `FixVignetteRadial` from `OpcodeList3`, per
 //!   the DNG 1.6 specification ([`dng`]).
-//! - Sony ARW and Fujifilm RAF: their private correction tags, ported from
-//!   darktable's embedded-metadata lens correction ([`vendor`]).
+//! - Sony ARW, Fujifilm RAF, OM/Olympus ORF and Panasonic RW2: their
+//!   private correction tags, ported from darktable's embedded-metadata lens
+//!   correction ([`vendor`]).
 //!
 //! Corrections act on the developed, linear, unoriented image (before the EXIF
 //! orientation), so every model is defined in sensor coordinates. Vignetting is
@@ -27,6 +28,8 @@ pub enum Source {
     Dng,
     Sony,
     Fujifilm,
+    Olympus,
+    Panasonic,
 }
 
 impl Source {
@@ -36,6 +39,8 @@ impl Source {
             Self::Dng => "DNG",
             Self::Sony => "Sony",
             Self::Fujifilm => "Fujifilm",
+            Self::Olympus => "OM/Olympus",
+            Self::Panasonic => "Panasonic",
         }
     }
 }
@@ -107,6 +112,13 @@ pub(crate) fn read_profile_from(src: &rawler::rawsource::RawSource) -> Option<Pr
         let buf = src.buf();
         if buf.starts_with(b"FUJIFILM") {
             return vendor::fujifilm(src);
+        }
+        // Panasonic's TIFF magic is 0x55; Olympus's is "RO" or "RS".
+        if buf.starts_with(b"IIU\0") {
+            return vendor::panasonic(src);
+        }
+        if matches!(buf.get(0..4), Some(b"IIRO" | b"IIRS" | b"MMOR")) {
+            return vendor::olympus(src);
         }
         dng::read(src).or_else(|| vendor::sony(src))
     }))

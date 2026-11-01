@@ -1,4 +1,4 @@
-use super::vendor::{fuji_radial, sony_radial};
+use super::vendor::{fuji_radial, olympus_radial, panasonic_radial, sony_radial};
 use super::*;
 
 fn opcode_list(ops: &[(u32, Vec<u8>)]) -> Vec<u8> {
@@ -182,6 +182,42 @@ fn fujifilm_coefficients_follow_darktable() {
     assert!(r.cor[1].iter().all(|&m| m == 1.0));
     assert!(r.cor[0][15] > 1.0 && r.cor[2][15] > 1.0);
     assert!(fuji_radial(&dist[..18], &ca, &vig).is_none());
+}
+
+/// `DistortionInfo` from a Panasonic RW2 (`6269228880.rw2`).
+#[test]
+fn panasonic_distortion_follows_darktable() {
+    let v: [i16; 16] = [-10583, -3487, 1, 642, 252, -12, 335, -1535, 2150, 616, 344, 428, 3605, 1116, 31400, -4762];
+    let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+    let r = panasonic_radial(&bytes).unwrap();
+    assert_eq!(r.cor[1][0], 1.0);
+    // a, b, c > 0: barrel; the source radius shrinks toward the corner.
+    let corner = r.cor[1][15];
+    let (scale, a, b, c) = (1.0 / (1.0 - 12.0 / 32768.0), 2150.0 / 32768.0, 252.0 / 32768.0, 428.0 / 32768.0);
+    let rd = corner;
+    let ru = rd + scale * (a * rd.powi(3) + b * rd.powi(5) + c * rd.powi(7));
+    assert!((ru - 1.0).abs() < 1e-6, "{ru}");
+    assert!(corner < 0.95);
+    // Correction off (low nibble of entry 7 not 1).
+    let mut off = bytes.clone();
+    off[14] = 0;
+    assert!(panasonic_radial(&off).is_none());
+}
+
+/// An OM/Olympus E-M1 Mark III ORF: no distortion ('0 0 0 1'), lateral CA.
+#[test]
+fn olympus_coefficients_follow_darktable() {
+    let dist = [0.0, 0.0, 0.0, 1.0];
+    let ca = [-0.000128627, 0.00019455, -0.0000100136, 0.00019634, -0.000285864, 0.0000486374];
+    let r = olympus_radial(Some(&dist), Some(&ca)).unwrap();
+    assert!(r.cor[1].iter().all(|&g| g == 1.0));
+    let (red, blue) = (r.cor[0][15], r.cor[2][15]);
+    assert!((red - (1.0 - 0.000128627 + 0.00019455 - 0.0000100136)).abs() < 1e-9);
+    assert!((blue - (1.0 + 0.00019634 - 0.000285864 + 0.0000486374)).abs() < 1e-9);
+    assert!(olympus_radial(Some(&dist), None).is_none());
+    // Distortion scales the radius by drs (1 + dk2 (r drs)² ...).
+    let barrel = olympus_radial(Some(&[-0.05, 0.0, 0.0, 0.98]), None).unwrap();
+    assert!((barrel.cor[1][15] - 0.98 * (1.0 - 0.05 * 0.98f64.powi(2))).abs() < 1e-12);
 }
 
 #[test]

@@ -5,8 +5,8 @@ Prepared 2026-10-29 against Negs `17e8a8c`, on branch `lens-corrections`
 
 **Status:** Phases 0 and 1a (macOS via Apple) implemented on 2026-10-29;
 see "Phase 0 results". Phase 1b and the Sony/Fujifilm half of Phase 2
-implemented for Linux on 2026-11-01 (see "Phase 1b/2 results"). Windows UI,
-OM/Olympus, Panasonic and Phase 3 are not started.
+implemented for Linux on 2026-11-01 (see "Phase 1b/2 results"), then
+OM/Olympus and Panasonic the same day. Windows UI and Phase 3 are not started.
 
 **Decided 2026-10-29 (Noah):** macOS first, using Apple's built-in
 correction (Phases 0 and 1a). Windows/Linux later, as a Rust port of
@@ -393,9 +393,30 @@ vendor curves: darktable's fitted scale, which may zoom out slightly).
   Leica's in-camera vignetting correction is not in the DNG opcodes, so the
   corners stay darker than the camera's JPEG.
 - Fujifilm 1.25× crop modes are not detected (knots should scale by 1.25).
-- Still open: Windows UI; OM/Olympus and Panasonic parsers (darktable has
-  them; no local samples); DNG `GainMap`; Apple-decoded files on macOS keep
-  Apple's correction.
+- Panasonic RW2 (`6269228880.rw2`, barrel distortion): corrected framing
+  matches the camera's embedded JPEG. darktable inverts Panasonic's formula
+  with two fixed-point iterations (0.3% radius error in this lens's corners);
+  Negs iterates to convergence.
+- OM/Olympus E-M1 Mark III ORF (`3119563425.orf`): lateral CA only (the
+  distortion entry is the null '0 0 0 1'); sub-pixel, not visible.
+- Still open: Windows UI; DNG `GainMap` (Android lens shading, see below);
+  Fujifilm 1.25× crop modes; Apple-decoded files on macOS keep Apple's
+  correction.
+
+### Phone DNGs and Fujifilm crop modes (assessment, 2026-11-01)
+
+- iPhone ProRAW: Apple writes it already demosaiced with its lens corrections
+  applied, so there is nothing to add *(verify with a sample)*.
+- Android (Pixel, Samsung, most others): vignetting and colour shading are
+  a `GainMap` in `OpcodeList2`, applied to sensor data before demosaicing;
+  some also have `WarpRectilinear`, which is handled. Without the gain map
+  their corners stay dark and can be tinted. About half a day: rawler gives
+  us the sensor data before development, so the map can be applied there.
+  Needs a sample.
+- Fujifilm 1.25× crop modes (some bodies' sports finder / crop shooting):
+  the knots must be scaled by 1.25 (maker note `CropMode` 0x104d = 2 or 4).
+  Without it, those shots get vignetting/CA (and distortion) correction on
+  the wrong radii. Rare; an hour or two once there is a sample.
 
 ### Phase 2 — vendor embedded data (3–5 days)
 
