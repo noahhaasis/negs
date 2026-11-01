@@ -346,15 +346,16 @@ final class SessionTests: XCTestCase {
         XCTAssertNil(model.session)
     }
 
-    /// Without the launch restore (no cached catalog, as after an update),
-    /// the session restores once the helper answers, and no saved frame is
-    /// kept beyond showing it.
-    func testRestoreWithoutCachedCatalogKeepsNoLaunchFrame() async throws {
+    /// When the session restores once the helper answers instead (as without
+    /// a cached catalog, after an update), no saved frame is kept for launch.
+    func testRestoreAfterLaunchKeepsNoLaunchFrame() async throws {
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
         let photo = try fixture()
         defer { try? FileManager.default.removeItem(at: photo) }
         let model = EditorModel(previewCache: scratchCache())
         defer { model.shutdown() }
+        model.launch(paths: paths)
         model.finishLaunching(waitingUpTo: 0)
         XCTAssertFalse(model.restoreAtLaunch(edited(photo)), "launch is over")
         await model.start(paths: paths, restoration: Task { self.edited(photo) })
@@ -364,7 +365,9 @@ final class SessionTests: XCTestCase {
 
     /// The cached catalog from the last launch, with one extra film stock.
     private func cacheCatalogWithExtraFilm(_ id: String) throws {
-        var catalog = try XCTUnwrap(CatalogCache.load(for: paths))
+        let cached = try XCTUnwrap(CatalogCache.load(for: paths)), paths = paths
+        addTeardownBlock { CatalogCache.save(cached, for: paths) }
+        var catalog = cached
         var profiles = catalog["profiles"].array
         var extra = try XCTUnwrap(profiles.first { !$0["paper"].bool })
         extra["id"] = .string(id)
@@ -392,6 +395,25 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
         XCTAssertFalse(model.inspectorVisible)
         XCTAssertFalse(model.films.contains { $0.id == "test_only_film" })
+    }
+
+    /// Reopening the restored photograph before the helper answers keeps it
+    /// open when the catalog then differs.
+    func testReopenBeforeADifferentCatalogKeepsThePhotographOpen() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        try cacheCatalogWithExtraFilm("test_only_film")
+        let photo = try fixture()
+        defer { try? FileManager.default.removeItem(at: photo) }
+        let model = EditorModel(previewCache: scratchCache())
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        XCTAssertTrue(model.restoreAtLaunch(edited(photo)))
+        model.finishLaunching(waitingUpTo: 0)
+        model.open(photo)
+        await model.start(paths: paths)
+        XCTAssertEqual(model.source, photo)
+        XCTAssertNotNil(model.session)
     }
 
     /// The session's film is only in the cached catalog: like a launch

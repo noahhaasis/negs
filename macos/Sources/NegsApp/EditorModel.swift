@@ -225,6 +225,11 @@ import UniformTypeIdentifiers
         source = nil; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
+        // A different catalog can arrive once the window is shown and the
+        // restored photograph is being cropped, compared or edited.
+        interactionStart = nil; cropSession = nil
+        original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
+        undoManager?.removeAllActions()
         state = before.state; inspectorVisible = before.inspectorVisible; fitImage = before.fitImage; status = before.status
         if recentFiles != before.recentFiles { recentFiles = before.recentFiles; saveRecents() }
         updateHistogram()
@@ -250,6 +255,11 @@ import UniformTypeIdentifiers
                 }
                 apply(catalog: catalog)
                 CatalogCache.save(catalog, for: engine.paths)
+            }
+            // The restore at launch stands: its open skipped the system's
+            // recent documents while it could still be undone.
+            if let (session, _) = launchRestore, source == session.source {
+                NSDocumentController.shared.noteNewRecentDocumentURL(session.source)
             }
             launchRestore = nil
             // The engine and session file load concurrently. Apply the restored
@@ -630,7 +640,8 @@ import UniformTypeIdentifiers
 
     func open(_ url: URL) {
         explicitOpenRequested = true
-        if launching { discardLaunchRestore() }
+        // During launch it undoes a restore at launch; later it supersedes it.
+        if launching { discardLaunchRestore() } else { launchRestore = nil }
         open(url, restoring: nil)
     }
 
@@ -673,7 +684,7 @@ import UniformTypeIdentifiers
         zoom(fit: session?.fitImage ?? true)
         recentFiles.removeAll { $0 == url }; recentFiles.insert(url, at: 0)
         recentFiles = Array(recentFiles.prefix(10)); saveRecents()
-        // A restore at launch may still be undone; `finishLaunching` notes it.
+        // A restore at launch may still be undone; `start` notes it.
         if !restoringAtLaunch { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
         status = ready ? "" : "Starting…"
         // Try the exact developed frame before decoding the raw placeholder,
@@ -682,7 +693,7 @@ import UniformTypeIdentifiers
         inputColour = .null; lensCorrectionSupported = false
         // Read off the main actor at once, with its histogram. At launch the
         // main actor stays busy building the window, which takes the frame
-        // through `showLaunchFrame` before it first appears.
+        // through `finishLaunching` before it first appears.
         let crop = state.crop
         let cachedFrame = session != nil ? paths.map { paths in
             LaunchFrame {
@@ -708,9 +719,6 @@ import UniformTypeIdentifiers
     func finishLaunching(waitingUpTo timeout: TimeInterval) {
         guard launching else { return }
         launching = false
-        if let (session, _) = launchRestore, source == session.source {
-            NSDocumentController.shared.noteNewRecentDocumentURL(session.source)
-        }
         guard let (frame, generation, rendered) = launchFrame else { return }
         launchFrame = nil
         if let loaded = frame.wait(timeout: timeout) { _ = showCached(loaded, generation: generation, rendered: rendered) }
