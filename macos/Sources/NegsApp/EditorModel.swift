@@ -164,6 +164,8 @@ import UniformTypeIdentifiers
     var interacting: Bool { interactionStart != nil }
 
     @ObservationIgnored let presetLibrary: PresetLibrary
+    /// Film and paper preview grids (`StockPreviews.swift`).
+    @ObservationIgnored let stockPreviews = StockPreviews()
 
     init(previewCache: RenderedPreviewCache = RenderedPreviewCache(), presetLibrary: PresetLibrary = PresetLibrary()) {
         self.previewCache = previewCache
@@ -235,8 +237,9 @@ import UniformTypeIdentifiers
         if rotation != .null { next.params["io.rotate_cw"] = rotation }
         if !films.contains(where: { $0.id == next.film }), let first = films.first { next.film = first.id }
         if !papers.contains(where: { $0.id == next.paper }), let first = papers.first { next.paper = first.id }
-        pairFilm(in: &next)
+        StockPreviewRules.pairFilm(in: &next, stocks: stocks)
         state = next
+        stockPreviews.update(stocks: stocks)
     }
 
     private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }
@@ -386,25 +389,14 @@ import UniformTypeIdentifiers
         if start != state { registerUndo(restoring: start, action: action) }
         if showingInteractiveFrame, ready, source != nil, !closing { scheduleRender() }
         if !previewCurrent { scheduleActivity() }
+        pumpStockPreviews()
     }
 
     func chooseFilm(_ stock: String) {
-        var next = state; next.film = stock
-        next.params["film_render.development_time"] = .null
-        // A new film brings its own grain, DIR and halation presets, as upstream applies them.
-        for path in Stock.presetPaths { next.params[path] = .null }
-        pairFilm(in: &next); apply(next, action: "Change Film")
+        apply(StockPreviewRules.choosing(stock, paper: false, in: state, stocks: stocks), action: "Change Film")
     }
     func choosePaper(_ stock: String) {
-        var next = state; next.paper = stock; next.params["print_render.development_time"] = .null
-        apply(next, action: "Change Paper")
-    }
-    private func pairFilm(in state: inout EditState) {
-        guard let film = films.first(where: { $0.id == state.film }) else { return }
-        state.params["io.scan_film"] = .bool(film.positive)
-        if papers.contains(where: { $0.id == film.target }), state.paper != film.target {
-            state.paper = film.target; state.params["print_render.development_time"] = .null
-        }
+        apply(StockPreviewRules.choosing(stock, paper: true, in: state, stocks: stocks), action: "Change Paper")
     }
     func limitPreview(_ enabled: Bool) {
         var next = state; next.limitPreview = enabled; apply(next, action: "Change Preview Resolution")
@@ -458,7 +450,8 @@ import UniformTypeIdentifiers
         guard !closing else { return }
         let render = next.rendered != state.rendered
         state = next
-        if render { changed() }
+        // A crop doesn't re-render the preview, but it changes the thumbnails.
+        if render { changed() } else { pumpStockPreviews() }
     }
     private func registerUndo(restoring previous: EditState, action: String) {
         undoManager?.registerUndo(withTarget: self) { model in
@@ -768,6 +761,8 @@ import UniformTypeIdentifiers
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
         if renderFailed { renderFailed = false }
+        // Dims the thumbnails now, or blanks them for a new photograph.
+        pumpStockPreviews()
         guard ready, source != nil, !closing else { return }
         scheduleRender()
         scheduleActivity()
@@ -780,6 +775,8 @@ import UniformTypeIdentifiers
             guard let self else { return }
             self.pendingRender = nil
             await self.render()
+            // The main preview goes first; thumbnails follow once it's current.
+            self.pumpStockPreviews()
         }
     }
     private func render() async {
@@ -889,6 +886,95 @@ import UniformTypeIdentifiers
     private func hideActivity() {
         activityTimer?.cancel(); activityTimer = nil
         if showsActivity { showsActivity = false }
+    }
+
+    // MARK: Film and paper previews
+
+    /// Settings › Film and paper previews. Off shows the menus and frees the
+    /// thumbnails here and in the helper.
+    func setStockPreviews(_ enabled: Bool) {
+        guard enabled != stockPreviews.enabled else { return }
+        stockPreviews.enabled = enabled
+        if enabled { pumpStockPreviews(); return }
+        if stockPreviews.clear(), let engine {
+            Task.detached(priority: .utility) { _ = try? await engine.request(["command": .string("release_thumbnails")]) }
+        }
+    }
+
+    /// Marks out-of-date thumbnails (dimmed, or blank for another photograph)
+    /// and requests the next one of an open grid: one helper request at a
+    /// time, and only while the main preview is current and nothing is dragged.
+    func pumpStockPreviews() {
+        let previews = stockPreviews
+        guard previews.enabled, !closing, let source else { return }
+        let scanning = state.params["io.scan_film"].bool
+        var grids: [[StockTile]] = []
+        if previews.filmOpen, previews.filmShown { grids.append(previews.films) }
+        if previews.paperOpen, previews.paperShown, !scanning { grids.append(previews.papers) }
+        guard !grids.isEmpty else { return }
+        let rendered = renderState, generation = sourceGeneration
+        var next: (StockTile, StockTile.Key)?
+        for tile in grids.joined() {
+            let key = StockTile.Key(generation: generation, request: StockPreviewRules.request(
+                for: tile.stock, state: rendered, stocks: stocks, source: source, generation: generation))
+            if tile.mark(wanted: key), next == nil { next = (tile, key) }
+        }
+        guard !previews.busy, ready, previewCurrent, !rendering, pendingRender == nil, !interacting, let engine else { return }
+        guard let (tile, key) = next else {
+            if let batch = previews.batch {
+                previews.batch = nil
+                let ms = Date().timeIntervalSince(batch.started) * 1000
+                previews.lastBatch = (batch.count, ms)
+                if ProcessInfo.processInfo.environment["NEGS_STOCK_THUMB_LOG"] != nil {
+                    FileHandle.standardError.write(Data(String(format: "stock thumbnails: %d in %.0f ms (%.0f ms each)\n", batch.count, ms, ms / Double(max(batch.count, 1))).utf8))
+                }
+            }
+            return
+        }
+        let started = previews.batch?.started ?? Date()
+        previews.batch = (started, (previews.batch?.count ?? 0) + 1)
+        previews.busy = true
+        let buffer = engine.directory.appendingPathComponent("stock-\(UUID().uuidString).rgba")
+        var command = key.request
+        command["preview_path"] = .string(buffer.path)
+        Task { [weak self] in
+            let image: CGImage?
+            do {
+                let (_, result) = try await engine.request(command)
+                let (width, height) = (Int(result["width"].double), Int(result["height"].double))
+                let display = result["display_color_space"].string
+                image = await Task.detached(priority: .userInitiated) {
+                    defer { try? FileManager.default.removeItem(at: buffer) }
+                    return try? Self.thumbnailImage(Data(contentsOf: buffer), width: width, height: height, displaySpace: display)
+                }.value
+                if ProcessInfo.processInfo.environment["NEGS_STOCK_THUMB_LOG"] != nil {
+                    FileHandle.standardError.write(Data("thumb \(tile.stock.id): \(Int(result["elapsed_ms"].double)) ms \(result["timing_ms"])\n".utf8))
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: buffer)
+                FileHandle.standardError.write(Data("stock thumbnail \(tile.stock.id): \(error.localizedDescription)\n".utf8))
+                image = nil
+            }
+            guard let self else { return }
+            self.stockPreviews.busy = false
+            guard !self.closing, self.stockPreviews.enabled else { return }
+            // The photograph changed meanwhile: drop it, the next pump retries.
+            // A failure stays blank until the next edit, so nothing spins.
+            if key.generation == self.sourceGeneration { tile.show(image, for: key) }
+            self.pumpStockPreviews()
+        }
+    }
+
+    /// The helper's RGBA thumbnail as an image tagged like the main preview
+    /// (`display_color_space`), so it shows the same colours.
+    nonisolated static func thumbnailImage(_ data: Data, width: Int, height: Int, displaySpace: String) throws -> CGImage {
+        guard width > 0, height > 0, width <= 4096, height <= 4096, data.count == width * height * 4,
+              let space = displayColorSpace(displaySpace), let provider = CGDataProvider(data: data as CFData),
+              let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4, space: space,
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: provider,
+                                  decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        else { throw EngineError(message: "The image engine returned an invalid thumbnail.") }
+        return image
     }
 
     /// Reads the engine's RGBA buffer into an IOSurface tagged with its

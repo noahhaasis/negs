@@ -55,6 +55,7 @@ import SwiftUI
         }
         #if SPEKTRAFILM_BENCHMARK
         InteractionBenchmark.start(model)
+        StockPreviewBenchmark.start(model)
         #endif
         updates.schedule(afterStartupOf: model)
     }

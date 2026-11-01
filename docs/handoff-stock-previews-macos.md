@@ -68,3 +68,98 @@ screenshots' paths, commit, push the branch, and tell Noah.
 
 Watch for: the Mac's helper backend (Metal via wgpu) may make `process` faster or slower than
 Linux's ~7 ms. If first open is much slower than ~2 s, report it before tuning.
+
+## macOS results
+
+Done 2026-11-01 on Noah's M1 Pro (on AC power, Low Power Mode off). Another Claude session
+was launching Negs builds at the same time (load average 3–7), so treat timings as ±10 %.
+Photographs: `~/Downloads/DSC_0144.jpg` and `DSC_3471.jpg`, both 6048 × 4032 JPEGs (24 MP).
+23 films + 10 papers, 320 px thumbnails, release builds with `MACOSX_DEPLOYMENT_TARGET=14.0`.
+
+What users get: Film and Paper are collapsed foldouts with the current stock on the right.
+Opened, each shows a two-column grid of the photograph under every stock, grouped like the
+old menus, with the current one outlined in the accent colour. A click is the same "Change
+Film" / "Change Paper" undo step as the menu. Settings has "Film and paper previews" (on by
+default); off brings back the menus at once.
+
+Screenshots: [grids open](stock-previews-macos/grids-open.jpg),
+[tiles following a 50 % crop](stock-previews-macos/cropped-50.jpg),
+[collapsed](stock-previews-macos/collapsed.png),
+[setting off](stock-previews-macos/setting-off.png).
+
+### In the app
+
+| | macOS | Linux (for comparison) |
+|---|---|---|
+| First open, all 33 thumbnails | **1.2 s** (37 ms each), starting once the main preview is done | ~2 s |
+| After an exposure edit (pipelines cached) | **0.5 s** for all 33 (15 ms each) | ~0.25 s |
+| Crop 80 % + 3° / tight 50 % crop | **0.6 s / 0.7 s** for all 33 | ~0.4 s / ~0.7 s |
+| Slider drag with both grids open | first drag frame waits for at most one thumbnail (≤ ~40 ms); 29–30 live frames in a 4 s drag vs 31–32 with the grids closed; main-thread hitches unchanged (p99 ~23 ms) | ≤ ~50 ms |
+| Memory, grids collapsed vs setting off | **+0** (app 374 vs 375 MB, helper 823 vs 822 MB) | +0 |
+| Memory, both grids open | app **+15–45 MB**, helper **+30–45 MB** (app 388–418 MB, helper 851–866 MB) | helper ≈ +60 MB, app ≈ +15 MB |
+| Window on screen (from exec, median of 5, alternating) | **497 ms** vs 508 ms on `main` | unchanged |
+| First developed image (from launch, median of 5) | **1.99 s** vs 2.05 s on `main` | — |
+
+Memory is the physical footprint (Activity Monitor's column) 8 s after things settle. The
+first developed image got slightly faster on the branch because of the helper's parallel
+gamut remap (main render 1.36 s vs 1.42 s), not because of the previews. The Mac's
+thumbnails are slower per tile than Linux's after an edit (Metal `process` ≈ 12–14 ms vs
+~7 ms) but much faster cold (pipeline build ≈ 16 ms vs ~45 ms), so first open is quicker.
+
+### Helper only (`linux/bench_stock_previews.py DSC_0144.jpg 320`)
+
+| | films (23) | papers (10) | per thumbnail |
+|---|---|---|---|
+| Cold | 718 ms | 306 ms | median 31 ms (pipeline 16, process 14) |
+| After an exposure edit | 331 ms | 137 ms | median 14 ms |
+| Crop 80 % + 3° | 346 ms | 131 ms | median 15 ms |
+| Crop 50 % | 389 ms | 166 ms | median 16 ms |
+
+The main re-render after all thumbnails was still a cache hit (82 ms), and the main preview
+buffer is byte-identical to `main`'s helper (2 photos × 2 stocks, glare off, SHA-256).
+The script needed a macOS memory fallback (`ps` + `footprint`); `/proc` doesn't exist here.
+
+### Implementation
+
+- `macos/Sources/NegsApp/StockPreviews.swift`: `StockPreviewRules` (the pure "state with this
+  stock chosen", now also used by `chooseFilm` / `choosePaper`; the thumbnail request; the
+  current / dimmed / placeholder decision), `StockTile` (one observable per tile, so a
+  thumbnail arriving redraws only its tile), `StockPreviews` (tiles, open state, setting in
+  UserDefaults `stockPreviews`, missing = on) and the SwiftUI foldout and grid.
+- `EditorModel.pumpStockPreviews()`: the Linux `pump`. Called after every render finishes,
+  on every edit (dims at once; a new photograph blanks at once), when a crop changes (no
+  main render, but the thumbnails change), when a drag ends and when a grid opens or
+  appears. It sends one `thumbnail` at a time, only when the preview is current, nothing is
+  rendering or pending and no slider is dragged. Thumbnails become sRGB- or
+  Rec. 2020-tagged `CGImage`s, the same colour handling as the main preview.
+- `Inspector.swift` shows the foldouts or the Pickers; `Updates.swift` (Settings window) has
+  the toggle (`EditorModel.setStockPreviews`; off clears the tiles and sends
+  `release_thumbnails`). SwiftUI builds only the visible control, which is cheap here: a
+  collapsed foldout builds no tiles, and the pop-up it replaces is the expensive control.
+- Tests: `macos/Tests/NegsTests/StockPreviewTests.swift` (choosing a film pairs its paper and
+  resets presets, a paper keeps the film, the tile key follows crop/straighten/photograph/
+  edits but not the border, dim vs blank, failures aren't retried, missing setting = on).
+  The full suite passes except the two `InspectorLayoutTests` that fail on `main` too.
+
+**Experiment-only hooks to remove with the Linux ones:** `NEGS_STOCK_EXPAND` (opens the
+grids at launch, `StockPreviews.init`), `NEGS_STOCK_THUMB_LOG` (stderr timings in
+`pumpStockPreviews`), `StockPreviews.lastBatch`, and
+`macos/Sources/NegsApp/StockPreviewBenchmark.swift` (`NEGS_STOCK_MEASURE=PHOTO`, compiled
+only with `-DSPEKTRAFILM_BENCHMARK`), plus the macOS memory fallback in
+`linux/bench_stock_previews.py`.
+
+How the app numbers were taken (benchmark build, isolated home so nothing touches Noah's
+session or caches):
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=14.0 swift build --package-path macos -c release \
+  --scratch-path target/swift-bench -Xswiftc -DSPEKTRAFILM_BENCHMARK
+HOME=$TMP CFFIXED_USER_HOME=$TMP SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_F64_CLI=/usr/bin/true \
+  NEGS_STOCK_MEASURE=~/Downloads/DSC_0144.jpg NEGS_STOCK_EXPAND=film,paper \
+  target/swift-bench/release/NegsApp -inspectorTab lab   # add -stockPreviews '<false/>' for "off"
+```
+
+Startup and drags used the existing `SPEKTRAFILM_BENCHMARK_PHOTO` drag benchmark on both
+builds, with a `CGWindowList` poller for exec → window.
+
+Not done: no notarized/packaged bundle was built, and an Intel Mac wasn't tried.

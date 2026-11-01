@@ -471,18 +471,27 @@ struct AdjustmentInspector: View {
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
         Section("Film & Paper") {
-            Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
-                ForEach(model.filmGroups) { group in
-                    Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+            // Preview grids, or the plain menus when Settings turns them off.
+            if model.stockPreviews.enabled {
+                StockFoldout(model: model, paper: false)
+            } else {
+                Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
+                    ForEach(model.filmGroups) { group in
+                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                    }
                 }
             }
             developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
             Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
                 .help("Skip printing and scan the developed film, as for slides.")
             if !scanning {
-                Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
-                    ForEach(model.paperGroups) { group in
-                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                if model.stockPreviews.enabled {
+                    StockFoldout(model: model, paper: true)
+                } else {
+                    Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
+                        ForEach(model.paperGroups) { group in
+                            Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                        }
                     }
                 }
                 developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")

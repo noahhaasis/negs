@@ -21,6 +21,12 @@ sequence = 0
 
 
 def memory():
+    if not Path('/proc').exists():
+        # macOS: resident size and the physical footprint (what Activity Monitor shows).
+        rss = int(subprocess.run(['ps', '-o', 'rss=', '-p', str(proc.pid)], capture_output=True, text=True).stdout) // 1024
+        line = subprocess.run(['footprint', '-f', 'bytes', str(proc.pid)], capture_output=True, text=True).stdout
+        footprint = int(line.split('Footprint:')[1].split()[0]) // 2**20 if 'Footprint:' in line else -1
+        return {'RSS': rss, 'footprint': footprint}
     status = Path(f'/proc/{proc.pid}/status').read_text()
     fields = dict(line.split(':', 1) for line in status.splitlines())
     return {k: int(fields[k].split()[0]) // 1024 for k in ('VmRSS', 'VmHWM')}

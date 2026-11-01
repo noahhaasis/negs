@@ -1,8 +1,8 @@
 # Film and paper previews
 
-Branch `stock-previews`. The Linux app is done and is the reference. macOS
-([handoff](handoff-stock-previews-macos.md)) and Windows
-([handoff](handoff-stock-previews-windows.md)) follow it.
+Branch `stock-previews`. The Linux app is done and is the reference. macOS is done too
+([handoff and results](handoff-stock-previews-macos.md#macos-results)); Windows
+([handoff](handoff-stock-previews-windows.md)) follows.
 
 ## Behaviour (all platforms)
 
