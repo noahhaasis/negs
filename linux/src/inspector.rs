@@ -603,7 +603,7 @@ pub fn build(ui: &Rc<Editor>) {
     }
     // Shown only when the decoder found corrections in this file.
     let lens = toggle(ui, &raw, crate::parameters::LENS_CORRECTIONS, true);
-    lens.set_subtitle("Distortion, vignetting and colour fringing, from the camera’s data in the file");
+    lens.set_subtitle("Distortion, vignetting and colour fringing");
     {
         let owner = Rc::downgrade(ui);
         visible(ui, &lens, move |_| owner.upgrade().is_some_and(|ui| ui.lens_supported.get()));

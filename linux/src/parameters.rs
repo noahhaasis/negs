@@ -951,6 +951,20 @@ mod tests {
     }
 
     #[test]
+    fn sessions_before_lens_corrections_keep_them_off() {
+        let defaults = json!({"io": {"lens_correction": {"enabled": true}}});
+        let mut old = State::default();
+        migrate_session(2, &mut old);
+        install_defaults(&mut old, &defaults, false);
+        assert_eq!(old.choices.get(LENS_CORRECTIONS).map(String::as_str), Some("false"));
+        assert_eq!(runtime(&old, &defaults)["io"]["lens_correction"]["enabled"], json!(false));
+        let mut current = State::default();
+        migrate_session(SESSION_SCHEMA, &mut current);
+        install_defaults(&mut current, &defaults, false);
+        assert_eq!(current.choices.get(LENS_CORRECTIONS).map(String::as_str), Some("true"));
+    }
+
+    #[test]
     #[ignore = "Requires a built native helper; the release recipe runs this integration gate"]
     fn live_helper_schema() {
         let helper = std::env::var_os("NEGS_SCHEMA_HELPER")

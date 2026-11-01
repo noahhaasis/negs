@@ -364,7 +364,13 @@ What was built (differs from the plan where noted):
    for sessions saved before it (session schema 3); kept when a preset is
    applied; the press-and-hold original follows it.
 5. Tests: unit tests in `lens/tests.rs`; `real_files_have_profiles`
-   (`#[ignore]`, `SPEKTRAFILM_LENS_TEST_FILES`).
+   (`#[ignore]`, `SPEKTRAFILM_LENS_TEST_FILES`); Linux session migration test.
+6. Desktop check `linux/check_lens.py --raw FILE --plain FILE` (Wayland,
+   AT-SPI; source `linux/core-env.sh` first). Passed 2026-11-01 with the Sony
+   ARW, the Fujifilm RAF and the Leica Q3 DNG against a Nikon DNG without
+   opcodes and a JPEG: switch shown and on for the corrected RAW, hidden for
+   the others, turning it off re-renders (the Q3 visibly reframes), reopening
+   turns it back on, and the session saves it.
 
 Rendering: vignetting is an in-place linear gain; distortion/CA is one
 Catmull-Rom resample into a new buffer, then a zoom about the centre so no
