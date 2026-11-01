@@ -41,20 +41,25 @@ def children(pid):
     return found
 
 
+# (environment, Settings → Film and paper previews)
 variants = {
-    'dropdown': {'NEGS_STOCK_DROPDOWN': '1'},
-    'grid-collapsed': {},
-    'grid-expanded': {'NEGS_STOCK_EXPAND': 'film,paper'},
+    'dropdown': ({}, False),
+    'grid-collapsed': ({}, True),
+    'grid-expanded': ({'NEGS_STOCK_EXPAND': 'film,paper'}, True),
 }
 results = {}
-for name, extra in variants.items():
-    env = dict(os.environ, NEGS_PROFILE_DIR=str(args.out / 'profile'), NEGS_INSPECTOR_MODE='eager',
+for name, (extra, previews) in variants.items():
+    profile = args.out / f'profile-{name}'
+    profile.mkdir(exist_ok=True)
+    # A photo argument restores Settings but not the edit.
+    (profile / 'session.json').write_text(json.dumps({'schema': 1, 'preferences': {'stock_previews': previews}}))
+    env = dict(os.environ, NEGS_PROFILE_DIR=str(profile), NEGS_INSPECTOR_MODE='eager',
                NEGS_QUIT_AFTER_MS=str(int(args.seconds * 1000) + 3000),
                NEGS_WIDGET_CAPTURE=str(args.out / f'{name}.png'),
                NEGS_WIDGET_CAPTURE_MS=str(int(args.seconds * 1000)),
                NEGS_STOCK_THUMB_LOG='1', **extra)
     log = (args.out / f'{name}.log').open('w')
-    p = subprocess.Popen(['bash', str(root / 'linux/run.sh'), '--fresh', str(args.photo.resolve())],
+    p = subprocess.Popen(['bash', str(root / 'linux/run.sh'), str(args.photo.resolve())],
                          env=env, stdout=log, stderr=log)
     time.sleep(args.seconds + 1)
     gui = memory(p.pid)

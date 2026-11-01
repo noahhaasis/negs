@@ -110,7 +110,13 @@ enum Command {
         /// The thumbnail's long edge in pixels.
         long_side: u32,
         preview_path: PathBuf,
+        /// The photograph's crop. The whole frame is developed, as for the
+        /// main preview, then cut, so grain and halation keep their scale.
+        #[serde(default)]
+        crop: Option<Crop>,
     },
+    /// Frees the thumbnails' caches (the stock previews were turned off).
+    ReleaseThumbnails,
     Save {
         render_id: u64,
         output: PathBuf,
@@ -165,6 +171,8 @@ struct Session {
 
 /// Every film with its paper, and every paper with the current film.
 const THUMBNAIL_PIPELINES: usize = 40;
+/// The longest frame developed for a cropped thumbnail.
+const THUMBNAIL_FRAME_MAX: u32 = 1280;
 
 /// The decoded input, and what it was decoded with: a RAW's white balance
 /// and a non-RAW file's interpretation each need a new decode.
@@ -305,10 +313,14 @@ impl Session {
         mut params: Box<RuntimeParams>,
         long_side: u32,
         preview_path: PathBuf,
+        crop: Option<Crop>,
         data: &Path,
     ) -> Result<Value> {
         let started = Instant::now();
         ensure!((16..=1024).contains(&long_side), "Invalid thumbnail size");
+        if let Some(crop) = &crop {
+            crop.validate()?;
+        }
         ensure!(
             RgbColourspace::find(&params.io.output_color_space).is_some(),
             "Unknown output colour space: {}",
@@ -328,7 +340,13 @@ impl Session {
         }
         // The thumbnail is the whole frame; Image Size describes the export.
         image_size::clear(&mut params);
-        let scale = long_side as f64 / source.width.max(source.height) as f64;
+        // Large enough that the crop fills `long_side`, within a bound on the
+        // developed frame (a tight crop then gets fewer pixels).
+        let (fraction_w, fraction_h) = crop.as_ref().map_or((1.0, 1.0), |c| (c.width, c.height));
+        let cropped_long = (source.width as f64 * fraction_w).max(source.height as f64 * fraction_h).max(1.0);
+        let frame_long = (source.width.max(source.height) as f64 * long_side as f64 / cropped_long)
+            .min(THUMBNAIL_FRAME_MAX as f64);
+        let scale = frame_long / source.width.max(source.height) as f64;
         let dimensions = if scale >= 1.0 {
             (source.width, source.height)
         } else {
@@ -362,9 +380,11 @@ impl Session {
         let built = started.elapsed();
         let backend = self.backend.get_or_insert_with(spektrafilm_gpu::select_backend);
         let (output, used_backend) = pipeline.process_with_backend(working, backend.as_ref());
+        let cropped = crop.map(|crop| crop.apply(&output));
+        let output = cropped.as_ref().unwrap_or(&output);
         let processed = started.elapsed();
         let encoding = Encoding::new(&params.io.output_color_space, params.io.output_cctf_encoding);
-        let (width, height) = write_display(&output, encoding, &post, &preview_path)?;
+        let (width, height) = write_display(output, encoding, &post, &preview_path)?;
         let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
         Ok(json!({
             "width": width, "height": height, "backend": used_backend,
@@ -432,8 +452,13 @@ impl Session {
                 Ok(json!({"width": width, "height": height, "input_colour": loaded.colour,
                           "display_color_space": DisplaySpace::of(encoding).name()}))
             }
-            Command::Thumbnail { input, source_generation, film, paper, params, long_side, preview_path } => {
-                self.thumbnail(input, source_generation, film, paper, params, long_side, preview_path, data)
+            Command::Thumbnail { input, source_generation, film, paper, params, long_side, preview_path, crop } => {
+                self.thumbnail(input, source_generation, film, paper, params, long_side, preview_path, crop, data)
+            }
+            Command::ReleaseThumbnails => {
+                self.thumbnail_source = None;
+                self.thumbnail_pipelines = Vec::new();
+                Ok(json!({}))
             }
             Command::Save {
                 render_id,

@@ -342,6 +342,8 @@ impl Editor {
         r.requested_revision = revision;
         drop(r);
         self.sync_history();
+        // A new photograph replaces the stock thumbnails with placeholders now.
+        crate::stock_browser::pump(self);
         let ui = self.clone();
         glib::timeout_add_local_once(
             Duration::from_millis(400),

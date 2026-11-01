@@ -53,24 +53,27 @@ main, ms = request({'command': 'render', 'input': str(photo), 'source_generation
 print(f"main render {main['width']}x{main['height']} on {main['backend']}: {ms:.0f} ms; helper {memory()} MB")
 
 
-def thumbnail(film, paper, positive, long_side, name, ev=0.0):
+def thumbnail(film, paper, positive, long_side, name, ev=0.0, crop=None):
     params = json.loads(json.dumps(defaults))
     params['camera']['exposure_compensation_ev'] = ev
     params['io']['scan_film'] = positive
     result, ms = request({'command': 'thumbnail', 'input': str(photo), 'source_generation': 1,
                           'film': film, 'paper': paper, 'params': params,
-                          'long_side': long_side, 'preview_path': str(scratch / f'{name}.rgba')})
+                          'long_side': long_side, 'crop': crop, 'preview_path': str(scratch / f'{name}.rgba')})
     return result, ms
 
 
-passes = [(s, 0.0, 'cold') for s in sizes] + [(sizes[-1], 0.5, 'after an exposure edit')]
-for long_side, ev, note in passes:
+half = {'x': 0.25, 'y': 0.25, 'width': 0.5, 'height': 0.5, 'angle': 0.0}
+tilted = {'x': 0.1, 'y': 0.1, 'width': 0.8, 'height': 0.8, 'angle': 3.0}
+passes = [(s, 0.0, 'cold', None) for s in sizes] + [(sizes[-1], 0.5, 'after an exposure edit', None),
+          (sizes[-1], 0.5, 'crop 80% + 3deg', tilted), (sizes[-1], 0.5, 'crop 50%', half)]
+for long_side, ev, note, crop in passes:
     for label, rows in (('films', [(f['id'], f['target'] if 'target' in f else (f['target_print'] or paper), f['positive']) for f in films]),
                         ('papers', [(film, p['id'], False) for p in papers])):
         times, parts = [], {}
         started = time.perf_counter()
         for i, (f, p, positive) in enumerate(rows):
-            result, ms = thumbnail(f, p, positive, long_side, f'{label}-{long_side}-{ev}-{i}', ev)
+            result, ms = thumbnail(f, p, positive, long_side, f'{label}-{long_side}-{ev}-{note[:4]}-{i}', ev, crop)
             times.append(ms)
             for k, v in result['timing_ms'].items():
                 parts.setdefault(k, []).append(v)
