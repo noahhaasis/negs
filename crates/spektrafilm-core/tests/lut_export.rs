@@ -46,6 +46,8 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
         params.scanner.lens_blur = 2.0;
         params.film_render.halation.boost_ev = 2.0;
         params.post.brightness = 50.0;
+        params.prep.highlights = -80.0;
+        params.prep.midtone_detail = 60.0;
         let text = lut_export::cube(&data, film, paper, params.clone(), 33).unwrap();
         assert!(text.contains("LUT_3D_SIZE 33\n"));
         assert!(text.contains("DOMAIN_MIN 0.0 0.0 0.0\nDOMAIN_MAX 1.0 1.0 1.0"));
@@ -56,6 +58,7 @@ fn exported_cube_matches_spectral_render_of_independent_pixels() {
         params.settings.use_enlarger_lut = true;
         params.settings.use_scanner_lut = true;
         let clean = lut_export::per_pixel_params(params.clone());
+        assert!(clean.prep.is_identity());
         // Python's lut_mode bakes the per-image trims neutral and computes
         // exactly; manual exposure stays (see per_pixel_params).
         assert_eq!(

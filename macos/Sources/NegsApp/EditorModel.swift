@@ -43,6 +43,7 @@ import UniformTypeIdentifiers
     private(set) var toneCurve: ToneCurveData?
     /// The photograph's film exposure, from the last render.
     private(set) var filmHistogram: FilmHistogram?
+    private(set) var waveform: Waveform?
     /// The developed preview's frame, uncropped, which the canvas lays out:
     /// the working frame, or less with the 12 MP limit.
     private(set) var imageSize = CGSize.zero
@@ -77,6 +78,20 @@ import UniformTypeIdentifiers
     private(set) var saving = false
     private(set) var exporting = false
     private(set) var exportStarted = Date()
+    private(set) var placingExposure = false
+    private(set) var exposurePlacementMessage: String?
+    var autoPlaceNewImages = UserDefaults.standard.object(forKey: "autoPlaceNewImages") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages")
+            if !autoPlaceNewImages {
+                exposurePlacementGate.edited()
+                if exposurePlacementAutomatic {
+                    exposurePlacementTask?.cancel(); exposurePlacementTask = nil; exposurePlacementID = nil
+                    exposurePlacementAutomatic = false; placingExposure = false
+                }
+            }
+        }
+    }
     var error: String?
     var status = "Starting…"
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
@@ -113,6 +128,10 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var exportJob: ExportJob?
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var sourceGeneration = 0
+    @ObservationIgnored private var exposurePlacementGate = ExposurePlacementGate()
+    @ObservationIgnored private var exposurePlacementTask: Task<Void, Never>?
+    @ObservationIgnored private var exposurePlacementID: UUID?
+    @ObservationIgnored private var exposurePlacementAutomatic = false
     @ObservationIgnored private var renderID = 0
     /// The last render is at export size: saving it gives the same file as
     /// a Fast export, byte for byte.
@@ -361,6 +380,7 @@ import UniformTypeIdentifiers
         let rotation = Int(state.params["io.rotate_cw"].double)
         if imageRotation != rotation {
             imageRotation = rotation
+            updateHistogram()
             cropSession?.update(photo: shownImageSize, rotation: rotation)
         }
         updateFilmStrip()
@@ -524,6 +544,7 @@ import UniformTypeIdentifiers
     /// else re-renders.
     private func replaceState(_ next: EditState) {
         guard !closing else { return }
+        if next != state { exposurePlacementGate.edited(); exposurePlacementMessage = nil }
         let render = next.rendered != state.rendered
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
@@ -662,6 +683,8 @@ import UniformTypeIdentifiers
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
+        exposurePlacementTask?.cancel(); exposurePlacementTask = nil; exposurePlacementID = nil
+        placingExposure = false; exposurePlacementAutomatic = false; exposurePlacementMessage = nil
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
@@ -682,14 +705,24 @@ import UniformTypeIdentifiers
             state = restored
             inspectorVisible = session.inspectorVisible
         } else {
+            // Each newly selected photograph starts with fresh adjustments.
+            // Film/paper and output preferences belong to the workflow; the
+            // previous photograph's Prep, Lab and Post edits do not.
+            let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"]
+            let retained = retainedPaths.map { ($0, state.params[$0]) }
+            state.params = defaults
+            for (path, value) in retained where value != .null { state.params[path] = value }
+            state.params["io.scan_film"] = .bool(films.first(where: { $0.id == state.film })?.positive ?? false)
             state.params["io.rotate_cw"] = .number(0)
             // How one file's colours are read never carries over to the next.
             let interpretation = defaults["io.input_interpretation"]
             if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
             state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
             state.crop = CropSettings()
+            state.border = BorderSettings()
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
+        exposurePlacementGate.opened(generation: generation, restored: session != nil, raw: isRaw, enabled: autoPlaceNewImages)
         undoManager?.removeAllActions()
         zoom(fit: session?.fitImage ?? true)
         recentFiles.removeAll { $0 == url }; recentFiles.insert(url, at: 0)
@@ -862,6 +895,8 @@ import UniformTypeIdentifiers
     /// next save.
     func choosePreviewSpace(_ name: String) {
         guard name != previewSpace, let index = SaveSettings.colorSpaces.firstIndex(of: name) else { return }
+        exposurePlacementGate.edited()
+        exposurePlacementMessage = nil
         SaveSettings.chosenSpace = index
         previewSpace = name
         changed()
@@ -955,6 +990,9 @@ import UniformTypeIdentifiers
             status = interactiveScale != nil
                 ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
                 : "\(Int(photograph.width)) × \(Int(photograph.height))\(previewScale < 1 ? " · shown at \(Self.percent(previewScale))" : "") · \(time)"
+            if revision == currentRevision, interactiveScale == nil {
+                scheduleAutomaticExposurePlacement(generation: generation)
+            }
         } catch {
             if currentRevision == revision, generation == sourceGeneration, !closing {
                 renderFailed = true; hideActivity(); report(error)
@@ -972,16 +1010,17 @@ import UniformTypeIdentifiers
     /// crop supersedes a count still running.
     private func updateHistogram() {
         histogramRequest += 1
-        guard let image else { histogram = nil; return }
-        let request = histogramRequest, crop = crop
+        guard let image else { histogram = nil; waveform = nil; return }
+        let request = histogramRequest, crop = crop, rotation = imageRotation
         Task.detached(priority: .userInitiated) { [weak self] in
-            let counted = Histogram.of(image, crop: crop)
+            let counted = ImageScopes.of(image, crop: crop, rotation: rotation)
             await self?.showHistogram(counted, request: request)
         }
     }
-    private func showHistogram(_ counted: Histogram, request: Int) {
-        guard request == histogramRequest, counted != histogram else { return }
-        histogram = counted
+    private func showHistogram(_ counted: ImageScopes, request: Int) {
+        guard request == histogramRequest else { return }
+        histogram = counted.histogram
+        waveform = counted.waveform
     }
 
     // MARK: Tone graph
@@ -1178,6 +1217,82 @@ import UniformTypeIdentifiers
     // MARK: Saving
 
     var canExportLUT: Bool { hasCatalog && engine != nil && !saving && !exporting && !cropping }
+
+    // MARK: Camera brightness
+
+    var canMatchCameraBrightness: Bool {
+        ready && engine != nil && isRaw && previewCurrent && !rendering && !placingExposure && !cropping && !interacting && !closing
+    }
+
+    private func scheduleAutomaticExposurePlacement(generation: Int) {
+        guard exposurePlacementGate.takeAutomatic(generation: generation, raw: isRaw, enabled: autoPlaceNewImages) else { return }
+        let expectedRevision = revision, expectedState = state
+        Task { [weak self] in
+            await Task.yield() // Let the first render finish publishing its frame.
+            guard let self, self.sourceGeneration == generation, self.revision == expectedRevision,
+                  self.state == expectedState, self.autoPlaceNewImages else { return }
+            self.matchCameraBrightness(automatic: true)
+        }
+    }
+
+    func matchCameraBrightness() { matchCameraBrightness(automatic: false) }
+
+    private func matchCameraBrightness(automatic: Bool) {
+        guard canMatchCameraBrightness, let engine, let source else { return }
+        exposurePlacementGate.edited()
+        let id = UUID(), generation = sourceGeneration, expectedRevision = revision
+        let snapshot = renderState, expectedState = state, size = sourceSize
+        let reference = engine.directory.appendingPathComponent("camera-brightness-\(id.uuidString).png")
+        exposurePlacementID = id; exposurePlacementAutomatic = automatic; placingExposure = true; exposurePlacementMessage = nil
+        exposurePlacementTask = Task { [weak self] in
+            defer {
+                try? FileManager.default.removeItem(at: reference)
+                if let self, self.exposurePlacementID == id {
+                    self.placingExposure = false; self.exposurePlacementTask = nil; self.exposurePlacementID = nil; self.exposurePlacementAutomatic = false
+                }
+            }
+            do {
+                let data = try await Task.detached(priority: .userInitiated) {
+                    try CameraBrightnessReference.png(from: source, expectedSize: size)
+                }.value
+                try Task.checkCancellation()
+                guard let self, !self.closing, self.sourceGeneration == generation,
+                      self.revision == expectedRevision, self.state == expectedState,
+                      !automatic || self.autoPlaceNewImages else { return }
+                try data.write(to: reference, options: .atomic)
+                let (_, result) = try await engine.request([
+                    "command": .string("place_exposure"), "input": .string(source.path),
+                    "source_generation": .number(Double(generation)), "film": .string(snapshot.film),
+                    "paper": .string(snapshot.paper), "params": snapshot.params,
+                    "reference_path": .string(reference.path)
+                ])
+                try Task.checkCancellation()
+                guard !self.closing, self.sourceGeneration == generation, self.exposurePlacementID == id else { return }
+                guard self.revision == expectedRevision, self.state == expectedState,
+                      !automatic || self.autoPlaceNewImages else {
+                    self.exposurePlacementMessage = "Adjustments changed; brightness match skipped."
+                    return
+                }
+                guard case .number(let exposure) = result["exposure_ev"], exposure.isFinite, (-3...3).contains(exposure) else {
+                    throw EngineError(message: "A reliable brightness match could not be found. Adjust Exposure manually.")
+                }
+                var next = self.state
+                next.params["prep.exposure_ev"] = .number(exposure)
+                self.apply(next, action: "Match Camera Brightness")
+                let value = exposure.formatted(.number.precision(.fractionLength(2)).sign(strategy: .always()))
+                self.exposurePlacementMessage = result["highlight_limited"].bool
+                    ? "Matched \(value) EV · limited to protect highlights."
+                    : "Matched camera brightness: \(value) EV."
+            } catch is CancellationError {
+                // A different photograph or shutdown supersedes this request.
+            } catch {
+                guard let self, !self.closing, self.sourceGeneration == generation,
+                      self.exposurePlacementID == id, self.revision == expectedRevision,
+                      self.state == expectedState else { return }
+                self.exposurePlacementMessage = error.localizedDescription
+            }
+        }
+    }
 
     // MARK: Print balance
 
@@ -1606,6 +1721,9 @@ import UniformTypeIdentifiers
     }
 
     func shutdown() {
+        exposurePlacementTask?.cancel(); exposurePlacementTask = nil; exposurePlacementID = nil
+        exposurePlacementGate.edited(); placingExposure = false
+
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
         exportJob?.cancel(); engine?.stop()
     }

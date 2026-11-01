@@ -61,4 +61,64 @@ final class HistogramTests: XCTestCase {
         var clipped = Histogram(); clipped.red[255] = 7
         XCTAssertEqual(clipped.peak, 7)
     }
+
+    func testWaveformPreservesHorizontalPositionAndRGBLevels() throws {
+        let scopes = ImageScopes.of(try surface(), crop: CropSettings())
+        let waveform = scopes.waveform
+        XCTAssertEqual(waveform.width, 100)
+        XCTAssertEqual(waveform.sampleCount, 6000)
+        XCTAssertEqual(waveform.red[0], 60, "Black is at the bottom of the left column")
+        XCTAssertEqual(waveform.red[200 * 100 + 50], 60, "The red column keeps its level and position")
+        XCTAssertEqual(waveform.green[50], 60)
+        XCTAssertEqual(waveform.blue[255 * 100 + 99], 60, "White is at the top of the right column")
+        XCTAssertEqual(waveform.red.reduce(0, +), scopes.histogram.red.reduce(0, +))
+        XCTAssertGreaterThan(waveform.rgba[(255 * 100) * 4], 0, "Raster draws black levels at the bottom")
+        XCTAssertGreaterThan(waveform.rgba[99 * 4], 0, "Raster draws white levels at the top")
+        XCTAssertNotNil(waveform.image)
+    }
+
+    func testWaveformUsesTheCroppedAndStraightenedFrame() throws {
+        let image = try surface()
+        let crop = CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
+        let waveform = ImageScopes.of(image, crop: CropSettings(rect: crop)).waveform
+        XCTAssertEqual(waveform.width, 50)
+        XCTAssertEqual(waveform.red[200 * 50], 60, "The red column moves to the cropped frame's left edge")
+        XCTAssertEqual(waveform.red[255 * 50 + 49], 60)
+        let turned = ImageScopes.of(image, crop: CropSettings(angle: 180)).waveform
+        XCTAssertEqual(turned.red[255 * 100], 60, "Straightening also reverses waveform positions")
+        XCTAssertEqual(turned.red[99], 60)
+    }
+
+    func testSampleBudgetAlsoBoundsThinPanoramas() throws {
+        for (width, height) in [(10000, 1), (1, 10000), (101, 61)] {
+            let scopes = ImageScopes.of(try surface(width: width, height: height), crop: CropSettings(), maxSamples: 127)
+            XCTAssertLessThanOrEqual(scopes.waveform.sampleCount, 127)
+            XCTAssertGreaterThan(scopes.waveform.sampleCount, 0)
+            XCTAssertEqual(Int(scopes.histogram.red.reduce(0, +)), scopes.waveform.sampleCount)
+            XCTAssertLessThanOrEqual(scopes.waveform.width, 256)
+        }
+    }
+
+    func testWaveformFollowsCanvasQuarterTurns() throws {
+        let image = try surface()
+        let halfTurn = ImageScopes.of(image, crop: CropSettings(), rotation: 2).waveform
+        XCTAssertEqual(halfTurn.red[255 * 100], 60)
+        XCTAssertEqual(halfTurn.red[99], 60)
+        for rotation in [1, 3, -1] {
+            let waveform = ImageScopes.of(image, crop: CropSettings(), rotation: rotation).waveform
+            XCTAssertEqual(waveform.width, 60)
+            for x in 0..<60 {
+                XCTAssertEqual(waveform.red[x], 50, "Every rotated column spans the original black half")
+                XCTAssertEqual(waveform.red[200 * 60 + x], 1)
+                XCTAssertEqual(waveform.red[255 * 60 + x], 49)
+            }
+        }
+    }
+
+    func testEmptySamplingProducesAnEmptyScopeWithoutAnImage() throws {
+        let scopes = ImageScopes.of(try surface(), crop: CropSettings(), maxSamples: 0)
+        XCTAssertEqual(scopes.histogram.peak, 0)
+        XCTAssertEqual(scopes.waveform.sampleCount, 0)
+        XCTAssertNil(scopes.waveform.image)
+    }
 }
