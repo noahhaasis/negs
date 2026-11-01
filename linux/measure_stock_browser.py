@@ -52,7 +52,7 @@ for name, (extra, previews) in variants.items():
     profile = args.out / f'profile-{name}'
     profile.mkdir(exist_ok=True)
     # A photo argument restores Settings but not the edit.
-    (profile / 'session.json').write_text(json.dumps({'schema': 1, 'preferences': {'stock_previews': previews}}))
+    (profile / 'session.json').write_text(json.dumps({'schema': 1, 'preferences': {'previews': previews}}))
     env = dict(os.environ, NEGS_PROFILE_DIR=str(profile), NEGS_INSPECTOR_MODE='eager',
                NEGS_QUIT_AFTER_MS=str(int(args.seconds * 1000) + 3000),
                NEGS_WIDGET_CAPTURE=str(args.out / f'{name}.png'),

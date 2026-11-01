@@ -2,10 +2,10 @@
 
 Branch `stock-previews`. Film and paper previews: the Linux app is done and is the
 reference; macOS is done too ([handoff and results](handoff-stock-previews-macos.md#macos-results)).
-[Preset previews](#preset-previews-macos-done-linux-and-windows-to-follow): macOS only so
-far. Windows ([handoff](handoff-stock-previews-windows.md)) does both, then
+[Preset previews](#preset-previews-macos-and-linux-done-windows-to-follow): macOS and Linux.
+Windows ([handoff](handoff-stock-previews-windows.md)) does both, then
 [finishes the feature](handoff-stock-previews-windows.md#finishing-the-feature-last-agent)
-(removes the experiment hooks everywhere). Still open after that: preset previews on Linux.
+(removes the experiment hooks everywhere).
 
 ## Behaviour (all platforms)
 
@@ -70,7 +70,7 @@ spectral LUT (`spektrafilm-core/src/input_gamut.rs`, `remap`) now runs rows in p
 The output is bit-identical (render hashes compared against `main`). It cut pipeline
 calibration from ~140 ms to ~45 ms, which also makes ordinary film changes faster.
 
-## Preset previews (macOS done; Linux and Windows to follow)
+## Preset previews (macOS and Linux done; Windows to follow)
 
 - Each row of the Presets panel shows a thumbnail (72 × 48 pt, grey until it arrives) of
   the photograph **with that preset applied**, exactly what clicking it would produce,
@@ -101,10 +101,19 @@ calibration from ~140 ms to ~45 ms, which also makes ordinary film changes faste
 
 ## Linux reference implementation
 
+Preset previews on Linux (2026-11-02): `preset_ui.rs` keeps a thumbnail per preset file
+(`PresetThumb`, 72 × 48, kept across list rebuilds and renames), the file's text and RAW
+white balance from the check, and `wanted_preset_thumbnails` (list order, `render_order`,
+`preset_key` on `catalog::preset_kept`). `stock_browser::pump` schedules stock and preset
+tiles together; grids and the list count as on screen only while mapped, so the hidden
+Adjustments page no longer renders grids while Presets shows. The preference is `previews`.
+Measured on the Linux box: 6 presets on a 24 MP JPEG ≈ 0.4 s; on a 24 MP ARW with two other
+white balances ≈ 2.4 s (as-shot ones first in ~0.2 s, then ~1 s per extra decode).
+
 - `linux/src/stock_browser.rs`: the whole feature (grid, scheduling (`pump`), staleness,
   setting).
 - `linux/src/inspector.rs`: builds the menu and the grid side by side (`stock_browser::rows`).
-- `linux/src/preferences.rs`: the `stock_previews` preference and the Settings switch.
+- `linux/src/preferences.rs`: the `previews` preference and the Settings switch.
 - `linux/src/runtime.rs`: `pump` after each main render completes and when one starts, so a
   new photograph blanks the tiles at once.
 - `linux/style.css`: `.stock-grid`, `.stock-tile`, `.selected-stock`, `.stock-thumb`.
