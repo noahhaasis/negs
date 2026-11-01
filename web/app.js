@@ -1801,8 +1801,13 @@ async function failed(e, what) {
   }
   showMessage(`${what}: ${e.message}`, true);
   if (e.crashed) {
-    const message = $("message").textContent;
-    await startEngine(kind).catch(() => {});
+    // A WebGPU engine that crashed usually lost its device (out of GPU
+    // memory, the GPU process restarting), and a new one on the same GPU
+    // tends to crash the same way on the next render. Carry on with the CPU
+    // engine; the Engine menu can switch back.
+    const fallback = kind === "gpu";
+    const message = fallback ? `${what}: ${e.message}. Switched to the CPU engine.` : $("message").textContent;
+    await startEngine(fallback ? "cpu" : kind).catch(() => {});
     showMessage(message, true);
   }
 }
@@ -2300,7 +2305,14 @@ viewport.addEventListener("drop", (ev) => {
   if (file) openFile(file);
 });
 
-const gpu = query.get("backend") ?? (navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null)) ? "gpu" : "cpu");
+// The adapter the engine will get (it asks for high performance), named in
+// the console so a crash report says which GPU it was.
+const adapter = navigator.gpu && (await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }).catch(() => null));
+if (adapter) {
+  const { vendor, architecture, device, description } = adapter.info ?? {};
+  console.info(`WebGPU adapter: ${[vendor, architecture, device, description].filter(Boolean).join(" · ") || "unknown"}${adapter.info?.isFallbackAdapter ? " (fallback)" : ""}`);
+}
+const gpu = query.get("backend") ?? (adapter ? "gpu" : "cpu");
 starting = startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
 starting.then(() => presets.sync());
 tutorial = createTutorial(tutorialAdapter());
