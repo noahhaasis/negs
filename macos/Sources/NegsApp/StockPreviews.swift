@@ -146,7 +146,7 @@ struct StockEntry {
     @ObservationIgnored var presetsShown = false
     @ObservationIgnored private(set) var films: [StockEntry] = []
     @ObservationIgnored private(set) var papers: [StockEntry] = []
-    /// By preset file; a renamed preset starts over.
+    /// By preset file (`moveTile` follows a rename).
     @ObservationIgnored private(set) var presets: [URL: PreviewTile] = [:]
     @ObservationIgnored var busy = false
     /// The current batch: when its first thumbnail was requested, and how many.
@@ -177,6 +177,10 @@ struct StockEntry {
         presets = Dictionary(files.map { ($0.url, presets[$0.url] ?? PreviewTile()) }, uniquingKeysWith: { a, _ in a })
     }
     func tile(preset: URL) -> PreviewTile? { presets[preset] }
+    /// A renamed preset keeps its thumbnail.
+    func moveTile(preset old: URL, to new: URL) {
+        if let tile = presets.removeValue(forKey: old) { presets[new] = tile }
+    }
 
     /// Drops every thumbnail; true if there were any.
     func clear() -> Bool {

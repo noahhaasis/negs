@@ -1408,7 +1408,11 @@ import UniformTypeIdentifiers
         if preset.url == unnamedPreset { unnamedPreset = nil }
         guard name != preset.name else { return }
         Task {
-            do { _ = try await presetLibrary.rename(preset, to: name) } catch { report(error) }
+            do {
+                let renamed = try await presetLibrary.rename(preset, to: name)
+                // Same file, same thumbnail: no blank tile while it's renamed.
+                stockPreviews.moveTile(preset: preset.url, to: renamed.url)
+            } catch { report(error) }
             await refreshPresets()
         }
     }

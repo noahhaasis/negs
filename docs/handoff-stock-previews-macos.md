@@ -163,3 +163,28 @@ Startup and drags used the existing `SPEKTRAFILM_BENCHMARK_PHOTO` drag benchmark
 builds, with a `CGWindowList` poller for exec → window.
 
 Not done: no notarized/packaged bundle was built, and an Intel Mac wasn't tried.
+
+## Preset previews (macOS)
+
+Added 2026-11-01/02 (spec: [Preset previews](stock-previews.md#preset-previews-macos-done-linux-and-windows-to-follow)).
+Measured with Noah's 12 presets (8 daylight, 3 as-shot, 1 custom white balance), release
+builds, on AC power.
+
+| | |
+|---|---|
+| 24 MP JPEG, all 12 thumbnails | **0.48 s** (30–57 ms each) |
+| 60 MP DNG, all 12 thumbnails | **3.5 s**: two presets with another white balance cost ~1.5 s each (a full RAW decode); the other ten 31–92 ms |
+| Helper memory on that DNG | **3.7 GB vs 2.1 GB** with previews off: the two extra decodes' freed buffers stay with the allocator; the kept copies are ~20 MB |
+| Lab edit | preset tiles untouched (they depend only on the kept settings) |
+
+Screenshot: [presets on a RAW](stock-previews-macos/presets-raw.jpg).
+
+Open question for Noah: the RAW white-balance cost. While such a decode runs (~1.5 s) the
+helper is busy, so a slider drag started then waits for it; a crop change makes the
+helper decode again (the reduced copy is sized for the crop).
+
+Implementation: `StockPreviewRules.presetCommand` / `presetKey`, `PreviewTile` (shared by
+stock and preset tiles), `StockPreviews.presets` / `moveTile`, `EditorModel.presetTexts`,
+the preset part of `pumpStockPreviews`, `PresetThumbnail` in `PresetInspector.swift`; the
+helper's `thumbnail` (`preset`, `own_decode`, `WbSource`) and its test
+`preset_thumbnails_apply_the_preset_like_preset_import`.

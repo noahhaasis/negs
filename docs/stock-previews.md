@@ -67,6 +67,27 @@ spectral LUT (`spektrafilm-core/src/input_gamut.rs`, `remap`) now runs rows in p
 The output is bit-identical (render hashes compared against `main`). It cut pipeline
 calibration from ~140 ms to ~45 ms, which also makes ordinary film changes faster.
 
+## Preset previews (macOS done; Linux and Windows to follow)
+
+- Each row of the Presets panel shows a thumbnail (72 × 48 pt, grey until it arrives) of
+  the photograph **with that preset applied**, exactly what clicking it would produce,
+  including the crop. Same scheduling, dimming and placeholder rules as the stock tiles;
+  thumbnails are made only while the Presets list is on screen, in list order. An invalid
+  preset shows a warning symbol in its placeholder. A renamed preset keeps its thumbnail.
+- The setting is now **"Film, paper and preset previews"**, subtitle "Show each stock and
+  preset on your photograph. Turn off to use simple menus and lists on slower computers."
+  Off shows the old text-only rows.
+- Request: the same `thumbnail` command plus `"preset": "<the preset file's text>"`, with the
+  current `film`, `paper` and `params`. The helper applies the preset over them exactly as
+  `preset_import` does (the preset's film and paper replace `film` and `paper`).
+- **Tile key:** a preset replaces every setting except `presets::KEPT`, so key the tile on
+  the request with `params` cut down to those paths and without `film`/`paper`. Lab edits
+  then leave preset tiles alone. The catalog lists the paths as `preset_kept`; with an older
+  helper that lacks it, key on everything.
+- A preset whose **RAW white balance** differs from the photograph's needs its own decode.
+  The helper keeps a reduced copy per white balance (`thumbnail_wb_sources`, up to 4) and
+  never replaces the main render's decoded source. Cost: see the macOS results.
+
 ## Linux reference implementation
 
 - `linux/src/stock_browser.rs`: the whole feature (grid, scheduling (`pump`), staleness,
