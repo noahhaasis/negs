@@ -342,6 +342,30 @@ fn without_data(raw: &mut rawler::RawImage) -> rawler::RawImage {
     meta
 }
 
+/// Where `profile` lies on another decoder's unoriented development of `path`
+/// (Apple's), `size` pixels: `Some(None)` about the image itself (vendor
+/// profiles), `Some(Some(area))` for a DNG frame. `None` when rawler would
+/// develop a different frame, so the profile cannot be placed with confidence.
+/// Reads metadata only.
+#[cfg(all(target_os = "macos", feature = "apple-raw"))]
+pub(crate) fn lens_placement(path: &Path, profile: &lens::Profile, size: (usize, usize)) -> Option<Option<lens::Area>> {
+    let src = rawler::rawsource::RawSource::new(path).ok()?;
+    let params = rawler::decoders::RawDecodeParams::default();
+    // A dummy decode reads the geometry without the sensor data; rawler
+    // panics on some malformed files.
+    let raw = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rawler::get_decoder(&src).and_then(|d| d.raw_image(&src, &params, true)).ok()
+    }))
+    .ok()
+    .flatten()?;
+    if profile.source == lens::Source::Dng {
+        let area = lens_area(&raw)?;
+        return (area.developed == size).then_some(Some(area.area));
+    }
+    let developed = raw.crop_area.or(raw.active_area).map(|r| r.d).unwrap_or_else(|| raw.dim());
+    ((developed.w, developed.h) == size).then_some(None)
+}
+
 /// Text of a caught panic payload (`panic!` with a literal or a format).
 fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {

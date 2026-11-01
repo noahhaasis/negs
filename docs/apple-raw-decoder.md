@@ -29,8 +29,11 @@ Apple runs at native size with draft mode off. Baseline exposure, exposure,
 shadow bias, global/local tone boosts, gamut mapping, noise reduction,
 sharpening, contrast, detail and moire adjustments are explicitly disabled
 where supported. Lens correction follows `RawDecodeOptions::lens_correction`
-(`io.lens_correction` in params; off unless set) where Apple supports the file,
-and the decoder reports that support; see
+(`io.lens_correction` in params; off unless set) where Apple supports the file.
+Where it does not, the decoder applies the corrections Negs reads itself
+(`crate::lens`, as on the rawler path) to Apple's unoriented image and then
+orients it, provided rawler develops the same frame. It reports support
+either way; see
 [the lens corrections plan](lens-corrections-plan.md). Apple's highlight colour recovery remains enabled:
 it reconstructs clipped sensor channels and prevented a pink saturated sky in
 the D750 comparison. It is part of the RAW development, not a tone boost.

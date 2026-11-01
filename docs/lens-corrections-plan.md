@@ -6,7 +6,9 @@ Prepared 2026-10-29 against Negs `17e8a8c`, on branch `lens-corrections`
 **Status:** Phases 0 and 1a (macOS via Apple) implemented on 2026-10-29;
 see "Phase 0 results". Phase 1b and the Sony/Fujifilm half of Phase 2
 implemented for Linux on 2026-11-01 (see "Phase 1b/2 results"), then
-OM/Olympus and Panasonic the same day. Windows UI and Phase 3 are not started.
+OM/Olympus and Panasonic the same day. On macOS the Rust stage also covers
+files Apple decodes but cannot correct (see "macOS: Rust stage for files
+Apple cannot correct"). Windows UI and Phase 3 are not started.
 
 **Decided 2026-11-01 (Noah):** ship this stage; Phase 3 (lensfun, for Nikon,
 Canon and others) waits.
@@ -403,8 +405,8 @@ vendor curves: darktable's fitted scale, which may zoom out slightly).
 - OM/Olympus E-M1 Mark III ORF (`3119563425.orf`): lateral CA only (the
   distortion entry is the null '0 0 0 1'); sub-pixel, not visible.
 - Still open: Windows UI; DNG `GainMap` (Android lens shading, see below);
-  Fujifilm 1.25× crop modes; Apple-decoded files on macOS keep Apple's
-  correction.
+  Fujifilm 1.25× crop modes. Apple-decoded files on macOS keep Apple's
+  correction where Apple has one; the others now get the Rust stage.
 
 ### Phone DNGs and Fujifilm crop modes (assessment, 2026-11-01)
 
@@ -474,3 +476,64 @@ Only do this if users ask for Nikon/Canon coverage after Phase 2.
 - **Memory:** correction can run in place except for the resample, which needs
   one extra full-size buffer briefly (720 MB at 60 MP, f32 RGB). Check against
   `docs/handoff-memory.md` limits; tile the resample if needed.
+
+## macOS: Rust stage for files Apple cannot correct (done 2026-11-01)
+
+Survey on macOS 26.5 (21 files from Noah's library): every file decodes with
+Apple, none falls back to rawler. The rawler fallback already gets the Rust
+stage, since it shares `RawlerDecoder`. Apple corrects native Nikon Z lenses
+and the Leica Q3, but not the Fujifilm X100V or 3 of 4 X-A2 files (XC 16-50),
+for which the Rust stage finds a Fujifilm profile. Apple's unoriented extent
+equals rawler's developed size on every file checked (X100V, X-A2, GX80, 6D,
+D800 DNG, Z 6, Q3). The GX80 RW2 here has no Rust profile.
+
+What was built:
+
+1. `apple_raw.m` takes `defer_orientation`: a file without
+   `isLensCorrectionSupported` is then rendered unoriented. It returns the
+   file's orientation and whether it was applied.
+2. `AppleRawDecoder` reads `lens::read_profile` before decoding (only with
+   the setting on) and asks for deferral when there is one. Where Apple has no
+   correction, `lib.rs::lens_placement` places the profile on Apple's image:
+   a dummy rawler decode (geometry only) must report the same developed size,
+   and DNG profiles reuse `lens_area`. The profile is applied, then the image
+   is oriented. `lens_correction_supported` reports a placeable profile with
+   the setting off too, so the macOS toggle appears; no Swift change.
+3. Files Apple corrects keep Apple's correction. Files without a Rust profile,
+   or with the setting off, are decoded exactly as before.
+
+Checks (2026-11-01):
+
+| File | Before | After |
+| --- | --- | --- |
+| X100V RAF (2, one portrait) | no toggle | corrected, +0.3–0.4 s decode |
+| X-A2 RAF, files Apple misses (2, one portrait) | no toggle | corrected |
+| X-A2 DSCF7112, Z 6 NEF (Apple supported) | Apple | Apple, unchanged |
+| GX80 RW2, D90 NEF (no data) | no toggle | unchanged |
+
+- `apple_orientation_matches_negs` (`#[ignore]`): Apple's orientation and
+  `ImageBuf::oriented` are bit-identical on portrait and landscape files, so
+  orienting after the correction changes nothing else.
+- Negs's correction on Apple's uncorrected image against Apple's own
+  (best zoom about the centre aligning the two):
+  - Leica Q3 DNG: zoom 1.000, gradient correlation 0.997, corner/centre
+    0.498 both. Negs's DNG placement matches Apple's exactly.
+  - X-A2 DSCF7112 (Fujifilm data): zoom 0.997 (uncorrected 0.965),
+    correlation 0.89. Negs's vignetting is somewhat stronger than Apple's
+    (darktable's model). Apple is kept where it supports a file.
+- Native app (unbundled `swift build`, isolated home): the X100V shows
+  "Lens corrections", switched on.
+
+New samples on macOS (2026-11-01). Apple corrects all of them except the
+Canon, so they keep Apple's correction. Negs's correction applied to Apple's
+uncorrected image, compared as above:
+
+| File | Negs vs Apple zoom | Correlation (uncorrected) | Corner/centre: off, Apple, Negs |
+| --- | --- | --- | --- |
+| Sony A7 IV ARW, Tamron 28-75 | 1.000 | 0.97 (0.65) | 0.25, 0.26, 0.31 |
+| OM E-M10 IV ORF, 12-200 | 1.012 | 0.93 (0.78) | 1.01, 1.05, 1.02 |
+| Panasonic S1R RW2, S 50/1.4 | 1.021 | 0.91 (0.58) | 0.75, 1.03, 0.94 |
+| Canon 2000D CR2, EF 50 | no data | | |
+
+The shapes agree. Negs keeps 1–2% more of the frame than Apple for OM and
+Panasonic, and does not correct Panasonic vignetting (Apple does).
