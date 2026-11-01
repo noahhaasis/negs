@@ -74,8 +74,9 @@ calibration from ~140 ms to ~45 ms, which also makes ordinary film changes faste
   including the crop. Same scheduling, dimming and placeholder rules as the stock tiles;
   thumbnails are made only while the Presets list is on screen, in list order. An invalid
   preset shows a warning symbol in its placeholder. A renamed preset keeps its thumbnail.
-- The setting is now **"Film, paper and preset previews"**, subtitle "Show each stock and
-  preset on your photograph. Turn off to use simple menus and lists on slower computers."
+- The setting is now **"Film, paper and preset previews"**, subtitle "Show each film,
+  paper and preset on your photograph. Turn off to use simple menus and lists on slower
+  computers."
   Off shows the old text-only rows.
 - Request: the same `thumbnail` command plus `"preset": "<the preset file's text>"`, with the
   current `film`, `paper` and `params`. The helper applies the preset over them exactly as
