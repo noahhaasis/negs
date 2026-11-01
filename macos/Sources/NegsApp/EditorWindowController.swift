@@ -131,6 +131,15 @@ import SwiftUI
         return true
     }
 
+    /// Applies the model now rather than on the next observation pass, which
+    /// at launch runs only after the window is on screen.
+    func refresh() {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            update()
+        }
+    }
+
     private func observe() {
         withObservationTracking { update() } onChange: { [weak self] in
             Task { @MainActor in self?.observe() }

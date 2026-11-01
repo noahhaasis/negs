@@ -119,6 +119,19 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var lastColorEdit: (setting: WritableKeyPath<BorderSettings, BorderColor>, state: EditState, at: Date)?
     @ObservationIgnored private var closing = false
     @ObservationIgnored private var explicitOpenRequested = false
+    /// The session restored at launch and what restoring it replaced, until
+    /// the helper's catalog confirms it. `discardLaunchRestore()` goes back.
+    @ObservationIgnored private var launchRestore: (session: EditorSession, before: LaunchRestoreBaseline)?
+    private struct LaunchRestoreBaseline {
+        var state: EditState, inspectorVisible: Bool, fitImage: Bool, status: String, recentFiles: [URL]
+    }
+    /// True until `finishLaunching`: Finder's open arrives after the restore
+    /// at launch, and the photograph it opens must not take the previous
+    /// session's edits, as before restoring early.
+    @ObservationIgnored private var launching = true
+    @ObservationIgnored private var restoringAtLaunch = false
+    /// The saved frame being read for the session restored at launch.
+    @ObservationIgnored private(set) var launchFrame: (frame: LaunchFrame, generation: Int, rendered: EditState)?
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
     @ObservationIgnored private var stripRequest: (film: String, format: FilmFormat)?
     @ObservationIgnored private var histogramRequest = 0
@@ -190,19 +203,65 @@ import UniformTypeIdentifiers
         } catch { report(error) }
     }
 
+    /// Restores the previous session with the last launch's catalog, before
+    /// the helper answers. False without a cached catalog or if the session
+    /// doesn't fit it; `start` then restores it as before.
+    func restoreAtLaunch(_ session: EditorSession) -> Bool {
+        guard hasCatalog, launching, !ready, !explicitOpenRequested, !closing, source == nil else { return false }
+        let before = LaunchRestoreBaseline(state: state, inspectorVisible: inspectorVisible, fitImage: fitImage, status: status, recentFiles: recentFiles)
+        restoringAtLaunch = true
+        defer { restoringAtLaunch = false }
+        guard (try? restore(session)) != nil else { return false }
+        launchRestore = (session, before)
+        return true
+    }
+
+    /// Goes back to no photograph and the defaults, as before the restore at
+    /// launch, so the caller continues as if it had never happened.
+    private func discardLaunchRestore() {
+        guard let (_, before) = launchRestore else { return }
+        launchRestore = nil; launchFrame = nil
+        sourceGeneration += 1
+        source = nil; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
+        showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
+        // A different catalog can arrive once the window is shown and the
+        // restored photograph is being cropped, compared or edited.
+        interactionStart = nil; cropSession = nil
+        original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
+        undoManager?.removeAllActions()
+        state = before.state; inspectorVisible = before.inspectorVisible; fitImage = before.fitImage; status = before.status
+        if recentFiles != before.recentFiles { recentFiles = before.recentFiles; saveRecents() }
+        updateHistogram()
+    }
+
     func start(paths: EnginePaths? = nil, restoration: Task<EditorSession?, Error>? = nil) async {
         launch(paths: paths)
         guard let request = catalogRequest, let engine else { return }
         catalogRequest = nil
+        var restoration = restoration
         do {
             let (_, catalog) = try await request.value
             guard !closing else { return }
             guard catalog["protocol"].double == 1 else { throw EngineError(message: "The image engine version doesn't match this app. Rebuild the app bundle.") }
             // An unchanged catalog keeps edits made while the helper started.
             if catalog != self.catalog {
+                // Applying a catalog resets the parameters, so a session
+                // restored with the cached one is undone and restored under
+                // this catalog, as without a cached one.
+                if let (session, _) = launchRestore, source == session.source {
+                    discardLaunchRestore()
+                    restoration = Task { session }
+                }
                 apply(catalog: catalog)
                 CatalogCache.save(catalog, for: engine.paths)
             }
+            // The restore at launch stands: its open skipped the system's
+            // recent documents while it could still be undone.
+            if let (session, _) = launchRestore, source == session.source {
+                NSDocumentController.shared.noteNewRecentDocumentURL(session.source)
+            }
+            launchRestore = nil
             // The engine and session file load concurrently. Apply the restored
             // parameters before ready/changed so no default render is wasted.
             if let restoration, !explicitOpenRequested {
@@ -581,6 +640,8 @@ import UniformTypeIdentifiers
 
     func open(_ url: URL) {
         explicitOpenRequested = true
+        // During launch it undoes a restore at launch; later it supersedes it.
+        if launching { discardLaunchRestore() } else { launchRestore = nil }
         open(url, restoring: nil)
     }
 
@@ -623,30 +684,62 @@ import UniformTypeIdentifiers
         zoom(fit: session?.fitImage ?? true)
         recentFiles.removeAll { $0 == url }; recentFiles.insert(url, at: 0)
         recentFiles = Array(recentFiles.prefix(10)); saveRecents()
-        NSDocumentController.shared.noteNewRecentDocumentURL(url)
+        // A restore at launch may still be undone; `start` notes it.
+        if !restoringAtLaunch { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
         status = ready ? "" : "Starting…"
         // Try the exact developed frame before decoding the raw placeholder,
         // so a cache hit never flashes the unprocessed photograph.
         let snapshot = renderState, paths = engine?.paths, cache = previewCache
         inputColour = .null; lensCorrectionSupported = false
+        // Read off the main actor at once, with its histogram. At launch the
+        // main actor stays busy building the window, which takes the frame
+        // through `finishLaunching` before it first appears.
+        let crop = state.crop
+        let cachedFrame = session != nil ? paths.map { paths in
+            LaunchFrame {
+                guard let frame = await cache.load(source: url, state: snapshot, paths: paths) else { return nil }
+                return LaunchFrame.Loaded(frame: frame, histogram: Histogram.of(frame.surface, crop: crop), histogramCrop: crop)
+            }
+        } : nil
+        launchFrame = restoringAtLaunch ? cachedFrame.map { ($0, generation, snapshot.rendered) } : nil
         Task { [weak self] in
-            if session != nil, let paths,
-               let cached = await cache.load(source: url, state: snapshot, paths: paths) {
-                guard let self, generation == self.sourceGeneration, self.image == nil, !self.closing else { return }
-                if self.renderState.rendered == snapshot.rendered {
-                    self.image = cached.surface; self.imageSize = cached.photoSize; self.isRaw = cached.raw
-                    self.sourceSize = cached.sourceSize; self.workingSize = cached.workingSize
-                    self.previewScale = cached.workingSize.width > 0 ? Double(cached.surface.width) / cached.workingSize.width : 1
-                    self.showingCachedPreview = true; self.placeholder = nil; self.hideActivity()
-                    self.updateHistogram(); self.updateFilmStrip()
-                    return
-                }
+            if let cachedFrame, let cached = await cachedFrame.value {
+                guard let self else { return }
+                if self.showCached(cached, generation: generation, rendered: snapshot.rendered) { return }
             }
             let thumbnail = await Task.detached(priority: .userInitiated) { Self.thumbnail(url) }.value
             if let (thumbnail, size) = thumbnail { self?.showPlaceholder(thumbnail, size: size, generation: generation) }
         }
         changed(invalidateCache: session == nil)
     }
+    /// Ends launch, before the window is shown: a restore at launch is no
+    /// longer undone by an open, and its saved frame is shown now if it's
+    /// read within `timeout`, so the window's first frame has the
+    /// photograph; otherwise it appears when read.
+    func finishLaunching(waitingUpTo timeout: TimeInterval) {
+        guard launching else { return }
+        launching = false
+        guard let (frame, generation, rendered) = launchFrame else { return }
+        launchFrame = nil
+        if let loaded = frame.wait(timeout: timeout) { _ = showCached(loaded, generation: generation, rendered: rendered) }
+    }
+
+    /// True if the saved frame is shown, or it no longer applies because
+    /// another photograph or image is shown; false if the edits changed.
+    private func showCached(_ cached: LaunchFrame.Loaded, generation: Int, rendered: EditState) -> Bool {
+        guard generation == sourceGeneration, image == nil, !closing else { return true }
+        guard renderState.rendered == rendered else { return false }
+        let frame = cached.frame
+        image = frame.surface; imageSize = frame.photoSize; isRaw = frame.raw
+        sourceSize = frame.sourceSize; workingSize = frame.workingSize
+        previewScale = frame.workingSize.width > 0 ? Double(frame.surface.width) / frame.workingSize.width : 1
+        showingCachedPreview = true; placeholder = nil; hideActivity()
+        // Counted with the frame for the crop it was read with.
+        if crop == cached.histogramCrop { histogramRequest += 1; histogram = cached.histogram } else { updateHistogram() }
+        updateFilmStrip()
+        return true
+    }
+
     private func showPlaceholder(_ thumbnail: CGImage, size: CGSize, generation: Int) {
         guard generation == sourceGeneration, image == nil else { return }
         placeholderSize = size; placeholder = thumbnail

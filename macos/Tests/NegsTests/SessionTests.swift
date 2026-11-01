@@ -240,6 +240,227 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(model.ready)
     }
 
+    /// A preview cache in a temporary file, removed after the test.
+    private func scratchCache() -> RenderedPreviewCache {
+        let cache = RenderedPreviewCache(file: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        addTeardownBlock { try? FileManager.default.removeItem(at: cache.file) }
+        return cache
+    }
+
+    /// Starts and stops a model once, which caches this helper's catalog,
+    /// and with a session also caches its developed frame.
+    private func cacheCatalog(previewCache: RenderedPreviewCache? = nil, restoring session: EditorSession? = nil) async throws {
+        let model = EditorModel(previewCache: previewCache ?? scratchCache())
+        defer { model.shutdown() }
+        await model.start(paths: paths, restoration: Task { session })
+        let deadline = Date().addingTimeInterval(30)
+        while session != nil && !model.previewCurrent && model.error == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNil(model.error)
+        XCTAssertNotNil(CatalogCache.load(for: paths))
+        await model.flushPreviewCache()
+    }
+
+    /// A session that differs from the defaults in its film, exposure and
+    /// inspector visibility.
+    private func edited(_ photo: URL, film: String = "kodak_trix") -> EditorSession {
+        var saved = EditState()
+        saved.film = film
+        saved.params = .object(["camera": .object(["exposure_compensation_ev": .number(1.5)])])
+        return EditorSession(source: photo, state: saved, inspectorVisible: false)
+    }
+
+    func testRestoresAtLaunchFromCachedCatalogBeforeHelperAnswers() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        let photo = try fixture()
+        defer { try? FileManager.default.removeItem(at: photo) }
+        let session = edited(photo)
+        let model = EditorModel(previewCache: scratchCache())
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        XCTAssertTrue(model.restoreAtLaunch(session))
+        // Restored at once, before the helper is asked anything else.
+        XCTAssertEqual(model.source, photo)
+        XCTAssertEqual(model.film, session.state.film)
+        XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
+        XCTAssertFalse(model.inspectorVisible)
+        model.finishLaunching(waitingUpTo: 0)
+        await model.start(paths: paths)
+        let deadline = Date().addingTimeInterval(30)
+        while !model.previewCurrent && model.error == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNil(model.error)
+        XCTAssertTrue(model.previewCurrent)
+        XCTAssertEqual(model.film, session.state.film)
+        XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
+        XCTAssertEqual(model.session?.source, photo)
+    }
+
+    /// Finder's open arrives after the launch restore; the chosen photograph
+    /// starts from the defaults, as if no session had been restored.
+    func testExplicitOpenAtLaunchDiscardsTheRestoredSession() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        let previous = try fixture(), chosen = try fixture()
+        defer { try? FileManager.default.removeItem(at: previous); try? FileManager.default.removeItem(at: chosen) }
+        let model = EditorModel(previewCache: scratchCache())
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        let defaultFilm = model.film, recents = model.recentFiles
+        XCTAssertTrue(model.restoreAtLaunch(edited(previous)))
+        model.open(chosen)
+        model.finishLaunching(waitingUpTo: 0)
+        XCTAssertEqual(model.source, chosen)
+        XCTAssertEqual(model.film, defaultFilm)
+        XCTAssertNotEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
+        XCTAssertTrue(model.inspectorVisible)
+        XCTAssertEqual(model.recentFiles, Array(([chosen] + recents.filter { $0 != chosen }).prefix(10)))
+        await model.start(paths: paths)
+        XCTAssertEqual(model.source, chosen)
+        XCTAssertEqual(model.film, defaultFilm)
+    }
+
+    /// An open that fails at launch leaves no photograph open, so quitting
+    /// can't save over the previous session.
+    func testFailedOpenAtLaunchLeavesNothingOpen() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        let previous = try fixture()
+        defer { try? FileManager.default.removeItem(at: previous) }
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("missing-\(UUID().uuidString).png")
+        let model = EditorModel(previewCache: scratchCache())
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        let defaultFilm = model.film, recents = model.recentFiles
+        XCTAssertTrue(model.restoreAtLaunch(edited(previous)))
+        model.open(missing)
+        XCTAssertNotNil(model.error)
+        model.finishLaunching(waitingUpTo: 0)
+        XCTAssertNil(model.source)
+        XCTAssertNil(model.image)
+        XCTAssertEqual(model.film, defaultFilm)
+        XCTAssertEqual(model.recentFiles, recents)
+        XCTAssertNil(model.launchFrame)
+        await model.start(paths: paths)
+        XCTAssertTrue(model.ready)
+        XCTAssertNil(model.source)
+        XCTAssertNil(model.session)
+    }
+
+    /// When the session restores once the helper answers instead (as without
+    /// a cached catalog, after an update), no saved frame is kept for launch.
+    func testRestoreAfterLaunchKeepsNoLaunchFrame() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        let photo = try fixture()
+        defer { try? FileManager.default.removeItem(at: photo) }
+        let model = EditorModel(previewCache: scratchCache())
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        model.finishLaunching(waitingUpTo: 0)
+        XCTAssertFalse(model.restoreAtLaunch(edited(photo)), "launch is over")
+        await model.start(paths: paths, restoration: Task { self.edited(photo) })
+        XCTAssertEqual(model.source, photo)
+        XCTAssertNil(model.launchFrame)
+    }
+
+    /// The cached catalog from the last launch, with one extra film stock.
+    private func cacheCatalogWithExtraFilm(_ id: String) throws {
+        let cached = try XCTUnwrap(CatalogCache.load(for: paths)), paths = paths
+        addTeardownBlock { CatalogCache.save(cached, for: paths) }
+        var catalog = cached
+        var profiles = catalog["profiles"].array
+        var extra = try XCTUnwrap(profiles.first { !$0["paper"].bool })
+        extra["id"] = .string(id)
+        profiles.append(extra)
+        catalog["profiles"] = .array(profiles)
+        CatalogCache.save(catalog, for: paths)
+    }
+
+    /// The helper's catalog differs from the cached one: the session is
+    /// restored again under the helper's, keeping its edits.
+    func testDifferentCatalogRestoresTheSessionAgain() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        try cacheCatalogWithExtraFilm("test_only_film")
+        let photo = try fixture()
+        defer { try? FileManager.default.removeItem(at: photo) }
+        let model = EditorModel(previewCache: scratchCache())
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        XCTAssertTrue(model.restoreAtLaunch(edited(photo)))
+        model.finishLaunching(waitingUpTo: 0)
+        await model.start(paths: paths)
+        XCTAssertEqual(model.source, photo)
+        XCTAssertEqual(model.film, "kodak_trix")
+        XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
+        XCTAssertFalse(model.inspectorVisible)
+        XCTAssertFalse(model.films.contains { $0.id == "test_only_film" })
+    }
+
+    /// Reopening the restored photograph before the helper answers keeps it
+    /// open when the catalog then differs.
+    func testReopenBeforeADifferentCatalogKeepsThePhotographOpen() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        try cacheCatalogWithExtraFilm("test_only_film")
+        let photo = try fixture()
+        defer { try? FileManager.default.removeItem(at: photo) }
+        let model = EditorModel(previewCache: scratchCache())
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        XCTAssertTrue(model.restoreAtLaunch(edited(photo)))
+        model.finishLaunching(waitingUpTo: 0)
+        model.open(photo)
+        await model.start(paths: paths)
+        XCTAssertEqual(model.source, photo)
+        XCTAssertNotNil(model.session)
+    }
+
+    /// The session's film is only in the cached catalog: like a launch
+    /// without one, nothing is open and the error says why, so quitting
+    /// can't save the defaults over the session.
+    func testDifferentCatalogWithoutTheSessionsFilmLeavesNothingOpen() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        try cacheCatalogWithExtraFilm("test_only_film")
+        let photo = try fixture()
+        defer { try? FileManager.default.removeItem(at: photo) }
+        let model = EditorModel(previewCache: scratchCache())
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        XCTAssertTrue(model.restoreAtLaunch(edited(photo, film: "test_only_film")))
+        model.finishLaunching(waitingUpTo: 0)
+        await model.start(paths: paths)
+        XCTAssertTrue(model.ready)
+        XCTAssertNil(model.source)
+        XCTAssertNil(model.image)
+        XCTAssertNil(model.session)
+        XCTAssertTrue(model.status.contains("unavailable film or paper"), model.status)
+        XCTAssertTrue(model.inspectorVisible)
+        XCTAssertNil(model.launchFrame)
+    }
+
+    /// The saved frame and its histogram are shown before the window first
+    /// appears, without waiting for the main actor's tasks.
+    func testLaunchFrameIsShownSynchronously() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        let photo = try fixture()
+        defer { try? FileManager.default.removeItem(at: photo) }
+        let cache = scratchCache()
+        let session = EditorSession(source: photo, state: EditState())
+        try await cacheCatalog(previewCache: cache, restoring: session)
+        let model = EditorModel(previewCache: cache)
+        defer { model.shutdown() }
+        model.launch(paths: paths)
+        XCTAssertTrue(model.restoreAtLaunch(session))
+        XCTAssertNil(model.image)
+        model.finishLaunching(waitingUpTo: 5)
+        XCTAssertNotNil(model.image)
+        XCTAssertNotNil(model.histogram)
+        XCTAssertEqual(model.imageSize, CGSize(width: 96, height: 64))
+        XCTAssertNil(model.launchFrame)
+    }
+
     func testUpdateRestartWaitsForExportWithoutCancellingIt() async throws {
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

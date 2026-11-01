@@ -132,3 +132,39 @@ final class RenderedPreviewCache: @unchecked Sendable {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
+
+/// The saved frame of the session restored at launch, read in the
+/// background. Tasks await it; the main thread may also wait briefly, which
+/// is safe because reading it never needs the main thread.
+final class LaunchFrame: @unchecked Sendable {
+    struct Loaded: @unchecked Sendable {
+        var frame: RenderedPreviewCache.Frame
+        var histogram: Histogram
+        var histogramCrop: CropSettings
+    }
+
+    private let done = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var result: Loaded?
+    private var task: Task<Loaded?, Never>?
+
+    init(_ load: @escaping @Sendable () async -> Loaded?) {
+        task = Task.detached(priority: .userInitiated) { [self] in
+            let loaded = await load()
+            lock.withLock { result = loaded }
+            done.signal()
+            return loaded
+        }
+    }
+
+    var value: Loaded? {
+        get async { await task?.value }
+    }
+
+    /// The frame if it's read within `timeout`, or nil.
+    func wait(timeout: TimeInterval) -> Loaded? {
+        guard done.wait(timeout: .now() + timeout) == .success else { return nil }
+        done.signal()
+        return lock.withLock { result }
+    }
+}
