@@ -399,6 +399,7 @@ impl Editor {
             }
             ui.sync_history();
             ui.render_next();
+            crate::stock_browser::pump(&ui);
         });
     }
     fn present_engine_frame(self: &Rc<Self>, frame: &Frame, developed: bool) {

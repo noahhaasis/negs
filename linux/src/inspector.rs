@@ -515,10 +515,20 @@ pub fn build(ui: &Rc<Editor>) {
     lab.add_css_class("inspector-body");
     section(&lab, "FILM & PAPER");
     let profiles = list();
-    stock(ui, &profiles, false);
+    // NEGS_STOCK_DROPDOWN=1 keeps the menus, to compare cost.
+    let dropdown = std::env::var_os("NEGS_STOCK_DROPDOWN").is_some();
+    if dropdown {
+        stock(ui, &profiles, false);
+    } else {
+        crate::stock_browser::row(ui, &profiles, false);
+    }
     development(ui, &profiles, false);
     toggle(ui, &profiles, "Scan film directly", false);
-    let paper = stock(ui, &profiles, true);
+    let paper: gtk::Widget = if dropdown {
+        stock(ui, &profiles, true).upcast()
+    } else {
+        crate::stock_browser::row(ui, &profiles, true).upcast()
+    };
     visible(ui, &paper, |s| !flag(s, "Scan film directly", false));
     development(ui, &profiles, true);
     lab.append(&profiles);

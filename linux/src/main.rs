@@ -23,6 +23,7 @@ mod preset_ui;
 mod presets;
 mod preview_cache;
 mod runtime;
+mod stock_browser;
 mod validation;
 
 use adw::prelude::*;
@@ -98,6 +99,7 @@ pub(crate) struct Editor {
     folder_monitor: RefCell<Option<gio::FileMonitor>>,
     folder_debounce: RefCell<Option<glib::SourceId>>,
     preferences: RefCell<preferences::Preferences>,
+    stock_browser: stock_browser::Browser,
 }
 
 fn icon(name: &str, tooltip: &str, action: &str) -> gtk::Button {
@@ -435,6 +437,7 @@ impl Editor {
             folder_monitor: RefCell::new(None),
             folder_debounce: RefCell::new(None),
             preferences: RefCell::new(preferences::Preferences::default()),
+            stock_browser: stock_browser::Browser::default(),
         });
         ui.owner.replace(Rc::downgrade(&ui));
         let hold_original = gtk::GestureClick::new();

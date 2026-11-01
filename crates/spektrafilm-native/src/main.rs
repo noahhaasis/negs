@@ -97,6 +97,20 @@ enum Command {
         #[serde(default)]
         crop: Option<Crop>,
     },
+    /// A small render of the current source with another film/paper, for the
+    /// stock browser. Independent of the main render: it never replaces the
+    /// retained output (Save) nor the cached main pipeline.
+    Thumbnail {
+        input: PathBuf,
+        #[serde(default)]
+        source_generation: u64,
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        /// The thumbnail's long edge in pixels.
+        long_side: u32,
+        preview_path: PathBuf,
+    },
     Save {
         render_id: u64,
         output: PathBuf,
@@ -142,7 +156,15 @@ struct Session {
     metering: Option<ImageBuf>,
     pipeline: Option<(String, Pipeline)>,
     output: Option<Rendered>,
+    /// The source reduced for stock thumbnails.
+    thumbnail_source: Option<((u32, u32), ImageBuf)>,
+    /// Calibrated pipelines for stock thumbnails, most recent last. A stock's
+    /// pipeline outlives edits that don't change its key (exposure, grain…).
+    thumbnail_pipelines: Vec<(String, Pipeline)>,
 }
+
+/// Every film with its paper, and every paper with the current film.
+const THUMBNAIL_PIPELINES: usize = 40;
 
 /// The decoded input, and what it was decoded with: a RAW's white balance
 /// and a non-RAW file's interpretation each need a new decode.
@@ -235,6 +257,125 @@ fn catalog(data: &Path) -> Result<Value> {
 }
 
 impl Session {
+    /// Decodes `input` unless the session already holds it with these settings.
+    fn load_source(
+        &mut self,
+        input: &Path,
+        source_generation: u64,
+        wb: spektrafilm_io::RawWhiteBalance,
+        lens: spektrafilm_io::LensCorrection,
+        interpretation: spektrafilm_io::InputInterpretation,
+    ) -> Result<()> {
+        let reload = self.source_generation != source_generation
+            || self.source.as_ref().is_none_or(|source| !source.current(input, wb, lens, &interpretation));
+        if reload {
+            // Release the last source's caches before decoding the next.
+            self.source = None;
+            self.scaled = None;
+            self.interactive = None;
+            self.metering = None;
+            self.thumbnail_source = None;
+            let loaded = spektrafilm_io::load_image_colour(
+                input,
+                spektrafilm_io::Formats::Any,
+                wb,
+                lens,
+                &interpretation,
+            )?;
+            self.source = Some(Source {
+                path: input.to_path_buf(),
+                wb,
+                lens,
+                lens_correction_supported: loaded.lens_correction_supported,
+                interpretation,
+                colour: loaded.colour,
+                image: loaded.image,
+            });
+            self.source_generation = source_generation;
+        }
+        Ok(())
+    }
+
+    fn thumbnail(
+        &mut self,
+        input: PathBuf,
+        source_generation: u64,
+        film: String,
+        paper: String,
+        mut params: Box<RuntimeParams>,
+        long_side: u32,
+        preview_path: PathBuf,
+        data: &Path,
+    ) -> Result<Value> {
+        let started = Instant::now();
+        ensure!((16..=1024).contains(&long_side), "Invalid thumbnail size");
+        ensure!(
+            RgbColourspace::find(&params.io.output_color_space).is_some(),
+            "Unknown output colour space: {}",
+            params.io.output_color_space
+        );
+        params.io.raw_white_balance.validate()?;
+        params.settings.serial_grain = false;
+        let post = std::mem::take(&mut params.post);
+        let interpretation = params.io.input_interpretation.clone();
+        interpretation.validate()?;
+        self.load_source(&input, source_generation, params.io.raw_white_balance, params.io.lens_correction, interpretation)?;
+        let decoded = started.elapsed();
+        let Source { image: source, colour, .. } = self.source.as_ref().unwrap();
+        params.io.apply_input_colour(colour);
+        if params.camera.auto_exposure && self.metering.is_none() {
+            self.metering = Some(spektrafilm_core::stages::filming::metering_preview(source));
+        }
+        // The thumbnail is the whole frame; Image Size describes the export.
+        image_size::clear(&mut params);
+        let scale = long_side as f64 / source.width.max(source.height) as f64;
+        let dimensions = if scale >= 1.0 {
+            (source.width, source.height)
+        } else {
+            (
+                ((source.width as f64 * scale).round() as u32).max(1),
+                ((source.height as f64 * scale).round() as u32).max(1),
+            )
+        };
+        let working = working_source(source, &mut self.thumbnail_source, dimensions, downsample_area).clone();
+        let resampled = started.elapsed();
+        let key = preview_pipeline_cache_key(&film, &paper, &params);
+        let cached = self.thumbnail_pipelines.iter().position(|(k, _)| *k == key);
+        let calibrated = match cached {
+            Some(index) => self.thumbnail_pipelines.remove(index).1,
+            None => {
+                let film_profile = profile::load_profile_by_name(data, &film)?;
+                let print_profile =
+                    profile::load_profile_by_name(data, if params.io.scan_film { &film } else { &paper })?;
+                Pipeline::new_with_spectral(film_profile, print_profile, (*params).clone(), data)
+                    .map_err(anyhow::Error::msg)?
+            }
+        };
+        let mut pipeline = calibrated.clone().with_params((*params).clone());
+        if self.thumbnail_pipelines.len() >= THUMBNAIL_PIPELINES {
+            self.thumbnail_pipelines.remove(0);
+        }
+        self.thumbnail_pipelines.push((key, calibrated));
+        if let Some(metering) = &self.metering {
+            pipeline = pipeline.with_metering_preview(metering.clone());
+        }
+        let built = started.elapsed();
+        let backend = self.backend.get_or_insert_with(spektrafilm_gpu::select_backend);
+        let (output, used_backend) = pipeline.process_with_backend(working, backend.as_ref());
+        let processed = started.elapsed();
+        let encoding = Encoding::new(&params.io.output_color_space, params.io.output_cctf_encoding);
+        let (width, height) = write_display(&output, encoding, &post, &preview_path)?;
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        Ok(json!({
+            "width": width, "height": height, "backend": used_backend,
+            "display_color_space": DisplaySpace::of(encoding).name(),
+            "elapsed_ms": ms(started.elapsed()), "cached_pipeline": cached.is_some(),
+            "timing_ms": {"decode": ms(decoded), "resample": ms(resampled - decoded),
+                "pipeline": ms(built - resampled), "process": ms(processed - built),
+                "write": ms(started.elapsed() - processed)},
+        }))
+    }
+
     fn handle(&mut self, request: Request, data: &Path) -> Result<Value> {
         match request.command {
             Command::Catalog => catalog(data),
@@ -290,6 +431,9 @@ impl Session {
                 let (width, height) = write_display(working, encoding, &PostParams::default(), &preview_path)?;
                 Ok(json!({"width": width, "height": height, "input_colour": loaded.colour,
                           "display_color_space": DisplaySpace::of(encoding).name()}))
+            }
+            Command::Thumbnail { input, source_generation, film, paper, params, long_side, preview_path } => {
+                self.thumbnail(input, source_generation, film, paper, params, long_side, preview_path, data)
             }
             Command::Save {
                 render_id,
@@ -409,32 +553,7 @@ impl Session {
                 let lens = params.io.lens_correction;
                 let interpretation = params.io.input_interpretation.clone();
                 interpretation.validate()?;
-                let reload = self.source_generation != source_generation
-                    || self.source.as_ref().is_none_or(|source| !source.current(&input, wb, lens, &interpretation));
-                if reload {
-                    // Release the last source's caches before decoding the next.
-                    self.source = None;
-                    self.scaled = None;
-                    self.interactive = None;
-                    self.metering = None;
-                    let loaded = spektrafilm_io::load_image_colour(
-                        &input,
-                        spektrafilm_io::Formats::Any,
-                        wb,
-                        lens,
-                        &interpretation,
-                    )?;
-                    self.source = Some(Source {
-                        path: input.clone(),
-                        wb,
-                        lens,
-                        lens_correction_supported: loaded.lens_correction_supported,
-                        interpretation,
-                        colour: loaded.colour,
-                        image: loaded.image,
-                    });
-                    self.source_generation = source_generation;
-                }
+                self.load_source(&input, source_generation, wb, lens, interpretation)?;
                 let Source { image: source, colour: input_colour, lens_correction_supported, .. } =
                     self.source.as_ref().unwrap();
                 // RAW and decoded files are the engine's linear sRGB; manual
