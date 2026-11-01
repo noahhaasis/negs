@@ -8,6 +8,9 @@ see "Phase 0 results". Phase 1b and the Sony/Fujifilm half of Phase 2
 implemented for Linux on 2026-11-01 (see "Phase 1b/2 results"), then
 OM/Olympus and Panasonic the same day. Windows UI and Phase 3 are not started.
 
+**Decided 2026-11-01 (Noah):** ship this stage; Phase 3 (lensfun, for Nikon,
+Canon and others) waits.
+
 **Decided 2026-10-29 (Noah):** macOS first, using Apple's built-in
 correction (Phases 0 and 1a). Windows/Linux later, as a Rust port of
 darktable's embedded-metadata correction (Phases 1b–2) plus a Rust
