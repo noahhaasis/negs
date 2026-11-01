@@ -85,6 +85,8 @@ import UniformTypeIdentifiers
     private(set) var presets: [PresetFile] = []
     /// What the engine made of each listed file, by the file's identity.
     private(set) var presetStatus: [PresetFile: PresetStatus] = [:]
+    /// Each readable preset file's text, for its thumbnail.
+    @ObservationIgnored private var presetTexts: [PresetFile: String] = [:]
     /// The preset whose name is being edited in the list.
     var renamingPreset: URL?
     /// A preset New Preset just made: Escape while naming it removes it.
@@ -890,8 +892,8 @@ import UniformTypeIdentifiers
 
     // MARK: Film and paper previews
 
-    /// Settings › Film and paper previews. Off shows the menus and frees the
-    /// thumbnails here and in the helper.
+    /// Settings › Film, paper and preset previews. Off shows the menus and
+    /// the plain preset list, and frees the thumbnails here and in the helper.
     func setStockPreviews(_ enabled: Bool) {
         guard enabled != stockPreviews.enabled else { return }
         stockPreviews.enabled = enabled
@@ -902,25 +904,38 @@ import UniformTypeIdentifiers
     }
 
     /// Marks out-of-date thumbnails (dimmed, or blank for another photograph)
-    /// and requests the next one of an open grid: one helper request at a
-    /// time, and only while the main preview is current and nothing is dragged.
+    /// and requests the next one of an open grid or the Presets list: one
+    /// helper request at a time, and only while the main preview is current
+    /// and nothing is dragged.
     func pumpStockPreviews() {
         let previews = stockPreviews
         guard previews.enabled, !closing, let source else { return }
         let scanning = state.params["io.scan_film"].bool
-        var grids: [[StockTile]] = []
-        if previews.filmOpen, previews.filmShown { grids.append(previews.films) }
-        if previews.paperOpen, previews.paperShown, !scanning { grids.append(previews.papers) }
-        guard !grids.isEmpty else { return }
         let rendered = renderState, generation = sourceGeneration
-        var next: (StockTile, StockTile.Key)?
-        for tile in grids.joined() {
-            let key = StockTile.Key(generation: generation, request: StockPreviewRules.request(
-                for: tile.stock, state: rendered, stocks: stocks, source: source, generation: generation))
-            if tile.mark(wanted: key), next == nil { next = (tile, key) }
+        // Each wanted tile: its look's key, the request, and a name for logs.
+        var wanted: [(tile: PreviewTile, key: PreviewTile.Key, command: [String: JSONValue], name: String)] = []
+        var entries: [StockEntry] = []
+        if previews.filmOpen, previews.filmShown { entries += previews.films }
+        if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papers }
+        for entry in entries {
+            let command = StockPreviewRules.request(for: entry.stock, state: rendered, stocks: stocks, source: source, generation: generation)
+            wanted.append((entry.tile, PreviewTile.Key(generation: generation, request: command), command, entry.stock.id))
+        }
+        if previews.presetsShown {
+            let kept = catalog["preset_kept"].array.map(\.string)
+            for preset in presets {
+                guard case .valid = presetStatus[preset], let text = presetTexts[preset], let tile = previews.tile(preset: preset.url) else { continue }
+                let command = StockPreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation)
+                wanted.append((tile, StockPreviewRules.presetKey(command, kept: kept.isEmpty ? nil : kept, generation: generation), command, preset.name))
+            }
+        }
+        guard !wanted.isEmpty else { return }
+        var next: (tile: PreviewTile, key: PreviewTile.Key, command: [String: JSONValue], name: String)?
+        for item in wanted {
+            if item.tile.mark(wanted: item.key), next == nil { next = item }
         }
         guard !previews.busy, ready, previewCurrent, !rendering, pendingRender == nil, !interacting, let engine else { return }
-        guard let (tile, key) = next else {
+        guard let (tile, key, request, name) = next else {
             if let batch = previews.batch {
                 previews.batch = nil
                 let ms = Date().timeIntervalSince(batch.started) * 1000
@@ -935,7 +950,7 @@ import UniformTypeIdentifiers
         previews.batch = (started, (previews.batch?.count ?? 0) + 1)
         previews.busy = true
         let buffer = engine.directory.appendingPathComponent("stock-\(UUID().uuidString).rgba")
-        var command = key.request
+        var command = request
         command["preview_path"] = .string(buffer.path)
         Task { [weak self] in
             let image: CGImage?
@@ -948,11 +963,11 @@ import UniformTypeIdentifiers
                     return try? Self.thumbnailImage(Data(contentsOf: buffer), width: width, height: height, displaySpace: display)
                 }.value
                 if ProcessInfo.processInfo.environment["NEGS_STOCK_THUMB_LOG"] != nil {
-                    FileHandle.standardError.write(Data("thumb \(tile.stock.id): \(Int(result["elapsed_ms"].double)) ms \(result["timing_ms"])\n".utf8))
+                    FileHandle.standardError.write(Data("thumb \(name): \(Int(result["elapsed_ms"].double)) ms \(result["timing_ms"])\n".utf8))
                 }
             } catch {
                 try? FileManager.default.removeItem(at: buffer)
-                FileHandle.standardError.write(Data("stock thumbnail \(tile.stock.id): \(error.localizedDescription)\n".utf8))
+                FileHandle.standardError.write(Data("thumbnail \(name): \(error.localizedDescription)\n".utf8))
                 image = nil
             }
             guard let self else { return }
@@ -1248,6 +1263,8 @@ import UniformTypeIdentifiers
     func refreshPresets() async {
         do { presets = try await presetLibrary.list() } catch { presets = []; report(error) }
         presetStatus = presetStatus.filter { presets.contains($0.key) }
+        presetTexts = presetTexts.filter { presets.contains($0.key) }
+        stockPreviews.update(presets: presets)
         guard let engine else { return }
         for preset in presets where presetStatus[preset] == nil {
             do {
@@ -1255,10 +1272,12 @@ import UniformTypeIdentifiers
                 let (_, result) = try await engine.request(["command": .string("preset_import"), "text": .string(text)])
                 presetStatus[preset] = .valid(film: result["film"].string, paper: result["paper"].string,
                                               scan: result["params"]["io.scan_film"].bool)
+                presetTexts[preset] = text
             } catch {
                 presetStatus[preset] = .invalid(error.localizedDescription)
             }
         }
+        pumpStockPreviews()
     }
 
     /// The film, paper and Lab settings of a preset, as one undo step. The

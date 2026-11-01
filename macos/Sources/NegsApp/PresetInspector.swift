@@ -6,8 +6,9 @@ enum InspectorPane: String {
     case adjustments, presets
 }
 
-/// The Presets panel: the presets in the app's folder. Clicking one applies
-/// it; double-click or Return applies it again after other edits.
+/// The Presets panel: the presets in the app's folder, each with a thumbnail
+/// of the photograph under it (unless Settings turns previews off). Clicking
+/// one applies it; double-click or Return applies it again after other edits.
 struct PresetInspector: View {
     let model: EditorModel
     @State private var selection: URL?
@@ -69,7 +70,8 @@ struct PresetInspector: View {
         ScrollViewReader { scroller in
             List(selection: $selection) {
                 ForEach(model.presets) { preset in
-                    PresetRow(model: model, preset: preset, status: model.presetStatus[preset])
+                    PresetRow(model: model, preset: preset, status: model.presetStatus[preset],
+                              tile: model.stockPreviews.enabled ? model.stockPreviews.tile(preset: preset.url) : nil)
                         .tag(preset.url)
                         .id(preset.url)
                 }
@@ -87,6 +89,8 @@ struct PresetInspector: View {
             }
         }
         .listStyle(.inset)
+        .onAppear { setShown(true) }
+        .onDisappear { setShown(false) }
         .contextMenu(forSelectionType: URL.self) { urls in
             if let preset = preset(urls.first) {
                 Button("Apply") { model.applyPreset(preset) }.disabled(!valid(preset))
@@ -105,6 +109,12 @@ struct PresetInspector: View {
     }
 
     private func preset(_ url: URL?) -> PresetFile? { model.presets.first { $0.url == url } }
+
+    /// Thumbnails are made only while the list is on screen.
+    private func setShown(_ shown: Bool) {
+        model.stockPreviews.presetsShown = shown
+        model.pumpStockPreviews()
+    }
 
     private static func fileURLs(_ providers: [NSItemProvider]) async -> [URL] {
         var urls: [URL] = []
@@ -126,17 +136,22 @@ private struct PresetRow: View {
     let model: EditorModel
     let preset: PresetFile
     let status: PresetStatus?
+    /// The thumbnail, or nil with previews off.
+    let tile: PreviewTile?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if model.renamingPreset == preset.url {
-                NameField(name: preset.name) { model.renamePreset(preset, to: $0) } cancel: { model.cancelRename(preset) }
-            } else {
-                Text(preset.name).lineLimit(1).foregroundStyle(invalid == nil ? .primary : .secondary)
+        HStack(spacing: 10) {
+            if let tile { PresetThumbnail(tile: tile, invalid: invalid != nil) }
+            VStack(alignment: .leading, spacing: 2) {
+                if model.renamingPreset == preset.url {
+                    NameField(name: preset.name) { model.renamePreset(preset, to: $0) } cancel: { model.cancelRename(preset) }
+                } else {
+                    Text(preset.name).lineLimit(1).foregroundStyle(invalid == nil ? .primary : .secondary)
+                }
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(invalid == nil ? (tile == nil ? 1 : 2) : 3)
             }
-            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(invalid == nil ? 1 : 3)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, tile == nil ? 2 : 3)
         .help(invalid ?? "")
     }
 
@@ -153,6 +168,28 @@ private struct PresetRow: View {
         case .invalid(let reason): return reason
         case nil: return " "
         }
+    }
+}
+
+/// A preset's thumbnail: the photograph with the preset applied, grey until
+/// it arrives, dimmed while an edit makes a new one.
+private struct PresetThumbnail: View {
+    let tile: PreviewTile
+    let invalid: Bool
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary)
+            if let image = tile.image {
+                Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                    .opacity(tile.dimmed ? 0.55 : 1)
+            } else if invalid {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 72, height: 48)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityHidden(true)
     }
 }
 

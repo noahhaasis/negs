@@ -4,8 +4,9 @@ import Observation
 import SwiftUI
 
 /// Film and paper as foldouts of thumbnails: the photograph developed with
-/// each stock and the current settings. `EditorModel` schedules them
-/// (`pumpStockPreviews`); this file holds the pure rules, the tiles and the grid.
+/// each stock and the current settings; and each preset's thumbnail in the
+/// Presets panel. `EditorModel` schedules them (`pumpStockPreviews`); this
+/// file holds the pure rules, the tiles and the grid.
 enum StockPreviewRules {
     /// The thumbnail's long edge: two columns of a ~340 pt inspector at 2×.
     static let longSide = 320
@@ -52,32 +53,60 @@ enum StockPreviewRules {
         return command
     }
 
+    /// The helper request for a preset's tile, without its scratch file: the
+    /// helper applies the preset over `state` as `preset_import` does.
+    static func presetCommand(text: String, state: EditState, source: URL, generation: Int) -> [String: JSONValue] {
+        var command: [String: JSONValue] = [
+            "command": .string("thumbnail"), "input": .string(source.path),
+            "source_generation": .number(Double(generation)),
+            "film": .string(state.film), "paper": .string(state.paper), "params": state.params,
+            "long_side": .number(Double(longSide)), "preset": .string(text)
+        ]
+        if let crop = EditorModel.cropJSON(state.crop) { command["crop"] = crop }
+        return command
+    }
+
+    /// What identifies a preset's thumbnail: its command with only the
+    /// settings a preset keeps (`kept`, the catalog's `preset_kept`), since
+    /// the preset replaces the rest. A Lab edit then leaves the tiles alone.
+    /// Without the list (an older helper), every setting counts.
+    static func presetKey(_ command: [String: JSONValue], kept: [String]?, generation: Int) -> PreviewTile.Key {
+        guard let kept else { return PreviewTile.Key(generation: generation, request: command) }
+        var request = command
+        let params = command["params"] ?? .null
+        var subset = JSONValue.object([:])
+        for path in kept { subset[path] = params[path] }
+        request["params"] = subset
+        // The preset brings its own film and paper.
+        request["film"] = nil; request["paper"] = nil
+        return PreviewTile.Key(generation: generation, request: request)
+    }
+
     enum Display: Equatable { case current, dimmed, placeholder }
 
     /// How a tile shows while `wanted` is its thumbnail: as is, dimmed after
     /// an edit to the same photograph, or blank for another photograph (never
     /// the previous photograph's picture).
-    static func display(shown: StockTile.Key?, wanted: StockTile.Key) -> Display {
+    static func display(shown: PreviewTile.Key?, wanted: PreviewTile.Key) -> Display {
         guard let shown else { return .placeholder }
         if shown == wanted { return .current }
         return shown.generation == wanted.generation ? .dimmed : .placeholder
     }
 }
 
-/// One stock's thumbnail. Each tile is observed on its own, so a thumbnail
-/// arriving redraws only its tile.
-@MainActor @Observable final class StockTile {
+/// One stock's or preset's thumbnail. Each tile is observed on its own, so
+/// a thumbnail arriving redraws only its tile.
+@MainActor @Observable final class PreviewTile {
     struct Key: Equatable {
         let generation: Int
         let request: [String: JSONValue]
     }
-    let stock: Stock
     private(set) var image: CGImage?
     private(set) var dimmed = false
     /// What the image (or the failure that left it blank) was made for.
     @ObservationIgnored private(set) var shown: Key?
 
-    init(stock: Stock) { self.stock = stock }
+    init() {}
 
     /// Updates the look for `wanted`; true when the tile needs a new thumbnail.
     func mark(wanted: Key) -> Bool {
@@ -95,10 +124,16 @@ enum StockPreviewRules {
     func clear() { image = nil; shown = nil; dimmed = false }
 }
 
+/// A stock and its tile.
+struct StockEntry {
+    let stock: Stock
+    let tile: PreviewTile
+}
+
 /// The tiles, the foldouts' open state and the setting.
 @MainActor @Observable final class StockPreviews {
     static let defaultsKey = "stockPreviews"
-    /// Settings › Film and paper previews; a missing value means on.
+    /// Settings › Film, paper and preset previews; a missing value means on.
     var enabled: Bool { didSet { defaults.set(enabled, forKey: Self.defaultsKey) } }
     @ObservationIgnored private let defaults: UserDefaults
     /// Collapsed at every launch.
@@ -107,8 +142,12 @@ enum StockPreviewRules {
     /// Whether each grid is on screen (not on another tab or pane).
     @ObservationIgnored var filmShown = false
     @ObservationIgnored var paperShown = false
-    @ObservationIgnored private(set) var films: [StockTile] = []
-    @ObservationIgnored private(set) var papers: [StockTile] = []
+    /// Whether the Presets panel's list is on screen.
+    @ObservationIgnored var presetsShown = false
+    @ObservationIgnored private(set) var films: [StockEntry] = []
+    @ObservationIgnored private(set) var papers: [StockEntry] = []
+    /// By preset file; a renamed preset starts over.
+    @ObservationIgnored private(set) var presets: [URL: PreviewTile] = [:]
     @ObservationIgnored var busy = false
     /// The current batch: when its first thumbnail was requested, and how many.
     @ObservationIgnored var batch: (started: Date, count: Int)?
@@ -125,18 +164,26 @@ enum StockPreviewRules {
 
     /// Tiles for the catalog's stocks, kept across catalog reloads by id.
     func update(stocks: [Stock]) {
-        let old = Dictionary((films + papers).map { ("\($0.stock.paper):\($0.stock.id)", $0) }, uniquingKeysWith: { a, _ in a })
-        func tiles(_ paper: Bool) -> [StockTile] {
-            stocks.filter { $0.paper == paper }.map { old["\(paper):\($0.id)"] ?? StockTile(stock: $0) }
+        let old = Dictionary((films + papers).map { ("\($0.stock.paper):\($0.stock.id)", $0.tile) }, uniquingKeysWith: { a, _ in a })
+        func entries(_ paper: Bool) -> [StockEntry] {
+            stocks.filter { $0.paper == paper }.map { StockEntry(stock: $0, tile: old["\(paper):\($0.id)"] ?? PreviewTile()) }
         }
-        films = tiles(false); papers = tiles(true)
+        films = entries(false); papers = entries(true)
     }
-    func tile(_ id: String, paper: Bool) -> StockTile? { (paper ? papers : films).first { $0.stock.id == id } }
+    func tile(_ id: String, paper: Bool) -> PreviewTile? { (paper ? papers : films).first { $0.stock.id == id }?.tile }
+
+    /// Tiles for the listed presets, kept by file.
+    func update(presets files: [PresetFile]) {
+        presets = Dictionary(files.map { ($0.url, presets[$0.url] ?? PreviewTile()) }, uniquingKeysWith: { a, _ in a })
+    }
+    func tile(preset: URL) -> PreviewTile? { presets[preset] }
 
     /// Drops every thumbnail; true if there were any.
     func clear() -> Bool {
         var had = false
-        for tile in films + papers where tile.shown != nil || tile.image != nil { had = true; tile.clear() }
+        for tile in (films + papers).map(\.tile) + presets.values where tile.shown != nil || tile.image != nil {
+            had = true; tile.clear()
+        }
         return had
     }
 }
@@ -185,7 +232,7 @@ private struct StockGrid: View {
                 Section {
                     ForEach(group.stocks) { stock in
                         if let tile = previews.tile(stock.id, paper: paper) {
-                            StockTileView(tile: tile, selected: stock.id == selected) {
+                            StockTileView(stock: stock, tile: tile, selected: stock.id == selected) {
                                 if paper { model.choosePaper(stock.id) } else { model.chooseFilm(stock.id) }
                             }
                         }
@@ -208,7 +255,8 @@ private struct StockGrid: View {
 }
 
 private struct StockTileView: View {
-    let tile: StockTile
+    let stock: Stock
+    let tile: PreviewTile
     let selected: Bool
     let choose: () -> Void
 
@@ -227,14 +275,14 @@ private struct StockTileView: View {
                 .overlay {
                     if selected { RoundedRectangle(cornerRadius: 5).strokeBorder(Color.accentColor, lineWidth: 2) }
                 }
-                Text(tile.stock.name).font(.caption).lineLimit(1).truncationMode(.tail)
+                Text(stock.name).font(.caption).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(selected ? .primary : .secondary)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(tile.stock.name)
-        .accessibilityLabel(tile.stock.name)
+        .help(stock.name)
+        .accessibilityLabel(stock.name)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

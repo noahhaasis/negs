@@ -55,8 +55,8 @@ final class StockPreviewTests: XCTestCase {
 
     func testTheTileKeyFollowsTheCropAndThePhotograph() {
         let photo = URL(fileURLWithPath: "/photos/a.jpg"), trix = stocks[2]
-        func key(_ state: EditState, _ source: URL = photo, generation: Int = 1) -> StockTile.Key {
-            StockTile.Key(generation: generation, request: StockPreviewRules.request(for: trix, state: state, stocks: stocks, source: source, generation: generation))
+        func key(_ state: EditState, _ source: URL = photo, generation: Int = 1) -> PreviewTile.Key {
+            PreviewTile.Key(generation: generation, request: StockPreviewRules.request(for: trix, state: state, stocks: stocks, source: source, generation: generation))
         }
         let base = key(edited())
         XCTAssertNil(base.request["crop"])
@@ -78,9 +78,46 @@ final class StockPreviewTests: XCTestCase {
         XCTAssertNotEqual(key(exposed), base)
     }
 
+    func testAPresetTileFollowsOnlyWhatThePresetKeeps() {
+        let photo = URL(fileURLWithPath: "/photos/a.jpg"), text = #"{"simulation": {"film_stock": "kodak_portra_400"}}"#
+        let kept = ["io.output_color_space", "io.crop", "post"]
+        func command(_ state: EditState, text: String = text, generation: Int = 1) -> [String: JSONValue] {
+            StockPreviewRules.presetCommand(text: text, state: state, source: photo, generation: generation)
+        }
+        func key(_ state: EditState, text: String = text, generation: Int = 1) -> PreviewTile.Key {
+            StockPreviewRules.presetKey(command(state, text: text, generation: generation), kept: kept, generation: generation)
+        }
+        var state = edited()
+        state.params["io.output_color_space"] = .string("sRGB")
+        state.params["post.saturation"] = .number(0)
+        // The helper gets every setting and the preset; it applies the preset.
+        let sent = command(state)
+        XCTAssertEqual(sent["preset"], .string(text))
+        XCTAssertEqual(sent["params"], state.params)
+        XCTAssertEqual(sent["film"], .string("gold"))
+
+        let base = key(state)
+        // The preset replaces the Lab settings and the stocks, so they don't count.
+        var exposed = state; exposed.params["camera.exposure_compensation_ev"] = .number(2)
+        XCTAssertEqual(key(exposed), base)
+        XCTAssertEqual(key(StockPreviewRules.choosing("trix", paper: false, in: state, stocks: stocks)), base)
+        // What it keeps, the crop, the photograph and the file's text do.
+        var space = state; space.params["io.output_color_space"] = .string("Display P3")
+        XCTAssertNotEqual(key(space), base)
+        var post = state; post.params["post.saturation"] = .number(0.5)
+        XCTAssertNotEqual(key(post), base)
+        var cropped = state; cropped.crop.angle = 3
+        XCTAssertNotEqual(key(cropped), base)
+        XCTAssertNotEqual(key(state, generation: 2), base)
+        XCTAssertNotEqual(key(state, text: #"{"simulation": {"film_stock": "kodak_gold_200"}}"#), base)
+        // An older helper doesn't list what presets keep: every setting counts.
+        let everything = StockPreviewRules.presetKey(command(exposed), kept: nil, generation: 1)
+        XCTAssertNotEqual(everything, StockPreviewRules.presetKey(command(state), kept: nil, generation: 1))
+    }
+
     func testStaleTilesDimForTheSamePhotographAndBlankForAnother() {
         let request: [String: JSONValue] = ["film": .string("gold")]
-        let shown = StockTile.Key(generation: 3, request: request)
+        let shown = PreviewTile.Key(generation: 3, request: request)
         XCTAssertEqual(StockPreviewRules.display(shown: shown, wanted: shown), .current)
         XCTAssertEqual(StockPreviewRules.display(shown: shown, wanted: .init(generation: 3, request: ["film": .string("trix")])), .dimmed)
         XCTAssertEqual(StockPreviewRules.display(shown: shown, wanted: .init(generation: 4, request: request)), .placeholder)
@@ -88,9 +125,9 @@ final class StockPreviewTests: XCTestCase {
     }
 
     @MainActor func testTilesKeepTheirPictureOnlyForTheSamePhotograph() throws {
-        let tile = StockTile(stock: stocks[0])
+        let tile = PreviewTile()
         let image = try EditorModel.thumbnailImage(Data(repeating: 128, count: 4 * 4 * 4), width: 4, height: 4, displaySpace: "sRGB")
-        let first = StockTile.Key(generation: 1, request: ["ev": .number(0)])
+        let first = PreviewTile.Key(generation: 1, request: ["ev": .number(0)])
         XCTAssertTrue(tile.mark(wanted: first))
         tile.show(image, for: first)
         XCTAssertFalse(tile.mark(wanted: first))
@@ -99,7 +136,7 @@ final class StockPreviewTests: XCTestCase {
         XCTAssertTrue(tile.mark(wanted: .init(generation: 2, request: ["ev": .number(1)])))
         XCTAssertNil(tile.image); XCTAssertFalse(tile.dimmed)
         // A failure is remembered, so the same request isn't retried.
-        let failed = StockTile.Key(generation: 2, request: ["ev": .number(1)])
+        let failed = PreviewTile.Key(generation: 2, request: ["ev": .number(1)])
         tile.show(nil, for: failed)
         XCTAssertFalse(tile.mark(wanted: failed))
     }

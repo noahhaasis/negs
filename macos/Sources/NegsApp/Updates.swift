@@ -144,9 +144,9 @@ struct UpdateSettings: View {
                 Text("Install a release build to receive updates.").foregroundStyle(.secondary)
             }
             Divider().padding(.vertical, 8)
-            Toggle("Film and paper previews", isOn: Binding(
+            Toggle("Film, paper and preset previews", isOn: Binding(
                 get: { model.stockPreviews.enabled }, set: { model.setStockPreviews($0) }))
-            Text("Show each stock on your photograph. Turn off to use simple menus on slower computers.")
+            Text("Show each stock and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
                 .font(.callout).foregroundStyle(.secondary)
             Divider().padding(.vertical, 8)
             Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
