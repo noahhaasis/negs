@@ -22,6 +22,9 @@ pub struct Stock {
 #[derive(Deserialize)]
 struct Catalog {
     profiles: Vec<Stock>,
+    /// The settings a preset leaves as they are; missing from older helpers.
+    #[serde(default)]
+    preset_kept: Option<Vec<String>>,
 }
 fn nullable_string<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
@@ -70,6 +73,11 @@ pub fn install(value: &serde_json::Value) -> Result<(), String> {
     // same immutable metadata; the next application launch discovers updates.
     let _ = LIVE.set(catalog);
     Ok(())
+}
+/// The settings a preset leaves as they are (dotted paths), or None when
+/// the helper doesn't list them.
+pub fn preset_kept() -> Option<&'static [String]> {
+    LIVE.get()?.preset_kept.as_deref()
 }
 pub fn stocks(paper: bool) -> Vec<&'static Stock> {
     static CATALOG: OnceLock<Catalog> = OnceLock::new();

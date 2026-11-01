@@ -29,6 +29,8 @@ pub struct Preferences {
     pub png_bit_depth: u32,
     pub tiff_bit_depth: u32,
     pub last_save_folder: Option<PathBuf>,
+    /// Film, paper and preset thumbnails rather than plain menus and lists.
+    pub previews: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -53,6 +55,7 @@ impl Default for Preferences {
             png_bit_depth: 8,
             tiff_bit_depth: 16,
             last_save_folder: None,
+            previews: true,
         }
     }
 }
@@ -177,6 +180,20 @@ impl Editor {
             }
         ));
         group.add(&appearance);
+        let previews = adw::SwitchRow::builder()
+            .title("Film, paper and preset previews")
+            .subtitle("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
+            .active(self.preferences.borrow().previews)
+            .build();
+        previews.connect_active_notify(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |r| {
+                ui.preferences.borrow_mut().previews = r.is_active();
+                crate::stock_browser::apply(&ui);
+            }
+        ));
+        group.add(&previews);
         let recent = adw::ActionRow::builder()
             .title("Recent photographs")
             .subtitle("Paths are stored locally in your session")
