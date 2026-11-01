@@ -70,9 +70,12 @@ int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_corr
                 [raw setValue:@YES forKey:@"highlightRecoveryEnabled"];
             NSDictionary *properties = raw.properties;
             NSDictionary *tiff = properties[(__bridge NSString *)kCGImagePropertyTIFFDictionary];
+            // BlackIsZero marks a monochrome DNG. Olympus/OM ORFs tag their
+            // colour CFA image the same way, so trust it only in a DNG.
             out->monochrome = [properties[(__bridge NSString *)kCGImagePropertyColorModel]
                                 isEqual:(__bridge NSString *)kCGImagePropertyColorModelGray]
-                || [tiff[(__bridge NSString *)kCGImagePropertyTIFFPhotometricInterpretation] intValue] == 1;
+                || (properties[(__bridge NSString *)kCGImagePropertyDNGDictionary] != nil
+                    && [tiff[(__bridge NSString *)kCGImagePropertyTIFFPhotometricInterpretation] intValue] == 1);
             // Other modes develop at D65, then use the same CAT02/ACES tint
             // operation as rawler. Apple's unrelated -150..150 tint is unused.
             if (!as_shot && !out->monochrome) raw.neutralChromaticity = CGPointMake(0.3127, 0.3290);
