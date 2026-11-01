@@ -1,0 +1,57 @@
+Signature Edits sample photographs — source license review
+Checked: 2026-10-30
+
+Applies to the resized derivatives DSC_2498.dng, IMG_0316.dng, IMG_4416.dng.
+These photographs are NOT licensed under the application's GPL.
+
+Source: https://www.signatureedits.com/free-raw-photos/
+Full license and terms: https://www.signatureedits.com/free-raw-license-terms/
+
+The following are excerpts from the source's license and terms, not a
+replacement for the full terms linked above.
+
+License Details:
+
+“Signature Edits grants you an irrevocable, nonexclusive, worldwide
+copyright license to download, copy, modify, distribute, perform, and use
+raw files from Signature Edits for free, including for commercial purposes,
+without permission from or attributing the photographer or Signature Edits.”
+
+“This license does not include the right to compile photos from Signature
+Edits to replicate a similar or competing service or to misrepresent the
+authorship of these photos as your own original work.”
+
+“For example… You can use the photos on your website design, but you CAN’T
+use the photos to create a photo sharing site like our Free Raw Files page.”
+
+Section 5 also excludes rights to:
+- “Trademarks, logos, or brands that appear in Photos”
+- “People’s images if they are recognizable in the Photos”
+- “Works of art or authorship that appear in Photos”
+
+“If you download photos with any of these depicted in them, you may need
+the permission of the brand owner of the brand or work of authorship or
+individual depending on how you use the Photo.”
+
+Section 8 prohibits selling unaltered/minimally modified copies, including
+copies only resized or altered by automatic script, and using photos to
+create or contribute to a similar or competitive service. See the full
+terms for the exact wording and other conditions.
+
+Assessment for Negs:
+Modification and redistribution are expressly allowed. Three free sample
+inputs inside a local photo editor are not a competing RAW-photo library.
+Do not market these as Negs' original photography, sell the resized copies,
+expand this into a stock-photo library, or imply endorsement by the people
+pictured. No model/property releases have been independently verified;
+the copyright license is not a blanket release for every possible use.
+
+Credit (appreciated by the source, not required by its copyright grant):
+- DSC_2498: Skrypchenko (embedded Artist tag), via Signature Edits.
+- IMG_0316: via Signature Edits; photographer not identified in source metadata.
+- IMG_4416: via Signature Edits; photographer not identified in source metadata.
+
+Prepared by resizing demosaiced linear camera RGB to a 2560 px long edge,
+with lossy JPEG tiles and a DNG LinearizationTable, embedded camera preview,
+as-shot white balance, camera matrix and orientation. No authorship is
+claimed by Negs. The generated files do not copy GPS or camera serial tags.

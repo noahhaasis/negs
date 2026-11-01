@@ -1,0 +1,38 @@
+{
+  "id": "./",
+  "name": "Negs",
+  "short_name": "Negs",
+  "description": "Film simulation for your photographs, in your browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#161616",
+  "theme_color": "#161616",
+  "categories": ["photo"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "image/jpeg": [".jpg", ".jpeg"],
+        "image/png": [".png"],
+        "image/tiff": [".tif", ".tiff"],
+        "image/x-adobe-dng": [".dng"],
+        "image/x-nikon-nef": [".nef"],
+        "image/x-sony-arw": [".arw"],
+        "image/x-canon-cr2": [".cr2"],
+        "image/x-canon-cr3": [".cr3"],
+        "image/x-fuji-raf": [".raf"],
+        "image/x-olympus-orf": [".orf"],
+        "image/x-panasonic-rw2": [".rw2"],
+        "image/x-pentax-pef": [".pef"],
+        "image/x-samsung-srw": [".srw"]
+      }
+    }
+  ],
+  "launch_handler": { "client_mode": "focus-existing" }
+}

@@ -14,6 +14,7 @@
 //! over the source file's camera metadata read by [`read_metadata`].
 
 pub mod border;
+pub mod bounded;
 pub mod colour;
 pub mod crop;
 pub mod encoding;
@@ -230,43 +231,45 @@ pub(crate) struct RawlerImage {
     pub lens: Option<lens::Source>,
 }
 
-fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance, lens_correction: LensCorrection) -> Result<RawlerImage> {
-    use rawler::{
-        decoders::RawDecodeParams,
-        imgop::develop::{ProcessingStep, RawDevelop},
-        rawsource::RawSource,
-    };
+fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance, lens: LensCorrection) -> Result<RawlerImage> {
+    use rawler::rawsource::RawSource;
     wb.validate()?;
     let src =
         RawSource::new(path).with_context(|| format!("opening RAW file: {}", path.display()))?;
+    develop_rawler(&src, orient, wb, lens)
+}
+
+/// [`load_raw_with_wb`] from the file's bytes, with rawler: for browsers,
+/// which have no files.
+pub fn load_raw_bytes(bytes: &[u8], wb: RawWhiteBalance) -> Result<ImageBuf> {
+    wb.validate()?;
+    Ok(develop_rawler(&rawler::rawsource::RawSource::new_from_slice(bytes), true, wb, LensCorrection::default())?.image)
+}
+
+/// [`load_raw_bytes`] without turning the image upright, and the EXIF
+/// orientation (1 to 8) that would: for a caller that shrinks it first,
+/// which then turns a smaller copy.
+pub fn load_raw_bytes_unoriented(bytes: &[u8], wb: RawWhiteBalance) -> Result<(ImageBuf, u16)> {
+    wb.validate()?;
+    let src = rawler::rawsource::RawSource::new_from_slice(bytes);
+    let image = develop_rawler(&src, false, wb, LensCorrection::default())?.image;
+    Ok((image, raw_exif_orientation(&src, &rawler::decoders::RawDecodeParams::default())))
+}
+
+fn develop_rawler(
+    src: &rawler::rawsource::RawSource,
+    orient: bool,
+    wb: RawWhiteBalance,
+    lens_correction: LensCorrection,
+) -> Result<RawlerImage> {
+    use rawler::decoders::RawDecodeParams;
     let decode_params = RawDecodeParams::default();
-    let mut raw = rawler::decode(&src, &decode_params)
+    let raw = rawler::decode(src, &decode_params)
         .map_err(|e| anyhow::anyhow!("RAW decode failed: {e:?}"))?;
-    let mut dev = RawDevelop::default();
-    // Our `calibrate` replaces rawler's, which clips (see there).
-    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb | ProcessingStep::Calibrate));
-    // rawler guards `decode` against panics but not `develop_intermediate`,
-    // which still has `panic!`/`unimplemented!`/`assert!` paths for unusual
-    // files (e.g. Fuji SuperCCD with an active area, non-3x3 colour matrices
-    // without a D65 entry). The GUI loads on its UI thread, so turn a panic
-    // into an error instead of taking the app down.
-    let intermediate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<_> {
-        white_balance::prepare(&mut raw, wb)?;
-        let intermediate = dev
-            .develop_intermediate(&raw)
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-        let mut intermediate = calibrate(&raw, intermediate);
-        white_balance::finish(&mut intermediate, wb, white_balance::is_monochrome(&raw))?;
-        Ok(intermediate)
-    }))
-    .map_err(|p| anyhow::anyhow!("RAW develop failed: panicked: {}", panic_message(&p)))?
-    .context("RAW develop failed")?;
     let area = lens_area(&raw);
-    // The developed pixels no longer depend on the sensor buffer.
-    drop(raw);
-    let mut img = intermediate_to_image_buf(intermediate);
+    let mut img = develop_decoded(raw, wb)?;
     // Lens corrections are defined in sensor coordinates: before orientation.
-    let profile = lens::read_profile_from(&src);
+    let profile = lens::read_profile_from(src);
     if lens_correction.enabled && let Some(profile) = &profile {
         let area = area.filter(|a| a.developed == (img.width as usize, img.height as usize)).map(|a| a.area);
         lens::apply(&mut img, profile, area);
@@ -275,10 +278,8 @@ fn load_raw_rawler(path: &Path, orient: bool, wb: RawWhiteBalance, lens_correcti
     if !orient {
         return Ok(RawlerImage { image: img, lens });
     }
-    // rawler 0.8 still always sets `RawImage::orientation` to Normal (an
-    // upstream TODO), so read the EXIF tag ourselves.
-    let orientation = raw_exif_orientation(&src, &decode_params);
-    Ok(RawlerImage { image: img.oriented(orientation), lens })
+    // rawler still sets RawImage::orientation to Normal: read EXIF ourselves.
+    Ok(RawlerImage { image: img.oriented(raw_exif_orientation(src, &decode_params)), lens })
 }
 
 /// The active area (where DNG lens opcodes are defined) relative to the image
@@ -303,6 +304,42 @@ fn lens_area(raw: &rawler::RawImage) -> Option<LensArea> {
         ],
         developed: (crop.d.w, crop.d.h),
     })
+}
+
+/// Develop an already decoded sensor; shared with the opt-in bounded loader.
+fn develop_decoded(mut raw: rawler::RawImage, wb: RawWhiteBalance) -> Result<ImageBuf> {
+    use rawler::imgop::develop::{ProcessingStep, RawDevelop};
+    let mut dev = RawDevelop::default();
+    // Our `calibrate` replaces rawler's, which clips (see there).
+    dev.steps.retain(|s| !matches!(s, ProcessingStep::SRgb | ProcessingStep::Calibrate));
+    // rawler guards `decode` against panics but not `develop_intermediate`,
+    // which still has `panic!`/`unimplemented!`/`assert!` paths for unusual
+    // files (e.g. Fuji SuperCCD with an active area, non-3x3 colour matrices
+    // without a D65 entry). The GUI loads on its UI thread, so turn a panic
+    // into an error instead of taking the app down.
+    let intermediate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<_> {
+        white_balance::prepare(&mut raw, wb)?;
+        // The develop consumes the sensor data, so it never holds a second
+        // copy; the rest (the matrices, the white balance) calibrates.
+        let meta = without_data(&mut raw);
+        let intermediate = dev
+            .develop_intermediate_owned(raw)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        let mut intermediate = calibrate(&meta, intermediate);
+        white_balance::finish(&mut intermediate, wb, white_balance::is_monochrome(&meta))?;
+        Ok(intermediate)
+    }))
+    .map_err(|p| anyhow::anyhow!("RAW develop failed: panicked: {}", panic_message(&p)))?
+    .context("RAW develop failed")?;
+    Ok(intermediate_to_image_buf(intermediate))
+}
+
+/// A copy of `raw` without its sensor data.
+fn without_data(raw: &mut rawler::RawImage) -> rawler::RawImage {
+    let data = std::mem::replace(&mut raw.data, rawler::rawimage::RawImageData::Integer(Vec::new()));
+    let meta = raw.clone();
+    raw.data = data;
+    meta
 }
 
 /// Text of a caught panic payload (`panic!` with a literal or a format).
@@ -387,9 +424,9 @@ fn calibrate(raw: &rawler::RawImage, intermediate: rawler::imgop::develop::Inter
         rgb
     };
     match intermediate {
-        Intermediate::ThreeColor(pixels) => {
-            let data = pixels.data.par_iter().map(|p| develop(p)).collect();
-            Intermediate::ThreeColor(rawler::pixarray::Color2D::new_with(data, pixels.width, pixels.height))
+        Intermediate::ThreeColor(mut pixels) => {
+            pixels.data.par_iter_mut().for_each(|p| *p = develop(p));
+            Intermediate::ThreeColor(pixels)
         }
         Intermediate::FourColor(pixels) => {
             let data = pixels.data.par_iter().map(|p| develop(p)).collect();
@@ -413,6 +450,10 @@ fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate)
                 .for_each(|(dst, &v)| dst.fill(from_f32(v)));
             (pixels.width, pixels.height, out)
         }
+        // The same f32s, in their buffer.
+        #[cfg(not(feature = "precision-f64"))]
+        Intermediate::ThreeColor(pixels) => (pixels.width, pixels.height, flatten_rgb(pixels.data)),
+        #[cfg(feature = "precision-f64")]
         Intermediate::ThreeColor(pixels) => {
             let mut out = vec![from_f32(0.0); pixels.width * pixels.height * 3];
             out.par_chunks_exact_mut(3)
@@ -433,6 +474,16 @@ fn intermediate_to_image_buf(intermediate: rawler::imgop::develop::Intermediate)
         }
     };
     ImageBuf::from_data(w as u32, h as u32, scalars)
+}
+
+/// RGB pixels as their channels, without a copy.
+#[cfg(not(feature = "precision-f64"))]
+fn flatten_rgb(pixels: Vec<[f32; 3]>) -> Vec<f32> {
+    let mut pixels = std::mem::ManuallyDrop::new(pixels);
+    let (ptr, len, capacity) = (pixels.as_mut_ptr(), pixels.len(), pixels.capacity());
+    // SAFETY: [f32; 3] is three f32s with f32's alignment, so the allocation
+    // is one of `capacity * 3` f32s, `len * 3` of them initialised.
+    unsafe { Vec::from_raw_parts(ptr.cast::<f32>(), len * 3, capacity * 3) }
 }
 
 #[cfg(test)]

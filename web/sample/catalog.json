@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "default": "DSC_6377",
+  "offline": "DSC_6377",
+  "samples": [
+    {
+      "id": "DSC_6377",
+      "url": "sample/DSC_6377.dng",
+      "width": 6048,
+      "height": 4032,
+      "bytes": 3362272,
+      "sha256": "3017ee5e90ad64b1b090dc6f7904447dfdf12c661a24f5e3779df4038e1448bd",
+      "camera": "NIKON Z f",
+      "originalFilename": "DSC_6377.NEF",
+      "source": "project",
+      "credit": "Project-supplied photograph (no separate photo license supplied)"
+    },
+    {
+      "id": "IMG_0316",
+      "url": "sample/IMG_0316.dng",
+      "width": 1707,
+      "height": 2560,
+      "bytes": 483918,
+      "sha256": "c121aa8e6c7bbc13d433a7e3ed8a3b275380e0d0c1ef73de5623ae4067142860",
+      "camera": "Canon EOS 6D",
+      "originalFilename": "tag @signatureeditsco - free raws from signatureedits.com -IMG_0316.CR2",
+      "source": "signature-edits",
+      "sourceUrl": "https://www.signatureedits.com/free-raw-photos/",
+      "licenseUrl": "https://www.signatureedits.com/free-raw-license-terms/",
+      "credit": "Via Signature Edits (photographer not identified)"
+    },
+    {
+      "id": "DSC_2498",
+      "url": "sample/DSC_2498.dng",
+      "width": 1709,
+      "height": 2560,
+      "bytes": 478342,
+      "sha256": "8e41956a8d3137fa9dfa762df7b8069b7282f98140188c039c9a03054b27998b",
+      "camera": "NIKON D800",
+      "originalFilename": "tag @signatureeditsco - free raws from signatureedits.com -DSC_2498.dng",
+      "source": "signature-edits",
+      "sourceUrl": "https://www.signatureedits.com/free-raw-photos/",
+      "licenseUrl": "https://www.signatureedits.com/free-raw-license-terms/",
+      "credit": "Skrypchenko / Signature Edits"
+    },
+    {
+      "id": "DSC_6008",
+      "url": "sample/DSC_6008.dng",
+      "width": 2560,
+      "height": 1707,
+      "bytes": 589384,
+      "sha256": "cfbb1a23c5b411cfea70461f863c2b92fbeafe43858cdec0cf6d6e5336c9d24f",
+      "camera": "NIKON Z f",
+      "originalFilename": "DSC_6008.NEF",
+      "source": "project",
+      "credit": "Project-supplied photograph (no separate photo license supplied)"
+    },
+    {
+      "id": "DSC_6426",
+      "url": "sample/DSC_6426.dng",
+      "width": 1707,
+      "height": 2560,
+      "bytes": 910516,
+      "sha256": "2fe07acb98c528449afb0178cdbfa02449a0b59f341a79f4fb463fb5186cb775",
+      "camera": "NIKON Z f",
+      "originalFilename": "DSC_6426.NEF",
+      "source": "project",
+      "credit": "Project-supplied photograph (no separate photo license supplied)"
+    },
+    {
+      "id": "DSC_6028",
+      "url": "sample/DSC_6028.dng",
+      "width": 2560,
+      "height": 1707,
+      "bytes": 708852,
+      "sha256": "db8911979c2c10d13d331c281c8e9bbf3131966847bdef919f9f1bea46868bf0",
+      "camera": "NIKON Z f",
+      "originalFilename": "DSC_6028.NEF",
+      "source": "project",
+      "credit": "Project-supplied photograph (no separate photo license supplied)"
+    },
+    {
+      "id": "IMG_4416",
+      "url": "sample/IMG_4416.dng",
+      "width": 1706,
+      "height": 2560,
+      "bytes": 526058,
+      "sha256": "c6da52956f8a70cd4416a465f0274bf2e458b041a1d5edb5e4f1432dfa7508fb",
+      "camera": "Canon EOS 2000D",
+      "originalFilename": "free raws -  credit signatureedits.com - IMG_4416.CR2",
+      "source": "signature-edits",
+      "sourceUrl": "https://www.signatureedits.com/free-raw-photos/",
+      "licenseUrl": "https://www.signatureedits.com/free-raw-license-terms/",
+      "credit": "Via Signature Edits (photographer not identified)"
+    }
+  ]
+}
