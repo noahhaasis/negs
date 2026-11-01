@@ -118,6 +118,23 @@ to the window on screen (median of 10):
   cached in UserDefaults, keyed by the helper binary, so the inspector shows
   the stocks at once and isn't rebuilt when the helper answers. Edits are
   possible as soon as the catalog is known; rendering waits for the helper.
+- With that cached catalog, the session is read (a few kilobytes) and
+  restored synchronously in `applicationWillFinishLaunching`, and the saved
+  frame and its histogram are read on a background task while AppKit builds
+  the window. `applicationDidFinishLaunching` takes the frame, waiting at
+  most 0.15 s, before ordering the window in, so the first frame shows the
+  photograph. Waiting for the helper's catalog first, or for a main-actor
+  task, showed it about 0.4 s later: Swift's main-actor tasks don't run
+  until AppKit's back-to-back launch passes finish. A Finder open arrives
+  after this restore and undoes it, so the chosen photograph starts from the
+  defaults as before; a different catalog from the helper restores the
+  session again.
+- Measured on 2026-11-01 (M1 Pro, CI-equivalent SDK 15.5 build, a CR2
+  session on the Post tab): photograph visible 675 → 265 ms from exec, main
+  thread settled 707 → 569 ms. The inspector's first build (~180 ms of the
+  rest) is now the largest cost; making it cheaper would change its look
+  (a lighter layout than the grouped `Form`, ~90 ms; a custom slider instead
+  of `NSSlider`, ~85 ms), which was declined.
 
 Borders (solid, film frame, keyline, 35mm) are presentation only. They
 are not render parameters, so a border change never re-renders: the canvas

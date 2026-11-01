@@ -28,12 +28,19 @@ import SwiftUI
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // The helper starts while AppKit builds the window, and the cached
-        // catalog fills in the inspector's first frame. Session I/O overlaps
-        // the catalog request, never window layout. Benchmarks and explicit
+        // catalog fills in the inspector's first frame. With that catalog the
+        // session restores before the window is built, so its saved frame and
+        // adjustments are in the window's first frames; the main actor's tasks
+        // only run after AppKit's launch passes. Without a cached catalog, or
+        // if the session can't be read now, it restores once the helper
+        // answers and reports any error then. Benchmarks and explicit
         // launches must not reopen a previous photograph.
         model.launch()
         let benchmark = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] != nil
-        var restoration: Task<EditorSession?, Error>? = benchmark ? nil : Task { try await sessions.load() }
+        var restoration: Task<EditorSession?, Error>?
+        if !benchmark, Self.pathArgument != nil || !((try? sessions.read()).flatMap { $0 }.map(model.restoreAtLaunch) ?? false) {
+            restoration = Task { try await sessions.load() }
+        }
         #if SPEKTRAFILM_BENCHMARK
         if let path = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_SESSION"] {
             let store = SessionStore(file: URL(fileURLWithPath: path))
@@ -47,16 +54,20 @@ import SwiftUI
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // The saved frame has usually been read while AppKit built the
+        // window; waiting briefly puts it in the window's first frame.
+        model.showLaunchFrame(waitingUpTo: 0.15)
         editor?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         // Finder opens arrive through application(_:open:); a path argument is for `swift run`.
-        if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }) {
-            model.open(URL(fileURLWithPath: path))
-        }
+        if let path = Self.pathArgument { model.open(URL(fileURLWithPath: path)) }
         #if SPEKTRAFILM_BENCHMARK
         InteractionBenchmark.start(model)
         #endif
         updates.schedule(afterStartupOf: model)
+    }
+    private static var pathArgument: String? {
+        CommandLine.arguments.dropFirst().first { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }
     }
     func application(_ application: NSApplication, open urls: [URL]) {
         if let url = urls.first(where: \.isFileURL) { model.open(url) }

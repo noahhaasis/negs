@@ -33,7 +33,8 @@ struct EditorSession: Codable, Equatable, Sendable {
     }
 }
 
-/// All file I/O, JSON coding and bookmark resolution run away from the main actor.
+/// File I/O, JSON coding and bookmark resolution run away from the main
+/// actor, except the one small read at launch (`read()`).
 actor SessionStore {
     let file: URL
 
@@ -41,7 +42,12 @@ actor SessionStore {
         self.file = file
     }
 
-    func load() throws -> EditorSession? {
+    func load() throws -> EditorSession? { try read() }
+
+    /// `load()` without the actor, for launch, before the window is built: a
+    /// file of a few kilobytes and a bookmark resolution that never mounts a
+    /// volume or shows UI.
+    nonisolated func read() throws -> EditorSession? {
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
         guard (attributes[.size] as? Int ?? Int.max) <= 1_048_576 else {
