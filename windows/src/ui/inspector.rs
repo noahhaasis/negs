@@ -571,7 +571,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 SendMessageW(slider, TBM_SETRANGEMAX, WPARAM(0), LPARAM(steps));
                 SendMessageW(slider, TBM_SETLINESIZE, WPARAM(0), LPARAM(1));
                 SendMessageW(slider, TBM_SETPAGESIZE, WPARAM(0), LPARAM((steps / 10).max(1)));
-                let _ = SetWindowSubclass(slider, Some(trackbar_subclass), 1, 0);
+                let _ = SetWindowSubclass(slider, Some(trackbar_subclass), 1, id(RESET) as usize);
             }
             controls.push(slider);
             let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), WINDOW_EX_STYLE(WS_EX_CLIENTEDGE.0), parent, id(EDIT), fonts.ui);
@@ -1607,11 +1607,55 @@ fn draw_swatch(dc: HDC, r: RECT, style: usize, mat: u32, line: u32, disabled: bo
     }
 }
 
+thread_local! {
+    /// The last click on a trackbar: its window, time and position.
+    static LAST_TRACKBAR_CLICK: Cell<Option<(usize, u32, i32, i32)>> = const { Cell::new(None) };
+    /// A trackbar whose reset click's button-up it must not see.
+    static RESET_TRACKBAR: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Whether this click on a trackbar completes a double-click. Trackbars
+/// may not have CS_DBLCLKS, so this checks the time and distance as
+/// Windows does.
+unsafe fn second_click(hwnd: HWND, lparam: LPARAM) -> bool {
+    let (x, y) = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
+    let time = unsafe { GetMessageTime() } as u32;
+    let last = LAST_TRACKBAR_CLICK.replace(Some((hwnd.0 as usize, time, x, y)));
+    let double = last.is_some_and(|(window, at, lx, ly)| unsafe {
+        window == hwnd.0 as usize
+            && time.wrapping_sub(at) <= GetDoubleClickTime()
+            && (x - lx).abs() <= GetSystemMetrics(SM_CXDOUBLECLK) / 2
+            && (y - ly).abs() <= GetSystemMetrics(SM_CYDOUBLECLK) / 2
+    });
+    if double {
+        LAST_TRACKBAR_CLICK.set(None);
+    }
+    double
+}
+
 /// Mouse wheel over a trackbar scrolls the panel unless it has focus.
-extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
+/// Double-click or Alt-click resets it, as in Lightroom (macOS
+/// `ResettableSlider`), by clicking the row's reset button, whose id is the
+/// subclass's data. A double-click's first click still moves the thumb.
+extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, reset: usize) -> LRESULT {
     unsafe {
         if msg == WM_MOUSEWHEEL && GetFocus() != hwnd {
             return SendMessageW(GetParent(hwnd).unwrap_or_default(), msg, wparam, lparam);
+        }
+        if matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONDBLCLK) {
+            let alt = GetKeyState(VK_MENU.0 as i32) < 0;
+            let double = msg == WM_LBUTTONDBLCLK || second_click(hwnd, lparam);
+            if (alt || double) && IsWindowEnabled(hwnd).as_bool() {
+                RESET_TRACKBAR.set(hwnd.0 as usize);
+                let parent = GetParent(hwnd).unwrap_or_default();
+                let button = GetDlgItem(parent, reset as i32).unwrap_or_default();
+                SendMessageW(parent, WM_COMMAND, WPARAM(((BN_CLICKED as usize) << 16) | reset), LPARAM(button.0 as isize));
+                return LRESULT(0);
+            }
+        }
+        if msg == WM_LBUTTONUP && RESET_TRACKBAR.get() == hwnd.0 as usize {
+            RESET_TRACKBAR.set(0);
+            return LRESULT(0);
         }
         DefSubclassProc(hwnd, msg, wparam, lparam)
     }
@@ -1881,6 +1925,7 @@ fn build_crop(app: &mut App) {
         SendMessageW(angle, TBM_SETRANGEMAX, WPARAM(0), LPARAM(450));
         SendMessageW(angle, TBM_SETLINESIZE, WPARAM(0), LPARAM(5));
         SendMessageW(angle, TBM_SETPAGESIZE, WPARAM(0), LPARAM(50));
+        let _ = SetWindowSubclass(angle, Some(trackbar_subclass), 1, C_ANGLE_RESET as usize);
     }
     super::dialogs::tooltip(angle, "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.");
     add(C_LABELS + 6, w!("STATIC"), "Size", WINDOW_STYLE(0), fonts.ui);

@@ -699,12 +699,10 @@ struct CropInspector: View {
                         Text("\(session.angle.formatted(.number.precision(.fractionLength(1))))°")
                             .monospacedDigit().foregroundStyle(.secondary).frame(minWidth: 40, alignment: .trailing)
                     }
-                    Slider(value: Binding(get: { session.angle }, set: session.straighten), in: -CropSettings.maxAngle...CropSettings.maxAngle) {
-                        Text("Angle")
-                    } onEditingChanged: { editing in
-                        editing ? session.beginStraightening() : session.endStraightening()
-                    }
-                    .labelsHidden().controlSize(.small)
+                    ResettableSlider(title: "Angle", value: Binding(get: { session.angle }, set: session.straighten),
+                                     range: -CropSettings.maxAngle...CropSettings.maxAngle,
+                                     editing: { $0 ? session.beginStraightening() : session.endStraightening() },
+                                     reset: { session.beginStraightening(); session.straighten(to: 0); session.endStraightening() })
                 }
                 .help("Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.")
             }

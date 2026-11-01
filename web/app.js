@@ -373,7 +373,21 @@ function buildRow(c) {
   range.setAttribute("aria-label", c.label);
   range.addEventListener("input", () => { b.set(snap(Number(range.value), c)); changed("interactive"); });
   range.addEventListener("change", () => { b.set(snap(Number(range.value), c)); changed("settled"); });
-  title.addEventListener("dblclick", () => { b.set(b.initial()); changed("settled"); });
+  const resetToInitial = () => { b.set(b.initial()); changed("settled"); };
+  title.addEventListener("dblclick", resetToInitial);
+  // Double-click or Option/Alt-click on the slider resets it, as in
+  // Lightroom (macOS ResettableSlider). A double-click's first click still
+  // moves the thumb. Alt-click is caught before the range or touchSlider
+  // starts a drag.
+  track.addEventListener("dblclick", () => { if (!range.disabled) resetToInitial(); });
+  for (const type of ["pointerdown", "mousedown"]) {
+    track.addEventListener(type, (ev) => {
+      if (!ev.altKey || ev.button !== 0 || range.disabled) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (type === "pointerdown") resetToInitial();
+    }, { capture: true });
+  }
   value.addEventListener("click", () => {
     const field = el("input", { className: "value-field", inputMode: "decimal", value: formatValue(b.get(), c.step) });
     field.setAttribute("aria-label", c.label);

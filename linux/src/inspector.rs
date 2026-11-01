@@ -183,6 +183,14 @@ fn number_row(
     scale.set_draw_value(false);
     scale.set_hexpand(true);
     scale.update_property(&[gtk::accessible::Property::Label(knob.0)]);
+    reset_on_double_click(
+        &scale,
+        glib::clone!(
+            #[weak]
+            reset,
+            move || reset.emit_clicked()
+        ),
+    );
     outer.append(&scale);
     row.set_child(Some(&outer));
     reset_menu(&row, &reset);
@@ -1276,6 +1284,22 @@ fn reset_slot(reset: &gtk::Button) -> gtk::Stack {
     );
     slot.set_visible_child_name("empty");
     slot
+}
+
+/// Double-clicking a slider resets it, as in Lightroom (macOS
+/// `ResettableSlider`). Not Alt-click as on macOS and Windows: some window
+/// managers take Alt-drag to move the window. Claiming the second press keeps
+/// the scale from also starting a drag; the first still moves the knob.
+pub(crate) fn reset_on_double_click(scale: &gtk::Scale, reset: impl Fn() + 'static) {
+    let click = gtk::GestureClick::new();
+    click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    click.connect_pressed(move |gesture, count, _, _| {
+        if count == 2 {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            reset();
+        }
+    });
+    scale.add_controller(click);
 }
 
 pub(crate) fn reset_menu(widget: &impl IsA<gtk::Widget>, reset: &gtk::Button) {
