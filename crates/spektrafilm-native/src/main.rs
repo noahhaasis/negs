@@ -176,10 +176,11 @@ struct Session {
     thumbnail_wb_sources: Vec<WbSource>,
 }
 
-/// The source decoded with another RAW white balance, reduced for thumbnails.
+/// The source decoded with another RAW white balance, reduced to the largest
+/// frame a thumbnail develops (`THUMBNAIL_FRAME_MAX`).
 struct WbSource {
+    /// Effective (`RawWhiteBalance::effective`).
     wb: spektrafilm_io::RawWhiteBalance,
-    dimensions: (u32, u32),
     colour: spektrafilm_io::InputColour,
     image: ImageBuf,
     /// The auto-exposure metering frame of this decode.
@@ -375,11 +376,14 @@ impl Session {
         let interpretation = params.io.input_interpretation.clone();
         interpretation.validate()?;
         let (wb, lens) = (params.io.raw_white_balance, params.io.lens_correction);
-        // A preset's own RAW white balance needs a decode of its own. It gets
-        // a reduced copy here, so the main render keeps its decoded source.
+        // A preset whose RAW white balance isn't the photograph's needs a
+        // decode of its own. It gets a reduced copy here, so the main render
+        // keeps its decoded source. (A preset keeps the lens correction and
+        // the interpretation, so only the white balance can differ.)
         let own_decode = preset_applied
+            && spektrafilm_io::is_raw(&input)
             && self.source_generation == source_generation
-            && self.source.as_ref().is_some_and(|s| s.path == input && !s.current(&input, wb, lens, &interpretation));
+            && self.source.as_ref().is_some_and(|s| s.path == input && s.wb.effective() != wb.effective());
         if !own_decode {
             self.load_source(&input, source_generation, wb, lens, interpretation.clone())?;
         }
@@ -387,32 +391,41 @@ impl Session {
         let source = &self.source.as_ref().unwrap().image;
         // The thumbnail is the whole frame; Image Size describes the export.
         image_size::clear(&mut params);
-        let dimensions = thumbnail_dimensions((source.width, source.height), long_side, crop.as_ref());
+        let full = (source.width, source.height);
+        let dimensions = thumbnail_dimensions(full, long_side, crop.as_ref());
         let (working, metering) = if own_decode {
-            let index = match self.thumbnail_wb_sources.iter().position(|s| s.wb == wb && s.dimensions == dimensions) {
+            let index = match self.thumbnail_wb_sources.iter().position(|s| s.wb == wb.effective()) {
                 Some(index) => index,
                 None => {
                     let loaded = spektrafilm_io::load_image_colour(
                         &input, spektrafilm_io::Formats::Any, wb, lens, &interpretation,
                     )?;
                     let metering = spektrafilm_core::stages::filming::metering_preview(&loaded.image);
-                    let image = if dimensions == (loaded.image.width, loaded.image.height) {
+                    // The largest frame any thumbnail develops, so a new crop
+                    // reduces this copy instead of decoding again.
+                    let largest = thumbnail_dimensions(full, THUMBNAIL_FRAME_MAX, None);
+                    let image = if largest == (loaded.image.width, loaded.image.height) {
                         loaded.image
                     } else {
-                        downsample_area(&loaded.image, dimensions)
+                        downsample_area(&loaded.image, largest)
                     };
                     if self.thumbnail_wb_sources.len() >= THUMBNAIL_WB_SOURCES {
                         self.thumbnail_wb_sources.remove(0);
                     }
-                    self.thumbnail_wb_sources.push(WbSource { wb, dimensions, colour: loaded.colour, image, metering });
+                    self.thumbnail_wb_sources.push(WbSource { wb: wb.effective(), colour: loaded.colour, image, metering });
                     self.thumbnail_wb_sources.len() - 1
                 }
             };
             let entry = self.thumbnail_wb_sources.remove(index);
             params.io.apply_input_colour(&entry.colour);
-            let found = (entry.image.clone(), Some(entry.metering.clone()));
+            let working = if dimensions == (entry.image.width, entry.image.height) {
+                entry.image.clone()
+            } else {
+                downsample_area(&entry.image, dimensions)
+            };
+            let metering = Some(entry.metering.clone());
             self.thumbnail_wb_sources.push(entry);
-            found
+            (working, metering)
         } else {
             let Source { image: source, colour, .. } = self.source.as_ref().unwrap();
             params.io.apply_input_colour(colour);

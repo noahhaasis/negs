@@ -82,6 +82,35 @@ enum StockPreviewRules {
         return PreviewTile.Key(generation: generation, request: request)
     }
 
+    /// The white balance a RAW decode uses: the temperature and tint count
+    /// only in Custom mode (`RawWhiteBalance::effective`).
+    static func effectiveWhiteBalance(_ wb: JSONValue) -> JSONValue {
+        let mode = wb["mode"].string.isEmpty ? "as_shot" : wb["mode"].string
+        return mode == "custom" ? .object(["mode": .string(mode), "temperature": wb["temperature"], "tint": wb["tint"]])
+                                : .object(["mode": .string(mode)])
+    }
+
+    /// Whether a preset's RAW white balance makes the helper decode the RAW
+    /// again (~1.5 s for 60 MP).
+    static func needsOwnDecode(preset: JSONValue, photo: JSONValue) -> Bool {
+        effectiveWhiteBalance(preset) != effectiveWhiteBalance(photo)
+    }
+
+    /// The presets in list order, except on a RAW: those needing their own
+    /// decode come last, grouped by white balance, so each decode is followed
+    /// by the presets it serves and the quick ones show first.
+    static func renderOrder<P>(_ presets: [P], raw: Bool, whiteBalance: (P) -> JSONValue?, photo: JSONValue) -> [P] {
+        guard raw else { return presets }
+        var groups: [JSONValue] = []
+        let ranked = presets.enumerated().map { index, preset -> (rank: Int, index: Int, preset: P) in
+            guard let wb = whiteBalance(preset), needsOwnDecode(preset: wb, photo: photo) else { return (0, index, preset) }
+            let effective = effectiveWhiteBalance(wb)
+            if !groups.contains(effective) { groups.append(effective) }
+            return (1 + groups.firstIndex(of: effective)!, index, preset)
+        }
+        return ranked.sorted { ($0.rank, $0.index) < ($1.rank, $1.index) }.map(\.preset)
+    }
+
     enum Display: Equatable { case current, dimmed, placeholder }
 
     /// How a tile shows while `wanted` is its thumbnail: as is, dimmed after

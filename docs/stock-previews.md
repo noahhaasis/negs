@@ -84,9 +84,16 @@ calibration from ~140 ms to ~45 ms, which also makes ordinary film changes faste
   the request with `params` cut down to those paths and without `film`/`paper`. Lab edits
   then leave preset tiles alone. The catalog lists the paths as `preset_kept`; with an older
   helper that lacks it, key on everything.
-- A preset whose **RAW white balance** differs from the photograph's needs its own decode.
-  The helper keeps a reduced copy per white balance (`thumbnail_wb_sources`, up to 4) and
-  never replaces the main render's decoded source. Cost: see the macOS results.
+- On a RAW, a preset whose **white balance** differs from the photograph's needs its own
+  decode (~1.5 s for 60 MP). Only the effective white balance counts (temperature and tint
+  only in Custom mode, `RawWhiteBalance::effective`). The helper keeps one copy per white
+  balance (`thumbnail_wb_sources`, up to 4) reduced to `THUMBNAIL_FRAME_MAX`, so crop changes
+  don't decode again, and never replaces the main render's decoded source. Its pixels
+  match a full-resolution reduction to within 1/255. Noah chose exact thumbnails over
+  using the photograph's white balance (2026-11-02).
+- **Order:** on a RAW, the app renders the presets that need their own decode last,
+  grouped by white balance (`StockPreviewRules.renderOrder`); preset tiles wait while the
+  engine is still checking the preset files, so the order covers all of them.
 
 ## Linux reference implementation
 

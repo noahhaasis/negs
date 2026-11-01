@@ -173,18 +173,23 @@ builds, on AC power.
 | | |
 |---|---|
 | 24 MP JPEG, all 12 thumbnails | **0.48 s** (30–57 ms each) |
-| 60 MP DNG, all 12 thumbnails | **3.5 s**: two presets with another white balance cost ~1.5 s each (a full RAW decode); the other ten 31–92 ms |
-| Helper memory on that DNG | **3.7 GB vs 2.1 GB** with previews off: the two extra decodes' freed buffers stay with the allocator; the kept copies are ~20 MB |
+| 60 MP DNG, all 12 thumbnails | **3.2 s**: the 3 that share the photo's white balance first (~0.1 s), then one ~1.5 s RAW decode per other white balance (2 here) followed by the presets it serves (~30 ms each) |
+| Crop change on that DNG | **15–21 ms** per preset (no new decode); main render still a cache hit afterwards |
+| Helper memory on that DNG | **3.8 GB vs 2.1 GB** with previews off: the extra decodes' freed buffers stay with the allocator; the kept copies are ~20 MB |
+| Pixels vs a full-resolution reduction | within 1/255 (0.3 % of values differ by 1) |
 | Lab edit | preset tiles untouched (they depend only on the kept settings) |
 
 Screenshot: [presets on a RAW](stock-previews-macos/presets-raw.jpg).
 
-Open question for Noah: the RAW white-balance cost. While such a decode runs (~1.5 s) the
-helper is busy, so a slider drag started then waits for it; a crop change makes the
-helper decode again (the reduced copy is sized for the crop).
+Decided with Noah (2026-11-02): keep exact thumbnails for presets with another white
+balance, but render them last and don't decode again after a crop. While such a decode
+runs (~1.5 s, once per white balance per photograph) the helper is busy, so a slider drag
+started then waits for it. The extra memory stays (mimalloc would likely return it; see
+the macOS malloc notes).
 
 Implementation: `StockPreviewRules.presetCommand` / `presetKey`, `PreviewTile` (shared by
 stock and preset tiles), `StockPreviews.presets` / `moveTile`, `EditorModel.presetTexts`,
-the preset part of `pumpStockPreviews`, `PresetThumbnail` in `PresetInspector.swift`; the
-helper's `thumbnail` (`preset`, `own_decode`, `WbSource`) and its test
+the preset part of `pumpStockPreviews`, `PresetThumbnail` in `PresetInspector.swift`,
+`StockPreviewRules.renderOrder`; the helper's `thumbnail` (`preset`, `own_decode`, `WbSource`),
+`RawWhiteBalance::effective` and its test
 `preset_thumbnails_apply_the_preset_like_preset_import`.

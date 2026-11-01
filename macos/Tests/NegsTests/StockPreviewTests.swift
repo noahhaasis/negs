@@ -115,6 +115,27 @@ final class StockPreviewTests: XCTestCase {
         XCTAssertNotEqual(everything, StockPreviewRules.presetKey(command(state), kept: nil, generation: 1))
     }
 
+    func testPresetsNeedingTheirOwnRawDecodeComeLast() {
+        let asShot: JSONValue = .object(["mode": .string("as_shot"), "temperature": .number(5500), "tint": .number(1)])
+        let daylight: JSONValue = .object(["mode": .string("daylight"), "temperature": .number(5500), "tint": .number(1)])
+        var daylightOther = daylight; daylightOther["temperature"] = .number(6500)
+        let custom: JSONValue = .object(["mode": .string("custom"), "temperature": .number(5500), "tint": .number(1)])
+        var customOther = custom; customOther["temperature"] = .number(6500)
+        // Temperature and tint count only for a custom white balance.
+        XCTAssertFalse(StockPreviewRules.needsOwnDecode(preset: daylightOther, photo: daylight))
+        XCTAssertTrue(StockPreviewRules.needsOwnDecode(preset: daylight, photo: asShot))
+        XCTAssertTrue(StockPreviewRules.needsOwnDecode(preset: customOther, photo: custom))
+        XCTAssertFalse(StockPreviewRules.needsOwnDecode(preset: custom, photo: custom))
+
+        // Quick ones first, then each decode followed by the presets it serves.
+        let balances = ["a": daylight, "b": asShot, "c": custom, "d": asShot, "e": daylightOther]
+        let order = { (raw: Bool) in
+            StockPreviewRules.renderOrder(["a", "b", "c", "d", "e", "unknown"], raw: raw, whiteBalance: { balances[$0] }, photo: asShot)
+        }
+        XCTAssertEqual(order(true), ["b", "d", "unknown", "a", "e", "c"])
+        XCTAssertEqual(order(false), ["a", "b", "c", "d", "e", "unknown"])
+    }
+
     func testStaleTilesDimForTheSamePhotographAndBlankForAnother() {
         let request: [String: JSONValue] = ["film": .string("gold")]
         let shown = PreviewTile.Key(generation: 3, request: request)

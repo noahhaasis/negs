@@ -87,6 +87,12 @@ import UniformTypeIdentifiers
     private(set) var presetStatus: [PresetFile: PresetStatus] = [:]
     /// Each readable preset file's text, for its thumbnail.
     @ObservationIgnored private var presetTexts: [PresetFile: String] = [:]
+    /// Each valid preset's RAW white balance, to make thumbnails that need
+    /// their own RAW decode last.
+    @ObservationIgnored private var presetWhiteBalances: [PresetFile: JSONValue] = [:]
+    /// While the engine checks preset files: their thumbnails wait, so the
+    /// order (quick ones first) covers every preset.
+    @ObservationIgnored private var checkingPresets = 0
     /// The preset whose name is being edited in the list.
     var renamingPreset: URL?
     /// A preset New Preset just made: Escape while naming it removes it.
@@ -921,9 +927,11 @@ import UniformTypeIdentifiers
             let command = StockPreviewRules.request(for: entry.stock, state: rendered, stocks: stocks, source: source, generation: generation)
             wanted.append((entry.tile, PreviewTile.Key(generation: generation, request: command), command, entry.stock.id))
         }
-        if previews.presetsShown {
+        if previews.presetsShown, checkingPresets == 0 {
             let kept = catalog["preset_kept"].array.map(\.string)
-            for preset in presets {
+            let ordered = StockPreviewRules.renderOrder(presets, raw: isRaw, whiteBalance: { self.presetWhiteBalances[$0] },
+                                                        photo: rendered.params["io.raw_white_balance"])
+            for preset in ordered {
                 guard case .valid = presetStatus[preset], let text = presetTexts[preset], let tile = previews.tile(preset: preset.url) else { continue }
                 let command = StockPreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation)
                 wanted.append((tile, StockPreviewRules.presetKey(command, kept: kept.isEmpty ? nil : kept, generation: generation), command, preset.name))
@@ -1264,8 +1272,11 @@ import UniformTypeIdentifiers
         do { presets = try await presetLibrary.list() } catch { presets = []; report(error) }
         presetStatus = presetStatus.filter { presets.contains($0.key) }
         presetTexts = presetTexts.filter { presets.contains($0.key) }
+        presetWhiteBalances = presetWhiteBalances.filter { presets.contains($0.key) }
         stockPreviews.update(presets: presets)
         guard let engine else { return }
+        checkingPresets += 1
+        defer { checkingPresets -= 1; pumpStockPreviews() }
         for preset in presets where presetStatus[preset] == nil {
             do {
                 let text = try Self.presetText(try await presetLibrary.read(preset))
@@ -1273,11 +1284,11 @@ import UniformTypeIdentifiers
                 presetStatus[preset] = .valid(film: result["film"].string, paper: result["paper"].string,
                                               scan: result["params"]["io.scan_film"].bool)
                 presetTexts[preset] = text
+                presetWhiteBalances[preset] = result["params"]["io.raw_white_balance"]
             } catch {
                 presetStatus[preset] = .invalid(error.localizedDescription)
             }
         }
-        pumpStockPreviews()
     }
 
     /// The film, paper and Lab settings of a preset, as one undo step. The

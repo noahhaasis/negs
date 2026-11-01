@@ -60,6 +60,16 @@ impl Default for RawWhiteBalance {
 }
 
 impl RawWhiteBalance {
+    /// What the decoder uses: the temperature and tint only in Custom mode.
+    /// Two settings with the same effective value decode identically.
+    pub fn effective(self) -> Self {
+        if self.mode == RawWhiteBalanceMode::Custom {
+            self
+        } else {
+            Self { mode: self.mode, ..Self::default() }
+        }
+    }
+
     pub fn validate(self) -> Result<()> {
         if self.mode == RawWhiteBalanceMode::Custom {
             ensure!(
