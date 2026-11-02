@@ -10,6 +10,9 @@ use spektrafilm_math::image::ImageBuf;
 
 use crate::RawWhiteBalance;
 
+mod dng;
+pub use dng::is_dng;
+
 #[cfg(all(target_os = "macos", feature = "apple-raw"))]
 mod apple;
 #[cfg(all(target_os = "macos", feature = "apple-raw"))]
@@ -94,11 +97,13 @@ impl RawDecoder for RawlerDecoder {
     fn name(&self) -> &'static str {
         "rawler"
     }
-    /// No lens corrections yet (plan Phase 1b).
+    /// Applies the corrections in DNG opcodes and Sony and Fujifilm
+    /// metadata ([`crate::lens`]).
     fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
+        let raw = crate::load_raw_rawler(path, options.apply_orientation, options.white_balance, options.lens_correction)?;
         Ok(RawImage {
-            image: crate::load_raw_rawler(path, options.apply_orientation, options.white_balance)?,
-            lens_correction_supported: false,
+            image: raw.image,
+            lens_correction_supported: raw.lens.is_some(),
         })
     }
 }
@@ -337,6 +342,29 @@ mod tests {
             (on.image.width, on.image.height)
         );
         assert_eq!(off.image.data != on.image.data, on.lens_correction_supported);
+        Ok(())
+    }
+
+    /// Where Apple cannot correct a file, Negs corrects it unoriented and
+    /// orients it itself. That orientation must equal Apple's to the bit, so
+    /// the developed photograph is the same as Apple orienting it.
+    #[cfg(all(target_os = "macos", feature = "apple-raw"))]
+    #[test]
+    #[ignore = "requires a local camera RAW: set SPEKTRAFILM_RAW_TEST_FILE"]
+    fn apple_orientation_matches_negs() -> Result<()> {
+        let path = std::env::var_os("SPEKTRAFILM_RAW_TEST_FILE")
+            .context("SPEKTRAFILM_RAW_TEST_FILE is required")?;
+        let path = Path::new(&path);
+        let apple = AppleRawDecoder.decode(path, RawDecodeOptions::default())?.image;
+        let upright = AppleRawDecoder.decode(
+            path,
+            RawDecodeOptions { apply_orientation: false, ..Default::default() },
+        )?;
+        let src = rawler::rawsource::RawSource::new(path)?;
+        let orientation = crate::raw_exif_orientation(&src, &Default::default());
+        let ours = upright.image.oriented(orientation);
+        assert_eq!((ours.width, ours.height), (apple.width, apple.height));
+        assert!(ours.data == apple.data, "orientation {orientation} differs from Apple's");
         Ok(())
     }
 }

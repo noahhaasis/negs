@@ -11,6 +11,8 @@
 typedef struct {
     float *pixels; // RGBA float32, top row first, malloc-owned until release.
     uint32_t width, height, monochrome, lens_correction_supported;
+    // The file's EXIF orientation (1-8), and whether the pixels have it applied.
+    uint32_t orientation, oriented;
     char version[32];
     char error[768];
 } SFAppleRaw;
@@ -22,7 +24,10 @@ static int fail(SFAppleRaw *out, int code, NSString *message) {
 
 // 0 success, 1 unsupported format, 2 I/O/render failure. The caller always frees
 // pixels, including on exceptions. No exception crosses the C ABI.
-int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_correction, SFAppleRaw *out) {
+// `defer_orientation` leaves a file Apple cannot lens-correct unoriented, so the
+// caller can correct it in sensor coordinates first and orient it afterwards.
+int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_correction,
+                        int defer_orientation, SFAppleRaw *out) {
     @autoreleasepool {
         @try {
             NSURL *url = CFBridgingRelease(CFURLCreateFromFileSystemRepresentation(
@@ -33,6 +38,10 @@ int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_corr
             if (!raw) return fail(out, 1, @"Apple RAW does not support this file on this macOS version");
             raw.draftModeEnabled = NO;
             raw.scaleFactor = 1;
+            out->orientation = (uint32_t)raw.orientation;
+            if (out->orientation < 1 || out->orientation > 8) out->orientation = 1;
+            if (defer_orientation && !raw.isLensCorrectionSupported) orient = 0;
+            out->oriented = orient && out->orientation != 1;
             if (!orient) raw.orientation = kCGImagePropertyOrientationUp;
             // Explicit scene-linear development: no automatic photographic look.
             raw.exposure = 0;
@@ -61,9 +70,12 @@ int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_corr
                 [raw setValue:@YES forKey:@"highlightRecoveryEnabled"];
             NSDictionary *properties = raw.properties;
             NSDictionary *tiff = properties[(__bridge NSString *)kCGImagePropertyTIFFDictionary];
+            // BlackIsZero marks a monochrome DNG. Olympus/OM ORFs tag their
+            // colour CFA image the same way, so trust it only in a DNG.
             out->monochrome = [properties[(__bridge NSString *)kCGImagePropertyColorModel]
                                 isEqual:(__bridge NSString *)kCGImagePropertyColorModelGray]
-                || [tiff[(__bridge NSString *)kCGImagePropertyTIFFPhotometricInterpretation] intValue] == 1;
+                || (properties[(__bridge NSString *)kCGImagePropertyDNGDictionary] != nil
+                    && [tiff[(__bridge NSString *)kCGImagePropertyTIFFPhotometricInterpretation] intValue] == 1);
             // Other modes develop at D65, then use the same CAT02/ACES tint
             // operation as rawler. Apple's unrelated -150..150 tint is unused.
             if (!as_shot && !out->monochrome) raw.neutralChromaticity = CGPointMake(0.3127, 0.3290);

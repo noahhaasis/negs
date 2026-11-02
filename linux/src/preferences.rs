@@ -29,6 +29,11 @@ pub struct Preferences {
     pub png_bit_depth: u32,
     pub tiff_bit_depth: u32,
     pub last_save_folder: Option<PathBuf>,
+    /// Film, paper and preset thumbnails rather than plain menus and lists.
+    pub previews: bool,
+    /// Changing the film leaves the paper as it is, rather than switching to
+    /// the film's own paper.
+    pub keep_paper: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -53,6 +58,8 @@ impl Default for Preferences {
             png_bit_depth: 8,
             tiff_bit_depth: 16,
             last_save_folder: None,
+            previews: true,
+            keep_paper: false,
         }
     }
 }
@@ -177,6 +184,35 @@ impl Editor {
             }
         ));
         group.add(&appearance);
+        let previews = adw::SwitchRow::builder()
+            .title("Film, paper and preset previews")
+            .subtitle("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
+            .active(self.preferences.borrow().previews)
+            .build();
+        previews.connect_active_notify(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |r| {
+                ui.preferences.borrow_mut().previews = r.is_active();
+                crate::stock_browser::apply(&ui);
+            }
+        ));
+        group.add(&previews);
+        let keep_paper = adw::SwitchRow::builder()
+            .title("Keep paper when changing film")
+            .subtitle("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.")
+            .active(self.preferences.borrow().keep_paper)
+            .build();
+        keep_paper.connect_active_notify(glib::clone!(
+            #[weak(rename_to=ui)]
+            self,
+            move |r| {
+                ui.preferences.borrow_mut().keep_paper = r.is_active();
+                // Film thumbnails show what a click would develop.
+                crate::stock_browser::pump(&ui);
+            }
+        ));
+        group.add(&keep_paper);
         let recent = adw::ActionRow::builder()
             .title("Recent photographs")
             .subtitle("Paths are stored locally in your session")

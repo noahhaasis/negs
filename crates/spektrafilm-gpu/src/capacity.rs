@@ -1,4 +1,5 @@
-//! Admission checks for Windows/Linux Vulkan, before full-image GPU allocation.
+//! Admission checks for Windows/Linux Vulkan and browser WebGPU, before
+//! full-image GPU allocation.
 //! This is a conservative memory estimate, not device-loss recovery or a
 //! guarantee against long-running shaders. Metal keeps its existing path.
 
@@ -102,6 +103,17 @@ pub(crate) fn vulkan_limits(adapter: &wgpu::Adapter) -> CapacityLimits {
     }
 }
 
+/// Browsers report the buffer limits but not the GPU's memory.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn browser_limits(adapter: &wgpu::Adapter) -> CapacityLimits {
+    let limits = adapter.limits();
+    CapacityLimits {
+        max_binding: u64::from(limits.max_storage_buffer_binding_size),
+        max_buffer: limits.max_buffer_size,
+        memory_budget: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,3 +171,4 @@ mod tests {
         assert!(limits.buffer(2_147_483_648, "FFT").is_err());
     }
 }
+

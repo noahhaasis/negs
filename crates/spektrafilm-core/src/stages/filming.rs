@@ -8,7 +8,7 @@ use spektrafilm_math::colorspace::{self, RgbColourspace};
 use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f32, from_f64, to_f64};
 use spektrafilm_math::spectral::TcLut;
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::params::RuntimeParams;
 use crate::profile::Profile;

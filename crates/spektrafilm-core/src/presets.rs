@@ -531,7 +531,7 @@ fn load_stock(data_dir: &Path, id: &str, paper: bool) -> Result<Profile, String>
     let what = if paper { "print paper" } else { "film" };
     let known = !id.is_empty()
         && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        && data_dir.join("profiles").join(format!("{id}.json")).is_file();
+        && crate::data_fs::is_file(&data_dir.join("profiles").join(format!("{id}.json")));
     if !known {
         return Err(format!("Negs doesn't have the {what} “{id}”."));
     }

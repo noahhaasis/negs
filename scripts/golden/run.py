@@ -55,7 +55,10 @@ STOCKS = [
 PRESET_NAMES = ["det", "colour", "grain_on", "grain_off", "grain_on_coarse", "grain_off_coarse",
                 "boost", "diff_bpm", "diff_cinebloom", "diff_enlarger", "diff_glimmer", "dir_wide",
                 "halation_big", "lens_cam_large", "lens_cam_small", "lens_scan_large",
-                "lens_scan_small", "morph", "preflash", "unsharp_iir", "unsharp_strong"]
+                "lens_scan_small", "morph", "preflash", "unsharp_iir", "unsharp_strong",
+                # Grain off, so `quality` checks the GPU preflash against the reference
+                # where the GPU folds print exposure and white correction (09a66ad).
+                "preflash_exposure", "preflash_white"]
 LAYOUTS = {
     "border_35mm": ["--border", "35mm"],
     "border_keyline": ["--border", "keyline", "--instagram"],

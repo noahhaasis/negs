@@ -236,12 +236,98 @@ struct LabeledSlider: View {
                         .help("Click to type a value")
                 }
             }
-            Slider(value: value, in: range) { Text(title) } onEditingChanged: { editing($0) }
-            .labelsHidden().controlSize(.small)
+            ResettableSlider(title: title, value: value, range: range, editing: editing, reset: reset)
         }
         .padding(.vertical, 1)
         .resettable(modified: modified, reset: reset)
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// A small slider that double-click or Option-click resets, as in Lightroom
+/// and Capture One. AppKit, because NSSlider tracks the mouse itself and
+/// SwiftUI's tap gestures on a Slider never fire. A double-click's first
+/// click still moves the knob; the second resets.
+struct ResettableSlider: NSViewRepresentable {
+    let title: String
+    let value: Binding<Double>
+    let range: ClosedRange<Double>
+    let editing: (Bool) -> Void
+    let reset: () -> Void
+
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = Control()
+        slider.isContinuous = true
+        slider.target = context.coordinator
+        slider.action = #selector(Coordinator.changed(_:))
+        slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        slider.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return slider
+    }
+
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.parent = self
+        let slider = slider as! Control
+        slider.editing = editing
+        slider.reset = reset
+        slider.setAccessibilityLabel(title)
+        // SwiftUI applies its environment's control size after makeNSView.
+        if slider.controlSize != .small { slider.controlSize = .small }
+        if slider.minValue != range.lowerBound { slider.minValue = range.lowerBound }
+        if slider.maxValue != range.upperBound { slider.maxValue = range.upperBound }
+        slider.wanted = value.wrappedValue
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        var parent: ResettableSlider
+        init(_ parent: ResettableSlider) { self.parent = parent }
+        @objc func changed(_ slider: NSSlider) {
+            parent.value.wrappedValue = slider.doubleValue
+            // Read back the snapped value at once rather than waiting for
+            // updateNSView, so the knob's target is current when a drag ends.
+            (slider as! Control).wanted = parent.value.wrappedValue
+        }
+    }
+
+    final class Control: NSSlider {
+        var editing: (Bool) -> Void = { _ in }
+        var reset: () -> Void = {}
+        /// The model's value, snapped to the step, which the knob shows.
+        var wanted = 0.0 {
+            didSet { if !tracking { show() } }
+        }
+        private var tracking = false
+        private var settling: Timer?
+
+        private func show() {
+            if doubleValue != wanted { doubleValue = wanted }
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 || event.modifierFlags.contains(.option) {
+                reset()
+                return
+            }
+            settling?.invalidate()
+            // NSSlider tracks the drag inside mouseDown, so it returns when the mouse is released.
+            tracking = true
+            editing(true)
+            super.mouseDown(with: event)
+            tracking = false
+            editing(false)
+            show()
+            // On macOS 26 the slider writes its last tracked value back about
+            // 0.25 s after release, which undoes the step snap and a
+            // double-click's reset. Keep showing the model's value until then.
+            // A default-mode timer, so it never fires during a drag.
+            let until = Date(timeIntervalSinceNow: 0.6)
+            settling = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] timer in
+                guard let self, Date() < until else { return timer.invalidate() }
+                self.show()
+            }
+        }
     }
 }
 
@@ -471,18 +557,27 @@ struct AdjustmentInspector: View {
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
         Section("Film & Paper") {
-            Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
-                ForEach(model.filmGroups) { group in
-                    Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+            // Preview grids, or the plain menus when Settings turns them off.
+            if model.previews.enabled {
+                StockFoldout(model: model, paper: false)
+            } else {
+                Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
+                    ForEach(model.filmGroups) { group in
+                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                    }
                 }
             }
             developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
             Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
                 .help("Skip printing and scan the developed film, as for slides.")
             if !scanning {
-                Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
-                    ForEach(model.paperGroups) { group in
-                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                if model.previews.enabled {
+                    StockFoldout(model: model, paper: true)
+                } else {
+                    Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
+                        ForEach(model.paperGroups) { group in
+                            Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                        }
                     }
                 }
                 developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")

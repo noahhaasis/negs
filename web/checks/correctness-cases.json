@@ -1,0 +1,771 @@
+[
+ {
+  "name": "portra400-card",
+  "image": "results/card.jpg",
+  "film": "kodak_portra_400",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "portra400-hills",
+  "image": "results/hills.jpg",
+  "film": "kodak_portra_400",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "portra400-coast",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "portra400-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "gold200-coast",
+  "image": "results/coast.jpg",
+  "film": "kodak_gold_200",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "ektar100-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_ektar_100",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "portra160-premier-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_160",
+  "paper": "kodak_endura_premier",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "portra800push2-hills",
+  "image": "results/hills.jpg",
+  "film": "kodak_portra_800_push2",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "c200-coast",
+  "image": "results/coast.jpg",
+  "film": "fujifilm_c200",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "pro400h-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "fujifilm_pro_400h",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "xtra400-supra-hills",
+  "image": "results/hills.jpg",
+  "film": "fujifilm_xtra_400",
+  "paper": "kodak_supra_endura",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "ultramax-ultra-card",
+  "image": "results/card.jpg",
+  "film": "kodak_ultramax_400",
+  "paper": "kodak_ultra_endura",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "portra400-edge-coast",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": "kodak_ektacolor_edge",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "vision500t-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_vision3_500t",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "vision50d-2393-coast",
+  "image": "results/coast.jpg",
+  "film": "kodak_vision3_50d",
+  "paper": "kodak_2393",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "verita-hills",
+  "image": "results/hills.jpg",
+  "film": "kodak_verita_200d",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "vision200t-card",
+  "image": "results/card.jpg",
+  "film": "kodak_vision3_200t",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "doublex-2302-hills",
+  "image": "results/hills.jpg",
+  "film": "kodak_doublex",
+  "paper": "kodak_2302",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "trix-d76-mgrc-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_trix400_d76_8min",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "doublex-mgrc-card",
+  "image": "results/card.jpg",
+  "film": "kodak_doublex",
+  "paper": "ilford_mgrc_deluxe_grade2",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "velvia-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "fujifilm_velvia_100",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "provia-coast",
+  "image": "results/coast.jpg",
+  "film": "fujifilm_provia_100f",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "ektachrome-hills",
+  "image": "results/hills.jpg",
+  "film": "kodak_ektachrome_100",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "kodachrome-card",
+  "image": "results/card.jpg",
+  "film": "kodak_kodachrome_64",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "trix-reversal-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_trix",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "portra400-scan-coast",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "io.scan_film": true
+  }
+ },
+ {
+  "name": "vision250d-scan-hills",
+  "image": "results/hills.jpg",
+  "film": "kodak_vision3_250d",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "io.scan_film": true
+  }
+ },
+ {
+  "name": "ev-plus2",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.exposure_compensation_ev": 2
+  }
+ },
+ {
+  "name": "ev-minus2",
+  "image": "results/hills.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.exposure_compensation_ev": -2
+  }
+ },
+ {
+  "name": "ae-off",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.auto_exposure": false
+  }
+ },
+ {
+  "name": "meter-matrix",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.auto_exposure_method": "matrix"
+  }
+ },
+ {
+  "name": "meter-highlight",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.auto_exposure_method": "highlight_weighted"
+  }
+ },
+ {
+  "name": "lens-blur",
+  "image": "results/card.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.lens_blur_um": 8
+  }
+ },
+ {
+  "name": "format-120",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.film_format_mm": 60
+  }
+ },
+ {
+  "name": "format-small",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.film_format_mm": 16
+  }
+ },
+ {
+  "name": "lens-diffusion",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.diffusion_filter.active": true,
+   "camera.diffusion_filter.strength": 1
+  }
+ },
+ {
+  "name": "lens-glimmer",
+  "image": "results/card.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "camera.diffusion_filter.active": true,
+   "camera.diffusion_filter.filter_family": "glimmerglass",
+   "camera.diffusion_filter.halo_warmth": 0.5
+  }
+ },
+ {
+  "name": "print-diffusion",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "enlarger.diffusion_filter.active": true,
+   "enlarger.diffusion_filter.filter_family": "cinebloom",
+   "enlarger.diffusion_filter.strength": 0.8
+  }
+ },
+ {
+  "name": "halation-off",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "film_render.halation.active": false
+  }
+ },
+ {
+  "name": "halation-strong",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "film_render.halation.halation_amount": 3,
+   "film_render.halation.scatter_amount": 2,
+   "film_render.halation.halation_spatial_scale": 2
+  }
+ },
+ {
+  "name": "dir-off",
+  "image": "results/hills.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "film_render.dir_couplers.active": false
+  }
+ },
+ {
+  "name": "dir-strong",
+  "image": "results/hills.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "film_render.dir_couplers.amount": 2,
+   "film_render.dir_couplers.diffusion_size_um": 60
+  }
+ },
+ {
+  "name": "film-curves",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "film_render.density_curves_morph.active": true,
+   "film_render.density_curves_morph.gamma_factor": 1.3,
+   "film_render.density_curves_morph.gamma_factor_red": 0.8
+  }
+ },
+ {
+  "name": "print-curves",
+  "image": "results/hills.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "print_render.density_curves_morph.active": true,
+   "print_render.density_curves_morph.gamma_factor": 0.7,
+   "print_render.density_curves_morph.gamma_factor_fast": 1.4
+  }
+ },
+ {
+  "name": "film-base",
+  "image": "results/card.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "film_render.base.active": false
+  }
+ },
+ {
+  "name": "film-base-tuned",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "film_render.base.scale": 1.5,
+   "film_render.base.tilt": 0.5
+  }
+ },
+ {
+  "name": "print-base-off",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "print_render.base.active": false
+  }
+ },
+ {
+  "name": "enlarger-shifts",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "enlarger.m_filter_shift": 0.2,
+   "enlarger.y_filter_shift": -0.15
+  }
+ },
+ {
+  "name": "preflash",
+  "image": "results/hills.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "enlarger.preflash_exposure": 0.05,
+   "enlarger.preflash_m_filter_shift": 0.1
+  }
+ },
+ {
+  "name": "print-exposure",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "enlarger.print_exposure": 1.6,
+   "enlarger.print_exposure_compensation": false
+  }
+ },
+ {
+  "name": "scanner",
+  "image": "results/card.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "scanner.black_correction": true,
+   "scanner.white_correction": true,
+   "scanner.lens_blur": 1,
+   "scanner.unsharp_mask": [
+    0,
+    0
+   ]
+  }
+ },
+ {
+  "name": "cat16-off",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "settings.use_cat16": false
+  }
+ },
+ {
+  "name": "out-gamut-off",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "io.output_gamut_compress.algorithm": "off"
+  }
+ },
+ {
+  "name": "in-gamut-off",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "io.input_gamut_compress.algorithm": "off"
+  }
+ },
+ {
+  "name": "mallett",
+  "image": "results/hills.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "settings.rgb_to_raw_method": "mallett2019"
+  }
+ },
+ {
+  "name": "linear-out",
+  "image": "results/coast.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false,
+   "io.output_cctf_encoding": false
+  }
+ },
+ {
+  "name": "full-portra400-cliffs",
+  "image": "results/cliffs.jpg",
+  "film": "kodak_portra_400",
+  "paper": null,
+  "det": false,
+  "edits": {}
+ },
+ {
+  "name": "full-velvia-coast",
+  "image": "results/coast.jpg",
+  "film": "fujifilm_velvia_100",
+  "paper": null,
+  "det": false,
+  "edits": {}
+ },
+ {
+  "name": "full-doublex-hills",
+  "image": "results/hills.jpg",
+  "film": "kodak_doublex",
+  "paper": "kodak_2302",
+  "det": false,
+  "edits": {}
+ },
+ {
+  "name": "full-vision500t-card",
+  "image": "results/card.jpg",
+  "film": "kodak_vision3_500t",
+  "paper": null,
+  "det": false,
+  "edits": {}
+ },
+ {
+  "name": "arw-portra400",
+  "image": "results/sony.arw",
+  "film": "kodak_portra_400",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "arw-velvia",
+  "image": "results/sony.arw",
+  "film": "fujifilm_velvia_100",
+  "det": true,
+  "edits": {
+   "film_render.grain.active": false,
+   "film_render.glare.active": false,
+   "print_render.glare.active": false
+  }
+ },
+ {
+  "name": "arw-full-gold200",
+  "image": "results/sony.arw",
+  "film": "kodak_gold_200",
+  "paper": null,
+  "det": false,
+  "edits": {}
+ }
+]

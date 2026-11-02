@@ -6,7 +6,8 @@
 ///   3. Compute print exposure normalization factor from midgray spectral density
 ///   4. Pass all calibration data to the pipeline stages
 use std::path::Path;
-use std::time::Instant;
+use web_time::Instant;
+
 
 use spektrafilm_gpu::ComputeBackend;
 use spektrafilm_io::image_size::SizeError;
@@ -184,6 +185,9 @@ pub struct Pipeline {
     /// caller resized it before the pipeline. `None` meters the image given
     /// to `process`, before its own working-size resize.
     metering_preview: Option<ImageBuf>,
+    /// The auto-exposure EV already metered for this frame by a caller that
+    /// renders it repeatedly; see [`Self::with_autoexposure_ev`].
+    autoexposure_ev: Option<f64>,
 }
 
 impl Pipeline {
@@ -206,9 +210,11 @@ impl Pipeline {
 
     /// Return a copy of this calibrated pipeline with updated runtime params.
     /// Callers must only use this when the calibration-affecting inputs match
-    /// the pipeline that was originally built. The print exposure factor
-    /// follows `params` (exposure compensation, film gamma, film curves), so
-    /// those don't.
+    /// the pipeline that was originally built
+    /// ([`crate::preview::preview_pipeline_cache_key`]). The enlarger's M/Y
+    /// shifts and preflash, and the print exposure factor (exposure
+    /// compensation, film gamma, film curves), follow `params`, as a pipeline
+    /// built with them would have them, so those don't.
     pub fn with_params(mut self, params: RuntimeParams) -> Self {
         let mut params = params;
         apply_film_specific_params(&self.film, &mut params);
@@ -218,8 +224,44 @@ impl Pipeline {
         );
         self.params = params;
         self.apply_film_curves_morph();
+        // The simplified pipeline (`Pipeline::new`) neither calibrates nor
+        // preflashes; it keeps the enlarger it was built with.
+        if self.tc_lut.is_some() {
+            let [c, m, y] = self.neutral_cmy;
+            self.params.enlarger.c_filter_neutral = c as f32;
+            self.params.enlarger.m_filter_neutral = m as f32;
+            self.params.enlarger.y_filter_neutral = y as f32;
+            self.filter_enlarger();
+        }
         self.print_exposure_factor = self.compute_print_exposure_factor();
         self
+    }
+
+    /// The print illuminant through the enlarger's neutral filters plus the
+    /// M/Y shifts, and the preflash's constant raw exposure, from
+    /// `self.params.enlarger`. f64 for Python parity: the neutral C/M/Y come
+    /// from the f64 lookup, the shifts are f32 in params.
+    fn filter_enlarger(&mut self) {
+        let [c, m, y] = self.neutral_cmy;
+        let enlarger = &self.params.enlarger;
+        self.print_illuminant = enlarger::enlarger_filtered_illuminant_f64(
+            &enlarger.illuminant,
+            c,
+            m + enlarger.m_filter_shift as f64,
+            y + enlarger.y_filter_shift as f64,
+        );
+        // Constant enlarger preflash exposure (Python `_compute_raw_preflash`):
+        // film base density lit by the preflash-filtered illuminant, integrated
+        // against the print sensitivity. Off (→ [0; 3]) unless preflash_exposure > 0.
+        // Upstream lights the profile's base here, without `film_render.base`.
+        self.preflash_raw = enlarger::compute_preflash_raw(
+            enlarger,
+            c,
+            m,
+            y,
+            &self.film.data.base_density,
+            &self.print_sensitivity,
+        );
     }
 
     /// Re-filter the enlarger with M and Y filter shifts in f64, the unknowns
@@ -247,6 +289,15 @@ impl Pipeline {
     /// as upstream meters the frame before its crop and resize.
     pub fn with_metering_preview(mut self, preview: ImageBuf) -> Self {
         self.metering_preview = Some(preview);
+        self
+    }
+
+    /// Use `ev`, a [`Self::frame_autoexposure_ev`] of this frame from an
+    /// earlier render, instead of metering again. Only valid while the
+    /// metering inputs match: the film, the metering method and the input
+    /// colour space and settings.
+    pub fn with_autoexposure_ev(mut self, ev: f64) -> Self {
+        self.autoexposure_ev = Some(ev);
         self
     }
 
@@ -286,6 +337,9 @@ impl Pipeline {
     pub fn frame_autoexposure_ev(&self, image: &ImageBuf) -> f64 {
         if !self.params.camera.auto_exposure {
             return 0.0;
+        }
+        if let Some(ev) = self.autoexposure_ev {
+            return ev;
         }
         match &self.metering_preview {
             Some(preview) => self.autoexposure_ev(preview),
@@ -386,6 +440,7 @@ impl Pipeline {
             preflash_raw: [0.0; 3],
             output_gamut,
             metering_preview: None,
+            autoexposure_ev: None,
         };
         pipeline.apply_film_curves_morph();
         pipeline
@@ -441,7 +496,6 @@ impl Pipeline {
             params.enlarger.m_filter_neutral as f64,
             params.enlarger.y_filter_neutral as f64,
         ]);
-        let (c_neutral_f64, m_neutral_f64, y_neutral_f64) = (cmy_f64[0], cmy_f64[1], cmy_f64[2]);
 
         // Film sensitivity: Python `sensitivity = np.nan_to_num(10 ** log_sensitivity)` — f64.
         let log_sens = film.log_sensitivity_f64();
@@ -547,15 +601,6 @@ impl Pipeline {
         // The TC LUT is used unnormalized — Python's `rgb_to_raw_hanatos2025` does NOT scale it.
         // See `spektrafilm/utils/spectral_upsampling.py:rgb_to_raw_hanatos2025` (comment line 373).
 
-        // Compute enlarger illuminant with dichroic filters — f64 for Python parity.
-        // c/m/y come from the f64 lookup, shift values are f32 in params.
-        let print_illuminant = enlarger::enlarger_filtered_illuminant_f64(
-            &params.enlarger.illuminant,
-            c_neutral_f64,
-            m_neutral_f64 + params.enlarger.m_filter_shift as f64,
-            y_neutral_f64 + params.enlarger.y_filter_shift as f64,
-        );
-
         // Print sensitivity: Python `sensitivity = np.nan_to_num(10 ** log_sensitivity)` — f64 with NaN→0.
         let print_log_sens = print.log_sensitivity_f64();
         let print_sensitivity: Vec<[f64; 3]> = print_log_sens
@@ -570,19 +615,6 @@ impl Pipeline {
             })
             .collect();
 
-        // Constant enlarger preflash exposure (Python `_compute_raw_preflash`):
-        // film base density lit by the preflash-filtered illuminant, integrated
-        // against the print sensitivity. Off (→ [0; 3]) unless preflash_exposure > 0.
-        // Upstream lights the profile's base here, without `film_render.base`.
-        let preflash_raw = enlarger::compute_preflash_raw(
-            &params.enlarger,
-            c_neutral_f64,
-            m_neutral_f64,
-            y_neutral_f64,
-            &film.data.base_density,
-            &print_sensitivity,
-        );
-
         let output_gamut = crate::gamut_compression::OutputGamutCompress::build(
             &params.io.output_gamut_compress,
             &params.io.output_color_space,
@@ -594,13 +626,16 @@ impl Pipeline {
             tc_lut,
             front_illuminant,
             print_exposure_factor: 1.0,
-            print_illuminant,
+            print_illuminant: Vec::new(),
             neutral_cmy: cmy_f64,
             print_sensitivity,
-            preflash_raw,
+            preflash_raw: [0.0; 3],
             output_gamut,
             metering_preview: None,
+            autoexposure_ev: None,
         };
+        // The enlarger illuminant with its dichroic filters, and the preflash.
+        pipeline.filter_enlarger();
         pipeline.apply_film_curves_morph();
         pipeline.print_exposure_factor = pipeline.compute_print_exposure_factor();
 
@@ -810,7 +845,8 @@ impl Pipeline {
         // highlight boost, and enlarger diffusion. Backends that do not
         // implement the resident chain return `None` and fall through.
         if self.tc_lut.is_some() {
-            match self.try_gpu_resident(&image, backend, &color_ref, autoexposure_ev) {
+            let run = |params: &spektrafilm_gpu::FilmChainParams<'_>| backend.try_run_film_chain(params);
+            match self.try_gpu_resident(&image, None, backend, &color_ref, autoexposure_ev, run) {
                 Ok(Some(out)) => {
                     tracing::info!("pipeline: gpu-resident fast path complete");
                     return Ok((self.finish_resident(out, backend), backend.name()));
@@ -899,6 +935,74 @@ impl Pipeline {
         image: &ImageBuf,
         backend: &dyn ComputeBackend,
     ) -> Option<ImageBuf> {
+        let run = |params: &spektrafilm_gpu::FilmChainParams<'_>| backend.try_run_film_chain(params);
+        let out = self.borrowed_resident(image, None, backend, run)?;
+        let out = self.finish_resident(out, backend);
+        Some(self.apply_post(out))
+    }
+
+    /// [`Self::process_resident_borrowed`] in two halves around the GPU
+    /// readback, for browsers, where it can't block: this submits the chain,
+    /// made into `output`, and [`Self::finish_submitted`] finishes it once
+    /// `on_mapped` has run. Ask for display output only when
+    /// [`Self::display_on_gpu`]. `image_key` names `image`'s pixels
+    /// ([`spektrafilm_gpu::FilmChainParams::image_key`]).
+    pub fn submit_resident(
+        &self,
+        image: &ImageBuf,
+        image_key: Option<u64>,
+        backend: &dyn ComputeBackend,
+        output: spektrafilm_gpu::ChainOutput,
+        on_mapped: Box<dyn FnOnce() + Send>,
+    ) -> Option<Box<dyn spektrafilm_gpu::PendingFilmChain>> {
+        let submit =
+            |params: &spektrafilm_gpu::FilmChainParams<'_>| backend.submit_film_chain(params, output, on_mapped);
+        self.borrowed_resident(image, image_key, backend, submit)
+    }
+
+    /// The finished chain: a scan finished as `process_resident_borrowed`
+    /// finishes it, display output as it is.
+    pub fn finish_submitted(
+        &self,
+        pending: Box<dyn spektrafilm_gpu::PendingFilmChain>,
+        backend: &dyn ComputeBackend,
+    ) -> spektrafilm_gpu::ChainResult {
+        match pending.finish() {
+            spektrafilm_gpu::ChainResult::Scan(out) => {
+                spektrafilm_gpu::ChainResult::Scan(self.apply_post(self.finish_resident(out, backend)))
+            }
+            display => display,
+        }
+    }
+
+    /// Whether the resident chain's display output
+    /// ([`spektrafilm_gpu::ChainOutput::Rgba8`], with [`Self::display_post`])
+    /// is what `preview::display_rgba` makes of the finished, post-adjusted
+    /// scan: an sRGB output, encoded on the GPU if at all.
+    pub fn display_on_gpu(&self, backend: &dyn ComputeBackend) -> bool {
+        let output = spektrafilm_math::colorspace::RgbColourspace::output(&self.params.io.output_color_space);
+        backend.resident_chain_applies_post_scan()
+            && output.name == spektrafilm_math::colorspace::SRGB.name
+            && (!self.params.io.output_cctf_encoding || self.gpu_encodes_output())
+    }
+
+    /// The post adjustments for the GPU display pass, as [`Self::apply_post`]
+    /// makes them; none when they change nothing.
+    pub fn display_post(&self) -> Option<spektrafilm_gpu::DisplayPost> {
+        let post = &self.params.post;
+        (!post.is_identity()).then(|| {
+            crate::post::PostProcess::new(post, self.params.io.output_cctf_encoding, &self.params.io.output_color_space)
+                .display()
+        })
+    }
+
+    fn borrowed_resident<T>(
+        &self,
+        image: &ImageBuf,
+        image_key: Option<u64>,
+        backend: &dyn ComputeBackend,
+        run: impl FnOnce(&spektrafilm_gpu::FilmChainParams<'_>) -> Option<T>,
+    ) -> Option<T> {
         self.tc_lut.as_ref()?;
         let io = &self.params.io;
         if io.photo_long_side_px.is_some() || (io.upscale_factor - 1.0).abs() >= 1e-6 {
@@ -918,9 +1022,7 @@ impl Pipeline {
             self.preflash_raw,
         );
         let autoexposure_ev = self.frame_autoexposure_ev(image);
-        let out = self.try_gpu_resident(image, backend, &color_ref, autoexposure_ev).ok()??;
-        let out = self.finish_resident(out, backend);
-        Some(self.apply_post(out))
+        self.try_gpu_resident(image, image_key, backend, &color_ref, autoexposure_ev, run).ok()?
     }
 
     /// Resize the working image to the requested size, mirroring Python's
@@ -937,15 +1039,19 @@ impl Pipeline {
     /// hands it to the backend's `try_run_film_chain`. The output is linear RGB,
     /// unclipped, unless the backend applies the post-scan pass; see
     /// `finish_resident`.
-    fn try_gpu_resident(
+    fn try_gpu_resident<T>(
         &self,
         image: &ImageBuf,
+        image_key: Option<u64>,
         backend: &dyn ComputeBackend,
         color_ref: &crate::color_reference::ColorReference,
         autoexposure_ev: f64,
-    ) -> Result<Option<ImageBuf>, String> {
-        // The front pass expects linear RGB.
+        run: impl FnOnce(&spektrafilm_gpu::FilmChainParams<'_>) -> Option<T>,
+    ) -> Result<Option<T>, String> {
+        // The front pass expects linear RGB. Decoded pixels aren't the
+        // caller's, so they have no key.
         let decoded;
+        let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding);
         let image = if self.params.io.input_cctf_decoding {
             let mut d = image.clone();
             stages::filming::decode_input_cctf(&mut d, &self.params);
@@ -1322,6 +1428,7 @@ impl Pipeline {
 
         let params = spektrafilm_gpu::FilmChainParams {
             image,
+            image_key,
             front,
             film_log_exposure: &film_log_exp,
             film_density_curves_normalized: &film_curves_norm,
@@ -1361,7 +1468,7 @@ impl Pipeline {
             .rgb_to_rgb_self,
         };
         backend.film_chain_capacity(&params)?;
-        Ok(backend.try_run_film_chain(&params))
+        Ok(run(&params))
     }
 
     /// After the GPU fast path returns linear RGB, apply the encoding the CPU

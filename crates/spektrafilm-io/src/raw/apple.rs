@@ -19,6 +19,8 @@ struct NativeImage {
     height: u32,
     monochrome: u32,
     lens_correction_supported: u32,
+    orientation: u32,
+    oriented: u32,
     version: [c_char; 32],
     error: [c_char; 768],
 }
@@ -29,6 +31,7 @@ unsafe extern "C" {
         orient: i32,
         as_shot: i32,
         lens_correction: i32,
+        defer_orientation: i32,
         output: *mut NativeImage,
     ) -> i32;
     fn sf_apple_raw_free(pixels: *mut f32);
@@ -49,8 +52,14 @@ impl RawDecoder for AppleRawDecoder {
         "apple"
     }
 
+    /// Apple's own lens correction where it supports the file; otherwise the
+    /// corrections Negs reads itself ([`crate::lens`]), applied in sensor
+    /// coordinates before orientation as on the rawler path.
     fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
         options.white_balance.validate()?;
+        // Read before decoding, so Apple can leave such a file unoriented.
+        let own_lens = if options.lens_correction.enabled { crate::lens::read_profile(path) } else { None };
+        let file = path;
         let path = CString::new(path.as_os_str().as_bytes())?;
         let mut native = NativeImage {
             pixels: std::ptr::null_mut(),
@@ -58,6 +67,8 @@ impl RawDecoder for AppleRawDecoder {
             height: 0,
             monochrome: 0,
             lens_correction_supported: 0,
+            orientation: 1,
+            oriented: 0,
             version: [0; 32],
             error: [0; 768],
         };
@@ -67,6 +78,7 @@ impl RawDecoder for AppleRawDecoder {
                 options.apply_orientation.into(),
                 (options.white_balance.mode == crate::RawWhiteBalanceMode::AsShot).into(),
                 options.lens_correction.enabled.into(),
+                own_lens.is_some().into(),
                 &mut native,
             )
         };
@@ -98,7 +110,13 @@ impl RawDecoder for AppleRawDecoder {
             .zip(rgba.par_chunks_exact(4))
             .for_each(|(out, pixel)| out.copy_from_slice(&pixel[..3]));
         let (width, height, monochrome) = (native.width, native.height, native.monochrome != 0);
-        let lens_correction_supported = native.lens_correction_supported != 0;
+        let mut lens_correction_supported = native.lens_correction_supported != 0;
+        // Orientation still to apply: Apple left it to us (deferred) or the
+        // caller asked for none.
+        let pending = if options.apply_orientation && native.oriented == 0 { native.orientation as u16 } else { 1 };
+        // Apple rotated the pixels by a quarter turn, so its unoriented extent
+        // is transposed.
+        let transposed = native.oriented != 0 && native.orientation >= 5;
         drop(native);
         // Unclamped: colours outside sRGB arrive as negative coordinates and
         // the spectral model takes them; only non-finite values are refused.
@@ -107,8 +125,23 @@ impl RawDecoder for AppleRawDecoder {
         let data: Vec<Scalar> = rgb;
         #[cfg(feature = "precision-f64")]
         let data: Vec<Scalar> = rgb.into_par_iter().map(from_f32).collect();
+        let mut image = ImageBuf::from_data(width, height, data);
+        if !lens_correction_supported {
+            let profile = if options.lens_correction.enabled { own_lens } else { crate::lens::read_profile(file) };
+            if let Some(profile) = profile {
+                let (w, h) = (image.width as usize, image.height as usize);
+                let size = if transposed { (h, w) } else { (w, h) };
+                if let Some(area) = crate::lens_placement(file, &profile, size) {
+                    lens_correction_supported = true;
+                    // Enabled with a profile means Apple left the image unoriented.
+                    if options.lens_correction.enabled {
+                        crate::lens::apply(&mut image, &profile, area);
+                    }
+                }
+            }
+        }
         Ok(RawImage {
-            image: ImageBuf::from_data(width, height, data),
+            image: image.oriented(pending),
             lens_correction_supported,
         })
     }

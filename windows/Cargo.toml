@@ -79,3 +79,8 @@ opt-level = 3
 
 [dev-dependencies]
 spektrafilm-math = { path = "../crates/spektrafilm-math" }
+
+# The engine's rawler (spektrafilm-io uses its develop_intermediate_owned);
+# see vendor/README.md.
+[patch.crates-io]
+rawler = { path = "../vendor/rawler" }

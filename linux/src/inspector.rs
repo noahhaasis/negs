@@ -183,6 +183,14 @@ fn number_row(
     scale.set_draw_value(false);
     scale.set_hexpand(true);
     scale.update_property(&[gtk::accessible::Property::Label(knob.0)]);
+    reset_on_double_click(
+        &scale,
+        glib::clone!(
+            #[weak]
+            reset,
+            move || reset.emit_clicked()
+        ),
+    );
     outer.append(&scale);
     row.set_child(Some(&outer));
     reset_menu(&row, &reset);
@@ -515,11 +523,15 @@ pub fn build(ui: &Rc<Editor>) {
     lab.add_css_class("inspector-body");
     section(&lab, "FILM & PAPER");
     let profiles = list();
-    stock(ui, &profiles, false);
+    // Menus or preview grids, as Settings says; both are built so the
+    // setting switches without rebuilding the inspector.
+    let film = stock(ui, &profiles, false).upcast();
+    crate::stock_browser::rows(ui, &profiles, false, film);
     development(ui, &profiles, false);
     toggle(ui, &profiles, "Scan film directly", false);
-    let paper = stock(ui, &profiles, true);
-    visible(ui, &paper, |s| !flag(s, "Scan film directly", false));
+    // Shown unless scanning the film directly (see `stock_browser::apply`).
+    let paper = stock(ui, &profiles, true).upcast();
+    crate::stock_browser::rows(ui, &profiles, true, paper);
     development(ui, &profiles, true);
     lab.append(&profiles);
     section(&lab, "IMAGE SIZE");
@@ -601,7 +613,14 @@ pub fn build(ui: &Rc<Editor>) {
             }
         }));
     }
-    let raw_caption = gtk::Label::new(Some("RAW white balance · changes re-decode the photograph"));
+    // Shown only when the decoder found corrections in this file.
+    let lens = toggle(ui, &raw, crate::parameters::LENS_CORRECTIONS, true);
+    lens.set_subtitle("Distortion, vignetting and colour fringing");
+    {
+        let owner = Rc::downgrade(ui);
+        visible(ui, &lens, move |_| owner.upgrade().is_some_and(|ui| ui.lens_supported.get()));
+    }
+    let raw_caption = gtk::Label::new(Some("RAW development · changes re-decode the photograph"));
     raw_caption.set_wrap(true);
     raw_caption.add_css_class("caption");
     lab.append(&raw_caption);
@@ -1072,7 +1091,7 @@ fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
             };
             let mut h = ui.history.borrow_mut();
             h.begin(if paper { "Change Paper" } else { "Change Film" });
-            crate::catalog::choose(&mut h.state, stock);
+            crate::catalog::choose(&mut h.state, stock, ui.preferences.borrow().keep_paper);
             h.commit();
             drop(h);
             ui.sync_state();
@@ -1269,6 +1288,22 @@ fn reset_slot(reset: &gtk::Button) -> gtk::Stack {
     );
     slot.set_visible_child_name("empty");
     slot
+}
+
+/// Double-clicking a slider resets it, as in Lightroom (macOS
+/// `ResettableSlider`). Not Alt-click as on macOS and Windows: some window
+/// managers take Alt-drag to move the window. Claiming the second press keeps
+/// the scale from also starting a drag; the first still moves the knob.
+pub(crate) fn reset_on_double_click(scale: &gtk::Scale, reset: impl Fn() + 'static) {
+    let click = gtk::GestureClick::new();
+    click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    click.connect_pressed(move |gesture, count, _, _| {
+        if count == 2 {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            reset();
+        }
+    });
+    scale.add_controller(click);
 }
 
 pub(crate) fn reset_menu(widget: &impl IsA<gtk::Widget>, reset: &gtk::Button) {

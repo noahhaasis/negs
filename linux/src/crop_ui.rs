@@ -91,6 +91,14 @@ pub fn build(ui: &Rc<Editor>) {
     dial.set_draw_value(false);
     dial.set_hexpand(true);
     dial.update_property(&[gtk::accessible::Property::Label("Straighten angle")]);
+    crate::inspector::reset_on_double_click(
+        &dial,
+        glib::clone!(
+            #[weak]
+            a,
+            move || a.set_value(0.)
+        ),
+    );
     let spin = gtk::SpinButton::new(Some(&a), 0.1, 1);
     spin.set_width_chars(4);
     spin.update_property(&[gtk::accessible::Property::Label("Straighten degrees")]);

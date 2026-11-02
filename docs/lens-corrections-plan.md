@@ -4,7 +4,14 @@ Prepared 2026-10-29 against Negs `17e8a8c`, on branch `lens-corrections`
 (worktree `~/Work/Negs-lens`).
 
 **Status:** Phases 0 and 1a (macOS via Apple) implemented on 2026-10-29;
-see "Phase 0 results". Phases 1b–3 are not started.
+see "Phase 0 results". Phase 1b and the Sony/Fujifilm half of Phase 2
+implemented for Linux on 2026-11-01 (see "Phase 1b/2 results"), then
+OM/Olympus and Panasonic the same day. On macOS the Rust stage also covers
+files Apple decodes but cannot correct (see "macOS: Rust stage for files
+Apple cannot correct"). Windows UI and Phase 3 are not started.
+
+**Decided 2026-11-01 (Noah):** ship this stage; Phase 3 (lensfun, for Nikon,
+Canon and others) waits.
 
 **Decided 2026-10-29 (Noah):** macOS first, using Apple's built-in
 correction (Phases 0 and 1a). Windows/Linux later, as a Rust port of
@@ -341,19 +348,80 @@ The old egui app (`crates/spektrafilm-gui`) is not maintained; skip it.
 The rawler fallback reports no support, so the toggle stays hidden for files
 Apple cannot open. The CLI and Windows/Linux keep it off unless params set it.
 
-### Phase 1b — DNG opcodes and the shared pipeline (1–1.5 weeks)
+### Phase 1b — DNG opcodes and the shared pipeline (done for Linux 2026-11-01)
 
-1. `lens` module: model, `WarpRectilinear`, `FixVignetteRadial`, `GainMap`
-   parsers (big-endian opcode blobs, per the DNG 1.6 spec; port from
-   darktable's `dng_opcode.c`), renderer.
-2. Rawler path: remove `CropDefault`, apply correction, crop, orient.
-3. Settings sub-flags, native helper, CLI flag (`--lens-correction on|off`).
-4. UI on Windows and Linux; on macOS the same toggle drives the Rust stage
-   when the file fell back to rawler.
-5. Tests (below).
+What was built (differs from the plan where noted):
 
-Ship after Phase 1b: it is already useful for phone DNGs on Windows/Linux, and
-it puts every cross-cutting piece in place.
+1. `spektrafilm-io/src/lens/`: `Profile` (source + model), `read_profile`,
+   `apply`. DNG `WarpRectilinear` (radial + tangential, per plane, so lateral
+   CA) and `FixVignetteRadial` written from the DNG spec (`dng.rs`). Sony and
+   Fujifilm ported from darktable (`vendor.rs`, with darktable's notice).
+   `GainMap` is **not** handled: it lives in `OpcodeList2` (pre-demosaic) and
+   none of the local samples carry one.
+2. Rawler's `CropDefault` was **kept**: rawler reports the active area and
+   crop, so the DNG frame is offset onto the developed image instead
+   (`lib.rs::lens_area`). The stage runs after calibration, before
+   orientation.
+3. One `enabled` flag only (no sub-flags), matching macOS. The helper's
+   existing `lens_correction_supported` now comes from the rawler path too.
+4. Linux: "Lens corrections" switch in the RAW group, shown only when the last
+   render reports support; on for each newly opened photo and on Reset; off
+   for sessions saved before it (session schema 3); kept when a preset is
+   applied; the press-and-hold original follows it.
+5. Tests: unit tests in `lens/tests.rs`; `real_files_have_profiles`
+   (`#[ignore]`, `SPEKTRAFILM_LENS_TEST_FILES`); Linux session migration test.
+6. Desktop check `linux/check_lens.py --raw FILE --plain FILE` (Wayland,
+   AT-SPI; source `linux/core-env.sh` first). Passed 2026-11-01 with the Sony
+   ARW, the Fujifilm RAF and the Leica Q3 DNG against a Nikon DNG without
+   opcodes and a JPEG: switch shown and on for the corrected RAW, hidden for
+   the others, turning it off re-renders (the Q3 visibly reframes), reopening
+   turns it back on, and the session saves it.
+
+Rendering: vignetting is an in-place linear gain; distortion/CA is one
+Catmull-Rom resample into a new buffer, then a zoom about the centre so no
+border pixel samples outside the image (DNG: only zoom in, never out;
+vendor curves: darktable's fitted scale, which may zoom out slightly).
+
+## Phase 1b/2 results (2026-11-01, Linux, 12 threads, machine under load)
+
+| File | Data found | Decode off | Lens stage |
+| --- | --- | --- | --- |
+| Leica Q3 DNG, 60 MP | warp with lateral CA | ~1.5 s | +0.7 s (up to 2 s under memory pressure) |
+| Sony ARW, 24 MP | distortion, CA, vignetting | ~0.45 s | +0.45 s |
+| Fujifilm X100V RAF, 26 MP | CA, vignetting (fixed lens: no distortion) | ~0.6 s | +0.5 s |
+
+- Synthetic 24 MP: ~165 ms without CA (one sample per pixel), ~440 ms with
+  CA (three). Only on decode (open, WB or lens change, export), not per slider.
+- Peak memory unchanged (60 MP: 1.82 GB off and on): the extra buffer is
+  smaller than rawler's own decode peak.
+- The Q3's corrected framing matches Leica's full-size in-camera preview.
+  Leica's in-camera vignetting correction is not in the DNG opcodes, so the
+  corners stay darker than the camera's JPEG.
+- Fujifilm 1.25× crop modes are not detected (knots should scale by 1.25).
+- Panasonic RW2 (`6269228880.rw2`, barrel distortion): corrected framing
+  matches the camera's embedded JPEG. darktable inverts Panasonic's formula
+  with two fixed-point iterations (0.3% radius error in this lens's corners);
+  Negs iterates to convergence.
+- OM/Olympus E-M1 Mark III ORF (`3119563425.orf`): lateral CA only (the
+  distortion entry is the null '0 0 0 1'); sub-pixel, not visible.
+- Still open: Windows UI; DNG `GainMap` (Android lens shading, see below);
+  Fujifilm 1.25× crop modes. Apple-decoded files on macOS keep Apple's
+  correction where Apple has one; the others now get the Rust stage.
+
+### Phone DNGs and Fujifilm crop modes (assessment, 2026-11-01)
+
+- iPhone ProRAW: Apple writes it already demosaiced with its lens corrections
+  applied, so there is nothing to add *(verify with a sample)*.
+- Android (Pixel, Samsung, most others): vignetting and colour shading are
+  a `GainMap` in `OpcodeList2`, applied to sensor data before demosaicing;
+  some also have `WarpRectilinear`, which is handled. Without the gain map
+  their corners stay dark and can be tinted. About half a day: rawler gives
+  us the sensor data before development, so the map can be applied there.
+  Needs a sample.
+- Fujifilm 1.25× crop modes (some bodies' sports finder / crop shooting):
+  the knots must be scaled by 1.25 (maker note `CropMode` 0x104d = 2 or 4).
+  Without it, those shots get vignetting/CA (and distortion) correction on
+  the wrong radii. Rare; an hour or two once there is a sample.
 
 ### Phase 2 — vendor embedded data (3–5 days)
 
@@ -408,3 +476,64 @@ Only do this if users ask for Nikon/Canon coverage after Phase 2.
 - **Memory:** correction can run in place except for the resample, which needs
   one extra full-size buffer briefly (720 MB at 60 MP, f32 RGB). Check against
   `docs/handoff-memory.md` limits; tile the resample if needed.
+
+## macOS: Rust stage for files Apple cannot correct (done 2026-11-01)
+
+Survey on macOS 26.5 (21 files from Noah's library): every file decodes with
+Apple, none falls back to rawler. The rawler fallback already gets the Rust
+stage, since it shares `RawlerDecoder`. Apple corrects native Nikon Z lenses
+and the Leica Q3, but not the Fujifilm X100V or 3 of 4 X-A2 files (XC 16-50),
+for which the Rust stage finds a Fujifilm profile. Apple's unoriented extent
+equals rawler's developed size on every file checked (X100V, X-A2, GX80, 6D,
+D800 DNG, Z 6, Q3). The GX80 RW2 here has no Rust profile.
+
+What was built:
+
+1. `apple_raw.m` takes `defer_orientation`: a file without
+   `isLensCorrectionSupported` is then rendered unoriented. It returns the
+   file's orientation and whether it was applied.
+2. `AppleRawDecoder` reads `lens::read_profile` before decoding (only with
+   the setting on) and asks for deferral when there is one. Where Apple has no
+   correction, `lib.rs::lens_placement` places the profile on Apple's image:
+   a dummy rawler decode (geometry only) must report the same developed size,
+   and DNG profiles reuse `lens_area`. The profile is applied, then the image
+   is oriented. `lens_correction_supported` reports a placeable profile with
+   the setting off too, so the macOS toggle appears; no Swift change.
+3. Files Apple corrects keep Apple's correction. Files without a Rust profile,
+   or with the setting off, are decoded exactly as before.
+
+Checks (2026-11-01):
+
+| File | Before | After |
+| --- | --- | --- |
+| X100V RAF (2, one portrait) | no toggle | corrected, +0.3–0.4 s decode |
+| X-A2 RAF, files Apple misses (2, one portrait) | no toggle | corrected |
+| X-A2 DSCF7112, Z 6 NEF (Apple supported) | Apple | Apple, unchanged |
+| GX80 RW2, D90 NEF (no data) | no toggle | unchanged |
+
+- `apple_orientation_matches_negs` (`#[ignore]`): Apple's orientation and
+  `ImageBuf::oriented` are bit-identical on portrait and landscape files, so
+  orienting after the correction changes nothing else.
+- Negs's correction on Apple's uncorrected image against Apple's own
+  (best zoom about the centre aligning the two):
+  - Leica Q3 DNG: zoom 1.000, gradient correlation 0.997, corner/centre
+    0.498 both. Negs's DNG placement matches Apple's exactly.
+  - X-A2 DSCF7112 (Fujifilm data): zoom 0.997 (uncorrected 0.965),
+    correlation 0.89. Negs's vignetting is somewhat stronger than Apple's
+    (darktable's model). Apple is kept where it supports a file.
+- Native app (unbundled `swift build`, isolated home): the X100V shows
+  "Lens corrections", switched on.
+
+New samples on macOS (2026-11-01). Apple corrects all of them except the
+Canon, so they keep Apple's correction. Negs's correction applied to Apple's
+uncorrected image, compared as above:
+
+| File | Negs vs Apple zoom | Correlation (uncorrected) | Corner/centre: off, Apple, Negs |
+| --- | --- | --- | --- |
+| Sony A7 IV ARW, Tamron 28-75 | 1.000 | 0.97 (0.65) | 0.25, 0.26, 0.31 |
+| OM E-M10 IV ORF, 12-200 | 1.012 | 0.93 (0.78) | 1.01, 1.05, 1.02 |
+| Panasonic S1R RW2, S 50/1.4 | 1.021 | 0.91 (0.58) | 0.75, 1.03, 0.94 |
+| Canon 2000D CR2, EF 50 | no data | | |
+
+The shapes agree. Negs keeps 1–2% more of the frame than Apple for OM and
+Panasonic, and does not correct Panasonic vignetting (Apple does).

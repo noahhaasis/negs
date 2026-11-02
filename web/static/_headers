@@ -1,0 +1,19 @@
+# Apply to the document AND workers: required for SharedArrayBuffer / rayon.
+# no-cache keeps sw.js fresh too: a browser that cached it would miss updates.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  X-Content-Type-Options: nosniff
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-cache
+
+# Only the default sample is retained explicitly by the service worker.
+# Do not also accumulate the other RAWs in the browser's HTTP cache.
+/sample/*.dng
+  Cache-Control: no-store
+
+/pkg/*.wasm
+  Content-Type: application/wasm
+
+/pkg-threads/*.wasm
+  Content-Type: application/wasm

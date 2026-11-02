@@ -22,6 +22,9 @@ pub struct Stock {
 #[derive(Deserialize)]
 struct Catalog {
     profiles: Vec<Stock>,
+    /// The settings a preset leaves as they are; missing from older helpers.
+    #[serde(default)]
+    preset_kept: Option<Vec<String>>,
 }
 fn nullable_string<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
@@ -70,6 +73,11 @@ pub fn install(value: &serde_json::Value) -> Result<(), String> {
     // same immutable metadata; the next application launch discovers updates.
     let _ = LIVE.set(catalog);
     Ok(())
+}
+/// The settings a preset leaves as they are (dotted paths), or None when
+/// the helper doesn't list them.
+pub fn preset_kept() -> Option<&'static [String]> {
+    LIVE.get()?.preset_kept.as_deref()
 }
 pub fn stocks(paper: bool) -> Vec<&'static Stock> {
     static CATALOG: OnceLock<Catalog> = OnceLock::new();
@@ -125,8 +133,9 @@ pub fn selected(state: &crate::model::State, paper: bool) -> &'static Stock {
 }
 /// Choosing a film or paper in the inspector: the stock's own development
 /// time, and for a film its grain, DIR and halation presets (as upstream
-/// re-applies them on a stock change), its scan mode and target paper.
-pub fn choose(state: &mut crate::model::State, stock: &Stock) {
+/// re-applies them on a stock change), its scan mode and target paper —
+/// unless `keep_paper` (the Keep paper when changing film setting).
+pub fn choose(state: &mut crate::model::State, stock: &Stock, keep_paper: bool) {
     let paper = stock.paper;
     state.choices.insert(
         if paper { "Paper ID" } else { "Film ID" }.into(),
@@ -145,7 +154,7 @@ pub fn choose(state: &mut crate::model::State, stock: &Stock) {
         state
             .choices
             .insert("Scan film directly".into(), stock.positive.to_string());
-        if !stock.target.is_empty() {
+        if !keep_paper && !stock.target.is_empty() {
             state
                 .choices
                 .insert("Paper ID".into(), stock.target.clone());
@@ -174,6 +183,20 @@ mod tests {
         );
         for film in films {
             assert!(film.target.is_empty() || papers.iter().any(|s| s.id == film.target));
+        }
+    }
+    #[test]
+    fn keep_paper_leaves_the_paper_alone() {
+        let film = super::stocks(false).into_iter().find(|s| !s.target.is_empty()).unwrap();
+        let other = super::stocks(true).into_iter().find(|s| s.id != film.target).unwrap();
+        for keep in [false, true] {
+            let mut state = crate::model::State::default();
+            state.choices.insert("Paper ID".into(), other.id.clone());
+            state.choices.insert("Print development".into(), "2".into());
+            super::choose(&mut state, film, keep);
+            let paper = if keep { &other.id } else { &film.target };
+            assert_eq!(state.choices.get("Paper ID"), Some(paper));
+            assert_eq!(state.choices.contains_key("Print development"), keep);
         }
     }
 }

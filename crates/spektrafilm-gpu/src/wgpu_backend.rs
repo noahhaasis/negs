@@ -312,7 +312,7 @@ pub struct WgpuBackend {
     pipeline_cache: std::sync::Mutex<std::collections::HashMap<usize, CachedPipeline>>,
     /// Vulkan driver binaries reused between processes (Metal has its own cache).
     disk_pipeline_cache: Option<crate::pipeline_cache::DiskPipelineCache>,
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
     capacity: crate::capacity::CapacityLimits,
     /// Upper bound for `WORKGROUP_SIZE` overrides: the adapter's limit, or
     /// lower with `SPEKTRAFILM_WGPU_WORKGROUP_SIZE` (a diagnostic to exercise
@@ -323,6 +323,41 @@ pub struct WgpuBackend {
     /// `SPEKTRAFILM_WGPU_PROBE_WORKGROUPS` set.
     #[cfg(target_os = "macos")]
     threadgroup_probe: Option<metal::Device>,
+    image_pool: ImagePool,
+    /// The canvas display output is presented on (`ChainOutput::Present`),
+    /// and what makes its surface.
+    #[cfg(target_arch = "wasm32")]
+    canvas: std::sync::Mutex<Option<Canvas>>,
+    #[cfg(target_arch = "wasm32")]
+    instance: wgpu::Instance,
+    #[cfg(target_arch = "wasm32")]
+    adapter: wgpu::Adapter,
+    /// Keyed inputs (`FilmChainParams::image_key`), newest first.
+    resident_inputs: std::sync::Mutex<Vec<(u64, wgpu::Buffer)>>,
+    /// The last film chain's TC LUT, by its f64 data.
+    tc_lut_cache: std::sync::Mutex<Option<(Vec<f64>, wgpu::Buffer)>>,
+    /// Buffers the chain being encoded made for itself (see `transient`).
+    #[cfg(target_arch = "wasm32")]
+    transient: std::sync::Mutex<Vec<wgpu::Buffer>>,
+    /// The most a diffusion filter's FFT grid may take, in bytes, 0 for no
+    /// limit: past it the glow is made from a smaller copy of the image
+    /// (`set_diffusion_grid_budget`).
+    diffusion_grid_budget: std::sync::atomic::AtomicU64,
+}
+
+/// Frees `buffer`'s memory now in browsers. There, dropping a buffer does
+/// nothing (wgpu's WebGPU backend): its memory waits for the garbage
+/// collector to take the JavaScript object, which in the engine's worker can
+/// be many renders later, and full-image buffers left waiting ran a GPU out
+/// of memory (a failed allocation renders black). The browser keeps the
+/// memory until the GPU work already submitted with it is done. Natively a
+/// buffer is freed when dropped, so this does nothing.
+#[cfg(feature = "wgpu-backend")]
+fn release(buffer: &wgpu::Buffer) {
+    #[cfg(target_arch = "wasm32")]
+    buffer.destroy();
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = buffer;
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -337,13 +372,23 @@ struct CachedPipeline {
 #[cfg(feature = "wgpu-backend")]
 impl WgpuBackend {
     pub fn new() -> Option<Self> {
+        pollster::block_on(Self::new_async())
+    }
+
+    /// [`Self::new`] for browsers, where the adapter and device can only be
+    /// awaited.
+    pub async fn new_async() -> Option<Self> {
         // Metal on macOS, Vulkan everywhere else. DX12 is left out on purpose:
         // every Windows GPU that can run this well has Vulkan (NVIDIA and AMD
         // since 2012, Intel since Skylake), and a second Windows backend would
         // need its own shader compiler and golden calibration. Without Vulkan
-        // the CPU engine renders instead.
+        // the CPU engine renders instead. Browsers offer WebGPU.
+        #[cfg(not(target_arch = "wasm32"))]
+        let backends = wgpu::Backends::VULKAN | wgpu::Backends::METAL;
+        #[cfg(target_arch = "wasm32")]
+        let backends = wgpu::Backends::BROWSER_WEBGPU;
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::METAL,
+            backends,
             ..Default::default()
         });
 
@@ -351,11 +396,13 @@ impl WgpuBackend {
         // picks the AMD GPU, which switches the discrete GPU on. Measure both
         // for speed and battery, and check large RAWs (e.g. 60 MP) fit the
         // 4 GB of VRAM on smaller Radeon Pro parts.
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))?;
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .await?;
 
         // The default `Limits` cap storage buffer bindings at 128 MB,
         // which a 6-channel ≥ 14 MP image exceeds (image_bytes =
@@ -370,6 +417,8 @@ impl WgpuBackend {
         }
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         let capacity = crate::capacity::vulkan_limits(&adapter);
+        #[cfg(target_arch = "wasm32")]
+        let capacity = crate::capacity::browser_limits(&adapter);
         let adapter_limits = adapter.limits();
         let mut limits = wgpu::Limits::default();
         limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
@@ -377,6 +426,11 @@ impl WgpuBackend {
         limits.max_compute_workgroups_per_dimension =
             adapter_limits.max_compute_workgroups_per_dimension;
         limits.max_bind_groups = adapter_limits.max_bind_groups.max(limits.max_bind_groups);
+        // A browser shows a full-size frame as a texture (`Shown`).
+        #[cfg(target_arch = "wasm32")]
+        {
+            limits.max_texture_dimension_2d = adapter_limits.max_texture_dimension_2d;
+        }
         // Our per-pixel shaders use `@workgroup_size(1024)`; the default
         // Limits cap workgroup invocations at 256, so lift that here too.
         // Large images wrap the dispatch grid into y (`linear_dispatch_grid`)
@@ -408,16 +462,18 @@ impl WgpuBackend {
         if cache_path.is_some() {
             opt_feats |= wgpu::Features::PIPELINE_CACHE;
         }
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("spektrafilm"),
-                required_features: opt_feats,
-                required_limits: limits,
-                memory_hints: wgpu::MemoryHints::Performance,
-            },
-            None,
-        ))
-        .ok()?;
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("spektrafilm"),
+                    required_features: opt_feats,
+                    required_limits: limits,
+                    memory_hints: wgpu::MemoryHints::Performance,
+                },
+                None,
+            )
+            .await
+            .ok()?;
 
         let disk_pipeline_cache = cache_path
             .map(|path| crate::pipeline_cache::DiskPipelineCache::new(&device, path));
@@ -450,11 +506,26 @@ impl WgpuBackend {
             queue,
             pipeline_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             disk_pipeline_cache,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
             capacity,
             max_workgroup_size,
             #[cfg(target_os = "macos")]
             threadgroup_probe,
+            image_pool: ImagePool::default(),
+            tc_lut_cache: std::sync::Mutex::new(None),
+            resident_inputs: std::sync::Mutex::new(Vec::new()),
+            #[cfg(target_arch = "wasm32")]
+            transient: std::sync::Mutex::new(Vec::new()),
+            // SPEKTRAFILM_DIFFUSION_GRID_BUDGET (bytes) tries a limit natively.
+            diffusion_grid_budget: std::sync::atomic::AtomicU64::new(
+                std::env::var("SPEKTRAFILM_DIFFUSION_GRID_BUDGET").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+            ),
+            #[cfg(target_arch = "wasm32")]
+            canvas: std::sync::Mutex::new(None),
+            #[cfg(target_arch = "wasm32")]
+            instance,
+            #[cfg(target_arch = "wasm32")]
+            adapter,
         })
     }
 
@@ -607,7 +678,7 @@ impl WgpuBackend {
         n_pixels: u32,
         output_idx: usize,
     ) -> Vec<f32> {
-        let t_start = std::time::Instant::now();
+        let t_start = web_time::Instant::now();
         let layout_entries: Vec<wgpu::BindGroupLayoutEntry> = bindings
             .iter()
             .enumerate()
@@ -634,8 +705,7 @@ impl WgpuBackend {
         let gpu_buffers: Vec<wgpu::Buffer> = bindings
             .iter()
             .map(|b| {
-                use wgpu::util::DeviceExt;
-                self.device
+                self
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("buffer"),
                         contents: &b.data,
@@ -763,11 +833,10 @@ impl WgpuBackend {
     /// The grain passes alone on a density image (the film chain's step 3c),
     /// for tests that check the GPU grain's statistics against the CPU's.
     pub fn run_grain(&self, density: &ImageBuf, gp: &crate::GrainGpuParams) -> ImageBuf {
-        use wgpu::util::DeviceExt;
         let (w, h) = (density.width, density.height);
         let bytes = density.pixel_count() as u64 * 12;
         let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
-        let den = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let den = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("grain_density"),
             contents: bytemuck::cast_slice(&scalars_to_f32(&density.data)),
             usage,
@@ -807,8 +876,22 @@ impl WgpuBackend {
     /// and unsharp as a single command buffer with ping-pong image storage.
     /// Only one upload at the start and one readback at the end.
     pub fn run_film_chain(&self, p: &crate::FilmChainParams<'_>) -> ImageBuf {
-        use wgpu::util::DeviceExt;
-        let t_start = std::time::Instant::now();
+        match self.start_film_chain(p, crate::ChainOutput::Scan, Box::new(|| {})).finish() {
+            crate::ChainResult::Scan(image) => image,
+            _ => unreachable!("a scan was asked for"),
+        }
+    }
+
+    /// [`Self::run_film_chain`] up to the readback, made into `output`:
+    /// submits the chain and starts mapping its output, calling `on_mapped`
+    /// once [`FilmChainReadback::finish`] can read it without waiting.
+    pub fn start_film_chain(
+        &self,
+        p: &crate::FilmChainParams<'_>,
+        output: crate::ChainOutput,
+        on_mapped: Box<dyn FnOnce() + Send>,
+    ) -> FilmChainReadback {
+        let t_start = web_time::Instant::now();
         // Pull all references into locals so the existing body below
         // doesn't need a rewrite — only the param sources change.
         let image = p.image;
@@ -831,16 +914,34 @@ impl WgpuBackend {
         let n_pixels = image.pixel_count() as u32;
         let img_bytes = n_pixels as usize * 3 * 4;
 
-        // Ping-pong image buffers (each holds H*W*3 f32 values).
-        let make_img_buf = |label: &str| {
-            self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size: img_bytes as u64,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            })
+        // Effects share up to two full-image scratch buffers. Plan these
+        // before taking the pool: a render already too large to retain must
+        // evict old sizes BEFORE allocating its buffers, not after its peak.
+        let scratch_count = if p.dir_couplers.is_some()
+            || p.halation.is_some()
+            || p.unsharp.is_some()
+            || p.grain.is_some()
+        {
+            2
+        } else if p.glare.is_some()
+            || p.diffusion.is_some()
+            || (!p.scan_film && p.enlarger_diffusion.is_some())
+        {
+            1
+        } else {
+            0
+        };
+        // Ping-pong image buffers (each holds H*W*3 f32 values), the last
+        // render's in browsers (see `ImagePool`).
+        let minimum_bytes = img_bytes as u64 * (2 + scratch_count as u64);
+        let mut images = self.image_pool.take((image.width, image.height), minimum_bytes);
+        let mut make_img_buf = |label: &str| {
+            images.buffer(
+                &self.device,
+                label,
+                img_bytes as u64,
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            )
         };
         let mappable = self
             .device
@@ -852,7 +953,10 @@ impl WgpuBackend {
         // (~0.5 GB/s) blit on this unified-memory GPU. With
         // MAPPABLE_PRIMARY_BUFFERS we create buf_a already mapped (MAP_WRITE)
         // and memcpy the input straight into its (shared) memory — no staging.
-        let input_f32 = scalars_to_f32(&image.data);
+        let input_f32 = || scalars_to_f32(&image.data);
+        // A keyed input stays uploaded for the next chain with its key, and
+        // is copied to buf_a on the GPU first thing (see `input_copy`).
+        let mut resident_input = None;
         let buf_a = if mappable {
             let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("img_a"),
@@ -865,37 +969,39 @@ impl WgpuBackend {
             });
             buf.slice(..)
                 .get_mapped_range_mut()
-                .copy_from_slice(bytemuck::cast_slice(&input_f32));
+                .copy_from_slice(bytemuck::cast_slice(&input_f32()));
             buf.unmap();
             buf
+        } else if let Some(key) = p.image_key {
+            resident_input = Some(self.resident_input(key, img_bytes as u64, || input_f32()));
+            make_img_buf("img_a")
         } else {
             let buf = make_img_buf("img_a");
             self.queue
-                .write_buffer(&buf, 0, bytemuck::cast_slice(&input_f32));
+                .write_buffer(&buf, 0, bytemuck::cast_slice(&input_f32()));
             buf
         };
 
         // buf_b holds the final RGB. With MAPPABLE_PRIMARY_BUFFERS we add
         // MAP_READ so it can be mapped directly for a zero-copy readback,
         // skipping the slow Private→Shared blit on unified memory.
-        let buf_b = {
-            let mut usage = wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC;
-            if mappable {
-                usage |= wgpu::BufferUsages::MAP_READ;
-            }
+        let buf_b = if mappable {
             self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("img_b"),
                 size: img_bytes as u64,
-                usage,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             })
+        } else {
+            make_img_buf("img_b")
         };
 
         // Static (LUT) buffers — uploaded once.
         let mk_storage = |label: &str, bytes: &[u8]| {
-            self.device
+            self
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some(label),
                     contents: bytes,
@@ -903,7 +1009,7 @@ impl WgpuBackend {
                 })
         };
         let mk_uniform = |label: &str, bytes: &[u8]| {
-            self.device
+            self
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some(label),
                     contents: bytes,
@@ -1050,17 +1156,21 @@ impl WgpuBackend {
         }
         let has_enlarger_diffusion = p.enlarger_diffusion.is_some();
         let print_exposure_scale = p.print_exposure_scale as f32;
-        let print_norm_for_shader = if has_enlarger_diffusion && print_exposure_scale != 0.0 {
-            (print_normalization_factor / p.print_exposure_scale) as f32
-        } else {
-            print_normalization_factor as f32
-        };
+        // CPU order: (raw × factor + preflash) × print_exposure × bw. Without
+        // enlarger diffusion the exposure scale is folded into the shader's
+        // normalization, so the preflash must carry it too.
+        let (print_norm_for_shader, preflash_scale) =
+            if has_enlarger_diffusion && print_exposure_scale != 0.0 {
+                ((print_normalization_factor / p.print_exposure_scale) as f32, 1.0)
+            } else {
+                (print_normalization_factor as f32, p.print_exposure_scale)
+            };
         let print_params = PrintParams {
             width: image.width,
             height: image.height,
             n_wavelengths: film_channel_density.len() as u32,
             normalization_factor: print_norm_for_shader,
-            preflash: [preflash[0] as f32, preflash[1] as f32, preflash[2] as f32],
+            preflash: preflash.map(|v| (v * preflash_scale) as f32),
             _pad: 0.0,
         };
         let print_params_buf = mk_uniform("print_params", bytemuck::bytes_of(&print_params));
@@ -1156,8 +1266,7 @@ impl WgpuBackend {
         // rides along in the tuple to outlive the encoder.
         let (front_pipe, bg_front, _front_tc_lut) = match &p.front {
             crate::FrontPass::Hanatos2025 { tc_lut, .. } => {
-                let tc_lut_f32: Vec<f32> = tc_lut.data.iter().map(|&v| v as f32).collect();
-                let tc_lut_buf = mk_storage("tc_lut", bytemuck::cast_slice(&tc_lut_f32));
+                let tc_lut_buf = self.tc_lut_buffer(tc_lut);
                 let pipe = self.cached_pipeline(
                     include_str!("../../spektrafilm-shaders/wgsl/hanatos2025_rgb_to_raw.wgsl"),
                     &[
@@ -1382,39 +1491,26 @@ impl WgpuBackend {
             ],
         });
 
-        // Readback buffer (for the final image only) — only needed when we
-        // can't map buf_b directly. Skipping it on the mappable path also
-        // avoids allocating a second full-image buffer per frame.
-        let readback = (!mappable).then(|| {
-            self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("readback"),
-                size: img_bytes as u64,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
-        });
 
         // Effects execute sequentially in separate compute passes. Share their
         // full-image storage, but keep every input/output of a dispatch distinct.
         // See docs/memory-scratch-reuse.md for the pass/lifetime table.
         // This pool is per-render: no full images enter the backend cache.
-        let scratch_count = if p.dir_couplers.is_some()
-            || p.halation.is_some()
-            || p.unsharp.is_some()
-            || p.grain.is_some()
-        {
-            2
-        } else if p.glare.is_some()
-            || p.diffusion.is_some()
-            || (!p.scan_film && p.enlarger_diffusion.is_some())
-        {
-            1
-        } else {
-            0
-        };
         let scratch: Vec<_> = (0..scratch_count)
             .map(|i| make_img_buf(&format!("effect_scratch_{i}")))
             .collect();
+
+        // Readback buffer (for the final image only) — only needed when we
+        // can't map buf_b directly. Skipping it on the mappable path also
+        // avoids allocating a second full-image buffer per frame.
+        let readback = (!mappable && output == crate::ChainOutput::Scan).then(|| {
+            images.buffer(
+                &self.device,
+                "readback",
+                img_bytes as u64,
+                wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            )
+        });
 
         // ── Halation auxiliary buffers + bind groups (only if active) ────
         // The two ping-pong buffers are reused as blur input/mid; shared
@@ -1451,6 +1547,7 @@ impl WgpuBackend {
                 image.height,
                 &buf_b,
                 &scratch,
+                &mut |label, bytes| images.buffer(&self.device, &format!("camera_{label}"), bytes, wgpu::BufferUsages::STORAGE),
                 self,
             )
         });
@@ -1585,6 +1682,7 @@ impl WgpuBackend {
                         image.height,
                         &buf_b,
                         &scratch,
+                        &mut |label, bytes| images.buffer(&self.device, &format!("enlarger_{label}"), bytes, wgpu::BufferUsages::STORAGE),
                         self,
                     )
                 });
@@ -1618,6 +1716,9 @@ impl WgpuBackend {
             dispatch_linear(&mut pass, n, pipe.workgroup_size);
         };
 
+        if let Some(input) = &resident_input {
+            encoder.copy_buffer_to_buffer(input, 0, &buf_a, 0, img_bytes as u64);
+        }
         let mut profiler = GpuStageProfiler::new(&self.device, &self.queue);
         profiler.mark("upload", &mut encoder);
         // 1. Front pass (tc LUT lookup): buf_a (rgb in) → buf_b (raw), after
@@ -1736,26 +1837,42 @@ impl WgpuBackend {
         if let Some(rb) = readback.as_ref() {
             encoder.copy_buffer_to_buffer(&buf_b, 0, rb, 0, img_bytes as u64);
         }
+        // Display output: drawn on the canvas, or made into bytes and read
+        // back. Without a canvas, a present reads the bytes back instead.
+        let mut output = output;
+        let mut frame = None;
+        if let crate::ChainOutput::Present { encoded, post } = output.clone() {
+            let scan = ShownScan { generation: images.generation, encoded };
+            frame = self.encode_present(&mut encoder, &buf_b, image.width, image.height, scan, post.as_deref());
+            if frame.is_none() {
+                output = crate::ChainOutput::Rgba8 { encoded, post };
+            }
+        }
+        let rgba_readback = match output {
+            // A presented frame is done when the GPU is: four bytes of it
+            // read back say when (wgpu's `on_submitted_work_done` isn't
+            // there in browsers).
+            crate::ChainOutput::Present { .. } => {
+                let fence = images.buffer(&self.device, "fence", 4, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST);
+                encoder.copy_buffer_to_buffer(&buf_b, 0, &fence, 0, 4);
+                Some(fence)
+            }
+            crate::ChainOutput::Rgba8 { encoded, ref post } => {
+                let bytes = n_pixels as u64 * 4;
+                let rgba = images.buffer(&self.device, "rgba", bytes, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC);
+                let rgba_readback =
+                    images.buffer(&self.device, "rgba_readback", bytes, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST);
+                self.encode_display_rgba8(&mut encoder, &buf_b, &rgba, n_pixels, encoded, post.as_deref());
+                encoder.copy_buffer_to_buffer(&rgba, 0, &rgba_readback, 0, bytes);
+                Some(rgba_readback)
+            }
+            _ => None,
+        };
         // Everything since function entry: CPU-side param prep, buffer
         // creation/uploads, and command encoding.
         let cpu_setup_ms = t_start.elapsed().as_secs_f32() * 1000.0;
         self.queue.submit(Some(encoder.finish()));
-
-        // Single sync point at the end. Map buf_b directly on the zero-copy
-        // path, or the staging buffer otherwise.
-        let map_target = readback.as_ref().unwrap_or(&buf_b);
-        let slice = map_target.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            tx.send(r).unwrap();
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv().unwrap().unwrap();
-        let gpu_wait_ms = t_start.elapsed().as_secs_f32() * 1000.0 - cpu_setup_ms;
-        let data = slice.get_mapped_range();
-        let out_f32: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
-        drop(data);
-        map_target.unmap();
+        self.release_transient();
 
         profiler.report();
         // Persist only when new pipelines were compiled. The helper can be
@@ -1764,17 +1881,237 @@ impl WgpuBackend {
         if let Some(cache) = &self.disk_pipeline_cache {
             cache.flush();
         }
-        let out = ImageBuf::from_data(image.width, image.height, f32_to_scalars(out_f32));
-        tracing::debug!(
-            cpu_setup_ms = format!("{cpu_setup_ms:.1}"),
-            gpu_wait_ms = format!("{gpu_wait_ms:.1}"),
-            readback_ms = format!(
-                "{:.1}",
-                t_start.elapsed().as_secs_f32() * 1000.0 - cpu_setup_ms - gpu_wait_ms
+
+        if let Some(frame) = frame {
+            frame.present();
+        }
+
+        // Single sync point at the end. Map buf_b directly on the zero-copy
+        // path, or the staging buffer otherwise.
+        let buffer = rgba_readback.or(readback).unwrap_or_else(|| buf_b.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            // The receiver is gone when a browser caller gave up on the render.
+            let _ = tx.send(r);
+            on_mapped();
+        });
+        FilmChainReadback {
+            device: self.device.clone(),
+            buffer,
+            output,
+            mapped: rx,
+            pool: self.image_pool.clone(),
+            images,
+            width: image.width,
+            height: image.height,
+            t_start,
+            cpu_setup_ms,
+        }
+    }
+
+    /// Encode `rgb`'s display bytes into `rgba`, packed RGBA8
+    /// (`ChainOutput::Rgba8`).
+    fn encode_display_rgba8(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        rgb: &wgpu::Buffer,
+        rgba: &wgpu::Buffer,
+        n_pixels: u32,
+        encoded: bool,
+        post: Option<&crate::DisplayPost>,
+    ) {
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Params {
+            n_pixels: u32,
+            encoded: u32,
+            _pad: [u32; 2],
+        }
+        let pipe = self.cached_pipeline(
+            concat!(
+                include_str!("../../spektrafilm-shaders/wgsl/display_rgba8.wgsl"),
+                include_str!("../../spektrafilm-shaders/wgsl/display_post.wgsl"),
             ),
-            "film chain timings"
+            &[
+                wgpu::BufferBindingType::Uniform,
+                wgpu::BufferBindingType::Storage { read_only: true },
+                wgpu::BufferBindingType::Storage { read_only: false },
+                wgpu::BufferBindingType::Uniform,
+                wgpu::BufferBindingType::Storage { read_only: true },
+            ],
         );
-        out
+        let (post, tables) = self.post_buffers(post);
+        let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("display_rgba8_params"),
+            contents: bytemuck::bytes_of(&Params { n_pixels, encoded: encoded as u32, _pad: [0; 2] }),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bg_display_rgba8"),
+            layout: &pipe.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: rgb.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: rgba.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: post.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: tables.as_entire_binding() },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("display_rgba8"), timestamp_writes: None });
+        pass.set_pipeline(&pipe.pipeline);
+        pass.set_bind_group(0, &bg, &[]);
+        dispatch_linear(&mut pass, n_pixels, pipe.workgroup_size);
+    }
+
+    /// The display shaders' `post` uniform and `post_tables` for `post`;
+    /// inactive, with a placeholder table, for none.
+    fn post_buffers(&self, post: Option<&crate::DisplayPost>) -> (wgpu::Buffer, wgpu::Buffer) {
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Post {
+            on: u32,
+            encoded: u32,
+            saturation: f32,
+            _pad: u32,
+            luma: [f32; 4],
+        }
+        let uniform = match post {
+            Some(p) => Post {
+                on: 1,
+                encoded: p.encoded as u32,
+                saturation: p.saturation,
+                _pad: 0,
+                luma: [p.luma[0], p.luma[1], p.luma[2], 0.0],
+            },
+            None => Post { on: 0, encoded: 0, saturation: 0.0, _pad: 0, luma: [0.0; 4] },
+        };
+        let tables: Vec<f32> = match post {
+            Some(p) => [&p.decode, &p.encode, &p.tone].into_iter().flatten().copied().collect(),
+            None => vec![0.0; 4],
+        };
+        let uniform = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("display_post"),
+            contents: bytemuck::bytes_of(&uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let tables = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("display_post_tables"),
+            contents: bytemuck::cast_slice(&tables),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        (uniform, tables)
+    }
+
+    /// Without a canvas there's nothing to present on.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn encode_present(
+        &self,
+        _encoder: &mut wgpu::CommandEncoder,
+        _rgb: &wgpu::Buffer,
+        _width: u32,
+        _height: u32,
+        _scan: ShownScan,
+        _post: Option<&crate::DisplayPost>,
+    ) -> Option<wgpu::SurfaceTexture> {
+        None
+    }
+
+    /// The input with `key` on the GPU, uploaded from `data` if it isn't
+    /// there. The last two keys stay: a slider's interactive frames and the
+    /// settled frame after it.
+    fn resident_input<'a>(&self, key: u64, bytes: u64, data: impl FnOnce() -> Cow<'a, [f32]>) -> wgpu::Buffer {
+        let mut inputs = self.resident_inputs.lock().unwrap();
+        if let Some(i) = inputs.iter().position(|(k, b)| *k == key && b.size() == bytes) {
+            let entry = inputs.remove(i);
+            inputs.insert(0, entry);
+        } else {
+            // Storage too: the canvas shows the input as the original.
+            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("resident_input"),
+                size: bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&data()));
+            inputs.insert(0, (key, buffer));
+            let kept = inputs.len().min(2);
+            for (_, old) in inputs.drain(kept..) {
+                release(&old);
+            }
+        }
+        inputs[0].1.clone()
+    }
+
+    /// `tc_lut` on the GPU in f32, uploaded again only when it changes: a
+    /// slider that keeps the film keeps its LUT.
+    fn tc_lut_buffer(&self, tc_lut: &spektrafilm_math::spectral::TcLut) -> wgpu::Buffer {
+        let mut cached = self.tc_lut_cache.lock().unwrap();
+        if let Some((data, buffer)) = cached.as_ref()
+            && *data == tc_lut.data
+        {
+            return buffer.clone();
+        }
+        let tc_lut_f32: Vec<f32> = tc_lut.data.iter().map(|&v| v as f32).collect();
+        let buffer = self.new_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tc_lut"),
+            contents: bytemuck::cast_slice(&tc_lut_f32),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        if let Some((_, old)) = cached.replace((tc_lut.data.clone(), buffer.clone())) {
+            release(&old);
+        }
+        buffer
+    }
+
+    /// A buffer holding `desc.contents` for the chain being encoded only
+    /// (see `transient`).
+    fn create_buffer_init(&self, desc: &wgpu::util::BufferInitDescriptor<'_>) -> wgpu::Buffer {
+        self.transient(self.new_buffer_init(desc))
+    }
+
+    /// `buffer`, which the chain being encoded made for itself, freed once
+    /// the chain is submitted (`release_transient`; see `release`).
+    fn transient(&self, buffer: wgpu::Buffer) -> wgpu::Buffer {
+        #[cfg(target_arch = "wasm32")]
+        self.transient.lock().unwrap().push(buffer.clone());
+        buffer
+    }
+
+    fn release_transient(&self) {
+        #[cfg(target_arch = "wasm32")]
+        for buffer in self.transient.lock().unwrap().drain(..) {
+            release(&buffer);
+        }
+    }
+
+    /// A buffer holding `desc.contents`. In browsers, a buffer mapped at
+    /// creation costs a shared-memory allocation, about 0.3 ms each in
+    /// Chrome, and a render makes dozens of small ones; writing through the
+    /// queue costs a few µs.
+    fn new_buffer_init(&self, desc: &wgpu::util::BufferInitDescriptor<'_>) -> wgpu::Buffer {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use wgpu::util::DeviceExt;
+            self.device.create_buffer_init(desc)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let size = (desc.contents.len() as u64).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
+            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: desc.label,
+                size,
+                usage: desc.usage | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            if size as usize == desc.contents.len() {
+                self.queue.write_buffer(&buffer, 0, desc.contents);
+            } else {
+                let mut padded = desc.contents.to_vec();
+                padded.resize(size as usize, 0);
+                self.queue.write_buffer(&buffer, 0, &padded);
+            }
+            buffer
+        }
     }
 
     /// Get-or-compile a pipeline by shader source + binding layout. Cached by
@@ -1816,6 +2153,970 @@ impl WgpuBackend {
     }
 }
 
+/// A browser canvas the backend draws display output on.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+struct Canvas {
+    surface: wgpu::Surface<'static>,
+    size: (u32, u32),
+    /// `display_present.wgsl`'s passes: a scan's bytes into the shown image
+    /// (with Post adjustments), a mip level from the one above it, and the
+    /// view on the canvas.
+    make_shown: wgpu::ComputePipeline,
+    mip: wgpu::RenderPipeline,
+    draw: wgpu::RenderPipeline,
+    sampler: wgpu::Sampler,
+    /// Where the page shows the photograph, once it has said.
+    view: Option<View>,
+    /// The shown image first, and the one before it if it was another size:
+    /// a slider's interactive frames and the settled frame take turns.
+    shown: Vec<Shown>,
+    /// The photograph before any film (`set_original`), which a view with
+    /// `original` draws in the shown image's place.
+    original: Option<Shown>,
+    /// The border's texture (`set_border_texture`), with its mip levels, and
+    /// the transparent texel drawn without one.
+    border_texture: Option<wgpu::Texture>,
+    blank: wgpu::Texture,
+}
+
+/// A frame's display bytes, kept in a texture with mip levels so that a new
+/// view draws it again without the film chain.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+struct Shown {
+    texture: wgpu::Texture,
+    /// Whether its mip levels hold it: made when a view first shrinks it.
+    mipped: bool,
+    /// The film chain's scan it was made from, for a Post edit to make it
+    /// again from ([`WgpuBackend::repost`]); none for bytes made elsewhere.
+    scan: Option<ShownScan>,
+}
+
+/// Which pooled scan a shown image was made from, and how it's encoded.
+#[cfg(feature = "wgpu-backend")]
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+struct ShownScan {
+    /// Its render's [`ImageSet::generation`].
+    generation: u64,
+    encoded: bool,
+}
+
+/// Where the canvas shows the photograph.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct View {
+    /// The canvas's size in device pixels.
+    pub width: u32,
+    pub height: u32,
+    /// The finished photograph's rectangle on it, in device pixels: left,
+    /// top, width, height. A frame rendered smaller fills it too.
+    pub rect: [f32; 4],
+    /// The canvas around the photograph, RGB from 0 to 1, stored as is.
+    pub background: [f32; 3],
+    /// Draw the original instead of the developed frame, when there is one.
+    pub original: bool,
+    /// The border around the photograph, if any.
+    pub border: BorderView,
+    /// Inverse normalized affine rows, output/source extents, clip and filter.
+    /// The page's crop.js maps crop, leveling and rotation without a render.
+    pub transform: [f32; 12],
+}
+
+/// A presentation border as the view draws it around the photograph
+/// (`Border` in `display_present.wgsl`; the page's `web/border.js` lays it
+/// out as `spektrafilm-io::border` does). Rectangles are left, top, width,
+/// height in the photograph's own pixels, from its top-left corner; colours
+/// are RGB from 0 to 1, stored as is.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct BorderView {
+    /// The photograph's width and height; zero for no border.
+    pub photo: [f32; 4],
+    /// The whole canvas: with Instagram's extension, the 3:4 one.
+    pub canvas: [f32; 4],
+    /// The bordered canvas, in `mat`; outside it, `fill`.
+    pub frame: [f32; 4],
+    /// The keyline's ring, in `line_color`, inside the mat.
+    pub line: [f32; 4],
+    pub fill: [f32; 4],
+    pub mat: [f32; 4],
+    pub line_color: [f32; 4],
+    /// Where the texture lies over everything.
+    pub texture: [f32; 4],
+    /// The texture's kind (0 none, 1 the 120 frame's nine-patch, 2 the 35mm
+    /// strip), whether it's turned a quarter, and the nine-patch's corner
+    /// size and scale (canvas pixels per texel).
+    pub texture_fit: [f32; 4],
+}
+
+/// Where a view draws a shown image: its top-left corner on the canvas,
+/// device pixels per texel, the mip level it samples, and whether it's
+/// drawn 1:1.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+struct Placement {
+    origin: [f32; 2],
+    scale: [f32; 2],
+    lod: f32,
+    exact: bool,
+}
+
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+impl View {
+    /// An image within a pixel of the rectangle's size is drawn 1:1, centred
+    /// on it at whole pixels: the settled frame at fit, rendered to that
+    /// size, and a full-size frame at 100%. Any other is sampled.
+    fn place(&self, width: u32, height: u32) -> Placement {
+        let [x, y, w, h] = self.rect;
+        let (iw, ih) = (width as f32 * self.transform[8], height as f32 * self.transform[9]);
+        if self.transform[11] == 0.0 && (w - iw).abs() <= 1.0 && (h - ih).abs() <= 1.0 {
+            let origin = [(x + (w - iw) / 2.0).round(), (y + (h - ih) / 2.0).round()];
+            return Placement { origin, scale: [1.0; 2], lod: 0.0, exact: true };
+        }
+        let scale = [w / iw, h / ih];
+        let lod = (-scale[0].min(scale[1]).log2()).max(0.0);
+        Placement { origin: [x, y], scale, lod, exact: false }
+    }
+}
+
+/// Canvases are 8-bit and unencoded: a pixel holds the display bytes as
+/// they are, and RGBA bytes can be written straight in. Every browser
+/// supports it, if not always as its preferred format. Shown images are
+/// kept in it too.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+const CANVAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// At most this much of shown images stays on the GPU; the older one goes
+/// first.
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+const MAX_SHOWN_BYTES: u64 = 256 << 20;
+
+#[cfg(all(feature = "wgpu-backend", target_arch = "wasm32"))]
+impl WgpuBackend {
+    /// Present display output on `target` from now on (`ChainOutput::Present`).
+    pub fn set_canvas(&self, target: wgpu::SurfaceTarget<'static>) -> Result<(), String> {
+        let surface = self.instance.create_surface(target).map_err(|e| e.to_string())?;
+        if !surface.get_capabilities(&self.adapter).formats.contains(&CANVAS_FORMAT) {
+            return Err("the canvas has no RGBA8 format".into());
+        }
+        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("display_present"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(concat!(
+                include_str!("../../spektrafilm-shaders/wgsl/display_present.wgsl"),
+                include_str!("../../spektrafilm-shaders/wgsl/display_post.wgsl"),
+            ))),
+        });
+        let make_shown = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("make_shown"),
+            layout: None,
+            module: &module,
+            entry_point: Some("make_shown"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let render = |entry_point: &str| {
+            self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry_point),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(entry_point),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: CANVAS_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
+                cache: None,
+            })
+        };
+        let (mip, draw) = (render("fs_mip"), render("fs_view"));
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shown"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let blank = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("no_border"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: CANVAS_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &blank,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[0; 4],
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        let canvas = Canvas {
+            surface,
+            size: (0, 0),
+            make_shown,
+            mip,
+            draw,
+            sampler,
+            view: None,
+            shown: Vec::new(),
+            original: None,
+            border_texture: None,
+            blank,
+        };
+        if let Some(old) = self.canvas.lock().unwrap().replace(canvas) {
+            for shown in old.shown.into_iter().chain(old.original) {
+                shown.texture.destroy();
+            }
+            for texture in old.border_texture.into_iter().chain([old.blank]) {
+                texture.destroy();
+            }
+        }
+        Ok(())
+    }
+
+    /// Keep straight-alpha sRGB RGBA8 `rgba` as the border's texture, with
+    /// its mip levels, for views with a border texture to draw; none clears
+    /// it. Nothing is drawn now. False without a canvas or when a texture
+    /// can't be that large.
+    pub fn set_border_texture(&self, texture: Option<(u32, u32, &[u8])>) -> bool {
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        if let Some(old) = canvas.border_texture.take() {
+            old.destroy();
+        }
+        let Some((width, height, rgba)) = texture else {
+            return true;
+        };
+        if width.max(height) > self.device.limits().max_texture_dimension_2d {
+            return false;
+        }
+        let texture = self.shown_image(width, height);
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.encode_mips(&mut encoder, canvas, &texture);
+        self.queue.submit(Some(encoder.finish()));
+        canvas.border_texture = Some(texture);
+        true
+    }
+
+    /// Keep RGBA8 display bytes of the photograph before any film, for views
+    /// with `original` to draw in place of the developed frame; nothing is
+    /// drawn now. False without a canvas or when a texture can't be that
+    /// large.
+    pub fn set_original(&self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        let Some(texture) = self.original_texture(canvas, width, height) else {
+            return false;
+        };
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        canvas.original = Some(Shown { texture, mipped: false, scan: None });
+        Self::trim_shown(canvas);
+        true
+    }
+
+    /// [`Self::set_original`] from a linear (or, with `encoded`, sRGB-encoded)
+    /// sRGB `image` on the GPU: the input uploaded under `key`, as the film
+    /// chain keeps it (uploaded now if it isn't there), made into display
+    /// bytes by the pass a presented frame's scan takes. Those equal
+    /// `preview::display_rgba` of the image for an sRGB display.
+    pub fn set_original_from_input(&self, key: u64, image: &ImageBuf, encoded: bool) -> bool {
+        let (width, height) = (image.width, image.height);
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        let Some(texture) = self.original_texture(canvas, width, height) else {
+            return false;
+        };
+        let input = self.resident_input(key, u64::from(width) * u64::from(height) * 12, || scalars_to_f32(&image.data));
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.encode_make_shown(&mut encoder, canvas, &input, &texture, encoded, None);
+        self.queue.submit(Some(encoder.finish()));
+        self.release_transient();
+        canvas.original = Some(Shown { texture, mipped: false, scan: None });
+        Self::trim_shown(canvas);
+        true
+    }
+
+    /// The texture for a `width` × `height` original: the last one if it's
+    /// that size. None when a texture can't be that large.
+    fn original_texture(&self, canvas: &mut Canvas, width: u32, height: u32) -> Option<wgpu::Texture> {
+        if width.max(height) > self.device.limits().max_texture_dimension_2d {
+            return None;
+        }
+        Some(match canvas.original.take() {
+            Some(old) if (old.texture.width(), old.texture.height()) == (width, height) => old.texture,
+            old => {
+                if let Some(old) = old {
+                    old.texture.destroy();
+                }
+                self.shown_image(width, height)
+            }
+        })
+    }
+
+    /// Draw RGBA8 display bytes on the canvas, for frames made elsewhere
+    /// (the CPU engine). False without a canvas.
+    pub fn present_rgba(&self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        let Some(texture) = self.shown_texture(canvas, width, height) else {
+            return false;
+        };
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        canvas.shown[0].scan = None;
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        let frame = self.encode_view(&mut encoder, canvas);
+        self.queue.submit(Some(encoder.finish()));
+        self.release_transient();
+        frame.map(|frame| frame.present()).is_some()
+    }
+
+    /// Show the photograph where `view` says from now on, and draw the shown
+    /// image there now: a display pass, without the film chain. `on_drawn`
+    /// runs once the GPU has drawn it. False with nothing to draw, though
+    /// the next frame presented takes the view.
+    pub fn show(&self, view: View, on_drawn: Box<dyn FnOnce()>) -> bool {
+        let mut canvas = self.canvas.lock().unwrap();
+        let Some(canvas) = canvas.as_mut() else {
+            return false;
+        };
+        canvas.view = Some(view);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        let (Some(frame), Some(drawn)) = (self.encode_view(&mut encoder, canvas), Self::drawn(canvas)) else {
+            return false;
+        };
+        let texture = drawn.texture.clone();
+        self.submit_drawn(encoder, &texture, frame, on_drawn);
+        true
+    }
+
+    /// Make the shown image again from the scan it was made from, with
+    /// `post`, and draw it: a Post edit's display pass, without the film
+    /// chain. `on_drawn` runs once the GPU has drawn it. The image's size, or
+    /// None when that scan is gone (a render has taken its buffers, or the
+    /// pool let them go) or there's no canvas: then render instead.
+    pub fn repost(&self, post: Option<&crate::DisplayPost>, on_drawn: Box<dyn FnOnce()>) -> Option<(u32, u32)> {
+        let mut canvas = self.canvas.lock().unwrap();
+        let canvas = canvas.as_mut()?;
+        let shown = canvas.shown.first()?;
+        let scan = shown.scan?;
+        let texture = shown.texture.clone();
+        let (width, height) = (texture.width(), texture.height());
+        let buffer = self.image_pool.scan(scan.generation, (width, height))?;
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.encode_make_shown(&mut encoder, canvas, &buffer, &texture, scan.encoded, post);
+        canvas.shown[0].mipped = false;
+        let Some(frame) = self.encode_view(&mut encoder, canvas) else {
+            self.queue.submit(Some(encoder.finish()));
+            self.release_transient();
+            return None;
+        };
+        let drawn = Self::drawn(canvas).map_or(texture, |d| d.texture.clone());
+        self.submit_drawn(encoder, &drawn, frame, on_drawn);
+        Some((width, height))
+    }
+
+    /// Submit a display pass that drew `texture` on `frame`, present it, and
+    /// run `on_drawn` once the GPU is done.
+    fn submit_drawn(
+        &self,
+        mut encoder: wgpu::CommandEncoder,
+        texture: &wgpu::Texture,
+        frame: wgpu::SurfaceTexture,
+        on_drawn: Box<dyn FnOnce()>,
+    ) {
+        // One texel copied after the drawing says when the GPU is done, as a
+        // presented frame's fence does.
+        let fence = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("view_fence"),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &fence,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None },
+            },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        self.queue.submit(Some(encoder.finish()));
+        self.release_transient();
+        frame.present();
+        let mapped = fence.clone();
+        fence.slice(..).map_async(wgpu::MapMode::Read, move |_| {
+            release(&mapped);
+            on_drawn();
+        });
+    }
+
+    /// The shown image's size and where its view draws it, in the canvas's
+    /// device pixels: `[width, height, left, top, drawn width, drawn height]`.
+    pub fn shown(&self) -> Option<[f32; 6]> {
+        let mut canvas = self.canvas.lock().unwrap();
+        let canvas = canvas.as_mut()?;
+        let texture = &Self::drawn(canvas)?.texture;
+        let (width, height) = (texture.width(), texture.height());
+        let view = self.view_of(canvas, width, height);
+        let place = view.place(width, height);
+        let (iw, ih) = (width as f32 * view.transform[8], height as f32 * view.transform[9]);
+        let (w, h) = (iw * place.scale[0], ih * place.scale[1]);
+        Some([iw, ih, place.origin[0], place.origin[1], w, h])
+    }
+
+    /// Limit a diffusion filter's FFT grid to `bytes` (0: no limit). A
+    /// larger one convolves the image shrunk by the smallest whole factor
+    /// that fits and blends the glow back at full size: for a device short
+    /// of memory, where the exact grid, several times the image, doesn't fit.
+    /// The narrowest parts of the glow soften a little.
+    pub fn set_diffusion_grid_budget(&self, bytes: u64) {
+        self.diffusion_grid_budget.store(bytes, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Release render scratch and uploaded inputs before a separate decoder
+    /// starts. Keep display textures so a failed decode can still show the
+    /// old photograph; the engine also keeps its CPU source for recovery.
+    pub fn release_render_buffers(&self) {
+        self.image_pool.clear();
+        for (_, input) in self.resident_inputs.lock().unwrap().drain(..) {
+            release(&input);
+        }
+    }
+
+    /// Free the photograph's shown images, original, inputs AND pooled
+    /// render buffers before another opens (see `release`).
+    pub fn forget_photograph(&self) {
+        self.release_render_buffers();
+        if let Some(canvas) = self.canvas.lock().unwrap().as_mut() {
+            for shown in canvas.shown.drain(..).chain(canvas.original.take()) {
+                shown.texture.destroy();
+            }
+        }
+    }
+
+    /// The largest frame this GPU renders and shows: the longest side a
+    /// texture may have, and the pixels an image buffer may hold.
+    pub fn image_limits(&self) -> (u32, u64) {
+        let pixels = self.capacity.max_binding.min(self.capacity.max_buffer) / 12;
+        (self.device.limits().max_texture_dimension_2d, pixels)
+    }
+
+    /// The canvas's view, or by default the image 1:1 on a canvas of its size.
+    fn view_of(&self, canvas: &Canvas, width: u32, height: u32) -> View {
+        canvas.view.unwrap_or(View {
+            width,
+            height,
+            rect: [0.0, 0.0, width as f32, height as f32],
+            background: [0.0; 3],
+            original: false,
+            border: BorderView::default(),
+            transform: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0],
+        })
+    }
+
+    /// The image the canvas's view draws: the original when the view asks
+    /// for it and there is one, otherwise the shown image.
+    fn drawn(canvas: &mut Canvas) -> Option<&mut Shown> {
+        match &mut canvas.original {
+            Some(original) if canvas.view.is_some_and(|v| v.original) => Some(original),
+            _ => canvas.shown.first_mut(),
+        }
+    }
+
+    /// The shown image for a `width` × `height` frame, the last of that size
+    /// or a new one, now first. None when a texture can't be that large.
+    fn shown_texture(&self, canvas: &mut Canvas, width: u32, height: u32) -> Option<wgpu::Texture> {
+        if width.max(height) > self.device.limits().max_texture_dimension_2d {
+            return None;
+        }
+        let same = canvas.shown.iter().position(|s| (s.texture.width(), s.texture.height()) == (width, height));
+        let shown = match same {
+            Some(i) => canvas.shown.remove(i),
+            None => Shown { texture: self.shown_image(width, height), mipped: false, scan: None },
+        };
+        let texture = shown.texture.clone();
+        canvas.shown.insert(0, Shown { mipped: false, scan: None, ..shown });
+        Self::trim_shown(canvas);
+        Some(texture)
+    }
+
+    /// A texture for a shown image of `width` × `height`, with its mip levels.
+    fn shown_image(&self, width: u32, height: u32) -> wgpu::Texture {
+        self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shown"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: width.max(height).ilog2() + 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: CANVAS_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        })
+    }
+
+    /// Keep the shown image before the first only while it, the first and
+    /// the original fit `MAX_SHOWN_BYTES`.
+    fn trim_shown(canvas: &mut Canvas) {
+        // With its mip levels, a third more than its bytes.
+        let bytes = |s: &Shown| u64::from(s.texture.width()) * u64::from(s.texture.height()) * 16 / 3;
+        let total = canvas.shown.iter().take(2).chain(&canvas.original).map(bytes).sum::<u64>();
+        let kept = if total <= MAX_SHOWN_BYTES { 2 } else { 1 };
+        for old in canvas.shown.drain(kept.min(canvas.shown.len())..) {
+            old.texture.destroy();
+        }
+    }
+
+    /// Encode making `rgb`'s display bytes the shown image and drawing it on
+    /// the canvas; the frame to present once submitted. `None` without a
+    /// canvas.
+    fn encode_present(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        rgb: &wgpu::Buffer,
+        width: u32,
+        height: u32,
+        scan: ShownScan,
+        post: Option<&crate::DisplayPost>,
+    ) -> Option<wgpu::SurfaceTexture> {
+        let mut canvas = self.canvas.lock().unwrap();
+        let canvas = canvas.as_mut()?;
+        let texture = self.shown_texture(canvas, width, height)?;
+        self.encode_make_shown(encoder, canvas, rgb, &texture, scan.encoded, post);
+        canvas.shown[0].scan = Some(scan);
+        self.encode_view(encoder, canvas)
+    }
+
+    /// Encode making `rgb` (linear, or with `encoded` sRGB-encoded, RGB
+    /// floats of `texture`'s size) display bytes in `texture`'s first level,
+    /// adjusted by `post`.
+    fn encode_make_shown(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        canvas: &Canvas,
+        rgb: &wgpu::Buffer,
+        texture: &wgpu::Texture,
+        encoded: bool,
+        post: Option<&crate::DisplayPost>,
+    ) {
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Params {
+            width: u32,
+            height: u32,
+            encoded: u32,
+            _pad: u32,
+        }
+        let (width, height) = (texture.width(), texture.height());
+        let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("make_shown_params"),
+            contents: bytemuck::bytes_of(&Params { width, height, encoded: encoded as u32, _pad: 0 }),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let target = texture.create_view(&wgpu::TextureViewDescriptor { mip_level_count: Some(1), ..Default::default() });
+        let (post, tables) = self.post_buffers(post);
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bg_make_shown"),
+            layout: &canvas.make_shown.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: rgb.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&target) },
+                wgpu::BindGroupEntry { binding: 7, resource: post.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 8, resource: tables.as_entire_binding() },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("make_shown"), timestamp_writes: None });
+        pass.set_pipeline(&canvas.make_shown);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.dispatch_workgroups(width.div_ceil(16), height.div_ceil(16), 1);
+    }
+
+    /// Encode drawing the shown image where the view says, its mip levels
+    /// first if the view shrinks it and they don't hold it yet; the frame to
+    /// present once submitted. `None` with nothing shown.
+    fn encode_view(&self, encoder: &mut wgpu::CommandEncoder, canvas: &mut Canvas) -> Option<wgpu::SurfaceTexture> {
+        #[repr(C)]
+        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Params {
+            origin: [f32; 2],
+            scale: [f32; 2],
+            size: [f32; 2],
+            lod: f32,
+            exact: u32,
+            background: [f32; 4],
+            border: BorderView,
+            source: [f32; 4],
+            map_x: [f32; 4],
+            map_y: [f32; 4],
+        }
+        let texture = Self::drawn(canvas)?.texture.clone();
+        let (width, height) = (texture.width(), texture.height());
+        let view = self.view_of(canvas, width, height);
+        let place = view.place(width, height);
+        if place.lod > 0.0 && !Self::drawn(canvas)?.mipped {
+            self.encode_mips(encoder, canvas, &texture);
+            Self::drawn(canvas)?.mipped = true;
+        }
+        let frame = self.canvas_frame(canvas, view.width, view.height)?;
+        let [r, g, b] = view.background;
+        let params = self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("view_params"),
+            contents: bytemuck::bytes_of(&Params {
+                origin: place.origin,
+                scale: place.scale,
+                size: [width as f32 * view.transform[8], height as f32 * view.transform[9]],
+                lod: place.lod,
+                exact: place.exact as u32,
+                background: [r, g, b, 1.0],
+                border: view.border,
+                source: [width as f32, height as f32, view.transform[10], 0.0],
+                map_x: view.transform[0..4].try_into().unwrap(),
+                map_y: view.transform[4..8].try_into().unwrap(),
+            }),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let shown = texture.create_view(&Default::default());
+        let border = canvas.border_texture.as_ref().unwrap_or(&canvas.blank).create_view(&Default::default());
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bg_view"),
+            layout: &canvas.draw.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 3, resource: params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&shown) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&canvas.sampler) },
+                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&border) },
+            ],
+        });
+        let target = frame.texture.create_view(&Default::default());
+        let background = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("view"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &target,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(background), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&canvas.draw);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        Some(frame)
+    }
+
+    /// Encode filling `texture`'s mip levels, each from the one above.
+    fn encode_mips(&self, encoder: &mut wgpu::CommandEncoder, canvas: &Canvas, texture: &wgpu::Texture) {
+        let layout = canvas.mip.get_bind_group_layout(0);
+        let level = |base_mip_level| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        for i in 1..texture.mip_level_count() {
+            let (finer, target) = (level(i - 1), level(i));
+            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg_mip"),
+                layout: &layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&canvas.sampler) },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&finer) },
+                ],
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mip"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&canvas.mip);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
+    /// The canvas's next frame, sized `width` × `height`.
+    fn canvas_frame(&self, canvas: &mut Canvas, width: u32, height: u32) -> Option<wgpu::SurfaceTexture> {
+        if canvas.size != (width, height) {
+            canvas.surface.configure(
+                &self.device,
+                &wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
+                    format: CANVAS_FORMAT,
+                    width,
+                    height,
+                    present_mode: wgpu::PresentMode::Fifo,
+                    desired_maximum_frame_latency: 2,
+                    alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+                    view_formats: Vec::new(),
+                },
+            );
+            canvas.size = (width, height);
+        }
+        canvas.surface.get_current_texture().ok()
+    }
+}
+
+/// A submitted resident film chain whose output is being mapped.
+#[cfg(feature = "wgpu-backend")]
+pub struct FilmChainReadback {
+    device: wgpu::Device,
+    buffer: wgpu::Buffer,
+    output: crate::ChainOutput,
+    mapped: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    /// The render's full-image buffers, back to the pool once read.
+    pool: ImagePool,
+    images: ImageSet,
+    width: u32,
+    height: u32,
+    t_start: web_time::Instant,
+    cpu_setup_ms: f32,
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl FilmChainReadback {
+    /// The chain's output. Waits for the GPU natively; a browser maps buffers
+    /// only between tasks, so there call it after `on_mapped` has run.
+    pub fn finish(self) -> crate::ChainResult {
+        let (width, height, buffer) = (self.width, self.height, &self.buffer);
+        self.device.poll(wgpu::Maintain::Wait);
+        self.mapped.recv().unwrap().unwrap();
+        let gpu_wait_ms = self.t_start.elapsed().as_secs_f32() * 1000.0 - self.cpu_setup_ms;
+        let data = buffer.slice(..).get_mapped_range();
+        let out = match self.output {
+            crate::ChainOutput::Scan => {
+                let out_f32: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+                crate::ChainResult::Scan(ImageBuf::from_data(width, height, f32_to_scalars(out_f32)))
+            }
+            crate::ChainOutput::Rgba8 { .. } => crate::ChainResult::Rgba8 { width, height, rgba: data.to_vec() },
+            crate::ChainOutput::Present { .. } => crate::ChainResult::Presented { width, height },
+        };
+        drop(data);
+        buffer.unmap();
+        self.pool.put(self.images);
+        tracing::debug!(
+            cpu_setup_ms = format!("{:.1}", self.cpu_setup_ms),
+            gpu_wait_ms = format!("{gpu_wait_ms:.1}"),
+            readback_ms = format!(
+                "{:.1}",
+                self.t_start.elapsed().as_secs_f32() * 1000.0 - self.cpu_setup_ms - gpu_wait_ms
+            ),
+            "film chain timings"
+        );
+        out
+    }
+}
+
+/// The resident chain's full-image buffers, kept from one render to the next
+/// of the same size in browsers, for the last two sizes: a slider's
+/// interactive frames and the settled frame after it. There a new buffer
+/// costs a few ms (the browser clears it) and a new readback buffer more,
+/// which at preview sizes is a good part of a frame. Native renders make
+/// them per render, so no full images stay on the GPU between renders
+/// (docs/memory-scratch-reuse.md).
+#[cfg(feature = "wgpu-backend")]
+#[derive(Clone, Default)]
+struct ImagePool(std::sync::Arc<std::sync::Mutex<Vec<ImageSet>>>);
+
+/// At most this much stays pooled: preview frames on a large display, not an
+/// export.
+#[cfg(feature = "wgpu-backend")]
+const MAX_POOLED_BYTES: u64 = 512 << 20;
+
+#[cfg(feature = "wgpu-backend")]
+impl ImagePool {
+    /// The pooled buffers for an image of `size`, which a render in flight
+    /// doesn't hold, since it took them.
+    fn take(&self, size: (u32, u32), minimum_bytes: u64) -> ImageSet {
+        static GENERATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let mut sets = self.0.lock().unwrap();
+        let free = match sets.iter().position(|set| set.size == size) {
+            Some(i) => sets.remove(i).used,
+            None => Vec::new(),
+        };
+        // Reuse this size's partial set even when the complete render would
+        // exceed the pool budget. Only other sizes go before a large render.
+        if minimum_bytes > MAX_POOLED_BYTES {
+            for set in sets.drain(..) {
+                for (_, buffer) in set.used.iter().chain(&set.free) {
+                    release(buffer);
+                }
+            }
+        }
+        let generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        ImageSet { size, generation, free, used: Vec::new() }
+    }
+
+    /// Explicitly destroy buffers rather than waiting for worker-side JS GC.
+    /// Includes unused buffers defensively, even though put() drains those.
+    fn clear(&self) {
+        for set in self.0.lock().unwrap().drain(..) {
+            for (_, buffer) in set.used.iter().chain(&set.free) {
+                release(buffer);
+            }
+        }
+    }
+
+    /// The scan (`img_b`) of render `generation`, of `size`, while the pool
+    /// still holds that render's buffers unchanged: no later render has
+    /// taken them, and they weren't let go.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn scan(&self, generation: u64, size: (u32, u32)) -> Option<wgpu::Buffer> {
+        let sets = self.0.lock().unwrap();
+        let set = sets.iter().find(|set| set.generation == generation && set.size == size)?;
+        set.used.iter().find(|(label, _)| label == "img_b").map(|(_, buffer)| buffer.clone())
+    }
+
+    fn put(&self, mut set: ImageSet) {
+        if !cfg!(target_arch = "wasm32") {
+            return;
+        }
+        // What this render didn't reuse, and the sets that no longer fit,
+        // are freed now (see `release`).
+        let unused = std::mem::take(&mut set.free);
+        let mut sets = self.0.lock().unwrap();
+        sets.insert(0, set);
+        let kept = sets.len().min(2);
+        let evicted = sets.split_off(kept);
+        Self::trim(&mut sets, MAX_POOLED_BYTES);
+        for (_, buffer) in unused.iter().chain(evicted.iter().flat_map(|set| &set.used)) {
+            release(buffer);
+        }
+    }
+
+    /// Keep partial sets, newest first, within the SAME byte budget. A 12 MP
+    /// frame's four RGB buffers alone exceed 512 MiB: evicting the entire set
+    /// made every zoom edit allocate all four again before Safari reclaimed
+    /// the old ones. Keep the buffers that fit (including img_b for Post).
+    fn trim(sets: &mut Vec<ImageSet>, mut bytes: u64) {
+        for set in sets.iter_mut() {
+            set.used.retain(|(_, buffer)| {
+                if buffer.size() <= bytes {
+                    bytes -= buffer.size();
+                    true
+                } else {
+                    release(buffer);
+                    false
+                }
+            });
+        }
+        sets.retain(|set| !set.used.is_empty());
+    }
+}
+
+/// One render's full-image buffers, from the [`ImagePool`].
+#[cfg(feature = "wgpu-backend")]
+struct ImageSet {
+    size: (u32, u32),
+    /// Which render took it, counting up.
+    generation: u64,
+    free: Vec<(String, wgpu::Buffer)>,
+    used: Vec<(String, wgpu::Buffer)>,
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl ImageSet {
+    /// The last render's buffer `label`, or a new one.
+    fn buffer(&mut self, device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
+        let pooled = self.free.iter().position(|(l, _)| l == label).map(|i| self.free.swap_remove(i).1);
+        let buffer = match pooled {
+            Some(buffer) if buffer.size() == size && buffer.usage() == usage => buffer,
+            old => {
+                // E.g. an FFT grid whose radius changed: free the old grid
+                // before allocating its replacement, not at render completion.
+                if let Some(old) = old { release(&old); }
+                device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
+            }
+        };
+        self.used.push((label.to_owned(), buffer.clone()));
+        buffer
+    }
+}
+
+#[cfg(feature = "wgpu-backend")]
+impl crate::PendingFilmChain for FilmChainReadback {
+    fn finish(self: Box<Self>) -> crate::ChainResult {
+        FilmChainReadback::finish(*self)
+    }
+}
+
 /// Per-stage GPU timing for the resident chain, enabled with
 /// `SPEKTRAFILM_GPU_PROFILE=1`: each `mark` submits the work encoded since
 /// the previous mark and waits for it, so the stage's wall time is mostly GPU
@@ -1825,7 +3126,7 @@ struct GpuStageProfiler<'a> {
     device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
     enabled: bool,
-    last: std::time::Instant,
+    last: web_time::Instant,
     rows: Vec<(&'static str, f64)>,
 }
 
@@ -1833,7 +3134,7 @@ struct GpuStageProfiler<'a> {
 impl<'a> GpuStageProfiler<'a> {
     fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> Self {
         let enabled = std::env::var_os("SPEKTRAFILM_GPU_PROFILE").is_some();
-        Self { device, queue, enabled, last: std::time::Instant::now(), rows: Vec::new() }
+        Self { device, queue, enabled, last: web_time::Instant::now(), rows: Vec::new() }
     }
 
     fn mark(&mut self, name: &'static str, encoder: &mut wgpu::CommandEncoder) {
@@ -1843,7 +3144,7 @@ impl<'a> GpuStageProfiler<'a> {
         let done = std::mem::replace(encoder, self.device.create_command_encoder(&Default::default()));
         self.queue.submit(Some(done.finish()));
         self.device.poll(wgpu::Maintain::Wait);
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         self.rows.push((name, (now - self.last).as_secs_f64() * 1e3));
         self.last = now;
     }
@@ -2253,12 +3554,22 @@ impl ComputeBackend for WgpuBackend {
         Some(self.run_film_chain(params))
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    fn submit_film_chain(
+        &self,
+        params: &crate::FilmChainParams<'_>,
+        output: crate::ChainOutput,
+        on_mapped: Box<dyn FnOnce() + Send>,
+    ) -> Option<Box<dyn crate::PendingFilmChain>> {
+        self.film_chain_capacity(params).ok()?;
+        Some(Box::new(self.start_film_chain(params, output, on_mapped)))
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
     fn image_capacity(&self, width: u32, height: u32) -> Result<(), String> {
         self.capacity.image(width, height).map(|_| ())
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_arch = "wasm32"))]
     fn film_chain_capacity(&self, params: &crate::FilmChainParams<'_>) -> Result<(), String> {
         let mut bytes = self.capacity.image(params.image.width, params.image.height)?;
         // Camera and enlarger FFT states are prepared together and remain
@@ -2388,7 +3699,6 @@ fn build_ref_blur_channels(
     active: [bool; 3],
     label: &str,
 ) -> RefBlur {
-    use wgpu::util::DeviceExt;
     let fir_layout = [
         wgpu::BufferBindingType::Uniform,
         wgpu::BufferBindingType::Storage { read_only: true },
@@ -2499,7 +3809,7 @@ fn build_ref_blur_channels(
             let start = c * taps + (taps - k.len()) / 2;
             padded[start..start + k.len()].copy_from_slice(k);
         }
-        let kernel_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let kernel_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{label}_fir_kernels")),
             contents: bytemuck::cast_slice(&padded),
             usage: wgpu::BufferUsages::STORAGE,
@@ -2511,7 +3821,7 @@ fn build_ref_blur_channels(
                 scale: if vertical == 0 { [1.0; 4] } else { fir.scale },
                 ..fir
             };
-            let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{label}_fir_params_{vertical}")),
                 contents: bytemuck::bytes_of(&params),
                 usage: wgpu::BufferUsages::UNIFORM,
@@ -2547,12 +3857,12 @@ fn build_ref_blur_channels(
         // The row passes read src and write mid; the column pass filters mid
         // and writes out. The column pass binds a placeholder for src, so out
         // may alias src.
-        let placeholder = device.create_buffer(&wgpu::BufferDescriptor {
+        let placeholder = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label}_iir_unused")),
             size: 16,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
-        });
+        }));
         // Rows: six dispatches of the segmented recursion (zero-state runs,
         // scan over segments, final runs; forward then backward).
         let segments = width.div_ceil(IIR_ROW_SEGMENT).clamp(1, 64);
@@ -2583,12 +3893,12 @@ fn build_ref_blur_channels(
                 }
             }
         }
-        let state_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        let state_buf = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label}_iir_row_state")),
             size: (height as u64) * (segments as u64) * 9 * 4,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
-        });
+        }));
         for mode in 0..6u32 {
             let params = RowParams {
                 width,
@@ -2603,7 +3913,7 @@ fn build_ref_blur_channels(
                 c2: iir.c2,
                 a,
             };
-            let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{label}_iir_row_params_{mode}")),
                 contents: bytemuck::bytes_of(&params),
                 usage: wgpu::BufferUsages::UNIFORM,
@@ -2635,7 +3945,7 @@ fn build_ref_blur_channels(
         }
         // Columns: mid filtered in place, written to out.
         let params = IirParams { vertical: 1, ..iir };
-        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("{label}_iir_params_1")),
             contents: bytemuck::bytes_of(&params),
             usage: wgpu::BufferUsages::UNIFORM,
@@ -2825,7 +4135,6 @@ fn build_halation_state(
     scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> HalationState {
-    use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
     let buf_c = scratch[0].clone();
     let buf_d = scratch[1].clone();
@@ -2885,7 +4194,7 @@ fn build_halation_state(
         // vec4<f32>: per-channel tail weights, .w padding for 16-byte alignment
         tail_weight: [f32; 4],
     }
-    let scatter_mix_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let scatter_mix_params = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("halation_scatter_mix_params"),
         contents: bytemuck::bytes_of(&ScatterMixParams {
             n_pixels: n_pixels as u32,
@@ -2989,7 +4298,7 @@ fn build_halation_state(
         _pad2: u32,
         scale: [f32; 4],
     }
-    let final_add_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let final_add_params = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("halation_final_add_params"),
         contents: bytemuck::bytes_of(&AddScaledPerChannelParams {
             n_pixels: n_pixels as u32,
@@ -3056,7 +4365,7 @@ fn build_halation_state(
             1.0 / (1.0 + hp.halation_a_tot[2]),
             0.0,
         ];
-        let renorm_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let renorm_params = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("halation_renorm_params"),
             contents: bytemuck::bytes_of(&RenormParams {
                 n_pixels: n_pixels as u32,
@@ -3199,7 +4508,6 @@ impl Fft2d {
         inverse: bool,
         start_in_a: bool,
     ) -> Self {
-        use wgpu::util::DeviceExt;
         let pipeline = backend.cached_pipeline(
             include_str!("../../spektrafilm-shaders/wgsl/fft_stage.wgsl"),
             &[
@@ -3231,7 +4539,7 @@ impl Fft2d {
             let mut ns = 1;
             for radix in fft_radices(n) {
                 let params = Params { n, radix, ns, lines, elem_stride, line_stride, inverse: inverse as u32, line_fastest };
-                let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("fft_stage_params"),
                     contents: bytemuck::bytes_of(&params),
                     usage: wgpu::BufferUsages::UNIFORM,
@@ -3301,6 +4609,28 @@ struct DiffusionChannel {
     extract: (wgpu::BindGroup, (u32, u32)),
 }
 
+/// Discrete 2D exponential's mass relative to its continuum integral.
+/// Reducing lambda without this correction overweights subpixel cores:
+/// their central sample stays 1 while a broad component loses k² samples.
+#[cfg(feature = "wgpu-backend")]
+fn exponential_sampling_moments(lambda: f64) -> (f64, f64) {
+    if lambda >= 8.0 {
+        // Poisson summation: first lattice correction, residual O(lambda^-5).
+        // Broad components have negligible response at the pixel Nyquist.
+        return (1.0 + 0.036414 / lambda.powi(3), 0.0);
+    }
+    let r = (20.0 * lambda).ceil() as i32;
+    let (mut sum, mut nyquist) = (0.0, 0.0);
+    for y in -r..=r {
+        for x in -r..=r {
+            let v = (-((x * x + y * y) as f64).sqrt() / lambda).exp();
+            sum += v;
+            nyquist += if x % 2 == 0 { v } else { -v };
+        }
+    }
+    (sum / (2.0 * std::f64::consts::PI * lambda * lambda), nyquist)
+}
+
 #[cfg(feature = "wgpu-backend")]
 #[allow(clippy::too_many_arguments)]
 fn build_diffusion_state(
@@ -3310,26 +4640,35 @@ fn build_diffusion_state(
     height: u32,
     buf_b: &wgpu::Buffer,
     scratch: &[wgpu::Buffer],
+    grid: &mut dyn FnMut(&str, u64) -> wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> DiffusionState {
-    use wgpu::util::DeviceExt;
     let psf = &plan.psf;
-    let r = psf.radius;
-    let n1 = fft_size(height + 2 * r);
-    let n2 = fft_size(width + 2 * r);
+    let (full_w, full_h) = (width, height);
+    // Its grid two complex planes and a real one: 20 bytes a cell. Past the
+    // backend's budget, the image is shrunk k times for the convolution and
+    // the glow drawn back at full size (fft_conv.wgsl's modes 5 and 6).
+    let size_at = |k: u32| {
+        let (w, h) = (full_w.div_ceil(k), full_h.div_ceil(k));
+        let r = psf.radius.div_ceil(k).min(w.min(h).saturating_sub(1));
+        (w, h, r, fft_size(h + 2 * r), fft_size(w + 2 * r))
+    };
+    let budget = backend.diffusion_grid_budget.load(std::sync::atomic::Ordering::Relaxed);
+    let fits = |k: u32| {
+        let (.., n1, n2) = size_at(k);
+        budget == 0 || n1 as u64 * n2 as u64 * 20 <= budget
+    };
+    let k = (1..=16).find(|&k| fits(k)).unwrap_or(16);
+    let (width, height, r, n1, n2) = size_at(k);
     let n_grid = n1 as u64 * n2 as u64;
     let buf_mix = scratch[0].clone();
-    let mk = |label: &str, bytes: u64| {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: bytes,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        })
-    };
-    let grid_a = mk("diffusion_fft_a", n_grid * 8);
-    let grid_b = mk("diffusion_fft_b", n_grid * 8);
-    let kspec = mk("diffusion_kspec", n_grid * 4);
+    // The FFT grids, several times the image, from the render's pooled
+    // buffers (`grid`): iOS Safari holds a destroyed buffer's memory until
+    // the garbage collector takes it, so new ones each render added up until
+    // the tab was killed.
+    let grid_a = grid("diffusion_fft_a", n_grid * 8);
+    let grid_b = grid("diffusion_fft_b", n_grid * 8);
+    let kspec = grid("diffusion_kspec", n_grid * 4);
     // exp(−2πi·m/n), m < n, in f64 then rounded.
     let twiddles = |n: u32| -> Vec<f32> {
         (0..n)
@@ -3340,7 +4679,7 @@ fn build_diffusion_state(
             .collect()
     };
     let storage = |label: &str, data: &[f32]| {
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),
             contents: bytemuck::cast_slice(data),
             usage: wgpu::BufferUsages::STORAGE,
@@ -3348,12 +4687,28 @@ fn build_diffusion_state(
     };
     let tw1 = storage("diffusion_tw1", &twiddles(n1));
     let tw2 = storage("diffusion_tw2", &twiddles(n2));
+    // Decay lengths in grid pixels. Preserve each component's discrete
+    // mass when reducing, rather than overweighting the subpixel cores.
     let mut comps = vec![0.0f32; 3 * 16 * 2];
+    let mut masses = std::collections::HashMap::new();
+    let mut moments = |lambda: f64| *masses.entry(lambda.to_bits()).or_insert_with(|| exponential_sampling_moments(lambda));
+    let mut detail = [0.0f32; 3];
     for c in 0..3 {
         assert!(psf.components[c].len() <= 16, "diffusion PSF has more than 16 exponentials");
-        for (k, &(lambda, amp)) in psf.components[c].iter().enumerate() {
-            comps[(c * 16 + k) * 2] = lambda as f32;
-            comps[(c * 16 + k) * 2 + 1] = amp as f32;
+        let (mut total_mass, mut nyquist_mass) = (0.0, 0.0);
+        for (i, &(lambda, amp)) in psf.components[c].iter().enumerate() {
+            let reduced = lambda / k as f64;
+            let correction = if k > 1 {
+                let (mass, nyquist) = moments(lambda);
+                total_mass += amp * mass * 2.0 * std::f64::consts::PI * lambda * lambda;
+                nyquist_mass += amp * nyquist;
+                mass / moments(reduced).0
+            } else { 1.0 };
+            comps[(c * 16 + i) * 2] = reduced as f32;
+            comps[(c * 16 + i) * 2 + 1] = (amp * correction) as f32;
+        }
+        if total_mass > 0.0 {
+            detail[c] = (nyquist_mass / total_mass).clamp(0.0, 1.0) as f32;
         }
     }
     let comps_buf = storage("diffusion_psf_components", &comps);
@@ -3381,7 +4736,11 @@ fn build_diffusion_state(
         channel: u32,
         n_comp: u32,
         p_s: f32,
-        _pad: [u32; 3],
+        k: u32,
+        full_h: u32,
+        full_w: u32,
+        detail: f32,
+        _pad: [f32; 3],
     }
     let mut owned = vec![grid_a.clone(), grid_b.clone(), kspec.clone(), tw1.clone(), tw2.clone(), comps_buf.clone()];
     let mut job = |mode: u32, channel: u32, grid: &wgpu::Buffer| {
@@ -3395,9 +4754,13 @@ fn build_diffusion_state(
             channel,
             n_comp: psf.components[channel as usize].len() as u32,
             p_s: plan.p_s,
-            _pad: [0; 3],
+            k,
+            full_h,
+            full_w,
+            detail: detail[channel as usize],
+            _pad: [0.0; 3],
         };
-        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("diffusion_fft_conv_params"),
             contents: bytemuck::bytes_of(&params),
             usage: wgpu::BufferUsages::UNIFORM,
@@ -3415,7 +4778,11 @@ fn build_diffusion_state(
             ],
         });
         owned.push(params_buf);
-        let threads = if mode == 4 { width * height } else { (n_grid) as u32 };
+        let threads = match mode {
+            4 => width * height,
+            6 => full_w * full_h,
+            _ => n_grid as u32,
+        };
         (bg, linear_dispatch_grid(threads, pipeline.workgroup_size))
     };
     let grid = |in_a: bool| if in_a { &grid_a } else { &grid_b };
@@ -3433,17 +4800,17 @@ fn build_diffusion_state(
             psf: job(0, c, &grid_a),
             kernel_fft,
             kspec: job(1, c, grid(k_in_a)),
-            pad: job(2, c, &grid_a),
+            pad: job(if k > 1 { 5 } else { 2 }, c, &grid_a),
             image_fft,
             mul: job(3, c, grid(x_in_a)),
             inverse_fft,
-            extract: job(4, c, grid(y_in_a)),
+            extract: job(if k > 1 { 6 } else { 4 }, c, grid(y_in_a)),
         });
     }
     DiffusionState {
         channels,
         pipeline,
-        n_full: width * height,
+        n_full: full_w * full_h,
         buf_mix,
         _owned: owned,
     }
@@ -3520,7 +4887,6 @@ fn build_highlight_boost_state(
     img: &wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> HighlightBoostState {
-    use wgpu::util::DeviceExt;
     let n_values = n_pixels * 3;
     let mut counts = Vec::new();
     let mut values = n_values;
@@ -3554,12 +4920,12 @@ fn build_highlight_boost_state(
         .iter()
         .enumerate()
         .map(|(i, &c)| {
-            device.create_buffer(&wgpu::BufferDescriptor {
+            backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("highlight_reduce_{i}")),
                 size: (c as u64) * 4,
                 usage: wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
-            })
+            }))
         })
         .collect();
 
@@ -3573,7 +4939,7 @@ fn build_highlight_boost_state(
     let mut reductions = Vec::with_capacity(counts.len());
     for (i, &blocks) in counts.iter().enumerate() {
         let pass_values = if i == 0 { n_values } else { counts[i - 1] };
-        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("highlight_reduce_params_{i}")),
             contents: bytemuck::bytes_of(&ReduceParams {
                 n_values: pass_values,
@@ -3619,7 +4985,7 @@ fn build_highlight_boost_state(
         boost_range: f32,
         protect_ev: f32,
     }
-    let boost_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let boost_params = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("highlight_boost_params"),
         contents: bytemuck::bytes_of(&BoostParams {
             n_values,
@@ -3711,7 +5077,6 @@ fn build_log_to_linear_state(
     img: &wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> InplaceUnaryState {
-    use wgpu::util::DeviceExt;
     #[repr(C)]
     #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
     struct Params {
@@ -3726,7 +5091,7 @@ fn build_log_to_linear_state(
             wgpu::BufferBindingType::Storage { read_only: false },
         ],
     );
-    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("print_log_to_linear_params"),
         contents: bytemuck::bytes_of(&Params {
             n_pixels,
@@ -3765,7 +5130,6 @@ fn build_linear_to_log_state(
     img: &wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> InplaceUnaryState {
-    use wgpu::util::DeviceExt;
     #[repr(C)]
     #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
     struct Params {
@@ -3779,7 +5143,7 @@ fn build_linear_to_log_state(
             wgpu::BufferBindingType::Storage { read_only: false },
         ],
     );
-    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("print_linear_to_log_params"),
         contents: bytemuck::bytes_of(&Params {
             n_pixels,
@@ -3819,7 +5183,6 @@ fn build_post_scan_state(
     img: &wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> InplaceUnaryState {
-    use wgpu::util::DeviceExt;
     #[repr(C)]
     #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
     struct Params {
@@ -3835,7 +5198,7 @@ fn build_post_scan_state(
             wgpu::BufferBindingType::Storage { read_only: false },
         ],
     );
-    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("post_scan_params"),
         contents: bytemuck::bytes_of(&Params {
             n_pixels,
@@ -3901,7 +5264,6 @@ fn build_dir_state(
     scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> DirState {
-    use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
     let buf_correction = scratch[0].clone();
     let buf_diffused = scratch[1].clone();
@@ -3940,7 +5302,7 @@ fn build_dir_state(
         m_row2: [m[2][0], m[2][1], m[2][2], 0.0],
         donor: LangmuirUniform::new(dp.donor.as_ref()),
     };
-    let matmul_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let matmul_params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("dir_matmul_params"),
         contents: bytemuck::bytes_of(&matmul_params),
         usage: wgpu::BufferUsages::UNIFORM,
@@ -4044,7 +5406,7 @@ fn build_dir_state(
                     wgpu::BufferBindingType::Storage { read_only: false },
                 ],
             ),
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("dir_receiver_subtract_params"),
                 contents: bytemuck::bytes_of(&ReceiverSubtractParams {
                     n_pixels: n_pixels as u32,
@@ -4056,7 +5418,7 @@ fn build_dir_state(
         ),
         None => (
             add_scaled_pipe,
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("dir_subtract_params"),
                 contents: bytemuck::bytes_of(&AddScaledParams {
                     n_pixels: n_pixels as u32,
@@ -4109,12 +5471,12 @@ fn build_dir_state(
         .iter()
         .flat_map(|r| r.iter().map(|&v| if v.is_nan() { 0.0 } else { v as f32 }))
         .collect();
-    let log_exp_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let log_exp_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("dir_density_log_exp"),
         contents: bytemuck::cast_slice(&log_exp_f32),
         usage: wgpu::BufferUsages::STORAGE,
     });
-    let curves_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let curves_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("dir_density_curves_0"),
         contents: bytemuck::cast_slice(&curves_f32),
         usage: wgpu::BufferUsages::STORAGE,
@@ -4137,7 +5499,7 @@ fn build_dir_state(
         gamma_inv: [1.0; 3],
         _pad: 0.0,
     };
-    let density_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let density_params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("dir_density_params"),
         contents: bytemuck::bytes_of(&density_params),
         usage: wgpu::BufferUsages::UNIFORM,
@@ -4267,7 +5629,6 @@ fn build_unsharp_state(
     scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> UnsharpState {
-    use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
     let out_buf = scratch[0].clone();
     let blur_dst = &scratch[1];
@@ -4294,7 +5655,7 @@ fn build_unsharp_state(
         _pad0: u32,
         _pad1: u32,
     }
-    let combine_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let combine_params = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("unsharp_combine_params"),
         contents: bytemuck::bytes_of(&CombineParams {
             n_pixels: n_pixels as u32,
@@ -4392,7 +5753,6 @@ fn build_glare_state(
     scratch: &[wgpu::Buffer],
     backend: &WgpuBackend,
 ) -> GlareState {
-    use wgpu::util::DeviceExt;
     let n_pixels = (width as usize) * (height as usize);
     let scratch = scratch[0].clone();
 
@@ -4412,7 +5772,7 @@ fn build_glare_state(
         mu: f32,
         sigma: f32,
     }
-    let gen_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let gen_params = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("glare_gen_params"),
         contents: bytemuck::bytes_of(&GenParams {
             n_pixels: n_pixels as u32,
@@ -4481,7 +5841,7 @@ fn build_glare_state(
         _pad2: u32,
         offset: [f32; 4],
     }
-    let apply_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let apply_params = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("glare_apply_params"),
         contents: bytemuck::bytes_of(&ApplyParams {
             n_pixels: n_pixels as u32,
@@ -4574,7 +5934,6 @@ fn build_gamut_state(
     n_pixels: u32,
     backend: &WgpuBackend,
 ) -> GamutState {
-    use wgpu::util::DeviceExt;
     let pipe = backend.cached_pipeline(
         include_str!("../../spektrafilm-shaders/wgsl/gamut_compress.wgsl"),
         &[
@@ -4602,7 +5961,7 @@ fn build_gamut_state(
         Some([t, l, p]) => [t, l, p, 1.0],
         None => [0.0, 1.0, 1.0, 0.0],
     };
-    let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("gamut_params"),
         contents: bytemuck::bytes_of(&GamutParams {
             n_pixels,
@@ -4625,7 +5984,7 @@ fn build_gamut_state(
     } else {
         gp.cmax.iter().map(|&v| v as f32).collect()
     };
-    let cmax_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let cmax_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("gamut_cmax"),
         contents: bytemuck::cast_slice(&cmax_f32),
         usage: wgpu::BufferUsages::STORAGE,
@@ -4719,14 +6078,13 @@ fn build_grain_state(
     acc: &wgpu::Buffer,
     backend: &WgpuBackend,
 ) -> GrainState {
-    use wgpu::util::DeviceExt;
     let n_pixels = width * height;
     let n_layers = gp.n_layers();
     let n_samples = gp.interp_x.len();
     let storage = |read_only| wgpu::BufferBindingType::Storage { read_only };
     let uniform = wgpu::BufferBindingType::Uniform;
     let job = |pipe: &CachedPipelineRef, label: &str, params: &[u8], buffers: &[&wgpu::Buffer]| {
-        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let params_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),
             contents: params,
             usage: wgpu::BufferUsages::UNIFORM,
@@ -4755,7 +6113,7 @@ fn build_grain_state(
     curves.extend(gp.interp_x.iter().flatten());
     curves.extend(gp.interp_inv_dx.iter().flatten());
     curves.extend(gp.curves_layers.iter().flatten());
-    let curves_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let curves_buf = backend.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("grain_curves"),
         contents: bytemuck::cast_slice(&curves),
         usage: wgpu::BufferUsages::STORAGE,
@@ -4909,12 +6267,12 @@ fn build_grain_state(
         let mut level = 0;
         loop {
             let blocks = values.div_ceil(2048).max(1);
-            let out = device.create_buffer(&wgpu::BufferDescriptor {
+            let out = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("grain_sums_{level}")),
                 size: blocks as u64 * 6 * 4,
                 usage: wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
-            });
+            }));
             let params = ReduceParams { n_values: values, mode: (level > 0) as u32, _pad: [0; 2] };
             let reduce = if level == 0 {
                 job(&reduce_pipe, "grain_sum_reduce", bytemuck::bytes_of(&params), &[cur, other, &out])
@@ -4933,12 +6291,12 @@ fn build_grain_state(
         // 5. Renormalize and remove the floor.
         passes.push(finalize(true, other, buffers.last().expect("sums")));
     } else {
-        let unused = device.create_buffer(&wgpu::BufferDescriptor {
+        let unused = backend.transient(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("grain_sums_unused"),
             size: 32,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
-        });
+        }));
         passes.push(finalize(false, cur, &unused));
         buffers.push(unused);
     }
@@ -4991,6 +6349,41 @@ mod grain_tests {
     use wgpu::util::DeviceExt;
 
     #[test]
+    fn image_pool_preserves_small_reuse_but_evicts_before_oversized_renders() {
+        let pool = ImagePool::default();
+        let set = |size, generation| ImageSet { size, generation, free: Vec::new(), used: Vec::new() };
+        pool.0.lock().unwrap().extend([set((100, 100), 1), set((200, 200), 2)]);
+        let small = pool.take((100, 100), 100 * 100 * 48);
+        assert_eq!(small.size, (100, 100));
+        assert_eq!(pool.0.lock().unwrap().len(), 1, "other small size remains reusable");
+        let large = pool.take((4242, 2828), 4242 * 2828 * 48);
+        assert_eq!(large.size, (4242, 2828));
+        assert!(pool.0.lock().unwrap().is_empty(), "old sizes gone before large buffers allocate");
+        pool.0.lock().unwrap().push(set((200, 200), 3));
+        pool.clear();
+        assert!(pool.0.lock().unwrap().is_empty(), "forget clears the pool too");
+    }
+
+    #[test]
+    fn image_pool_keeps_partial_oversized_sets_within_budget() {
+        let Some(backend) = WgpuBackend::new() else { return };
+        let buffer = |label: &str, size| (label.to_owned(), backend.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label), size, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false,
+        }));
+        let large = ImageSet { size: (4242, 2828), generation: 9, free: Vec::new(),
+            used: ["img_a", "img_b", "effect_scratch_0", "effect_scratch_1"].map(|l| buffer(l, 144)).into() };
+        let small = ImageSet { size: (100, 100), generation: 10, free: Vec::new(), used: vec![buffer("img_b", 64)] };
+        let pool = ImagePool::default();
+        pool.0.lock().unwrap().extend([large, small]);
+        ImagePool::trim(&mut pool.0.lock().unwrap(), 512);
+        assert_eq!(pool.0.lock().unwrap().iter().flat_map(|s| &s.used).map(|(_, b)| b.size()).sum::<u64>(), 496);
+        assert!(pool.scan(9, (4242, 2828)).is_some(), "retained scan still supports Post");
+        let next = pool.take((4242, 2828), MAX_POOLED_BYTES + 1);
+        assert_eq!(next.free.len(), 3, "large render reuses its partial set");
+        assert!(pool.0.lock().unwrap().is_empty(), "other size evicted before allocating");
+    }
+
+    #[test]
     fn linear_dispatch_grid_covers_every_thread_within_limits() {
         // Up to 150 MP, and the 3-values-per-pixel highlight-boost pass at
         // 100 MP. The overshoot is less than one row of workgroups.
@@ -5006,7 +6399,7 @@ mod grain_tests {
     }
 
     /// The Metal threadgroup query must agree with what Apple GPUs are known
-    /// to run: every shader's default size. (The earlier single-pass grain shader
+    /// to run: each single-entry compute shader's default size. (The earlier single-pass grain shader
     /// could not run 1024 threads, hence grain's default of 256; the
     /// per-sub-layer shader that replaced it can, and keeps 256.)
     #[cfg(target_os = "macos")]
@@ -5025,8 +6418,23 @@ mod grain_tests {
         let mut paths: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
         paths.sort();
         for path in paths {
-            let source = std::fs::read_to_string(&path).unwrap();
+            let mut source = std::fs::read_to_string(&path).unwrap();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            // Post is a shared fragment, not a standalone shader. Assemble
+            // its callers exactly as the production display pipelines do.
+            if name == "display_post.wgsl" {
+                continue;
+            }
+            if matches!(name.as_str(), "display_rgba8.wgsl" | "display_present.wgsl") {
+                source.push_str(include_str!("../../spektrafilm-shaders/wgsl/display_post.wgsl"));
+            }
+            // This query mirrors the single `main` compute pipeline helper.
+            // Display shaders also contain render/multiple named entries,
+            // which use their own pipeline layouts and are not this helper.
+            let module = wgpu::naga::front::wgsl::parse_str(&source).unwrap();
+            if !matches!(module.entry_points.as_slice(), [entry] if entry.stage == wgpu::naga::ShaderStage::Compute && entry.name == "main") {
+                continue;
+            }
             let entries = layout_from_wgsl(&source);
             let declared = declared_workgroup_size(&source);
             let limit = metal_threadgroups::max_threads(&device, &source, &entries, declared)
@@ -5513,7 +6921,7 @@ mod grain_tests {
                 for _ in 0..10 {
                     encode(&mut encoder);
                 }
-                let t = std::time::Instant::now();
+                let t = web_time::Instant::now();
                 backend.queue.submit(Some(encoder.finish()));
                 backend.device.poll(wgpu::Maintain::Wait);
                 if i >= 2 {
@@ -5608,6 +7016,30 @@ mod grain_tests {
         }
     }
 
+    #[test]
+    fn reduced_diffusion_preserves_component_mass_ratios() {
+        let discrete_sum = |lambda: f64| {
+            let r = (20.0 * lambda).ceil() as i32;
+            let mut sum = 0.0;
+            for y in -r..=r {
+                for x in -r..=r {
+                    sum += (-((x * x + y * y) as f64).sqrt() / lambda).exp();
+                }
+            }
+            sum
+        };
+        for lambda in [0.2, 0.7, 3.0, 8.0, 16.0] {
+            for k in [2.0, 3.0, 4.0] {
+                let reduced = lambda / k;
+                let corrected_mass = discrete_sum(reduced) * k * k
+                    * exponential_sampling_moments(lambda).0 / exponential_sampling_moments(reduced).0;
+                let exact_mass = discrete_sum(lambda);
+                let error = (corrected_mass / exact_mass - 1.0).abs();
+                assert!(error < 2e-7, "lambda {lambda}, k {k}: mass error {error}");
+            }
+        }
+    }
+
     /// The GPU diffusion filter against the CPU's reflect-padded FFT
     /// convolution in f64 (`convolve2d_reflect`) and its mix, on odd sizes
     /// that need radix 2, 3, 4 and 5 stages, for each channel's own PSF.
@@ -5635,7 +7067,10 @@ mod grain_tests {
             let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
             let img = backend.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("img"), contents: bytemuck::cast_slice(&data), usage });
             let scratch = vec![backend.device.create_buffer(&wgpu::BufferDescriptor { label: Some("s"), size: (w * h * 12) as u64, usage, mapped_at_creation: false })];
-            let state = build_diffusion_state(&backend.device, &plan, w as u32, h as u32, &img, &scratch, &backend);
+            let mut grid = |label: &str, size| {
+                backend.device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false })
+            };
+            let state = build_diffusion_state(&backend.device, &plan, w as u32, h as u32, &img, &scratch, &mut grid, &backend);
             let got = run_and_read(&backend, &img, w * h * 12, |e| state.encode_passes(e, &img));
             let k = 2 * r + 1;
             let mut worst = 0.0f64;

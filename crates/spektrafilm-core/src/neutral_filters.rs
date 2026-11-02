@@ -27,7 +27,7 @@ impl NeutralFilters {
     /// Returns an empty database if the file is missing — matches Python's behavior.
     pub fn load(data_dir: &Path) -> Self {
         let path = data_dir.join("filters").join("neutral_print_filters.json");
-        let db = std::fs::read_to_string(&path)
+        let db = crate::data_fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str::<RawDb>(&s).ok())
             .map(|raw| raw.0)

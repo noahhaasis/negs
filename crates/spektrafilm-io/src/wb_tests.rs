@@ -138,6 +138,49 @@ fn selection_reloads_raw_and_export_json_reproduces_preview_pixels() {
     assert_eq!(daylight.data, custom_daylight.data);
 }
 
+/// The browser's routes (`spektrafilm-wasm` decode/load and the opt-in
+/// bounded decode) develop RAW bytes, not paths: they must apply the same
+/// shared WB as the path loaders, mode by mode, and validate it.
+#[test]
+fn byte_loaders_apply_the_same_wb_as_path_loaders() {
+    let file = write_fixture();
+    let bytes = std::fs::read(&file.0).unwrap();
+    let wbs = RawWhiteBalanceMode::ALL.map(|mode| RawWhiteBalance { mode, temperature: 3200.0, tint: 0.85 });
+    for wb in wbs {
+        let path = load_raw_with_wb(&file.0, wb).unwrap();
+        assert_eq!(load_raw_bytes(&bytes, wb).unwrap().data, path.data, "{:?}", wb.mode);
+        let (unoriented, orientation) = load_raw_bytes_unoriented(&bytes, wb).unwrap();
+        assert_eq!(orientation, 6);
+        assert_eq!(unoriented.oriented(orientation).data, path.data, "{:?}", wb.mode);
+        for mode in [bounded::Mode::LargeBayer, bounded::Mode::ForceBayer] {
+            match bounded::load_raw_bytes_kept(&bytes, wb, 0, 1e9, mode) {
+                Ok(kept) => assert_eq!(kept.image.oriented(kept.orientation).data, path.data, "{:?} {mode:?}", wb.mode),
+                // The linear fixture isn't a Bayer mosaic: forcing the banded
+                // developer refuses it rather than ignoring the WB.
+                Err(e) => assert!(matches!(mode, bounded::Mode::ForceBayer), "{e:#}"),
+            }
+        }
+    }
+    let [as_shot, daylight, tungsten, custom] = wbs.map(|wb| load_raw_bytes(&bytes, wb).unwrap().data);
+    assert_ne!(daylight, as_shot);
+    assert_ne!(tungsten, daylight);
+    assert_ne!(custom, daylight);
+    let custom_daylight = RawWhiteBalance { mode: RawWhiteBalanceMode::Custom, temperature: 6504.0, tint: 1.0 };
+    assert_eq!(load_raw_bytes(&bytes, custom_daylight).unwrap().data, daylight);
+    assert_eq!(load_raw_bytes(&bytes, RawWhiteBalance::default()).unwrap().data, as_shot);
+    let invalid = RawWhiteBalance { mode: RawWhiteBalanceMode::Custom, temperature: 1000.0, tint: 1.0 };
+    for error in [
+        load_raw_bytes(&bytes, invalid).unwrap_err(),
+        load_raw_bytes_unoriented(&bytes, invalid).unwrap_err(),
+        bounded::load_raw_bytes_kept(&bytes, invalid, 0, 1e9, bounded::Mode::LargeBayer).err().unwrap(),
+    ] {
+        assert!(format!("{error:#}").contains("temperature must be between 1667 and 25000 K"), "{error:#}");
+    }
+    // Inactive custom values are kept but not validated or applied.
+    let inactive = RawWhiteBalance { mode: RawWhiteBalanceMode::Daylight, temperature: f64::NAN, tint: -1.0 };
+    assert_eq!(load_raw_bytes(&bytes, inactive).unwrap().data, daylight);
+}
+
 #[test]
 fn as_shot_keeps_coefficients_and_missing_metadata_fallback() {
     let mut raw = raw_fixture();
