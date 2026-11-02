@@ -303,15 +303,18 @@ private struct StockTileView: View {
     var body: some View {
         Button(action: choose) {
             VStack(alignment: .leading, spacing: 3) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 5).fill(.quaternary)
-                    if let image = tile.image {
-                        Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
-                            .opacity(tile.dimmed ? 0.55 : 1)
+                // The thumbnail is an overlay so its fill can't widen the
+                // tile past its column (as a ZStack child it did, and the
+                // tiles overlapped).
+                RoundedRectangle(cornerRadius: 5).fill(.quaternary)
+                    .frame(maxWidth: .infinity).frame(height: 92)
+                    .overlay {
+                        if let image = tile.image {
+                            Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                                .opacity(tile.dimmed ? 0.55 : 1)
+                        }
                     }
-                }
-                .frame(maxWidth: .infinity).frame(height: 92)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay {
                     if selected { RoundedRectangle(cornerRadius: 5).strokeBorder(Color.accentColor, lineWidth: 2) }
                 }
