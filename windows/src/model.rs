@@ -318,6 +318,9 @@ pub struct Model {
     rendered_space: String,
     /// How the helper read the photograph's colours (`input_colour`).
     pub input_colour: Value,
+    /// The last render's RAW carries lens corrections the decoder can apply
+    /// (`lens_correction_supported`), which shows the Lens corrections switch.
+    pub lens_supported: bool,
     /// The shown frame was rendered at canvas size while a slider moved;
     /// letting go renders the photograph at export size.
     showing_interactive_frame: bool,
@@ -332,7 +335,8 @@ pub struct Model {
     awaiting_restoration: bool,
     restoration: Option<Result<Option<EditorSession>>>,
     catalog_arrived: bool,
-    original_cache: Option<Picture>,
+    /// The decoded original, with the `original_key` it was decoded for.
+    original_cache: Option<(Value, Picture)>,
     original_loading: bool,
     histogram_request: u64,
     /// When the app started and when the first developed photograph went on
@@ -420,6 +424,7 @@ impl Model {
             render_on_gpu: false,
             rendered_space: String::new(),
             input_colour: Value::Null,
+            lens_supported: false,
             showing_interactive_frame: false,
             showing_cached_preview: false,
             preview_cache: RenderedPreviewCache::default(),
@@ -615,6 +620,9 @@ impl Model {
     fn apply_catalog(&mut self, catalog: Value) {
         self.stocks = catalog["profiles"].as_array().map(|a| a.iter().map(Stock::new).collect()).unwrap_or_default();
         self.defaults = catalog["defaults"].clone();
+        // The engine leaves lens corrections off for params from before them,
+        // so their crops keep their place; the app corrects every new edit.
+        json::set(&mut self.defaults, state::LENS_CORRECTION, Value::Bool(true));
         self.nullable_paths = catalog["nullable_paths"]
             .as_array()
             .map(|paths| paths.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect())
@@ -1356,7 +1364,7 @@ impl Model {
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
         if let Some(session) = session {
             let mut restored = session.state;
-            restored.params = json::restoring(&self.defaults, &restored.params, &self.nullable_paths);
+            restored.params = state::restored_params(&self.defaults, &restored.params, &self.nullable_paths);
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
             if !factor.is_null() {
@@ -1370,6 +1378,8 @@ impl Model {
             if !interpretation.is_null() {
                 json::set(&mut self.state.params, "io.input_interpretation", interpretation);
             }
+            // Lens corrections are per photograph: on for a new one.
+            json::set(&mut self.state.params, state::LENS_CORRECTION, json::get(&self.defaults, state::LENS_CORRECTION).clone());
             self.state.crop = CropSettings::default();
         }
         self.is_raw = is_raw(path);
@@ -1385,6 +1395,7 @@ impl Model {
         let path = path.to_path_buf();
         let state = self.render_state();
         self.input_colour = Value::Null;
+        self.lens_supported = false;
         let fallback = move || {
             if let Some((picture, size)) = crate::thumbnail::placeholder(&path) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
@@ -1398,13 +1409,13 @@ impl Model {
                     let source_size = (frame.source_width as u32, frame.source_height as u32);
                     let working = Size::new(frame.working_width, frame.working_height);
                     let scale = (frame.width as f64 / frame.working_width).min(1.0);
-                    let raw = frame.raw;
+                    let (raw, lens_supported) = (frame.raw, frame.lens_correction_supported);
                     let picture = Picture::new(frame.pixels, frame.width, frame.height).in_display_space(&frame.display_space);
                     ui::post(move |app: &mut App| {
                         let model = &mut app.model;
                         if generation != model.source_generation || model.image.is_some() || model.closing { return; }
                         if model.render_state().rendered() != expected { std::thread::spawn(fallback); return; }
-                        model.image = Some(picture); model.image_size = size; model.is_raw = raw;
+                        model.image = Some(picture); model.image_size = size; model.is_raw = raw; model.lens_supported = lens_supported;
                         model.source_size = source_size; model.working_size = working; model.preview_scale = scale;
                         model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
                         model.update_histogram();
@@ -1432,6 +1443,7 @@ impl Model {
     /// Decodes the original ahead of a press, such as when the pointer
     /// reaches the button.
     pub fn prepare_original(&mut self) {
+        self.drop_stale_original();
         if self.can_show_original() && self.original_cache.is_none() {
             self.load_original();
         }
@@ -1453,11 +1465,28 @@ impl Model {
         }
         self.holding_original = true;
         self.mark(dirty::CANVAS | dirty::STATUS);
-        if let Some(cached) = &self.original_cache {
+        self.drop_stale_original();
+        if let Some((_, cached)) = &self.original_cache {
             self.original = Some(cached.clone());
             return;
         }
         self.load_original();
+    }
+
+    /// What the original's decode depends on: the RAW development (white
+    /// balance, lens corrections), how other files' colours are read, the
+    /// preview limit and the output space.
+    fn original_key(&self) -> Value {
+        let params = self.render_state().params;
+        let io = &params["io"];
+        json!([io["raw_white_balance"], io["lens_correction"], io["input_interpretation"], io["input_color_space"],
+            io["input_cctf_decoding"], io["output_color_space"], io["output_cctf_encoding"], self.state.limit_preview])
+    }
+
+    fn drop_stale_original(&mut self) {
+        if self.original_cache.as_ref().is_some_and(|(key, _)| *key != self.original_key()) && !self.original_loading {
+            self.original_cache = None;
+        }
     }
 
     /// Decodes at the developed preview's resolution, so it is as sharp at
@@ -1471,6 +1500,7 @@ impl Model {
         let source_long = self.source_size.0.max(self.source_size.1);
         let max_pixels = if source_long > 0 { image.width.max(image.height).min(source_long) } else { image.width.max(image.height) };
         let generation = self.source_generation;
+        let key = self.original_key();
         self.original_loading = true;
         let name = file_name(&source);
         let finish = move |app: &mut App, picture: Result<Picture>| {
@@ -1481,7 +1511,7 @@ impl Model {
             model.original_loading = false;
             match picture {
                 Ok(picture) => {
-                    model.original_cache = Some(picture.clone());
+                    model.original_cache = Some((key, picture.clone()));
                     if model.holding_original {
                         model.original = Some(picture);
                         model.mark(dirty::CANVAS | dirty::STATUS);
@@ -1815,6 +1845,7 @@ impl Model {
                         source_width: json::number(&result["source_width"]), source_height: json::number(&result["source_height"]),
                         working_width: json::number(&result["working_width"]), working_height: json::number(&result["working_height"]),
                         raw: json::boolean(&result["raw"]), display_space: json::string(&result["display_color_space"]).to_string(),
+                        lens_correction_supported: json::boolean(&result["lens_correction_supported"]),
                         pixels: pixels.clone(),
                     }));
                     let picture = Picture::new(pixels, w, h).in_display_space(json::string(&result["display_color_space"]));
@@ -1853,6 +1884,7 @@ impl Model {
                     session.update(shown, rotation);
                 }
                 self.is_raw = json::boolean(&result["raw"]);
+                self.lens_supported = json::boolean(&result["lens_correction_supported"]);
                 self.rendered_space = json::string(&result["output_color_space"]).to_string();
                 if self.input_colour != result["input_colour"] {
                     self.input_colour = result["input_colour"].clone();
@@ -2310,8 +2342,6 @@ mod tests {
         Rendered { id: 1, revision: model.revision, generation: model.source_generation, interactive, result, picture, cached: None }
     }
 
-    /// The Image Size notice describes the settled preview, so reduced drag
-    /// frames don't insert or reword it and move the sliders below it.
     /// Settings › Keep paper when changing film, through the film menu.
     #[test]
     fn keep_paper_leaves_the_paper_alone() {
@@ -2334,6 +2364,27 @@ mod tests {
         }
     }
 
+    /// Lens corrections: on for every new edit and after Reset, though the
+    /// engine's default is off; the switch shows only for a supported RAW.
+    #[test]
+    fn lens_corrections_are_on_for_new_edits_and_after_reset() {
+        let mut model = Model::new(Preferences::default());
+        model.apply_catalog(json!({"profiles": [], "defaults": {"io": {"lens_correction": {"enabled": false}, "rotate_cw": 0}}}));
+        assert_eq!(model.value(state::LENS_CORRECTION), &json!(true));
+        model.set(state::LENS_CORRECTION, json!(false));
+        assert_eq!(model.value(state::LENS_CORRECTION), &json!(false));
+        model.reset();
+        assert_eq!(model.value(state::LENS_CORRECTION), &json!(true));
+        let (revision, generation) = (model.revision, model.source_generation);
+        let mut frame = rendered(&model, 1200, false);
+        frame.result["raw"] = json!(true);
+        frame.result["lens_correction_supported"] = json!(true);
+        model.render_finished(Ok(frame), revision, generation, false);
+        assert!(model.is_raw && model.lens_supported);
+    }
+
+    /// The Image Size notice describes the settled preview, so reduced drag
+    /// frames don't insert or reword it and move the sliders below it.
     #[test]
     fn drag_frames_keep_the_preview_scale() {
         for settled in [2400, 1200] {
@@ -2436,6 +2487,7 @@ mod preset_tests {
         model.set("io.rotate_cw", json!(1));
         model.set("post.contrast", json!(20));
         model.set("settings.use_cat16", json!(false));
+        model.set(state::LENS_CORRECTION, json!(false));
         model.set("camera.exposure_compensation_ev", json!(1.5));
         model.limit_preview(true);
         let before = model.state.clone();
@@ -2449,7 +2501,7 @@ mod preset_tests {
         assert_eq!(json::number(model.value("film_render.development_time")), 9.0);
         assert_eq!(model.value("film_render.dir_couplers.langmuir_donor_k_rgb.0"), &Value::Null);
         assert_eq!(model.value("io.raw_white_balance.mode"), &json!("daylight"));
-        for path in [state::SIZE_TARGET, "io.rotate_cw", "post.contrast", "settings.use_cat16"] {
+        for path in [state::SIZE_TARGET, "io.rotate_cw", "post.contrast", "settings.use_cat16", state::LENS_CORRECTION] {
             assert!(json::same(model.value(path), before.value(path)), "{path}");
         }
         assert!(model.state.limit_preview);

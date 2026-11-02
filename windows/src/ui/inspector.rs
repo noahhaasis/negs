@@ -59,6 +59,8 @@ enum When {
     PaperTimes,
     AutoExposure,
     Raw,
+    /// A RAW whose decode found corrections for its lens.
+    LensCorrection,
     CustomWhiteBalance,
     Scanning,
     Ratio35,
@@ -283,6 +285,7 @@ fn rows() -> Vec<Row> {
     add(&mut rows, Kind::Choice("White balance", "io.raw_white_balance.mode", state::WHITE_BALANCE), lab, Some(wb), When::Raw);
     add(&mut rows, Kind::Slider(state::WB_TEMPERATURE), lab, Some(wb), When::CustomWhiteBalance);
     add(&mut rows, Kind::Slider(state::WB_TINT), lab, Some(wb), When::CustomWhiteBalance);
+    add(&mut rows, Kind::Toggle("Lens corrections", state::LENS_CORRECTION), lab, None, When::LensCorrection);
     let groups = |rows: &mut Vec<Row>, section: Section| {
         for group in ADJUSTMENT_GROUPS.iter().filter(|g| g.section == section) {
             let header = add(rows, Kind::Group { title: group.title, enable: group.enable }, lab, None, When::Always);
@@ -416,6 +419,7 @@ fn visible(row: &Row, model: &Model, expanded: &dyn Fn(usize) -> bool) -> bool {
         When::PaperTimes => !scanning && stock_times(model, true).len() > 1,
         When::AutoExposure => json::boolean(model.value("camera.auto_exposure")),
         When::Raw => model.is_raw,
+        When::LensCorrection => model.is_raw && model.lens_supported,
         When::NotRaw => !model.is_raw,
         When::AssumeInput => !model.is_raw && json::string(model.value("io.input_interpretation.mode")) == "assume",
         When::ManualInput => !model.is_raw && json::string(model.value("io.input_interpretation.mode")) == "manual",
@@ -631,6 +635,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             let c = check(title);
             match kind {
                 Kind::Toggle("Scan film directly", _) => super::dialogs::tooltip(c, "Skip printing and scan the developed film, as for slides."),
+                Kind::Toggle("Lens corrections", _) => super::dialogs::tooltip(c, "Corrects distortion, vignetting and colour fringing with the data the camera recorded for its lens."),
                 Kind::Toggle("Use less memory for export", _) => super::dialogs::tooltip(c, "Processes grain channels one at a time. Same result, less memory, longer export."),
                 Kind::BorderToggle(_, 1) => super::dialogs::tooltip(c, "Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post."),
                 Kind::BorderToggle(_, 2) => super::dialogs::tooltip(c, "Adds the border to exported photographs and saved previews."),

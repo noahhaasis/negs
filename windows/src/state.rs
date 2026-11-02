@@ -82,6 +82,22 @@ impl EditState {
 pub const SIZE_TARGET: &str = "io.photo_long_side_px";
 pub const SIZE_FACTOR: &str = "io.upscale_factor";
 
+/// The camera's own lens corrections for a RAW (`io.lens_correction`), as on
+/// macOS and Linux. Per photograph: on for each newly opened one and after
+/// Reset, kept when a preset is applied (the engine's `presets::KEPT`).
+pub const LENS_CORRECTION: &str = "io.lens_correction.enabled";
+
+/// A saved edit's params on today's defaults. A session from before lens
+/// corrections was developed without them, so they stay off and its crop
+/// keeps its place.
+pub fn restored_params(defaults: &Value, saved: &Value, nullable: &[String]) -> Value {
+    let mut params = json::restoring(defaults, saved, nullable);
+    if json::get(saved, LENS_CORRECTION).is_null() {
+        json::set(&mut params, LENS_CORRECTION, Value::Bool(false));
+    }
+    params
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SizeMode {
     Original,
@@ -574,6 +590,17 @@ pub fn ratio_name(width: f64, height: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sessions_before_lens_corrections_keep_them_off() {
+        let defaults = serde_json::json!({"io": {"lens_correction": {"enabled": true}, "rotate_cw": 0}});
+        let old = serde_json::json!({"io": {"rotate_cw": 1}});
+        assert_eq!(restored_params(&defaults, &old, &[]), serde_json::json!({"io": {"lens_correction": {"enabled": false}, "rotate_cw": 1}}));
+        for saved in [true, false] {
+            let current = serde_json::json!({"io": {"lens_correction": {"enabled": saved}, "rotate_cw": 1}});
+            assert_eq!(json::get(&restored_params(&defaults, &current, &[]), LENS_CORRECTION), &Value::Bool(saved));
+        }
+    }
     use serde_json::json;
 
     /// The same values as the macOS app's slider tests.

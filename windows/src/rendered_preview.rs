@@ -30,6 +30,8 @@ pub struct Frame {
     /// The helper's `display_color_space`; records from before it are sRGB.
     #[serde(default)]
     pub display_space: String,
+    /// Shows the Lens corrections switch before the first render.
+    pub lens_correction_supported: bool,
     #[serde(skip)]
     pub pixels: Vec<u8>,
 }
@@ -122,7 +124,7 @@ pub fn key(source: &Path, state: &EditState, paths: &EnginePaths) -> Option<Stri
     let mut files = vec![stamp(source).ok()?, stamp(&paths.helper).ok()?, stamp(&paths.data).ok()?];
     data_stamps(&paths.data, &mut files).ok()?;
     files.sort();
-    serde_json::to_string(&serde_json::json!({"schema": 2, "state": state.rendered(), "files": files})).ok()
+    serde_json::to_string(&serde_json::json!({"schema": 3, "state": state.rendered(), "files": files})).ok()
 }
 
 fn checksum(bytes: &[u8]) -> u64 {
@@ -182,7 +184,7 @@ mod tests {
         let frame = Frame {
             width: 2, height: 1, photo_width: 4000.0, photo_height: 2000.0, source_width: 2000.0, source_height: 1000.0,
             working_width: 8000.0, working_height: 4000.0, raw: true,
-            display_space: crate::picture::WIDE_DISPLAY_SPACE.into(), pixels: pixels.clone(),
+            display_space: crate::picture::WIDE_DISPLAY_SPACE.into(), lens_correction_supported: true, pixels: pixels.clone(),
         };
         let cache = RenderedPreviewCache::new(file.clone());
         cache.save("settings".into(), frame);
@@ -191,7 +193,7 @@ mod tests {
         assert_eq!(loaded.pixels, pixels);
         assert_eq!(loaded.photo_width, 4000.0);
         assert_eq!((loaded.source_width, loaded.working_width), (2000.0, 8000.0));
-        assert!(loaded.raw);
+        assert!(loaded.raw && loaded.lens_correction_supported);
         assert_eq!(loaded.display_space, crate::picture::WIDE_DISPLAY_SPACE);
         assert!(read(&file, "other settings").is_err());
         let mut bytes = std::fs::read(&file).unwrap();
