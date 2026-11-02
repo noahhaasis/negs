@@ -1091,7 +1091,7 @@ fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
             };
             let mut h = ui.history.borrow_mut();
             h.begin(if paper { "Change Paper" } else { "Change Film" });
-            crate::catalog::choose(&mut h.state, stock);
+            crate::catalog::choose(&mut h.state, stock, ui.preferences.borrow().keep_paper);
             h.commit();
             drop(h);
             ui.sync_state();

@@ -1093,10 +1093,10 @@ mod tests {
                 .unwrap();
             let b = films.iter().find(|s| s.id != a.id && s.id != film).unwrap();
             let mut there_and_back = applied.clone();
-            crate::catalog::choose(&mut there_and_back, b);
-            crate::catalog::choose(&mut there_and_back, a);
+            crate::catalog::choose(&mut there_and_back, b, false);
+            crate::catalog::choose(&mut there_and_back, a, false);
             let mut direct = applied.clone();
-            crate::catalog::choose(&mut direct, a);
+            crate::catalog::choose(&mut direct, a, false);
             assert_eq!(there_and_back, direct, "{name}");
             let mut expected = result["params"].clone();
             for path in parameters::STOCK_PRESET_PATHS {
@@ -1154,7 +1154,7 @@ mod tests {
             .into_iter()
             .find(|s| s.id == "kodak_portra_400")
             .unwrap();
-        crate::catalog::choose(&mut state, film);
+        crate::catalog::choose(&mut state, film, false);
         state.values.insert("Enlarger.Magenta shift".into(), 3.5);
         let params = parameters::runtime(&state, &defaults);
         let paper = crate::catalog::selected(&state, true).id.clone();

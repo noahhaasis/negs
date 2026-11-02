@@ -97,12 +97,13 @@ pub fn enabled(ui: &Editor) -> bool {
 }
 
 /// What a click on `stock` would develop: the current state with that stock
-/// chosen (a film brings its own paper and presets), cropped as shown.
+/// chosen (a film brings its own presets, and its paper unless the setting
+/// keeps the paper), cropped as shown.
 fn request(ui: &Editor, stock: &Stock) -> Option<(u64, serde_json::Value, String)> {
     let r = ui.runtime.borrow();
     let (source, _) = r.source.clone()?;
     let mut state = ui.history.borrow().state.clone();
-    crate::catalog::choose(&mut state, stock);
+    crate::catalog::choose(&mut state, stock, ui.preferences.borrow().keep_paper);
     let params = parameters::runtime(&state, &r.defaults);
     let film = crate::catalog::selected(&state, false).id.clone();
     let paper = crate::catalog::selected(&state, true).id.clone();
@@ -213,7 +214,7 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
                 }
                 let mut h = ui.history.borrow_mut();
                 h.begin(if paper { "Change Paper" } else { "Change Film" });
-                crate::catalog::choose(&mut h.state, stock);
+                crate::catalog::choose(&mut h.state, stock, ui.preferences.borrow().keep_paper);
                 h.commit();
                 drop(h);
                 ui.sync_state();
