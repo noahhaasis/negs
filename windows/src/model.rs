@@ -19,6 +19,7 @@ use crate::histogram::Histogram;
 use crate::json;
 use crate::picture::Picture;
 use crate::presets::{self, PresetFile, Status as PresetStatus};
+use crate::previews::{self, Previews, Target};
 use crate::session::{CatalogCache, EditorSession, Preferences};
 use crate::rendered_preview::{self, Frame, RenderedPreviewCache};
 use crate::state::{self, EditState, Stock};
@@ -38,6 +39,8 @@ pub mod dirty {
     pub const CROP: u32 = 1 << 9;
     pub const LAYOUT: u32 = 1 << 10;
     pub const PRESETS: u32 = 1 << 11;
+    /// A preview tile changed, or what they should show may have.
+    pub const PREVIEWS: u32 = 1 << 12;
     pub const ALL: u32 = u32::MAX;
 }
 
@@ -315,6 +318,9 @@ pub struct Model {
     rendered_space: String,
     /// How the helper read the photograph's colours (`input_colour`).
     pub input_colour: Value,
+    /// The last render's RAW carries lens corrections the decoder can apply
+    /// (`lens_correction_supported`), which shows the Lens corrections switch.
+    pub lens_supported: bool,
     /// The shown frame was rendered at canvas size while a slider moved;
     /// letting go renders the photograph at export size.
     showing_interactive_frame: bool,
@@ -329,7 +335,8 @@ pub struct Model {
     awaiting_restoration: bool,
     restoration: Option<Result<Option<EditorSession>>>,
     catalog_arrived: bool,
-    original_cache: Option<Picture>,
+    /// The decoded original, with the `original_key` it was decoded for.
+    original_cache: Option<(Value, Picture)>,
     original_loading: bool,
     histogram_request: u64,
     /// When the app started and when the first developed photograph went on
@@ -344,6 +351,8 @@ pub struct Model {
     pub renaming_preset: Option<PathBuf>,
     /// New Preset's file while it is first named: Escape removes it.
     unnamed_preset: Option<PathBuf>,
+    /// The film, paper and preset thumbnails.
+    pub previews: Previews,
 }
 
 /// What the adjustments column shows.
@@ -415,6 +424,7 @@ impl Model {
             render_on_gpu: false,
             rendered_space: String::new(),
             input_colour: Value::Null,
+            lens_supported: false,
             showing_interactive_frame: false,
             showing_cached_preview: false,
             preview_cache: RenderedPreviewCache::default(),
@@ -435,6 +445,7 @@ impl Model {
             preset_status: HashMap::new(),
             renaming_preset: None,
             unnamed_preset: None,
+            previews: Previews::default(),
         }
     }
 
@@ -609,6 +620,9 @@ impl Model {
     fn apply_catalog(&mut self, catalog: Value) {
         self.stocks = catalog["profiles"].as_array().map(|a| a.iter().map(Stock::new).collect()).unwrap_or_default();
         self.defaults = catalog["defaults"].clone();
+        // The engine leaves lens corrections off for params from before them,
+        // so their crops keep their place; the app corrects every new edit.
+        json::set(&mut self.defaults, state::LENS_CORRECTION, Value::Bool(true));
         self.nullable_paths = catalog["nullable_paths"]
             .as_array()
             .map(|paths| paths.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect())
@@ -726,34 +740,18 @@ impl Model {
     }
 
     pub fn choose_film(&mut self, stock: &str) {
-        let mut next = self.state.clone();
-        next.film = stock.into();
-        json::set(&mut next.params, "film_render.development_time", Value::Null);
-        // A new film brings its own grain, DIR and halation presets, as upstream applies them.
-        for field in state::GRAIN_STOCK_FIELDS {
-            json::set(&mut next.params, &format!("film_render.grain.{field}"), Value::Null);
-        }
-        for path in state::DIR_HALATION_STOCK_PATHS {
-            json::set(&mut next.params, path, Value::Null);
-        }
-        self.pair_film(&mut next);
+        let next = state::choosing(&self.state, stock, false, self.prefs.keep_paper, &self.stocks);
         self.apply(next, "Change Film");
     }
 
     pub fn choose_paper(&mut self, stock: &str) {
-        let mut next = self.state.clone();
-        next.paper = stock.into();
-        json::set(&mut next.params, "print_render.development_time", Value::Null);
+        let next = state::choosing(&self.state, stock, true, self.prefs.keep_paper, &self.stocks);
         self.apply(next, "Change Paper");
     }
 
+    /// When the catalog loads, the film brings its own paper whatever the setting.
     fn pair_film(&self, state: &mut EditState) {
-        let Some(film) = self.stocks.iter().find(|s| !s.paper && s.id == state.film) else { return };
-        json::set(&mut state.params, "io.scan_film", Value::Bool(film.positive));
-        if self.stocks.iter().any(|s| s.paper && s.id == film.target) && state.paper != film.target {
-            state.paper = film.target.clone();
-            json::set(&mut state.params, "print_render.development_time", Value::Null);
-        }
+        state::pair_film(state, &self.stocks, true);
     }
 
     /// Original develops the source's own pixels; Longest side resizes the
@@ -1021,7 +1019,8 @@ impl Model {
         }
         let presets = &self.presets;
         self.preset_status.retain(|file, _| presets.contains(file));
-        self.mark(dirty::PRESETS);
+        self.previews.retain_presets(&self.presets.iter().map(|p| p.path.clone()).collect::<Vec<_>>());
+        self.mark(dirty::PRESETS | dirty::PREVIEWS);
         self.check_presets();
     }
 
@@ -1045,14 +1044,15 @@ impl Model {
                 }
             };
             self.preset_status.insert(preset.clone(), PresetStatus::Checking);
-            engine.request(json!({"command": "preset_import", "text": text}), engine::timeout_for("preset_import"), move |result| {
-                ui::post(move |app: &mut App| app.model.preset_checked(preset, result));
+            let command = json!({"command": "preset_import", "text": text});
+            engine.request(command, engine::timeout_for("preset_import"), move |result| {
+                ui::post(move |app: &mut App| app.model.preset_checked(preset, text, result));
             });
         }
         self.mark(dirty::PRESETS);
     }
 
-    fn preset_checked(&mut self, preset: PresetFile, result: Result<(u64, Value)>) {
+    fn preset_checked(&mut self, preset: PresetFile, text: String, result: Result<(u64, Value)>) {
         if !self.presets.contains(&preset) {
             return;
         }
@@ -1061,6 +1061,8 @@ impl Model {
                 film: json::string(&result["film"]).into(),
                 paper: json::string(&result["paper"]).into(),
                 scan: json::boolean(&result["params"]["io"]["scan_film"]),
+                text,
+                white_balance: result["params"]["io"]["raw_white_balance"].clone(),
             },
             Err(error) => PresetStatus::Invalid(format!("{error:#}")),
         };
@@ -1256,8 +1258,9 @@ impl Model {
         if name == preset.name() {
             return;
         }
-        if let Err(error) = self.preset_library.rename(preset, name) {
-            self.report(&error);
+        match self.preset_library.rename(preset, name) {
+            Ok(renamed) => self.previews.move_preset(&preset.path, &renamed.path),
+            Err(error) => self.report(&error),
         }
         self.refresh_presets();
     }
@@ -1361,7 +1364,7 @@ impl Model {
         let fit = session.as_ref().map_or(true, |s| s.fit_image);
         if let Some(session) = session {
             let mut restored = session.state;
-            restored.params = json::restoring(&self.defaults, &restored.params, &self.nullable_paths);
+            restored.params = state::restored_params(&self.defaults, &restored.params, &self.nullable_paths);
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = json::get(&self.defaults, state::SIZE_FACTOR).clone();
             if !factor.is_null() {
@@ -1375,6 +1378,8 @@ impl Model {
             if !interpretation.is_null() {
                 json::set(&mut self.state.params, "io.input_interpretation", interpretation);
             }
+            // Lens corrections are per photograph: on for a new one.
+            json::set(&mut self.state.params, state::LENS_CORRECTION, json::get(&self.defaults, state::LENS_CORRECTION).clone());
             self.state.crop = CropSettings::default();
         }
         self.is_raw = is_raw(path);
@@ -1390,6 +1395,7 @@ impl Model {
         let path = path.to_path_buf();
         let state = self.render_state();
         self.input_colour = Value::Null;
+        self.lens_supported = false;
         let fallback = move || {
             if let Some((picture, size)) = crate::thumbnail::placeholder(&path) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
@@ -1403,13 +1409,13 @@ impl Model {
                     let source_size = (frame.source_width as u32, frame.source_height as u32);
                     let working = Size::new(frame.working_width, frame.working_height);
                     let scale = (frame.width as f64 / frame.working_width).min(1.0);
-                    let raw = frame.raw;
+                    let (raw, lens_supported) = (frame.raw, frame.lens_correction_supported);
                     let picture = Picture::new(frame.pixels, frame.width, frame.height).in_display_space(&frame.display_space);
                     ui::post(move |app: &mut App| {
                         let model = &mut app.model;
                         if generation != model.source_generation || model.image.is_some() || model.closing { return; }
                         if model.render_state().rendered() != expected { std::thread::spawn(fallback); return; }
-                        model.image = Some(picture); model.image_size = size; model.is_raw = raw;
+                        model.image = Some(picture); model.image_size = size; model.is_raw = raw; model.lens_supported = lens_supported;
                         model.source_size = source_size; model.working_size = working; model.preview_scale = scale;
                         model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
                         model.update_histogram();
@@ -1437,6 +1443,7 @@ impl Model {
     /// Decodes the original ahead of a press, such as when the pointer
     /// reaches the button.
     pub fn prepare_original(&mut self) {
+        self.drop_stale_original();
         if self.can_show_original() && self.original_cache.is_none() {
             self.load_original();
         }
@@ -1458,11 +1465,28 @@ impl Model {
         }
         self.holding_original = true;
         self.mark(dirty::CANVAS | dirty::STATUS);
-        if let Some(cached) = &self.original_cache {
+        self.drop_stale_original();
+        if let Some((_, cached)) = &self.original_cache {
             self.original = Some(cached.clone());
             return;
         }
         self.load_original();
+    }
+
+    /// What the original's decode depends on: the RAW development (white
+    /// balance, lens corrections), how other files' colours are read, the
+    /// preview limit and the output space.
+    fn original_key(&self) -> Value {
+        let params = self.render_state().params;
+        let io = &params["io"];
+        json!([io["raw_white_balance"], io["lens_correction"], io["input_interpretation"], io["input_color_space"],
+            io["input_cctf_decoding"], io["output_color_space"], io["output_cctf_encoding"], self.state.limit_preview])
+    }
+
+    fn drop_stale_original(&mut self) {
+        if self.original_cache.as_ref().is_some_and(|(key, _)| *key != self.original_key()) && !self.original_loading {
+            self.original_cache = None;
+        }
     }
 
     /// Decodes at the developed preview's resolution, so it is as sharp at
@@ -1476,6 +1500,7 @@ impl Model {
         let source_long = self.source_size.0.max(self.source_size.1);
         let max_pixels = if source_long > 0 { image.width.max(image.height).min(source_long) } else { image.width.max(image.height) };
         let generation = self.source_generation;
+        let key = self.original_key();
         self.original_loading = true;
         let name = file_name(&source);
         let finish = move |app: &mut App, picture: Result<Picture>| {
@@ -1486,7 +1511,7 @@ impl Model {
             model.original_loading = false;
             match picture {
                 Ok(picture) => {
-                    model.original_cache = Some(picture.clone());
+                    model.original_cache = Some((key, picture.clone()));
                     if model.holding_original {
                         model.original = Some(picture);
                         model.mark(dirty::CANVAS | dirty::STATUS);
@@ -1523,6 +1548,184 @@ impl Model {
                 let picture = crate::thumbnail::original(&path, max_pixels);
                 ui::post(move |app: &mut App| finish(app, picture));
             });
+        }
+    }
+
+    // MARK: Previews
+
+    /// Settings › Film, paper and preset previews. Off shows the menus and
+    /// the plain preset list, and frees the thumbnails here and in the engine.
+    pub fn set_previews(&mut self, on: bool) {
+        if self.prefs.previews == on {
+            return;
+        }
+        self.prefs.previews = on;
+        self.prefs.save();
+        if !on && self.previews.clear() {
+            if let Some(engine) = &self.engine {
+                engine.request(json!({"command": "release_thumbnails"}), engine::timeout_for("release_thumbnails"), |_| {});
+            }
+        }
+        self.mark(dirty::STRUCTURE | dirty::PRESETS | dirty::PREVIEWS);
+    }
+
+    /// Settings › Keep paper when changing film. The film tiles show what a
+    /// click would develop, so they follow it: their keys include the paper.
+    pub fn set_keep_paper(&mut self, on: bool) {
+        if self.prefs.keep_paper != on {
+            self.prefs.keep_paper = on;
+            self.prefs.save();
+            self.mark(dirty::PREVIEWS);
+        }
+    }
+
+    /// Opens or closes the Film or Paper foldout.
+    pub fn toggle_foldout(&mut self, paper: bool) {
+        let open = if paper { &mut self.previews.paper_open } else { &mut self.previews.film_open };
+        *open = !*open;
+        self.mark(dirty::STRUCTURE | dirty::PREVIEWS);
+    }
+
+    /// Whether the Film or Paper grid is open and on screen.
+    pub fn grid_shown(&self, paper: bool) -> bool {
+        self.prefs.previews
+            && self.previews.open(paper)
+            && self.inspector_visible
+            && self.pane() == Pane::Adjustments
+            && self.prefs.inspector_tab != "Post"
+            && !self.cropping()
+            && !(paper && json::boolean(self.value("io.scan_film")))
+    }
+
+    /// Whether any thumbnails are on screen.
+    pub fn previews_on_screen(&self) -> bool {
+        self.grid_shown(false) || self.grid_shown(true) || self.preset_thumbnails_shown()
+    }
+
+    /// Whether the Presets list, with its thumbnails, is on screen.
+    fn preset_thumbnails_shown(&self) -> bool {
+        self.prefs.previews && self.inspector_visible && self.pane() == Pane::Presets && !self.cropping()
+    }
+
+    /// The main preview has nothing to do: thumbnails may use the engine.
+    fn previews_may_render(&self) -> bool {
+        self.ready
+            && !self.closing
+            && !self.rendering
+            && !self.pending_render
+            && !self.interacting()
+            && self.image.is_some()
+            && (self.preview_current || self.render_failed)
+    }
+
+    /// The thumbnails on screen, in the order they're made, with their keys
+    /// and requests: the open grids top to bottom, then the presets once the
+    /// engine has checked them all.
+    fn wanted_previews(&self) -> Vec<(Target, previews::Key, Value)> {
+        let Some(source) = &self.source else { return vec![] };
+        let generation = self.source_generation;
+        let state = self.render_state();
+        let mut wanted = vec![];
+        for paper in [false, true] {
+            if !self.grid_shown(paper) {
+                continue;
+            }
+            let (films, papers) = (self.films(), self.papers());
+            let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
+            for stock in groups.iter().flat_map(|g| g.stocks.iter()) {
+                let command = previews::stock_command(&state, stock, &self.stocks, self.prefs.keep_paper, source, generation);
+                wanted.push((Target::Stock { id: stock.id.clone(), paper }, previews::Key::new(generation, &command), command));
+            }
+        }
+        let checking = self.presets.iter().any(|p| matches!(self.preset_status.get(p), None | Some(PresetStatus::Checking)));
+        if self.preset_thumbnails_shown() && !checking {
+            let kept: Option<Vec<String>> = self.catalog["preset_kept"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect());
+            let valid: Vec<(&PresetFile, &str, &Value)> = self
+                .presets
+                .iter()
+                .filter_map(|p| match self.preset_status.get(p) {
+                    Some(PresetStatus::Valid { text, white_balance, .. }) => Some((p, text.as_str(), white_balance)),
+                    _ => None,
+                })
+                .collect();
+            let photo = state.value("io.raw_white_balance");
+            for (preset, text, _) in previews::render_order(valid, self.is_raw, |p| Some(p.2.clone()), photo) {
+                let command = previews::preset_command(text, &state, source, generation);
+                wanted.push((Target::Preset(preset.path.clone()), previews::preset_key(&command, kept.as_deref(), generation), command));
+            }
+        }
+        wanted
+    }
+
+    /// Dims or blanks out-of-date thumbnails, and asks the engine for the
+    /// next one on screen: one request at a time, and only while the main
+    /// preview has nothing to do. True when a tile's look changed.
+    pub fn pump_previews(&mut self) -> bool {
+        if !self.prefs.previews {
+            return false;
+        }
+        let mut changed = false;
+        let mut next = None;
+        for (target, key, command) in self.wanted_previews() {
+            let (needs, look) = self.previews.thumb_mut(&target).mark(&key);
+            changed |= look;
+            if needs && next.is_none() {
+                next = Some((target, key, command));
+            }
+        }
+        if self.previews.busy || !self.previews_may_render() {
+            return changed;
+        }
+        let (Some((target, key, mut command)), Some(engine)) = (next, self.engine.clone()) else { return changed };
+        self.previews.busy = true;
+        self.previews.requests += 1;
+        let buffer = engine.directory().join(format!("thumbnail-{}.rgba", self.previews.requests));
+        command["preview_path"] = json!(buffer);
+        let (color, rotation) = (self.previews.color.clone(), self.rotation());
+        engine.request(command, engine::timeout_for("thumbnail"), move |result| {
+            let bitmap = result.and_then(|(_, r)| {
+                let rgba = std::fs::read(&buffer)?;
+                let wide = crate::picture::is_wide(json::string(&r["display_color_space"]));
+                previews::Bitmap::from_rgba(&rgba, json::number(&r["width"]) as u32, json::number(&r["height"]) as u32, wide, color.as_deref(), rotation)
+            });
+            let _ = std::fs::remove_file(&buffer);
+            ui::post(move |app: &mut App| app.model.thumbnail_finished(target, key, bitmap));
+        });
+        changed
+    }
+
+    fn thumbnail_finished(&mut self, target: Target, key: previews::Key, bitmap: Result<previews::Bitmap>) {
+        self.previews.busy = false;
+        if self.closing || !self.prefs.previews {
+            return;
+        }
+        // The photograph changed meanwhile: drop it, the next pump asks again.
+        if key.generation == self.source_generation {
+            let bitmap = match bitmap {
+                Ok(bitmap) => Some(Arc::new(bitmap)),
+                // Leave the placeholder; a later edit retries. Don't spin on a failure.
+                Err(error) => {
+                    eprintln!("thumbnail {target:?}: {error:#}");
+                    None
+                }
+            };
+            self.previews.thumb_mut(&target).show(bitmap, key);
+        }
+        self.mark(dirty::PREVIEWS);
+    }
+
+    /// The canvas moved to a monitor with another profile: thumbnails are
+    /// made again through it.
+    pub fn set_preview_color(&mut self, color: Option<Arc<crate::icc::Transform>>) {
+        let same = match (&self.previews.color, &color) {
+            (Some(a), Some(b)) => a.profile == b.profile,
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.previews.color = color;
+            self.previews.clear();
+            self.mark(dirty::PREVIEWS);
         }
     }
 
@@ -1642,6 +1845,7 @@ impl Model {
                         source_width: json::number(&result["source_width"]), source_height: json::number(&result["source_height"]),
                         working_width: json::number(&result["working_width"]), working_height: json::number(&result["working_height"]),
                         raw: json::boolean(&result["raw"]), display_space: json::string(&result["display_color_space"]).to_string(),
+                        lens_correction_supported: json::boolean(&result["lens_correction_supported"]),
                         pixels: pixels.clone(),
                     }));
                     let picture = Picture::new(pixels, w, h).in_display_space(json::string(&result["display_color_space"]));
@@ -1680,6 +1884,7 @@ impl Model {
                     session.update(shown, rotation);
                 }
                 self.is_raw = json::boolean(&result["raw"]);
+                self.lens_supported = json::boolean(&result["lens_correction_supported"]);
                 self.rendered_space = json::string(&result["output_color_space"]).to_string();
                 if self.input_colour != result["input_colour"] {
                     self.input_colour = result["input_colour"].clone();
@@ -2137,6 +2342,47 @@ mod tests {
         Rendered { id: 1, revision: model.revision, generation: model.source_generation, interactive, result, picture, cached: None }
     }
 
+    /// Settings › Keep paper when changing film, through the film menu.
+    #[test]
+    fn keep_paper_leaves_the_paper_alone() {
+        let stock = |id: &str, paper: bool, target: &str| Stock {
+            id: id.into(), name: id.into(), paper, positive: false, bw: false, target: target.into(), times: vec![], grain: Value::Null,
+        };
+        for keep in [false, true] {
+            let mut model = Model::new(Preferences { keep_paper: keep, ..Preferences::default() });
+            model.stocks = vec![stock("portra", false, "endura"), stock("vision", false, "print_film"), stock("endura", true, ""), stock("crystal", true, ""), stock("print_film", true, "")];
+            model.state = EditState { film: "portra".into(), paper: "crystal".into(), params: json!({"print_render": {"development_time": 2.0}}), ..Default::default() };
+            model.choose_film("vision");
+            assert_eq!(model.state.film, "vision");
+            assert_eq!(model.state.paper, if keep { "crystal" } else { "print_film" });
+            assert_eq!(model.state.value("print_render.development_time").is_null(), !keep);
+            assert_eq!(model.undo_title(), Some("Change Film"));
+            // Loading a catalog still pairs the film with its paper.
+            let mut loaded = model.state.clone();
+            model.pair_film(&mut loaded);
+            assert_eq!(loaded.paper, "print_film");
+        }
+    }
+
+    /// Lens corrections: on for every new edit and after Reset, though the
+    /// engine's default is off; the switch shows only for a supported RAW.
+    #[test]
+    fn lens_corrections_are_on_for_new_edits_and_after_reset() {
+        let mut model = Model::new(Preferences::default());
+        model.apply_catalog(json!({"profiles": [], "defaults": {"io": {"lens_correction": {"enabled": false}, "rotate_cw": 0}}}));
+        assert_eq!(model.value(state::LENS_CORRECTION), &json!(true));
+        model.set(state::LENS_CORRECTION, json!(false));
+        assert_eq!(model.value(state::LENS_CORRECTION), &json!(false));
+        model.reset();
+        assert_eq!(model.value(state::LENS_CORRECTION), &json!(true));
+        let (revision, generation) = (model.revision, model.source_generation);
+        let mut frame = rendered(&model, 1200, false);
+        frame.result["raw"] = json!(true);
+        frame.result["lens_correction_supported"] = json!(true);
+        model.render_finished(Ok(frame), revision, generation, false);
+        assert!(model.is_raw && model.lens_supported);
+    }
+
     /// The Image Size notice describes the settled preview, so reduced drag
     /// frames don't insert or reword it and move the sliders below it.
     #[test]
@@ -2241,6 +2487,7 @@ mod preset_tests {
         model.set("io.rotate_cw", json!(1));
         model.set("post.contrast", json!(20));
         model.set("settings.use_cat16", json!(false));
+        model.set(state::LENS_CORRECTION, json!(false));
         model.set("camera.exposure_compensation_ev", json!(1.5));
         model.limit_preview(true);
         let before = model.state.clone();
@@ -2254,7 +2501,7 @@ mod preset_tests {
         assert_eq!(json::number(model.value("film_render.development_time")), 9.0);
         assert_eq!(model.value("film_render.dir_couplers.langmuir_donor_k_rgb.0"), &Value::Null);
         assert_eq!(model.value("io.raw_white_balance.mode"), &json!("daylight"));
-        for path in [state::SIZE_TARGET, "io.rotate_cw", "post.contrast", "settings.use_cat16"] {
+        for path in [state::SIZE_TARGET, "io.rotate_cw", "post.contrast", "settings.use_cat16", state::LENS_CORRECTION] {
             assert!(json::same(model.value(path), before.value(path)), "{path}");
         }
         assert!(model.state.limit_preview);
@@ -2351,8 +2598,9 @@ mod preset_tests {
         let Some(mut live) = live("refused") else { return };
         let exotic = live.model.preset_library.add(br#"{"output_gamut_compress": {"algorithm": "jzazbz"}}"#, "Exotic").unwrap();
         live.model.refresh_presets();
-        let result = ask(&live.engine, json!({"command": "preset_import", "text": presets::text(&std::fs::read(&exotic.path).unwrap()).unwrap()}));
-        live.model.preset_checked(exotic.clone(), result.map(|v| (0, v)));
+        let text = presets::text(&std::fs::read(&exotic.path).unwrap()).unwrap();
+        let result = ask(&live.engine, json!({"command": "preset_import", "text": text}));
+        live.model.preset_checked(exotic.clone(), text, result.map(|v| (0, v)));
         match live.model.preset_status.get(&exotic) {
             Some(PresetStatus::Invalid(reason)) => assert!(reason.contains("jzazbz"), "{reason}"),
             other => panic!("accepted: {other:?}"),

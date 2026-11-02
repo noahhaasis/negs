@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use anyhow::{Result, anyhow, bail};
+use serde_json::Value;
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION};
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, MOVEFILE_WRITE_THROUGH, MoveFileExW};
 
@@ -40,7 +41,8 @@ impl PresetFile {
 pub enum Status {
     /// Asked, not answered yet.
     Checking,
-    Valid { film: String, paper: String, scan: bool },
+    /// With the file's text and RAW white balance, for its preview.
+    Valid { film: String, paper: String, scan: bool, text: String, white_balance: Value },
     Invalid(String),
 }
 

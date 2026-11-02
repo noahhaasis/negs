@@ -15,6 +15,7 @@ mod picture;
 mod platform;
 mod platform_events;
 mod presets;
+mod previews;
 mod rendered_preview;
 mod session;
 mod state;

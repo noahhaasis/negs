@@ -20,6 +20,8 @@ use super::{App, create, id, post, with_app};
 use crate::model::{Model, Pane};
 use crate::platform::{pcwstr, wide};
 use crate::presets::{PresetFile, Status, name};
+use crate::previews::{Bitmap, Target};
+use std::sync::Arc;
 
 const LIST: u16 = 1;
 const ADD: u16 = 2;
@@ -54,6 +56,8 @@ pub struct Panel {
     click_selected: Option<usize>,
     /// The row being dragged to a new place.
     drag: Option<usize>,
+    /// The rows have room for thumbnails (Settings › previews).
+    thumbnails: bool,
 }
 
 thread_local! {
@@ -68,7 +72,14 @@ thread_local! {
     static EDIT_PENDING: Cell<bool> = const { Cell::new(false) };
     /// The row whose name is being edited: its name isn't drawn under the field.
     static EDITING: Cell<Option<usize>> = const { Cell::new(None) };
+    /// Each row's thumbnail while previews are on: the picture, and whether
+    /// it is out of date. None when previews are off.
+    static THUMBS: RefCell<Option<Vec<(Option<Arc<Bitmap>>, bool)>>> = const { RefCell::new(None) };
 }
+
+/// The thumbnail at the start of a row, in DIPs (`PresetThumbnail`).
+const THUMB_WIDTH: i32 = 72;
+const THUMB_HEIGHT: i32 = 48;
 
 pub fn register() {
     unsafe {
@@ -140,18 +151,21 @@ fn build(app: &mut App) {
         shown: vec![],
         click_selected: None,
         drag: None,
+        thumbnails: app.model.prefs.previews,
     });
     set_metrics(app);
     super::drop::register_presets(window, list);
 }
 
 /// Fonts for drawing, and the row height: a one-pixel-wide image list of
-/// that height is how a report view gets taller rows.
+/// that height is how a report view gets taller rows. Rows with thumbnails
+/// are taller.
 fn set_metrics(app: &mut App) {
     let Some(p) = &app.presets_view else { return };
     FONTS.with(|f| f.set((app.fonts.ui.0 as isize, app.fonts.small.0 as isize)));
+    let height = if p.thumbnails { THUMB_HEIGHT as f64 + 12.0 } else { 42.0 };
     unsafe {
-        let images = ImageList_Create(1, app.px(42.0), ILC_COLOR, 1, 0);
+        let images = ImageList_Create(1, app.px(height), ILC_COLOR, 1, 0);
         let old = SendMessageW(p.list, LVM_SETIMAGELIST, WPARAM(LVSIL_SMALL as usize), LPARAM(images.0));
         if old.0 != 0 {
             let _ = ImageList_Destroy(HIMAGELIST(old.0));
@@ -220,7 +234,7 @@ fn row(model: &Model, file: &PresetFile) -> Row {
     let stock = |id: &str, paper: bool| model.stocks.iter().find(|s| s.paper == paper && s.id == id).map_or_else(|| id.to_owned(), |s| s.name.clone());
     let status = model.preset_status.get(file);
     let (detail, valid) = match status {
-        Some(Status::Valid { film, paper, scan }) => {
+        Some(Status::Valid { film, paper, scan, .. }) => {
             (if *scan { format!("{} · film scan", stock(film, false)) } else { format!("{} → {}", stock(film, false), stock(paper, true)) }, true)
         }
         Some(Status::Invalid(reason)) => (reason.clone(), false),
@@ -254,6 +268,12 @@ pub fn sync(app: &mut App) {
     if !unsafe { IsWindowVisible(p.window) }.as_bool() {
         return;
     }
+    if p.thumbnails != app.model.prefs.previews {
+        p.thumbnails = app.model.prefs.previews;
+        set_metrics(app);
+        redraw_previews(app);
+    }
+    let Some(p) = &mut app.presets_view else { return };
     let model = &app.model;
     let rows: Vec<Row> = model.presets.iter().map(|f| row(model, f)).collect();
     let enabled = model.can_change_presets();
@@ -290,7 +310,10 @@ pub fn sync(app: &mut App) {
         unsafe {
             let _ = InvalidateRect(p.list, None, false);
         }
+        redraw_previews(app);
     }
+    let Some(p) = &mut app.presets_view else { return };
+    let model = &app.model;
     // New Preset: rename the new row at once.
     let renaming = model.renaming_preset.as_ref().and_then(|path| p.shown.iter().position(|r| &r.file.path == path));
     if let Some(index) = renaming {
@@ -573,7 +596,27 @@ fn draw_row(draw: &NMLVCUSTOMDRAW) {
         let _ = DeleteObject(brush);
         SetBkMode(dc, TRANSPARENT);
         let (ui, small) = FONTS.with(Cell::get);
-        let inner = RECT { left: bounds.left + px(16), right: bounds.right - px(12), ..bounds };
+        let thumb = THUMBS.with(|t| t.borrow().as_ref().map(|t| t.get(index).cloned().unwrap_or_default()));
+        let text_left = match &thumb {
+            Some((image, dimmed)) => {
+                let top = (bounds.top + bounds.bottom - px(THUMB_HEIGHT)) / 2;
+                let frame = RECT { left: bounds.left + px(12), top, right: bounds.left + px(12 + THUMB_WIDTH), bottom: top + px(THUMB_HEIGHT) };
+                super::inspector::draw_thumbnail(dc, frame, px(8), image.as_deref(), *dimmed, COLORREF(if chosen && focused { 0xd8d8d8 } else { 0xdedede }));
+                if r.refused {
+                    // A warning sign in the placeholder.
+                    let glyph = super::inspector::glyph_font();
+                    let old = SelectObject(dc, glyph);
+                    SetTextColor(dc, COLORREF(0x707070));
+                    let mut sign: Vec<u16> = "\u{E7BA}".encode_utf16().collect();
+                    let mut fr = frame;
+                    DrawTextW(dc, &mut sign, &mut fr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                    SelectObject(dc, old);
+                }
+                px(12 + THUMB_WIDTH + 10)
+            }
+            None => px(16),
+        };
+        let inner = RECT { left: bounds.left + text_left, right: bounds.right - px(12), ..bounds };
         let middle = (bounds.top + bounds.bottom) / 2;
         let old = SelectObject(dc, HGDIOBJ(ui as *mut _));
         SetTextColor(dc, COLORREF(text));
@@ -698,7 +741,10 @@ fn notify(hwnd: HWND, header: &NMHDR, lparam: LPARAM) -> Option<LRESULT> {
                     let mut r = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
                     SendMessageW(list, LVM_GETITEMRECT, WPARAM(info.item.iItem.max(0) as usize), LPARAM(&mut r as *mut _ as isize));
                     let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(list).max(96) as i32;
-                    let (x, y) = (r.left + 13 * dpi / 96, r.top + 3 * dpi / 96);
+                    let thumbnails = THUMBS.with(|t| t.borrow().is_some());
+                    let left = if thumbnails { 12 + THUMB_WIDTH + 7 } else { 13 };
+                    let name_top = if thumbnails { (r.bottom - r.top) / 2 - 18 * dpi / 96 } else { 3 * dpi / 96 };
+                    let (x, y) = (r.left + left * dpi / 96, r.top + name_top);
                     let _ = SetWindowSubclass(edit, Some(edit_subclass), 2, (x as u32 as usize) << 32 | y as u32 as usize);
                     EDITING.with(|e| e.set(Some(info.item.iItem.max(0) as usize)));
                     let _ = InvalidateRect(list, Some(&r), false);
@@ -830,6 +876,44 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
+/// Brings the rows' thumbnails up to date with the model's.
+pub fn redraw_previews(app: &mut App) {
+    let Some(p) = &app.presets_view else { return };
+    let thumbs = p.thumbnails.then(|| {
+        p.shown
+            .iter()
+            .map(|r| {
+                let thumb = app.model.previews.thumb(&Target::Preset(r.file.path.clone()));
+                (thumb.and_then(|t| t.image.clone()), thumb.is_some_and(|t| t.dimmed))
+            })
+            .collect::<Vec<_>>()
+    });
+    let same = THUMBS.with(|t| {
+        let old = t.borrow();
+        match (old.as_ref(), thumbs.as_ref()) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.len() == b.len()
+                    && a.iter().zip(b).all(|(x, y)| {
+                        x.1 == y.1
+                            && match (&x.0, &y.0) {
+                                (Some(i), Some(j)) => Arc::ptr_eq(i, j),
+                                (None, None) => true,
+                                _ => false,
+                            }
+                    })
+            }
+            _ => false,
+        }
+    });
+    if !same {
+        THUMBS.with(|t| *t.borrow_mut() = thumbs);
+        unsafe {
+            let _ = InvalidateRect(p.list, None, false);
         }
     }
 }
