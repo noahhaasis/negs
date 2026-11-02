@@ -43,7 +43,7 @@ fn main() -> Result<()> {
             }
             "--help" => {
                 println!(
-                    "raw_decoder_probe [--decoder auto|apple|rawler] [--iterations N] [--no-orient] [--lens-correction] [--wb as_shot|daylight|tungsten|custom] [--temperature K] [--tint T] [--output DIR] INPUT"
+                    "raw_decoder_probe [--decoder auto|apple|apple9|apple8|rawler] [--iterations N] [--no-orient] [--lens-correction] [--wb as_shot|daylight|tungsten|custom] [--temperature K] [--tint T] [--output DIR] INPUT"
                 );
                 return Ok(());
             }
@@ -117,6 +117,7 @@ fn main() -> Result<()> {
             .save(out.join("preview.png"))?;
     }
     let report = json!({"success":true,"input":input.file_name().unwrap().to_string_lossy(),"decoder":decoded.decoder,
+        "decoder_version":decoded.decoder_version,
         "requested":format!("{decoder:?}"),"white_balance":options.white_balance,"oriented":options.apply_orientation,
         "lens_correction":options.lens_correction.enabled,"lens_correction_supported":decoded.lens_correction_supported,
         "width":image.width,"height":image.height,"decode_ms":times,"min":minimum,"max":maximum,

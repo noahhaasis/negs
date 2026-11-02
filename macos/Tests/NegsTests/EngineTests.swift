@@ -26,6 +26,10 @@ final class EngineTests: XCTestCase {
         let (_, catalog) = try await client.request(["command": .string("catalog")])
         XCTAssertEqual(catalog["protocol"], .number(1))
         let defaults = catalog["defaults"]
+        XCTAssertEqual(defaults["prep.exposure_ev"], .number(0), "Neutral Prep exposure")
+        for control in prepToneControls + prepColorControls + prepDetailControls {
+            XCTAssertEqual(defaults[control.id], .number(0), "Neutral Prep control: \(control.id)")
+        }
         let stocks = catalog["profiles"].array.map(Stock.init)
         for group in adjustmentGroups {
             for control in group.controls {

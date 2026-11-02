@@ -109,6 +109,65 @@ def main():
                         size=3, output=str(lut))
                 request("save", render_id=first_id, output=str(saved))
                 assert buffer.read_bytes() == first_bytes, "LUT export must preserve the current preview"
+                # Prep edits reuse the decoded source and calibrated pipeline,
+                # but must invalidate the rendered frame and GPU upload.
+                prepared = copy.deepcopy(params)
+                prepared["prep"]["highlights"] = -80
+                prepared["prep"]["shadows"] = 35
+                prepared["prep"]["color_boost"] = 20
+                _, _ = request("render", **(render_args | {"params": prepared}))
+                prep_bytes = buffer.read_bytes()
+                assert prep_bytes != first_bytes, "Prep must affect the film input"
+                _, _ = request("render", **(render_args | {"params": prepared}))
+                assert buffer.read_bytes() == prep_bytes, "Reusing Prep must not apply it twice"
+                first_id, _ = request("render", **render_args)
+                assert buffer.read_bytes() == first_bytes, "Resetting Prep must restore the exact neutral frame"
+                invalid_prep = copy.deepcopy(params)
+                invalid_prep["prep"]["gain"] = 101
+                request("render", expect_error=True, **(render_args | {"params": invalid_prep}))
+                # Exposure placement solves an absolute Prep EV against a
+                # colour-managed camera-reference proxy. It is read-only with
+                # respect to the visible/savable render, including on errors.
+                assert catalog["capabilities"]["place_exposure"]
+                reference = work / "placement-reference.png"
+                target_params = copy.deepcopy(params)
+                target_params["prep"]["exposure_ev"] = 0.8
+                reference_id, _ = request("render", **(render_args | {"params": target_params}))
+                request("save", render_id=reference_id, output=str(reference))
+                first_id, _ = request("render", **render_args)
+                request("save", render_id=first_id, output=str(saved))
+                before_placement_save = saved.read_bytes()
+                placement_args = dict(input=str(source), source_generation=0,
+                                      film="kodak_gold_200", paper="kodak_portra_endura",
+                                      params=params, reference_path=str(reference))
+                _, placement = request("place_exposure", **placement_args)
+                assert abs(placement["exposure_ev"] - 0.8) < 0.15, placement
+                assert abs(placement["after_error_ev"]) < abs(placement["before_error_ev"]), placement
+                assert isinstance(placement["highlight_limited"], bool)
+                changed_start = copy.deepcopy(params)
+                changed_start["prep"]["exposure_ev"] = -1.2
+                _, repeated = request("place_exposure", **(placement_args | {"params": changed_start}))
+                assert abs(repeated["exposure_ev"] - placement["exposure_ev"]) < 1e-5, (placement, repeated)
+                request("place_exposure", expect_error=True, **(placement_args | {"source_generation": 999}))
+                request("place_exposure", expect_error=True, **(placement_args | {"input": str(work / "other.png")}))
+                changed_decode = copy.deepcopy(params)
+                changed_decode["io"]["input_interpretation"]["mode"] = "manual"
+                request("place_exposure", expect_error=True, **(placement_args | {"params": changed_decode}))
+                request("place_exposure", expect_error=True, **(placement_args | {"reference_path": str(work / "missing-reference.png")}))
+                invalid_reference = work / "bad-reference.png"
+                invalid_reference.write_text("This is not a PNG")
+                request("place_exposure", expect_error=True, **(placement_args | {"reference_path": str(invalid_reference)}))
+                png(invalid_reference, 24, 32)
+                request("place_exposure", expect_error=True, **(placement_args | {"reference_path": str(invalid_reference)}))
+                png(invalid_reference, 2050, 2)
+                request("place_exposure", expect_error=True, **(placement_args | {"reference_path": str(invalid_reference)}))
+                request("place_exposure", expect_error=True, **(placement_args | {"params": invalid_prep}))
+                assert buffer.read_bytes() == first_bytes, "Placement must preserve the current preview buffer"
+                request("save", render_id=first_id, output=str(saved))
+                assert saved.read_bytes() == before_placement_save, "Placement must preserve the full-resolution save state"
+                # Retain the solved, nonzero placement in the later Fast and
+                # Reference export checks, as the actual editor does.
+                params["prep"]["exposure_ev"] = placement["exposure_ev"]
                 params["camera"]["exposure_compensation_ev"] = 1.5
                 params["io"]["rotate_cw"] = 1  # The exporter rotates; the app passes it to save.
                 second_id, result = request("render", **render_args)
@@ -166,6 +225,18 @@ def main():
                                env=dict(os.environ, SPEKTRAFILM_BACKEND="cpu"), check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
                 assert struct.unpack(">II", exported.read_bytes()[16:24]) == (12, 16)
+                placed_reference = exported.read_bytes()
+                neutral_params = copy.deepcopy(params)
+                neutral_params["prep"]["exposure_ev"] = 0
+                neutral_params_file = work / "neutral-placement.json"
+                neutral_params_file.write_text(json.dumps(neutral_params))
+                neutral_export = work / "neutral-placement.png"
+                subprocess.run([args.exporter.resolve(), "process", str(source), "-o", str(neutral_export),
+                                "--film", "kodak_gold_200", "--paper", "kodak_portra_endura",
+                                "--params", str(neutral_params_file), "--data-dir", str(args.data_dir.resolve())],
+                               env=dict(os.environ, SPEKTRAFILM_BACKEND="cpu"), check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                assert neutral_export.read_bytes() != placed_reference, "Reference export must apply the saved exposure placement"
                 subprocess.run([args.exporter.resolve(), "process", str(source), "-o", str(exported),
                                 "--film", "kodak_gold_200", "--paper", "kodak_portra_endura", "--crop", "0,0,0.5,1,-2",
                                 "--params", str(export_params), "--data-dir", str(args.data_dir.resolve())],

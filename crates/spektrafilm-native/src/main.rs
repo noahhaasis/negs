@@ -78,6 +78,16 @@ enum Command {
         limit_preview: bool,
         preview_path: PathBuf,
     },
+    /// Fit the graded exposure to an embedded camera-preview reference without
+    /// replacing the current render or changing the decoded source.
+    PlaceExposure {
+        input: PathBuf,
+        source_generation: u64,
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        reference_path: PathBuf,
+    },
     Render {
         input: PathBuf,
         #[serde(default)]
@@ -169,6 +179,11 @@ struct Session {
     /// The same for interactive renders, kept beside `scaled` so a drag
     /// after a full-size render doesn't resample the source again.
     interactive: Option<((u32, u32), ImageBuf)>,
+    /// Prep's output for the photograph-size and the interactive frame (see
+    /// `Pipeline::with_prepared_frame`): each slot only ever sees its frame's
+    /// one resample of `source` per size, and is replaced with the source.
+    prepared_photo: spektrafilm_core::prep::PreparedFrame,
+    prepared_interactive: spektrafilm_core::prep::PreparedFrame,
     /// The source's auto-exposure metering frame. Every render of the source,
     /// at any preview or working size, meters it, as the exporter does, so
     /// the preview's exposure is the export's.
@@ -283,7 +298,7 @@ fn catalog(data: &Path) -> Result<Value> {
         data.display()
     );
     catalog["protocol"] = json!(1);
-    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true, "tone_curve": true});
+    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true, "tone_curve": true, "place_exposure": true});
     // What a preset leaves as it is: a preset's thumbnail changes only with these.
     catalog["preset_kept"] = json!(presets::KEPT);
     Ok(catalog)
@@ -306,6 +321,8 @@ impl Session {
             self.source = None;
             self.scaled = None;
             self.interactive = None;
+            self.prepared_photo = Default::default();
+            self.prepared_interactive = Default::default();
             self.metering = None;
             self.thumbnail_source = None;
             self.thumbnail_wb_sources = Vec::new();
@@ -555,6 +572,50 @@ impl Session {
                 self.thumbnail_wb_sources = Vec::new();
                 Ok(json!({}))
             }
+            Command::PlaceExposure { input, source_generation, film, paper, mut params, reference_path } => {
+                let started = Instant::now();
+                params.prep.validate().map_err(anyhow::Error::msg)?;
+                params.io.raw_white_balance.validate()?;
+                params.io.input_interpretation.validate()?;
+                ensure!(params.io.upscale_factor.is_finite()
+                    && (0.1..=1.0).contains(&params.io.upscale_factor), "Invalid working resolution");
+                ensure!(RgbColourspace::find(&params.io.output_color_space).is_some(),
+                    "Unknown output colour space: {}", params.io.output_color_space);
+                let source = self.source.as_ref().context("Open a photograph and wait for its preview before placing exposure")?;
+                ensure!(self.source_generation == source_generation
+                    && source.current(&input, params.io.raw_white_balance, params.io.lens_correction,
+                                      &params.io.input_interpretation),
+                    "The photograph or RAW settings changed; wait for its current preview and try again");
+                let reference = placement_reference(&reference_path, &source.image)?;
+                params.io.apply_input_colour(&source.colour);
+                ensure!(RgbColourspace::find(&params.io.input_color_space).is_some(),
+                    "Unknown input colour space: {}", params.io.input_color_space);
+                image_size::clear(&mut params);
+                let key = preview_pipeline_cache_key(&film, &paper, &params);
+                // Borrow the calibrated look when possible, but keep all
+                // placement work local. Save must still see the last preview.
+                let pipeline = if let Some((cached_key, pipeline)) = &self.pipeline {
+                    if cached_key == &key { Some(pipeline.clone()) } else { None }
+                } else { None };
+                let mut pipeline = match pipeline {
+                    Some(pipeline) => pipeline.with_params((*params).clone()),
+                    None => Pipeline::new_with_spectral(
+                        profile::load_profile_by_name(data, &film)?,
+                        profile::load_profile_by_name(data, if params.io.scan_film { &film } else { &paper })?,
+                        (*params).clone(), data,
+                    ).map_err(anyhow::Error::msg)?,
+                };
+                if let Some(metering) = &self.metering {
+                    pipeline = pipeline.with_metering_preview(metering.clone());
+                }
+                let backend = self.backend.get_or_insert_with(spektrafilm_gpu::select_backend);
+                let placement = spektrafilm_core::exposure_placement::place_exposure(
+                    &pipeline, &source.image, &reference, backend.as_ref(),
+                ).map_err(anyhow::Error::msg)?;
+                let mut result = serde_json::to_value(placement)?;
+                result["elapsed_ms"] = json!(started.elapsed().as_secs_f64() * 1000.0);
+                Ok(result)
+            }
             Command::Save {
                 render_id,
                 output,
@@ -667,6 +728,7 @@ impl Session {
                 );
                 params.io.raw_white_balance.validate()?;
                 params.settings.serial_grain = false;
+                params.prep.validate().map_err(anyhow::Error::msg)?;
                 // Applied to the display and on save, so the pipeline runs without them.
                 let post = std::mem::take(&mut params.post);
                 let wb = params.io.raw_white_balance;
@@ -746,24 +808,33 @@ impl Session {
                 }
                 // The tone graph's histogram: the photograph's film exposure,
                 // from the metering frame (the whole frame, before spatial effects).
+                // Prep's exposure is a uniform gain, so it shifts the stops like
+                // the camera's; its other controls reshape them, so then the
+                // frame goes through Prep and is counted as exposed.
                 let histogram = {
-                    let stops_key = format!("{}|{source_generation}|{}", input.display(), self.pipeline.as_ref().unwrap().0);
+                    let metering = self
+                        .metering
+                        .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(source));
+                    let ae = if params.camera.auto_exposure { pipeline.metering_film_raw(metering).1 } else { 0.0 };
+                    let reshaped = !spektrafilm_core::prep::PrepParams { exposure_ev: 0.0, ..params.prep }.is_identity();
+                    let mut stops_key = format!("{}|{source_generation}|{}", input.display(), self.pipeline.as_ref().unwrap().0);
+                    if reshaped {
+                        stops_key += &format!("|{:?}|{ae}|{}", params.prep, params.camera.exposure_compensation_ev);
+                    }
                     if self.film_stops.as_ref().is_none_or(|(old, _)| old != &stops_key) {
-                        let metering = self
-                            .metering
-                            .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(source));
-                        let (raw, _) = pipeline.metering_film_raw(metering);
+                        let raw = if reshaped {
+                            pipeline.metering_film_raw_prepared(metering, ae).map_err(anyhow::Error::msg)?
+                        } else {
+                            pipeline.metering_film_raw(metering).0
+                        };
                         self.film_stops = Some((stops_key, spektrafilm_core::tone_curve::raw_stops(&raw)));
                     }
-                    let ae = match &self.metering {
-                        Some(metering) if params.camera.auto_exposure => pipeline.metering_film_raw(metering).1,
-                        _ => 0.0,
-                    };
-                    let ev = ae + params.camera.exposure_compensation_ev as f64;
+                    let ev = if reshaped { 0.0 } else { ae + params.camera.exposure_compensation_ev as f64 + params.prep.exposure_ev as f64 };
                     let counts = spektrafilm_core::tone_curve::film_histogram(&self.film_stops.as_ref().unwrap().1, ev, 128);
                     json!({"stops": spektrafilm_core::tone_curve::STOPS, "ev": ev, "counts": counts})
                 };
                 let working = if dimensions == photo_dimensions {
+                    pipeline = pipeline.with_prepared_frame(self.prepared_photo.clone());
                     working_source(
                         source,
                         &mut self.scaled,
@@ -771,6 +842,7 @@ impl Session {
                         rescale_preview_input_fast,
                     )
                 } else {
+                    pipeline = pipeline.with_prepared_frame(self.prepared_interactive.clone());
                     working_source(source, &mut self.interactive, dimensions, downsample_area)
                 };
                 let backend = self
@@ -820,6 +892,27 @@ impl Session {
             }
         }
     }
+}
+
+/// References are small, upright, complete camera frames. Decode their ICC/
+/// transfer metadata through the same colour-managed loader as other images;
+/// the solver receives linear sRGB, never encoded PNG samples mistaken for light.
+fn placement_reference(path: &Path, source: &ImageBuf) -> Result<ImageBuf> {
+    let metadata = std::fs::metadata(path).context("Reading camera-preview reference")?;
+    ensure!(metadata.is_file() && metadata.len() <= 32 * 1024 * 1024,
+        "The camera-preview reference must be a PNG smaller than 32 MB");
+    let reader = image::ImageReader::open(path)?.with_guessed_format()?;
+    ensure!(reader.format() == Some(image::ImageFormat::Png), "The camera-preview reference must be a PNG");
+    let (width, height) = reader.into_dimensions()?;
+    ensure!((2..=2048).contains(&width) && (2..=2048).contains(&height),
+        "The camera-preview reference must be between 2 and 2048 pixels on each side");
+    let reference = spektrafilm_io::load_image(path, spektrafilm_io::Formats::Any)?;
+    let aspect = reference.width as f64 / reference.height as f64;
+    let source_aspect = source.width as f64 / source.height as f64;
+    ensure!((aspect / source_aspect - 1.0).abs() <= 0.02,
+        "The camera-preview reference must show the whole photograph with matching orientation");
+    ensure!(reference.data.iter().all(|v| v.is_finite()), "The camera-preview reference contains invalid pixels");
+    Ok(reference)
 }
 
 /// A request line. Params from before `io.input_interpretation` keep the
