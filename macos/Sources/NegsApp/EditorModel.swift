@@ -38,6 +38,11 @@ import UniformTypeIdentifiers
     private(set) var original: IOSurface?
     /// The tones of `image` within the crop; nil until it develops.
     private(set) var histogram: Histogram?
+    /// The tone graph's curve for the current film, paper and settings
+    /// (or the last ones, until the next arrives); nil while hidden.
+    private(set) var toneCurve: ToneCurveData?
+    /// The photograph's film exposure, from the last render.
+    private(set) var filmHistogram: FilmHistogram?
     /// The developed preview's frame, uncropped, which the canvas lays out:
     /// the working frame, or less with the 12 MP limit.
     private(set) var imageSize = CGSize.zero
@@ -143,6 +148,9 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
     @ObservationIgnored private var stripRequest: (film: String, format: FilmFormat)?
     @ObservationIgnored private var histogramRequest = 0
+    @ObservationIgnored private var toneGraphsShown = 0
+    @ObservationIgnored private var toneCurveTask: Task<Void, Never>?
+    @ObservationIgnored private var toneCurveStale = false
     /// The source's original, decoded on first use and kept until another
     /// photograph opens. Volatile while hidden.
     @ObservationIgnored private var originalCache: IOSurface?
@@ -307,6 +315,7 @@ import UniformTypeIdentifiers
         PreviewRules.pairFilm(in: &next, stocks: stocks)
         state = next
         previews.update(stocks: stocks)
+        scheduleToneCurve()
     }
 
     private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }
@@ -859,6 +868,7 @@ import UniformTypeIdentifiers
     }
 
     private func changed(invalidateCache: Bool = true) {
+        scheduleToneCurve()
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
         if renderFailed { renderFailed = false }
@@ -923,6 +933,8 @@ import UniformTypeIdentifiers
             showingInteractiveFrame = interactiveScale != nil
             image = developed; placeholder = nil
             updateHistogram()
+            let film = FilmHistogram(result["film_histogram"])
+            if film != filmHistogram { filmHistogram = film }
             cropSession?.update(photo: shownImageSize, rotation: imageRotation)
             updateFilmStrip()
             isRaw = result["raw"].bool
@@ -970,6 +982,39 @@ import UniformTypeIdentifiers
     private func showHistogram(_ counted: Histogram, request: Int) {
         guard request == histogramRequest, counted != histogram else { return }
         histogram = counted
+    }
+
+    // MARK: Tone graph
+
+    func toneGraphAppeared(_ shown: Bool) {
+        toneGraphsShown = max(0, toneGraphsShown + (shown ? 1 : -1))
+        scheduleToneCurve()
+    }
+
+    /// Asks the helper for the current settings' curve, one request at a
+    /// time; edits made meanwhile ask again once it answers.
+    private func scheduleToneCurve() {
+        guard toneGraphsShown > 0, hasCatalog, engine != nil, !closing else { return }
+        guard toneCurveTask == nil else { toneCurveStale = true; return }
+        toneCurveTask = Task { [weak self] in
+            guard let self else { return }
+            repeat {
+                toneCurveStale = false
+                let snapshot = renderState
+                let request: JSONValue = .object(["film": .string(snapshot.film), "paper": .string(snapshot.paper), "params": snapshot.params])
+                guard toneCurve?.request != request, let engine else { continue }
+                do {
+                    let (_, result) = try await engine.request([
+                        "command": .string("tone_curve"), "film": .string(snapshot.film),
+                        "paper": .string(snapshot.paper), "params": snapshot.params, "count": .number(256)])
+                    let controls = ToneControls { snapshot.params[$0] }
+                    if let curve = ToneCurveData(result, request: request, controls: controls) { toneCurve = curve }
+                } catch {
+                    // A curve that can't be computed leaves the last one; the render reports errors.
+                }
+            } while toneCurveStale && !closing
+            toneCurveTask = nil
+        }
     }
 
     /// Only mention an update once it has visibly taken a while.

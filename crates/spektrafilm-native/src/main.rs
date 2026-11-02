@@ -121,6 +121,15 @@ enum Command {
     },
     /// Frees the thumbnails' caches (the previews were turned off).
     ReleaseThumbnails,
+    /// The tone graph's curve: `count` greys through film → print → scan
+    /// (`spektrafilm_core::tone_curve`). Image-independent.
+    ToneCurve {
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        #[serde(default)]
+        count: Option<usize>,
+    },
     Save {
         render_id: u64,
         output: PathBuf,
@@ -174,6 +183,11 @@ struct Session {
     /// Reduced sources for preset thumbnails whose RAW white balance isn't
     /// the main source's, most recent last.
     thumbnail_wb_sources: Vec<WbSource>,
+    /// The tone graph's calibrated pipeline (per-pixel params).
+    tone_pipeline: Option<(String, Pipeline)>,
+    /// The metering frame's film exposure in stops for the tone graph's
+    /// histogram, keyed by the source and the render pipeline.
+    film_stops: Option<(String, Vec<[f32; 3]>)>,
 }
 
 /// The source decoded with another RAW white balance, reduced to the largest
@@ -269,7 +283,7 @@ fn catalog(data: &Path) -> Result<Value> {
         data.display()
     );
     catalog["protocol"] = json!(1);
-    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true});
+    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true, "tone_curve": true});
     // What a preset leaves as it is: a preset's thumbnail changes only with these.
     catalog["preset_kept"] = json!(presets::KEPT);
     Ok(catalog)
@@ -295,6 +309,7 @@ impl Session {
             self.metering = None;
             self.thumbnail_source = None;
             self.thumbnail_wb_sources = Vec::new();
+            self.film_stops = None;
             let loaded = spektrafilm_io::load_image_colour(
                 input,
                 spektrafilm_io::Formats::Any,
@@ -509,6 +524,31 @@ impl Session {
             Command::Thumbnail { input, source_generation, film, paper, params, long_side, preview_path, crop, preset } => {
                 self.thumbnail(input, source_generation, film, paper, params, long_side, preview_path, crop, preset, data)
             }
+            Command::ToneCurve { film, paper, params, count } => {
+                let started = Instant::now();
+                let params = spektrafilm_core::tone_curve::tone_params(&params);
+                let key = preview_pipeline_cache_key(&film, &paper, &params);
+                let cached = self.tone_pipeline.as_ref().is_some_and(|(old, _)| old == &key);
+                if !cached {
+                    let film_profile = profile::load_profile_by_name(data, &film)?;
+                    let print_profile =
+                        profile::load_profile_by_name(data, if params.io.scan_film { &film } else { &paper })?;
+                    let pipeline = Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data)
+                        .map_err(anyhow::Error::msg)?;
+                    self.tone_pipeline = Some((key, pipeline));
+                }
+                let pipeline = self.tone_pipeline.as_ref().unwrap().1.clone().with_params(params);
+                let built = started.elapsed();
+                let curve = spektrafilm_core::tone_curve::tone_curve(&pipeline, count.unwrap_or(256));
+                let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+                Ok(json!({
+                    "stops": spektrafilm_core::tone_curve::STOPS,
+                    "film": curve.film, "paper": curve.paper, "rgb": curve.rgb,
+                    "cached_pipeline": cached,
+                    "timing_ms": {"pipeline": ms(built), "curve": ms(started.elapsed() - built)},
+                    "elapsed_ms": ms(started.elapsed()),
+                }))
+            }
             Command::ReleaseThumbnails => {
                 self.thumbnail_source = None;
                 self.thumbnail_pipelines = Vec::new();
@@ -704,6 +744,25 @@ impl Session {
                 if let Some(metering) = &self.metering {
                     pipeline = pipeline.with_metering_preview(metering.clone());
                 }
+                // The tone graph's histogram: the photograph's film exposure,
+                // from the metering frame (the whole frame, before spatial effects).
+                let histogram = {
+                    let stops_key = format!("{}|{source_generation}|{}", input.display(), self.pipeline.as_ref().unwrap().0);
+                    if self.film_stops.as_ref().is_none_or(|(old, _)| old != &stops_key) {
+                        let metering = self
+                            .metering
+                            .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(source));
+                        let (raw, _) = pipeline.metering_film_raw(metering);
+                        self.film_stops = Some((stops_key, spektrafilm_core::tone_curve::raw_stops(&raw)));
+                    }
+                    let ae = match &self.metering {
+                        Some(metering) if params.camera.auto_exposure => pipeline.metering_film_raw(metering).1,
+                        _ => 0.0,
+                    };
+                    let ev = ae + params.camera.exposure_compensation_ev as f64;
+                    let counts = spektrafilm_core::tone_curve::film_histogram(&self.film_stops.as_ref().unwrap().1, ev, 128);
+                    json!({"stops": spektrafilm_core::tone_curve::STOPS, "ev": ev, "counts": counts})
+                };
                 let working = if dimensions == photo_dimensions {
                     working_source(
                         source,
@@ -745,6 +804,7 @@ impl Session {
                     "output_color_space": encoding.space.name,
                     "display_color_space": DisplaySpace::of(encoding).name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
+                    "film_histogram": histogram,
                 });
                 self.output = Some(Rendered {
                     id: request.id,
