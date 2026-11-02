@@ -21,9 +21,10 @@ pub const LONG_SIDE: u32 = 320;
 /// The helper request for `stock`'s tile, without its scratch file. It
 /// identifies the thumbnail: the photograph (path and generation), every
 /// render setting with the stock chosen, and the crop and straighten.
-/// `state` is the edit as rendered (`Model::render_state`).
-pub fn stock_command(state: &EditState, stock: &Stock, stocks: &[Stock], source: &Path, generation: u64) -> Value {
-    let chosen = state::choosing(state, &stock.id, stock.paper, stocks);
+/// `state` is the edit as rendered (`Model::render_state`); `keep_paper` as
+/// for `state::choosing`, so a film's tile shows what a click would develop.
+pub fn stock_command(state: &EditState, stock: &Stock, stocks: &[Stock], keep_paper: bool, source: &Path, generation: u64) -> Value {
+    let chosen = state::choosing(state, &stock.id, stock.paper, keep_paper, stocks);
     let mut command = json!({
         "command": "thumbnail", "input": source, "source_generation": generation,
         "film": chosen.film, "paper": chosen.paper, "params": chosen.params, "long_side": LONG_SIDE,
@@ -370,7 +371,7 @@ mod tests {
 
     #[test]
     fn a_film_tile_pairs_its_paper_and_resets_the_films_presets() {
-        let chosen = state::choosing(&edit(), "vision", false, &stocks());
+        let chosen = state::choosing(&edit(), "vision", false, false, &stocks());
         assert_eq!((chosen.film.as_str(), chosen.paper.as_str()), ("vision", "print_film"));
         assert!(chosen.value("film_render.development_time").is_null());
         assert!(chosen.value("print_render.development_time").is_null());
@@ -378,15 +379,45 @@ mod tests {
         assert!(chosen.value("film_render.dir_couplers.gamma_samelayer_rgb").is_null());
         assert!(chosen.value("film_render.halation.halation_strength").is_null());
         assert_eq!(chosen.value("camera.exposure_compensation_ev"), &json!(1.0));
-        let slide = state::choosing(&edit(), "velvia", false, &stocks());
+        let slide = state::choosing(&edit(), "velvia", false, false, &stocks());
         assert_eq!(slide.value("io.scan_film"), &json!(true));
         // No target print: the paper stays.
         assert_eq!(slide.paper, "crystal");
     }
 
+    /// Settings › Keep paper when changing film (Linux `keep_paper_leaves_the_paper_alone`).
+    #[test]
+    fn keep_paper_leaves_the_paper_alone() {
+        for keep in [false, true] {
+            let chosen = state::choosing(&edit(), "vision", false, keep, &stocks());
+            assert_eq!(chosen.paper, if keep { "crystal" } else { "print_film" });
+            let time = chosen.value("print_render.development_time").clone();
+            assert_eq!(time, if keep { json!(3.0) } else { Value::Null });
+            // Everything else a film change does still happens.
+            assert_eq!(chosen.film, "vision");
+            assert!(chosen.value("film_render.development_time").is_null());
+            assert!(chosen.value("film_render.grain.rms_granularity").is_null());
+            assert_eq!(state::choosing(&edit(), "velvia", false, keep, &stocks()).value("io.scan_film"), &json!(true));
+        }
+    }
+
+    #[test]
+    fn a_film_tile_follows_the_keep_paper_setting() {
+        let stocks = stocks();
+        let photo = Path::new("a.jpg");
+        let vision = &stocks[2];
+        let kept = stock_command(&edit(), vision, &stocks, true, photo, 1);
+        let paired = stock_command(&edit(), vision, &stocks, false, photo, 1);
+        assert_eq!((kept["paper"].as_str(), paired["paper"].as_str()), (Some("crystal"), Some("print_film")));
+        assert_ne!(Key::new(1, &kept), Key::new(1, &paired));
+        // A paper tile doesn't depend on it.
+        let endura = &stocks[3];
+        assert_eq!(stock_command(&edit(), endura, &stocks, true, photo, 1), stock_command(&edit(), endura, &stocks, false, photo, 1));
+    }
+
     #[test]
     fn a_paper_tile_keeps_the_film() {
-        let chosen = state::choosing(&edit(), "endura", true, &stocks());
+        let chosen = state::choosing(&edit(), "endura", true, false, &stocks());
         assert_eq!((chosen.film.as_str(), chosen.paper.as_str()), ("portra", "endura"));
         assert!(chosen.value("print_render.development_time").is_null());
         assert_eq!(chosen.value("film_render.development_time"), &json!(7.0));
@@ -397,14 +428,14 @@ mod tests {
     fn the_tile_key_changes_with_the_crop_and_the_photograph() {
         let stocks = stocks();
         let photo = Path::new("C:\\photos\\a.jpg");
-        let key = |state: &EditState, source: &Path, generation| Key::new(generation, &stock_command(state, &stocks[0], &stocks, source, generation));
+        let key = |state: &EditState, source: &Path, generation| Key::new(generation, &stock_command(state, &stocks[0], &stocks, false, source, generation));
         let plain = key(&edit(), photo, 1);
-        assert!(stock_command(&edit(), &stocks[0], &stocks, photo, 1).get("crop").is_none());
+        assert!(stock_command(&edit(), &stocks[0], &stocks, false, photo, 1).get("crop").is_none());
         let mut cropped = edit();
         cropped.crop.rect.width = 0.8;
         let with_crop = key(&cropped, photo, 1);
         assert_ne!(with_crop, plain);
-        assert_eq!(stock_command(&cropped, &stocks[0], &stocks, photo, 1)["crop"]["width"], json!(0.8));
+        assert_eq!(stock_command(&cropped, &stocks[0], &stocks, false, photo, 1)["crop"]["width"], json!(0.8));
         let mut straightened = edit();
         straightened.crop.angle = 3.0;
         assert_ne!(key(&straightened, photo, 1), plain);

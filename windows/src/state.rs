@@ -175,8 +175,9 @@ impl Stock {
 /// The edit with stock `id` chosen, exactly as choosing it from the menu or
 /// a preview tile makes it (`PreviewRules.choosing`). A film resets its
 /// development time and its grain, DIR and halation presets, sets scanning
-/// for slides and brings its own paper; a paper keeps the film.
-pub fn choosing(state: &EditState, id: &str, paper: bool, stocks: &[Stock]) -> EditState {
+/// for slides and brings its own paper unless `keep_paper` (Settings › Keep
+/// paper when changing film); a paper keeps the film.
+pub fn choosing(state: &EditState, id: &str, paper: bool, keep_paper: bool, stocks: &[Stock]) -> EditState {
     let mut next = state.clone();
     if paper {
         next.paper = id.into();
@@ -192,15 +193,15 @@ pub fn choosing(state: &EditState, id: &str, paper: bool, stocks: &[Stock]) -> E
     for path in DIR_HALATION_STOCK_PATHS {
         json::set(&mut next.params, path, Value::Null);
     }
-    pair_film(&mut next, stocks);
+    pair_film(&mut next, stocks, !keep_paper);
     next
 }
 
-/// Scanning for slides, and the film's own paper.
-pub fn pair_film(state: &mut EditState, stocks: &[Stock]) {
+/// Scanning for slides, and the film's own paper unless `paper` is false.
+pub fn pair_film(state: &mut EditState, stocks: &[Stock], paper: bool) {
     let Some(film) = stocks.iter().find(|s| !s.paper && s.id == state.film) else { return };
     json::set(&mut state.params, "io.scan_film", Value::Bool(film.positive));
-    if stocks.iter().any(|s| s.paper && s.id == film.target) && state.paper != film.target {
+    if paper && stocks.iter().any(|s| s.paper && s.id == film.target) && state.paper != film.target {
         state.paper = film.target.clone();
         json::set(&mut state.params, "print_render.development_time", Value::Null);
     }

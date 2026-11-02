@@ -162,6 +162,10 @@ pub struct Preferences {
     /// Settings › Film, paper and preset previews (the Mac's `previews`).
     /// Old settings files lack it: on.
     pub previews: bool,
+    /// Settings › Keep paper when changing film (the Mac's `keep_paper`).
+    /// Old settings files lack it: off, the paper follows the film.
+    #[serde(rename = "keep_paper")]
+    pub keep_paper: bool,
 }
 
 impl Default for Preferences {
@@ -186,6 +190,7 @@ impl Default for Preferences {
             check_for_updates: true,
             image_size_long_side: None,
             previews: true,
+            keep_paper: false,
         }
     }
 }
@@ -365,5 +370,10 @@ mod tests {
         let off: Preferences = serde_json::from_str(r#"{"previews": false}"#).unwrap();
         assert!(!off.previews);
         assert!(serde_json::to_string(&off).unwrap().contains(r#""previews":false"#));
+        // Keep paper: off unless saved on, under the Mac's key.
+        assert!(!old.keep_paper);
+        let kept: Preferences = serde_json::from_str(r#"{"keep_paper": true}"#).unwrap();
+        assert!(kept.keep_paper);
+        assert!(serde_json::to_string(&kept).unwrap().contains(r#""keep_paper":true"#));
     }
 }
