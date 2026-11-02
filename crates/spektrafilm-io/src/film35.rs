@@ -104,17 +104,52 @@ pub enum EdgePrint {
 }
 
 /// Each film profile's edge print and look. Sources for the edge prints
-/// are in `docs/35mm-scan-sources.md`. Films not listed (Tri-X 7266 is
-/// only made in 16 mm and Super 8) get the generic strip.
+/// are in `docs/35mm-scan-sources.md`; the Fotufilm ports use product
+/// codes or names, not checked against scans. Films not listed (Tri-X 7266
+/// is only made in 16 mm and Super 8) get the generic strip.
 pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
+    ("agfa_agfachrome_100", Kind::Slide, EdgePrint::Still(&["AGFACHROME 100"])),
+    ("agfa_agfachrome_200", Kind::Slide, EdgePrint::Still(&["AGFACHROME 200"])),
+    ("agfa_agfachrome_50", Kind::Slide, EdgePrint::Still(&["AGFACHROME 50"])),
+    ("cinestill_400d", Kind::Negative, EdgePrint::Still(&["CINESTILL 400D"])),
+    ("cinestill_800t", Kind::Negative, EdgePrint::Still(&["CINESTILL 800T"])),
+    ("fotufilm_infrared_color", Kind::Slide, EdgePrint::Still(&["INFRARED"])),
+    ("fujifilm_astia_100f", Kind::Slide, EdgePrint::Still(&["FUJI RAP100F"])),
     ("fujifilm_c200", Kind::Negative, EdgePrint::Still(&["FUJI", "200", "CA24"])),
+    (
+        "fujifilm_eterna_500",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8573", keykode: None },
+    ),
+    (
+        "fujifilm_eterna_vivid_500",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8547", keykode: None },
+    ),
+    (
+        "fujifilm_f64d",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8522", keykode: None },
+    ),
+    ("fujifilm_pro_160ns", Kind::Negative, EdgePrint::Still(&["PRO160NS", "FUJI"])),
     ("fujifilm_pro_400h", Kind::Negative, EdgePrint::Still(&["PRO400H", "FUJI"])),
     ("fujifilm_provia_100f", Kind::Slide, EdgePrint::Still(&["FUJI RDPIII"])),
+    ("fujifilm_reala_100", Kind::Negative, EdgePrint::Still(&["FUJI", "REALA", "CS"])),
+    (
+        "fujifilm_reala_500d",
+        Kind::Negative,
+        EdgePrint::Cine { product: "8592", keykode: None },
+    ),
+    ("fujifilm_superia_200", Kind::Negative, EdgePrint::Still(&["FUJI", "S-200"])),
     ("fujifilm_velvia_100", Kind::Slide, EdgePrint::Still(&["FUJI RVP100"])),
+    ("fujifilm_velvia_50", Kind::Slide, EdgePrint::Still(&["FUJI RVP"])),
     ("fujifilm_xtra_400", Kind::Negative, EdgePrint::Still(&["FUJI", "S-400", "CH23"])),
+    ("harman_phoenix_200", Kind::Negative, EdgePrint::Still(&["HARMAN PHOENIX 200"])),
     ("kodak_2302", Kind::BlackAndWhite, EdgePrint::Print("2302 KODAK")),
     ("kodak_2383", Kind::Negative, EdgePrint::Print("2383 KODAK")),
     ("kodak_2393", Kind::Negative, EdgePrint::Print("2393 KODAK")),
+    ("kodak_aerochrome_1443", Kind::Slide, EdgePrint::Still(&["KODAK 1443"])),
+    ("kodak_aerocolor_2460", Kind::Negative, EdgePrint::Still(&["KODAK 2460"])),
     (
         "kodak_doublex",
         Kind::BlackAndWhite,
@@ -123,7 +158,10 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ("kodak_ektachrome_100", Kind::Slide, EdgePrint::Still(&["KODAK E100"])),
     ("kodak_ektar_100", Kind::Negative, EdgePrint::Still(&["KODAK EKTAR 100"])),
     ("kodak_gold_200", Kind::Negative, EdgePrint::Still(&["KODAK GB 200"])),
+    ("kodak_kodachrome_200", Kind::Slide, EdgePrint::Still(&["KODAK KL"])),
+    ("kodak_kodachrome_25", Kind::Slide, EdgePrint::Still(&["KODAK KM"])),
     ("kodak_kodachrome_64", Kind::Slide, EdgePrint::Still(&["KODAK KR"])),
+    ("kodak_kodacolor_100", Kind::Negative, EdgePrint::Still(&["KODAK KODACOLOR 100"])),
     ("kodak_portra_160", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 160"])),
     ("kodak_portra_400", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 400"])),
     ("kodak_portra_800", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 800"])),
@@ -155,6 +193,17 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
         "kodak_vision3_50d",
         Kind::Negative,
         EdgePrint::Cine { product: "5203", keykode: Some("ER") },
+    ),
+    ("lomography_color_100", Kind::Negative, EdgePrint::Still(&["LOMOGRAPHY 100"])),
+    (
+        "lomography_lomochrome_metropolis",
+        Kind::Negative,
+        EdgePrint::Still(&["LOMOCHROME METROPOLIS"]),
+    ),
+    (
+        "lomography_lomochrome_turquoise",
+        Kind::Negative,
+        EdgePrint::Still(&["LOMOCHROME TURQUOISE"]),
     ),
 ];
 

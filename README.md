@@ -92,9 +92,10 @@ Method, versions and reproduction: [benchmarks](docs/benchmarks.md).
 
 | | |
 |---|---|
-| **Colour negative** | Portra 160, Portra 400, Portra 800 (+1, +2), Ektar 100, Gold 200, Ultramax 400, Fujicolor C200, Pro 400H, Superia X-TRA 400 |
-| **Slide** | Ektachrome 100, Kodachrome 64, Velvia 100, Provia 100F |
-| **Motion picture** | Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Verita 200D |
+| **Colour negative** | Portra 160, Portra 400, Portra 800 (+1, +2), Ektar 100, Gold 200, Ultramax 400, Fujicolor C200, Pro 400H, Pro 160NS, Superia 200 *(approximate)*, Superia X-TRA 400, Superia Reala 100, Kodacolor 100, Aerocolor IV 2460, CineStill 800T, CineStill 400D *(approximate)*, Lomography Color 100 *(approximate)*, Harman Phoenix 200 *(approximate)*, LomoChrome Metropolis *(approximate)*, LomoChrome Turquoise *(approximate)* |
+| **Slide** | Ektachrome 100, Kodachrome 25, Kodachrome 64, Kodachrome 200, Velvia 50, Velvia 100, Provia 100F, Astia 100F, Agfachrome 50, Agfachrome 100, Agfachrome 200 |
+| **Motion picture** | Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Verita 200D, Eterna 500, Eterna Vivid 500, F-64D, Reala 500D |
+| **Infrared** | Aerochrome III 1443 *(approximate)*, Infrared Color *(creative)* |
 | **Black & white** | Tri-X 400 *(experimental)*, Double-X 5222 *(experimental)* |
 | **Papers & print film** | Portra Endura, Endura Premier, Supra Endura, Ultra Endura, Ektacolor Edge, Crystal Archive II, Ilford Multigrade RC, Vision 2383, Vision 2393 |
 
@@ -214,7 +215,7 @@ The film model at the heart of Negs comes from two open-source projects. Negs bu
 - **[spektrafilm](https://github.com/andreavolpato/spektrafilm)** by Andrea Volpato: the spectral simulation of film and print. The physics and the stock data come from here.
 - **[spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs)** by turbasvin: the Rust port of spektrafilm that Negs started from.
 
-The default spectral-upsampling table is by [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt). The optional Arctic 2026 table is by Andrea Volpato, from spektrafilm, and the Mallett 2019 table is spektrafilm's tabulation of the spectral primary decomposition by Ian Mallett and Cem Yuksel (2019). The profiles and tables from spektrafilm are under CC BY-SA 4.0 ([license](data/SPEKTRAFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). Parts of the maths are ported from numpy, scipy, scikit-image and colour-science. RAW files Apple can't read are decoded with [rawler](https://github.com/dnglab/dnglab), and updates are delivered with [Sparkle](https://sparkle-project.org).
+The default spectral-upsampling table is by [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt). The optional Arctic 2026 table is by Andrea Volpato, from spektrafilm, and the Mallett 2019 table is spektrafilm's tabulation of the spectral primary decomposition by Ian Mallett and Cem Yuksel (2019). The profiles and tables from spektrafilm are under CC BY-SA 4.0 ([license](data/SPEKTRAFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). 24 additional film profiles are adapted from [Fotufilm](https://fotufilm.com) by MUAStudio Inc., also under CC BY-SA 4.0 ([license](data/FOTUFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). Parts of the maths are ported from numpy, scipy, scikit-image and colour-science. RAW files Apple can't read are decoded with [rawler](https://github.com/dnglab/dnglab), and updates are delivered with [Sparkle](https://sparkle-project.org).
 
 ## License
 

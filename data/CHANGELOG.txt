@@ -35,3 +35,33 @@ Negs-only data, not from spektrafilm:
   entries for Double-X and three colour negatives to check the method. B&W
   papers (kodak_2302, ilford_mgrc_deluxe_grade2) have no colour to balance,
   so they get no entries and keep the C0 M50 Y50 fallback.
+
+Fotufilm film profiles (CC BY-SA 4.0, by MUAStudio Inc., https://fotufilm.com;
+see FOTUFILM_LICENSE.txt):
+
+- profiles/: 24 colour films converted from fotufilm-engine commit 96623ba
+  by tools/fotufilm_port (convert.py, port_stocks.py, ship.py). Films Negs
+  already had from spektrafilm keep their spektrafilm profiles; the matching
+  Fotufilm profiles are not shipped. Changes from the Fotufilm originals:
+  sensitivities rebalanced to Negs' neutral-exposure convention; curves
+  resampled onto Negs' log-exposure grid and fitted with three norm_cdfs
+  sub-layers; slide curves shifted so mid-grey is neutral at Y = 0.18;
+  spectral adaptation window fitted per stock (fit_window.py); Fotufilm's
+  donor fourth layer (Reala 500D) and per-stock engine features (couplers,
+  grain, halation) are not carried over; each profile's antihalation class
+  is chosen from Fotufilm's halation strength (CineStill, which has no
+  anti-halation layer, gets "no"). LomoChrome, CineStill 400D,
+  Lomography Color 100, Phoenix 200, Aerochrome and Infrared Color are marked
+  approximate in their metadata, as Fotufilm models them from samples;
+  Superia 200 is too, as it renders further from Fotufilm than the others.
+  LomoChrome Purple is held back (it renders about a stop darker than
+  Fotufilm; cause not yet found).
+- filters/neutral_print_filters.json: TH-KG3 entries for the 15 ported colour
+  negatives on every colour paper, from upstream's solver
+  (crates/spektrafilm-cli/src/bin/solve_neutral_filters.rs). Existing entries
+  unchanged.
+- presets/couplers.toml: 11 ported stocks with steep curves get the class
+  default DIR-coupler gammas scaled down (factor in each entry's comment), so
+  the coupler pre-correction stays well defined (tools/fotufilm_port/fold_check.py).
+- borders/35mm/: edge-print strips for the 24 ported films (product codes or
+  names, crates/spektrafilm-io/src/film35.rs).

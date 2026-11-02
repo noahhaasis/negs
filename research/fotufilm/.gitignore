@@ -1,0 +1,11 @@
+# Third-party clone and the 555 MB raw dataset stay local; record revisions/hashes in README.md instead.
+upstream/
+gold200-dataset/
+testdata/
+testimages/user/
+testimages/linear/
+# Third-party forum notes and spectral datasets, plus generated comparison renders.
+forum/
+spectral-datasets/
+compare/
+testimages/

@@ -92,6 +92,125 @@
  ],
  "profiles": [
   {
+   "stock": "agfa_agfachrome_100",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "agfa_agfachrome_200",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "agfa_agfachrome_50",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "cinestill_400d",
+   "use": "still",
+   "antihalation": "no",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.3,
+    0.1,
+    0.015
+   ]
+  },
+  {
+   "stock": "cinestill_800t",
+   "use": "still",
+   "antihalation": "no",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.3,
+    0.1,
+    0.015
+   ]
+  },
+  {
+   "stock": "fotufilm_infrared_color",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_astia_100f",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_c200",
    "use": "still",
    "antihalation": "weak",
@@ -122,6 +241,74 @@
    "halation_strength": [
     0.05,
     0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_500",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_eterna_vivid_500",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_f64d",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_pro_160ns",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
     0.0
    ]
   },
@@ -160,6 +347,57 @@
    ]
   },
   {
+   "stock": "fujifilm_reala_100",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_reala_500d",
+   "use": "cine",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    50.0,
+    50.0,
+    50.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "fujifilm_superia_200",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_velvia_100",
    "use": "still",
    "antihalation": "strong",
@@ -177,7 +415,41 @@
    ]
   },
   {
+   "stock": "fujifilm_velvia_50",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_xtra_400",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "harman_phoenix_200",
    "use": "still",
    "antihalation": "weak",
    "is_film": true,
@@ -258,6 +530,40 @@
    "halation_strength": [
     0.015,
     0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_aerochrome_1443",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_aerocolor_2460",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
     0.0
    ]
   },
@@ -364,7 +670,58 @@
    ]
   },
   {
+   "stock": "kodak_kodachrome_200",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_kodachrome_25",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
    "stock": "kodak_kodachrome_64",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_kodacolor_100",
    "use": "still",
    "antihalation": "weak",
    "is_film": true,
@@ -649,6 +1006,57 @@
    "halation_strength": [
     0.015,
     0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "lomography_color_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "lomography_lomochrome_metropolis",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "lomography_lomochrome_turquoise",
+   "use": "still",
+   "antihalation": "weak",
+   "is_film": true,
+   "is_bw": false,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.08,
+    0.02,
     0.0
    ]
   }
