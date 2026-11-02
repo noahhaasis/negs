@@ -925,6 +925,75 @@ impl Pipeline {
         Ok((result, backend.name()))
     }
 
+    /// The CPU chain on a small image, keeping its taps: the film's log10
+    /// exposure, the paper's log10 exposure (`None` when the film is
+    /// scanned directly), and the scan. For the tone graph
+    /// ([`crate::tone_curve`]), so the params should be per-pixel; auto
+    /// exposure isn't applied.
+    pub fn process_taps(&self, image: ImageBuf) -> (ImageBuf, Option<ImageBuf>, ImageBuf) {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let backend: &dyn ComputeBackend = &CPU;
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        let log_film = stages::filming::expose(
+            image,
+            &self.film,
+            &self.params,
+            backend,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+            color_ref.filming_exposure_correction,
+            0.0,
+        );
+        let filmed = stages::filming::develop(log_film.clone(), &self.film, &self.params, backend);
+        if self.params.io.scan_film {
+            let scan = stages::scanning::process(filmed, &self.film, &self.params, backend, &color_ref, &self.output_gamut);
+            return (log_film, None, scan);
+        }
+        let log_paper = stages::printing::expose_calibrated(
+            filmed,
+            &self.film,
+            &self.print,
+            &self.params,
+            backend,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+            color_ref.printing_exposure_correction,
+        );
+        let printed = stages::printing::develop(&log_paper, &self.print, &self.params, backend);
+        let scan = stages::scanning::process(printed, &self.print, &self.params, backend, &color_ref, &self.output_gamut);
+        (log_film, Some(log_paper), scan)
+    }
+
+    /// The film's raw exposure of an auto-exposure metering frame
+    /// ([`stages::filming::metering_preview`]) before any exposure scale, and
+    /// the auto-exposure EV metered on it (0 with auto exposure off), as
+    /// [`Self::autoexposure_ev`] meters it. On the CPU.
+    pub fn metering_film_raw(&self, preview: &ImageBuf) -> (ImageBuf, f64) {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let raw = stages::filming::encoded_rgb_to_film_raw(
+            preview,
+            &self.params,
+            &CPU,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+        )
+        .unwrap_or_else(|| preview.clone());
+        let ev = if self.params.camera.auto_exposure {
+            stages::filming::measure_raw_autoexposure_ev(&raw, &self.params.camera.auto_exposure_method, 1.0)
+        } else {
+            0.0
+        };
+        (raw, ev)
+    }
+
     /// Run only the GPU-resident path from a borrowed image. This is used by
     /// the live GUI when it has already decided the working resolution, so a
     /// full-resolution preview does not need to deep-clone the loaded image

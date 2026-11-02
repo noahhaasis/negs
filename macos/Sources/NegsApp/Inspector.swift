@@ -737,6 +737,7 @@ struct AdjustmentInspector: View {
     @ViewBuilder private func groups(_ section: InspectorSection) -> some View {
         ForEach(adjustmentGroups.filter { $0.section == section }) { group in
             disclosure(group.title, symbol: group.symbol, enable: group.enable) {
+                if group.title == "Print Curves" { ToneGraphView(model: model) }
                 ForEach(group.controls) { control($0) }
                     .disabled(group.enable.map { !model.value($0).bool } ?? false)
             }
