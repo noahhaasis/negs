@@ -167,11 +167,131 @@ def to_list(a, nd=6):
     return round(float(a), nd)
 
 
+def development_family(stock, reference_minutes):
+    """(minutes, curve, basis) for the reference development and every listed condition, by time.
+
+    Fotufilm stores the reference process as the stock's own curves and does not repeat its time;
+    the caller supplies it from the manufacturer datasheet. Each condition carries complete curves
+    on the same exposure axis (a push is rated faster, but the film sees the same light), which is
+    exactly a Negs development-time family."""
+    fam = [(float(reference_minutes), stock["curves"][0], "datasheet")]
+    for c in stock.get("development", {}).get("conditions", []):
+        fam.append((float(c["timeMinutes"]), c["curves"][0], c["basis"]))
+    fam.sort(key=lambda f: f[0])
+    if len({t for t, *_ in fam}) != len(fam):
+        raise SystemExit("duplicate development time")
+    return fam
+
+
+def convert_bw(stock, provenance, args):
+    """A Fotufilm monochrome negative as a Negs `bw` profile (the layout of kodak_trix400_d76_8min).
+
+    * The three Fotufilm layers are identical (checked); one channel is kept.
+    * Sensitivity: same LUT-neutral balance as every Negs profile, B&W ones included (Tri-X, Double-X
+      and 7266 all give raw exposure 1.8886 for the D55 neutral).
+    * Silver is spectrally neutral: channel_density 1, base = the reference curve's dMin, flat.
+    * Exposure axis kept as Fotufilm placed it (its rating of each film), as in the colour port.
+    * Every development condition becomes a column of the time family; `default_development_time`
+      names the reference time, which need not be the middle entry."""
+    sp = stock["spectral"]
+    if stock.get("isReversal"):
+        raise SystemExit("B&W reversal not handled")
+    report = {"source_id": stock["id"], "upstream_rev": UPSTREAM_REV, "warnings": []}
+    S = np.array(sp["layerSensitivity"], float)
+    if not np.allclose(S, S[0]):
+        raise SystemExit("monochrome stock with differing layer sensitivities")
+    for c in stock.get("development", {}).get("conditions", []) + [{"curves": stock["curves"]}]:
+        if any(json.dumps(x, sort_keys=True) != json.dumps(c["curves"][0], sort_keys=True) for x in c["curves"]):
+            raise SystemExit("monochrome stock with differing layer curves")
+    s = S[0]
+    floor = stock.get("sensitivityFloor")
+    if floor:
+        s = np.maximum(s, floor * s.max())
+    illum_name, illum_xy = reference_illuminant(stock)
+    neutral = sample_bilinear(load_lut(), *xy_to_tc(*illum_xy))
+    s = s * BALANCE_K / float(neutral @ s)
+    with np.errstate(divide="ignore"):
+        logS = np.where(s > 0, np.log10(np.where(s > 0, s, 1)), np.nan)
+
+    fam = development_family(stock, args.reference_minutes)
+    times = [t for t, *_ in fam]
+    ref = times.index(float(args.reference_minutes))
+    base_dmin = stock["curves"][0]["dMin"]
+    nets, bases, centers, amps, sigmas, layers, resid = [], [], [], [], [], [], []
+    for t, c, basis in fam:
+        net = record_curve(c)(LOG_EXPOSURE) - c["dMin"]
+        if (np.diff(net) < -1e-4).any():
+            report["warnings"].append(f"{t:g} min net curve not monotonic on the Negs grid")
+        cc, a, sg, comps, r, _ = fit_norm_cdfs(LOG_EXPOSURE, net, args.components)
+        nets.append(net); bases.append(c["dMin"]); centers.append(cc); amps.append(a); sigmas.append(sg)
+        layers.append(comps); resid.append(r)
+    report["development_times"] = times
+    report["development_basis"] = {f"{t:g}": b for t, _, b in fam}
+    report["default_development_time"] = times[ref]
+    report["norm_cdfs_max_residual"] = [round(r, 4) for r in resid]
+    report["balance_log_offset"] = round(float(np.log10(BALANCE_K / (neutral @ S[0]))), 4)
+    estimated = [t for t, _, b in fam if b == "estimated"]
+
+    info = {
+        "stock": args.id, "name": args.name or f"{stock['name']} (Fotufilm)",
+        "type": "negative", "support": "film", "stage": "filming",
+        "use": "cine" if "motion" in (stock.get("subtitle") or "").lower() else "still",
+        # Fotufilm gives these films 0.015-0.03 halation, the same range as its Tri-X (0.03), which
+        # Negs' datasheet Tri-X models as "strong" anti-halation; all are backed camera films.
+        "antihalation": "strong",
+        "target_print": args.target_print,
+        "channel_model": "bw", "densitometer": "diffuse_visual",
+        "log_sensitivity_density_over_min": 1.0,
+        "reference_illuminant": illum_name, "viewing_illuminant": "D50",
+    }
+    dev = stock.get("development", {})
+    process = ", ".join(x for x in (dev.get("developer"), dev.get("dilution"),
+                                    f"{dev['temperatureC']:g} C" if dev.get("temperatureC") else None,
+                                    dev.get("agitation")) if x)
+    est = (f" Development times {', '.join(f'{t:g}' for t in estimated)} min are Fotufilm estimates (its "
+           "process-level rule applied to this film's curve), not manufacturer curves." if estimated else "")
+    approx = " Marked APPROXIMATE: the source profile is not a direct datasheet transcription." if args.approximate else ""
+    metadata = {
+        "version": f"fotufilm-port-0.1 (fotufilm-engine {UPSTREAM_REV[:7]})",
+        "copyright": "Copyright 2026 MUAStudio Inc. (Fotufilm, https://fotufilm.com). Converted for Negs by Noah Haasis.",
+        "created": "2026-11-02",
+        "license": ("Fotufilm film profile by MUAStudio Inc., https://fotufilm.com, licensed under CC BY-SA 4.0 "
+                    "(https://creativecommons.org/licenses/by-sa/4.0/). Modified: converted to the spektrafilm/Negs "
+                    "B&W profile format (one channel, sensitivity rebalanced, curves resampled, norm_cdfs sub-layers "
+                    "fitted, development conditions gathered into a time family); see data/CHANGELOG.txt. "
+                    "Adaptations remain CC BY-SA 4.0." + approx),
+        "citation": "Fotufilm, https://fotufilm.com, https://github.com/DhaliwalX/fotufilm-engine",
+        "datasource": (provenance + f" Development: {dev.get('source', '')} p{dev.get('sourcePage', '')}; {process}. "
+                       f"Reference time {times[ref]:g} min from the manufacturer datasheet; its curve was checked "
+                       f"against that datasheet's graph ({args.checked})." + est),
+        "approximate": bool(args.approximate),
+        "estimated_development_times": estimated,
+    }
+    k = args.components
+    data = {
+        "wavelengths": WL.tolist(),
+        "log_sensitivity": to_list(logS[:, None]),
+        "channel_density": [[1.0] for _ in WL],
+        "base_density": [[round(b, 6) for b in bases] for _ in WL],
+        "log_exposure": to_list(LOG_EXPOSURE),
+        "density_curves": to_list(np.stack(nets, 1)),
+        "density_curves_layers": to_list(np.stack(layers, 2)),       # 256 x k x n_times
+        "density_curves_model": {"model_type": "norm_cdfs", "centers": to_list(np.array(centers)),
+                                 "amplitudes": to_list(np.array(amps)), "sigmas": to_list(np.array(sigmas)),
+                                 "alphas": None},
+        "development_time": times,
+        "default_development_time": times[ref],
+    }
+    assert np.array(data["density_curves_layers"]).shape == (len(LOG_EXPOSURE), k, len(times))
+    report["base_dmin_reference"] = base_dmin
+    return {"metadata": metadata, "info": info, "data": data}, report
+
+
 def convert(stock, provenance, args):
     sp = stock["spectral"]
     mono, reversal = stock.get("isMonochrome", False), stock.get("isReversal", False)
     if mono:
-        raise SystemExit("B&W stocks need the Negs bw channel model; not handled yet")
+        return convert_bw(stock, provenance, args)
     report = {"source_id": stock["id"], "upstream_rev": UPSTREAM_REV, "warnings": []}
 
     # --- sensitivity
@@ -293,6 +413,8 @@ def main():
     ap.add_argument("--assets", default="/home/noah/Work/Negs-fotufilm/research/fotufilm/upstream/SOURCE_ASSETS.json")
     ap.add_argument("--report")
     ap.add_argument("--components", type=int, default=3, help="norm_cdfs sub-layers (Negs ships 3)")
+    ap.add_argument("--reference-minutes", type=float, help="B&W: datasheet time of the stock's own curves")
+    ap.add_argument("--checked", default="", help="B&W: how the reference curve was checked, for metadata")
     args = ap.parse_args()
     stock = json.load(open(args.src))
     assets = json.load(open(args.assets))

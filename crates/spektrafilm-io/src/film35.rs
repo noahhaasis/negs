@@ -106,9 +106,11 @@ pub enum EdgePrint {
 }
 
 /// Each film profile's edge print and look. Sources for the edge prints
-/// are in `docs/35mm-scan-sources.md`; the Fotufilm ports use product
-/// codes or names, not checked against scans. Films not listed (Tri-X 7266
-/// is only made in 16 mm and Super 8) get the generic strip.
+/// are in `docs/35mm-scan-sources.md`; the Fotufilm colour ports use
+/// product codes or names, not checked against scans. The Fotufilm B&W
+/// ports use Fotufilm's edge texts (Acros II, which has none, its name).
+/// Films not listed (Tri-X 7266 is only made in 16 mm and Super 8) get the
+/// generic strip.
 pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ("agfa_agfachrome_100", Kind::Slide, EdgePrint::Still(&["AGFACHROME 100"])),
     ("agfa_agfachrome_200", Kind::Slide, EdgePrint::Still(&["AGFACHROME 200"])),
@@ -116,6 +118,7 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ("cinestill_400d", Kind::Negative, EdgePrint::Still(&["CINESTILL 400D"])),
     ("cinestill_800t", Kind::Negative, EdgePrint::Still(&["CINESTILL 800T"])),
     ("fotufilm_infrared_color", Kind::Slide, EdgePrint::Still(&["INFRARED"])),
+    ("fujifilm_acros_100_ii", Kind::BlackAndWhite, EdgePrint::Still(&["ACROS II"])),
     ("fujifilm_astia_100f", Kind::Slide, EdgePrint::Still(&["FUJI RAP100F"])),
     ("fujifilm_c200", Kind::Negative, EdgePrint::Still(&["FUJI", "200", "CA24"])),
     (
@@ -147,6 +150,13 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ("fujifilm_velvia_50", Kind::Slide, EdgePrint::Still(&["FUJI RVP"])),
     ("fujifilm_xtra_400", Kind::Negative, EdgePrint::Still(&["FUJI", "S-400", "CH23"])),
     ("harman_phoenix_200", Kind::Negative, EdgePrint::Still(&["HARMAN PHOENIX 200"])),
+    (
+        "ilford_delta_3200",
+        Kind::BlackAndWhite,
+        EdgePrint::Still(&["ILFORD", "DELTA 3200 PROFESSIONAL"]),
+    ),
+    ("ilford_fp4_plus", Kind::BlackAndWhite, EdgePrint::Still(&["ILFORD FP4 PLUS"])),
+    ("ilford_hp5_plus", Kind::BlackAndWhite, EdgePrint::Still(&["ILFORD HP5 PLUS"])),
     ("kodak_2302", Kind::BlackAndWhite, EdgePrint::Print("2302 KODAK")),
     ("kodak_2383", Kind::Negative, EdgePrint::Print("2383 KODAK")),
     ("kodak_2393", Kind::Negative, EdgePrint::Print("2393 KODAK")),
@@ -169,6 +179,7 @@ pub const STOCKS: &[(&str, Kind, EdgePrint)] = &[
     ("kodak_portra_800", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 800"])),
     ("kodak_portra_800_push1", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 800"])),
     ("kodak_portra_800_push2", Kind::Negative, EdgePrint::Still(&["KODAK PORTRA 800"])),
+    ("kodak_tmax_100", Kind::BlackAndWhite, EdgePrint::Still(&["KODAK 100TMX"])),
     ("kodak_trix400_d76_8min", Kind::BlackAndWhite, EdgePrint::Still(&["KODAK 400TX"])),
     ("kodak_ultramax_400", Kind::Negative, EdgePrint::Still(&["KODAK GC 400-9"])),
     (

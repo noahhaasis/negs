@@ -194,6 +194,23 @@
    ]
   },
   {
+   "stock": "fujifilm_acros_100_ii",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
    "stock": "fujifilm_astia_100f",
    "use": "still",
    "antihalation": "weak",
@@ -462,6 +479,57 @@
    "halation_strength": [
     0.08,
     0.02,
+    0.0
+   ]
+  },
+  {
+   "stock": "ilford_delta_3200",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "ilford_fp4_plus",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
+    0.0
+   ]
+  },
+  {
+   "stock": "ilford_hp5_plus",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
     0.0
    ]
   },
@@ -853,6 +921,23 @@
    "halation_strength": [
     0.05,
     0.015,
+    0.0
+   ]
+  },
+  {
+   "stock": "kodak_tmax_100",
+   "use": "still",
+   "antihalation": "strong",
+   "is_film": true,
+   "is_bw": true,
+   "halation_first_sigma_um": [
+    65.0,
+    65.0,
+    65.0
+   ],
+   "halation_strength": [
+    0.015,
+    0.005,
     0.0
    ]
   },

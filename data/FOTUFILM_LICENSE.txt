@@ -3,7 +3,7 @@
                           License: CC BY-SA 4.0
 ================================================================================
 
-The 24 film profiles in data/profiles/ listed below are adapted from the
+The 29 film profiles in data/profiles/ listed below are adapted from the
 Fotufilm film profiles by MUAStudio Inc. (Fotufilm, https://fotufilm.com),
 source https://github.com/DhaliwalX/fotufilm-engine at commit
 96623ba0831a52dbddcda35727a206d4123a8b5f. They are licensed under Creative
@@ -15,7 +15,10 @@ Changes: converted to the spektrafilm/Negs profile format. Sensitivities are
 rebalanced to Negs' neutral-exposure convention; characteristic curves are
 resampled and fitted with spektrafilm's three-component model; slide curves
 are placed so mid-grey is neutral at 18% transmittance; a spectral adaptation
-window is fitted per stock. Each profile's metadata records this. See
+window is fitted per stock. The five black-and-white films keep one
+channel, are fitted with four components, and gather Fotufilm's development
+conditions into a development-time family. Each profile's metadata records
+this. See
 CHANGELOG.txt. Engine-side per-stock DIR-coupler presets for some of these
 stocks are in presets/couplers.toml.
 
@@ -24,13 +27,15 @@ match Andrea Volpato's spektrafilm profiles (CC BY-SA 4.0, see
 SPEKTRAFILM_LICENSE.txt); that lineage is credited in each profile.
 
 Profiles: agfa_agfachrome_50, agfa_agfachrome_100, agfa_agfachrome_200,
-cinestill_400d, cinestill_800t, fotufilm_infrared_color, fujifilm_astia_100f,
-fujifilm_eterna_500, fujifilm_eterna_vivid_500, fujifilm_f64d,
-fujifilm_pro_160ns, fujifilm_reala_100, fujifilm_reala_500d,
-fujifilm_superia_200, fujifilm_velvia_50, harman_phoenix_200,
-kodak_aerochrome_1443, kodak_aerocolor_2460, kodak_kodachrome_25,
-kodak_kodachrome_200, kodak_kodacolor_100, lomography_color_100,
-lomography_lomochrome_metropolis, lomography_lomochrome_turquoise.
+cinestill_400d, cinestill_800t, fotufilm_infrared_color,
+fujifilm_acros_100_ii, fujifilm_astia_100f, fujifilm_eterna_500,
+fujifilm_eterna_vivid_500, fujifilm_f64d, fujifilm_pro_160ns,
+fujifilm_reala_100, fujifilm_reala_500d, fujifilm_superia_200,
+fujifilm_velvia_50, harman_phoenix_200, ilford_delta_3200, ilford_fp4_plus,
+ilford_hp5_plus, kodak_aerochrome_1443, kodak_aerocolor_2460,
+kodak_kodachrome_25, kodak_kodachrome_200, kodak_kodacolor_100,
+kodak_tmax_100, lomography_color_100, lomography_lomochrome_metropolis,
+lomography_lomochrome_turquoise.
 
 Film and manufacturer names identify simulated film types. They remain their
 owners' trademarks and do not imply endorsement.

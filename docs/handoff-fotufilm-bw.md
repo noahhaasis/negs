@@ -5,6 +5,52 @@ Written 2 November 2026 at the end of the Fotufilm colour port (branch
 locally only: not merged to `main`, not pushed. Start this work from that
 branch, or from `main` once the owner has merged it.
 
+## Status, 2 November 2026: ported, not committed
+
+The five films are in the working tree on `fotufilm-port`, uncommitted, waiting for the owner's OK:
+`ilford_hp5_plus`, `ilford_fp4_plus`, `ilford_delta_3200`, `kodak_tmax_100`, `fujifilm_acros_100_ii`.
+The 35mm borders, halation fixture, Linux catalog, README, `FOTUFILM_LICENSE.txt` and `CHANGELOG.txt`
+are done. `cargo test --release -p spektrafilm-core -p spektrafilm-io -p spektrafilm-native`: 280
+passed, 0 failed, 3 ignored. `spektrafilm-gui` builds.
+
+Owner decisions (answers to the open questions at the end):
+- **Push/pull:** one entry per film with a development-time picker holding every Fotufilm time,
+  estimated ones included (HP5 9.5/14, FP4 6/9 min). The engine gained an optional
+  `data.default_development_time` (`profile.rs`, `ProfileData::development_index`; validated to be
+  one of the times), because Negs otherwise opens on the middle time, which for HP5 is a push. The
+  egui GUI pre-selects it; the Linux, macOS and Windows apps send "Profile default" (null), which
+  the core resolves. Python upstream doesn't know the field.
+- **Grain:** keep Negs' grain. **Follow-up: investigate Fotufilm's per-film grain.** Today every
+  film missing from `data/presets/grain.toml` gets the schema default (rms 6, uniformity 0.97).
+  That covers all the new B&W films, Tri-X 400 and the colour ports, so Delta 3200 is as fine as
+  Acros.
+- **Paper:** grade 2 for every film (only B&W paper).
+
+What was done, and what it found:
+- **Datasheet check** (`research/fotufilm/bw-datasheet-check.md`): every reference curve overlaid
+  on its manufacturer graph matches (HP5 0.016 D, FP4 0.009 D, T-MAX 0.02 D, Acros within line
+  width, Delta all four times). This also fixed the reference times Fotufilm leaves implicit: HP5
+  6.5, FP4 8, Delta 9, Acros 7, T-MAX 6 min. None is marked approximate. The estimated times are
+  listed in `metadata.estimated_development_times`.
+- **Converter:** `convert.py` `convert_bw` (one channel, same `BALANCE_K` as every Negs profile
+  incl. Tri-X, flat silver, per-time base from each curve's dMin, four norm_cdfs components because
+  three miss the 0.01 D gate, antihalation "strong" as Negs' Tri-X). `port_stocks.py` has the `BW`
+  manifest and `port_bw`; `ship.py <dir> --bw`. Fotufilm's exposure axis is kept, as in the colour
+  port. It places mid-grey differently per film (Delta 3200 thin at EI 3200).
+- **Cross-engine** (`xeng_bw.py`; `xphotos_bw.py` for the owner's NEFs): Fotufilm `--paper screen`
+  vs Negs on grade 2, L* only. Negs times every print to the same mid-grey; Fotufilm keeps the
+  film's speed in the print, so raw gaps are 5 to 19 L*, the Tri-X baseline included. With the
+  print exposure matched to Fotufilm's mid-grey once per film, normal development gives Tri-X
+  baseline 3.0, HP5 2.5, FP4 2.5, Acros 1.6, T-MAX 2.6, Delta 4.3. All pass. Delta at +2 EV is
+  5.4 against the baseline's 2.0, just outside. With the timing matched per development time,
+  pushes and pulls are within 3 to 6. HP5 at 14 min is the exception (8.7). Fotufilm's B&W
+  screen view is a digital read that stays soft; Negs prints the contrasty negative the way grade
+  2 paper would.
+- **Owner page:** "Five new black-and-white films",
+  https://claude.ai/artifact/HbuvVXVtmqFMws8gEdXa9L (private to the owner's account), uses only
+  the owner's NEFs.
+- **Edge prints:** Fotufilm's texts; Acros II has none in Fotufilm, so it prints "ACROS II".
+
 ## What the owner wants
 
 - The owner is the product owner: technical, but not a film expert. Report
@@ -158,7 +204,7 @@ cargo test --release -p spektrafilm-core -p spektrafilm-io -p spektrafilm-native
 
 At the end of the colour port this was 253 passed, 0 failed.
 
-## Open questions for the owner
+## Open questions for the owner (answered 2 November, see Status)
 
 - Push/pull variants: ship only the default time, or separate profiles per
   development condition?

@@ -1410,6 +1410,151 @@
       }
     },
     {
+      "id": "fujifilm_acros_100_ii",
+      "name": "Fujifilm Neopan 100 Acros II",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        4.0,
+        7.0,
+        10.0
+      ],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.5,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "ilford_delta_3200",
+      "name": "Ilford Delta 3200 Professional",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        7.0,
+        9.0,
+        12.0,
+        16.0
+      ],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.5,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "ilford_fp4_plus",
+      "name": "Ilford FP4 Plus",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        6.0,
+        8.0,
+        9.0
+      ],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.5,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "ilford_hp5_plus",
+      "name": "Ilford HP5 Plus",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        6.5,
+        9.5,
+        14.0
+      ],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.5,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "kodak_doublex",
       "name": "Kodak Double-X Negative Film 5222",
       "paper": false,
@@ -1444,6 +1589,41 @@
           0.6,
           0.6,
           0.6
+        ]
+      }
+    },
+    {
+      "id": "kodak_tmax_100",
+      "name": "Kodak T-MAX 100",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        6.0,
+        7.5
+      ],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.5,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
         ]
       }
     },

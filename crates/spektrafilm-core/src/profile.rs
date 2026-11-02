@@ -134,6 +134,22 @@ pub struct ProfileData {
     /// column on B&W profiles. Empty for colour profiles.
     #[serde(default, deserialize_with = "deser_zero_vec")]
     pub development_time: Vec<f64>,
+    /// The family entry used when no time is requested. Absent means the
+    /// floor-middle entry, as upstream picks; ported films whose normal time
+    /// isn't the middle one (HP5 Plus: 6.5 of 6.5/9.5/14 min) name it here.
+    #[serde(default)]
+    pub default_development_time: Option<f64>,
+}
+
+impl ProfileData {
+    /// Index of the development time to render: `requested` if given (nearest
+    /// entry), else the profile's default.
+    pub fn development_index(&self, requested: Option<f64>) -> usize {
+        development_time_index(
+            &self.development_time,
+            requested.or(self.default_development_time),
+        )
+    }
 }
 
 /// Sum-of-CDFs parametric model of a profile's density curves.
@@ -391,7 +407,7 @@ pub fn load_profile(path: &Path) -> Result<Profile, ProfileError> {
     // Resolve the default base+fog column so the field is usable straight
     // after load. `resolve_for_render` re-selects it for B&W development-time
     // families when a specific time is requested.
-    let idx = development_time_index(&profile.data.development_time, None);
+    let idx = profile.data.development_index(None);
     profile.data.base_density = base_density_column(&profile.data.base_density_rows, idx);
     Ok(profile)
 }
@@ -513,7 +529,7 @@ pub fn resolve_for_render(mut profile: Profile, development_time: Option<f64>) -
     if !profile.is_bw() {
         return profile;
     }
-    let idx = development_time_index(&profile.data.development_time, development_time);
+    let idx = profile.data.development_index(development_time);
     let d = &mut profile.data;
 
     // 1. Collapse the development-time family (columns of density_curves,
@@ -605,6 +621,13 @@ fn validate_profile(profile: &Profile) -> Result<(), ProfileError> {
         if data.channel_density.iter().any(|r| r.len() != 1) {
             return Err(ProfileError::Validation(
                 "bw profile channel_density must have exactly 1 channel".into(),
+            ));
+        }
+        if let Some(t) = data.default_development_time
+            && !data.development_time.iter().any(|v| (v - t).abs() < 1e-9)
+        {
+            return Err(ProfileError::Validation(
+                "default_development_time must be one of development_time".into(),
             ));
         }
         let n_times = data.development_time.len().max(1);
@@ -732,6 +755,33 @@ mod tests {
         let model = r.data.density_curves_model.as_ref().unwrap();
         assert_eq!(model.n_channels(), 3);
         assert_eq!(model.centers[0], model.centers[1]);
+    }
+
+    /// A family whose normal time isn't the middle entry names it: HP5 Plus
+    /// opens at 6.5 of 6.5/9.5/14 min. A requested time still wins, and
+    /// families without the field keep the floor-middle default.
+    #[test]
+    fn default_development_time_overrides_middle() {
+        let p = data_profile("ilford_hp5_plus").expect("bundled HP5 Plus profile");
+        assert_eq!(p.data.development_time, vec![6.5, 9.5, 14.0]);
+        assert_eq!(p.data.development_index(None), 0);
+        assert_eq!(p.data.base_density, base_density_column(&p.data.base_density_rows, 0));
+        let want: Vec<f64> = p.data.density_curves.iter().map(|r| r[0]).collect();
+        let r = resolve_for_render(p.clone(), None);
+        assert_eq!(r.data.development_time, vec![6.5]);
+        assert!(r.data.density_curves.iter().zip(&want).all(|(row, w)| row[0] == *w));
+        let r = resolve_for_render(p, Some(14.0));
+        assert_eq!(r.data.development_time, vec![14.0]);
+        let doublex = data_profile("kodak_doublex").expect("bundled Double-X");
+        assert_eq!(doublex.data.default_development_time, None);
+        assert_eq!(doublex.data.development_index(None), 2);
+    }
+
+    #[test]
+    fn default_development_time_must_be_listed() {
+        let mut p = data_profile("ilford_hp5_plus").expect("bundled HP5 Plus profile");
+        p.data.default_development_time = Some(7.0);
+        assert!(validate_profile(&p).is_err());
     }
 
     /// Colour profiles pass through `resolve_for_render` untouched.

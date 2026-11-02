@@ -46,6 +46,23 @@ POS = {
     "aerochrome1443": ("kodak_aerochrome_1443", "Kodak Aerochrome III 1443 (infrared)", None, True),
     "infraredcolor": ("fotufilm_infrared_color", "Infrared Color (creative)", None, True),
 }
+# fotufilm id: (negs id, display name, datasheet reference time (min), how its curve was checked)
+# Fotufilm keeps the reference time implicit; it comes from each film's datasheet, whose graph the
+# reference curve was overlaid on (research/fotufilm/bw-datasheet-check.md).
+BW = {
+    "hp5plus400": ("ilford_hp5_plus", "Ilford HP5 Plus", 6.5,
+                   "ILFORD HP5 Plus fact sheet, April 2010, p5, ILFOTEC HC 1+31 6.5 min: max 0.016 D"),
+    "fp4plus125": ("ilford_fp4_plus", "Ilford FP4 Plus", 8,
+                   "ILFORD FP4 Plus fact sheet, July 2010, p4, ILFOTEC HC 1+31 8 min: max 0.009 D"),
+    "delta3200": ("ilford_delta_3200", "Ilford Delta 3200 Professional", 9,
+                  "ILFORD Delta 3200 fact sheet, German edition, October 2002, p7, DD-X 1+4 7/9/12/16 min: "
+                  "all four curves overlay"),
+    "acros100": ("fujifilm_acros_100_ii", "Fujifilm Neopan 100 Acros II", 7,
+                 "Fujifilm AF3-0259E (120 edition), p3, D-76 4/7/10 min: within 0.06 D, line-trace precision"),
+    "tmax100": ("kodak_tmax_100", "Kodak T-MAX 100", 6,
+                "Kodak F-4016, p8, D-76 small tank 6/7.5 min: max 0.02 D"),
+}
+BW_PAPER = "ilford_mgrc_deluxe_grade2"
 MANIFEST = {**NEG, **POS}
 # Already in Negs under its own data; ported only as test fixtures for comparison pages.
 DUPLICATES = {"superia400": "fujifilm_xtra_400", "ektachromee100": "kodak_ektachrome_100", "gold200": "kodak_gold_200",
@@ -102,7 +119,31 @@ def port(fid, data_dir):
     return report
 
 
+def port_bw(fid, data_dir):
+    nid, name, ref, checked = BW[fid]
+    out = HERE / "out/port"; out.mkdir(parents=True, exist_ok=True)
+    prof_path = data_dir / "profiles" / f"{nid}.json"
+    run(["uv", "run", "python", "convert.py", str(UP / f"{fid}.json"), str(prof_path), "--id", nid,
+         "--name", name, "--target-print", BW_PAPER, "--reference-minutes", str(ref), "--checked", checked,
+         "--components", "4",  # as kodak_trix400_d76_8min; 3 misses the 0.01 D gate
+         "--report", str(out / f"{nid}.convert.json")])
+    conv = json.loads((out / f"{nid}.convert.json").read_text())
+    d = json.loads(prof_path.read_text())["data"]
+    c = {"curve_fit_ok": max(conv["norm_cdfs_max_residual"]) <= 0.01,   # the bw-expansion source gate
+         "default_listed": d["default_development_time"] in d["development_time"],
+         "finite": all(np.isfinite(np.array(d[k], dtype=float)).all()
+                       for k in ("density_curves", "density_curves_layers", "base_density")),
+         "warnings": conv.get("warnings", [])}
+    report = {"fotufilm_id": fid, "negs_id": nid, "name": name, "convert": conv, "checks": c}
+    (out / f"{nid}.report.json").write_text(json.dumps(report, indent=1))
+    ok = all(v for k, v in c.items() if k != "warnings")
+    print(f"{nid:28} {'OK ' if ok else 'FAIL'} times {conv['development_times']} default "
+          f"{conv['default_development_time']:g} fit≤{max(conv['norm_cdfs_max_residual']):.4f}D "
+          f"{'; '.join(c['warnings'])}", flush=True)
+    return report
+
+
 if __name__ == "__main__":
     data_dir = Path(sys.argv[1]).resolve()
-    for fid in (sys.argv[2:] or list(MANIFEST)):
-        port(fid, data_dir)
+    for fid in (sys.argv[2:] or list(MANIFEST) + list(BW)):
+        (port_bw if fid in BW else port)(fid, data_dir)

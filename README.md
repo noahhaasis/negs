@@ -98,7 +98,7 @@ Method, versions and reproduction: [benchmarks](docs/benchmarks.md).
 | **Slide** | Ektachrome 100, Kodachrome 25, Kodachrome 64, Kodachrome 200, Velvia 50, Velvia 100, Provia 100F, Astia 100F, Agfachrome 50, Agfachrome 100, Agfachrome 200 |
 | **Motion picture** | Vision3 50D, Vision3 250D, Vision3 200T, Vision3 500T, Verita 200D, Eterna 500, Eterna Vivid 500, F-64D, Reala 500D |
 | **Infrared** | Aerochrome III 1443 *(approximate)*, Infrared Color *(creative)* |
-| **Black & white** | Tri-X 400 *(experimental)*, Double-X 5222 *(experimental)* |
+| **Black & white** | Tri-X 400 *(experimental)*, Double-X 5222 *(experimental)*, HP5 Plus, FP4 Plus, Delta 3200, T-MAX 100, Acros 100 II |
 | **Papers & print film** | Portra Endura, Endura Premier, Supra Endura, Ultra Endura, Ektacolor Edge, Crystal Archive II, Ilford Multigrade RC, Vision 2383, Vision 2393 |
 
 Kodak, Fujifilm and Ilford stock names are trademarks of their owners. Negs is not affiliated with them.
