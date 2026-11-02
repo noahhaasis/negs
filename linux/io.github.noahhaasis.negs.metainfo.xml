@@ -57,6 +57,11 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.13.0" date="2026-11-02">
+      <description>
+        <p>Film, paper and preset previews show each choice on your photograph, and supported RAW photographs get lens corrections. Sliders reset on double-click, and a new setting keeps the paper when you change film.</p>
+      </description>
+    </release>
     <release version="0.12.0" date="2026-10-29">
       <description>
         <p>The native per-user bundle now includes OpenBLAS, so the engine starts without a separate OpenBLAS installation.</p>
