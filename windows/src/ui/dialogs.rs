@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::UI::Controls::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -167,44 +168,180 @@ pub fn about(owner: HWND) {
     task_dialog(owner, "Negs", &content, None, TD_INFORMATION_ICON, &[], TASKDIALOG_FLAGS(0));
 }
 
-/// Settings: the update preferences, like the Mac's Settings window.
+const SETTINGS_PREVIEWS: u16 = 10;
+const SETTINGS_AUTOMATIC: u16 = 11;
+const SETTINGS_CHECK: u16 = 12;
+
+thread_local! {
+    /// The open Settings dialog's result: None while open, then whether OK closed it.
+    static SETTINGS_DONE: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The dialog's descriptions, drawn grey.
+    static SETTINGS_NOTES: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Settings (the Mac's Settings window): previews and updates, in a modal
+/// dialog with OK and Cancel. Updates show only in builds that have them.
 pub fn settings(app: &mut App) {
     let configured = crate::updates::configured();
-    if !configured {
-        task_dialog(app.main, "Settings", "Updates are not configured for this build.", None, PCWSTR::null(), &[], TASKDIALOG_FLAGS(0));
-        return;
-    }
-    let last = crate::updates::last_check().map_or("never".to_string(), |t| t);
-    let title = wide("Negs");
-    let instruction = wide("Settings");
-    let content = wide(format!("Updates are installed only when you choose to restart Negs.\n\nLast checked: {last}"));
-    let verification = wide("Automatically check for updates");
-    let check = wide("Check for Updates…");
-    let close = wide("Close");
-    let buttons = [TASKDIALOG_BUTTON { nButtonID: 100, pszButtonText: pcwstr(&check) }, TASKDIALOG_BUTTON { nButtonID: 101, pszButtonText: pcwstr(&close) }];
-    let automatic = crate::updates::automatic();
-    let config = TASKDIALOGCONFIG {
-        cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
-        hwndParent: app.main,
-        dwFlags: TDF_POSITION_RELATIVE_TO_WINDOW | if automatic { TDF_VERIFICATION_FLAG_CHECKED } else { TASKDIALOG_FLAGS(0) },
-        pszWindowTitle: pcwstr(&title),
-        pszMainInstruction: pcwstr(&instruction),
-        pszContent: pcwstr(&content),
-        pszVerificationText: pcwstr(&verification),
-        cButtons: 2,
-        pButtons: buttons.as_ptr(),
-        nDefaultButton: 101,
-        ..Default::default()
-    };
-    let (mut pressed, mut checked) = (0, BOOL(0));
+    let px = |dip: f64| app.px(dip);
+    let fonts = &app.fonts;
     unsafe {
-        let _ = TaskDialogIndirect(&config, Some(&mut pressed), None, Some(&mut checked));
+        let class = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(settings_proc),
+            hInstance: super::instance(),
+            lpszClassName: windows::core::w!("NegsSettings"),
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            hbrBackground: windows::Win32::Graphics::Gdi::GetSysColorBrush(windows::Win32::Graphics::Gdi::COLOR_BTNFACE),
+            ..Default::default()
+        };
+        RegisterClassExW(&class);
     }
-    crate::updates::set_automatic(checked.as_bool());
-    app.model.prefs.check_for_updates = checked.as_bool();
-    app.model.prefs.save();
-    if pressed == 100 {
-        crate::updates::check(true);
+    let (width, pad) = (px(440.0), px(20.0));
+    let inner = width - 2 * pad;
+    let title = wide("Settings");
+    let style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+    let ex = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
+    let dialog = unsafe {
+        CreateWindowExW(ex, windows::core::w!("NegsSettings"), pcwstr(&title), style, 0, 0, width, px(200.0), app.main, None, super::instance(), None).unwrap_or_default()
+    };
+    let make = |class: PCWSTR, text: &str, style: WINDOW_STYLE, id: u16, font| super::create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), dialog, id, font);
+    let label = |text: &str, font| make(windows::core::w!("STATIC"), text, WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFT.0 | windows::Win32::System::SystemServices::SS_NOPREFIX.0), 0, font);
+    let check = |text: &str, id: u16, on: bool| {
+        let c = make(windows::core::w!("BUTTON"), text, WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32), id, fonts.ui);
+        unsafe {
+            SendMessageW(c, BM_SETCHECK, WPARAM(on as usize), LPARAM(0));
+        }
+        c
+    };
+    // Each row: the control, its height (None: measure the wrapped text), its
+    // indent, the gap after it, and a width other than the whole row's.
+    let mut rows: Vec<(HWND, Option<i32>, i32, i32, Option<i32>)> = vec![];
+    let mut notes = vec![];
+    rows.push((label("Previews", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
+    let previews = check("Film, paper and preset previews", SETTINGS_PREVIEWS, app.model.prefs.previews);
+    rows.push((previews, Some(px(22.0)), 0, px(2.0), None));
+    let note = label("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(18.0), px(18.0), None));
+    rows.push((label("Updates", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
+    let mut automatic = HWND::default();
+    if configured {
+        automatic = check("Automatically check for updates", SETTINGS_AUTOMATIC, crate::updates::automatic());
+        rows.push((automatic, Some(px(22.0)), 0, px(2.0), None));
+        let last = crate::updates::last_check().unwrap_or_else(|| "never".into());
+        let note = label(&format!("Updates are installed only when you choose to restart Negs. Last checked: {last}."), fonts.small);
+        notes.push(note);
+        rows.push((note, None, px(18.0), px(10.0), None));
+        let button = make(windows::core::w!("BUTTON"), "Check for Updates…", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), SETTINGS_CHECK, fonts.ui);
+        rows.push((button, Some(px(28.0)), px(18.0), px(4.0), Some(px(160.0))));
+    } else {
+        let note = label("Updates are not configured for this build.", fonts.small);
+        notes.push(note);
+        rows.push((note, None, 0, px(4.0), None));
+    }
+    SETTINGS_NOTES.with(|n| *n.borrow_mut() = notes.iter().map(|h| h.0 as isize).collect());
+    let mut y = pad;
+    for (control, height, indent, gap, fixed) in rows {
+        let w = fixed.unwrap_or(inner - indent);
+        let h = height.unwrap_or_else(|| wrapped_height(control, w));
+        unsafe {
+            let _ = MoveWindow(control, pad + indent, y, w, h, false);
+        }
+        y += h + gap;
+    }
+    let (button_w, button_h) = (px(88.0), px(28.0));
+    y += px(12.0);
+    let ok = make(windows::core::w!("BUTTON"), "OK", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), IDOK.0 as u16, fonts.ui);
+    let cancel = make(windows::core::w!("BUTTON"), "Cancel", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), IDCANCEL.0 as u16, fonts.ui);
+    unsafe {
+        let _ = MoveWindow(ok, width - pad - 2 * button_w - px(8.0), y, button_w, button_h, false);
+        let _ = MoveWindow(cancel, width - pad - button_w, y, button_w, button_h, false);
+        // Size the window around the client area, centred on the editor.
+        let mut frame = RECT { left: 0, top: 0, right: width, bottom: y + button_h + pad };
+        let _ = windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi(&mut frame, style, false, ex, app.dpi);
+        let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
+        let mut owner = RECT::default();
+        let _ = GetWindowRect(app.main, &mut owner);
+        let (x, top) = (owner.left + (owner.right - owner.left - fw) / 2, owner.top + (owner.bottom - owner.top - fh) / 3);
+        let _ = SetWindowPos(dialog, None, x, top.max(owner.top), fw, fh, SWP_NOZORDER | SWP_NOACTIVATE);
+        SETTINGS_DONE.with(|d| d.set(None));
+        let _ = EnableWindow(app.main, false);
+        let _ = ShowWindow(dialog, SW_SHOW);
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(previews);
+        let mut msg = MSG::default();
+        while SETTINGS_DONE.with(Cell::get).is_none() {
+            if !GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                // WM_QUIT: leave it for the main loop.
+                PostQuitMessage(msg.wParam.0 as i32);
+                break;
+            }
+            if !IsDialogMessageW(dialog, &msg).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        let accepted = SETTINGS_DONE.with(Cell::get).unwrap_or(false);
+        let checked = |c: HWND| SendMessageW(c, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
+        let (previews_on, automatic_on) = (checked(previews), configured && checked(automatic));
+        let _ = EnableWindow(app.main, true);
+        let _ = DestroyWindow(dialog);
+        let _ = SetForegroundWindow(app.main);
+        if !accepted {
+            return;
+        }
+        if configured {
+            crate::updates::set_automatic(automatic_on);
+            app.model.prefs.check_for_updates = automatic_on;
+            app.model.prefs.save();
+        }
+        app.model.set_previews(previews_on);
+    }
+}
+
+/// The height `control`'s text needs, wrapped at `width`.
+fn wrapped_height(control: HWND, width: i32) -> i32 {
+    use windows::Win32::Graphics::Gdi::*;
+    unsafe {
+        let mut text = [0u16; 512];
+        let n = GetWindowTextW(control, &mut text) as usize;
+        let dc = GetDC(control);
+        let font = HFONT(SendMessageW(control, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _);
+        let old = SelectObject(dc, font);
+        let mut r = RECT { left: 0, top: 0, right: width, bottom: 0 };
+        DrawTextW(dc, &mut text[..n], &mut r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+        SelectObject(dc, old);
+        ReleaseDC(control, dc);
+        r.bottom
+    }
+}
+
+extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    use windows::Win32::Graphics::Gdi::*;
+    unsafe {
+        match msg {
+            WM_COMMAND => {
+                let id = (wparam.0 & 0xffff) as i32;
+                if id == IDOK.0 || id == IDCANCEL.0 {
+                    SETTINGS_DONE.with(|d| d.set(Some(id == IDOK.0)));
+                } else if id == SETTINGS_CHECK as i32 {
+                    crate::updates::check(true);
+                }
+                LRESULT(0)
+            }
+            WM_CLOSE => {
+                SETTINGS_DONE.with(|d| d.set(Some(false)));
+                LRESULT(0)
+            }
+            WM_CTLCOLORSTATIC => {
+                let dc = HDC(wparam.0 as *mut _);
+                SetBkMode(dc, TRANSPARENT);
+                let note = SETTINGS_NOTES.with(|n| n.borrow().contains(&lparam.0));
+                SetTextColor(dc, COLORREF(if note { 0x6d6d6d } else { GetSysColor(COLOR_WINDOWTEXT) }));
+                LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
     }
 }
 

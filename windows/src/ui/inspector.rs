@@ -92,6 +92,8 @@ enum Kind {
     BorderToggle(&'static str, u8),
     Choice(&'static str, &'static str, &'static [&'static str]),
     Stock(bool),
+    /// The film or paper as a foldout of preview tiles (Settings › previews).
+    Foldout(bool),
     DevTime(bool),
     BorderStyles,
     Color(bool),
@@ -128,11 +130,17 @@ pub struct Inspector {
     dpi: u32,
     /// The stock lists were filled from this catalog.
     stocks_filled: usize,
+    /// The film and paper tiles, built the first time each foldout opens.
+    grids: [Option<StockGrid>; 2],
     dev_times: [Vec<f64>; 2],
     decimal: char,
 }
 
 thread_local! {
+    /// The current film and paper names, for the foldout headers.
+    static FOLDOUT_NAMES: RefCell<[String; 2]> = const { RefCell::new([String::new(), String::new()]) };
+    /// The tiles as drawn, by grid (film, paper) and position.
+    static TILES: RefCell<[Vec<TileLook>; 2]> = const { RefCell::new([Vec::new(), Vec::new()]) };
     static HISTOGRAM: RefCell<Option<crate::histogram::Histogram>> = const { RefCell::new(None) };
     static SWATCHES: Cell<(u32, u32, u32)> = const { Cell::new((0xffffff, 0, 0)) };
     static ITEM_HEIGHT: Cell<i32> = const { Cell::new(20) };
@@ -140,11 +148,12 @@ thread_local! {
 
 pub fn register() {
     unsafe {
-        let classes: [(PCWSTR, WNDPROC, SYS_COLOR_INDEX); 4] = [
+        let classes: [(PCWSTR, WNDPROC, SYS_COLOR_INDEX); 5] = [
             (w!("NegsInspector"), Some(panel_proc), COLOR_BTNFACE),
             (w!("NegsRows"), Some(rows_proc), COLOR_BTNFACE),
             (w!("NegsHistogram"), Some(histogram_proc), COLOR_BTNFACE),
             (w!("NegsCropPanel"), Some(crop_proc), COLOR_BTNFACE),
+            (w!("NegsStockGrid"), Some(grid_proc), COLOR_BTNFACE),
         ];
         for (name, proc_, background) in classes {
             let class = WNDCLASSEXW {
@@ -187,6 +196,7 @@ impl Inspector {
             built: false,
             dpi,
             stocks_filled: 0,
+            grids: [None, None],
             dev_times: [vec![], vec![]],
             decimal: '.',
         }
@@ -245,9 +255,11 @@ fn rows() -> Vec<Row> {
     let lab = Tab::Lab;
     add(&mut rows, Kind::Section("Film & Paper"), lab, None, When::Always);
     add(&mut rows, Kind::Stock(false), lab, None, When::Always);
+    add(&mut rows, Kind::Foldout(false), lab, None, When::Always);
     add(&mut rows, Kind::DevTime(false), lab, None, When::FilmTimes);
     add(&mut rows, Kind::Toggle("Scan film directly", "io.scan_film"), lab, None, When::Always);
     add(&mut rows, Kind::Stock(true), lab, None, When::NotScanning);
+    add(&mut rows, Kind::Foldout(true), lab, None, When::NotScanning);
     add(&mut rows, Kind::DevTime(true), lab, None, When::PaperTimes);
     add(&mut rows, Kind::Section("Image Size"), lab, None, When::Always);
     add(&mut rows, Kind::SizeMode, lab, None, When::Always);
@@ -372,6 +384,12 @@ pub fn dpi_changed(app: &mut App) {
             let _ = DestroyWindow(crop.panel);
         }
     }
+    // Built again at the new size when shown.
+    for grid in app.inspector.grids.iter_mut().filter_map(Option::take) {
+        unsafe {
+            let _ = DestroyWindow(grid.window);
+        }
+    }
 }
 
 fn tab(model: &Model) -> Tab {
@@ -411,6 +429,13 @@ fn visible(row: &Row, model: &Model, expanded: &dyn Fn(usize) -> bool) -> bool {
         When::Keyline => border.style == BorderStyle::Keyline,
         When::FilmStyle => border.style == BorderStyle::Film,
     };
+    // The previews setting shows the foldouts or the menus.
+    let shown = shown
+        && match row.kind {
+            Kind::Stock(_) => !model.prefs.previews,
+            Kind::Foldout(_) => model.prefs.previews,
+            _ => true,
+        };
     shown && row.group.is_none_or(|g| expanded(g))
 }
 
@@ -499,6 +524,23 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
                     let _ = ShowWindow(c, if want[i] { SW_SHOWNA } else { SW_HIDE });
                 }
             }
+        }
+    }
+    // An open foldout's tiles, built the first time it opens.
+    let catalog_size = model.stocks.len() + model.stocks.iter().map(|s| s.id.len()).sum::<usize>();
+    for paper in [false, true] {
+        let open = model.previews.open(paper) && ins.rows.iter().any(|r| r.kind == Kind::Foldout(paper) && r.shown);
+        if ins.grids[paper as usize].as_ref().is_some_and(|g| g.catalog != catalog_size) {
+            if let Some(grid) = ins.grids[paper as usize].take() {
+                unsafe {
+                    let _ = DestroyWindow(grid.window);
+                }
+            }
+        }
+        if open && ins.grids[paper as usize].is_none() && model.has_catalog() {
+            ins.grids[paper as usize] = Some(build_grid(ins.rows_panel, &app.fonts, model, paper, catalog_size));
+            created = true;
+            fix_z_order(ins);
         }
     }
     // The note's height follows its text, so set it before laying out.
@@ -669,6 +711,15 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             controls.push(label(if paper { "Print development" } else { "Development" }, fonts.ui));
             controls.push(combo(false));
         }
+        Kind::Foldout(paper) => {
+            let title = if paper { "Paper" } else { "Film" };
+            let header = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
+            unsafe {
+                SetWindowLongPtrW(header, GWLP_USERDATA, (paper as isize) << 1);
+            }
+            super::dialogs::tooltip(header, &format!("Show each {} on your photograph", title.to_lowercase()));
+            controls.push(header);
+        }
         Kind::BorderStyles => {
             for (i, style) in border::STYLES.iter().enumerate() {
                 let b = create(w!("BUTTON"), border::title(*style), hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(i as u16), fonts.small);
@@ -689,7 +740,11 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
 fn fix_z_order(ins: &Inspector) {
     let mut previous = HWND_TOP;
     for row in &ins.rows {
-        for &c in &row.controls {
+        let grid = match row.kind {
+            Kind::Foldout(paper) => ins.grids[paper as usize].as_ref().map(|g| g.window),
+            _ => None,
+        };
+        for &c in row.controls.iter().chain(grid.iter()) {
             unsafe {
                 let _ = SetWindowPos(c, previous, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
@@ -723,6 +778,7 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
     let indent = ins.px(14.0);
     let mut y = ins.px(4.0);
     let mut positions: Vec<(HWND, i32, i32, i32, i32)> = vec![];
+    let mut grids_shown = [false; 2];
     for row in &ins.rows {
         if !row.shown || row.controls.is_empty() {
             continue;
@@ -780,6 +836,19 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 positions.push((c[0], right - button, y + ins.px(3.0), button, ins.px(26.0)));
                 ins.px(34.0)
             }
+            Kind::Foldout(paper) => {
+                positions.push((c[0], pad - ins.px(4.0), y + ins.px(2.0), right - pad + ins.px(4.0), ins.px(26.0)));
+                let header = ins.px(30.0);
+                match &ins.grids[paper as usize] {
+                    Some(grid) if model.previews.open(paper) => {
+                        grids_shown[paper as usize] = true;
+                        let height = layout_grid(grid, right - x, ins.dpi);
+                        positions.push((grid.window, x, y + header, right - x, height));
+                        header + height + ins.px(6.0)
+                    }
+                    _ => header,
+                }
+            }
             Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace => {
                 let label = ins.px(108.0).min((right - x) / 2);
                 positions.push((c[0], x, y + ins.px(6.0), label - ins.px(4.0), ins.px(18.0)));
@@ -800,8 +869,14 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 ins.px(30.0)
             }
         };
-        let _ = model;
         y += height;
+    }
+    for (grid, shown) in ins.grids.iter().zip(grids_shown) {
+        if let Some(grid) = grid {
+            unsafe {
+                let _ = ShowWindow(grid.window, if shown { SW_SHOWNA } else { SW_HIDE });
+            }
+        }
     }
     ins.content = y + ins.px(8.0);
     let visible = client.bottom;
@@ -1030,6 +1105,25 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 select_stock(c[1], if paper { &model.state.paper } else { &model.state.film }, model, paper);
                 enable_all(c, catalog);
             }
+            Kind::Foldout(paper) => {
+                let open = model.previews.open(paper);
+                let name = if paper { model.paper_name() } else { model.film_name() };
+                let title = if paper { "Paper" } else { "Film" };
+                let changed = FOLDOUT_NAMES.with(|n| std::mem::replace(&mut n.borrow_mut()[paper as usize], name.clone()) != name);
+                unsafe {
+                    let data = (paper as isize) << 1 | open as isize;
+                    if changed || GetWindowLongPtrW(c[0], GWLP_USERDATA) != data {
+                        SetWindowLongPtrW(c[0], GWLP_USERDATA, data);
+                        let _ = InvalidateRect(c[0], None, false);
+                        super::accessible_name(c[0], &format!("{title}: {name}, {}", if open { "expanded" } else { "collapsed" }));
+                    }
+                }
+                enable_all(c, catalog);
+                if let Some(grid) = &ins.grids[paper as usize] {
+                    select_tile(grid, if paper { &model.state.paper } else { &model.state.film });
+                    enable(grid.window, catalog);
+                }
+            }
             Kind::DevTime(paper) => {
                 let times = stock_times(model, paper);
                 if ins.dev_times[paper as usize] != times || unsafe { SendMessageW(c[1], CB_GETCOUNT, WPARAM(0), LPARAM(0)).0 } == 0 {
@@ -1239,6 +1333,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
                 None => app.model.dirty |= dirty::INSPECTOR,
             }
         }
+        (Kind::Foldout(paper), ACTION) if code == BN_CLICKED => app.model.toggle_foldout(paper),
         (Kind::DevTime(paper), COMBO) if code == CBN_SELCHANGE => {
             let times = stock_times(&app.model, paper);
             let path = if paper { "print_render.development_time" } else { "film_render.development_time" };
@@ -1459,6 +1554,10 @@ fn draw_item(item: &DRAWITEMSTRUCT) {
         FillRect(dc, &r, GetSysColorBrush(COLOR_BTNFACE));
         SetBkMode(dc, TRANSPARENT);
         let label_color = COLORREF(GetSysColor(if disabled { COLOR_GRAYTEXT } else { COLOR_WINDOWTEXT }));
+        if part == ACTION {
+            draw_foldout(item, &mut text[..n], label_color);
+            return;
+        }
         if part == HEADER && n > 0 && !["Color", "Line color"].contains(&String::from_utf16_lossy(&text[..n]).as_str()) {
             // A group header: chevron, then the title.
             let open = GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA) != 0;
@@ -1756,6 +1855,330 @@ fn commit_edit(hwnd: HWND) {
         app.model.dirty |= dirty::INSPECTOR;
         let _ = app;
     });
+}
+
+// MARK: Film and paper previews
+
+/// An open foldout: headings and a two-column grid of tiles, one owner-drawn
+/// button per stock, under the menu's headings in catalog order.
+struct StockGrid {
+    window: HWND,
+    /// Each tile's stock id and button, in order.
+    tiles: Vec<(String, HWND)>,
+    /// Each heading and the index of the first tile under it.
+    headings: Vec<(HWND, usize)>,
+    /// The catalog it was built from.
+    catalog: usize,
+}
+
+/// A tile as drawn.
+#[derive(Clone, Default)]
+struct TileLook {
+    image: Option<std::sync::Arc<crate::previews::Bitmap>>,
+    dimmed: bool,
+    selected: bool,
+}
+
+const TILE_FIRST: u16 = 100;
+/// The thumbnail's height, the caption and the gaps, in DIPs.
+const TILE_IMAGE: f64 = 92.0;
+const TILE_CAPTION: f64 = 18.0;
+const TILE_GAP: f64 = 8.0;
+const TILE_HEADING: f64 = 24.0;
+
+fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, catalog: usize) -> StockGrid {
+    let window = create(w!("NegsStockGrid"), if paper { "Papers" } else { "Films" }, WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), parent, 0, HFONT::default());
+    unsafe {
+        SetWindowLongPtrW(window, GWLP_USERDATA, paper as isize);
+    }
+    let (films, papers) = (model.films(), model.papers());
+    let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
+    let (mut tiles, mut headings) = (vec![], vec![]);
+    for group in groups {
+        let heading = create(w!("STATIC"), group.title, WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), window, 0, fonts.small);
+        headings.push((heading, tiles.len()));
+        for stock in group.stocks {
+            let id = TILE_FIRST + tiles.len() as u16;
+            let tile = create(w!("BUTTON"), &stock.name, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), window, id, fonts.small);
+            super::dialogs::tooltip(tile, &stock.name);
+            unsafe {
+                let _ = SetWindowSubclass(tile, Some(tile_subclass), 1, 0);
+            }
+            tiles.push((stock.id.clone(), tile));
+        }
+    }
+    // Thumbnails made before the grid was (re)built show at once.
+    let looks = tiles
+        .iter()
+        .map(|(id, _)| {
+            let thumb = model.previews.thumb(&crate::previews::Target::Stock { id: id.clone(), paper });
+            TileLook { image: thumb.and_then(|t| t.image.clone()), dimmed: thumb.is_some_and(|t| t.dimmed), selected: false }
+        })
+        .collect();
+    TILES.with(|t| t.borrow_mut()[paper as usize] = looks);
+    let grid = StockGrid { window, tiles, headings, catalog };
+    select_tile(&grid, if paper { &model.state.paper } else { &model.state.film });
+    grid
+}
+
+/// Places the headings and tiles for `width`; returns the grid's height.
+fn layout_grid(grid: &StockGrid, width: i32, dpi: u32) -> i32 {
+    let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
+    let gap = px(TILE_GAP);
+    let column = ((width - gap) / 2).max(1);
+    let tile = px(TILE_IMAGE + TILE_CAPTION);
+    let mut y = 0;
+    unsafe {
+        for (g, &(heading, first)) in grid.headings.iter().enumerate() {
+            let end = grid.headings.get(g + 1).map_or(grid.tiles.len(), |h| h.1);
+            let _ = MoveWindow(heading, 0, y + px(6.0), width, px(16.0), false);
+            y += px(TILE_HEADING);
+            for (i, (_, button)) in grid.tiles[first..end].iter().enumerate() {
+                let (col, row) = (i as i32 % 2, i as i32 / 2);
+                let _ = MoveWindow(*button, col * (column + gap), y + row * (tile + gap), column, tile, false);
+            }
+            let rows = (end - first).div_ceil(2) as i32;
+            y += rows * tile + (rows - 1).max(0) * gap + px(2.0);
+        }
+        let _ = InvalidateRect(grid.window, None, true);
+    }
+    y
+}
+
+/// Outlines the current stock's tile, and names it for screen readers.
+fn select_tile(grid: &StockGrid, selected: &str) {
+    let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
+    TILES.with(|t| {
+        let mut t = t.borrow_mut();
+        let looks = &mut t[paper as usize];
+        for (i, (id, button)) in grid.tiles.iter().enumerate() {
+            let Some(look) = looks.get_mut(i) else { continue };
+            let now = id == selected;
+            if look.selected != now {
+                look.selected = now;
+                let name = window_text(*button);
+                super::accessible_name(*button, &if now { format!("{name}, current") } else { name });
+                unsafe {
+                    let _ = InvalidateRect(*button, None, false);
+                }
+            }
+        }
+    });
+}
+
+/// Brings the open grids' tiles up to date with the model's thumbnails.
+pub fn redraw_previews(app: &mut App) {
+    let ins = &app.inspector;
+    for (paper, grid) in ins.grids.iter().enumerate() {
+        let Some(grid) = grid else { continue };
+        if !unsafe { IsWindowVisible(grid.window) }.as_bool() {
+            continue;
+        }
+        TILES.with(|t| {
+            let mut t = t.borrow_mut();
+            for (look, (id, button)) in t[paper].iter_mut().zip(&grid.tiles) {
+                let thumb = app.model.previews.thumb(&crate::previews::Target::Stock { id: id.clone(), paper: paper == 1 });
+                let image = thumb.and_then(|t| t.image.clone());
+                let dimmed = thumb.is_some_and(|t| t.dimmed);
+                let same = look.dimmed == dimmed
+                    && match (&look.image, &image) {
+                        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                        (None, None) => true,
+                        _ => false,
+                    };
+                if !same {
+                    look.image = image;
+                    look.dimmed = dimmed;
+                    unsafe {
+                        let _ = InvalidateRect(*button, None, false);
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// A foldout's header: chevron and title, the current stock at the right.
+fn draw_foldout(item: &DRAWITEMSTRUCT, title: &mut [u16], color: COLORREF) {
+    unsafe {
+        let (dc, r) = (item.hDC, item.rcItem);
+        let data = GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA);
+        let (open, paper) = (data & 1 != 0, data & 2 != 0);
+        let height = r.bottom - r.top;
+        let old = SelectObject(dc, with_app_fonts_glyph());
+        SetTextColor(dc, color);
+        let mut chevron: Vec<u16> = (if open { "\u{E70D}" } else { "\u{E76C}" }).encode_utf16().collect();
+        let mut cr = RECT { left: r.left + 2, top: r.top, right: r.left + height, bottom: r.bottom };
+        DrawTextW(dc, &mut chevron, &mut cr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+        SelectObject(dc, HGDIOBJ(SendMessageW(item.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _));
+        let mut measure = RECT::default();
+        DrawTextW(dc, title, &mut measure, DT_SINGLELINE | DT_CALCRECT);
+        let mut tr = RECT { left: r.left + height + 2, ..r };
+        DrawTextW(dc, title, &mut tr, DT_SINGLELINE | DT_VCENTER);
+        let mut name: Vec<u16> = FOLDOUT_NAMES.with(|n| n.borrow()[paper as usize].encode_utf16().collect());
+        if !name.is_empty() {
+            SetTextColor(dc, COLORREF(if item.itemState.0 & ODS_DISABLED.0 != 0 { GetSysColor(COLOR_GRAYTEXT) } else { 0x6d6d6d }));
+            let mut nr = RECT { left: r.left + height + 2 + measure.right + height / 2, right: r.right - 4, ..r };
+            DrawTextW(dc, &mut name, &mut nr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS | DT_NOPREFIX);
+        }
+        SelectObject(dc, old);
+        if item.itemState.0 & ODS_FOCUS.0 != 0 {
+            let _ = DrawFocusRect(dc, &r);
+        }
+    }
+}
+
+/// A tile: the thumbnail cropped to fill a rounded frame (grey until it
+/// arrives, dimmed while out of date), the accent outline on the current
+/// stock, and the name below, cut with an ellipsis.
+fn draw_tile(item: &DRAWITEMSTRUCT, look: &TileLook) {
+    unsafe {
+        let (dc, r) = (item.hDC, item.rcItem);
+        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(item.hwndItem).max(96) as i32;
+        let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
+        FillRect(dc, &r, GetSysColorBrush(COLOR_BTNFACE));
+        let inset = px(2.0);
+        let frame = RECT { left: r.left + inset, top: r.top + inset, right: r.right - inset, bottom: r.top + px(TILE_IMAGE) - inset };
+        let radius = px(10.0);
+        draw_thumbnail(dc, frame, radius, look.image.as_deref(), look.dimmed, COLORREF(0xdedede));
+        if look.selected {
+            let accent = super::canvas::accent_color();
+            let pen = CreatePen(PS_SOLID, px(2.0), COLORREF(accent[0] as u32 | (accent[1] as u32) << 8 | (accent[2] as u32) << 16));
+            let old = SelectObject(dc, pen);
+            let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+            let _ = RoundRect(dc, frame.left, frame.top, frame.right, frame.bottom, radius, radius);
+            SelectObject(dc, old_brush);
+            SelectObject(dc, old);
+            let _ = DeleteObject(pen);
+        }
+        let mut text = [0u16; 128];
+        let n = GetWindowTextW(item.hwndItem, &mut text) as usize;
+        let font = SendMessageW(item.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0));
+        let old = SelectObject(dc, HGDIOBJ(font.0 as *mut _));
+        SetBkMode(dc, TRANSPARENT);
+        let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
+        SetTextColor(dc, COLORREF(if disabled { GetSysColor(COLOR_GRAYTEXT) } else if look.selected { GetSysColor(COLOR_WINDOWTEXT) } else { 0x5a5a5a }));
+        let mut tr = RECT { left: r.left + inset, top: frame.bottom + px(2.0), right: r.right - inset, bottom: r.bottom };
+        DrawTextW(dc, &mut text[..n], &mut tr, DT_SINGLELINE | DT_TOP | DT_LEFT | DT_END_ELLIPSIS | DT_NOPREFIX);
+        SelectObject(dc, old);
+        if item.itemState.0 & ODS_FOCUS.0 != 0 {
+            let _ = DrawFocusRect(dc, &RECT { left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+        }
+    }
+}
+
+/// A thumbnail cropped to fill `frame` with rounded corners, or the grey
+/// placeholder; dimmed (55 % opacity over the background) while out of date.
+pub fn draw_thumbnail(dc: HDC, frame: RECT, radius: i32, image: Option<&crate::previews::Bitmap>, dimmed: bool, placeholder: COLORREF) {
+    unsafe {
+        let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
+        if fw <= 0 || fh <= 0 {
+            return;
+        }
+        let region = CreateRoundRectRgn(frame.left, frame.top, frame.right + 1, frame.bottom + 1, radius, radius);
+        let _ = SelectClipRgn(dc, region);
+        let brush = CreateSolidBrush(placeholder);
+        FillRect(dc, &frame, brush);
+        let _ = DeleteObject(brush);
+        if let Some(image) = image {
+            // Cover: the largest centred part of the image with the frame's shape.
+            let (iw, ih) = (image.width as f64, image.height as f64);
+            let scale = (fw as f64 / iw).max(fh as f64 / ih);
+            let (sw, sh) = ((fw as f64 / scale).min(iw), (fh as f64 / scale).min(ih));
+            let (sx, sy) = ((iw - sw) / 2.0, (ih - sh) / 2.0);
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: image.width as i32,
+                    biHeight: -(image.height as i32),
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let previous = SetStretchBltMode(dc, HALFTONE);
+            let _ = SetBrushOrgEx(dc, 0, 0, None);
+            StretchDIBits(
+                dc,
+                frame.left,
+                frame.top,
+                fw,
+                fh,
+                sx.round() as i32,
+                sy.round() as i32,
+                sw.round() as i32,
+                sh.round() as i32,
+                Some(image.bgra.as_ptr() as *const _),
+                &info,
+                DIB_RGB_COLORS,
+                SRCCOPY,
+            );
+            SetStretchBltMode(dc, STRETCH_BLT_MODE(previous));
+            if dimmed {
+                let mem = CreateCompatibleDC(dc);
+                let bitmap = CreateCompatibleBitmap(dc, 1, 1);
+                let old = SelectObject(mem, bitmap);
+                FillRect(mem, &RECT { left: 0, top: 0, right: 1, bottom: 1 }, GetSysColorBrush(COLOR_BTNFACE));
+                let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 115, AlphaFormat: 0 };
+                let _ = AlphaBlend(dc, frame.left, frame.top, fw, fh, mem, 0, 0, 1, 1, blend);
+                SelectObject(mem, old);
+                let _ = DeleteObject(bitmap);
+                let _ = DeleteDC(mem);
+            }
+        }
+        let _ = SelectClipRgn(dc, None);
+        let _ = DeleteObject(region);
+    }
+}
+
+/// Enter chooses a focused tile, as Space does: owner-drawn buttons aren't
+/// push buttons to `IsDialogMessage`.
+extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
+    unsafe {
+        let enter = wparam.0 == VK_RETURN.0 as usize;
+        if msg == WM_GETDLGCODE && enter {
+            return LRESULT((DLGC_WANTMESSAGE | DLGC_BUTTON) as isize);
+        }
+        if msg == WM_KEYDOWN && enter {
+            let parent = GetParent(hwnd).unwrap_or_default();
+            SendMessageW(parent, WM_COMMAND, WPARAM(((BN_CLICKED as usize) << 16) | GetDlgCtrlID(hwnd) as usize), LPARAM(hwnd.0 as isize));
+            return LRESULT(0);
+        }
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+}
+
+extern "system" fn grid_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        let paper = GetWindowLongPtrW(hwnd, GWLP_USERDATA) != 0;
+        match msg {
+            WM_COMMAND if ((wparam.0 >> 16) & 0xffff) as u32 == BN_CLICKED => {
+                let index = (wparam.0 & 0xffff) as u16;
+                with_app(|app| {
+                    let Some(index) = index.checked_sub(TILE_FIRST) else { return };
+                    let Some(id) = app.inspector.grids[paper as usize].as_ref().and_then(|g| g.tiles.get(index as usize)).map(|t| t.0.clone()) else { return };
+                    if paper { app.model.choose_paper(&id) } else { app.model.choose_film(&id) }
+                });
+                LRESULT(0)
+            }
+            WM_DRAWITEM => {
+                let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
+                let index = (item.CtlID as u16).wrapping_sub(TILE_FIRST) as usize;
+                let look = TILES.with(|t| t.borrow()[paper as usize].get(index).cloned()).unwrap_or_default();
+                draw_tile(item, &look);
+                LRESULT(1)
+            }
+            WM_CTLCOLORSTATIC => {
+                let dc = HDC(wparam.0 as *mut _);
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, COLORREF(0x6d6d6d));
+                LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
 }
 
 /// The histogram: red, green and blue added on a dark well, as in photo
@@ -2210,4 +2633,9 @@ mod tests {
         // Control ids stay below the crop panel's.
         assert!(FIRST_ID as usize + rows.len() * PARTS as usize <= u16::MAX as usize);
     }
+}
+
+/// The small Segoe MDL2 Assets font the headers' chevrons use.
+pub fn glyph_font() -> HGDIOBJ {
+    with_app_fonts_glyph()
 }

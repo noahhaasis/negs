@@ -159,6 +159,9 @@ pub struct Preferences {
     /// The last Image Size Longest side chosen, offered when switching to it
     /// again. Never switches the mode by itself.
     pub image_size_long_side: Option<u32>,
+    /// Settings › Film, paper and preset previews (the Mac's `previews`).
+    /// Old settings files lack it: on.
+    pub previews: bool,
 }
 
 impl Default for Preferences {
@@ -182,6 +185,7 @@ impl Default for Preferences {
             inspector_width: 340.0,
             check_for_updates: true,
             image_size_long_side: None,
+            previews: true,
         }
     }
 }
@@ -352,5 +356,14 @@ mod tests {
         prefs.set_expanded("Grain", true);
         prefs.set_expanded("Enlarger", false);
         assert_eq!(prefs.expanded_adjustments, "Grain");
+    }
+
+    #[test]
+    fn settings_from_before_previews_turn_them_on() {
+        let old: Preferences = serde_json::from_str(r#"{"recentFiles": [], "checkForUpdates": false}"#).unwrap();
+        assert!(old.previews && !old.check_for_updates);
+        let off: Preferences = serde_json::from_str(r#"{"previews": false}"#).unwrap();
+        assert!(!off.previews);
+        assert!(serde_json::to_string(&off).unwrap().contains(r#""previews":false"#));
     }
 }

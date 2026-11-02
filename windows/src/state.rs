@@ -172,6 +172,40 @@ impl Stock {
     }
 }
 
+/// The edit with stock `id` chosen, exactly as choosing it from the menu or
+/// a preview tile makes it (`PreviewRules.choosing`). A film resets its
+/// development time and its grain, DIR and halation presets, sets scanning
+/// for slides and brings its own paper; a paper keeps the film.
+pub fn choosing(state: &EditState, id: &str, paper: bool, stocks: &[Stock]) -> EditState {
+    let mut next = state.clone();
+    if paper {
+        next.paper = id.into();
+        json::set(&mut next.params, "print_render.development_time", Value::Null);
+        return next;
+    }
+    next.film = id.into();
+    json::set(&mut next.params, "film_render.development_time", Value::Null);
+    // A new film brings its own grain, DIR and halation presets, as upstream applies them.
+    for field in GRAIN_STOCK_FIELDS {
+        json::set(&mut next.params, &format!("film_render.grain.{field}"), Value::Null);
+    }
+    for path in DIR_HALATION_STOCK_PATHS {
+        json::set(&mut next.params, path, Value::Null);
+    }
+    pair_film(&mut next, stocks);
+    next
+}
+
+/// Scanning for slides, and the film's own paper.
+pub fn pair_film(state: &mut EditState, stocks: &[Stock]) {
+    let Some(film) = stocks.iter().find(|s| !s.paper && s.id == state.film) else { return };
+    json::set(&mut state.params, "io.scan_film", Value::Bool(film.positive));
+    if stocks.iter().any(|s| s.paper && s.id == film.target) && state.paper != film.target {
+        state.paper = film.target.clone();
+        json::set(&mut state.params, "print_render.development_time", Value::Null);
+    }
+}
+
 /// Stocks of one kind, in catalog order, for sectioned stock menus.
 pub struct StockGroup<'a> {
     pub title: &'static str,
