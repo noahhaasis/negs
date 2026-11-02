@@ -38,6 +38,13 @@ tiles, and the tile click).
 
 ## macOS
 
+**Done 2026-11-02** (uncommitted on `main` at the time of writing): `PreviewRules.choosing`
+and `request(for:)` take `keepPaper`, and `pairFilm` takes `paper:` (default true, so the
+catalog-load pairing is unchanged). The setting is `Previews.keepPaper` (UserDefaults
+`keep_paper`), toggled through `EditorModel.setKeepPaper`, which re-pumps the tiles. Tests:
+`testKeepPaperLeavesThePaperAlone` and `testMissingSettingMeansThePaperFollowsTheFilm` in
+`PreviewTests.swift`.
+
 - Pairing lives in `macos/Sources/NegsApp/Previews.swift`: `PreviewRules.choosing(_:paper:in:stocks:)`
   calls `pairFilm(in:stocks:)`, which sets scan mode **and** the paper. Split it (or add a
   `keepPaper` parameter) so `choosing` skips only the paper part when the setting is on.

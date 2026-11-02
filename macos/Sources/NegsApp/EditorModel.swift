@@ -460,10 +460,10 @@ import UniformTypeIdentifiers
     }
 
     func chooseFilm(_ stock: String) {
-        apply(PreviewRules.choosing(stock, paper: false, in: state, stocks: stocks), action: "Change Film")
+        apply(PreviewRules.choosing(stock, paper: false, keepPaper: previews.keepPaper, in: state, stocks: stocks), action: "Change Film")
     }
     func choosePaper(_ stock: String) {
-        apply(PreviewRules.choosing(stock, paper: true, in: state, stocks: stocks), action: "Change Paper")
+        apply(PreviewRules.choosing(stock, paper: true, keepPaper: previews.keepPaper, in: state, stocks: stocks), action: "Change Paper")
     }
     func limitPreview(_ enabled: Bool) {
         var next = state; next.limitPreview = enabled; apply(next, action: "Change Preview Resolution")
@@ -1002,6 +1002,14 @@ import UniformTypeIdentifiers
         }
     }
 
+    /// Settings › Keep paper when changing film. The film tiles show what a
+    /// click would develop, so they go stale (their key holds the paper).
+    func setKeepPaper(_ keep: Bool) {
+        guard keep != previews.keepPaper else { return }
+        previews.keepPaper = keep
+        pumpPreviews()
+    }
+
     /// Marks out-of-date thumbnails (dimmed, or blank for another photograph)
     /// and requests the next one of an open grid or the Presets list: one
     /// helper request at a time, and only while the main preview is current
@@ -1016,7 +1024,8 @@ import UniformTypeIdentifiers
         if previews.filmOpen, previews.filmShown { entries += previews.films }
         if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papers }
         for entry in entries {
-            let command = PreviewRules.request(for: entry.stock, state: rendered, stocks: stocks, source: source, generation: generation)
+            let command = PreviewRules.request(for: entry.stock, keepPaper: previews.keepPaper, state: rendered, stocks: stocks,
+                                               source: source, generation: generation)
             wanted.append((entry.tile, PreviewTile.Key(generation: generation, request: command), command, entry.stock.id))
         }
         if previews.presetsShown, checkingPresets == 0 {
