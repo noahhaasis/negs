@@ -440,7 +440,7 @@ impl Model {
             preset_status: HashMap::new(),
             renaming_preset: None,
             unnamed_preset: None,
-            previews: Previews::new(),
+            previews: Previews::default(),
         }
     }
 
@@ -1635,12 +1635,7 @@ impl Model {
         if self.previews.busy || !self.previews_may_render() {
             return changed;
         }
-        if next.is_none() && let Some((started, count)) = self.previews.batch.take() {
-            self.previews.finished_batch = Some((count, engine::elapsed_ms(started)));
-        }
         let (Some((target, key, mut command)), Some(engine)) = (next, self.engine.clone()) else { return changed };
-        let (started, count) = self.previews.batch.unwrap_or((Instant::now(), 0));
-        self.previews.batch = Some((started, count + 1));
         self.previews.busy = true;
         self.previews.requests += 1;
         let buffer = engine.directory().join(format!("thumbnail-{}.rgba", self.previews.requests));

@@ -69,12 +69,7 @@ pub fn schedule(ui: &Rc<Editor>) {
     );
     if let Some(path) = std::env::var_os("NEGS_WIDGET_CAPTURE") {
         glib::timeout_add_local_once(
-            Duration::from_millis(
-                std::env::var("NEGS_WIDGET_CAPTURE_MS")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(2000),
-            ),
+            Duration::from_millis(2000),
             glib::clone!(
                 #[weak]
                 ui,
