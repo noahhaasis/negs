@@ -1,9 +1,10 @@
-//! The adjustments column (`Inspector.swift`), with the common controls: a
-//! histogram, a Lab | Post switch, scrolling rows of trackbars with buddy
-//! edit boxes, checkboxes and drop-down lists, and Reset Adjustments. The
-//! rows of collapsed groups are created when the group first opens, and the
-//! whole column only after the window's first frame (§17). While cropping,
-//! the crop panel takes its place.
+//! The adjustments column (`Inspector.swift`), with the common controls: the
+//! scope (histogram or waveform, resizable), the film and paper pinned above
+//! a Prep | Lab | Output switch, scrolling rows of trackbars with buddy edit
+//! boxes, checkboxes and drop-down lists, and Reset Adjustments. The rows of
+//! collapsed groups are created when the group first opens, and the whole
+//! column only after the window's first frame (§17). While cropping, the crop
+//! panel takes its place.
 
 use std::cell::{Cell, RefCell};
 
@@ -27,6 +28,7 @@ use crate::crop::CropAspect;
 use crate::json;
 use crate::model::{BorderWidth, Model, dirty};
 use crate::platform::{pcwstr, wide};
+use crate::session::SCOPE_HEIGHTS;
 use crate::state::{self, ADJUSTMENT_GROUPS, Adjustment, Section};
 
 const FIRST_ID: u16 = 1000;
@@ -40,14 +42,24 @@ const COMBO: u16 = 5;
 const HEADER: u16 = 6;
 const ACTION: u16 = 7;
 const TAB_LAB: u16 = 900;
-const TAB_POST: u16 = 901;
+const TAB_OUTPUT: u16 = 901;
 const RESET_ALL: u16 = 902;
+const TAB_PREP: u16 = 903;
+const SCOPE_MODE: u16 = 904;
+const TABS: [(u16, &str); 3] = [(TAB_PREP, "Prep"), (TAB_LAB, "Lab"), (TAB_OUTPUT, "Output")];
+/// An open stock grid's height, in DIPs: it scrolls inside itself, keeping
+/// the tabs in reach.
+const GRID_HEIGHT: f64 = 290.0;
 const CROP_FIRST: u16 = 950;
 
+/// Prepare the photograph, develop the film, then finish it; the pinned
+/// rows (film and paper) sit above the tabs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
+    Prep,
     Lab,
-    Post,
+    Output,
+    Pinned,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -60,7 +72,6 @@ enum When {
     FilmTimes,
     NotScanning,
     PaperTimes,
-    AutoExposure,
     Raw,
     /// A RAW whose decode found corrections for its lens.
     LensCorrection,
@@ -68,7 +79,20 @@ enum When {
     Scanning,
     Ratio35,
     LongestSide,
-    SizeNote,
+    /// The row's note has text.
+    Note,
+    /// Auto exposure, while the brightness match doesn't hide the meter.
+    Meter,
+    MeterAuto,
+    /// Film format › Custom…: the long-edge slider.
+    CustomFormat,
+    /// Not among the Lab's basics: with Show all controls, or once changed.
+    Shows(&'static str),
+    ScanToggle,
+    ScanSection,
+    OutputGroup,
+    /// An adjustment group: it has basics, or something in it changed.
+    Group(usize),
     Mat,
     Keyline,
     FilmStyle,
@@ -84,7 +108,16 @@ enum Kind {
     Slider(Adjustment),
     BorderSlider(&'static str, BorderWidth),
     Toggle(&'static str, &'static str),
-    LimitPreview,
+    /// Prep › Match camera brightness (Match original brightness for files).
+    MatchBrightness,
+    /// Prep › Exposure: the user's exposure above the brightness match.
+    ExposureOffset,
+    /// Lab › Camera › Film format: stills formats, or Custom….
+    FilmFormat,
+    /// Lab › Show all controls (a preference).
+    AllControls,
+    /// The paper row while scanning film directly.
+    PaperSkipped,
     /// The colour space the preview develops in (a preference).
     PreviewSpace,
     /// Image Size: Original or Longest side.
@@ -92,8 +125,8 @@ enum Kind {
     LongestSide,
     /// The exported photograph's size.
     Photograph,
-    /// An Image Size error, or that the preview shows fewer pixels.
-    SizeNote,
+    /// Small text that follows the model.
+    Note(Note),
     BorderToggle(&'static str, u8),
     Choice(&'static str, &'static str, &'static [&'static str]),
     Stock(bool),
@@ -108,6 +141,16 @@ enum Kind {
     ToneGraph,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Note {
+    /// An Image Size error, or that the preview shows fewer pixels.
+    Size,
+    /// What the brightness match did, or why it can't.
+    Brightness,
+    /// What Show all controls shows.
+    AllControls,
+}
+
 struct Row {
     kind: Kind,
     tab: Tab,
@@ -118,14 +161,25 @@ struct Row {
     print: bool,
     /// Border controls, disabled while the border is off.
     border: bool,
+    /// An adjustment group's control: the group and its place, for the
+    /// Lab's basics.
+    basic: Option<(usize, usize)>,
     controls: Vec<HWND>,
     shown: bool,
 }
 
 pub struct Inspector {
     pub panel: HWND,
-    histogram: HWND,
-    tabs: [HWND; 2],
+    scope: HWND,
+    scope_mode: HWND,
+    scope_label: HWND,
+    grip: HWND,
+    /// The scope's height in DIPs, as dragged.
+    scope_height: f64,
+    /// The film and paper rows, above the tabs.
+    pinned: HWND,
+    pinned_height: i32,
+    tabs: [HWND; 3],
     rows_panel: HWND,
     reset: HWND,
     crop: Option<CropPanel>,
@@ -135,8 +189,8 @@ pub struct Inspector {
     content: i32,
     built: bool,
     dpi: u32,
-    /// The stock lists were filled from this catalog.
-    stocks_filled: usize,
+    /// The stock lists were filled from this catalog and these favourites.
+    stocks_filled: String,
     /// The film and paper tiles, built the first time each foldout opens.
     grids: [Option<StockGrid>; 2],
     dev_times: [Vec<f64>; 2],
@@ -167,7 +221,13 @@ thread_local! {
     static FOLDOUT_NAMES: RefCell<[String; 2]> = const { RefCell::new([String::new(), String::new()]) };
     /// The tiles as drawn, by grid (film, paper) and position.
     static TILES: RefCell<[Vec<TileLook>; 2]> = const { RefCell::new([Vec::new(), Vec::new()]) };
-    static HISTOGRAM: RefCell<Option<crate::histogram::Histogram>> = const { RefCell::new(None) };
+    /// What the scope draws: the histogram, the waveform, and whether it shows the waveform.
+    static SCOPE: RefCell<(Option<crate::histogram::Histogram>, Option<crate::histogram::Waveform>, bool)> = const { RefCell::new((None, None, false)) };
+    /// The scope's height while its handle is dragged: where the drag
+    /// started on screen, and the height then.
+    static GRIP_DRAG: Cell<Option<(i32, f64)>> = const { Cell::new(None) };
+    /// The tile under the pointer, by grid and position, which shows its star.
+    static HOVER_TILE: Cell<Option<(bool, usize)>> = const { Cell::new(None) };
     static SWATCHES: Cell<(u32, u32, u32)> = const { Cell::new((0xffffff, 0, 0)) };
     static ITEM_HEIGHT: Cell<i32> = const { Cell::new(20) };
 }
@@ -175,16 +235,18 @@ thread_local! {
 pub fn register() {
     unsafe {
         // Their backgrounds are painted from the palette.
-        let classes: [(PCWSTR, WNDPROC); 5] = [
-            (w!("NegsInspector"), Some(panel_proc)),
-            (w!("NegsRows"), Some(rows_proc)),
-            (w!("NegsHistogram"), Some(histogram_proc)),
-            (w!("NegsCropPanel"), Some(crop_proc)),
-            (w!("NegsStockGrid"), Some(grid_proc)),
+        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 6] = [
+            (w!("NegsInspector"), Some(panel_proc), WNDCLASS_STYLES(0)),
+            (w!("NegsRows"), Some(rows_proc), WNDCLASS_STYLES(0)),
+            (w!("NegsScope"), Some(scope_proc), WNDCLASS_STYLES(0)),
+            (w!("NegsScopeGrip"), Some(grip_proc), CS_DBLCLKS),
+            (w!("NegsCropPanel"), Some(crop_proc), WNDCLASS_STYLES(0)),
+            (w!("NegsStockGrid"), Some(grid_proc), WNDCLASS_STYLES(0)),
         ];
-        for (name, proc_) in classes {
+        for (name, proc_, style) in classes {
             let class = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                style,
                 lpfnWndProc: proc_,
                 hInstance: super::instance(),
                 lpszClassName: name,
@@ -209,8 +271,14 @@ impl Inspector {
         let panel = create(w!("NegsInspector"), "Adjustments", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), main, 0, HFONT::default());
         Self {
             panel,
-            histogram: HWND::default(),
-            tabs: [HWND::default(); 2],
+            scope: HWND::default(),
+            scope_mode: HWND::default(),
+            scope_label: HWND::default(),
+            grip: HWND::default(),
+            scope_height: SCOPE_HEIGHTS.0,
+            pinned: HWND::default(),
+            pinned_height: 0,
+            tabs: [HWND::default(); 3],
             rows_panel: HWND::default(),
             reset: HWND::default(),
             crop: None,
@@ -220,7 +288,7 @@ impl Inspector {
             content: 0,
             built: false,
             dpi,
-            stocks_filled: 0,
+            stocks_filled: String::new(),
             grids: [None, None],
             dev_times: [vec![], vec![]],
             decimal: '.',
@@ -255,27 +323,43 @@ impl Inspector {
         self.layout_frame();
     }
 
-    /// The histogram, the tab switch, the rows and the reset button.
+    /// The scope, the pinned stocks, the tab switch, the rows and the reset
+    /// button.
     fn layout_frame(&mut self) {
         if !self.built {
             return;
         }
         let (w, h) = (self.rect.right - self.rect.left, self.rect.bottom - self.rect.top);
         let pad = self.px(16.0);
-        let histogram = self.px(88.0);
+        // On the 8 DIP grid: the scope's menu, the scope and its grabber,
+        // the pinned stocks, the tabs, the rows and the reset button.
+        let inner = w - 2 * pad;
+        let mode = self.px(24.0);
+        let scope = self.px(self.scope_height);
+        let grip = self.px(8.0);
         let tabs = self.px(32.0);
         let reset = self.px(32.0);
-        let top = self.px(8.0);
-        let tabs_top = top + histogram + self.px(8.0);
-        let rows_top = tabs_top + tabs + self.px(8.0);
-        let rows_bottom = h - reset - pad - self.px(8.0);
+        let mut y = self.px(8.0);
         unsafe {
-            let _ = MoveWindow(self.histogram, pad, top, w - 2 * pad, histogram, true);
-            let half = (w - 2 * pad) / 2;
-            let _ = MoveWindow(self.tabs[0], pad, tabs_top, half, tabs, true);
-            let _ = MoveWindow(self.tabs[1], pad + half, tabs_top, w - 2 * pad - half, tabs, true);
-            let _ = MoveWindow(self.rows_panel, 0, rows_top, w, (rows_bottom - rows_top).max(0), true);
-            let _ = MoveWindow(self.reset, pad, h - reset - pad, w - 2 * pad, reset, true);
+            let _ = MoveWindow(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0), true);
+            let _ = MoveWindow(self.scope_label, w - pad - self.px(40.0), y + self.px(4.0), self.px(40.0), self.px(16.0), true);
+            y += mode + self.px(8.0);
+            let _ = MoveWindow(self.scope, pad, y, inner, scope, true);
+            y += scope;
+            let _ = MoveWindow(self.grip, pad, y, inner, grip, true);
+            y += grip;
+            let _ = MoveWindow(self.pinned, 0, y, w, self.pinned_height, true);
+            y += self.pinned_height + self.px(8.0);
+            let each = inner / 3;
+            for (i, &tab) in self.tabs.iter().enumerate() {
+                let x = pad + each * i as i32;
+                let width = if i == 2 { inner - 2 * each } else { each };
+                let _ = MoveWindow(tab, x, y, width, tabs, true);
+            }
+            y += tabs + self.px(8.0);
+            let rows_bottom = h - reset - pad - self.px(8.0);
+            let _ = MoveWindow(self.rows_panel, 0, y, w, (rows_bottom - y).max(0), true);
+            let _ = MoveWindow(self.reset, pad, h - reset - pad, inner, reset, true);
             if let Some(crop) = &self.crop {
                 let _ = MoveWindow(crop.panel, 0, 0, w, h, true);
             }
@@ -283,54 +367,60 @@ impl Inspector {
     }
 }
 
-/// The rows of both tabs, in order (`Inspector.swift`, `lab` and `post`).
+/// The rows of the pinned area and the three tabs, in order
+/// (`Inspector.swift`: `filmAndPaper`, `prep`, `lab` and `output`).
 fn rows() -> Vec<Row> {
     let mut rows = vec![];
     let add = |rows: &mut Vec<Row>, kind: Kind, tab: Tab, group: Option<usize>, when: When| {
-        rows.push(Row { kind, tab, group, when, print: false, border: false, controls: vec![], shown: false });
+        rows.push(Row { kind, tab, group, when, print: false, border: false, basic: None, controls: vec![], shown: false });
         rows.len() - 1
     };
-    let lab = Tab::Lab;
-    add(&mut rows, Kind::Section("Film & Paper"), lab, None, When::Always);
-    add(&mut rows, Kind::Stock(false), lab, None, When::Always);
-    add(&mut rows, Kind::Foldout(false), lab, None, When::Always);
-    add(&mut rows, Kind::DevTime(false), lab, None, When::FilmTimes);
-    add(&mut rows, Kind::Toggle("Scan film directly", "io.scan_film"), lab, None, When::Always);
-    add(&mut rows, Kind::Stock(true), lab, None, When::NotScanning);
-    add(&mut rows, Kind::Foldout(true), lab, None, When::NotScanning);
-    add(&mut rows, Kind::DevTime(true), lab, None, When::PaperTimes);
-    add(&mut rows, Kind::Section("Image Size"), lab, None, When::Always);
-    add(&mut rows, Kind::SizeMode, lab, None, When::Always);
-    add(&mut rows, Kind::LongestSide, lab, None, When::LongestSide);
-    add(&mut rows, Kind::Photograph, lab, None, When::Always);
-    add(&mut rows, Kind::SizeNote, lab, None, When::SizeNote);
-    add(&mut rows, Kind::Footer("Resizes before film simulation, including halation and grain."), lab, None, When::Always);
-    add(&mut rows, Kind::Section("Camera"), lab, None, When::Always);
-    add(&mut rows, Kind::Toggle("Auto exposure", "camera.auto_exposure"), lab, None, When::Always);
-    add(&mut rows, Kind::Choice("Metering", "camera.auto_exposure_method", state::METERING), lab, None, When::AutoExposure);
-    for slider in state::CAMERA_SLIDERS {
-        add(&mut rows, Kind::Slider(*slider), lab, None, When::Always);
+    // Above the tabs: the stocks shape everything the tabs adjust.
+    let pinned = Tab::Pinned;
+    add(&mut rows, Kind::Stock(false), pinned, None, When::Always);
+    add(&mut rows, Kind::Foldout(false), pinned, None, When::Always);
+    add(&mut rows, Kind::DevTime(false), pinned, None, When::FilmTimes);
+    add(&mut rows, Kind::Stock(true), pinned, None, When::NotScanning);
+    add(&mut rows, Kind::Foldout(true), pinned, None, When::NotScanning);
+    add(&mut rows, Kind::DevTime(true), pinned, None, When::PaperTimes);
+    add(&mut rows, Kind::PaperSkipped, pinned, None, When::Scanning);
+
+    let prep = Tab::Prep;
+    add(&mut rows, Kind::Choice("White balance", "io.raw_white_balance.mode", state::WHITE_BALANCE), prep, None, When::Raw);
+    add(&mut rows, Kind::Slider(state::WB_TEMPERATURE), prep, None, When::CustomWhiteBalance);
+    add(&mut rows, Kind::Slider(state::WB_TINT), prep, None, When::CustomWhiteBalance);
+    add(&mut rows, Kind::Section("Brightness"), prep, None, When::Always);
+    add(&mut rows, Kind::MatchBrightness, prep, None, When::Always);
+    add(&mut rows, Kind::ExposureOffset, prep, None, When::Always);
+    add(&mut rows, Kind::Note(Note::Brightness), prep, None, When::Note);
+    add(&mut rows, Kind::Toggle("Auto exposure", "camera.auto_exposure"), prep, None, When::Meter);
+    add(&mut rows, Kind::Choice("Metering", "camera.auto_exposure_method", state::METERING), prep, None, When::MeterAuto);
+    for (title, sliders) in [("Tone", state::PREP_TONE), ("Color", state::PREP_COLOR), ("Detail", state::PREP_DETAIL)] {
+        add(&mut rows, Kind::Section(title), prep, None, When::Always);
+        for slider in sliders {
+            add(&mut rows, Kind::Slider(*slider), prep, None, When::Always);
+        }
     }
-    let input = add(&mut rows, Kind::Group { title: "Input Colour", enable: None }, lab, None, When::NotRaw);
-    add(&mut rows, Kind::Choice("Read as", "io.input_interpretation.mode", state::INPUT_MODES), lab, Some(input), When::NotRaw);
-    add(&mut rows, Kind::Choice("Colour space", "io.input_interpretation.color_space", state::ASSUMED_SPACES), lab, Some(input), When::AssumeInput);
-    add(&mut rows, Kind::Toggle("Linear values", "io.input_interpretation.linear"), lab, Some(input), When::AssumeInput);
-    add(&mut rows, Kind::Choice("Colour space", "io.input_color_space", state::MANUAL_SPACES), lab, Some(input), When::ManualInput);
-    add(&mut rows, Kind::Toggle("Decode the curve", "io.input_cctf_decoding"), lab, Some(input), When::ManualInput);
-    let wb = add(&mut rows, Kind::Group { title: "RAW White Balance", enable: None }, lab, None, When::Raw);
-    add(&mut rows, Kind::Choice("White balance", "io.raw_white_balance.mode", state::WHITE_BALANCE), lab, Some(wb), When::Raw);
-    add(&mut rows, Kind::Slider(state::WB_TEMPERATURE), lab, Some(wb), When::CustomWhiteBalance);
-    add(&mut rows, Kind::Slider(state::WB_TINT), lab, Some(wb), When::CustomWhiteBalance);
-    add(&mut rows, Kind::Toggle("Lens corrections", state::LENS_CORRECTION), lab, None, When::LensCorrection);
+    // How the file is read; set once per photograph.
+    add(&mut rows, Kind::Section("Lens"), prep, None, When::LensCorrection);
+    add(&mut rows, Kind::Toggle("Lens corrections", state::LENS_CORRECTION), prep, None, When::LensCorrection);
+    let input = add(&mut rows, Kind::Group { title: "Input Colour", enable: None }, prep, None, When::NotRaw);
+    add(&mut rows, Kind::Choice("Read as", "io.input_interpretation.mode", state::INPUT_MODES), prep, Some(input), When::NotRaw);
+    add(&mut rows, Kind::Choice("Colour space", "io.input_interpretation.color_space", state::ASSUMED_SPACES), prep, Some(input), When::AssumeInput);
+    add(&mut rows, Kind::Toggle("Linear values", "io.input_interpretation.linear"), prep, Some(input), When::AssumeInput);
+    add(&mut rows, Kind::Choice("Colour space", "io.input_color_space", state::MANUAL_SPACES), prep, Some(input), When::ManualInput);
+    add(&mut rows, Kind::Toggle("Decode the curve", "io.input_cctf_decoding"), prep, Some(input), When::ManualInput);
+
+    let lab = Tab::Lab;
     let groups = |rows: &mut Vec<Row>, section: Section| {
-        for group in ADJUSTMENT_GROUPS.iter().filter(|g| g.section == section) {
-            let header = add(rows, Kind::Group { title: group.title, enable: group.enable }, lab, None, When::Always);
+        for (index, group) in ADJUSTMENT_GROUPS.iter().enumerate().filter(|(_, g)| g.section == section) {
+            let header = add(rows, Kind::Group { title: group.title, enable: group.enable }, lab, None, When::Group(index));
             rows[header].print = section == Section::Print;
             if group.title == "Print Curves" {
                 let graph = add(rows, Kind::ToneGraph, lab, Some(header), When::Always);
                 rows[graph].print = true;
             }
-            for control in group.controls {
+            for (place, control) in group.controls.iter().enumerate() {
                 let kind = match *control {
                     Adjustment::Toggle { title, path } => Kind::Toggle(title, path),
                     Adjustment::Choice { title, path, options } => Kind::Choice(title, path, options),
@@ -340,31 +430,41 @@ fn rows() -> Vec<Row> {
                 let when = if state::color_only(control.path()) { When::ColorFilm } else { When::Always };
                 let row = add(rows, kind, lab, Some(header), when);
                 rows[row].print = section == Section::Print;
+                rows[row].basic = Some((index, place));
             }
         }
     };
+    add(&mut rows, Kind::Section("Camera"), lab, None, When::Always);
+    add(&mut rows, Kind::Slider(state::NEGATIVE_EXPOSURE), lab, None, When::Always);
+    add(&mut rows, Kind::FilmFormat, lab, None, When::Always);
+    add(&mut rows, Kind::Slider(state::FILM_FORMAT), lab, None, When::CustomFormat);
+    add(&mut rows, Kind::Slider(state::LENS_BLUR), lab, None, When::Shows(state::LENS_BLUR.path()));
     groups(&mut rows, Section::Camera);
     add(&mut rows, Kind::Section("Film"), lab, None, When::Always);
     groups(&mut rows, Section::Film);
     add(&mut rows, Kind::Section("Print"), lab, None, When::Always);
+    // Here rather than beside the stocks: few photographs want it.
+    add(&mut rows, Kind::Toggle("Scan film directly", "io.scan_film"), lab, None, When::ScanToggle);
     groups(&mut rows, Section::Print);
-    add(&mut rows, Kind::Footer("Printing is skipped while scanning film directly."), lab, None, When::Scanning);
-    add(&mut rows, Kind::Section("Scan & Color"), lab, None, When::Always);
+    add(&mut rows, Kind::Footer("Printing and the paper are skipped while scanning film directly."), lab, None, When::Scanning);
+    add(&mut rows, Kind::Section("Scan & Color"), lab, None, When::ScanSection);
     groups(&mut rows, Section::Scan);
-    let output = add(&mut rows, Kind::Group { title: "Output", enable: None }, lab, None, When::Always);
-    add(&mut rows, Kind::LimitPreview, lab, Some(output), When::Always);
-    add(&mut rows, Kind::PreviewSpace, lab, Some(output), When::Always);
-    add(&mut rows, Kind::Toggle("Encode with the colour space’s curve", "io.output_cctf_encoding"), lab, Some(output), When::Always);
-    add(&mut rows, Kind::Toggle("Use less memory for export", "settings.serial_grain"), lab, Some(output), When::Always);
+    let output = add(&mut rows, Kind::Group { title: "Output", enable: None }, lab, None, When::OutputGroup);
+    add(&mut rows, Kind::PreviewSpace, lab, Some(output), When::OutputGroup);
+    add(&mut rows, Kind::Toggle("Encode with the colour space’s curve", "io.output_cctf_encoding"), lab, Some(output), When::OutputGroup);
+    add(&mut rows, Kind::Section(""), lab, None, When::Always);
+    add(&mut rows, Kind::AllControls, lab, None, When::Always);
+    add(&mut rows, Kind::Note(Note::AllControls), lab, None, When::Always);
 
-    let post = Tab::Post;
-    add(&mut rows, Kind::Section("Tone"), post, None, When::Always);
-    for slider in state::POST_TONE {
-        add(&mut rows, Kind::Slider(*slider), post, None, When::Always);
-    }
-    add(&mut rows, Kind::Footer("Adjusts the finished scan/print. To recover a clipped highlight, use exposure in the Lab."), post, None, When::Always);
-    add(&mut rows, Kind::Section("Color"), post, None, When::Always);
-    add(&mut rows, Kind::Slider(state::POST_SATURATION), post, None, When::Always);
+    // The size and frame of the finished photograph. Tone and colour edits
+    // live in Prep, before the film, where nothing has clipped yet.
+    let post = Tab::Output;
+    add(&mut rows, Kind::Section("Image Size"), post, None, When::Always);
+    add(&mut rows, Kind::SizeMode, post, None, When::Always);
+    add(&mut rows, Kind::LongestSide, post, None, When::LongestSide);
+    add(&mut rows, Kind::Photograph, post, None, When::Always);
+    add(&mut rows, Kind::Note(Note::Size), post, None, When::Note);
+    add(&mut rows, Kind::Footer("Resizes before film simulation, including halation and grain."), post, None, When::Always);
     add(&mut rows, Kind::Section("Border"), post, None, When::Always);
     add(&mut rows, Kind::BorderToggle("Add border", 0), post, None, When::Always);
     let border_row = |rows: &mut Vec<Row>, kind: Kind, when: When| {
@@ -390,13 +490,34 @@ pub fn build(app: &mut App) {
     let fonts = &app.fonts;
     let ins = &mut app.inspector;
     ins.decimal = decimal_separator();
-    ins.histogram = create(w!("NegsHistogram"), "Histogram", WS_CHILD | WS_VISIBLE, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
-    let tab_style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
-    ins.tabs[0] = create(w!("BUTTON"), "Lab", tab_style | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, TAB_LAB, fonts.ui);
-    ins.tabs[1] = create(w!("BUTTON"), "Post", tab_style, WINDOW_EX_STYLE(0), ins.panel, TAB_POST, fonts.ui);
-    ins.rows_panel = create(w!("NegsRows"), "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
-    ins.reset = create(w!("BUTTON"), "Reset Adjustments", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, RESET_ALL, fonts.ui);
-    super::dialogs::tooltip(ins.reset, "Restore defaults on both tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.");
+    ins.scope_height = app.model.prefs.scope_height.clamp(SCOPE_HEIGHTS.0, SCOPE_HEIGHTS.1).round();
+    let visible = WS_CHILD | WS_VISIBLE;
+    ins.scope_mode = create(w!("COMBOBOX"), "", visible | WS_TABSTOP | WS_GROUP | WINDOW_STYLE(CBS_DROPDOWNLIST as u32), WINDOW_EX_STYLE(0), ins.panel, SCOPE_MODE, fonts.small);
+    for title in ["Histogram", "Waveform"] {
+        let text = wide(title);
+        unsafe {
+            SendMessageW(ins.scope_mode, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+        }
+    }
+    draw::paint_combo(ins.scope_mode);
+    super::accessible_name(ins.scope_mode, "Scope view");
+    ins.scope_label = create(w!("STATIC"), "RGB", visible | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), ins.panel, 0, fonts.small);
+    ins.scope = create(w!("NegsScope"), "Histogram", visible, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
+    ins.grip = create(w!("NegsScopeGrip"), "Scope height", visible | WS_TABSTOP, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
+    draw::track_hover(ins.grip);
+    super::dialogs::tooltip(ins.grip, "Drag to resize the scope; double-click for its smallest height");
+    ins.pinned = create(w!("NegsRows"), "", visible | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
+    let tab_style = visible | WS_TABSTOP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
+    for (i, (id, title)) in TABS.into_iter().enumerate() {
+        ins.tabs[i] = create(w!("BUTTON"), title, tab_style | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), ins.panel, id, fonts.ui);
+        // Prep | Lab | Output: Lab is the switch's middle segment.
+        if i == 1 {
+            draw::set_role(ins.tabs[i], Role::SegmentMiddle);
+        }
+    }
+    ins.rows_panel = create(w!("NegsRows"), "", visible | WS_VSCROLL | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
+    ins.reset = create(w!("BUTTON"), "Reset Adjustments", visible | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, RESET_ALL, fonts.ui);
+    super::dialogs::tooltip(ins.reset, "Restore defaults on all tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.");
     ins.rows = rows();
     ins.built = true;
     ITEM_HEIGHT.with(|h| h.set(ins.px(20.0)));
@@ -417,9 +538,9 @@ pub fn dpi_changed(app: &mut App) {
             // The font each control was created with, at the new size.
             let f = match (row.kind, i) {
                 (Kind::Section(_), _) => fonts.section,
-                (Kind::Footer(_) | Kind::SizeNote | Kind::BorderStyles, _) => fonts.small,
+                (Kind::Footer(_) | Kind::Note(_) | Kind::BorderStyles | Kind::ToneGraph, _) => fonts.small,
                 (Kind::Group { .. }, 0) => fonts.bold,
-                (Kind::Slider(_) | Kind::BorderSlider(..), 3) => fonts.glyph_small,
+                (Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset, 3) => fonts.glyph_small,
                 _ => fonts.ui,
             };
             unsafe {
@@ -430,6 +551,12 @@ pub fn dpi_changed(app: &mut App) {
     for &c in ins.tabs.iter().chain([&ins.reset]) {
         unsafe {
             SendMessageW(c, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+        }
+    }
+    for &c in [&ins.scope_mode, &ins.scope_label] {
+        let small = app.fonts.small;
+        unsafe {
+            SendMessageW(c, WM_SETFONT, WPARAM(small.0 as usize), LPARAM(1));
         }
     }
     if let Some(crop) = app.inspector.crop.take() {
@@ -446,7 +573,28 @@ pub fn dpi_changed(app: &mut App) {
 }
 
 fn tab(model: &Model) -> Tab {
-    if model.prefs.inspector_tab == "Post" { Tab::Post } else { Tab::Lab }
+    match model.prefs.tab() {
+        "Lab" => Tab::Lab,
+        "Output" => Tab::Output,
+        _ => Tab::Prep,
+    }
+}
+
+/// The preview's colour space or curve is off its default, so the Lab shows them.
+fn output_changed(model: &Model) -> bool {
+    model.preview_space() != crate::model::COLOR_SPACES[0] || model.is_modified("io.output_cctf_encoding")
+}
+
+fn control_modified(model: &Model, control: &Adjustment) -> bool {
+    !matches!(control, Adjustment::BalancePrint { .. }) && model.is_modified(control.path())
+}
+
+/// Whether the Lab shows a group: it has basics, or something in it changed.
+fn group_shows(model: &Model, group: &state::AdjustmentGroup) -> bool {
+    model.prefs.lab_all_controls
+        || group.basic > 0
+        || group.enable.is_some_and(|path| model.is_modified(path))
+        || group.controls.iter().any(|c| control_modified(model, c))
 }
 
 fn photo_size(model: &Model) -> Option<(u32, u32)> {
@@ -459,15 +607,17 @@ fn stock_times(model: &Model, paper: bool) -> Vec<f64> {
     model.stocks.iter().find(|s| s.paper == paper && &s.id == id).map(|s| s.times.clone()).unwrap_or_default()
 }
 
-fn visible(row: &Row, model: &Model, expanded: &dyn Fn(usize) -> bool) -> bool {
+/// Whether a row shows. `group_shown` says whether a row's group header is
+/// on screen and open.
+fn visible(row: &Row, model: &Model, group_shown: &dyn Fn(usize) -> bool) -> bool {
     let scanning = json::boolean(model.value("io.scan_film"));
     let border = model.state.border;
+    let all = model.prefs.lab_all_controls;
     let shown = match row.when {
         When::Always => true,
         When::FilmTimes => stock_times(model, false).len() > 1,
         When::NotScanning => !scanning,
         When::PaperTimes => !scanning && stock_times(model, true).len() > 1,
-        When::AutoExposure => json::boolean(model.value("camera.auto_exposure")),
         When::Raw => model.is_raw,
         When::LensCorrection => model.is_raw && model.lens_supported,
         When::NotRaw => !model.is_raw,
@@ -478,7 +628,17 @@ fn visible(row: &Row, model: &Model, expanded: &dyn Fn(usize) -> bool) -> bool {
         When::ColorFilm => !model.film_is_bw(),
         When::Ratio35 => photo_size(model).is_some_and(|(w, h)| !border::fits(BorderStyle::Film35, w, h)),
         When::LongestSide => model.size_mode() == state::SizeMode::LongestSide,
-        When::SizeNote => !size_note(model).is_empty(),
+        When::Note => matches!(row.kind, Kind::Note(note) if !note_text(model, note).is_empty()),
+        When::Meter => model.shows_meter(),
+        When::MeterAuto => model.shows_meter() && json::boolean(model.value("camera.auto_exposure")),
+        When::CustomFormat => model.film_format_custom(),
+        When::Shows(path) => all || model.is_modified(path),
+        When::ScanToggle => all || scanning,
+        When::ScanSection => {
+            all || output_changed(model) || ADJUSTMENT_GROUPS.iter().any(|g| g.section == Section::Scan && group_shows(model, g))
+        }
+        When::OutputGroup => all || output_changed(model),
+        When::Group(index) => group_shows(model, &ADJUSTMENT_GROUPS[index]),
         When::Mat => matches!(border.style, BorderStyle::Solid | BorderStyle::Keyline),
         When::Keyline => border.style == BorderStyle::Keyline,
         When::FilmStyle => border.style == BorderStyle::Film,
@@ -490,7 +650,22 @@ fn visible(row: &Row, model: &Model, expanded: &dyn Fn(usize) -> bool) -> bool {
             Kind::Foldout(_) => model.prefs.previews,
             _ => true,
         };
-    shown && row.group.is_none_or(|g| expanded(g))
+    // The Lab shows each group's basics, and anything changed from its default.
+    let basic = row.basic.is_none_or(|(index, place)| {
+        let group = &ADJUSTMENT_GROUPS[index];
+        all || place < group.basic || control_modified(model, &group.controls[place])
+    });
+    shown && basic && row.group.is_none_or(|g| group_shown(g))
+}
+
+/// A note's text; empty hides it.
+fn note_text(model: &Model, note: Note) -> String {
+    match note {
+        Note::Size => size_note(model),
+        Note::Brightness => model.brightness_match_note().unwrap_or_default(),
+        Note::AllControls if model.prefs.lab_all_controls => "Every camera, film, print and scan setting.".into(),
+        Note::AllControls => "The settings most photographs need. Any setting you or a preset changed also shows.".into(),
+    }
 }
 
 /// Why the Image Size can't be used, or that the preview has fewer pixels
@@ -527,11 +702,18 @@ fn row_title(kind: &Kind) -> &'static str {
 /// Creates the rows that became visible, shows and hides rows, lays them out
 /// and brings every control up to date with the model.
 pub fn sync(app: &mut App, structure: bool, histogram: bool) {
-    if histogram {
-        HISTOGRAM.with(|h| *h.borrow_mut() = app.model.histogram.clone());
-        if !app.inspector.histogram.is_invalid() {
+    if histogram || app.inspector.built {
+        let waveform = app.model.prefs.scope_mode == "Waveform";
+        let changed = SCOPE.with(|scope| {
+            let mut scope = scope.borrow_mut();
+            let next = (app.model.histogram.clone(), app.model.waveform.clone(), waveform);
+            let changed = *scope != next;
+            *scope = next;
+            changed
+        });
+        if changed && !app.inspector.scope.is_invalid() {
             unsafe {
-                let _ = InvalidateRect(app.inspector.histogram, None, false);
+                let _ = InvalidateRect(app.inspector.scope, None, false);
             }
         }
     }
@@ -542,7 +724,7 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     let cropping = app.model.cropping();
     let ins = &mut app.inspector;
     unsafe {
-        for c in [ins.histogram, ins.tabs[0], ins.tabs[1], ins.rows_panel, ins.reset] {
+        for c in [ins.scope, ins.scope_mode, ins.scope_label, ins.grip, ins.pinned, ins.tabs[0], ins.tabs[1], ins.tabs[2], ins.rows_panel, ins.reset] {
             let _ = ShowWindow(c, if cropping { SW_HIDE } else { SW_SHOWNA });
         }
     }
@@ -552,13 +734,25 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     }
     let current = tab(&app.model);
     unsafe {
-        SendMessageW(ins.tabs[0], BM_SETCHECK, WPARAM((current == Tab::Lab) as usize), LPARAM(0));
-        SendMessageW(ins.tabs[1], BM_SETCHECK, WPARAM((current == Tab::Post) as usize), LPARAM(0));
+        for (i, tab) in [Tab::Prep, Tab::Lab, Tab::Output].into_iter().enumerate() {
+            SendMessageW(ins.tabs[i], BM_SETCHECK, WPARAM((current == tab) as usize), LPARAM(0));
+        }
         let _ = EnableWindow(ins.reset, app.model.has_catalog());
+        let mode = (app.model.prefs.scope_mode == "Waveform") as isize;
+        if SendMessageW(ins.scope_mode, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != mode {
+            SendMessageW(ins.scope_mode, CB_SETCURSEL, WPARAM(mode as usize), LPARAM(0));
+            super::accessible_name(ins.scope, if mode == 1 { "RGB waveform" } else { "Histogram" });
+        }
     }
     let model = &app.model;
     let expanded: Vec<bool> = ins.rows.iter().map(|r| matches!(r.kind, Kind::Group { .. }) && model.prefs.expanded(row_title(&r.kind))).collect();
-    let want: Vec<bool> = ins.rows.iter().map(|r| r.tab == current && visible(r, model, &|g| expanded[g])).collect();
+    // A group's rows show only below its header, on screen and open.
+    let mut want = vec![false; ins.rows.len()];
+    for (i, row) in ins.rows.iter().enumerate() {
+        let on_tab = row.tab == current || row.tab == Tab::Pinned;
+        let shown = on_tab && visible(row, model, &|g| want[g] && expanded[g]);
+        want[i] = shown;
+    }
     let t0 = crate::platform::qpc();
     let mut created = false;
     for i in 0..ins.rows.len() {
@@ -581,11 +775,12 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
             }
         }
     }
-    // An open foldout's tiles, built the first time it opens.
-    let catalog_size = model.stocks.len() + model.stocks.iter().map(|s| s.id.len()).sum::<usize>();
+    // An open foldout's tiles, built the first time it opens, and again when
+    // the catalog or the favourites change.
     for paper in [false, true] {
+        let key = grid_key(model, paper);
         let open = model.previews.open(paper) && ins.rows.iter().any(|r| r.kind == Kind::Foldout(paper) && r.shown);
-        if ins.grids[paper as usize].as_ref().is_some_and(|g| g.catalog != catalog_size) {
+        if ins.grids[paper as usize].as_ref().is_some_and(|g| g.key != key) {
             if let Some(grid) = ins.grids[paper as usize].take() {
                 unsafe {
                     let _ = DestroyWindow(grid.window);
@@ -593,18 +788,20 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
             }
         }
         if open && ins.grids[paper as usize].is_none() && model.has_catalog() {
-            ins.grids[paper as usize] = Some(build_grid(ins.rows_panel, &app.fonts, model, paper, catalog_size));
+            ins.grids[paper as usize] = Some(build_grid(ins.pinned, &app.fonts, model, paper, key));
             created = true;
             fix_z_order(ins);
         }
     }
-    // The note's height follows its text, so set it before laying out.
+    // A note's height follows its text, so set it before laying out.
     let mut note_changed = false;
-    for row in ins.rows.iter().filter(|r| r.kind == Kind::SizeNote && r.shown) {
-        let note = size_note(model);
-        if window_text(row.controls[0]) != note {
-            set_text(row.controls[0], &note);
-            note_changed = true;
+    for row in ins.rows.iter().filter(|r| r.shown) {
+        if let Kind::Note(note) = row.kind {
+            let text = note_text(model, note);
+            if window_text(row.controls[0]) != text {
+                set_text(row.controls[0], &text);
+                note_changed = true;
+            }
         }
     }
     let t1 = crate::platform::qpc();
@@ -627,7 +824,7 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
 }
 
 fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
-    let parent = ins.rows_panel;
+    let parent = if ins.rows[index].tab == Tab::Pinned { ins.pinned } else { ins.rows_panel };
     let id = |part: u16| FIRST_ID + index as u16 * PARTS + part;
     let kind = ins.rows[index].kind;
     let hidden = WS_CHILD;
@@ -652,24 +849,36 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         Kind::Group { title, enable } => {
             let header = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.bold);
             draw::track_hover(header);
+            if let Some(help) = crate::help::group(title) {
+                super::dialogs::tooltip(header, help);
+            }
             controls.push(header);
             if enable.is_some() {
                 let on = check("On");
-                super::dialogs::tooltip(on, &format!("Turn {title} on or off"));
+                super::dialogs::tooltip(on, &format!("Turns {title} on or off, keeping its settings."));
                 controls.push(on);
             }
         }
-        Kind::Slider(Adjustment::Slider { .. }) | Kind::BorderSlider(..) => {
+        Kind::Slider(Adjustment::Slider { .. }) | Kind::BorderSlider(..) | Kind::ExposureOffset => {
             let (title, low, high, step) = match kind {
                 Kind::Slider(Adjustment::Slider { title, low, high, step, .. }) => (title, low, high, step),
                 Kind::BorderSlider(title, field) => {
                     let (low, high, step) = field.range();
                     (title, low, high, step)
                 }
+                // The range moves with the match; the number of steps doesn't.
+                Kind::ExposureOffset => ("Exposure (EV)", state::PREP_EXPOSURE_RANGE.0, state::PREP_EXPOSURE_RANGE.1, state::PREP_EXPOSURE_STEP),
                 _ => unreachable!(),
             };
-            controls.push(label(title, fonts.ui));
+            let text = label(title, fonts.ui);
+            controls.push(text);
             let slider = create(TRACKBAR_CLASSW, title, hidden | WS_TABSTOP | WINDOW_STYLE(TBS_NOTICKS | TBS_HORZ | TBS_BOTH), WINDOW_EX_STYLE(0), parent, id(SLIDER), HFONT::default());
+            if let Kind::Slider(Adjustment::Slider { path, .. }) = kind
+                && let Some(help) = crate::help::text(path)
+            {
+                super::dialogs::tooltip(text, help);
+                super::dialogs::tooltip(slider, help);
+            }
             let steps = ((high - low) / step).round() as isize;
             unsafe {
                 SendMessageW(slider, TBM_SETRANGEMIN, WPARAM(0), LPARAM(0));
@@ -699,12 +908,43 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             match kind {
                 Kind::Toggle("Scan film directly", _) => super::dialogs::tooltip(c, "Skip printing and scan the developed film, as for slides."),
                 Kind::Toggle("Lens corrections", _) => super::dialogs::tooltip(c, "Corrects distortion, vignetting and colour fringing with the data the camera recorded for its lens."),
-                Kind::Toggle("Use less memory for export", _) => super::dialogs::tooltip(c, "Processes grain channels one at a time. Same result, less memory, longer export."),
+                Kind::Toggle("Auto exposure", _) => super::dialogs::tooltip(c, "Meters the photograph and exposes the film so the metered area lands on mid-grey, as a camera's meter does. Exposure adds to it."),
+                Kind::Toggle("Encode with the colour space’s curve", _) => super::dialogs::tooltip(c, "Off writes linear values, for further processing."),
+                Kind::Toggle(_, path) => {
+                    if let Some(help) = crate::help::text(path) {
+                        super::dialogs::tooltip(c, help);
+                    }
+                }
+                Kind::BorderToggle(_, 0) => super::dialogs::tooltip(c, "Frames the photograph in a mat or a film frame. The preview always shows it; Include in export decides whether files get it."),
                 Kind::BorderToggle(_, 1) => super::dialogs::tooltip(c, "Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post."),
                 Kind::BorderToggle(_, 2) => super::dialogs::tooltip(c, "Adds the border to exported photographs and saved previews."),
                 _ => {}
             }
             controls.push(c);
+        }
+        Kind::MatchBrightness => controls.push(check("Match camera brightness")),
+        Kind::AllControls => {
+            let c = check("Show all controls");
+            super::dialogs::tooltip(c, "Shows every Lab setting. Off, the Lab shows the few most photographs need, and any that you or a preset changed.");
+            controls.push(c);
+        }
+        Kind::FilmFormat => {
+            controls.push(label("Film format", fonts.ui));
+            let c = combo(false);
+            for title in state::FILM_FORMATS.iter().map(|(name, _)| *name).chain(["Custom…"]) {
+                let text = wide(title);
+                unsafe {
+                    SendMessageW(c, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+                }
+            }
+            super::dialogs::tooltip(c, crate::help::text(state::FILM_FORMAT.path()).unwrap_or_default());
+            controls.push(c);
+        }
+        Kind::PaperSkipped => {
+            controls.push(label("Paper", fonts.ui));
+            let value = create(w!("STATIC"), "Skipped – scanning film", hidden | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0 | SS_ENDELLIPSIS.0), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
+            super::dialogs::tooltip(value, "Scan film directly is on in the Lab’s Print section.");
+            controls.push(value);
         }
         Kind::ToneGraph => {
             let text = create(w!("STATIC"), "Tone graph", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.small);
@@ -726,11 +966,6 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         Kind::BalancePrint(title, help) => {
             let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
             super::dialogs::tooltip(c, help);
-            controls.push(c);
-        }
-        Kind::LimitPreview => {
-            let c = check("Limit preview to 12 MP");
-            super::dialogs::tooltip(c, "Develops the preview faster on large photographs. Export keeps the full Image Size.");
             controls.push(c);
         }
         Kind::PreviewSpace => {
@@ -776,10 +1011,10 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             super::dialogs::tooltip(value, "The exported photograph, cropped, before rotation, the border, and any export size.");
             controls.push(value);
         }
-        Kind::SizeNote => {
+        Kind::Note(_) => {
             controls.push(create(w!("STATIC"), "", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), fonts.small));
         }
-        Kind::Choice(title, _, options) => {
+        Kind::Choice(title, path, options) => {
             controls.push(label(title, fonts.ui));
             let c = combo(false);
             for option in options {
@@ -788,11 +1023,16 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                     SendMessageW(c, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
                 }
             }
+            if let Some(help) = crate::help::text(path) {
+                super::dialogs::tooltip(c, help);
+            }
             controls.push(c);
         }
         Kind::Stock(paper) => {
             controls.push(label(if paper { "Paper" } else { "Film" }, fonts.ui));
-            controls.push(combo(true));
+            let c = combo(true);
+            super::dialogs::tooltip(c, if paper { crate::help::PAPER } else { crate::help::FILM });
+            controls.push(c);
         }
         Kind::DevTime(paper) => {
             controls.push(label(if paper { "Print development" } else { "Development" }, fonts.ui));
@@ -804,7 +1044,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             unsafe {
                 SetWindowLongPtrW(header, GWLP_USERDATA, (paper as isize) << 1);
             }
-            super::dialogs::tooltip(header, &format!("Show each {} on your photograph", title.to_lowercase()));
+            super::dialogs::tooltip(header, if paper { crate::help::PAPER } else { crate::help::FILM });
             draw::track_hover(header);
             controls.push(header);
         }
@@ -827,18 +1067,21 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
 }
 
 /// Tab order follows the rows, though they were created in another order.
+/// The pinned rows and the scrolling rows are each their own panel's children.
 fn fix_z_order(ins: &Inspector) {
-    let mut previous = HWND_TOP;
-    for row in &ins.rows {
-        let grid = match row.kind {
-            Kind::Foldout(paper) => ins.grids[paper as usize].as_ref().map(|g| g.window),
-            _ => None,
-        };
-        for &c in row.controls.iter().chain(grid.iter()) {
-            unsafe {
-                let _ = SetWindowPos(c, previous, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    for pinned in [true, false] {
+        let mut previous = HWND_TOP;
+        for row in ins.rows.iter().filter(|r| (r.tab == Tab::Pinned) == pinned) {
+            let grid = match row.kind {
+                Kind::Foldout(paper) => ins.grids[paper as usize].as_ref().map(|g| g.window),
+                _ => None,
+            };
+            for &c in row.controls.iter().chain(grid.iter()) {
+                unsafe {
+                    let _ = SetWindowPos(c, previous, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                }
+                previous = c;
             }
-            previous = c;
         }
     }
 }
@@ -858,24 +1101,40 @@ fn footer_height(ins: &Inspector, hwnd: HWND, width: i32) -> i32 {
     }
 }
 
+/// Lays out the pinned rows, which sizes their panel and moves the tabs,
+/// then the scrolling rows.
 fn layout_rows(ins: &mut Inspector, model: &Model) {
+    let pinned = place_rows(ins, model, true);
+    if pinned != ins.pinned_height {
+        ins.pinned_height = pinned;
+        ins.layout_frame();
+    }
+    place_rows(ins, model, false);
+}
+
+/// Places one panel's rows; returns the height they take.
+fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
+    let panel = if pinned { ins.pinned } else { ins.rows_panel };
     let mut client = RECT::default();
     unsafe {
-        let _ = GetClientRect(ins.rows_panel, &mut client);
+        let _ = GetClientRect(panel, &mut client);
     }
-    let width = client.right;
+    let width = if pinned { ins.rect.right - ins.rect.left } else { client.right };
     // An 8 DIP grid: rows are multiples of 8 high, and every row's control
     // starts at one column, grouped or not.
     let pad = ins.px(16.0);
     let indent = ins.px(16.0);
     let column = pad + ins.px(128.0);
     let text = ins.px(20.0);
-    let mut y = ins.px(8.0);
+    let mut y = ins.px(if pinned { 0.0 } else { 8.0 });
     let mut positions: Vec<(HWND, i32, i32, i32, i32)> = vec![];
     let mut grids_shown = [false; 2];
     let mut first = true;
-    for row in &ins.rows {
-        if !row.shown || row.controls.is_empty() {
+    let dpi = ins.dpi;
+    let grid_height = ins.px(GRID_HEIGHT);
+    for i in 0..ins.rows.len() {
+        let row = &ins.rows[i];
+        if !row.shown || row.controls.is_empty() || (row.tab == Tab::Pinned) != pinned {
             continue;
         }
         let x = pad + if row.group.is_some() { indent } else { 0 };
@@ -883,13 +1142,15 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
         let label = (column - x - ins.px(8.0)).max(ins.px(48.0));
         let c = &row.controls;
         let height = match row.kind {
+            // An untitled section only adds a gap.
+            Kind::Section("") => ins.px(8.0),
             Kind::Section(_) => {
                 // The first section needs no space above it.
                 let top = if first { 0 } else { ins.px(16.0) };
                 positions.push((c[0], pad, y + top, right - pad, ins.px(24.0)));
                 top + ins.px(32.0)
             }
-            Kind::Footer(_) | Kind::SizeNote => {
+            Kind::Footer(_) | Kind::Note(_) => {
                 let text_height = footer_height(ins, c[0], right - x);
                 positions.push((c[0], x, y, right - x, text_height));
                 text_height + ins.px(8.0)
@@ -907,6 +1168,14 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 positions.push((c[1], column, y + ins.px(2.0), right - column, text));
                 ins.px(24.0)
             }
+            Kind::PaperSkipped => {
+                // In the paper foldout's place: as tall, the title and the
+                // value where its title and its stock are.
+                let title = pad + ins.px(16.0);
+                positions.push((c[0], title, y + ins.px(6.0), column - title - ins.px(8.0), text));
+                positions.push((c[1], column, y + ins.px(6.0), right - column - ins.px(8.0), text));
+                ins.px(32.0)
+            }
             Kind::Group { enable, .. } => {
                 let check = if enable.is_some() { ins.px(56.0) } else { 0 };
                 positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0) - check, ins.px(28.0)));
@@ -915,7 +1184,7 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 }
                 ins.px(32.0)
             }
-            Kind::Slider(_) | Kind::BorderSlider(..) => {
+            Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset => {
                 let edit = ins.px(56.0);
                 let reset = ins.px(24.0);
                 positions.push((c[0], x, y + ins.px(2.0), right - x - reset - edit, text));
@@ -925,7 +1194,7 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 positions.push((c[2], r.left, r.top, r.right - r.left, r.bottom - r.top));
                 ins.px(48.0)
             }
-            Kind::Toggle(..) | Kind::LimitPreview | Kind::BorderToggle(..) => {
+            Kind::Toggle(..) | Kind::BorderToggle(..) | Kind::MatchBrightness | Kind::AllControls => {
                 positions.push((c[0], x, y + ins.px(4.0), right - x, ins.px(24.0)));
                 ins.px(32.0)
             }
@@ -949,17 +1218,18 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
             Kind::Foldout(paper) => {
                 positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0), ins.px(28.0)));
                 let header = ins.px(32.0);
-                match &ins.grids[paper as usize] {
-                    Some(grid) if model.previews.open(paper) => {
+                let open = model.previews.open(paper);
+                match &mut ins.grids[paper as usize] {
+                    Some(grid) if open => {
                         grids_shown[paper as usize] = true;
-                        let height = layout_grid(grid, right - x, ins.dpi);
+                        let height = layout_grid(grid, right - x, grid_height, dpi);
                         positions.push((grid.window, x, y + header, right - x, height));
                         header + height + ins.px(8.0)
                     }
                     _ => header,
                 }
             }
-            Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace => {
+            Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace | Kind::FilmFormat => {
                 positions.push((c[0], x, y + ins.px(6.0), label, text));
                 positions.push((c[1], column, y + ins.px(4.0), right - column, ins.px(300.0)));
                 ins.px(32.0)
@@ -981,12 +1251,20 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
         first = false;
         y += height;
     }
-    for (grid, shown) in ins.grids.iter().zip(grids_shown) {
-        if let Some(grid) = grid {
-            unsafe {
-                let _ = ShowWindow(grid.window, if shown { SW_SHOWNA } else { SW_HIDE });
+    if pinned {
+        for (grid, shown) in ins.grids.iter_mut().zip(grids_shown) {
+            if let Some(grid) = grid {
+                grid.was_open = shown;
+                unsafe {
+                    let _ = ShowWindow(grid.window, if shown { SW_SHOWNA } else { SW_HIDE });
+                }
             }
         }
+        place(&positions, 0);
+        unsafe {
+            let _ = InvalidateRect(ins.pinned, None, true);
+        }
+        return y;
     }
     ins.content = y + ins.px(8.0);
     let visible = client.bottom;
@@ -1043,6 +1321,22 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
         };
         SetScrollInfo(ins.rows_panel, SB_VERT, &info, true);
         let _ = InvalidateRect(ins.rows_panel, None, true);
+    }
+    ins.content
+}
+
+/// Moves windows to their places, `scroll` up.
+fn place(positions: &[(HWND, i32, i32, i32, i32)], scroll: i32) {
+    unsafe {
+        let mut defer = BeginDeferWindowPos(positions.len() as i32).ok();
+        for &(hwnd, x, y, w, h) in positions {
+            if let Some(d) = defer {
+                defer = DeferWindowPos(d, hwnd, None, x, y - scroll, w.max(0), h.max(0), SWP_NOZORDER | SWP_NOACTIVATE).ok();
+            }
+        }
+        if let Some(d) = defer {
+            let _ = EndDeferWindowPos(d);
+        }
     }
 }
 
@@ -1134,6 +1428,10 @@ fn format(value: f64, step: f64, decimal: char) -> String {
 
 fn slider_value(model: &Model, kind: &Kind) -> Option<(f64, f64, f64, f64, f64)> {
     match *kind {
+        Kind::ExposureOffset => {
+            let (low, high) = model.exposure_offset_range();
+            Some((model.exposure_offset(), 0.0, low, high, state::PREP_EXPOSURE_STEP))
+        }
         Kind::Slider(Adjustment::Slider { path, low, high, step, .. }) => {
             Some((json::number(model.value(path)), json::number(model.default_value(path)), low, high, step))
         }
@@ -1158,8 +1456,8 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
         }
     }
     let decimal = ins.decimal;
-    let catalog_size = model.stocks.len() + model.stocks.iter().map(|s| s.id.len()).sum::<usize>();
-    let refill_stocks = ins.stocks_filled != catalog_size;
+    let stocks_key = format!("{}|{}", grid_key(model, false), grid_key(model, true));
+    let refill_stocks = ins.stocks_filled != stocks_key;
     for (i, row) in ins.rows.iter().enumerate() {
         if row.controls.is_empty() || !row.shown {
             continue;
@@ -1190,7 +1488,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     set_check(c[1], json::boolean(model.value(path)));
                 }
             }
-            Kind::Slider(_) | Kind::BorderSlider(..) => {
+            Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset => {
                 let Some((value, default, low, _high, step)) = slider_value(model, &row.kind) else { continue };
                 if let Kind::Slider(Adjustment::Slider { title, path, .. }) = row.kind
                     && let Some(bw) = state::bw_title(path)
@@ -1208,6 +1506,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     }
                     let modified = match row.kind {
                         Kind::Slider(Adjustment::Slider { path, .. }) => model.is_modified(path),
+                        Kind::ExposureOffset => model.exposure_offset_modified(),
                         _ => (value - default).abs() > 1e-7,
                     };
                     let _ = ShowWindow(c[3], if modified && row.shown { SW_SHOWNA } else { SW_HIDE });
@@ -1220,10 +1519,35 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 set_check(c[0], json::boolean(model.value(path)));
                 enable(c[0], on);
             }
-            Kind::LimitPreview => {
-                set_check(c[0], model.state.limit_preview);
+            Kind::MatchBrightness => {
+                let raw = model.is_raw;
+                set_text(c[0], if raw { "Match camera brightness" } else { "Match original brightness" });
+                super::dialogs::tooltip(c[0], if raw {
+                    "Develops the RAW about as bright as the camera’s own preview, and keeps it there when you change film, paper or a preset. Exposure adds to it."
+                } else {
+                    "Develops the photograph about as bright as the file itself, and keeps it there when you change film, paper or a preset. Exposure adds to it."
+                });
+                set_check(c[0], model.matches_brightness());
                 enable(c[0], on);
             }
+            Kind::AllControls => {
+                set_check(c[0], model.prefs.lab_all_controls);
+                enable(c[0], catalog);
+            }
+            Kind::FilmFormat => {
+                let selected = if model.film_format_custom() {
+                    state::FILM_FORMATS.len()
+                } else {
+                    state::film_format(json::number(model.value(state::FILM_FORMAT.path()))).unwrap_or(state::FILM_FORMATS.len())
+                } as isize;
+                unsafe {
+                    if SendMessageW(c[1], CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != selected {
+                        SendMessageW(c[1], CB_SETCURSEL, WPARAM(selected as usize), LPARAM(0));
+                    }
+                }
+                enable_all(c, on);
+            }
+            Kind::PaperSkipped => {}
             Kind::ToneGraph => {
                 // Not off with the print curves: a contrast drag turns them on.
                 let on = catalog && !scanning;
@@ -1273,7 +1597,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     format!("{} × {} · {:.*} MP", size.width as u64, size.height as u64, if mp < 10.0 { 1 } else { 0 }, mp)
                 });
             }
-            Kind::SizeNote => {}
+            Kind::Note(_) => {}
             Kind::BorderToggle(_, which) => {
                 let b = model.state.border;
                 set_check(c[0], [b.enabled, b.instagram, b.export][which as usize]);
@@ -1353,7 +1677,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
         }
     }
     if refill_stocks {
-        ins.stocks_filled = catalog_size;
+        ins.stocks_filled = stocks_key;
     }
     ins.dev_times = [stock_times(model, false), stock_times(model, true)];
 }
@@ -1364,19 +1688,36 @@ fn enable_all(controls: &[HWND], on: bool) {
     }
 }
 
-/// The film or paper list, with group names as headers that can't be chosen.
-fn fill_stocks(combo: HWND, model: &Model, paper: bool) {
+/// What a grid or menu was built from: the catalog and the favourites.
+fn grid_key(model: &Model, paper: bool) -> String {
+    let catalog = model.stocks.len() + model.stocks.iter().map(|s| s.id.len()).sum::<usize>();
+    format!("{catalog}|{}", model.prefs.favorites(paper).join(","))
+}
+
+/// The film or paper menu's entries: the favourites, starred, then each
+/// group's heading (None, can't be chosen) and stocks. A favourite stays in
+/// its group too; the closed menu shows that entry, with the plain name.
+fn stock_entries(model: &Model, paper: bool) -> Vec<(String, Option<(String, bool)>)> {
     let (films, papers) = (model.films(), model.papers());
     let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
+    let mut entries: Vec<(String, Option<(String, bool)>)> =
+        model.favorite_stocks(paper).iter().map(|s| (format!("★ {}", s.name), Some((s.id.clone(), true)))).collect();
+    for group in groups {
+        entries.push((group.title.into(), None));
+        entries.extend(group.stocks.iter().map(|s| (s.name.clone(), Some((s.id.clone(), false)))));
+    }
+    entries
+}
+
+/// The film or paper list, with group names as headers that can't be chosen.
+fn fill_stocks(combo: HWND, model: &Model, paper: bool) {
     unsafe {
         SendMessageW(combo, CB_RESETCONTENT, WPARAM(0), LPARAM(0));
-        for group in groups {
-            let title = wide(group.title);
-            let i = SendMessageW(combo, CB_ADDSTRING, WPARAM(0), LPARAM(title.as_ptr() as isize)).0;
-            SendMessageW(combo, CB_SETITEMDATA, WPARAM(i as usize), LPARAM(1));
-            for stock in group.stocks {
-                let name = wide(&stock.name);
-                SendMessageW(combo, CB_ADDSTRING, WPARAM(0), LPARAM(name.as_ptr() as isize));
+        for (text, entry) in stock_entries(model, paper) {
+            let text = wide(&text);
+            let i = SendMessageW(combo, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize)).0;
+            if entry.is_none() {
+                SendMessageW(combo, CB_SETITEMDATA, WPARAM(i as usize), LPARAM(1));
             }
         }
     }
@@ -1384,27 +1725,14 @@ fn fill_stocks(combo: HWND, model: &Model, paper: bool) {
 
 /// The catalog id of the stock at `index` in the list, or None for a header.
 fn stock_at(model: &Model, paper: bool, index: usize) -> Option<String> {
-    let (films, papers) = (model.films(), model.papers());
-    let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
-    let mut i = 0;
-    for group in groups {
-        if i == index {
-            return None;
-        }
-        i += 1;
-        for stock in group.stocks {
-            if i == index {
-                return Some(stock.id.clone());
-            }
-            i += 1;
-        }
-    }
-    None
+    stock_entries(model, paper).into_iter().nth(index).and_then(|(_, entry)| entry).map(|(id, _)| id)
 }
 
 fn select_stock(combo: HWND, id: &str, model: &Model, paper: bool) {
-    let count = unsafe { SendMessageW(combo, CB_GETCOUNT, WPARAM(0), LPARAM(0)).0 } as usize;
-    let index = (0..count).find(|&i| stock_at(model, paper, i).as_deref() == Some(id)).map_or(-1, |i| i as isize);
+    let index = stock_entries(model, paper)
+        .iter()
+        .position(|(_, entry)| entry.as_ref().is_some_and(|(stock, favorite)| stock == id && !favorite))
+        .map_or(-1, |i| i as isize);
     unsafe {
         if SendMessageW(combo, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 != index {
             SendMessageW(combo, CB_SETCURSEL, WPARAM(index as usize), LPARAM(0));
@@ -1430,6 +1758,7 @@ fn set_slider(app: &mut App, index: usize, value: f64) {
             app.model.set(path, json::num(state::snap(value, low, high, step)));
         }
         Kind::BorderSlider(_, field) => app.model.set_border_percent(field, value),
+        Kind::ExposureOffset => app.model.set_exposure_offset(value),
         _ => {}
     }
 }
@@ -1442,6 +1771,7 @@ fn reset_row(app: &mut App, index: usize) {
             let initial = field.get(&crate::border::BorderSettings::default());
             app.model.set_border(|b| field.set(b, initial), "Change Border");
         }
+        Kind::ExposureOffset => app.model.reset_exposure_offset(),
         _ => {}
     }
 }
@@ -1451,19 +1781,28 @@ fn row_modified(app: &App, index: usize) -> bool {
         Kind::Slider(a) => app.model.is_modified(a.path()),
         Kind::Toggle(_, path) | Kind::Choice(_, path, _) => app.model.is_modified(path),
         Kind::BorderSlider(_, field) => (field.get(&app.model.state.border) - field.get(&crate::border::BorderSettings::default())).abs() > 1e-9,
+        Kind::ExposureOffset => app.model.exposure_offset_modified(),
         _ => false,
     }
 }
 
 fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
-    if id == TAB_LAB || id == TAB_POST {
-        let next = if id == TAB_LAB { "Lab" } else { "Post" };
-        if app.model.prefs.inspector_tab != next {
-            app.model.prefs.inspector_tab = next.into();
+    if let Some((_, next)) = TABS.iter().find(|(tab, _)| *tab == id) {
+        if app.model.prefs.tab() != *next || !app.model.prefs.inspector_tab_chosen {
+            app.model.prefs.choose_tab(next);
             app.model.prefs.save();
             app.inspector.scroll = 0;
             app.inspector.fade = true;
             app.model.dirty |= dirty::STRUCTURE;
+        }
+        return;
+    }
+    if id == SCOPE_MODE {
+        if code == CBN_SELCHANGE {
+            let waveform = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 } == 1;
+            app.model.prefs.scope_mode = if waveform { "Waveform" } else { "Histogram" }.into();
+            app.model.prefs.save();
+            app.model.dirty |= dirty::HISTOGRAM | dirty::INSPECTOR;
         }
         return;
     }
@@ -1486,7 +1825,16 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         }
         (Kind::Group { enable: Some(path), .. }, CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
-        (Kind::LimitPreview, CHECK) if code == BN_CLICKED => app.model.limit_preview(checked()),
+        (Kind::MatchBrightness, CHECK) if code == BN_CLICKED => app.model.set_matches_brightness(checked()),
+        (Kind::AllControls, CHECK) if code == BN_CLICKED => {
+            app.model.prefs.lab_all_controls = checked();
+            app.model.prefs.save();
+            app.model.dirty |= dirty::STRUCTURE | dirty::INSPECTOR;
+        }
+        (Kind::FilmFormat, COMBO) if code == CBN_SELCHANGE => {
+            let index = selection();
+            app.model.choose_film_format(usize::try_from(index).ok().filter(|&i| i < state::FILM_FORMATS.len()));
+        }
         (Kind::BalancePrint(..), ACTION) if code == BN_CLICKED => app.model.balance_print(),
         (Kind::ToneGraph, p) if code == BN_CLICKED && (p as usize) < super::tone_graph::CHANNELS.len() => {
             app.model.prefs.tone_graph_channel = super::tone_graph::CHANNELS[p as usize].into();
@@ -1514,7 +1862,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
                 "Change Border",
             );
         }
-        (Kind::Slider(_) | Kind::BorderSlider(..), RESET) if code == BN_CLICKED => reset_row(app, index),
+        (Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset, RESET) if code == BN_CLICKED => reset_row(app, index),
         (_, LABEL) if code == STN_DBLCLK && !draw::is_dimmed(hwnd) => reset_row(app, index),
         (Kind::Choice(_, path, options), COMBO) if code == CBN_SELCHANGE => {
             if let Some(option) = options.get(selection() as usize) {
@@ -1599,7 +1947,7 @@ fn trackbar(app: &mut App, slider: HWND, code: u32) {
 fn context_menu(app: &mut App, control: HWND, x: i32, y: i32) {
     let id = unsafe { GetDlgCtrlID(control) } as u16;
     let Some((index, _)) = row_of(id) else { return };
-    if !matches!(app.inspector.rows[index].kind, Kind::Slider(_) | Kind::BorderSlider(..) | Kind::Toggle(..) | Kind::Choice(..)) {
+    if !matches!(app.inspector.rows[index].kind, Kind::Slider(_) | Kind::BorderSlider(..) | Kind::ExposureOffset | Kind::Toggle(..) | Kind::Choice(..)) {
         return;
     }
     unsafe {
@@ -1627,10 +1975,32 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         match msg {
             WM_COMMAND => {
                 let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
-                if code == BN_CLICKED {
+                if id == SCOPE_MODE && matches!(code, CBN_DROPDOWN | CBN_CLOSEUP) {
+                    // The scope's menu, as the column's drop-down lists.
+                    if code == CBN_DROPDOWN && theme::dark() {
+                        theme::combo_list(HWND(lparam.0 as *mut _));
+                    }
+                    let _ = InvalidateRect(HWND(lparam.0 as *mut _), None, false);
+                }
+                if code == BN_CLICKED || (id == SCOPE_MODE && code == CBN_SELCHANGE) {
                     with_app(|app| command(app, id, code, HWND(lparam.0 as *mut _)));
                 }
                 LRESULT(0)
+            }
+            WM_CTLCOLORLISTBOX => {
+                let dc = HDC(wparam.0 as *mut _);
+                let p = theme::palette();
+                SetTextColor(dc, COLORREF(p.text));
+                SetBkColor(dc, COLORREF(p.control));
+                LRESULT(theme::brush(p.control).0 as isize)
+            }
+            WM_CTLCOLORSTATIC => {
+                // The scope's channel label.
+                let dc = HDC(wparam.0 as *mut _);
+                let p = theme::palette();
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, COLORREF(p.secondary));
+                LRESULT(theme::brush(p.panel).0 as isize)
             }
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
@@ -1665,6 +2035,9 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             WM_VSCROLL => {
                 with_app(|app| {
                     let ins = &mut app.inspector;
+                    if hwnd != ins.rows_panel {
+                        return;
+                    }
                     let mut info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, ..Default::default() };
                     let _ = GetScrollInfo(hwnd, SB_VERT, &mut info);
                     let line = ins.px(40.0);
@@ -1686,8 +2059,10 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 let delta = ((wparam.0 >> 16) & 0xffff) as i16 as i32;
                 with_app(|app| {
                     let ins = &mut app.inspector;
-                    let target = ins.scroll - delta * ins.px(60.0) / 120;
-                    scroll_to(ins, target);
+                    if hwnd == ins.rows_panel {
+                        let target = ins.scroll - delta * ins.px(60.0) / 120;
+                        scroll_to(ins, target);
+                    }
                 });
                 LRESULT(0)
             }
@@ -1745,7 +2120,7 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
 /// Footers are drawn grey; a static row index tells which rows are footers.
 fn with_footer(index: usize) -> bool {
     thread_local! {
-        static FOOTERS: Vec<bool> = rows().iter().map(|r| matches!(r.kind, Kind::Footer(_) | Kind::ToneGraph)).collect();
+        static FOOTERS: Vec<bool> = rows().iter().map(|r| matches!(r.kind, Kind::Footer(_) | Kind::Note(_) | Kind::ToneGraph | Kind::PaperSkipped)).collect();
     }
     FOOTERS.with(|f| f.get(index).copied().unwrap_or(false))
 }
@@ -2056,16 +2431,25 @@ fn commit_edit(hwnd: HWND) {
 
 // MARK: Film and paper previews
 
-/// An open foldout: headings and a two-column grid of tiles, one owner-drawn
-/// button per stock, under the menu's headings in catalog order.
+/// An open foldout: the favourites, untitled, then headings and a
+/// two-column grid of tiles, one owner-drawn button per stock, under the
+/// menu's headings in catalog order. A favourite's tile is there twice. At
+/// most `GRID_HEIGHT` tall, it scrolls inside itself.
 struct StockGrid {
     window: HWND,
     /// Each tile's stock id and button, in order.
     tiles: Vec<(String, HWND)>,
-    /// Each heading and the index of the first tile under it.
-    headings: Vec<(HWND, usize)>,
-    /// The catalog it was built from.
-    catalog: usize,
+    /// Each heading (none above the favourites) and the index of the first
+    /// tile under it.
+    headings: Vec<(Option<HWND>, usize)>,
+    /// The catalog and favourites it was built from (`grid_key`).
+    key: String,
+    scroll: i32,
+    content: i32,
+    view: i32,
+    /// It was on screen at the last layout; opening it again scrolls to the
+    /// current stock.
+    was_open: bool,
 }
 
 /// A tile as drawn.
@@ -2074,6 +2458,7 @@ struct TileLook {
     image: Option<std::sync::Arc<crate::previews::Bitmap>>,
     dimmed: bool,
     selected: bool,
+    favorite: bool,
 }
 
 const TILE_FIRST: u16 = 100;
@@ -2082,19 +2467,26 @@ const TILE_IMAGE: f64 = 92.0;
 const TILE_CAPTION: f64 = 18.0;
 const TILE_GAP: f64 = 8.0;
 const TILE_HEADING: f64 = 24.0;
+/// The star over a thumbnail's corner.
+const TILE_STAR: f64 = 24.0;
 
-fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, catalog: usize) -> StockGrid {
-    let window = create(w!("NegsStockGrid"), if paper { "Papers" } else { "Films" }, WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), parent, 0, HFONT::default());
+fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, key: String) -> StockGrid {
+    let window = create(w!("NegsStockGrid"), if paper { "Papers" } else { "Films" }, WS_CHILD | WS_CLIPCHILDREN | WS_VSCROLL, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), parent, 0, HFONT::default());
     unsafe {
         SetWindowLongPtrW(window, GWLP_USERDATA, paper as isize);
     }
     let (films, papers) = (model.films(), model.papers());
+    let favorites = model.favorite_stocks(paper);
     let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
+    let sections = std::iter::once((None, favorites)).chain(groups.into_iter().map(|g| (Some(g.title), g.stocks)));
     let (mut tiles, mut headings) = (vec![], vec![]);
-    for group in groups {
-        let heading = create(w!("STATIC"), group.title, WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), window, 0, fonts.small);
+    for (title, stocks) in sections {
+        if stocks.is_empty() {
+            continue;
+        }
+        let heading = title.map(|title| create(w!("STATIC"), title, WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), window, 0, fonts.small));
         headings.push((heading, tiles.len()));
-        for stock in group.stocks {
+        for stock in stocks {
             let id = TILE_FIRST + tiles.len() as u16;
             let tile = create(w!("BUTTON"), &stock.name, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), window, id, fonts.small);
             draw::track_hover(tile);
@@ -2110,37 +2502,108 @@ fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, ca
         .iter()
         .map(|(id, _)| {
             let thumb = model.previews.thumb(&crate::previews::Target::Stock { id: id.clone(), paper });
-            TileLook { image: thumb.and_then(|t| t.image.clone()), dimmed: thumb.is_some_and(|t| t.dimmed), selected: false }
+            TileLook { image: thumb.and_then(|t| t.image.clone()), dimmed: thumb.is_some_and(|t| t.dimmed), selected: false, favorite: model.prefs.is_favorite(id, paper) }
         })
         .collect();
     TILES.with(|t| t.borrow_mut()[paper as usize] = looks);
-    let grid = StockGrid { window, tiles, headings, catalog };
+    let grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false };
     select_tile(&grid, if paper { &model.state.paper } else { &model.state.film });
     grid
 }
 
-/// Places the headings and tiles for `width`; returns the grid's height.
-fn layout_grid(grid: &StockGrid, width: i32, dpi: u32) -> i32 {
+/// Where the headings and tiles go for `width`, and the content's height.
+fn grid_positions(grid: &StockGrid, width: i32, dpi: u32) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
     let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
     let gap = px(TILE_GAP);
     let column = ((width - gap) / 2).max(1);
     let tile = px(TILE_IMAGE + TILE_CAPTION);
     let mut y = 0;
-    unsafe {
-        for (g, &(heading, first)) in grid.headings.iter().enumerate() {
-            let end = grid.headings.get(g + 1).map_or(grid.tiles.len(), |h| h.1);
-            let _ = MoveWindow(heading, 0, y + px(6.0), width, px(16.0), false);
-            y += px(TILE_HEADING);
-            for (i, (_, button)) in grid.tiles[first..end].iter().enumerate() {
-                let (col, row) = (i as i32 % 2, i as i32 / 2);
-                let _ = MoveWindow(*button, col * (column + gap), y + row * (tile + gap), column, tile, false);
+    let mut positions = vec![];
+    for (g, &(heading, first)) in grid.headings.iter().enumerate() {
+        let end = grid.headings.get(g + 1).map_or(grid.tiles.len(), |h| h.1);
+        match heading {
+            Some(heading) => {
+                positions.push((heading, 0, y + px(6.0), width, px(16.0)));
+                y += px(TILE_HEADING);
             }
-            let rows = (end - first).div_ceil(2) as i32;
-            y += rows * tile + (rows - 1).max(0) * gap + px(2.0);
+            None => y += px(4.0),
         }
+        for (i, (_, button)) in grid.tiles[first..end].iter().enumerate() {
+            let (col, row) = (i as i32 % 2, i as i32 / 2);
+            positions.push((*button, col * (column + gap), y + row * (tile + gap), column, tile));
+        }
+        let rows = (end - first).div_ceil(2) as i32;
+        y += rows * tile + (rows - 1).max(0) * gap + px(2.0);
+    }
+    (positions, y)
+}
+
+/// Places the headings and tiles for `width`, at most `limit` tall with a
+/// scroll bar beyond it; returns the grid's height. Opening it shows the
+/// current stock's tile in the middle.
+fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
+    let (mut positions, mut content) = grid_positions(grid, width, dpi);
+    if content > limit {
+        let bar = unsafe { windows::Win32::UI::HiDpi::GetSystemMetricsForDpi(SM_CXVSCROLL, dpi) };
+        (positions, content) = grid_positions(grid, width - bar, dpi);
+    }
+    grid.content = content;
+    grid.view = content.min(limit);
+    if !grid.was_open {
+        let selected = TILES.with(|t| {
+            let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
+            t.borrow()[paper as usize].iter().position(|look| look.selected)
+        });
+        let tile = selected.and_then(|i| positions.iter().find(|p| p.0 == grid.tiles[i].1));
+        grid.scroll = tile.map_or(0, |&(_, _, y, _, h)| y + h / 2 - grid.view / 2);
+    }
+    grid.scroll = grid.scroll.clamp(0, (grid.content - grid.view).max(0));
+    place(&positions, grid.scroll);
+    unsafe {
+        let info = SCROLLINFO {
+            cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+            fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
+            nMin: 0,
+            nMax: grid.content,
+            nPage: grid.view.max(0) as u32,
+            nPos: grid.scroll,
+            ..Default::default()
+        };
+        SetScrollInfo(grid.window, SB_VERT, &info, true);
         let _ = InvalidateRect(grid.window, None, true);
     }
-    y
+    grid.view
+}
+
+/// Scrolls an open grid to `target`.
+fn scroll_grid(grid: &mut StockGrid, target: i32) {
+    let target = target.clamp(0, (grid.content - grid.view).max(0));
+    if target == grid.scroll {
+        return;
+    }
+    let delta = grid.scroll - target;
+    grid.scroll = target;
+    unsafe {
+        ScrollWindowEx(grid.window, 0, delta, None, None, None, None, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+        let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nPos: target, ..Default::default() };
+        SetScrollInfo(grid.window, SB_VERT, &info, true);
+    }
+}
+
+/// Scrolls a grid so a focused tile is in view.
+fn reveal_tile(grid: &mut StockGrid, tile: HWND) {
+    unsafe {
+        let mut r = RECT::default();
+        let _ = GetWindowRect(tile, &mut r);
+        let mut top_left = POINT { x: r.left, y: r.top };
+        let _ = windows::Win32::Graphics::Gdi::ScreenToClient(grid.window, &mut top_left);
+        let (top, height) = (top_left.y + grid.scroll, r.bottom - r.top);
+        if top < grid.scroll {
+            scroll_grid(grid, top);
+        } else if top + height > grid.scroll + grid.view {
+            scroll_grid(grid, top + height - grid.view);
+        }
+    }
 }
 
 /// Outlines the current stock's tile, and names it for screen readers.
@@ -2155,7 +2618,8 @@ fn select_tile(grid: &StockGrid, selected: &str) {
             if look.selected != now {
                 look.selected = now;
                 let name = window_text(*button);
-                super::accessible_name(*button, &if now { format!("{name}, current") } else { name });
+                let favorite = if look.favorite { ", favorite" } else { "" };
+                super::accessible_name(*button, &if now { format!("{name}, current{favorite}") } else { format!("{name}{favorite}") });
                 unsafe {
                     let _ = InvalidateRect(*button, None, false);
                 }
@@ -2223,7 +2687,7 @@ fn draw_foldout(c: &mut Canvas, item: &DRAWITEMSTRUCT, title: &str, color: u32) 
 /// A tile: the thumbnail cropped to fill a rounded frame (grey until it
 /// arrives, dimmed while out of date), the accent outline on the current
 /// stock, and the name below, cut with an ellipsis.
-fn draw_tile(item: &DRAWITEMSTRUCT, look: &TileLook) {
+fn draw_tile(item: &DRAWITEMSTRUCT, look: &TileLook, hovered: bool) {
     let p = theme::palette();
     let s = draw::dpi_of(item.hwndItem);
     let px = |dip: f64| (dip * s as f64).round() as i32;
@@ -2232,12 +2696,23 @@ fn draw_tile(item: &DRAWITEMSTRUCT, look: &TileLook) {
     let inset = px(2.0);
     let frame = RECT { left: inset, top: inset, right: c.w - inset, bottom: px(TILE_IMAGE) - inset };
     let radius = 6.0 * s;
-    let hot = draw::is_hot(item.hwndItem);
+    let hot = hovered || draw::is_hot(item.hwndItem);
     draw_thumbnail(&mut c, frame, radius, look.image.as_deref(), look.dimmed, p.well, p.panel);
     if look.selected {
         c.round_frame(RectF::of(frame).inset(-inset as f32, -inset as f32), radius + inset as f32, 2.0 * s, p.accent);
     } else if hot {
         c.round_frame(RectF::of(frame), radius, s, p.strong_border);
+    }
+    // The star sits over the thumbnail's corner, on the photograph, so its
+    // colours don't follow the theme: on a favourite, or under the pointer.
+    if look.favorite || hot {
+        let star = RECT { left: frame.right - px(TILE_STAR), top: frame.top, right: frame.right, bottom: frame.top + px(TILE_STAR) };
+        let shadow = RECT { left: star.left + 1, top: star.top + 1, right: star.right + 1, bottom: star.bottom + 1 };
+        let glyph = if look.favorite { "\u{E735}" } else { "\u{E734}" };
+        let font = HFONT(with_app_fonts_glyph().0);
+        let center = DT_SINGLELINE | DT_VCENTER | DT_CENTER;
+        c.text(glyph, shadow, font, theme::rgb(0x20, 0x20, 0x20), center);
+        c.text(glyph, star, font, if look.favorite { theme::rgb(0xff, 0xc8, 0x00) } else { theme::rgb(0xff, 0xff, 0xff) }, center);
     }
     let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
     let ink = if disabled { p.disabled } else if look.selected || hot { p.text } else { p.secondary };
@@ -2305,8 +2780,41 @@ pub fn draw_thumbnail(c: &mut Canvas, frame: RECT, radius: f32, image: Option<&c
     }
 }
 
+/// The tile's grid (paper or not) and position.
+fn tile_of(hwnd: HWND) -> (bool, usize) {
+    unsafe {
+        let paper = GetWindowLongPtrW(GetParent(hwnd).unwrap_or_default(), GWLP_USERDATA) != 0;
+        (paper, (GetDlgCtrlID(hwnd) as u16).wrapping_sub(TILE_FIRST) as usize)
+    }
+}
+
+/// Whether a point in the tile's client area is on its star.
+fn on_star(hwnd: HWND, lparam: LPARAM) -> bool {
+    unsafe {
+        let mut r = RECT::default();
+        let _ = GetClientRect(hwnd, &mut r);
+        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as i32;
+        let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
+        let (x, y) = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
+        let right = r.right - px(2.0);
+        x >= right - px(TILE_STAR) && x < right && y >= px(2.0) && y < px(2.0) + px(TILE_STAR)
+    }
+}
+
+fn toggle_tile_favorite(hwnd: HWND) {
+    let (paper, index) = tile_of(hwnd);
+    post(move |app: &mut App| {
+        let id = app.inspector.grids[paper as usize].as_ref().and_then(|g| g.tiles.get(index)).map(|t| t.0.clone());
+        if let Some(id) = id {
+            app.model.toggle_favorite(&id, paper);
+        }
+    });
+}
+
 /// Enter chooses a focused tile, as Space does: owner-drawn buttons aren't
-/// push buttons to `IsDialogMessage`.
+/// push buttons to `IsDialogMessage`. A click on the star (or the context
+/// menu, for the keyboard) stars or unstars the stock instead; the pointer
+/// over a tile shows its star.
 extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
     unsafe {
         let enter = wparam.0 == VK_RETURN.0 as usize;
@@ -2317,6 +2825,56 @@ extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
             let parent = GetParent(hwnd).unwrap_or_default();
             SendMessageW(parent, WM_COMMAND, WPARAM(((BN_CLICKED as usize) << 16) | GetDlgCtrlID(hwnd) as usize), LPARAM(hwnd.0 as isize));
             return LRESULT(0);
+        }
+        match msg {
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if on_star(hwnd, lparam) => {
+                toggle_tile_favorite(hwnd);
+                return LRESULT(0);
+            }
+            WM_MOUSEMOVE => {
+                let tile = tile_of(hwnd);
+                if HOVER_TILE.get() != Some(tile) {
+                    HOVER_TILE.set(Some(tile));
+                    let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                    let _ = TrackMouseEvent(&mut track);
+                    let _ = InvalidateRect(hwnd, None, false);
+                }
+            }
+            WM_MOUSELEAVE => {
+                if HOVER_TILE.get() == Some(tile_of(hwnd)) {
+                    HOVER_TILE.set(None);
+                }
+                let _ = InvalidateRect(hwnd, None, false);
+            }
+            WM_CONTEXTMENU => {
+                let (paper, index) = tile_of(hwnd);
+                let favorite = TILES.with(|t| t.borrow()[paper as usize].get(index).is_some_and(|l| l.favorite));
+                let menu = CreatePopupMenu().unwrap();
+                let text = wide(if favorite { "Remove from &Favorites" } else { "Add to &Favorites" });
+                let _ = AppendMenuW(menu, MF_STRING, 1, pcwstr(&text));
+                let (mut x, mut y) = ((lparam.0 & 0xffff) as i16 as i32, ((lparam.0 >> 16) & 0xffff) as i16 as i32);
+                if x == -1 && y == -1 {
+                    let mut r = RECT::default();
+                    let _ = GetWindowRect(hwnd, &mut r);
+                    (x, y) = (r.left, r.bottom);
+                }
+                let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, hwnd, None);
+                let _ = DestroyMenu(menu);
+                if chosen.0 == 1 {
+                    toggle_tile_favorite(hwnd);
+                }
+                return LRESULT(0);
+            }
+            WM_SETFOCUS => {
+                let raw = hwnd.0 as isize;
+                post(move |app: &mut App| {
+                    let (paper, _) = tile_of(HWND(raw as *mut _));
+                    if let Some(grid) = app.inspector.grids[paper as usize].as_mut() {
+                        reveal_tile(grid, HWND(raw as *mut _));
+                    }
+                });
+            }
+            _ => {}
         }
         DefSubclassProc(hwnd, msg, wparam, lparam)
     }
@@ -2339,7 +2897,7 @@ extern "system" fn grid_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 let item = &*(lparam.0 as *const DRAWITEMSTRUCT);
                 let index = (item.CtlID as u16).wrapping_sub(TILE_FIRST) as usize;
                 let look = TILES.with(|t| t.borrow()[paper as usize].get(index).cloned()).unwrap_or_default();
-                draw_tile(item, &look);
+                draw_tile(item, &look, HOVER_TILE.get() == Some((paper, index)));
                 LRESULT(1)
             }
             WM_CTLCOLORSTATIC => {
@@ -2350,14 +2908,40 @@ extern "system" fn grid_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
+            WM_VSCROLL | WM_MOUSEWHEEL => {
+                with_app(|app| {
+                    let line = app.inspector.px(40.0);
+                    let Some(grid) = app.inspector.grids[paper as usize].as_mut() else { return };
+                    let target = if msg == WM_MOUSEWHEEL {
+                        grid.scroll - ((wparam.0 >> 16) & 0xffff) as i16 as i32 * line * 3 / 2 / 120
+                    } else {
+                        let mut info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, ..Default::default() };
+                        let _ = GetScrollInfo(hwnd, SB_VERT, &mut info);
+                        match SCROLLBAR_COMMAND((wparam.0 & 0xffff) as i32) {
+                            SB_LINEUP => info.nPos - line,
+                            SB_LINEDOWN => info.nPos + line,
+                            SB_PAGEUP => info.nPos - info.nPage as i32,
+                            SB_PAGEDOWN => info.nPos + info.nPage as i32,
+                            SB_THUMBTRACK | SB_THUMBPOSITION => info.nTrackPos,
+                            SB_TOP => 0,
+                            SB_BOTTOM => i32::MAX / 2,
+                            _ => info.nPos,
+                        }
+                    };
+                    scroll_grid(grid, target);
+                });
+                LRESULT(0)
+            }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
 }
 
-/// The histogram: red, green and blue added on a dark well, as in photo
-/// editors; overlaps mix to cyan, magenta, yellow and white.
-extern "system" fn histogram_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+/// The scope on a dark well: the histogram's red, green and blue added, as
+/// in photo editors (overlaps mix to cyan, magenta, yellow and white), or
+/// the RGB waveform with its levels in percent at the left. Grid lines at a
+/// quarter, half and three quarters.
+extern "system" fn scope_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         match msg {
             WM_PAINT => {
@@ -2366,42 +2950,70 @@ extern "system" fn histogram_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 let mut r = RECT::default();
                 let _ = GetClientRect(hwnd, &mut r);
                 let (w, h) = (r.right.max(1) as usize, r.bottom.max(1) as usize);
-                let mut pixels = vec![0u32; w * h];
+                let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as usize;
                 let well = 0x1a1a1a;
-                pixels.iter_mut().for_each(|p| *p = well);
-                HISTOGRAM.with(|histogram| {
-                    let Some(histogram) = &*histogram.borrow() else { return };
-                    let peak = histogram.peak() as f64;
-                    if peak <= 0.0 {
-                        return;
-                    }
-                    let inset = 4;
-                    let top = 6;
-                    let plot_w = w.saturating_sub(2 * inset).max(1);
-                    let plot_h = h.saturating_sub(top).max(1);
-                    for x in 0..plot_w {
-                        let bin = x as f64 * 255.0 / (plot_w - 1).max(1) as f64;
-                        let (i, f) = (bin.floor() as usize, bin.fract());
-                        let at = |bins: &[u32; 256]| {
-                            let a = bins[i.min(255)] as f64;
-                            let b = bins[(i + 1).min(255)] as f64;
-                            ((a * (1.0 - f) + b * f) / peak).min(1.0)
-                        };
-                        let heights = [at(&histogram.red), at(&histogram.green), at(&histogram.blue)];
-                        let colors = [[1.0, 0.2, 0.2], [0.2, 1.0, 0.2], [0.25, 0.35, 1.0]];
-                        for y in 0..plot_h {
-                            let level = 1.0 - (y as f64 + 0.5) / plot_h as f64;
-                            let mut c = [0.1f64, 0.1, 0.1];
-                            for k in 0..3 {
-                                if heights[k] >= level {
-                                    for j in 0..3 {
-                                        c[j] += colors[k][j] * 0.75;
+                let mut pixels = vec![well; w * h];
+                let (has_photo, waveform) = SCOPE.with(|scope| {
+                    let scope = scope.borrow();
+                    if scope.2 {
+                        // The levels' column, then the raster scaled into the plot.
+                        let left = 26 * dpi / 96;
+                        let (top, bottom) = (6 * dpi / 96, 6 * dpi / 96);
+                        let (plot_w, plot_h) = (w.saturating_sub(left + 4).max(1), h.saturating_sub(top + bottom).max(1));
+                        grid_lines(&mut pixels, w, left, top, plot_w, plot_h);
+                        if let Some(waveform) = scope.1.as_ref().filter(|wf| wf.samples > 0) {
+                            let raster = waveform.raster();
+                            for y in 0..plot_h {
+                                let sy = (y * 256 / plot_h).min(255);
+                                for x in 0..plot_w {
+                                    let [rr, gg, bb, a] = raster[sy * waveform.width + (x * waveform.width / plot_w).min(waveform.width - 1)];
+                                    if a == 0 {
+                                        continue;
+                                    }
+                                    let p = &mut pixels[(top + y) * w + left + x];
+                                    let under = |shift: u32| ((*p >> shift) & 0xff) * (255 - a as u32) / 255;
+                                    *p = ((rr as u32 + under(16)).min(255)) << 16 | ((gg as u32 + under(8)).min(255)) << 8 | (bb as u32 + under(0)).min(255);
+                                }
+                            }
+                        }
+                        (scope.0.is_some(), Some((left, top, plot_h)))
+                    } else {
+                        let (inset, top) = (4, 6);
+                        let (plot_w, plot_h) = (w.saturating_sub(2 * inset).max(1), h.saturating_sub(top).max(1));
+                        grid_lines(&mut pixels, w, inset, top, plot_w, plot_h);
+                        if let Some(histogram) = &scope.0 {
+                            let peak = histogram.peak() as f64;
+                            if peak > 0.0 {
+                                for x in 0..plot_w {
+                                    let bin = x as f64 * 255.0 / (plot_w - 1).max(1) as f64;
+                                    let (i, f) = (bin.floor() as usize, bin.fract());
+                                    let at = |bins: &[u32; 256]| {
+                                        let a = bins[i.min(255)] as f64;
+                                        let b = bins[(i + 1).min(255)] as f64;
+                                        ((a * (1.0 - f) + b * f) / peak).min(1.0)
+                                    };
+                                    let heights = [at(&histogram.red), at(&histogram.green), at(&histogram.blue)];
+                                    let colors = [[1.0, 0.2, 0.2], [0.2, 1.0, 0.2], [0.25, 0.35, 1.0]];
+                                    for y in 0..plot_h {
+                                        let level = 1.0 - (y as f64 + 0.5) / plot_h as f64;
+                                        if heights.iter().all(|&height| height < level) {
+                                            continue;
+                                        }
+                                        let mut c = [0.1f64, 0.1, 0.1];
+                                        for k in 0..3 {
+                                            if heights[k] >= level {
+                                                for j in 0..3 {
+                                                    c[j] += colors[k][j] * 0.75;
+                                                }
+                                            }
+                                        }
+                                        let byte = |v: f64| (v.min(1.0) * 255.0) as u32;
+                                        pixels[(top + y) * w + inset + x] = byte(c[0]) << 16 | byte(c[1]) << 8 | byte(c[2]);
                                     }
                                 }
                             }
-                            let byte = |v: f64| (v.min(1.0) * 255.0) as u32;
-                            pixels[(top + y) * w + inset + x] = byte(c[0]) << 16 | byte(c[1]) << 8 | byte(c[2]);
                         }
+                        (scope.0.is_some(), None)
                     }
                 });
                 let info = BITMAPINFO {
@@ -2418,6 +3030,19 @@ extern "system" fn histogram_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 };
                 let mut c = Canvas::new(dc, r);
                 SetDIBitsToDevice(c.hdc(), 0, 0, w as u32, h as u32, 0, 0, 0, h as u32, pixels.as_ptr() as *const _, &info, DIB_RGB_COLORS);
+                // Labels on the dark well, which is dark in either theme.
+                let ink = theme::rgb(0x9a, 0x9a, 0x9a);
+                let font = HFONT(with_app_fonts_small().0);
+                if let Some((left, top, plot_h)) = waveform {
+                    for (i, level) in [100, 75, 50, 25, 0].into_iter().enumerate() {
+                        let y = (top + plot_h * i / 4) as i32;
+                        let tr = RECT { left: 2, top: y - 8, right: left as i32 - 3, bottom: y + 8 };
+                        c.text(&level.to_string(), tr, font, ink, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+                    }
+                }
+                if !has_photo {
+                    c.text("No developed photograph", r, font, ink, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                }
                 c.round_corners(RectF::of(r), 6.0 * draw::dpi_of(hwnd), theme::palette().panel);
                 c.present(dc);
                 let _ = EndPaint(hwnd, &ps);
@@ -2433,12 +3058,130 @@ extern "system" fn histogram_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
+/// Faint lines across the plot at a quarter, half and three quarters.
+fn grid_lines(pixels: &mut [u32], width: usize, left: usize, top: usize, plot_w: usize, plot_h: usize) {
+    for fraction in [1, 2, 3] {
+        let y = top + plot_h * fraction / 4;
+        for x in left..(left + plot_w).min(width) {
+            if let Some(p) = pixels.get_mut(y * width + x) {
+                *p = 0x2c2c2c;
+            }
+        }
+    }
+}
+
+/// The small UI font, for the scope's labels.
+fn with_app_fonts_small() -> HGDIOBJ {
+    thread_local! {
+        static SMALL: Cell<isize> = const { Cell::new(0) };
+    }
+    SMALL.with(|f| {
+        if f.get() == 0 {
+            with_app(|app| f.set(app.fonts.small.0 as isize));
+        }
+        HGDIOBJ(f.get() as *mut _)
+    })
+}
+
+/// The scope's height: a grabber under it. Drag to resize (88–420 DIPs,
+/// remembered), double-click for the smallest; Up and Down change it in
+/// steps when focused.
+extern "system" fn grip_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let set_height = |height: f64, save: bool| {
+        with_app(|app| {
+            let height = height.round().clamp(SCOPE_HEIGHTS.0, SCOPE_HEIGHTS.1);
+            if height != app.inspector.scope_height {
+                app.inspector.scope_height = height;
+                app.inspector.layout_frame();
+                app.model.dirty |= dirty::STRUCTURE;
+            }
+            if save && app.model.prefs.scope_height != height {
+                app.model.prefs.scope_height = height;
+                app.model.prefs.save();
+            }
+        });
+    };
+    let current = || with_app(|app| app.inspector.scope_height).unwrap_or(SCOPE_HEIGHTS.0);
+    unsafe {
+        match msg {
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let dc = BeginPaint(hwnd, &mut ps);
+                let mut r = RECT::default();
+                let _ = GetClientRect(hwnd, &mut r);
+                // A pill in the middle, darker under the pointer or while dragged.
+                let p = theme::palette();
+                let s = draw::dpi_of(hwnd);
+                let mut c = Canvas::new(dc, r);
+                c.clear(p.panel);
+                let (cw, ch) = (32.0 * s, 4.0 * s);
+                let pill = RectF::new(((r.right as f32 - cw) / 2.0).round(), ((r.bottom as f32 - ch) / 2.0).round(), cw, ch);
+                let active = draw::is_hot(hwnd) || GRIP_DRAG.get().is_some();
+                c.round_rect(pill, ch / 2.0, if active { p.secondary } else { theme::mix(p.border, p.strong_border, 0.4) });
+                if GetFocus() == hwnd && draw::focus_cues(hwnd) {
+                    draw::focus_ring(&mut c, RectF::new(pill.x - 8.0 * s, 0.0, cw + 16.0 * s, r.bottom as f32), 3.0 * s, s);
+                }
+                c.present(dc);
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            WM_SETCURSOR => {
+                SetCursor(LoadCursorW(None, IDC_SIZENS).unwrap_or_default());
+                LRESULT(1)
+            }
+            WM_LBUTTONDOWN => {
+                // Measured on screen: the handle moves with the height.
+                let mut point = POINT::default();
+                let _ = GetCursorPos(&mut point);
+                GRIP_DRAG.set(Some((point.y, current())));
+                SetCapture(hwnd);
+                let _ = SetFocus(hwnd);
+                LRESULT(0)
+            }
+            WM_MOUSEMOVE => {
+                if let Some((start, height)) = GRIP_DRAG.get() {
+                    let mut point = POINT::default();
+                    let _ = GetCursorPos(&mut point);
+                    let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as f64;
+                    set_height(height + (point.y - start) as f64 * 96.0 / dpi, false);
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONUP | WM_CAPTURECHANGED => {
+                if GRIP_DRAG.take().is_some() {
+                    if msg == WM_LBUTTONUP {
+                        let _ = ReleaseCapture();
+                    }
+                    set_height(current(), true);
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONDBLCLK => {
+                set_height(SCOPE_HEIGHTS.0, true);
+                LRESULT(0)
+            }
+            WM_GETDLGCODE => LRESULT(DLGC_WANTARROWS as isize),
+            WM_KEYDOWN if matches!(VIRTUAL_KEY(wparam.0 as u16), VK_UP | VK_DOWN) => {
+                let step = if wparam.0 == VK_DOWN.0 as usize { 20.0 } else { -20.0 };
+                set_height(current() + step, true);
+                LRESULT(0)
+            }
+            WM_SETFOCUS | WM_KILLFOCUS => {
+                let _ = InvalidateRect(hwnd, None, false);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
 /// Logs where Exposure's trackbar is, for the startup probe.
 pub fn report_geometry(app: &mut App) {
     if !app.report.active() {
         return;
     }
-    let found = app.inspector.rows.iter().find(|r| matches!(r.kind, Kind::Slider(Adjustment::Slider { path: "camera.exposure_compensation_ev", .. })));
+    let exposure = |kind: &Kind| matches!(kind, Kind::ExposureOffset | Kind::Slider(Adjustment::Slider { path: "camera.exposure_compensation_ev", .. }));
+    let found = app.inspector.rows.iter().find(|r| exposure(&r.kind) && r.shown);
     if let Some(row) = found.filter(|r| r.shown && !r.controls.is_empty()) {
         let mut rect = RECT::default();
         unsafe {
@@ -2832,6 +3575,79 @@ mod tests {
         }
         // Control ids stay below the crop panel's.
         assert!(FIRST_ID as usize + rows.len() * PARTS as usize <= u16::MAX as usize);
+        // Prep's sliders are rows too.
+        for control in state::PREP_TONE.iter().chain(state::PREP_COLOR).chain(state::PREP_DETAIL) {
+            assert!(paths.contains(&control.path()), "{}", control.path());
+        }
+    }
+
+    /// The rows a model shows, by kind, with every group open.
+    fn shown(model: &crate::model::Model) -> Vec<Kind> {
+        let rows = rows();
+        let current = tab(model);
+        let mut want = vec![false; rows.len()];
+        for (i, row) in rows.iter().enumerate() {
+            let on_tab = row.tab == current || row.tab == Tab::Pinned;
+            let visible = on_tab && visible(row, model, &|g| want[g]);
+            want[i] = visible;
+        }
+        rows.iter().zip(want).filter(|(_, w)| *w).map(|(r, _)| r.kind).collect()
+    }
+
+    fn model() -> crate::model::Model {
+        let mut model = crate::model::Model::new(crate::session::Preferences::default());
+        model.defaults = serde_json::json!({"camera": {"lens_blur_um": 0.0, "auto_exposure": true}, "scanner": {"lens_blur": 0.0},
+            "enlarger": {"print_exposure": 1.0, "preflash_exposure": 0.0}, "io": {"output_cctf_encoding": true}});
+        model.state.params = model.defaults.clone();
+        model
+    }
+
+    /// `Inspector.swift`'s Lab: each group's basics, anything changed from
+    /// its default, and everything with Show all controls.
+    #[test]
+    fn the_lab_shows_basics_and_changes() {
+        let mut model = model();
+        model.prefs.choose_tab("Lab");
+        let slider = |path: &'static str| move |k: &Kind| matches!(k, Kind::Slider(a) if a.path() == path);
+        let title = |name: &'static str| move |k: &Kind| matches!(k, Kind::Group { title, .. } if *title == name);
+        let rows = shown(&model);
+        assert!(rows.iter().any(slider("enlarger.print_exposure")));
+        assert!(rows.iter().any(|k| matches!(k, Kind::BalancePrint(..))), "Balance Print is the Enlarger's fourth basic");
+        assert!(!rows.iter().any(slider("enlarger.preflash_exposure")));
+        assert!(!rows.iter().any(slider("camera.lens_blur_um")));
+        assert!(!rows.iter().any(title("Scanner")) && !rows.iter().any(|k| *k == Kind::Section("Scan & Color")));
+        assert!(!rows.iter().any(|k| matches!(k, Kind::Toggle("Scan film directly", _))));
+        // A change shows its control, and its group and section.
+        crate::json::set(&mut model.state.params, "enlarger.preflash_exposure", serde_json::json!(0.1));
+        crate::json::set(&mut model.state.params, "scanner.lens_blur", serde_json::json!(1.0));
+        let rows = shown(&model);
+        assert!(rows.iter().any(slider("enlarger.preflash_exposure")) && rows.iter().any(title("Scanner")));
+        assert!(rows.iter().any(|k| *k == Kind::Section("Scan & Color")));
+        model.prefs.lab_all_controls = true;
+        let rows = shown(&model);
+        assert!(rows.iter().any(slider("camera.lens_blur_um")) && rows.iter().any(title("Color Management")));
+        assert!(rows.iter().any(|k| matches!(k, Kind::Toggle("Scan film directly", _))) && rows.iter().any(title("Output")));
+        assert!(rows.iter().all(|k| !matches!(k, Kind::ExposureOffset)), "Prep's rows stay on Prep");
+    }
+
+    /// Prep shows the meter while matching is off or unavailable, or when
+    /// it's changed; the pinned stocks show on every tab.
+    #[test]
+    fn prep_shows_the_meter_when_the_match_doesnt_set_it() {
+        let mut model = model();
+        let meter = |rows: &[Kind]| rows.iter().any(|k| matches!(k, Kind::Toggle("Auto exposure", _)));
+        assert_eq!(tab(&model), Tab::Prep, "The inspector opens on Prep");
+        assert!(meter(&shown(&model)));
+        model.state.brightness_match = Some(state::BrightnessMatch::default());
+        model.is_raw = true;
+        let rows = shown(&model);
+        assert!(!meter(&rows) && rows.iter().any(|k| *k == Kind::Note(Note::Brightness)));
+        crate::json::set(&mut model.state.params, "camera.auto_exposure", serde_json::json!(false));
+        assert!(meter(&shown(&model)));
+        for name in ["Prep", "Lab", "Output"] {
+            model.prefs.choose_tab(name);
+            assert!(shown(&model).iter().any(|k| matches!(k, Kind::Foldout(false))), "{name}");
+        }
     }
 }
 

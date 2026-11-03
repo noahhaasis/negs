@@ -70,9 +70,9 @@ on its build machine: [validation results](prep-validation-2026-11-01.md).
 
 ## Open
 
-- **Windows, Linux and web inspectors.** The engine is shared, so those apps render Prep
-  (neutral unless set), but only macOS has the controls. Needed before Prep counts as shipped
-  on every platform.
+- **Linux and web inspectors.** The engine is shared, so those apps render Prep (neutral
+  unless set), but only macOS and Windows have the controls (Windows: `docs/windows-app.md`,
+  branch `windows-prep-port`). Needed before Prep counts as shipped on every platform.
 - **Highlights centring.** The range is −180…100 (the recovered extended recovery travel), so 0
   sits at 64 % of the track. Options: a piecewise mapping that centres 0, −100…100, or leave it.
   Above an encoded base of 1.0 (linear ≈ 4.2) the tone table's end slope is extrapolated, so
