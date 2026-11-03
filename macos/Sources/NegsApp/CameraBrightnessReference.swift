@@ -4,6 +4,13 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+/// Why a RAW's embedded preview can't serve as the reference. Retrying the
+/// same photograph gives the same answer, so the app stops offering it.
+struct CameraPreviewUnusable: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 /// A camera's embedded preview, never a new RAW development. The small,
 /// explicitly tagged sRGB image is only a brightness reference, not a look.
 enum CameraBrightnessReference {
@@ -17,16 +24,20 @@ enum CameraBrightnessReference {
                 kCGImageSourceThumbnailMaxPixelSize: 512,
                 kCGImageSourceShouldCacheImmediately: true
               ] as CFDictionary) else {
-            throw EngineError(message: "This RAW has no embedded camera preview. Adjust Exposure manually.")
+            throw CameraPreviewUnusable(message: "This RAW has no camera preview to match.")
         }
         guard thumbnail.width >= 64, thumbnail.height >= 64,
               expectedSize.width > 0, expectedSize.height > 0 else {
-            throw EngineError(message: "The camera preview is too small to match brightness reliably.")
+            throw CameraPreviewUnusable(message: "The camera preview is too small to match.")
         }
-        let aspect = Double(thumbnail.width) / Double(thumbnail.height)
         let expected = expectedSize.width / expectedSize.height
-        guard max(aspect, expected) / min(aspect, expected) <= 1.02 else {
-            throw EngineError(message: "The camera preview has a different crop. Adjust Exposure manually.")
+        var preview = thumbnail
+        if !sameShape(Double(thumbnail.width) / Double(thumbnail.height), expected) {
+            // Only previews of another shape pay for the bar search.
+            guard let inside = trimmingBars(thumbnail, toAspect: expected) else {
+                throw CameraPreviewUnusable(message: "The camera preview is framed differently from the photo.")
+            }
+            preview = inside
         }
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         let exif = properties?[kCGImagePropertyExifDictionary] as? [CFString: Any]
@@ -39,31 +50,67 @@ enum CameraBrightnessReference {
               sRGBDeclared || namedProfile,
               sourceSpace.model == .rgb || sourceSpace.model == .monochrome,
               sourceSpace.copyICCData() != nil else {
-            throw EngineError(message: "The camera preview has no usable color profile. Adjust Exposure manually.")
+            throw CameraPreviewUnusable(message: "The camera preview has no color profile.")
         }
-        let scale = min(1, 512.0 / Double(max(thumbnail.width, thumbnail.height)))
-        let width = max(1, Int((Double(thumbnail.width) * scale).rounded()))
-        let height = max(1, Int((Double(thumbnail.height) * scale).rounded()))
+        let scale = min(1, 512.0 / Double(max(preview.width, preview.height)))
+        let width = max(1, Int((Double(preview.width) * scale).rounded()))
+        let height = max(1, Int((Double(preview.height) * scale).rounded()))
         guard let sRGB = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                 bytesPerRow: width * 4, space: sRGB,
                 bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else {
-            throw EngineError(message: "The camera preview could not be prepared.")
+            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
         }
         context.interpolationQuality = .high
-        context.draw(thumbnail, in: CGRect(x: 0, y: 0, width: width, height: height))
+        context.draw(preview, in: CGRect(x: 0, y: 0, width: width, height: height))
         guard let image = context.makeImage() else {
-            throw EngineError(message: "The camera preview could not be prepared.")
+            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
         }
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
-            throw EngineError(message: "The camera preview could not be prepared.")
+            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
         }
         CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: 1] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
-            throw EngineError(message: "The camera preview could not be prepared.")
+            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
         }
         return data as Data
+    }
+
+    static func sameShape(_ aspect: Double, _ expected: Double) -> Bool {
+        max(aspect, expected) / min(aspect, expected) <= 1.02
+    }
+
+    /// The picture inside black bars, when that has the photo's shape. Some
+    /// cameras letterbox a 4:3 preview of their 3:2 frame: the Leica M8 with 13
+    /// rows top and bottom (320×240), the M (Typ 240) and Monochrom (Typ 246)
+    /// with 14 rows at the top only (160×120); also the Sony A100, Minolta
+    /// Dynax 7D and Nikon D1. Each edge is searched on its own, so one-sided
+    /// bars work; a dark scene edge that isn't a bar leaves the wrong shape and
+    /// is refused like any other crop.
+    static func trimmingBars(_ image: CGImage, toAspect expected: Double) -> CGImage? {
+        let width = image.width, height = image.height
+        guard width > 0, height > 0,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let data = context.data else { return nil }
+        // Row 0 of the bitmap is the image's top row. Bars measure 0–4 of 255;
+        // 24 leaves room for JPEG noise without taking in shadows with detail.
+        let pixels = data.bindMemory(to: UInt8.self, capacity: width * height)
+        let black: UInt8 = 24
+        func barRow(_ y: Int) -> Bool { (0..<width).allSatisfy { pixels[y * width + $0] <= black } }
+        var top = 0, bottom = height
+        while top < bottom, barRow(top) { top += 1 }
+        while bottom > top, barRow(bottom - 1) { bottom -= 1 }
+        func barColumn(_ x: Int) -> Bool { (top..<bottom).allSatisfy { pixels[$0 * width + x] <= black } }
+        var left = 0, right = width
+        while left < right, barColumn(left) { left += 1 }
+        while right > left, barColumn(right - 1) { right -= 1 }
+        let inside = (width: right - left, height: bottom - top)
+        guard inside.width < width || inside.height < height, inside.width >= 64, inside.height >= 64,
+              sameShape(Double(inside.width) / Double(inside.height), expected) else { return nil }
+        return image.cropping(to: CGRect(x: left, y: top, width: inside.width, height: inside.height))
     }
 }
 
@@ -82,3 +129,4 @@ struct ExposurePlacementGate {
         return raw && enabled
     }
 }
+

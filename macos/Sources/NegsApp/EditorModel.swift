@@ -80,6 +80,15 @@ import UniformTypeIdentifiers
     private(set) var exportStarted = Date()
     private(set) var placingExposure = false
     private(set) var exposurePlacementMessage: String?
+    /// A failed match that trying again can't change. A preview problem holds
+    /// for the photograph (`edits` nil); no reliable answer holds until an edit.
+    private var exposurePlacementFailure: (generation: Int, edits: Int?, message: String)?
+    private var exposurePlacementBlocked: Bool {
+        guard let failure = exposurePlacementFailure, failure.generation == sourceGeneration else { return false }
+        return failure.edits.map { $0 == editCount } ?? true
+    }
+    /// Why Match camera brightness is unavailable, shown under the button.
+    var exposurePlacementFailureMessage: String? { exposurePlacementBlocked ? exposurePlacementFailure?.message : nil }
     var autoPlaceNewImages = UserDefaults.standard.object(forKey: "autoPlaceNewImages") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages")
@@ -1236,6 +1245,7 @@ import UniformTypeIdentifiers
 
     var canMatchCameraBrightness: Bool {
         ready && engine != nil && isRaw && previewCurrent && !rendering && !placingExposure && !cropping && !interacting && !closing
+            && !exposurePlacementBlocked
     }
 
     private func scheduleAutomaticExposurePlacement(generation: Int) {
@@ -1289,7 +1299,7 @@ import UniformTypeIdentifiers
                     return
                 }
                 guard case .number(let exposure) = result["exposure_ev"], exposure.isFinite, (-3...3).contains(exposure) else {
-                    throw EngineError(message: "A reliable brightness match could not be found. Adjust Exposure manually.")
+                    throw EngineError(message: "No reliable brightness match with these settings.")
                 }
                 var next = self.state
                 next.params["prep.exposure_ev"] = .number(exposure)
@@ -1303,7 +1313,8 @@ import UniformTypeIdentifiers
             } catch {
                 guard let self, !self.closing, self.sourceGeneration == generation,
                       self.exposurePlacementID == id, self.editCount == edits else { return }
-                self.exposurePlacementMessage = error.localizedDescription
+                self.exposurePlacementMessage = nil
+                self.exposurePlacementFailure = (generation, error is CameraPreviewUnusable ? nil : edits, error.localizedDescription)
             }
         }
     }
