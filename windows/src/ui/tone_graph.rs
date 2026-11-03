@@ -3,7 +3,7 @@
 //! the graph and turns the pointer into edits: the middle handle sideways
 //! for Print exposure, the side handles and the curve up or down for the
 //! gammas, each drag one undo step, double-click to reset. GDI draws only
-//! aliased lines, so it is drawn into a pixel buffer like the histogram.
+//! aliased lines, so it is drawn with the shared anti-aliased `Canvas`.
 
 use std::cell::RefCell;
 
@@ -15,6 +15,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
+use super::draw::{Canvas, RectF};
+use super::theme::{self, Color};
 use super::{post, with_app};
 use crate::json;
 use crate::model::Model;
@@ -112,7 +114,7 @@ pub fn register() {
         lpfnWndProc: Some(graph_proc),
         hInstance: super::instance(),
         lpszClassName: w!("NegsToneGraph"),
-        hbrBackground: unsafe { GetSysColorBrush(COLOR_BTNFACE) },
+        // It paints all of itself, from the palette.
         ..Default::default()
     };
     unsafe {
@@ -340,149 +342,86 @@ extern "system" fn graph_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
 
 // MARK: Drawing
 
-type Rgb = [f32; 3];
-
-const WHITE: Rgb = [1.0, 1.0, 1.0];
-const BLACK: Rgb = [0.0, 0.0, 0.0];
-const YELLOW: Rgb = [1.0, 0.8, 0.0];
-const CHANNEL_COLORS: [Rgb; 3] = [[1.0, 0.35, 0.35], [0.35, 0.9, 0.35], [0.4, 0.55, 1.0]];
-
-/// An antialiased drawing: each shape's coverage is worked out in `mask`
-/// and composited once, so a polyline's joints don't darken.
-struct Raster {
-    width: usize,
-    height: usize,
-    pixels: Vec<Rgb>,
-    mask: Vec<f32>,
+/// The graph's colours. In light and dark it is a dark well like the
+/// histogram's (and the Mac's graph); in high contrast, the system's
+/// colours only, with the faint layers left out.
+struct Ink {
+    well: Color,
+    line: Color,
+    /// The grid's opacity, and the dashed zero line's.
+    grid: (f32, f32),
+    channels: [Color; 3],
+    handle: Color,
+    outline: Color,
+    middle: Color,
+    /// The layers that aren't chosen are drawn faintly behind.
+    faint_layers: bool,
 }
 
-impl Raster {
-    fn new(width: usize, height: usize, background: Rgb) -> Self {
-        Self { width, height, pixels: vec![background; width * height], mask: vec![0.0; width * height] }
-    }
-
-    /// The pixels a box covers, clipped.
-    fn span(&self, (x0, y0, x1, y1): (f64, f64, f64, f64)) -> (usize, usize, usize, usize) {
-        let clip = |v: f64, n: usize| (v.max(0.0) as usize).min(n);
-        (clip(x0.floor(), self.width), clip(y0.floor(), self.height), clip(x1.ceil() + 1.0, self.width), clip(y1.ceil() + 1.0, self.height))
-    }
-
-    /// Composites `color` over the mask's coverage within `bounds`, and clears it.
-    fn composite(&mut self, bounds: (usize, usize, usize, usize), color: Rgb, alpha: f32) {
-        let (x0, y0, x1, y1) = bounds;
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let i = y * self.width + x;
-                let a = std::mem::take(&mut self.mask[i]) * alpha;
-                if a > 0.0 {
-                    let p = &mut self.pixels[i];
-                    for c in 0..3 {
-                        p[c] += (color[c] - p[c]) * a;
-                    }
-                }
-            }
+impl Ink {
+    fn of(theme: theme::Theme) -> Self {
+        let p = theme.palette;
+        if theme.high_contrast {
+            return Self {
+                well: p.window,
+                line: p.text,
+                grid: (0.25, 0.5),
+                channels: [p.text; 3],
+                handle: p.window,
+                outline: p.text,
+                middle: p.accent,
+                faint_layers: false,
+            };
         }
-    }
-
-    /// A shape given by its coverage at each pixel centre, within `bounds`.
-    fn shape(&mut self, bounds: (f64, f64, f64, f64), color: Rgb, alpha: f32, coverage: impl Fn(f64, f64) -> f64) {
-        let span = self.span(bounds);
-        for y in span.1..span.3 {
-            for x in span.0..span.2 {
-                self.mask[y * self.width + x] = coverage(x as f64 + 0.5, y as f64 + 0.5).clamp(0.0, 1.0) as f32;
-            }
+        Self {
+            well: theme::rgb(0x1a, 0x1a, 0x1a),
+            line: theme::rgb(0xff, 0xff, 0xff),
+            grid: (0.07, 0.18),
+            channels: [theme::rgb(0xff, 0x59, 0x59), theme::rgb(0x59, 0xe6, 0x59), theme::rgb(0x66, 0x8c, 0xff)],
+            handle: theme::rgb(0xff, 0xff, 0xff),
+            outline: theme::rgb(0, 0, 0),
+            middle: theme::rgb(0xff, 0xcc, 0x00),
+            faint_layers: true,
         }
-        self.composite(span, color, alpha);
-    }
-
-    fn stroke(&mut self, points: &[(f64, f64)], width: f64, color: Rgb, alpha: f32) {
-        if points.len() < 2 {
-            return;
-        }
-        let pad = width / 2.0 + 1.0;
-        let mut all = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        for pair in points.windows(2) {
-            let ((ax, ay), (bx, by)) = (pair[0], pair[1]);
-            let bounds = (ax.min(bx) - pad, ay.min(by) - pad, ax.max(bx) + pad, ay.max(by) + pad);
-            all = (all.0.min(bounds.0), all.1.min(bounds.1), all.2.max(bounds.2), all.3.max(bounds.3));
-            let span = self.span(bounds);
-            let (dx, dy) = (bx - ax, by - ay);
-            let length = dx * dx + dy * dy;
-            for y in span.1..span.3 {
-                for x in span.0..span.2 {
-                    let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
-                    let t = if length > 0.0 { (((px - ax) * dx + (py - ay) * dy) / length).clamp(0.0, 1.0) } else { 0.0 };
-                    let d = (px - ax - t * dx).hypot(py - ay - t * dy);
-                    let m = &mut self.mask[y * self.width + x];
-                    *m = m.max((width / 2.0 + 0.5 - d).clamp(0.0, 1.0) as f32);
-                }
-            }
-        }
-        let span = self.span(all);
-        self.composite(span, color, alpha);
-    }
-
-    /// The area under a polyline whose x increases, down to `bottom`.
-    fn fill_under(&mut self, points: &[(f64, f64)], bottom: f64, color: Rgb, alpha: f32) {
-        let (Some(first), Some(last)) = (points.first(), points.last()) else { return };
-        let span = self.span((first.0, 0.0, last.0, bottom));
-        let mut segment = 0;
-        for x in span.0..span.2 {
-            let px = x as f64 + 0.5;
-            if px < first.0 || px > last.0 {
-                continue;
-            }
-            while segment + 2 < points.len() && points[segment + 1].0 < px {
-                segment += 1;
-            }
-            let ((ax, ay), (bx, by)) = (points[segment], points[segment + 1]);
-            let top = if bx > ax { ay + (by - ay) * (px - ax) / (bx - ax) } else { ay };
-            for y in span.1..span.3.min(bottom.ceil() as usize) {
-                self.mask[y * self.width + x] = (y as f64 + 1.0 - top).clamp(0.0, 1.0) as f32;
-            }
-        }
-        self.composite(span, color, alpha);
-    }
-
-    fn colorrefs(&self) -> Vec<u32> {
-        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
-        self.pixels.iter().map(|p| byte(p[0]) << 16 | byte(p[1]) << 8 | byte(p[2])).collect()
     }
 }
 
 /// Signed distance from a rounded box centred at `c` with half-size `half`.
-fn rounded_box(p: (f64, f64), c: (f64, f64), half: (f64, f64), radius: f64) -> f64 {
+fn rounded_box(p: (f32, f32), c: (f32, f32), half: (f32, f32), radius: f32) -> f32 {
     let q = ((p.0 - c.0).abs() - half.0 + radius, (p.1 - c.1).abs() - half.1 + radius);
     q.0.max(0.0).hypot(q.1.max(0.0)) + q.0.max(q.1).min(0.0) - radius
 }
 
 fn paint(hwnd: HWND, dc: HDC, view: &View) {
     let geometry = view.geometry(hwnd);
-    let (w, h) = (geometry.width as usize, geometry.height as usize);
-    let face = unsafe { GetSysColor(COLOR_BTNFACE) };
-    let face = [face & 0xff, face >> 8 & 0xff, face >> 16 & 0xff].map(|c| c as f32 / 255.0);
-    let mut raster = Raster::new(w, h, face);
-    let (gw, gh) = (geometry.width, geometry.height);
-    raster.shape((0.0, 0.0, gw, gh), [0.1; 3], 1.0, |x, y| 0.5 - rounded_box((x, y), (gw / 2.0, gh / 2.0), (gw / 2.0, gh / 2.0), view.px(6.0)));
-    // Grid: every 2 stops, mid-grey dashed; brightness quarters.
-    let line = view.px(1.0).round().max(1.0);
-    let crisp = |v: f64| v.floor() + 0.5;
+    let theme = theme::current();
+    let ink = Ink::of(theme);
+    let px = |dip: f64| view.px(dip) as f32;
+    let at = |x: f64, y: f64| (x as f32, y as f32);
+    let (gw, gh) = (geometry.width as f32, geometry.height as f32);
+    let mut c = Canvas::new(dc, RECT { left: 0, top: 0, right: gw as i32, bottom: gh as i32 });
+    c.clear(theme.palette.panel);
+    let well = RectF::new(0.0, 0.0, gw, gh);
+    c.round_rect(well, px(6.0), ink.well);
+    // Grid: every 2 stops, the middle one dashed; brightness quarters.
+    let line = px(1.0).round().max(1.0);
+    let crisp = |v: f64| v.floor() as f32 + 0.5;
     for stop in [-4.0, -2.0, 0.0, 2.0, 4.0] {
         let x = crisp(geometry.x(stop));
         if stop == 0.0 {
-            let dash = view.px(3.0);
+            let dash = px(3.0);
             let mut y = 0.0;
             while y < gh {
-                raster.stroke(&[(x, y), (x, (y + dash).min(gh))], line, WHITE, 0.18);
+                c.stroke(&[(x, y), (x, (y + dash).min(gh))], line, ink.line, ink.grid.1);
                 y += 2.0 * dash;
             }
         } else {
-            raster.stroke(&[(x, 0.0), (x, gh)], line, WHITE, 0.07);
+            c.stroke(&[(x, 0.0), (x, gh)], line, ink.line, ink.grid.0);
         }
     }
     for level in [0.25, 0.5, 0.75] {
         let y = crisp(geometry.y(level));
-        raster.stroke(&[(0.0, y), (gw, y)], line, WHITE, 0.07);
+        c.stroke(&[(0.0, y), (gw, y)], line, ink.line, ink.grid.0);
     }
     // Disabled while scanning film directly; dimmed while a curve for other
     // settings stands in for the next.
@@ -495,54 +434,47 @@ fn paint(hwnd: HWND, dc: HDC, view: &View) {
         if peak > 0.0 {
             let (low, high) = histogram.range;
             let width = (high - low) / bins.len() as f64;
-            let mut area = vec![(geometry.x(low), gh)];
-            area.extend(bins.iter().enumerate().map(|(i, count)| (geometry.x(low + (i as f64 + 0.5) * width), gh - (count / peak).min(1.0) * gh * 0.55)));
-            area.push((geometry.x(high), gh));
-            raster.fill_under(&area, gh, channel.map_or(WHITE, |c| CHANNEL_COLORS[c]), 0.16 * strength as f32);
+            let gh = geometry.height;
+            let mut area = vec![at(geometry.x(low), gh)];
+            area.extend(bins.iter().enumerate().map(|(i, count)| at(geometry.x(low + (i as f64 + 0.5) * width), gh - (count / peak).min(1.0) * gh * 0.55)));
+            area.push(at(geometry.x(high), gh));
+            c.fill_under(&area, gh as f32, channel.map_or(ink.line, |i| ink.channels[i]), 0.16 * strength);
         }
     }
     if let Some(display) = view.display() {
-        let path = |series: &[f64]| -> Vec<(f64, f64)> { display.stops.iter().zip(series).map(|(t, b)| (geometry.x(*t), geometry.y(*b))).collect() };
-        let alpha = strength as f32;
-        for c in 0..3 {
-            let strong = channel == Some(c);
-            raster.stroke(&path(&display.rgb[c]), view.px(if strong { 2.0 } else { 1.0 }), CHANNEL_COLORS[c], if strong { alpha } else { 0.35 * alpha });
+        let path = |series: &[f64]| -> Vec<(f32, f32)> { display.stops.iter().zip(series).map(|(t, b)| at(geometry.x(*t), geometry.y(*b))).collect() };
+        let alpha = strength;
+        for i in 0..3 {
+            let strong = channel == Some(i);
+            if strong || ink.faint_layers {
+                c.stroke(&path(&display.rgb[i]), px(if strong { 2.0 } else { 1.0 }), ink.channels[i], if strong { alpha } else { 0.35 * alpha });
+            }
         }
         if channel.is_none() {
-            raster.stroke(&path(&display.brightness(None)), view.px(2.0), WHITE, alpha);
+            c.stroke(&path(&display.brightness(None)), px(2.0), ink.line, alpha);
         }
         if let Some(Handle::Curve(t)) = view.active() {
             let tone = view.drag.as_ref().map_or(t, |d| d.tone);
-            let (x, y) = (geometry.x(t), geometry.y(display.value(&display.brightness(channel), tone)));
-            let r = view.px(3.0);
-            raster.shape((x - r - 1.0, y - r - 1.0, x + r + 1.0, y + r + 1.0), WHITE, 0.6 * alpha, |px, py| r + 0.5 - (px - x).hypot(py - y));
+            let (x, y) = at(geometry.x(t), geometry.y(display.value(&display.brightness(channel), tone)));
+            let r = px(3.0);
+            c.shape((x - r, y - r, x + r, y + r), ink.line, 0.6 * alpha, |px, py| (px - x).hypot(py - y) - r);
         }
         for (handle, (x, y)) in geometry.handle_points(&display, channel) {
-            let r = view.px(if handle.same(view.active()) { 6.0 } else { 4.5 });
-            let bounds = (x - r - 2.0, y - r - 2.0, x + r + 2.0, y + r + 2.0);
-            let distance = |px: f64, py: f64| {
-                if handle == Handle::Middle { rounded_box((px, py), (x, y), (r, r), view.px(1.5)) } else { (px - x).hypot(py - y) - r }
+            let (x, y) = at(x, y);
+            let r = px(if handle.same(view.active()) { 6.0 } else { 4.5 });
+            let bounds = (x - r - 1.0, y - r - 1.0, x + r + 1.0, y + r + 1.0);
+            let corner = px(1.5);
+            let distance = |px: f32, py: f32| {
+                if handle == Handle::Middle { rounded_box((px, py), (x, y), (r, r), corner) } else { (px - x).hypot(py - y) - r }
             };
-            raster.shape(bounds, if handle == Handle::Middle { YELLOW } else { WHITE }, alpha, |px, py| 0.5 - distance(px, py));
-            raster.shape(bounds, BLACK, 0.8 * alpha, |px, py| line / 2.0 + 0.5 - distance(px, py).abs());
+            c.shape(bounds, if handle == Handle::Middle { ink.middle } else { ink.handle }, alpha, distance);
+            c.shape(bounds, ink.outline, 0.8 * alpha, |px, py| distance(px, py).abs() - line / 2.0);
         }
     }
-    let pixels = raster.colorrefs();
-    let info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: w as i32,
-            biHeight: -(h as i32),
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    unsafe {
-        SetDIBitsToDevice(dc, 0, 0, w as u32, h as u32, 0, 0, 0, h as u32, pixels.as_ptr() as *const _, &info, DIB_RGB_COLORS);
+    if theme.high_contrast {
+        c.round_frame(well, px(6.0), line, ink.line);
     }
+    c.present(dc);
 }
 
 #[cfg(test)]
@@ -550,31 +482,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strokes_are_antialiased_and_joints_dont_darken() {
-        let mut raster = Raster::new(20, 10, BLACK);
-        // A horizontal line through pixel centres, in two segments.
-        raster.stroke(&[(0.0, 4.5), (10.0, 4.5), (20.0, 4.5)], 1.0, WHITE, 1.0);
-        assert_eq!(raster.pixels[4 * 20 + 10], WHITE);
-        assert_eq!(raster.pixels[3 * 20 + 10], BLACK);
-        // Between two rows: half on each.
-        let mut raster = Raster::new(20, 10, BLACK);
-        raster.stroke(&[(0.0, 5.0), (20.0, 5.0)], 1.0, WHITE, 1.0);
-        assert!((raster.pixels[4 * 20 + 7][0] - 0.5).abs() < 1e-6 && (raster.pixels[5 * 20 + 7][0] - 0.5).abs() < 1e-6);
-        assert!(raster.mask.iter().all(|m| *m == 0.0));
-    }
-
-    #[test]
-    fn the_area_fills_below_its_edge() {
-        let mut raster = Raster::new(10, 10, BLACK);
-        raster.fill_under(&[(0.0, 10.0), (0.0, 4.5), (10.0, 4.5), (10.0, 10.0)], 10.0, WHITE, 1.0);
-        assert_eq!(raster.pixels[3 * 10 + 5], BLACK);
-        assert!((raster.pixels[4 * 10 + 5][0] - 0.5).abs() < 1e-6);
-        assert_eq!(raster.pixels[9 * 10 + 5], WHITE);
-    }
-
-    #[test]
     fn channel_buttons_name_a_layer_or_the_neutral_curve() {
         assert_eq!(CHANNELS.map(channel), [None, Some(0), Some(1), Some(2)]);
         assert_eq!(channel("unknown"), None);
+    }
+
+    #[test]
+    fn high_contrast_draws_in_the_system_colours_only() {
+        let palette = theme::LIGHT;
+        let ink = Ink::of(theme::Theme { palette, dark: false, high_contrast: true });
+        let system = [palette.window, palette.text, palette.accent];
+        let used = [ink.well, ink.line, ink.handle, ink.outline, ink.middle].into_iter().chain(ink.channels);
+        assert!(used.into_iter().all(|c| system.contains(&c)));
+        assert!(!ink.faint_layers);
     }
 }

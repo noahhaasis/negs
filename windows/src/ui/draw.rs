@@ -47,6 +47,8 @@ struct Buffer {
 thread_local! {
     static SHARED: std::cell::RefCell<Option<Buffer>> = const { std::cell::RefCell::new(None) };
     static SHARED_IN_USE: Cell<bool> = const { Cell::new(false) };
+    /// Coverage for `Canvas::stroke` and `fill_under`, all zero between uses.
+    static MASK: std::cell::RefCell<Vec<f32>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Buffers above this many pixels aren't kept.
@@ -162,7 +164,6 @@ impl Canvas {
         let y0 = (bounds.1.floor() as i32 - 1).max(0);
         let x1 = (bounds.2.ceil() as i32 + 1).min(w);
         let y1 = (bounds.3.ceil() as i32 + 1).min(h);
-        let (r, g, b) = ((color & 0xff) as f32, ((color >> 8) & 0xff) as f32, ((color >> 16) & 0xff) as f32);
         let pixels = self.pixels();
         if pixels.is_empty() {
             return;
@@ -170,15 +171,92 @@ impl Canvas {
         for y in y0..y1 {
             for x in x0..x1 {
                 let coverage = (0.5 - shape(x as f32 + 0.5, y as f32 + 0.5)).clamp(0.0, 1.0) * alpha;
-                if coverage <= 0.0 {
-                    continue;
+                if coverage > 0.0 {
+                    blend(&mut pixels[(y * stride + x) as usize], color, coverage);
                 }
-                let p = &mut pixels[(y * stride + x) as usize];
-                let (pb, pg, pr) = ((*p & 0xff) as f32, ((*p >> 8) & 0xff) as f32, ((*p >> 16) & 0xff) as f32);
-                let blend = |d: f32, s: f32| (d + (s - d) * coverage).round() as u32;
-                *p = blend(pb, b) | blend(pg, g) << 8 | blend(pr, r) << 16;
             }
         }
+    }
+
+    /// Blends `color` by the coverage `draw` leaves in a mask (and returns
+    /// the box of), clearing it: the parts of one shape merge before they
+    /// are blended, so a translucent polyline's joints don't darken.
+    fn masked(&mut self, color: Color, alpha: f32, draw: impl FnOnce(&mut [f32], i32, i32) -> Option<(i32, i32, i32, i32)>) {
+        let (w, h, stride) = (self.w, self.h, self.stride);
+        MASK.with(|mask| {
+            let mut mask = mask.borrow_mut();
+            let n = (w * h) as usize;
+            if mask.len() < n {
+                mask.resize(n, 0.0);
+            }
+            let Some((x0, y0, x1, y1)) = draw(&mut mask[..n], w, h) else { return };
+            let pixels = self.pixels();
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let coverage = std::mem::take(&mut mask[(y * w + x) as usize]) * alpha;
+                    if coverage > 0.0 && !pixels.is_empty() {
+                        blend(&mut pixels[(y * stride + x) as usize], color, coverage);
+                    }
+                }
+            }
+        });
+    }
+
+    /// A shape given by its signed distance (negative inside), `alpha`
+    /// opaque.
+    pub fn shape(&mut self, bounds: (f32, f32, f32, f32), color: Color, alpha: f32, distance: impl Fn(f32, f32) -> f32) {
+        self.cover(bounds, color, alpha, distance);
+    }
+
+    /// A polyline `width` wide, `alpha` opaque, its joints even.
+    pub fn stroke(&mut self, points: &[(f32, f32)], width: f32, color: Color, alpha: f32) {
+        if points.len() < 2 {
+            return;
+        }
+        let pad = width / 2.0 + 1.0;
+        self.masked(color, alpha, |mask, w, h| {
+            let mut all: Option<(i32, i32, i32, i32)> = None;
+            for pair in points.windows(2) {
+                let ((ax, ay), (bx, by)) = (pair[0], pair[1]);
+                let span = span((ax.min(bx) - pad, ay.min(by) - pad, ax.max(bx) + pad, ay.max(by) + pad), w, h);
+                for y in span.1..span.3 {
+                    for x in span.0..span.2 {
+                        let d = segment_distance(x as f32 + 0.5, y as f32 + 0.5, ax, ay, bx, by);
+                        let m = &mut mask[(y * w + x) as usize];
+                        *m = m.max((width / 2.0 + 0.5 - d).clamp(0.0, 1.0));
+                    }
+                }
+                all = Some(all.map_or(span, |a| (a.0.min(span.0), a.1.min(span.1), a.2.max(span.2), a.3.max(span.3))));
+            }
+            all
+        });
+    }
+
+    /// The area under a polyline whose x increases, down to `bottom`.
+    pub fn fill_under(&mut self, points: &[(f32, f32)], bottom: f32, color: Color, alpha: f32) {
+        let (Some(&first), Some(&last)) = (points.first(), points.last()) else { return };
+        if points.len() < 2 {
+            return;
+        }
+        self.masked(color, alpha, |mask, w, h| {
+            let span = span((first.0, 0.0, last.0, bottom), w, h);
+            let mut segment = 0;
+            for x in span.0..span.2 {
+                let px = x as f32 + 0.5;
+                if px < first.0 || px > last.0 {
+                    continue;
+                }
+                while segment + 2 < points.len() && points[segment + 1].0 < px {
+                    segment += 1;
+                }
+                let ((ax, ay), (bx, by)) = (points[segment], points[segment + 1]);
+                let top = if bx > ax { ay + (by - ay) * (px - ax) / (bx - ax) } else { ay };
+                for y in span.1..span.3.min(bottom.ceil() as i32) {
+                    mask[(y * w + x) as usize] = (y as f32 + 1.0 - top).clamp(0.0, 1.0);
+                }
+            }
+            Some(span)
+        });
     }
 
     /// A filled rounded rectangle.
@@ -270,6 +348,21 @@ impl Drop for Canvas {
     }
 }
 
+/// Moves a buffer pixel (0x00rrggbb) towards `color` by `coverage`.
+fn blend(p: &mut u32, color: Color, coverage: f32) {
+    let mix = |at: u32, from: u32| {
+        let (d, s) = (((*p >> at) & 0xff) as f32, ((color >> from) & 0xff) as f32);
+        ((d + (s - d) * coverage).round() as u32) << at
+    };
+    *p = mix(0, 16) | mix(8, 8) | mix(16, 0);
+}
+
+/// The pixels a box covers, clipped to `w` × `h`.
+fn span((x0, y0, x1, y1): (f32, f32, f32, f32), w: i32, h: i32) -> (i32, i32, i32, i32) {
+    let clip = |v: f32, n: i32| (v.max(0.0) as i32).min(n);
+    (clip(x0.floor(), w), clip(y0.floor(), h), clip(x1.ceil() + 1.0, w), clip(y1.ceil() + 1.0, h))
+}
+
 fn bgr(color: Color) -> u32 {
     ((color & 0xff) << 16) | (color & 0xff00) | ((color >> 16) & 0xff)
 }
@@ -357,6 +450,8 @@ pub enum Role {
     /// A segment of a two-part switch.
     SegmentLeft = 4,
     SegmentRight = 5,
+    /// A segment between two others (a switch of more than two parts).
+    SegmentMiddle = 6,
     /// A value box: no border until hovered or focused.
     Value = 10,
     /// A text field with a border.
@@ -375,7 +470,7 @@ pub fn set_role(hwnd: HWND, role: Role) {
 
 fn role(hwnd: HWND) -> Option<Role> {
     let value = unsafe { GetPropW(hwnd, ROLE) }.0 as isize;
-    [Role::Primary, Role::Secondary, Role::Glyph, Role::SegmentLeft, Role::SegmentRight, Role::Value, Role::Field, Role::Link].into_iter().find(|r| *r as isize == value)
+    [Role::Primary, Role::Secondary, Role::Glyph, Role::SegmentLeft, Role::SegmentRight, Role::SegmentMiddle, Role::Value, Role::Field, Role::Link].into_iter().find(|r| *r as isize == value)
 }
 
 /// A button's role: set explicitly, else from its style.
@@ -386,15 +481,16 @@ fn button_role(hwnd: HWND) -> Option<ButtonKind> {
         return Some(match role {
             Role::Primary => ButtonKind::Push(true),
             Role::Glyph => ButtonKind::Glyph,
-            Role::SegmentLeft => ButtonKind::Segment(false),
-            Role::SegmentRight => ButtonKind::Segment(true),
+            Role::SegmentLeft => ButtonKind::Segment(Part::First),
+            Role::SegmentRight => ButtonKind::Segment(Part::Last),
+            Role::SegmentMiddle => ButtonKind::Segment(Part::Middle),
             Role::Link => ButtonKind::Link,
             _ => ButtonKind::Push(false),
         });
     }
     match kind as i32 {
         BS_AUTOCHECKBOX | BS_CHECKBOX => Some(ButtonKind::Check),
-        BS_AUTORADIOBUTTON | BS_RADIOBUTTON if style & BS_PUSHLIKE as u32 != 0 => Some(ButtonKind::Segment(style & WS_GROUP.0 == 0)),
+        BS_AUTORADIOBUTTON | BS_RADIOBUTTON if style & BS_PUSHLIKE as u32 != 0 => Some(ButtonKind::Segment(if style & WS_GROUP.0 == 0 { Part::Last } else { Part::First })),
         BS_AUTORADIOBUTTON | BS_RADIOBUTTON => Some(ButtonKind::Radio),
         BS_DEFPUSHBUTTON => Some(ButtonKind::Push(true)),
         BS_PUSHBUTTON => {
@@ -413,9 +509,51 @@ enum ButtonKind {
     Glyph,
     Check,
     Radio,
-    /// The right-hand segment or not.
-    Segment(bool),
+    Segment(Part),
     Link,
+}
+
+/// Where a segment sits in its switch.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Part {
+    First,
+    Middle,
+    Last,
+}
+
+// MARK: Dimmed labels
+
+const DIMMED: PCWSTR = w!("NegsDimmed");
+
+/// Enables or disables a control. A disabled static control embosses its
+/// text whatever colour it is given (white over grey, which shows in dark),
+/// so a label stays enabled and is dimmed instead, and its parent's
+/// `WM_CTLCOLORSTATIC` gives it the disabled colour (`is_dimmed`).
+pub fn enable(hwnd: HWND, on: bool) {
+    unsafe {
+        let enabled = IsWindowEnabled(hwnd).as_bool();
+        if (enabled && !is_dimmed(hwnd)) == on {
+            return;
+        }
+        if class_of(hwnd) == "Static" {
+            if !enabled {
+                let _ = EnableWindow(hwnd, true);
+            }
+            if on {
+                let _ = RemovePropW(hwnd, DIMMED);
+            } else {
+                let _ = SetPropW(hwnd, DIMMED, HANDLE(1 as *mut _));
+            }
+            let _ = InvalidateRect(hwnd, None, true);
+        } else {
+            let _ = EnableWindow(hwnd, on);
+        }
+    }
+}
+
+/// Whether a label shows as disabled: disabled, or dimmed by `enable`.
+pub fn is_dimmed(hwnd: HWND) -> bool {
+    unsafe { !GetPropW(hwnd, DIMMED).is_invalid() || !IsWindowEnabled(hwnd).as_bool() }
 }
 
 // MARK: Hover
@@ -694,19 +832,24 @@ fn paint_button(draw: &NMCUSTOMDRAW, kind: ButtonKind) {
                 focus_ring(&mut c, r, radius, s);
             }
         }
-        ButtonKind::Segment(right) => {
-            // Each half draws its part of one rounded outline.
-            let whole = if right { RectF::new(r.x - r.w, r.y, r.w * 2.0, r.h) } else { RectF::new(r.x, r.y, r.w * 2.0, r.h) };
+        ButtonKind::Segment(part) => {
+            // Each segment draws its part of one rounded outline, which
+            // reaches past the sides that have a neighbour.
+            let (before, after) = (part != Part::First, part != Part::Last);
+            let x = if before { r.x - r.w } else { r.x };
+            let whole = RectF::new(x, r.y, r.w * (1 + before as u8 + after as u8) as f32, r.h);
             c.round_rect(whole, radius + s, p.border);
             c.round_rect(whole.inset(s, s), radius, if hot && !checked && !disabled { p.control_hover } else { p.control });
-            if right {
+            if before {
                 c.round_rect(RectF::new(0.0, r.y + 5.0 * s, s, r.h - 10.0 * s), 0.0, p.border);
             }
             if checked {
-                let inset = RectF::new(r.x + if right { 2.0 * s } else { 3.0 * s }, r.y + 3.0 * s, r.w - 5.0 * s, r.h - 6.0 * s);
+                let (left, right) = (if before { 2.0 * s } else { 3.0 * s }, if after { 2.0 * s } else { 3.0 * s });
+                let inset = RectF::new(r.x + left, r.y + 3.0 * s, r.w - left - right, r.h - 6.0 * s);
                 c.round_rect(inset, radius - s, if disabled { p.disabled } else { p.accent });
             }
-            let ink = if disabled { p.disabled } else if checked { p.on_accent } else { p.text };
+            // A disabled choice keeps its text readable on the grey fill.
+            let ink = if checked { if disabled { p.control } else { p.on_accent } } else if disabled { p.disabled } else { p.text };
             c.label(&text, c.rect(), font, ink, center, cues);
             if focused {
                 focus_ring(&mut c, r.inset(s, s), radius, s);
@@ -945,5 +1088,49 @@ impl Canvas {
             // Only inside the rectangle's box.
             if x < r.x || y < r.y || x > r.x + r.w || y > r.y + r.h { 1.0 } else { -rounded_box(x, y, r, radius) }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WHITE: Color = theme::rgb(255, 255, 255);
+    const BLACK: Color = theme::rgb(0, 0, 0);
+
+    fn red(c: &mut Canvas, x: i32, y: i32) -> f32 {
+        let stride = c.stride;
+        ((c.pixels()[(y * stride + x) as usize] >> 16) & 0xff) as f32
+    }
+
+    fn canvas(w: i32, h: i32) -> Canvas {
+        let mut c = Canvas::new(HDC::default(), RECT { left: 0, top: 0, right: w, bottom: h });
+        c.clear(BLACK);
+        c
+    }
+
+    #[test]
+    fn strokes_are_antialiased_and_joints_dont_darken() {
+        let mut c = canvas(20, 10);
+        // A horizontal line through pixel centres, in two segments, half opaque.
+        c.stroke(&[(0.0, 4.5), (10.0, 4.5), (20.0, 4.5)], 1.0, WHITE, 0.5);
+        assert_eq!(red(&mut c, 10, 4), red(&mut c, 5, 4));
+        assert!((red(&mut c, 10, 4) - 127.5).abs() <= 1.0);
+        assert_eq!(red(&mut c, 10, 3), 0.0);
+        drop(c);
+        // Between two rows: half on each.
+        let mut c = canvas(20, 10);
+        c.stroke(&[(0.0, 5.0), (20.0, 5.0)], 1.0, WHITE, 1.0);
+        assert!((red(&mut c, 7, 4) - 127.5).abs() <= 1.0 && (red(&mut c, 7, 5) - 127.5).abs() <= 1.0);
+        assert!(MASK.with(|m| m.borrow().iter().all(|v| *v == 0.0)));
+    }
+
+    #[test]
+    fn the_area_fills_below_its_edge() {
+        let mut c = canvas(10, 10);
+        c.fill_under(&[(0.0, 10.0), (0.0, 4.5), (10.0, 4.5), (10.0, 10.0)], 10.0, WHITE, 1.0);
+        assert_eq!(red(&mut c, 5, 3), 0.0);
+        assert!((red(&mut c, 5, 4) - 127.5).abs() <= 1.0);
+        assert_eq!(red(&mut c, 5, 9), 255.0);
     }
 }

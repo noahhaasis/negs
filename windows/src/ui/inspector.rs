@@ -707,7 +707,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
             controls.push(c);
         }
         Kind::ToneGraph => {
-            let text = create(w!("STATIC"), "Tone graph", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.small);
+            let text = create(w!("STATIC"), "Tone graph", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.small);
             controls.push(text);
             controls.push(super::tone_graph::create(parent, id(ACTION), text));
             let names = ["the neutral curve", "the red layer", "the green layer", "the blue layer"];
@@ -715,6 +715,10 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 let group = if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) };
                 let style = hidden | WS_TABSTOP | group | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
                 let b = create(w!("BUTTON"), title, style, WINDOW_EX_STYLE(0), parent, id(i as u16), fonts.small);
+                // One switch of four segments; the style tells the ends.
+                if (1..3).contains(&i) {
+                    draw::set_role(b, Role::SegmentMiddle);
+                }
                 super::dialogs::tooltip(b, &format!("Show {}", names[i]));
                 controls.push(b);
             }
@@ -926,14 +930,16 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 ins.px(32.0)
             }
             Kind::ToneGraph => {
-                let button = ins.px(30.0);
+                // The label and the RGB | R | G | B switch on one 32 DIP
+                // line, the graph below on the grid.
+                let button = ins.px(32.0);
                 let buttons = 4 * button;
-                positions.push((c[0], x, y + ins.px(4.0), right - x - buttons - ins.px(6.0), ins.px(18.0)));
+                positions.push((c[0], x, y + ins.px(4.0), right - x - buttons - ins.px(8.0), ins.px(24.0)));
                 for (i, &b) in c[2..].iter().enumerate() {
-                    positions.push((b, right - buttons + button * i as i32, y + ins.px(1.0), button, ins.px(22.0)));
+                    positions.push((b, right - buttons + button * i as i32, y + ins.px(4.0), button, ins.px(24.0)));
                 }
-                positions.push((c[1], x, y + ins.px(28.0), right - x, ins.px(170.0)));
-                ins.px(28.0 + 170.0 + 10.0)
+                positions.push((c[1], x, y + ins.px(32.0), right - x, ins.px(168.0)));
+                ins.px(32.0 + 168.0 + 8.0)
             }
             Kind::BalancePrint(..) => {
                 let button = ins.px(128.0).min(right - x);
@@ -1112,11 +1118,7 @@ fn set_text(hwnd: HWND, text: &str) {
 }
 
 fn enable(hwnd: HWND, on: bool) {
-    unsafe {
-        if IsWindowEnabled(hwnd).as_bool() != on {
-            let _ = EnableWindow(hwnd, on);
-        }
-    }
+    draw::enable(hwnd, on);
 }
 
 fn set_check(hwnd: HWND, on: bool) {
@@ -1513,7 +1515,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             );
         }
         (Kind::Slider(_) | Kind::BorderSlider(..), RESET) if code == BN_CLICKED => reset_row(app, index),
-        (_, LABEL) if code == STN_DBLCLK => reset_row(app, index),
+        (_, LABEL) if code == STN_DBLCLK && !draw::is_dimmed(hwnd) => reset_row(app, index),
         (Kind::Choice(_, path, options), COMBO) if code == CBN_SELCHANGE => {
             if let Some(option) = options.get(selection() as usize) {
                 app.model.set(path, Value::String(option.to_string()));
@@ -1731,7 +1733,7 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 SetBkMode(dc, TRANSPARENT);
                 let p = theme::palette();
                 let footer = row_of(id).is_some_and(|(index, _)| with_footer(index));
-                let color = if !IsWindowEnabled(control).as_bool() { p.disabled } else if footer { p.secondary } else { p.text };
+                let color = if draw::is_dimmed(control) { p.disabled } else if footer { p.secondary } else { p.text };
                 SetTextColor(dc, COLORREF(color));
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
@@ -2741,7 +2743,7 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 let p = theme::palette();
                 let id = GetDlgCtrlID(control) as u16;
                 let footer = id == C_LABELS + 7 || id == C_SIZE_NOTE;
-                let color = if !IsWindowEnabled(control).as_bool() { p.disabled } else if footer { p.secondary } else { p.text };
+                let color = if draw::is_dimmed(control) { p.disabled } else if footer { p.secondary } else { p.text };
                 SetTextColor(dc, COLORREF(color));
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
