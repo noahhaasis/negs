@@ -99,8 +99,11 @@ pub fn sync_recent(app: &mut App) {
         }
     }
     for (i, path) in recent.iter().enumerate() {
-        let name = crate::model::file_name(path).replace('&', "&amp;").replace('<', "&lt;");
-        let link = create(WC_LINK, &format!("<a>{name}</a>"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, WINDOW_EX_STYLE(0), app.empty, id::EMPTY_RECENT + i as u16, app.fonts.ui);
+        // Buttons drawn as links: a SysLink's colour can't follow the theme.
+        let name = crate::model::file_name(path).replace('&', "&&");
+        let link = create(w!("BUTTON"), &name, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), app.empty, id::EMPTY_RECENT + i as u16, app.fonts.ui);
+        draw::set_role(link, draw::Role::Link);
+        draw::track_hover(link);
         super::dialogs::tooltip(link, &path.display().to_string());
         e.recent.push(link);
     }

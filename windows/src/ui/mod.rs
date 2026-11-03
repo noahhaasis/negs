@@ -9,6 +9,7 @@
 //! separately (`canvas::VIEW`) so it can paint at any time.
 
 pub mod canvas;
+mod chrome;
 mod dialogs;
 mod draw;
 mod drop;
@@ -920,6 +921,7 @@ pub fn create(class: PCWSTR, text: &str, style: WINDOW_STYLE, ex: WINDOW_EX_STYL
         if !font.is_invalid() {
             SendMessageW(hwnd, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(0));
         }
+        theme::apply_control(hwnd, true);
         hwnd
     }
 }
@@ -1023,10 +1025,10 @@ fn accelerators() -> HACCEL {
     unsafe { CreateAcceleratorTableW(&accels).unwrap_or_default() }
 }
 
-/// Segoe icon glyphs drawn at the window's DPI, for the toolbar.
+/// Segoe icon glyphs drawn at the window's DPI: they size the toolbar's
+/// buttons (`chrome` paints them from the palette).
 fn toolbar_images(dpi: u32) -> HIMAGELIST {
-    // Open, Film Strip, Fit, Actual Size, Rotate, Crop, Export, Adjustments, Presets
-    let glyphs = ['\u{E838}', '\u{E8B9}', '\u{E9A6}', '\u{E71E}', '\u{E7AD}', '\u{E7A8}', '\u{E78C}', '\u{E9E9}', '\u{E81E}'];
+    let glyphs = chrome::TOOL_GLYPHS;
     let size = (20 * dpi / 96) as i32;
     unsafe {
         let list = ImageList_Create(size, size, ILC_COLOR32, glyphs.len() as i32, 0);
@@ -1096,6 +1098,7 @@ fn build_toolbar(main: HWND, dpi: u32) -> HWND {
         SendMessageW(toolbar, TB_BUTTONSTRUCTSIZE, WPARAM(std::mem::size_of::<TBBUTTON>()), LPARAM(0));
         SendMessageW(toolbar, TB_SETEXTENDEDSTYLE, WPARAM(0), LPARAM((TBSTYLE_EX_MIXEDBUTTONS | 0x80 /* TBSTYLE_EX_DOUBLEBUFFER */) as isize));
         SendMessageW(toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
+        theme::apply_control(HWND(SendMessageW(toolbar, TB_GETTOOLTIPS, WPARAM(0), LPARAM(0)).0 as *mut _), true);
         let tips: Vec<Vec<u16>> = [
             "Open photograph (Ctrl+O)",
             "Show or hide film strip (F6)",
@@ -1215,6 +1218,7 @@ pub fn run() {
         inspector::register();
         presets::register();
 
+        theme::init();
         let (menu, recent) = build_menu();
         let main = CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -1232,15 +1236,18 @@ pub fn run() {
         )
         .unwrap();
         MAIN.store(main.0 as isize, Ordering::Relaxed);
+        theme::apply_window(main);
         let dpi = GetDpiForWindow(main).max(96);
         restore_placement(main, &model.prefs, dpi);
         report.stamp("main_window");
         let fonts = Fonts::new(dpi);
         report.stamp("fonts");
         let toolbar = build_toolbar(main, dpi);
+        chrome::subclass_toolbar(toolbar, fonts.glyph);
         report.stamp("toolbar");
-        let status = create(STATUSCLASSNAMEW, "", WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SBARS_SIZEGRIP), WINDOW_EX_STYLE(0), main, 0, fonts.ui);
+        let status = create(STATUSCLASSNAMEW, "", WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WINDOW_STYLE(SBARS_SIZEGRIP), WINDOW_EX_STYLE(0), main, 0, fonts.ui);
         empty::subclass_status(status);
+        chrome::subclass_status(status);
         let progress = create(PROGRESS_CLASSW, "", WS_CHILD | WINDOW_STYLE(PBS_MARQUEE), WINDOW_EX_STYLE(0), status, 0, HFONT::default());
         SendMessageW(progress, PBM_SETMARQUEE, WPARAM(1), LPARAM(30));
         let cancel = create(w!("BUTTON"), "Cancel", WS_CHILD | WS_TABSTOP, WINDOW_EX_STYLE(0), status, id::CANCEL_EXPORT, fonts.ui);
@@ -1429,6 +1436,11 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(0)
             }
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
+            WM_SETTINGCHANGE | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
+                // The app theme ("ImmersiveColorSet"), high contrast or the accent.
+                post(|app: &mut App| app.retheme());
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_GETMINMAXINFO => {
                 let info = &mut *(lparam.0 as *mut MINMAXINFO);
                 let dpi = GetDpiForWindow(hwnd).max(96) as i32;
@@ -1596,6 +1608,7 @@ impl App {
         self.fonts = Fonts::new(dpi);
         unsafe {
             SendMessageW(self.toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
+            chrome::subclass_toolbar(self.toolbar, self.fonts.glyph);
             SendMessageW(self.status, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             SendMessageW(self.cancel, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             SendMessageW(self.original_button, WM_SETFONT, WPARAM(self.fonts.glyph_small.0 as usize), LPARAM(1));
@@ -1605,6 +1618,19 @@ impl App {
         presets::dpi_changed(self);
         empty::dpi_changed(self);
         self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::CANVAS | dirty::STRIP;
+    }
+
+    /// Follows a change of the system's theme, contrast or accent.
+    fn retheme(&mut self) {
+        if !theme::refresh() {
+            return;
+        }
+        theme::apply_all();
+        presets::retheme(self);
+        unsafe {
+            let _ = InvalidateRect(self.canvas, None, false);
+        }
+        self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::STRIP | dirty::CANVAS;
     }
 
     fn status_menu(&mut self) {

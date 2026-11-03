@@ -55,6 +55,7 @@ pub fn tooltip(hwnd: HWND, text: &str) {
                 )
                 .unwrap_or_default();
                 SendMessageW(tip, TTM_SETMAXTIPWIDTH, WPARAM(0), LPARAM(420));
+                super::theme::apply_control(tip, true);
                 t.set(tip.0 as isize);
             }
             HWND(t.get() as *mut _)
@@ -205,6 +206,7 @@ pub fn settings(app: &mut App) {
     let dialog = unsafe {
         CreateWindowExW(ex, windows::core::w!("NegsSettings"), pcwstr(&title), style, 0, 0, width, px(200.0), app.main, None, super::instance(), None).unwrap_or_default()
     };
+    super::theme::apply_window(dialog);
     let make = |class: PCWSTR, text: &str, style: WINDOW_STYLE, id: u16, font| super::create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), dialog, id, font);
     let label = |text: &str, font| make(windows::core::w!("STATIC"), text, WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFT.0 | windows::Win32::System::SystemServices::SS_NOPREFIX.0), 0, font);
     let check = |text: &str, id: u16, on: bool| {

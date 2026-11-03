@@ -918,3 +918,10 @@ pub fn redraw_previews(app: &mut App) {
 pub fn shown(model: &Model) -> bool {
     model.inspector_visible && model.pane() == Pane::Presets && !model.cropping()
 }
+
+/// After a theme change: the list's own colours.
+pub fn retheme(app: &mut App) {
+    if let Some(p) = &app.presets_view {
+        theme_list(p.list);
+    }
+}

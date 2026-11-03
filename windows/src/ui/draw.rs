@@ -290,6 +290,8 @@ pub enum Role {
     Value = 10,
     /// A text field with a border.
     Field = 11,
+    /// Accent text, underlined under the pointer (recent photographs).
+    Link = 12,
 }
 
 const ROLE: PCWSTR = w!("NegsRole");
@@ -302,7 +304,7 @@ pub fn set_role(hwnd: HWND, role: Role) {
 
 fn role(hwnd: HWND) -> Option<Role> {
     let value = unsafe { GetPropW(hwnd, ROLE) }.0 as isize;
-    [Role::Primary, Role::Secondary, Role::Glyph, Role::SegmentLeft, Role::SegmentRight, Role::Value, Role::Field].into_iter().find(|r| *r as isize == value)
+    [Role::Primary, Role::Secondary, Role::Glyph, Role::SegmentLeft, Role::SegmentRight, Role::Value, Role::Field, Role::Link].into_iter().find(|r| *r as isize == value)
 }
 
 /// A button's role: set explicitly, else from its style.
@@ -315,6 +317,7 @@ fn button_role(hwnd: HWND) -> Option<ButtonKind> {
             Role::Glyph => ButtonKind::Glyph,
             Role::SegmentLeft => ButtonKind::Segment(false),
             Role::SegmentRight => ButtonKind::Segment(true),
+            Role::Link => ButtonKind::Link,
             _ => ButtonKind::Push(false),
         });
     }
@@ -341,6 +344,7 @@ enum ButtonKind {
     Radio,
     /// The right-hand segment or not.
     Segment(bool),
+    Link,
 }
 
 // MARK: Hover
@@ -557,6 +561,28 @@ fn paint_button(draw: &NMCUSTOMDRAW, kind: ButtonKind) {
                 focus_ring(&mut c, r, radius, s);
             }
         }
+        ButtonKind::Link => {
+            let ink = if disabled { p.disabled } else if pressed { p.accent_pressed } else if hot { p.accent_hover } else { p.accent };
+            let mut measure = RECT::default();
+            let mut wide_text: Vec<u16> = text.encode_utf16().collect();
+            unsafe {
+                let old = SelectObject(c.dc, font);
+                if !wide_text.is_empty() {
+                    DrawTextW(c.dc, &mut wide_text, &mut measure, DT_CALCRECT | DT_SINGLELINE);
+                }
+                SelectObject(c.dc, old);
+            }
+            let left = 2.0 * s;
+            c.label(&text, RECT { left: left as i32, top: 0, right: c.w, bottom: c.h }, font, ink, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, cues);
+            let width = (measure.right as f32).min(r.w - left);
+            if hot {
+                let baseline = ((r.h + measure.bottom as f32) / 2.0).round();
+                c.round_rect(RectF::new(left, baseline - s, width, s), 0.0, ink);
+            }
+            if focused {
+                focus_ring(&mut c, RectF::new(0.0, 0.0, width + 2.0 * left, r.h), radius, s);
+            }
+        }
         ButtonKind::Glyph => {
             if hot && !disabled {
                 c.round_rect(r, radius, if pressed { p.subtle_pressed } else { p.subtle_hover });
@@ -636,6 +662,7 @@ fn parent_background(hwnd: HWND) -> Color {
     let parent = unsafe { GetParent(hwnd) }.unwrap_or_default();
     match class_of(parent).as_str() {
         "NegsEmpty" | "NegsStrip" => p.window,
+        "msctls_statusbar32" => p.panel,
         _ => p.panel,
     }
 }
