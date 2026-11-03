@@ -156,6 +156,8 @@ fn solve(
         .filter(|(_, v)| **v >= inverse_srgb(0.15) && **v <= inverse_srgb(0.85))
         .map(|(i, _)| i)
         .collect();
+    // The app matches "midtone quantiles" and "±3 EV" below to word its note
+    // (CameraBrightnessReference.failure); keep those phrases.
     if selected.len() < 3 {
         return Err(
             "Camera preview has too few usable midtone quantiles; exposure unchanged".into(),
