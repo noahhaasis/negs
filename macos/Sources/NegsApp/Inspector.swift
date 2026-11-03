@@ -544,18 +544,24 @@ struct AdjustmentInspector: View {
     @AppStorage("inspectorTab") private var tab = InspectorTab.prep
 
     var body: some View {
-        // The histogram and tab switch stay put above the tab's scrolling sections.
+        // The histogram, film and paper, and tab switch stay put above the
+        // tab's scrolling sections, so every tab opens with the stocks in view.
         VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                ScopePanelView(histogram: model.histogram, waveform: model.waveform)
-                Picker("Tab", selection: $tab) {
-                    ForEach(InspectorTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden()
-                .frame(maxWidth: .infinity)
+            ScopePanelView(histogram: model.histogram, waveform: model.waveform)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+            // Sized to its rows; an open stock grid scrolls inside its own frame.
+            Form { filmAndPaper }
+                .formStyle(.grouped)
+                .scrollDisabled(true)
+                .fixedSize(horizontal: false, vertical: true)
+            Picker("Tab", selection: $tab) {
+                ForEach(InspectorTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.segmented).labelsHidden()
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
-            .padding(.vertical, 10)
+            .padding(.bottom, 10)
             Divider()
             Form {
                 switch tab {
@@ -591,9 +597,10 @@ struct AdjustmentInspector: View {
         Section("Detail") { ForEach(prepDetailControls) { control($0) } }
     }
 
-    @ViewBuilder private var lab: some View {
+    /// Above the tabs: the stocks shape everything the tabs adjust.
+    @ViewBuilder private var filmAndPaper: some View {
         let scanning = model.value("io.scan_film").bool
-        Section("Film & Paper") {
+        Section {
             // Preview grids, or the plain menus when Settings turns them off.
             if model.previews.enabled {
                 StockFoldout(model: model, paper: false)
@@ -605,8 +612,6 @@ struct AdjustmentInspector: View {
                 }
             }
             developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
-            Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
-                .help("Skip printing and scan the developed film, as for slides.")
             if !scanning {
                 if model.previews.enabled {
                     StockFoldout(model: model, paper: true)
@@ -618,8 +623,20 @@ struct AdjustmentInspector: View {
                     }
                 }
                 developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")
+            } else {
+                // The switch lives in the Lab's Print section; say why the paper went.
+                LabeledContent {
+                    Text("Skipped – scanning film").foregroundStyle(.secondary)
+                } label: {
+                    Text("Paper").foregroundStyle(.secondary)
+                }
+                .help("Scan film directly is on in the Lab’s Print section.")
             }
         }
+    }
+
+    @ViewBuilder private var lab: some View {
+        let scanning = model.value("io.scan_film").bool
         ImageSizeSection(model: model)
         Section("Camera") {
             Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
@@ -647,9 +664,12 @@ struct AdjustmentInspector: View {
         }
         Section("Film") { groups(.film) }
         Section {
+            // Here rather than beside the stocks: few photographs want it.
+            Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
+                .help("Skip printing and scan the developed film, as for slides.")
             groups(.print).disabled(scanning)
         } header: { Text("Print") } footer: {
-            if scanning { Text("Printing is skipped while scanning film directly.").font(.caption).foregroundStyle(.secondary) }
+            if scanning { Text("Printing and the paper are skipped while scanning film directly.").font(.caption).foregroundStyle(.secondary) }
         }
         Section("Scan & Color") {
             groups(.scan)

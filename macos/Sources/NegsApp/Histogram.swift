@@ -201,7 +201,8 @@ struct ScopePanelView: View {
     @AppStorage("scopeHeight") private var height = ScopePanelView.defaultHeight
     /// The height while the handle is dragged, saved to `height` when it's let go.
     @State private var dragHeight: Double?
-    static let defaultHeight = 190.0, heights = 88.0...420.0
+    /// Starts at the smallest height, leaving the room to the controls.
+    static let heights = 88.0...420.0, defaultHeight = heights.lowerBound
 
     var body: some View {
         VStack(spacing: 6) {
