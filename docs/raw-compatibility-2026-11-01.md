@@ -1,5 +1,8 @@
 # Per-file Apple RAW compatibility verification
 
+*Results from yosoyelchris's fork (`d2a144d`), before the port into Negs; kept as
+that build's record. The port's own checks are in ticket 26.*
+
 Verified on macOS 27.2 (26B5086k), 1 November 2026, using one local camera RAW
 per model. Original photographs, filenames and paths are not included here.
 
