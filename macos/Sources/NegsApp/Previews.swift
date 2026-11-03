@@ -12,9 +12,10 @@ enum PreviewRules {
     static let longSide = 320
 
     /// The edit with `id` chosen, exactly as choosing it from the menu makes
-    /// it. A film brings its own paper and grain/DIR/halation presets and sets
-    /// scanning for slides; a paper keeps the film.
-    static func choosing(_ id: String, paper: Bool, in state: EditState, stocks: [Stock]) -> EditState {
+    /// it. A film brings its own grain/DIR/halation presets, sets scanning for
+    /// slides, and brings its own paper unless `keepPaper` (Settings › Keep
+    /// paper when changing film); a paper keeps the film.
+    static func choosing(_ id: String, paper: Bool, keepPaper: Bool, in state: EditState, stocks: [Stock]) -> EditState {
         var next = state
         if paper {
             next.paper = id; next.params["print_render.development_time"] = .null
@@ -24,15 +25,15 @@ enum PreviewRules {
         next.params["film_render.development_time"] = .null
         // A new film brings its own grain, DIR and halation presets, as upstream applies them.
         for path in Stock.presetPaths { next.params[path] = .null }
-        pairFilm(in: &next, stocks: stocks)
+        pairFilm(in: &next, stocks: stocks, paper: !keepPaper)
         return next
     }
 
-    /// Scanning for slides, and the film's own paper.
-    static func pairFilm(in state: inout EditState, stocks: [Stock]) {
+    /// Scanning for slides, and the film's own paper unless `paper` is false.
+    static func pairFilm(in state: inout EditState, stocks: [Stock], paper: Bool = true) {
         guard let film = stocks.first(where: { !$0.paper && $0.id == state.film }) else { return }
         state.params["io.scan_film"] = .bool(film.positive)
-        if stocks.contains(where: { $0.paper && $0.id == film.target }), state.paper != film.target {
+        if paper, stocks.contains(where: { $0.paper && $0.id == film.target }), state.paper != film.target {
             state.paper = film.target; state.params["print_render.development_time"] = .null
         }
     }
@@ -40,9 +41,10 @@ enum PreviewRules {
     /// The helper request for `stock`'s tile, without its scratch file. It
     /// identifies the thumbnail: the photograph (path and generation), every
     /// render setting with the stock chosen, and the crop and straighten.
-    /// `state` is the edit as rendered (`EditorModel.renderState`).
-    static func request(for stock: Stock, state: EditState, stocks: [Stock], source: URL, generation: Int) -> [String: JSONValue] {
-        let chosen = choosing(stock.id, paper: stock.paper, in: state, stocks: stocks)
+    /// `state` is the edit as rendered (`EditorModel.renderState`); `keepPaper`
+    /// as for `choosing`, so a film's tile shows what a click would develop.
+    static func request(for stock: Stock, keepPaper: Bool, state: EditState, stocks: [Stock], source: URL, generation: Int) -> [String: JSONValue] {
+        let chosen = choosing(stock.id, paper: stock.paper, keepPaper: keepPaper, in: state, stocks: stocks)
         var command: [String: JSONValue] = [
             "command": .string("thumbnail"), "input": .string(source.path),
             "source_generation": .number(Double(generation)),
@@ -159,11 +161,15 @@ struct StockEntry {
     let tile: PreviewTile
 }
 
-/// The tiles, the foldouts' open state and the setting.
+/// The tiles, the foldouts' open state and the settings.
 @MainActor @Observable final class Previews {
     static let defaultsKey = "previews"
+    static let keepPaperKey = "keep_paper"
     /// Settings › Film, paper and preset previews; a missing value means on.
     var enabled: Bool { didSet { defaults.set(enabled, forKey: Self.defaultsKey) } }
+    /// Settings › Keep paper when changing film; a missing value means off.
+    /// Here because the film tiles follow it too.
+    var keepPaper: Bool { didSet { defaults.set(keepPaper, forKey: Self.keepPaperKey) } }
     @ObservationIgnored private let defaults: UserDefaults
     /// Collapsed at every launch.
     var filmOpen = false
@@ -186,6 +192,7 @@ struct StockEntry {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         enabled = defaults.object(forKey: Self.defaultsKey) as? Bool ?? true
+        keepPaper = defaults.object(forKey: Self.keepPaperKey) as? Bool ?? false
         // Measurement hook (remove before shipping): NEGS_STOCK_EXPAND=film,paper opens the grids.
         let expand = ProcessInfo.processInfo.environment["NEGS_STOCK_EXPAND"]?.split(separator: ",") ?? []
         filmOpen = expand.contains("film"); paperOpen = expand.contains("paper")

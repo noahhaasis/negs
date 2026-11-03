@@ -148,6 +148,11 @@ struct UpdateSettings: View {
                 get: { model.previews.enabled }, set: { model.setPreviews($0) }))
             Text("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Keep paper when changing film", isOn: Binding(
+                get: { model.previews.keepPaper }, set: { model.setKeepPaper($0) }))
+                .padding(.top, 8)
+            Text("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 8)
             Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
                 .disabled(model.saving || model.exporting || updates.installing || updates.sessionInProgress)

@@ -27,7 +27,7 @@ final class PreviewTests: XCTestCase {
     }
 
     func testChoosingAFilmPairsItsPaperAndResetsItsPresets() {
-        let state = PreviewRules.choosing("trix", paper: false, in: edited(), stocks: stocks)
+        let state = PreviewRules.choosing("trix", paper: false, keepPaper: false, in: edited(), stocks: stocks)
         XCTAssertEqual(state.film, "trix")
         XCTAssertEqual(state.paper, "ilford")
         XCTAssertEqual(state.params["film_render.development_time"], .null)
@@ -37,15 +37,39 @@ final class PreviewTests: XCTestCase {
         // Every other setting carries over.
         XCTAssertEqual(state.params["camera.exposure_compensation_ev"], .number(0.7))
 
-        let slide = PreviewRules.choosing("velvia", paper: false, in: edited(), stocks: stocks)
+        let slide = PreviewRules.choosing("velvia", paper: false, keepPaper: false, in: edited(), stocks: stocks)
         XCTAssertEqual(slide.params["io.scan_film"], .bool(true))
         // Its own paper is the current one, so the print development time stays.
         XCTAssertEqual(slide.paper, "endura")
         XCTAssertEqual(slide.params["print_render.development_time"], .number(2))
     }
 
+    func testKeepPaperLeavesThePaperAlone() {
+        // Gold's paper is Endura; start from Multigrade with a print time.
+        var start = edited(); start.paper = "ilford"
+        for keep in [false, true] {
+            let state = PreviewRules.choosing("gold", paper: false, keepPaper: keep, in: start, stocks: stocks)
+            XCTAssertEqual(state.film, "gold")
+            XCTAssertEqual(state.paper, keep ? "ilford" : "endura")
+            XCTAssertEqual(state.params["print_render.development_time"], keep ? .number(2) : .null)
+            // Everything else a film change does still happens.
+            XCTAssertEqual(state.params["film_render.development_time"], .null)
+            for path in Stock.presetPaths { XCTAssertEqual(state.params[path], .null, path) }
+        }
+        // Slides still scan directly.
+        let slide = PreviewRules.choosing("velvia", paper: false, keepPaper: true, in: start, stocks: stocks)
+        XCTAssertEqual(slide.params["io.scan_film"], .bool(true))
+        XCTAssertEqual(slide.paper, "ilford")
+        // A film's tile shows it on the current paper.
+        let photo = URL(fileURLWithPath: "/photos/a.jpg"), gold = stocks[0]
+        let kept = PreviewRules.request(for: gold, keepPaper: true, state: start, stocks: stocks, source: photo, generation: 1)
+        let paired = PreviewRules.request(for: gold, keepPaper: false, state: start, stocks: stocks, source: photo, generation: 1)
+        XCTAssertEqual(kept["paper"], .string("ilford"))
+        XCTAssertEqual(paired["paper"], .string("endura"))
+    }
+
     func testChoosingAPaperKeepsTheFilm() {
-        let state = PreviewRules.choosing("ilford", paper: true, in: edited(), stocks: stocks)
+        let state = PreviewRules.choosing("ilford", paper: true, keepPaper: false, in: edited(), stocks: stocks)
         XCTAssertEqual(state.film, "gold")
         XCTAssertEqual(state.paper, "ilford")
         XCTAssertEqual(state.params["print_render.development_time"], .null)
@@ -56,7 +80,7 @@ final class PreviewTests: XCTestCase {
     func testTheTileKeyFollowsTheCropAndThePhotograph() {
         let photo = URL(fileURLWithPath: "/photos/a.jpg"), trix = stocks[2]
         func key(_ state: EditState, _ source: URL = photo, generation: Int = 1) -> PreviewTile.Key {
-            PreviewTile.Key(generation: generation, request: PreviewRules.request(for: trix, state: state, stocks: stocks, source: source, generation: generation))
+            PreviewTile.Key(generation: generation, request: PreviewRules.request(for: trix, keepPaper: false, state: state, stocks: stocks, source: source, generation: generation))
         }
         let base = key(edited())
         XCTAssertNil(base.request["crop"])
@@ -100,7 +124,7 @@ final class PreviewTests: XCTestCase {
         // The preset replaces the Lab settings and the stocks, so they don't count.
         var exposed = state; exposed.params["camera.exposure_compensation_ev"] = .number(2)
         XCTAssertEqual(key(exposed), base)
-        XCTAssertEqual(key(PreviewRules.choosing("trix", paper: false, in: state, stocks: stocks)), base)
+        XCTAssertEqual(key(PreviewRules.choosing("trix", paper: false, keepPaper: false, in: state, stocks: stocks)), base)
         // What it keeps, the crop, the photograph and the file's text do.
         var space = state; space.params["io.output_color_space"] = .string("Display P3")
         XCTAssertNotEqual(key(space), base)
@@ -169,5 +193,15 @@ final class PreviewTests: XCTestCase {
         XCTAssertTrue(previews.enabled)
         previews.enabled = false
         XCTAssertFalse(Previews(defaults: defaults).enabled)
+    }
+
+    @MainActor func testMissingSettingMeansThePaperFollowsTheFilm() {
+        let suite = "negs-keep-paper-\(UUID().uuidString)", defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let previews = Previews(defaults: defaults)
+        XCTAssertFalse(previews.keepPaper)
+        previews.keepPaper = true
+        XCTAssertTrue(Previews(defaults: defaults).keepPaper)
+        XCTAssertEqual(defaults.object(forKey: "keep_paper") as? Bool, true)
     }
 }
