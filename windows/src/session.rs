@@ -138,6 +138,9 @@ pub struct Preferences {
     /// Comma-separated titles of the expanded groups.
     pub expanded_adjustments: String,
     pub inspector_tab: String,
+    /// A tab was clicked. Before Prep every settings file saved "Lab" as the
+    /// default, so without this a "Lab" opens on Prep, as on the Mac.
+    pub inspector_tab_chosen: bool,
     /// What the adjustments column shows: "Adjustments" or "Presets".
     pub inspector_pane: String,
     pub export_engine: String,
@@ -168,7 +171,38 @@ pub struct Preferences {
     pub keep_paper: bool,
     /// The tone graph's channel: "rgb", "r", "g" or "b".
     pub tone_graph_channel: String,
+    /// Settings › New photographs: Start fresh (true, the default) or keep
+    /// the previous photograph's edits (false, as earlier versions did). A
+    /// restored session keeps its own edits either way.
+    #[serde(rename = "freshEditsForNewPhotos")]
+    pub fresh_edits: bool,
+    /// Settings › Match new photographs to camera brightness: whether a new
+    /// photograph starts with Prep › Match camera brightness on.
+    #[serde(rename = "autoPlaceNewImages")]
+    pub match_new_photos: bool,
+    /// Settings › Limit preview to 12 MP. A preference, not an edit, so Undo
+    /// and Reset Adjustments leave it. None until set: a session from before
+    /// it was a preference then lends its own value.
+    pub limit_preview: Option<bool>,
+    /// Settings › Use less memory for export: grain channels one at a time.
+    /// Only exports read it; previews always develop the channels together.
+    pub low_memory_export: bool,
+    /// Lab › Show all controls. Off, the Lab shows each group's basics and
+    /// anything changed from its default.
+    pub lab_all_controls: bool,
+    /// The scope above the tabs: "Histogram" or "Waveform".
+    pub scope_mode: String,
+    /// The scope's height in DIPs, dragged with the handle below it.
+    pub scope_height: f64,
+    /// Starred stock ids, in the order starred. Ids the catalog no longer has
+    /// are kept, in case it brings them back.
+    pub favorite_films: Vec<String>,
+    pub favorite_papers: Vec<String>,
 }
+
+/// The scope's heights in DIPs; it starts at the smallest, leaving the room
+/// to the controls.
+pub const SCOPE_HEIGHTS: (f64, f64) = (88.0, 420.0);
 
 impl Default for Preferences {
     fn default() -> Self {
@@ -176,7 +210,8 @@ impl Default for Preferences {
             recent_files: vec![],
             filmstrip_visible: true,
             expanded_adjustments: "Enlarger".into(),
-            inspector_tab: "Lab".into(),
+            inspector_tab: "Prep".into(),
+            inspector_tab_chosen: false,
             inspector_pane: "Adjustments".into(),
             export_engine: "fast".into(),
             output_format: "png".into(),
@@ -194,6 +229,15 @@ impl Default for Preferences {
             previews: true,
             keep_paper: false,
             tone_graph_channel: "rgb".into(),
+            fresh_edits: true,
+            match_new_photos: true,
+            limit_preview: None,
+            low_memory_export: false,
+            lab_all_controls: false,
+            scope_mode: "Histogram".into(),
+            scope_height: SCOPE_HEIGHTS.0,
+            favorite_films: vec![],
+            favorite_papers: vec![],
         }
     }
 }
@@ -223,6 +267,44 @@ impl Preferences {
             titles.push(title);
         }
         self.expanded_adjustments = titles.join(",");
+    }
+
+    /// The tab the inspector shows. Post became Output; settings files from
+    /// before Prep that never chose a tab open on Prep.
+    pub fn tab(&self) -> &str {
+        match self.inspector_tab.as_str() {
+            "Post" | "Output" => "Output",
+            "Lab" if self.inspector_tab_chosen => "Lab",
+            _ => "Prep",
+        }
+    }
+
+    pub fn choose_tab(&mut self, tab: &str) {
+        self.inspector_tab = tab.into();
+        self.inspector_tab_chosen = true;
+    }
+
+    pub fn limits_preview(&self) -> bool {
+        self.limit_preview.unwrap_or(false)
+    }
+
+    pub fn favorites(&self, paper: bool) -> &[String] {
+        if paper { &self.favorite_papers } else { &self.favorite_films }
+    }
+
+    pub fn is_favorite(&self, id: &str, paper: bool) -> bool {
+        self.favorites(paper).iter().any(|f| f == id)
+    }
+
+    /// Stars `id` (last among the favourites) or unstars it.
+    pub fn toggle_favorite(&mut self, id: &str, paper: bool) {
+        let ids = if paper { &mut self.favorite_papers } else { &mut self.favorite_films };
+        match ids.iter().position(|f| f == id) {
+            Some(index) => {
+                ids.remove(index);
+            }
+            None => ids.push(id.to_string()),
+        }
     }
 
     /// Adds a photograph to the top of Recent (at most 10, no duplicates).
@@ -378,5 +460,37 @@ mod tests {
         let kept: Preferences = serde_json::from_str(r#"{"keep_paper": true}"#).unwrap();
         assert!(kept.keep_paper);
         assert!(serde_json::to_string(&kept).unwrap().contains(r#""keep_paper":true"#));
+    }
+
+    /// Settings files from before Prep: start fresh, match new photographs,
+    /// open on Prep (or Output where Post was chosen), and lend no preview limit.
+    #[test]
+    fn settings_from_before_prep_take_the_new_defaults() {
+        let old: Preferences = serde_json::from_str(r#"{"inspectorTab": "Post"}"#).unwrap();
+        assert!(old.fresh_edits && old.match_new_photos && !old.low_memory_export && !old.lab_all_controls);
+        assert_eq!((old.tab(), old.limit_preview, old.scope_height), ("Output", None, 88.0));
+        let lab: Preferences = serde_json::from_str(r#"{"inspectorTab": "Lab"}"#).unwrap();
+        assert_eq!(lab.tab(), "Prep", "Every file saved Lab as the default");
+        let mut chosen = lab.clone();
+        chosen.choose_tab("Lab");
+        assert_eq!(chosen.tab(), "Lab");
+        assert_eq!(Preferences::default().tab(), "Prep");
+        let kept: Preferences = serde_json::from_str(r#"{"freshEditsForNewPhotos": false, "autoPlaceNewImages": false, "limitPreview": true}"#).unwrap();
+        assert!(!kept.fresh_edits && !kept.match_new_photos && kept.limits_preview());
+        let text = serde_json::to_string(&kept).unwrap();
+        assert!(text.contains(r#""freshEditsForNewPhotos":false"#) && text.contains(r#""autoPlaceNewImages":false"#));
+    }
+
+    #[test]
+    fn favourites_keep_the_order_starred() {
+        let mut prefs = Preferences::default();
+        prefs.toggle_favorite("portra", false);
+        prefs.toggle_favorite("gold", false);
+        prefs.toggle_favorite("endura", true);
+        assert_eq!(prefs.favorites(false), ["portra", "gold"]);
+        assert!(prefs.is_favorite("endura", true) && !prefs.is_favorite("endura", false));
+        prefs.toggle_favorite("portra", false);
+        prefs.toggle_favorite("portra", false);
+        assert_eq!(prefs.favorites(false), ["gold", "portra"]);
     }
 }

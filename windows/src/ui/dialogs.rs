@@ -172,6 +172,17 @@ const SETTINGS_PREVIEWS: u16 = 10;
 const SETTINGS_AUTOMATIC: u16 = 11;
 const SETTINGS_CHECK: u16 = 12;
 const SETTINGS_KEEP_PAPER: u16 = 13;
+const SETTINGS_NEW_PHOTOS: u16 = 14;
+const SETTINGS_MATCH: u16 = 15;
+const SETTINGS_LIMIT: u16 = 16;
+const SETTINGS_LOW_MEMORY: u16 = 17;
+const SETTINGS_NEW_NOTE: u16 = 18;
+
+/// Settings › New photographs: what each choice does.
+const NEW_PHOTOS_NOTES: [&str; 2] = [
+    "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections.",
+    "Each photograph you open starts with default Prep and Lab settings and no border. The film, paper, Image Size and output colour stay.",
+];
 
 thread_local! {
     /// The open Settings dialog's result: None while open, then whether OK closed it.
@@ -180,8 +191,9 @@ thread_local! {
     static SETTINGS_NOTES: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Settings (the Mac's Settings window): previews, keeping the paper and updates, in a modal
-/// dialog with OK and Cancel. Updates show only in builds that have them.
+/// Settings (the Mac's Settings window): previews, keeping the paper, new
+/// photographs, the preview and export, and updates, in a modal dialog with
+/// OK and Cancel. Updates show only in builds that have them.
 pub fn settings(app: &mut App) {
     let configured = crate::updates::configured();
     let px = |dip: f64| app.px(dip);
@@ -230,6 +242,40 @@ pub fn settings(app: &mut App) {
     let note = label("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.", fonts.small);
     notes.push(note);
     rows.push((note, None, px(18.0), px(18.0), None));
+    rows.push((label("New Photographs", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
+    let new_photos = make(windows::core::w!("COMBOBOX"), "", WS_TABSTOP | WS_VSCROLL | WINDOW_STYLE(CBS_DROPDOWNLIST as u32), SETTINGS_NEW_PHOTOS, fonts.ui);
+    for title in ["Keep the previous edits", "Start fresh"] {
+        let text = wide(title);
+        unsafe {
+            SendMessageW(new_photos, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+        }
+    }
+    let fresh = app.model.prefs.fresh_edits;
+    unsafe {
+        SendMessageW(new_photos, CB_SETCURSEL, WPARAM(fresh as usize), LPARAM(0));
+    }
+    super::accessible_name(new_photos, "New photographs");
+    rows.push((new_photos, Some(px(200.0)), 0, px(30.0) - px(200.0), Some(px(220.0))));
+    // The note's text follows the choice; it is laid out for the longer one.
+    let note = make(windows::core::w!("STATIC"), NEW_PHOTOS_NOTES[1], WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFT.0 | windows::Win32::System::SystemServices::SS_NOPREFIX.0), SETTINGS_NEW_NOTE, fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(18.0), px(10.0), None));
+    let match_new = check("Match new photographs to camera brightness", SETTINGS_MATCH, app.model.prefs.match_new_photos);
+    rows.push((match_new, Some(px(22.0)), 0, px(2.0), None));
+    let note = label("New photographs start with Prep › Match camera brightness on: a RAW develops about as bright as the camera's own preview, a JPEG or TIFF as the file itself.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(18.0), px(18.0), None));
+    rows.push((label("Preview & Export", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
+    let limit = check("Limit preview to 12 MP", SETTINGS_LIMIT, app.model.prefs.limits_preview());
+    rows.push((limit, Some(px(22.0)), 0, px(2.0), None));
+    let note = label("Develops the preview faster on large photographs. Export keeps the full Image Size.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(18.0), px(10.0), None));
+    let low_memory = check("Use less memory for export", SETTINGS_LOW_MEMORY, app.model.prefs.low_memory_export);
+    rows.push((low_memory, Some(px(22.0)), 0, px(2.0), None));
+    let note = label("Develops the grain one colour at a time. Same result, less memory, longer export.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(18.0), px(18.0), None));
     rows.push((label("Updates", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
     let mut automatic = HWND::default();
     if configured {
@@ -256,6 +302,7 @@ pub fn settings(app: &mut App) {
         }
         y += h + gap;
     }
+    set_new_photos_note(dialog, fresh);
     let (button_w, button_h) = (px(88.0), px(28.0));
     y += px(12.0);
     let ok = make(windows::core::w!("BUTTON"), "OK", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), IDOK.0 as u16, fonts.ui);
@@ -290,6 +337,8 @@ pub fn settings(app: &mut App) {
         let accepted = SETTINGS_DONE.with(Cell::get).unwrap_or(false);
         let checked = |c: HWND| SendMessageW(c, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
         let (previews_on, keep_paper_on, automatic_on) = (checked(previews), checked(keep_paper), configured && checked(automatic));
+        let fresh_on = SendMessageW(new_photos, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 == 1;
+        let (match_on, limit_on, low_memory_on) = (checked(match_new), checked(limit), checked(low_memory));
         let _ = EnableWindow(app.main, true);
         let _ = DestroyWindow(dialog);
         let _ = SetForegroundWindow(app.main);
@@ -303,6 +352,20 @@ pub fn settings(app: &mut App) {
         }
         app.model.set_previews(previews_on);
         app.model.set_keep_paper(keep_paper_on);
+        app.model.set_fresh_edits(fresh_on);
+        app.model.set_match_new_photos(match_on);
+        app.model.set_limit_preview(limit_on);
+        app.model.set_low_memory_export(low_memory_on);
+    }
+}
+
+/// The New photographs note for the choice in the open dialog.
+fn set_new_photos_note(dialog: HWND, fresh: bool) {
+    unsafe {
+        if let Ok(note) = GetDlgItem(dialog, SETTINGS_NEW_NOTE as i32) {
+            let text = wide(NEW_PHOTOS_NOTES[fresh as usize]);
+            let _ = SetWindowTextW(note, pcwstr(&text));
+        }
     }
 }
 
@@ -331,6 +394,9 @@ extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
                 let id = (wparam.0 & 0xffff) as i32;
                 if id == IDOK.0 || id == IDCANCEL.0 {
                     SETTINGS_DONE.with(|d| d.set(Some(id == IDOK.0)));
+                } else if id == SETTINGS_NEW_PHOTOS as i32 && ((wparam.0 >> 16) & 0xffff) as u32 == CBN_SELCHANGE {
+                    let fresh = SendMessageW(HWND(lparam.0 as *mut _), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 == 1;
+                    set_new_photos_note(hwnd, fresh);
                 } else if id == SETTINGS_CHECK as i32 {
                     crate::updates::check(true);
                 }
@@ -796,7 +862,6 @@ pub fn save(app: &mut App, export: bool) {
     } else {
         app.model.save_preview(path, size, settings);
     }
-    app.model.follow_preview_space();
 }
 
 /// Import Presets…: several files, saved by Negs or by spektrafilm.
