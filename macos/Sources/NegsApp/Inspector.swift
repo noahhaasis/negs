@@ -213,6 +213,44 @@ struct SliderRow: View {
     }
 }
 
+/// The film frame as a stills format, which writes the frame's long edge in
+/// mm; Custom shows the slider. A value no format has reads as Custom, so
+/// presets and older edits need no setting of their own.
+struct FilmFormatPicker: View {
+    let model: EditorModel
+    static let path = "camera.film_format_mm"
+    static let range: ClosedRange<Double> = 4...120
+    /// Long edges of the image area. 135 stays at the engine's 35 (not the
+    /// gate's 36) so existing edits render as before; 6×4.5 and 6×6 share 56.
+    static let formats: [(name: String, mm: Double)] = [
+        ("110", 17), ("Half frame", 24), ("35 mm (135)", 35),
+        ("6×4.5 / 6×6", 56), ("6×7", 70), ("6×9", 84), ("4×5", 120),
+    ]
+    static func format(mm: Double) -> String? { formats.first { abs($0.mm - mm) < 0.05 }?.name }
+    private static let custom = "Custom"
+
+    var body: some View {
+        let mm = model.value(Self.path).double
+        let custom = model.customFilmFormat || Self.format(mm: mm) == nil
+        Picker("Film format", selection: Binding(get: { custom ? Self.custom : Self.format(mm: mm) ?? Self.custom }, set: { name in
+            if let format = Self.formats.first(where: { $0.name == name }) {
+                model.customFilmFormat = false
+                model.set(Self.path, .number(format.mm))
+            } else {
+                model.customFilmFormat = true
+            }
+        })) {
+            ForEach(Self.formats, id: \.name) { Text($0.name).tag($0.name) }
+            Divider()
+            Text("Custom…").tag(Self.custom)
+        }
+        .help(ControlHelp.text(Self.path) ?? "")
+        if custom {
+            SliderRow(model: model, title: "Long edge (mm)", path: Self.path, range: Self.range, step: 0.1)
+        }
+    }
+}
+
 /// A slider under its title and value. Clicking the value types one; off
 /// its default, a button resets it.
 struct LabeledSlider: View {
@@ -710,7 +748,7 @@ struct AdjustmentInspector: View {
         let scanning = model.value("io.scan_film").bool
         Section("Camera") {
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
-            if shows("camera.film_format_mm") { control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1)) }
+            FilmFormatPicker(model: model)
             if shows("camera.lens_blur_um") { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
             groups(.camera)
         }

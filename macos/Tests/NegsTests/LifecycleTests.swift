@@ -29,6 +29,8 @@ import XCTest
         model.set("post.contrast", .number(40))
         model.set("io.raw_white_balance.mode", .string("custom"))
         model.set("io.raw_white_balance.temperature", .number(3200))
+        model.set("camera.film_format_mm", .number(56))
+        model.customFilmFormat = true
         let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
         undo.beginUndoGrouping()
         model.resetValue("prep.highlights")
@@ -43,6 +45,8 @@ import XCTest
         }
         XCTAssertEqual(model.film, film)
         XCTAssertEqual(model.paper, paper)
+        XCTAssertEqual(model.value("camera.film_format_mm"), model.defaultValue("camera.film_format_mm"))
+        XCTAssertFalse(model.customFilmFormat, "Start fresh also forgets Film format › Custom")
         XCTAssertFalse(undo.canUndo, "A new photograph cannot undo edits from the previous one")
         try await waitUntil { model.previewCurrent || model.error != nil }
         XCTAssertNil(model.error)
@@ -62,6 +66,8 @@ import XCTest
         model.set("prep.highlights", .number(-80))
         model.set("post.contrast", .number(40))
         model.border(\.enabled).wrappedValue = true
+        model.set("camera.film_format_mm", .number(56))
+        model.customFilmFormat = true
         // A → B → A: Negs keeps one session, so each selection is a fresh open
         // that takes the edits of the photograph before it.
         for url in [second, first] {
@@ -69,6 +75,8 @@ import XCTest
             XCTAssertEqual(model.value("prep.highlights"), .number(-80))
             XCTAssertEqual(model.value("post.contrast"), .number(40))
             XCTAssertTrue(model.border.enabled)
+            XCTAssertEqual(model.value("camera.film_format_mm"), .number(56))
+            XCTAssertTrue(model.customFilmFormat, "Keep the previous edits keeps Film format › Custom")
             XCTAssertEqual(model.crop, CropSettings())
         }
         try await waitUntil { model.previewCurrent || model.error != nil }

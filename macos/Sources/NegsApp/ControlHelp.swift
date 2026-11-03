@@ -35,7 +35,7 @@ enum ControlHelp {
 
         // Lab: camera
         "camera.exposure_compensation_ev": "Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative’s density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.",
-        "camera.film_format_mm": "The film frame’s long edge in mm: 35 for 35 mm film, about 56–90 for medium format. Grain, halation, scatter and diffusion are all sized on the film, so a smaller format shows them larger.",
+        "camera.film_format_mm": "The film the photograph was taken on, by the frame’s long edge. Grain, halation, scatter and diffusion are all sized on the film, so a smaller format shows them larger.",
         "camera.lens_blur_um": "Softness of the taking lens, measured on the film. 0 is a perfect lens.",
 
         // Lens Diffusion
