@@ -221,7 +221,9 @@ impl InputGamutCompress {
         let ch = lut.channels;
         let inv = 1.0 / (size as f64 - 1.0);
         let mut data = vec![0.0f64; size * size * ch];
-        for i in 0..size {
+        // Each cell is independent; rows in parallel (a film change rebuilds this).
+        use rayon::prelude::*;
+        data.par_chunks_mut(size * ch).enumerate().for_each(|(i, row)| {
             for j in 0..size {
                 // Step 1: tc cell → CIE xy.
                 let (x, y) = spectral::tc_to_xy(i as f64 * inv, j as f64 * inv);
@@ -232,10 +234,9 @@ impl InputGamutCompress {
                 // Step 4: bilinear sample original LUT at (tx, ty) grid coords.
                 let sample =
                     bilinear_sample(lut, tx * (size as f64 - 1.0), ty * (size as f64 - 1.0));
-                let base = (i * size + j) * ch;
-                data[base..base + ch].copy_from_slice(&sample[..ch]);
+                row[j * ch..j * ch + ch].copy_from_slice(&sample[..ch]);
             }
-        }
+        });
         TcLut {
             size,
             channels: ch,

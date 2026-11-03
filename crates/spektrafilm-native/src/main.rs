@@ -97,6 +97,30 @@ enum Command {
         #[serde(default)]
         crop: Option<Crop>,
     },
+    /// A small render of the current source with another film/paper or a
+    /// preset, for the stock and preset previews. Independent of the main render: it never replaces the
+    /// retained output (Save) nor the cached main pipeline.
+    Thumbnail {
+        input: PathBuf,
+        #[serde(default)]
+        source_generation: u64,
+        film: String,
+        paper: String,
+        params: Box<RuntimeParams>,
+        /// The thumbnail's long edge in pixels.
+        long_side: u32,
+        preview_path: PathBuf,
+        /// The photograph's crop. The whole frame is developed, as for the
+        /// main preview, then cut, so grain and halation keep their scale.
+        #[serde(default)]
+        crop: Option<Crop>,
+        /// A preset file's text, applied over `params` as `preset_import`
+        /// applies it; its film and paper replace `film` and `paper`.
+        #[serde(default)]
+        preset: Option<String>,
+    },
+    /// Frees the thumbnails' caches (the previews were turned off).
+    ReleaseThumbnails,
     Save {
         render_id: u64,
         output: PathBuf,
@@ -142,6 +166,46 @@ struct Session {
     metering: Option<ImageBuf>,
     pipeline: Option<(String, Pipeline)>,
     output: Option<Rendered>,
+    /// The source reduced for stock and preset thumbnails.
+    thumbnail_source: Option<((u32, u32), ImageBuf)>,
+    /// Calibrated pipelines for thumbnails, most recent last. A stock's
+    /// pipeline outlives edits that don't change its key (exposure, grain…).
+    thumbnail_pipelines: Vec<(String, Pipeline)>,
+    /// Reduced sources for preset thumbnails whose RAW white balance isn't
+    /// the main source's, most recent last.
+    thumbnail_wb_sources: Vec<WbSource>,
+}
+
+/// The source decoded with another RAW white balance, reduced to the largest
+/// frame a thumbnail develops (`THUMBNAIL_FRAME_MAX`).
+struct WbSource {
+    /// Effective (`RawWhiteBalance::effective`).
+    wb: spektrafilm_io::RawWhiteBalance,
+    colour: spektrafilm_io::InputColour,
+    image: ImageBuf,
+    /// The auto-exposure metering frame of this decode.
+    metering: ImageBuf,
+}
+
+/// Every film with its paper, and every paper with the current film.
+const THUMBNAIL_PIPELINES: usize = 40;
+/// The longest frame developed for a cropped thumbnail.
+const THUMBNAIL_FRAME_MAX: u32 = 1280;
+/// White balances kept for preset thumbnails (few presets differ).
+const THUMBNAIL_WB_SOURCES: usize = 4;
+
+/// The frame developed for a thumbnail: large enough that the crop fills
+/// `long_side`, within a bound (a tight crop then gets fewer pixels).
+fn thumbnail_dimensions((width, height): (u32, u32), long_side: u32, crop: Option<&Crop>) -> (u32, u32) {
+    let (fraction_w, fraction_h) = crop.map_or((1.0, 1.0), |c| (c.width, c.height));
+    let cropped_long = (width as f64 * fraction_w).max(height as f64 * fraction_h).max(1.0);
+    let frame_long = (width.max(height) as f64 * long_side as f64 / cropped_long).min(THUMBNAIL_FRAME_MAX as f64);
+    let scale = frame_long / width.max(height) as f64;
+    if scale >= 1.0 {
+        (width, height)
+    } else {
+        (((width as f64 * scale).round() as u32).max(1), ((height as f64 * scale).round() as u32).max(1))
+    }
 }
 
 /// The decoded input, and what it was decoded with: a RAW's white balance
@@ -206,10 +270,186 @@ fn catalog(data: &Path) -> Result<Value> {
     );
     catalog["protocol"] = json!(1);
     catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true});
+    // What a preset leaves as it is: a preset's thumbnail changes only with these.
+    catalog["preset_kept"] = json!(presets::KEPT);
     Ok(catalog)
 }
 
 impl Session {
+    /// Decodes `input` unless the session already holds it with these settings.
+    fn load_source(
+        &mut self,
+        input: &Path,
+        source_generation: u64,
+        wb: spektrafilm_io::RawWhiteBalance,
+        lens: spektrafilm_io::LensCorrection,
+        interpretation: spektrafilm_io::InputInterpretation,
+    ) -> Result<()> {
+        let reload = self.source_generation != source_generation
+            || self.source.as_ref().is_none_or(|source| !source.current(input, wb, lens, &interpretation));
+        if reload {
+            // Release the last source's caches before decoding the next.
+            self.source = None;
+            self.scaled = None;
+            self.interactive = None;
+            self.metering = None;
+            self.thumbnail_source = None;
+            self.thumbnail_wb_sources = Vec::new();
+            let loaded = spektrafilm_io::load_image_colour(
+                input,
+                spektrafilm_io::Formats::Any,
+                wb,
+                lens,
+                &interpretation,
+            )?;
+            self.source = Some(Source {
+                path: input.to_path_buf(),
+                wb,
+                lens,
+                lens_correction_supported: loaded.lens_correction_supported,
+                interpretation,
+                colour: loaded.colour,
+                image: loaded.image,
+            });
+            self.source_generation = source_generation;
+        }
+        Ok(())
+    }
+
+    fn thumbnail(
+        &mut self,
+        input: PathBuf,
+        source_generation: u64,
+        mut film: String,
+        mut paper: String,
+        mut params: Box<RuntimeParams>,
+        long_side: u32,
+        preview_path: PathBuf,
+        crop: Option<Crop>,
+        preset: Option<String>,
+        data: &Path,
+    ) -> Result<Value> {
+        let started = Instant::now();
+        ensure!((16..=1024).contains(&long_side), "Invalid thumbnail size");
+        let preset_applied = preset.is_some();
+        if let Some(text) = preset {
+            let preset = presets::import(&text, data).map_err(anyhow::Error::msg)?;
+            params = Box::new(presets::apply(&preset.params, &params));
+            (film, paper) = (preset.film, preset.paper);
+        }
+        if let Some(crop) = &crop {
+            crop.validate()?;
+        }
+        ensure!(
+            RgbColourspace::find(&params.io.output_color_space).is_some(),
+            "Unknown output colour space: {}",
+            params.io.output_color_space
+        );
+        params.io.raw_white_balance.validate()?;
+        params.settings.serial_grain = false;
+        let post = std::mem::take(&mut params.post);
+        let interpretation = params.io.input_interpretation.clone();
+        interpretation.validate()?;
+        let (wb, lens) = (params.io.raw_white_balance, params.io.lens_correction);
+        // A preset whose RAW white balance isn't the photograph's needs a
+        // decode of its own. It gets a reduced copy here, so the main render
+        // keeps its decoded source. (A preset keeps the lens correction and
+        // the interpretation, so only the white balance can differ.)
+        let own_decode = preset_applied
+            && spektrafilm_io::is_raw(&input)
+            && self.source_generation == source_generation
+            && self.source.as_ref().is_some_and(|s| s.path == input && s.wb.effective() != wb.effective());
+        if !own_decode {
+            self.load_source(&input, source_generation, wb, lens, interpretation.clone())?;
+        }
+        let decoded = started.elapsed();
+        let source = &self.source.as_ref().unwrap().image;
+        // The thumbnail is the whole frame; Image Size describes the export.
+        image_size::clear(&mut params);
+        let full = (source.width, source.height);
+        let dimensions = thumbnail_dimensions(full, long_side, crop.as_ref());
+        let (working, metering) = if own_decode {
+            let index = match self.thumbnail_wb_sources.iter().position(|s| s.wb == wb.effective()) {
+                Some(index) => index,
+                None => {
+                    let loaded = spektrafilm_io::load_image_colour(
+                        &input, spektrafilm_io::Formats::Any, wb, lens, &interpretation,
+                    )?;
+                    let metering = spektrafilm_core::stages::filming::metering_preview(&loaded.image);
+                    // The largest frame any thumbnail develops, so a new crop
+                    // reduces this copy instead of decoding again.
+                    let largest = thumbnail_dimensions(full, THUMBNAIL_FRAME_MAX, None);
+                    let image = if largest == (loaded.image.width, loaded.image.height) {
+                        loaded.image
+                    } else {
+                        downsample_area(&loaded.image, largest)
+                    };
+                    if self.thumbnail_wb_sources.len() >= THUMBNAIL_WB_SOURCES {
+                        self.thumbnail_wb_sources.remove(0);
+                    }
+                    self.thumbnail_wb_sources.push(WbSource { wb: wb.effective(), colour: loaded.colour, image, metering });
+                    self.thumbnail_wb_sources.len() - 1
+                }
+            };
+            let entry = self.thumbnail_wb_sources.remove(index);
+            params.io.apply_input_colour(&entry.colour);
+            let working = if dimensions == (entry.image.width, entry.image.height) {
+                entry.image.clone()
+            } else {
+                downsample_area(&entry.image, dimensions)
+            };
+            let metering = Some(entry.metering.clone());
+            self.thumbnail_wb_sources.push(entry);
+            (working, metering)
+        } else {
+            let Source { image: source, colour, .. } = self.source.as_ref().unwrap();
+            params.io.apply_input_colour(colour);
+            if params.camera.auto_exposure && self.metering.is_none() {
+                self.metering = Some(spektrafilm_core::stages::filming::metering_preview(source));
+            }
+            let working = working_source(source, &mut self.thumbnail_source, dimensions, downsample_area).clone();
+            (working, self.metering.clone())
+        };
+        let resampled = started.elapsed();
+        let key = preview_pipeline_cache_key(&film, &paper, &params);
+        let cached = self.thumbnail_pipelines.iter().position(|(k, _)| *k == key);
+        let calibrated = match cached {
+            Some(index) => self.thumbnail_pipelines.remove(index).1,
+            None => {
+                let film_profile = profile::load_profile_by_name(data, &film)?;
+                let print_profile =
+                    profile::load_profile_by_name(data, if params.io.scan_film { &film } else { &paper })?;
+                Pipeline::new_with_spectral(film_profile, print_profile, (*params).clone(), data)
+                    .map_err(anyhow::Error::msg)?
+            }
+        };
+        let mut pipeline = calibrated.clone().with_params((*params).clone());
+        if self.thumbnail_pipelines.len() >= THUMBNAIL_PIPELINES {
+            self.thumbnail_pipelines.remove(0);
+        }
+        self.thumbnail_pipelines.push((key, calibrated));
+        if let Some(metering) = metering {
+            pipeline = pipeline.with_metering_preview(metering);
+        }
+        let built = started.elapsed();
+        let backend = self.backend.get_or_insert_with(spektrafilm_gpu::select_backend);
+        let (output, used_backend) = pipeline.process_with_backend(working, backend.as_ref());
+        let cropped = crop.map(|crop| crop.apply(&output));
+        let output = cropped.as_ref().unwrap_or(&output);
+        let processed = started.elapsed();
+        let encoding = Encoding::new(&params.io.output_color_space, params.io.output_cctf_encoding);
+        let (width, height) = write_display(output, encoding, &post, &preview_path)?;
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        Ok(json!({
+            "width": width, "height": height, "backend": used_backend,
+            "display_color_space": DisplaySpace::of(encoding).name(),
+            "elapsed_ms": ms(started.elapsed()), "cached_pipeline": cached.is_some(),
+            "timing_ms": {"decode": ms(decoded), "resample": ms(resampled - decoded),
+                "pipeline": ms(built - resampled), "process": ms(processed - built),
+                "write": ms(started.elapsed() - processed)},
+        }))
+    }
+
     fn handle(&mut self, request: Request, data: &Path) -> Result<Value> {
         match request.command {
             Command::Catalog => catalog(data),
@@ -265,6 +505,15 @@ impl Session {
                 let (width, height) = write_display(working, encoding, &PostParams::default(), &preview_path)?;
                 Ok(json!({"width": width, "height": height, "input_colour": loaded.colour,
                           "display_color_space": DisplaySpace::of(encoding).name()}))
+            }
+            Command::Thumbnail { input, source_generation, film, paper, params, long_side, preview_path, crop, preset } => {
+                self.thumbnail(input, source_generation, film, paper, params, long_side, preview_path, crop, preset, data)
+            }
+            Command::ReleaseThumbnails => {
+                self.thumbnail_source = None;
+                self.thumbnail_pipelines = Vec::new();
+                self.thumbnail_wb_sources = Vec::new();
+                Ok(json!({}))
             }
             Command::Save {
                 render_id,
@@ -384,32 +633,7 @@ impl Session {
                 let lens = params.io.lens_correction;
                 let interpretation = params.io.input_interpretation.clone();
                 interpretation.validate()?;
-                let reload = self.source_generation != source_generation
-                    || self.source.as_ref().is_none_or(|source| !source.current(&input, wb, lens, &interpretation));
-                if reload {
-                    // Release the last source's caches before decoding the next.
-                    self.source = None;
-                    self.scaled = None;
-                    self.interactive = None;
-                    self.metering = None;
-                    let loaded = spektrafilm_io::load_image_colour(
-                        &input,
-                        spektrafilm_io::Formats::Any,
-                        wb,
-                        lens,
-                        &interpretation,
-                    )?;
-                    self.source = Some(Source {
-                        path: input.clone(),
-                        wb,
-                        lens,
-                        lens_correction_supported: loaded.lens_correction_supported,
-                        interpretation,
-                        colour: loaded.colour,
-                        image: loaded.image,
-                    });
-                    self.source_generation = source_generation;
-                }
+                self.load_source(&input, source_generation, wb, lens, interpretation)?;
                 let Source { image: source, colour: input_colour, lens_correction_supported, .. } =
                     self.source.as_ref().unwrap();
                 // RAW and decoded files are the engine's linear sRGB; manual
@@ -667,6 +891,51 @@ mod tests {
             text: r#"{"simulation": {"film_stock": "kodak_unknown"}}"#.into(), params: None,
         } }, &data).unwrap_err();
         assert!(refused.to_string().contains("kodak_unknown"), "{refused}");
+    }
+
+    /// A preset's thumbnail is the thumbnail of what `preset_import` makes of
+    /// it over the current params, and it leaves the main render alone.
+    #[test]
+    fn preset_thumbnails_apply_the_preset_like_preset_import() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-preset-thumbnail-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.png");
+        let pixels = (0..48 * 32 * 3).map(|i| ((i * 37) % 255) as spektrafilm_math::Scalar / 255.0).collect();
+        spektrafilm_io::save_image(&ImageBuf::from_data(48, 32, pixels), &input, None).unwrap();
+        let text = r#"{"simulation": {"film_stock": "kodak_portra_400", "print_paper": "kodak_portra_endura"},
+                       "camera": {"exposure_compensation_ev": 1.5}}"#;
+        let mut current = RuntimeParams::default();
+        current.io.output_color_space = "Display P3".into();
+        current.camera.exposure_compensation_ev = -1.0;
+        let mut session = Session::default();
+        let thumbnail = |session: &mut Session, film: &str, paper: &str, params: RuntimeParams, preset: Option<&str>, name: &str| {
+            let preview = dir.join(name);
+            let response = session.handle(Request { id: 1, command: Command::Thumbnail {
+                input: input.clone(), source_generation: 1, film: film.into(), paper: paper.into(),
+                params: Box::new(params), long_side: 24, preview_path: preview.clone(), crop: None,
+                preset: preset.map(str::to_string),
+            } }, &data).unwrap();
+            (response, std::fs::read(preview).unwrap())
+        };
+        let (response, with_preset) =
+            thumbnail(&mut session, "kodak_gold_200", "kodak_supra_endura", current.clone(), Some(text), "preset.rgba");
+        assert_eq!((response["width"].as_u64(), response["height"].as_u64()), (Some(24), Some(16)));
+        // The photograph's colour space stays; the preset's look comes in.
+        assert_eq!(response["display_color_space"], DisplaySpace::Rec2020SrgbTransfer.name());
+        let imported = session.handle(Request { id: 2, command: Command::PresetImport {
+            text: text.into(), params: Some(Box::new(current.clone())),
+        } }, &data).unwrap();
+        assert_eq!(imported["params"]["camera"]["exposure_compensation_ev"], 1.5);
+        let params: RuntimeParams = serde_json::from_value(imported["params"].clone()).unwrap();
+        let film = imported["film"].as_str().unwrap();
+        let paper = imported["paper"].as_str().unwrap();
+        let (_, applied) = thumbnail(&mut session, film, paper, params, None, "applied.rgba");
+        assert_eq!(with_preset, applied);
+        let (_, plain) = thumbnail(&mut session, "kodak_gold_200", "kodak_supra_endura", current, None, "plain.rgba");
+        assert_ne!(with_preset, plain);
+        assert!(session.output.is_none() && session.pipeline.is_none());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

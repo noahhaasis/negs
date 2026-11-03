@@ -523,11 +523,15 @@ pub fn build(ui: &Rc<Editor>) {
     lab.add_css_class("inspector-body");
     section(&lab, "FILM & PAPER");
     let profiles = list();
-    stock(ui, &profiles, false);
+    // Menus or preview grids, as Settings says; both are built so the
+    // setting switches without rebuilding the inspector.
+    let film = stock(ui, &profiles, false).upcast();
+    crate::stock_browser::rows(ui, &profiles, false, film);
     development(ui, &profiles, false);
     toggle(ui, &profiles, "Scan film directly", false);
-    let paper = stock(ui, &profiles, true);
-    visible(ui, &paper, |s| !flag(s, "Scan film directly", false));
+    // Shown unless scanning the film directly (see `stock_browser::apply`).
+    let paper = stock(ui, &profiles, true).upcast();
+    crate::stock_browser::rows(ui, &profiles, true, paper);
     development(ui, &profiles, true);
     lab.append(&profiles);
     section(&lab, "IMAGE SIZE");

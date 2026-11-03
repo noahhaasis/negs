@@ -1,15 +1,19 @@
 //! The Presets page of the sidebar (docs/presets-design.md). Clicking a
 //! preset applies it; Enter, or clicking it again, applies it again after
-//! other edits. File work and helper requests run on workers.
+//! other edits. Each row shows the photograph with that preset (unless
+//! Settings turns previews off; `stock_browser::pump` schedules them).
+//! File work and helper requests run on workers.
 use crate::{
     Editor, parameters,
     presets::{self, Preset, Status},
+    stock_browser::{Thumb, Wanted},
 };
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
+    collections::HashMap,
     path::PathBuf,
     rc::Rc,
     time::Duration,
@@ -22,6 +26,46 @@ struct Row {
     label: gtk::Label,
     entry: gtk::Entry,
     detail: gtk::Label,
+}
+
+/// A preset's thumbnail, kept by file across list rebuilds and renames.
+struct PresetThumb {
+    /// 72 × 48, grey until the thumbnail arrives.
+    frame: gtk::Overlay,
+    thumb: Rc<Thumb>,
+    /// In the placeholder of a preset the helper refused.
+    warning: gtk::Image,
+}
+impl PresetThumb {
+    fn new() -> Self {
+        let size = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        size.set_size_request(72, 48);
+        let frame = gtk::Overlay::new();
+        frame.set_child(Some(&size));
+        frame.set_valign(gtk::Align::Center);
+        frame.set_overflow(gtk::Overflow::Hidden);
+        frame.add_css_class("preset-thumb");
+        frame.update_property(&[gtk::accessible::Property::Label("")]);
+        let thumb = Rc::new(Thumb::new());
+        // An overlay, so the picture takes the frame's size, not its own.
+        frame.add_overlay(&thumb.picture);
+        frame.set_clip_overlay(&thumb.picture, true);
+        let warning = gtk::Image::from_icon_name("dialog-warning-symbolic");
+        warning.add_css_class("dim-label");
+        warning.set_visible(false);
+        frame.add_overlay(&warning);
+        Self {
+            frame,
+            thumb,
+            warning,
+        }
+    }
+}
+
+/// What a preset's thumbnail needs: the file's text and its RAW white balance.
+struct PresetSource {
+    text: String,
+    white_balance: serde_json::Value,
 }
 
 pub struct Panel {
@@ -38,6 +82,11 @@ pub struct Panel {
     /// Made by New Preset and not named yet: Escape removes it.
     unnamed: RefCell<Option<PathBuf>>,
     generation: Cell<u64>,
+    thumbs: RefCell<HashMap<PathBuf, PresetThumb>>,
+    sources: RefCell<HashMap<PathBuf, PresetSource>>,
+    /// While the helper checks preset files: thumbnails wait, so the order
+    /// (quick ones first) covers every preset.
+    checking: Cell<u32>,
 }
 
 impl Panel {
@@ -114,6 +163,9 @@ impl Panel {
             renaming: RefCell::default(),
             unnamed: RefCell::default(),
             generation: Cell::new(0),
+            thumbs: RefCell::default(),
+            sources: RefCell::default(),
+            checking: Cell::new(0),
         }
     }
 }
@@ -232,6 +284,12 @@ pub fn build(ui: &Rc<Editor>) {
         }
     ));
     ui.presets.page.add_controller(page_drop);
+    // Thumbnails are made only while the list is on screen.
+    list.connect_map(glib::clone!(
+        #[weak]
+        ui,
+        move |_| crate::stock_browser::pump_soon(&ui)
+    ));
 }
 
 fn paths(files: &gdk::FileList) -> Vec<PathBuf> {
@@ -283,8 +341,17 @@ impl Panel {
             return;
         };
         let (text, invalid) = self.detail(preset);
+        let thumbs = self.thumbs.borrow();
+        let thumb = thumbs.get(&preset.path).filter(|t| t.frame.is_visible());
+        if let Some(thumb) = thumbs.get(&preset.path) {
+            thumb.warning.set_visible(invalid.is_some());
+        }
         row.detail.set_text(&text);
-        row.detail.set_lines(if invalid.is_some() { 3 } else { 1 });
+        row.detail.set_lines(match (&invalid, thumb) {
+            (Some(_), _) => 3,
+            (None, Some(_)) => 2,
+            (None, None) => 1,
+        });
         row.row.set_tooltip_text(invalid.as_deref());
         if invalid.is_some() {
             row.label.add_css_class("dim-label");
@@ -356,6 +423,8 @@ impl Editor {
             vec![]
         });
         panel.verdicts.borrow_mut().retain(&files);
+        panel.sources.borrow_mut().retain(|path, _| files.iter().any(|p| &p.path == path));
+        panel.thumbs.borrow_mut().retain(|path, _| files.iter().any(|p| &p.path == path));
         self.show_presets(files);
         let unchecked: Vec<_> = panel
             .files
@@ -371,14 +440,17 @@ impl Editor {
             return;
         }
         let library = panel.library.clone();
+        panel.checking.set(panel.checking.get() + 1);
         let checked = gio::spawn_blocking(move || {
             unchecked
                 .into_iter()
                 .map(|preset| {
+                    let mut read = None;
                     let reply = library
                         .read(&preset)
                         .and_then(presets::text)
                         .and_then(|text| {
+                            read = Some(text.clone());
                             client
                                 .request(
                                     json!({"command": "preset_import", "text": text}),
@@ -386,18 +458,96 @@ impl Editor {
                                 )
                                 .map(|(_, result)| result)
                         });
-                    (preset, presets::status(reply))
+                    let source = reply.as_ref().ok().zip(read).map(|(result, text)| PresetSource {
+                        text,
+                        white_balance: result["params"]["io"]["raw_white_balance"].clone(),
+                    });
+                    (preset, presets::status(reply), source)
                 })
                 .collect::<Vec<_>>()
         })
         .await
         .unwrap_or_default();
-        for (preset, status) in checked {
+        panel.checking.set(panel.checking.get() - 1);
+        for (preset, status, source) in checked {
             panel.verdicts.borrow_mut().insert(&preset, status);
+            match source {
+                Some(source) => panel.sources.borrow_mut().insert(preset.path.clone(), source),
+                None => panel.sources.borrow_mut().remove(&preset.path),
+            };
             if let Some(index) = panel.row_index(&preset.path) {
                 panel.update_row(index);
             }
         }
+        crate::stock_browser::pump(self);
+    }
+
+    /// Shows or hides the thumbnails as Settings says.
+    pub fn presets_show_thumbnails(&self, on: bool) {
+        let panel = &self.presets;
+        for thumb in panel.thumbs.borrow().values() {
+            thumb.frame.set_visible(on);
+        }
+        for index in 0..panel.files.borrow().len() {
+            panel.update_row(index);
+        }
+    }
+
+    /// Drops every preset thumbnail; true if there were any.
+    pub fn clear_preset_thumbnails(&self) -> bool {
+        let mut had = false;
+        for thumb in self.presets.thumbs.borrow().values() {
+            had |= thumb.thumb.clear();
+        }
+        had
+    }
+
+    /// The listed presets' thumbnails while the list is on screen and every
+    /// file has been checked, in list order; on a RAW, presets that need a
+    /// decode of their own (another white balance) come last.
+    pub fn wanted_preset_thumbnails(&self) -> Vec<Wanted> {
+        let panel = &self.presets;
+        if !panel.list.is_mapped() || panel.checking.get() > 0 {
+            return vec![];
+        }
+        let r = self.runtime.borrow();
+        let Some((source, _)) = r.source.clone() else {
+            return vec![];
+        };
+        let state = self.history.borrow().state.clone();
+        let params = parameters::runtime(&state, &r.defaults);
+        let film = crate::catalog::selected(&state, false).id.clone();
+        let paper = crate::catalog::selected(&state, true).id.clone();
+        let crop = (state.crop.is_some() || state.straighten != 0.).then(|| parameters::crop(&state));
+        let (files, verdicts, sources, thumbs) = (
+            panel.files.borrow(),
+            panel.verdicts.borrow(),
+            panel.sources.borrow(),
+            panel.thumbs.borrow(),
+        );
+        let valid: Vec<_> = files
+            .iter()
+            .filter(|p| matches!(verdicts.get(p), Some(Status::Valid { .. })))
+            .filter_map(|p| Some((p, sources.get(&p.path)?, thumbs.get(&p.path)?)))
+            .collect();
+        let photo = &params["io"]["raw_white_balance"];
+        let ordered = render_order(valid, crate::photo::is_raw(&source), |(_, s, _)| &s.white_balance, photo);
+        ordered
+            .into_iter()
+            .map(|(preset, from, thumb)| {
+                let command = json!({"command":"thumbnail","input":source,
+                    "source_generation":r.source_generation,"film":film,"paper":paper,
+                    "params":params,"long_side":crate::stock_browser::LONG_SIDE,"crop":crop,
+                    "preset":from.text});
+                Wanted {
+                    key: preset_key(&command, crate::catalog::preset_kept()),
+                    thumb: thumb.thumb.clone(),
+                    generation: r.source_generation,
+                    command,
+                    name: preset.name(),
+                }
+            })
+            .collect()
     }
 
     /// Rebuilds the rows for `files`, keeping the selection and a rename.
@@ -429,6 +579,7 @@ impl Editor {
         for index in 0..panel.files.borrow().len() {
             panel.update_row(index);
         }
+        crate::stock_browser::pump_soon(self);
         if let Some(index) = selected.and_then(|path| panel.row_index(&path)) {
             panel.list.select_row(Some(&panel.rows.borrow()[index].row));
         }
@@ -444,8 +595,25 @@ impl Editor {
 
     fn preset_row(self: &Rc<Self>, index: usize, preset: &Preset) -> Row {
         let row = gtk::ListBoxRow::new();
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        line.add_css_class("preset-row");
+        {
+            let mut thumbs = self.presets.thumbs.borrow_mut();
+            let thumb = thumbs.entry(preset.path.clone()).or_insert_with(|| {
+                let thumb = PresetThumb::new();
+                thumb.frame.set_visible(crate::stock_browser::enabled(self));
+                thumb
+            });
+            // The row it was in is gone after a rebuild.
+            if thumb.frame.parent().is_some() {
+                thumb.frame.unparent();
+            }
+            line.append(&thumb.frame);
+        }
         let body = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        body.add_css_class("preset-row");
+        body.set_hexpand(true);
+        body.set_valign(gtk::Align::Center);
+        line.append(&body);
         let name = gtk::Stack::new();
         name.set_hhomogeneous(false);
         name.set_vhomogeneous(false);
@@ -466,7 +634,7 @@ impl Editor {
         detail.set_ellipsize(gtk::pango::EllipsizeMode::End);
         detail.set_lines(1);
         body.append(&detail);
-        row.set_child(Some(&body));
+        row.set_child(Some(&line));
         row.update_property(&[gtk::accessible::Property::Label(&preset.name())]);
 
         let path = preset.path.clone();
@@ -823,11 +991,24 @@ impl Editor {
         }
         panel.rows.borrow()[index].label.set_text(&name);
         glib::MainContext::default().spawn_local(async move {
+            let old = preset.path.clone();
             let result = gio::spawn_blocking(move || library.rename(&preset, &name))
                 .await
                 .unwrap_or_else(|_| Err("The preset couldn’t be renamed.".into()));
-            if let Err(error) = result {
-                ui.preset_error("Couldn’t rename the preset", &error);
+            match result {
+                // A renamed preset keeps its thumbnail.
+                Ok(renamed) => {
+                    let panel = &ui.presets;
+                    let moved = panel.thumbs.borrow_mut().remove(&old);
+                    if let Some(thumb) = moved {
+                        panel.thumbs.borrow_mut().insert(renamed.path.clone(), thumb);
+                    }
+                    let source = panel.sources.borrow_mut().remove(&old);
+                    if let Some(source) = source {
+                        panel.sources.borrow_mut().insert(renamed.path.clone(), source);
+                    }
+                }
+                Err(error) => ui.preset_error("Couldn’t rename the preset", &error),
             }
             ui.reload_presets().await;
         });
@@ -1040,5 +1221,127 @@ impl Editor {
             .build();
         dialog.add_response("close", "Close");
         dialog.present(Some(&self.window));
+    }
+}
+
+/// The white balance a RAW decode uses: the temperature and tint count only
+/// in Custom mode (`RawWhiteBalance::effective` in the helper).
+fn effective_white_balance(wb: &serde_json::Value) -> serde_json::Value {
+    let mode = wb["mode"].as_str().filter(|m| !m.is_empty()).unwrap_or("as_shot");
+    if mode == "custom" {
+        json!({"mode": mode, "temperature": wb["temperature"], "tint": wb["tint"]})
+    } else {
+        json!({"mode": mode})
+    }
+}
+
+/// The presets in list order, except on a RAW: those whose white balance
+/// isn't the photograph's need a decode of their own (~1.5 s for 60 MP), so
+/// they come last, grouped by white balance, each decode followed by the
+/// presets it serves.
+fn render_order<T>(
+    presets: Vec<T>,
+    raw: bool,
+    white_balance: impl Fn(&T) -> &serde_json::Value,
+    photo: &serde_json::Value,
+) -> Vec<T> {
+    if !raw {
+        return presets;
+    }
+    let photo = effective_white_balance(photo);
+    let mut groups: Vec<serde_json::Value> = vec![];
+    let mut ranked: Vec<_> = presets
+        .into_iter()
+        .enumerate()
+        .map(|(index, preset)| {
+            let effective = effective_white_balance(white_balance(&preset));
+            if effective == photo {
+                return (0, index, preset);
+            }
+            let group = groups.iter().position(|g| *g == effective).unwrap_or_else(|| {
+                groups.push(effective);
+                groups.len() - 1
+            });
+            (1 + group, index, preset)
+        })
+        .collect();
+    ranked.sort_by_key(|(rank, index, _)| (*rank, *index));
+    ranked.into_iter().map(|(_, _, preset)| preset).collect()
+}
+
+/// What identifies a preset's thumbnail: its request with only the settings
+/// a preset keeps (`kept`, the catalog's `preset_kept`), since the preset
+/// replaces the rest, and without the film and paper it brings. A Lab edit
+/// then leaves the thumbnails alone. Without the list (an older helper),
+/// every setting counts.
+fn preset_key(command: &serde_json::Value, kept: Option<&[String]>) -> String {
+    let Some(kept) = kept else {
+        return command.to_string();
+    };
+    let mut request = command.clone();
+    let mut subset = json!({});
+    for path in kept {
+        let value = path
+            .split('.')
+            .try_fold(&command["params"], |v, part| v.get(part))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        subset[path.as_str()] = value;
+    }
+    request["params"] = subset;
+    if let Some(object) = request.as_object_mut() {
+        object.remove("film");
+        object.remove("paper");
+    }
+    request.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preset_thumbnails_follow_only_the_settings_a_preset_keeps() {
+        let kept = vec!["io.crop".to_owned(), "io.output_color_space".to_owned()];
+        let command = |exposure: f64, crop: bool, film: &str| {
+            json!({"command": "thumbnail", "source_generation": 3, "film": film, "paper": "p",
+                "preset": "{}", "crop": null,
+                "params": {"io": {"crop": crop, "output_color_space": "sRGB"},
+                           "camera": {"exposure_compensation_ev": exposure}}})
+        };
+        let key = |c: &serde_json::Value| preset_key(c, Some(&kept));
+        // A Lab edit or another film doesn't change the thumbnail ...
+        assert_eq!(key(&command(0., false, "a")), key(&command(1., false, "b")));
+        // ... a kept setting does.
+        assert_ne!(key(&command(0., false, "a")), key(&command(0., true, "a")));
+        // An older helper without the list: everything counts.
+        assert_ne!(
+            preset_key(&command(0., false, "a"), None),
+            preset_key(&command(1., false, "a"), None)
+        );
+    }
+
+    #[test]
+    fn presets_needing_their_own_raw_decode_come_last_grouped() {
+        let daylight = json!({"mode": "daylight", "temperature": 5000., "tint": 0.});
+        let shot = json!({"mode": "as_shot", "temperature": 6500., "tint": 3.});
+        let custom = json!({"mode": "custom", "temperature": 4000., "tint": 0.});
+        let presets = vec![
+            ("d1", daylight.clone()),
+            ("s1", shot.clone()),
+            ("c1", custom.clone()),
+            ("d2", daylight.clone()),
+            // Temperature doesn't count outside Custom.
+            ("s2", json!({"mode": "as_shot", "temperature": 3000., "tint": 0.})),
+            ("missing", json!(null)),
+        ];
+        let names = |raw| {
+            render_order(presets.clone(), raw, |(_, wb)| wb, &shot)
+                .into_iter()
+                .map(|(n, _)| n)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(true), ["s1", "s2", "missing", "d1", "d2", "c1"]);
+        assert_eq!(names(false), ["d1", "s1", "c1", "d2", "s2", "missing"]);
     }
 }

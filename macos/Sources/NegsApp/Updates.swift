@@ -144,10 +144,15 @@ struct UpdateSettings: View {
                 Text("Install a release build to receive updates.").foregroundStyle(.secondary)
             }
             Divider().padding(.vertical, 8)
+            Toggle("Film, paper and preset previews", isOn: Binding(
+                get: { model.previews.enabled }, set: { model.setPreviews($0) }))
+            Text("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 8)
             Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
                 .disabled(model.saving || model.exporting || updates.installing || updates.sessionInProgress)
             Text("Removes settings, the saved editing session, and caches. Your original photographs and exported images are kept.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if model.saving || model.exporting {
                 Text("Wait for the current save or export to finish before removing app data.")
                     .font(.callout).foregroundStyle(.secondary)
