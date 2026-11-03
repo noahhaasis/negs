@@ -499,15 +499,21 @@ pub fn build(app: &mut App) {
             SendMessageW(ins.scope_mode, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
         }
     }
+    draw::paint_combo(ins.scope_mode);
     super::accessible_name(ins.scope_mode, "Scope view");
     ins.scope_label = create(w!("STATIC"), "RGB", visible | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), ins.panel, 0, fonts.small);
     ins.scope = create(w!("NegsScope"), "Histogram", visible, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
     ins.grip = create(w!("NegsScopeGrip"), "Scope height", visible | WS_TABSTOP, WINDOW_EX_STYLE(0), ins.panel, 0, HFONT::default());
+    draw::track_hover(ins.grip);
     super::dialogs::tooltip(ins.grip, "Drag to resize the scope; double-click for its smallest height");
     ins.pinned = create(w!("NegsRows"), "", visible | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
     let tab_style = visible | WS_TABSTOP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
     for (i, (id, title)) in TABS.into_iter().enumerate() {
         ins.tabs[i] = create(w!("BUTTON"), title, tab_style | if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) }, WINDOW_EX_STYLE(0), ins.panel, id, fonts.ui);
+        // Prep | Lab | Output: Lab is the switch's middle segment.
+        if i == 1 {
+            draw::set_role(ins.tabs[i], Role::SegmentMiddle);
+        }
     }
     ins.rows_panel = create(w!("NegsRows"), "", visible | WS_VSCROLL | WS_CLIPCHILDREN | WS_GROUP, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), ins.panel, 0, HFONT::default());
     ins.reset = create(w!("BUTTON"), "Reset Adjustments", visible | WS_TABSTOP | WS_GROUP, WINDOW_EX_STYLE(0), ins.panel, RESET_ALL, fonts.ui);
@@ -1961,10 +1967,32 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         match msg {
             WM_COMMAND => {
                 let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
+                if id == SCOPE_MODE && matches!(code, CBN_DROPDOWN | CBN_CLOSEUP) {
+                    // The scope's menu, as the column's drop-down lists.
+                    if code == CBN_DROPDOWN && theme::dark() {
+                        theme::combo_list(HWND(lparam.0 as *mut _));
+                    }
+                    let _ = InvalidateRect(HWND(lparam.0 as *mut _), None, false);
+                }
                 if code == BN_CLICKED || (id == SCOPE_MODE && code == CBN_SELCHANGE) {
                     with_app(|app| command(app, id, code, HWND(lparam.0 as *mut _)));
                 }
                 LRESULT(0)
+            }
+            WM_CTLCOLORLISTBOX => {
+                let dc = HDC(wparam.0 as *mut _);
+                let p = theme::palette();
+                SetTextColor(dc, COLORREF(p.text));
+                SetBkColor(dc, COLORREF(p.control));
+                LRESULT(theme::brush(p.control).0 as isize)
+            }
+            WM_CTLCOLORSTATIC => {
+                // The scope's channel label.
+                let dc = HDC(wparam.0 as *mut _);
+                let p = theme::palette();
+                SetBkMode(dc, TRANSPARENT);
+                SetTextColor(dc, COLORREF(p.secondary));
+                LRESULT(theme::brush(p.panel).0 as isize)
             }
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
@@ -3073,20 +3101,19 @@ extern "system" fn grip_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 let dc = BeginPaint(hwnd, &mut ps);
                 let mut r = RECT::default();
                 let _ = GetClientRect(hwnd, &mut r);
-                FillRect(dc, &r, GetSysColorBrush(COLOR_BTNFACE));
-                let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as i32;
-                let (cw, ch) = (32 * dpi / 96, (4 * dpi / 96).max(2));
-                let (cx, cy) = ((r.right - cw) / 2, (r.bottom - ch) / 2);
-                let brush = CreateSolidBrush(COLORREF(0xb4b4b4));
-                let old = SelectObject(dc, brush);
-                let pen = SelectObject(dc, GetStockObject(NULL_PEN));
-                let _ = RoundRect(dc, cx, cy, cx + cw + 1, cy + ch + 1, ch, ch);
-                SelectObject(dc, pen);
-                SelectObject(dc, old);
-                let _ = DeleteObject(brush);
-                if GetFocus() == hwnd {
-                    let _ = DrawFocusRect(dc, &RECT { left: cx - 4, top: 0, right: cx + cw + 4, bottom: r.bottom });
+                // A pill in the middle, darker under the pointer or while dragged.
+                let p = theme::palette();
+                let s = draw::dpi_of(hwnd);
+                let mut c = Canvas::new(dc, r);
+                c.clear(p.panel);
+                let (cw, ch) = (32.0 * s, 4.0 * s);
+                let pill = RectF::new(((r.right as f32 - cw) / 2.0).round(), ((r.bottom as f32 - ch) / 2.0).round(), cw, ch);
+                let active = draw::is_hot(hwnd) || GRIP_DRAG.get().is_some();
+                c.round_rect(pill, ch / 2.0, if active { p.secondary } else { theme::mix(p.border, p.strong_border, 0.4) });
+                if GetFocus() == hwnd && draw::focus_cues(hwnd) {
+                    draw::focus_ring(&mut c, RectF::new(pill.x - 8.0 * s, 0.0, cw + 16.0 * s, r.bottom as f32), 3.0 * s, s);
                 }
+                c.present(dc);
                 let _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
             }
