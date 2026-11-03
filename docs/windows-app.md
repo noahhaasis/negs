@@ -202,6 +202,102 @@ Print Curves On was undone with it. Double-clicking reset Print exposure. Hover 
 each handle. R emphasised the red layer and was saved. Scanning film directly disabled the
 graph. Collapsing Print Curves hid it.
 
+## Prep, Lab basics and camera brightness (ticket 26)
+
+A port of the macOS commits from `fafda8f` to `6b4d456` (see `docs/prep.md`). The
+helper already had Prep, `place_exposure` and the kept prepared frames, so this is UI and
+app logic. Decisions (2026-11-03): GPU Prep stays deferred, and Windows follows the Mac on
+Post, Start fresh and the Highlights range.
+
+- **Column:** the scope, then the film and paper (pinned, on every tab), then a
+  Prep | Lab | Output switch. The column opens on Prep. Settings files from before Prep
+  stored `"Lab"` whether chosen or not, so a tab counts as chosen only once it has been
+  clicked (`inspectorTabChosen`). An open stock grid is at most 290 DIP tall. It scrolls
+  inside itself and opens on the current stock.
+- **Prep:** white balance (RAW), Brightness (Match camera brightness or Match original
+  brightness, Exposure, the note, and Auto exposure and Metering when matching is off,
+  unavailable or they're changed), Tone, Color, Detail, Lens corrections, Input Colour.
+- **Lab:** Negative exposure, Film format (110 … 4×5, Custom… shows the long-edge
+  slider), each group's basic controls plus anything changed, and Show all controls. Scan
+  film directly sits at the top of Print. Scan & Color and its Output group (preview colour
+  space and curve) show when changed or with all controls. The Enlarger lists Balance Print
+  fourth, as on the Mac.
+- **Output:** Image Size and Border. Post's tone and colour rows are gone, and a restored
+  session's `post` values reset to neutral, as on the Mac.
+- **Settings:** New photographs (Start fresh by default, or Keep the previous edits), Match
+  new photographs to camera brightness (on), Limit preview to 12 MP, Use less memory for
+  export. The last two are preferences outside Undo and Reset. A session from before them
+  lends its per-photo preview limit once.
+- **Scope:** Histogram or RGB waveform, the `scopeMode` preference. The grabber below resizes
+  it from 88 to 420 DIP: drag, double-click for 88, or Up and Down when focused (`scopeHeight`).
+  Both scopes follow the crop, straightening and quarter turns (`histogram.rs`, `Scopes`).
+- **Tooltips:** every control and group (`help.rs`), with the Mac's `ControlHelp` texts; a
+  test compares the two tables. **Favourites:** a star on each film and paper tile, shown on
+  a favourite or under the pointer; a click on it, or the tile's context menu, stars or
+  unstars. Favourites lead the grid and the plain menus.
+
+![Prep](windows-prep-port/prep.png) ![Lab basics](windows-prep-port/lab-basics.png)
+![Lab, all controls](windows-prep-port/lab-all-controls.png)
+![Film grid and waveform](windows-prep-port/film-grid-waveform.png)
+![Matching after a paper change](windows-prep-port/rematching.png)
+![Output](windows-prep-port/output.png) ![Settings](windows-prep-port/settings.png)
+
+**Matching.** As in `EditorModel`: `prep.exposure_ev` holds the total, and
+`EditState.brightnessMatch` holds the solved part and the inputs it was solved for
+(`state::match_inputs`: everything except Prep, print exposure, grain, rotation, crop and
+output encoding). One solve runs at a time, after the settled preview. A reply is applied only
+if its inputs are still current, and it gets no undo step of its own. Opening another
+photograph supersedes a solve. Save and Export wait for a pending match and its preview, at
+most 30 s. Failures read as on the Mac: a problem with the reference holds for the photograph,
+a solve failure holds until the next edit.
+
+The reference (`brightness.rs`) is the RAW's embedded preview through rawler, oriented,
+letterbox bars trimmed when its shape differs, at most 512 px. For JPEG, PNG and TIFF it is
+the file itself through WIC with its profile; transparent and floating-point files are
+refused. ImageIO supplies the preview's colour space on the Mac. Here it comes from the EXIF
+ColorSpace, the Nikon, Canon or Pentax maker note, or an embedded JPEG's EXIF. Adobe RGB is
+converted to sRGB. Anything else reads "The camera preview has no color profile."
+
+**Validation** (2026-11-03, this machine, helper from `6ec07ac`; the crates are unchanged on
+this branch): 130 Windows tests pass, 29 of them new. They cover the Mac's lifecycle and
+exposure-placement rules: Start fresh and Keep, sessions, the preview limit through Undo and
+Reset, film formats, matches applied only for their inputs, offsets kept across a new match,
+Undo restoring a paper with its match, superseded and failed solves, waiting outputs, the
+Lab's basics and Prep's meter rule. Also scopes, tooltips against the Swift file, letterbox
+trimming, colour-space reading and preference migration. One test drives the real helper:
+`docs/card.jpg` matches itself at +0.09 EV, and with `NEGS_TEST_RAW` the D750 NEF (Adobe RGB
+in its Nikon maker note) matches its preview at +0.24 EV. Build warnings are unchanged (16, 14
+in tests).
+
+In the release app (`NEGS_PROFILE_DIR` profile, driven through UI Automation) the NEF opened on
+Prep with "Starts at +0.24 EV to match the camera.". Choosing Vision 2383 showed "Matching…"
+and then a new solve within 0.05 EV, which keeps the value. The session saved the match
+(`brightnessMatch` in `session.json`) and a relaunch restored it. All three tabs, Show all controls, the waveform at 170 DIP, the film
+grid with a starred Portra 400, and the Settings dialog look as in the screenshots.
+
+Performance, on a Ryzen 5 3600, warm profiles, `docs/card.jpg`, medians of 9 alternating runs
+against `main`'s build:
+
+| Stamp | main | this branch |
+|---|---|---|
+| `first_window_composited` | 109 ms | 106 ms |
+| `inspector_shown` | 296 ms | 257 ms |
+| `first_image_on_screen` | 973 ms | 975 ms |
+
+The first column builds fewer rows (create 36–41 ms against 100–107 ms), since the Lab shows
+only its basics. A first visit to Lab costs about 86 ms and to Output about 58 ms; after that a
+switch only shows and hides rows. The new visibility rules cost about 0.1 ms per inspector
+update (Prep 113 µs, Lab 96 µs, release build, real catalog). Through the helper on a 24 MP
+NEF, Prep's controls add 35 ms per 12 MP drag frame, and the match itself takes about 0.3 s
+(`docs/windows-prep-port-plan.md`).
+
+Not done or not verified here: sliders filling from their default (part of the UI polish
+pass, `docs/handoff-windows-ui-polish.md`); the RAW samples with letterboxed previews and other
+makers' colour spaces (no files on this PC; trimming and the maker-note readers are unit-tested
+only); Save and Export while a match is pending in the release app (unit-tested); Windows 11,
+150 % scaling and high contrast. Hover effects (the tile star) were seen only through the
+favourite's filled star.
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,
