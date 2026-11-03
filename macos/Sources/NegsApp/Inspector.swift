@@ -170,11 +170,11 @@ struct AdjustmentControl: View {
     var body: some View {
         switch adjustment {
         case .toggle(let title, let path):
-            Toggle(title, isOn: model.toggle(path)).resettable(model, path)
+            Toggle(title, isOn: model.toggle(path)).resettable(model, path).tooltip(ControlHelp.text(path))
         case .choice(let title, let path, let options):
             Picker(title, selection: model.choice(path)) {
                 ForEach(options, id: \.self) { Text(optionTitle($0)).tag($0) }
-            }.resettable(model, path)
+            }.resettable(model, path).tooltip(ControlHelp.text(path))
         case .slider(let title, let path, let range, let step):
             SliderRow(model: model, title: title, path: path, range: range, step: step)
         case .stockSlider(let title, let path, let index, let range, let step, let bwTitle):
@@ -183,7 +183,8 @@ struct AdjustmentControl: View {
                               value: model.stockNumber(path, index, range: range, step: step), range: range, step: step,
                               defaultValue: model.stockDefault(path, index), modified: model.isStockModified(path, index),
                               reset: { model.resetStock(path, index) },
-                              editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+                              editing: { $0 ? model.beginInteraction() : model.endInteraction() },
+                              help: ControlHelp.text(path))
             }
         case .balancePrint(let title, let help):
             HStack {
@@ -207,7 +208,8 @@ struct SliderRow: View {
         LabeledSlider(title: title, value: model.number(path, range: range, step: step), range: range, step: step,
                       defaultValue: model.defaultValue(path).double, modified: model.isModified(path),
                       reset: { model.resetValue(path) },
-                      editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+                      editing: { $0 ? model.beginInteraction() : model.endInteraction() },
+                      help: ControlHelp.text(path))
     }
 }
 
@@ -224,6 +226,8 @@ struct LabeledSlider: View {
     let modified: Bool
     let reset: () -> Void
     let editing: (Bool) -> Void
+    /// The tooltip of the title and the slider.
+    var help: String? = nil
 
     @State private var typing = false
     private var decimals: Int { max(0, Int(-log10(step).rounded(.down))) }
@@ -234,6 +238,7 @@ struct LabeledSlider: View {
             HStack(spacing: 4) {
                 Text(title).lineLimit(1)
                     .onTapGesture(count: 2) { reset() }
+                    .tooltip(help)
                 Spacer(minLength: 8)
                 if modified {
                     Button { reset() } label: { Image(systemName: "arrow.counterclockwise") }
@@ -254,7 +259,7 @@ struct LabeledSlider: View {
                         .help("Click to type a value")
                 }
             }
-            ResettableSlider(title: title, value: value, range: range, neutral: defaultValue, editing: editing, reset: reset)
+            ResettableSlider(title: title, value: value, range: range, neutral: defaultValue, editing: editing, reset: reset, toolTip: help)
         }
         .padding(.vertical, 1)
         .resettable(modified: modified, reset: reset)
@@ -275,6 +280,8 @@ struct ResettableSlider: NSViewRepresentable {
     var neutral: Double? = nil
     let editing: (Bool) -> Void
     let reset: () -> Void
+    /// AppKit's tooltip: SwiftUI's `.help` doesn't reach a hosted NSView.
+    var toolTip: String? = nil
 
     func makeNSView(context: Context) -> NSSlider {
         let slider = Control()
@@ -292,6 +299,7 @@ struct ResettableSlider: NSViewRepresentable {
         slider.editing = editing
         slider.reset = reset
         slider.setAccessibilityLabel(title)
+        if slider.toolTip != toolTip { slider.toolTip = toolTip }
         // SwiftUI applies its environment's control size after makeNSView.
         if slider.controlSize != .small { slider.controlSize = .small }
         if slider.minValue != range.lowerBound { slider.minValue = range.lowerBound }
@@ -530,6 +538,13 @@ private struct PixelField: NSViewRepresentable {
     }
 }
 
+extension View {
+    /// A native tooltip, or none.
+    @ViewBuilder func tooltip(_ text: String?) -> some View {
+        if let text { help(text) } else { self }
+    }
+}
+
 private extension View {
     func resettable(_ model: EditorModel, _ path: String) -> some View {
         resettable(modified: model.isModified(path)) { model.resetValue(path) }
@@ -593,7 +608,6 @@ struct AdjustmentInspector: View {
         if model.isRaw {
             Section {
                 control(.choice("White balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
-                    .help("How the RAW's colours are balanced before the film. Presets set it too, as they do in the Python app.")
                 if model.value("io.raw_white_balance.mode").string == "custom" {
                     control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
                     control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
@@ -608,7 +622,10 @@ struct AdjustmentInspector: View {
                       : "Develops the photograph about as bright as the file itself, and keeps it there when you change film, paper or a preset. Exposure adds to it.")
             LabeledSlider(title: "Exposure (EV)", value: model.exposureOffset, range: model.exposureOffsetRange, step: 0.05,
                           defaultValue: 0, modified: model.exposureOffsetModified, reset: model.resetExposureOffset,
-                          editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction() },
+                          help: model.matchesBrightness
+                              ? "Brighter or darker than the match, in stops. It stays when the match changes with the film, paper or a preset."
+                              : "Brightens or darkens the scene before the film, in stops. Unlike Negative exposure, the print doesn’t make up for it.")
             if let note = model.brightnessMatchNote {
                 Text(note).font(.caption).foregroundStyle(.secondary)
             }
@@ -651,8 +668,10 @@ struct AdjustmentInspector: View {
                         Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
                     }
                 }
+                .help(ControlHelp.film)
             }
-            developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
+            developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development",
+                            help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
             if !scanning {
                 if model.previews.enabled {
                     StockFoldout(model: model, paper: true)
@@ -662,8 +681,10 @@ struct AdjustmentInspector: View {
                             Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
                         }
                     }
+                    .help(ControlHelp.paper)
                 }
-                developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")
+                developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development",
+                                help: "How long the paper develops, from the times it was measured at. Longer gives deeper blacks and more contrast.")
             } else {
                 // The switch lives in the Lab's Print section; say why the paper went.
                 LabeledContent {
@@ -680,7 +701,6 @@ struct AdjustmentInspector: View {
         let scanning = model.value("io.scan_film").bool
         Section("Camera") {
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
-                .help("Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative's density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.")
             if shows("camera.film_format_mm") { control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1)) }
             if shows("camera.lens_blur_um") { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
             groups(.camera)
@@ -714,6 +734,7 @@ struct AdjustmentInspector: View {
         }
         Section {
             Toggle("Show all controls", isOn: $allControls)
+                .help("Shows every Lab setting. Off, the Lab shows the few most photographs need, and any that you or a preset changed.")
         } footer: {
             Text(allControls
                  ? "Every camera, film, print and scan setting."
@@ -752,9 +773,11 @@ struct AdjustmentInspector: View {
             switch model.value("io.input_interpretation.mode").string {
             case "assume":
                 Toggle("Linear values", isOn: model.toggle("io.input_interpretation.linear"))
+                    .tooltip(ControlHelp.text("io.input_interpretation.linear"))
             case "manual":
                 control(.choice("Colour space", "io.input_color_space", ["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020", "ACES2065-1", "ACEScg"]))
                 Toggle("Decode the curve", isOn: model.toggle("io.input_cctf_decoding"))
+                    .tooltip(ControlHelp.text("io.input_cctf_decoding"))
             default: EmptyView()
             }
             let colour = model.inputColour
@@ -775,6 +798,7 @@ struct AdjustmentInspector: View {
         ImageSizeSection(model: model)
         Section("Border") {
             Toggle("Add border", isOn: model.border(\.enabled))
+                .help("Frames the photograph in a mat or a film frame. The preview always shows it; Include in export decides whether files get it.")
             Group {
                 let photo = model.photoSize == .zero ? nil : model.photoSize
                 BorderStylePicker(selection: model.border(\.style), photo: photo, colors: (model.border.color, model.border.lineColor))
@@ -798,25 +822,30 @@ struct AdjustmentInspector: View {
         switch model.border.style {
         case .solid, .keyline:
             let keyline = model.border.style == .keyline
-            borderSlider("Width", \.width, 0...15, step: 0.1)
-            if keyline { borderSlider("Line width", \.line, 0.05...2, step: 0.05) }
+            borderSlider("Width", \.width, 0...15, step: 0.1, help: "The mat’s width, in percent of the photograph’s long edge.")
+            if keyline { borderSlider("Line width", \.line, 0.05...2, step: 0.05, help: "The line’s width, in percent of the photograph’s long edge.") }
             ColorPicker("Color", selection: model.borderColor(\.color), supportsOpacity: false)
-            if keyline { ColorPicker("Line color", selection: model.borderColor(\.lineColor), supportsOpacity: false) }
+                .help("The mat’s colour.")
+            if keyline {
+                ColorPicker("Line color", selection: model.borderColor(\.lineColor), supportsOpacity: false)
+                    .help("The line’s colour.")
+            }
         case .film:
-            borderSlider("Width", \.filmWidth, 0...15, step: 0.1)
-                .help("Adds black around the film frame.")
+            borderSlider("Width", \.filmWidth, 0...15, step: 0.1, help: "Adds black around the film frame, in percent of the photograph’s long edge.")
         case .film35:
             EmptyView()
         }
     }
 
     /// A border width in percent of the photograph's long edge.
-    private func borderSlider(_ title: String, _ setting: WritableKeyPath<BorderSettings, Double>, _ range: ClosedRange<Double>, step: Double) -> some View {
+    private func borderSlider(_ title: String, _ setting: WritableKeyPath<BorderSettings, Double>, _ range: ClosedRange<Double>, step: Double,
+                              help: String) -> some View {
         let initial = BorderSettings()[keyPath: setting]
         return LabeledSlider(title: title, value: model.borderPercent(setting, range: range, step: step), range: range, step: step, unit: "%",
                              defaultValue: initial * 100, modified: abs(model.border[keyPath: setting] - initial) > 1e-9,
                              reset: { model.border(setting).wrappedValue = initial },
-                             editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Border") })
+                             editing: { $0 ? model.beginInteraction() : model.endInteraction(action: "Change Border") },
+                             help: help)
     }
 
     private func control(_ adjustment: Adjustment) -> some View { AdjustmentControl(model: model, adjustment: adjustment) }
@@ -852,9 +881,11 @@ struct AdjustmentInspector: View {
         } label: {
             HStack {
                 Label(title, systemImage: symbol)
+                    .tooltip(ControlHelp.group(title))
                 Spacer()
                 if let enable {
                     Toggle(title, isOn: model.toggle(enable)).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                        .help("Turns \(title) on or off, keeping its settings.")
                 }
             }
             // As in Photos, clicking the title toggles the group, not only the chevron.
@@ -863,12 +894,13 @@ struct AdjustmentInspector: View {
         }
     }
 
-    @ViewBuilder private func developmentTime(stock: Stock?, path: String, label: String) -> some View {
+    @ViewBuilder private func developmentTime(stock: Stock?, path: String, label: String, help: String) -> some View {
         if let stock, stock.times.count > 1 {
             Picker(label, selection: Binding(get: { model.value(path).double }, set: { model.set(path, $0 == 0 ? .null : .number($0)) })) {
                 Text("Profile default").tag(0.0)
                 ForEach(stock.times, id: \.self) { Text("\($0.formatted()) min").tag($0) }
             }
+            .help(help)
         }
     }
 }
