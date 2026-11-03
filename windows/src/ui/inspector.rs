@@ -19,6 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
 use super::draw::{self, Canvas, RectF, Role};
+use super::motion;
 use super::theme;
 use super::{App, TBM_GETPOS, create, post, with_app};
 use crate::border::{self, BorderColor, BorderStyle};
@@ -140,6 +141,23 @@ pub struct Inspector {
     decimal: char,
     /// The UI font's line height, for value boxes inside their fields.
     line: i32,
+    /// Motion: the next layout slides rows to their places; the next sync
+    /// fades the rows in (Lab | Post); the slide running.
+    slide: bool,
+    fade: bool,
+    sliding: Option<Slide>,
+    /// Where the last layout put each control (its top), to slide from.
+    placed: std::collections::HashMap<isize, i32>,
+    /// Whether the crop panel showed at the last sync.
+    crop_shown: bool,
+}
+
+/// Rows moving to their new places after a group opens or closes; the
+/// rows it revealed show when they arrive.
+struct Slide {
+    start: std::time::Instant,
+    moves: Vec<(HWND, i32, i32, i32, i32, i32)>,
+    reveal: Vec<HWND>,
 }
 
 thread_local! {
@@ -205,6 +223,11 @@ impl Inspector {
             dev_times: [vec![], vec![]],
             decimal: '.',
             line: fonts.line,
+            slide: false,
+            fade: false,
+            sliding: None,
+            placed: Default::default(),
+            crop_shown: false,
         }
     }
 
@@ -583,6 +606,9 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     }
     let t2 = crate::platform::qpc();
     update_values(ins, model, &expanded);
+    if std::mem::take(&mut ins.fade) {
+        motion::fade_in(ins.rows_panel);
+    }
     let t3 = crate::platform::qpc();
     if created {
         let ms = |a, b| crate::platform::qpc_ms(a, b);
@@ -925,16 +951,47 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
     ins.content = y + ins.px(8.0);
     let visible = client.bottom;
     ins.scroll = ins.scroll.clamp(0, (ins.content - visible).max(0));
+    // A slide still running ends where this layout puts things.
+    let interrupted = ins.sliding.take().map(|s| s.reveal).unwrap_or_default();
+    let slide = std::mem::take(&mut ins.slide) && motion::enabled() && !ins.placed.is_empty();
+    let mut moves = vec![];
+    let mut reveal = vec![];
+    let mut placed = std::collections::HashMap::new();
     unsafe {
         let mut defer = BeginDeferWindowPos(positions.len() as i32).ok();
         for (hwnd, x, y, w, h) in positions {
+            let top = y - ins.scroll;
+            placed.insert(hwnd.0 as isize, top);
+            let mut at = top;
+            if slide {
+                match ins.placed.get(&(hwnd.0 as isize)) {
+                    Some(&from) if from != top => {
+                        moves.push((hwnd, x, from, top, w.max(0), h.max(0)));
+                        at = from;
+                    }
+                    Some(_) => {}
+                    None => reveal.push(hwnd),
+                }
+            }
             if let Some(d) = defer {
-                defer = DeferWindowPos(d, hwnd, None, x, y - ins.scroll, w.max(0), h.max(0), SWP_NOZORDER | SWP_NOACTIVATE).ok();
+                defer = DeferWindowPos(d, hwnd, None, x, at, w.max(0), h.max(0), SWP_NOZORDER | SWP_NOACTIVATE).ok();
+            }
+            if interrupted.contains(&hwnd) {
+                let _ = ShowWindow(hwnd, SW_SHOWNA);
             }
         }
         if let Some(d) = defer {
             let _ = EndDeferWindowPos(d);
         }
+        if !moves.is_empty() {
+            // Revealed rows wait until the rows below have made room.
+            for &hwnd in &reveal {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+            ins.sliding = Some(Slide { start: std::time::Instant::now(), moves, reveal });
+            super::after(std::time::Duration::from_millis(15), slide_step);
+        }
+        ins.placed = placed;
         let info = SCROLLINFO {
             cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
             fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
@@ -949,7 +1006,46 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
     }
 }
 
+/// One frame of a slide; the last shows the revealed rows.
+fn slide_step(app: &mut App) {
+    let ins = &mut app.inspector;
+    let Some(slide) = &ins.sliding else { return };
+    let t = slide.start.elapsed().as_secs_f64() / motion::DURATION.as_secs_f64();
+    let k = motion::ease(t);
+    unsafe {
+        let mut defer = BeginDeferWindowPos(slide.moves.len() as i32).ok();
+        for &(hwnd, x, from, to, w, h) in &slide.moves {
+            let y = if t >= 1.0 { to } else { from + ((to - from) as f64 * k).round() as i32 };
+            if let Some(d) = defer {
+                defer = DeferWindowPos(d, hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE).ok();
+            }
+        }
+        if let Some(d) = defer {
+            let _ = EndDeferWindowPos(d);
+        }
+    }
+    if t >= 1.0 {
+        finish_slide(ins);
+    } else {
+        super::after(std::time::Duration::from_millis(15), slide_step);
+    }
+}
+
+/// Ends a slide at once: everything at its place, the revealed rows shown.
+fn finish_slide(ins: &mut Inspector) {
+    let Some(slide) = ins.sliding.take() else { return };
+    unsafe {
+        for &(hwnd, x, _, to, w, h) in &slide.moves {
+            let _ = MoveWindow(hwnd, x, to, w, h, true);
+        }
+        for &hwnd in &slide.reveal {
+            let _ = ShowWindow(hwnd, SW_SHOWNA);
+        }
+    }
+}
+
 fn scroll_to(ins: &mut Inspector, target: i32) {
+    finish_slide(ins);
     let mut client = RECT::default();
     unsafe {
         let _ = GetClientRect(ins.rows_panel, &mut client);
@@ -962,6 +1058,9 @@ fn scroll_to(ins: &mut Inspector, target: i32) {
     ins.scroll = target;
     unsafe {
         ScrollWindowEx(ins.rows_panel, 0, delta, None, None, None, None, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+        for top in ins.placed.values_mut() {
+            *top += delta;
+        }
         let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nPos: target, ..Default::default() };
         SetScrollInfo(ins.rows_panel, SB_VERT, &info, true);
     }
@@ -1317,6 +1416,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.prefs.inspector_tab = next.into();
             app.model.prefs.save();
             app.inspector.scroll = 0;
+            app.inspector.fade = true;
             app.model.dirty |= dirty::STRUCTURE;
         }
         return;
@@ -1332,6 +1432,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
     let selection = || unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 };
     match (kind, part) {
         (Kind::Group { title, .. }, HEADER) if code == BN_CLICKED => {
+            app.inspector.slide = true;
             let open = !app.model.prefs.expanded(title);
             app.model.prefs.set_expanded(title, open);
             app.model.prefs.save();
@@ -1378,7 +1479,10 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
                 None => app.model.dirty |= dirty::INSPECTOR,
             }
         }
-        (Kind::Foldout(paper), ACTION) if code == BN_CLICKED => app.model.toggle_foldout(paper),
+        (Kind::Foldout(paper), ACTION) if code == BN_CLICKED => {
+            app.inspector.slide = true;
+            app.model.toggle_foldout(paper);
+        }
         (Kind::DevTime(paper), COMBO) if code == CBN_SELCHANGE => {
             let times = stock_times(&app.model, paper);
             let path = if paper { "print_render.development_time" } else { "film_render.development_time" };
@@ -2447,6 +2551,12 @@ fn sync_crop(app: &mut App) {
     unsafe {
         let _ = ShowWindow(crop.panel, if cropping { SW_SHOWNA } else { SW_HIDE });
     }
+    let panel = crop.panel;
+    if app.inspector.crop_shown != cropping {
+        app.inspector.crop_shown = cropping;
+        motion::fade_in(if cropping { panel } else { app.inspector.rows_panel });
+    }
+    let Some(crop) = &app.inspector.crop else { return };
     let Some(session) = &app.model.crop_session else { return };
     let decimal = app.inspector.decimal;
     for (i, aspect) in CropAspect::ALL.iter().enumerate() {

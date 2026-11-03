@@ -16,6 +16,7 @@ mod drop;
 mod empty;
 mod folder_watch;
 pub mod inspector;
+mod motion;
 mod presets;
 mod strip;
 mod theme;
