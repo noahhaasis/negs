@@ -29,8 +29,8 @@ pub struct Preferences {
     pub png_bit_depth: u32,
     pub tiff_bit_depth: u32,
     pub last_save_folder: Option<PathBuf>,
-    /// Film and paper as preview grids rather than menus.
-    pub stock_previews: bool,
+    /// Film, paper and preset thumbnails rather than plain menus and lists.
+    pub previews: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -55,7 +55,7 @@ impl Default for Preferences {
             png_bit_depth: 8,
             tiff_bit_depth: 16,
             last_save_folder: None,
-            stock_previews: true,
+            previews: true,
         }
     }
 }
@@ -181,15 +181,15 @@ impl Editor {
         ));
         group.add(&appearance);
         let previews = adw::SwitchRow::builder()
-            .title("Film and paper previews")
-            .subtitle("Show each stock on your photograph. Turn off to use simple menus on slower computers.")
-            .active(self.preferences.borrow().stock_previews)
+            .title("Film, paper and preset previews")
+            .subtitle("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
+            .active(self.preferences.borrow().previews)
             .build();
         previews.connect_active_notify(glib::clone!(
             #[weak(rename_to=ui)]
             self,
             move |r| {
-                ui.preferences.borrow_mut().stock_previews = r.is_active();
+                ui.preferences.borrow_mut().previews = r.is_active();
                 crate::stock_browser::apply(&ui);
             }
         ));

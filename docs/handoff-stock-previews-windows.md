@@ -134,12 +134,8 @@ lists them too). Keep the per-thumbnail *error* line on stderr, it's ordinary di
   build (`-Xswiftc -DSPEKTRAFILM_BENCHMARK`), and
   `swift test --package-path macos --filter PreviewTests`.
 
-**Linux, while you're there** (mechanical; Linux CI checks it): rename the preference
-`stock_previews` → `previews` in `linux/src/preferences.rs` and `stock_browser.rs`, like
-the other platforms. Leave its label "Film and paper previews" until Linux has preset
-previews.
+Linux already has preset previews, the new label and the `previews` preference
+(2026-11-02), so nothing is left there besides the hooks above.
 
-**Tell Noah what's left.** Unless someone has done it since, that's **preset previews on
-Linux** (needs a Linux session: reference is the Mac implementation and the spec's preset
-section; then the label becomes "Film, paper and preset previews"). Also say which
-platforms' builds you couldn't run. Don't merge into main; Noah decides that.
+**Tell Noah what's left**, and which platforms' builds you couldn't run. Don't merge into
+main; Noah decides that.

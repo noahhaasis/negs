@@ -30,3 +30,4 @@ list.presets { background: transparent; padding: 0 8px 12px; }
 .stock-tile { padding: 4px; border-radius: 8px; }
 .stock-tile.selected-stock { box-shadow: inset 0 0 0 2px @accent_color; }
 .stock-thumb { border-radius: 5px; background: alpha(currentColor, 0.08); }
+.preset-thumb { border-radius: 4px; background: alpha(currentColor, 0.08); }

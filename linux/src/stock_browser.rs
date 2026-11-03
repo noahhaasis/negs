@@ -1,7 +1,8 @@
 //! Film and paper foldouts: a two-column grid of the photograph developed
-//! with each stock and the current settings. Collapsed by default; thumbnails
-//! render only while a grid is open and the main preview is up to date.
-//! Settings can turn them off, which restores the plain menus.
+//! with each stock and the current settings. Collapsed by default. Also
+//! schedules the Presets list's thumbnails (`preset_ui`). Thumbnails render
+//! only while they're on screen and the main preview is up to date.
+//! Settings can turn them off, which restores the plain menus and list.
 use crate::{Editor, catalog::Stock, engine::Frame, parameters};
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -13,20 +14,67 @@ use std::{
 };
 
 /// The thumbnail's long edge: two columns of a ~340 px inspector at 2× scale.
+pub const LONG_SIDE: u32 = 320;
 fn long_side() -> u32 {
     std::env::var("NEGS_STOCK_THUMB_PX")
         .ok()
         .and_then(|v| v.parse().ok())
         .filter(|v| (16..=1024).contains(v))
-        .unwrap_or(320)
+        .unwrap_or(LONG_SIDE)
+}
+
+/// One thumbnail: a stock's tile or a preset's.
+pub struct Thumb {
+    pub picture: gtk::Picture,
+    /// The source generation and request the shown thumbnail (or the
+    /// failure that left it blank) was made for.
+    shown: RefCell<Option<(u64, String)>>,
+}
+impl Thumb {
+    pub fn new() -> Self {
+        let picture = gtk::Picture::new();
+        picture.set_content_fit(gtk::ContentFit::Cover);
+        picture.set_can_shrink(true);
+        Self {
+            picture,
+            shown: RefCell::new(None),
+        }
+    }
+    /// Updates the look for the wanted thumbnail; true when it needs a new one.
+    fn mark(&self, generation: u64, key: &str) -> bool {
+        match self.shown.borrow().as_ref() {
+            Some((_, k)) if k == key => {
+                self.picture.set_opacity(1.);
+                return false;
+            }
+            // Same photograph, other settings: keep it, dimmed.
+            Some((g, _)) if *g == generation => self.picture.set_opacity(0.55),
+            // Another photograph: a placeholder, never the old picture.
+            _ => {
+                self.picture.set_paintable(None::<&gdk::Paintable>);
+                self.picture.set_opacity(1.);
+            }
+        }
+        true
+    }
+    /// A finished thumbnail, or None when it failed (blank until the next edit).
+    fn show(&self, texture: Option<&gdk::Texture>, generation: u64, key: String) {
+        self.picture.set_paintable(texture);
+        self.picture.set_opacity(1.);
+        self.shown.replace(Some((generation, key)));
+    }
+    /// Drops the thumbnail; true if there was one.
+    pub fn clear(&self) -> bool {
+        self.picture.set_paintable(None::<&gdk::Paintable>);
+        self.picture.set_opacity(1.);
+        self.shown.take().is_some()
+    }
 }
 
 struct Tile {
     stock: &'static Stock,
     button: gtk::Button,
-    picture: gtk::Picture,
-    /// The source generation and request the shown thumbnail was rendered for.
-    shown: RefCell<Option<(u64, String)>>,
+    thumb: Rc<Thumb>,
 }
 
 struct Grid {
@@ -45,7 +93,7 @@ pub struct Browser {
 }
 
 pub fn enabled(ui: &Editor) -> bool {
-    ui.preferences.borrow().stock_previews
+    ui.preferences.borrow().previews
 }
 
 /// What a click on `stock` would develop: the current state with that stock
@@ -84,15 +132,15 @@ pub fn apply(ui: &Rc<Editor>) {
         menu.set_visible(shown && !on);
         grid.set_visible(shown && on);
     }
+    ui.presets_show_thumbnails(on);
     if on {
         pump(ui);
         return;
     }
-    let mut cached = false;
+    let mut cached = ui.clear_preset_thumbnails();
     for grid in ui.stock_browser.grids.borrow().iter() {
         for tile in &grid.tiles {
-            cached |= tile.shown.take().is_some();
-            tile.picture.set_paintable(None::<&gdk::Paintable>);
+            cached |= tile.thumb.clear();
         }
     }
     let client = ui.runtime.borrow().client.clone();
@@ -140,9 +188,8 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
             body.append(&f);
             flow = Some(f);
         }
-        let picture = gtk::Picture::new();
-        picture.set_content_fit(gtk::ContentFit::Cover);
-        picture.set_can_shrink(true);
+        let thumb = Rc::new(Thumb::new());
+        let picture = &thumb.picture;
         picture.set_size_request(-1, 92);
         picture.add_css_class("stock-thumb");
         let name = gtk::Label::new(Some(&stock.name));
@@ -150,7 +197,7 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
         name.set_xalign(0.);
         name.add_css_class("caption");
         let content = gtk::Box::new(gtk::Orientation::Vertical, 3);
-        content.append(&picture);
+        content.append(picture);
         content.append(&name);
         let button = gtk::Button::new();
         button.set_child(Some(&content));
@@ -176,8 +223,7 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
         tiles.push(Tile {
             stock,
             button,
-            picture,
-            shown: RefCell::new(None),
+            thumb,
         });
     }
     let holder = gtk::ListBoxRow::new();
@@ -195,6 +241,12 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
         #[weak]
         ui,
         move |_| pump(&ui)
+    ));
+    // Another inspector tab or the Presets page hides it.
+    row.connect_map(glib::clone!(
+        #[weak]
+        ui,
+        move |_| pump_soon(&ui)
     ));
     ui.rules.borrow_mut().push(Box::new(glib::clone!(
         #[weak]
@@ -219,37 +271,53 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
     row
 }
 
+/// `pump` once the current signal handler has returned.
+pub fn pump_soon(ui: &Rc<Editor>) {
+    let ui = ui.clone();
+    glib::idle_add_local_once(move || pump(&ui));
+}
+
+/// A thumbnail to render: the tile, the photograph's generation, the helper
+/// request, what identifies the result, and a name for logs.
+pub struct Wanted {
+    pub thumb: Rc<Thumb>,
+    pub generation: u64,
+    pub command: serde_json::Value,
+    pub key: String,
+    pub name: String,
+}
+
 /// Marks out-of-date thumbnails (dimmed, or blank for another photograph)
-/// and renders the next one of an open grid: one helper request at a time,
-/// and only while the main preview has nothing to do.
+/// and renders the next one of an open grid or the Presets list: one helper
+/// request at a time, and only while the main preview has nothing to do.
 pub fn pump(ui: &Rc<Editor>) {
     let browser = &ui.stock_browser;
     if crate::runtime::ui_only() || !enabled(ui) {
         return;
     }
-    let mut next = None;
+    let mut wanted = Vec::new();
     for grid in browser.grids.borrow().iter() {
-        if !grid.row.is_expanded() || !grid.row.is_visible() {
+        if !grid.row.is_expanded() || !grid.row.is_mapped() {
             continue;
         }
-        for (index, tile) in grid.tiles.iter().enumerate() {
+        for tile in &grid.tiles {
             let Some((generation, command, key)) = request(ui, tile.stock) else {
                 return;
             };
-            let shown = tile.shown.borrow();
-            match shown.as_ref() {
-                Some((_, k)) if *k == key => continue,
-                // Same photograph, other settings: keep it, dimmed.
-                Some((g, _)) if *g == generation => tile.picture.set_opacity(0.55),
-                // Another photograph: a placeholder, never the old picture.
-                _ => {
-                    tile.picture.set_paintable(None::<&gdk::Paintable>);
-                    tile.picture.set_opacity(1.);
-                }
-            }
-            if next.is_none() {
-                next = Some((grid.clone(), index, generation, command, key));
-            }
+            wanted.push(Wanted {
+                thumb: tile.thumb.clone(),
+                generation,
+                command,
+                key,
+                name: tile.stock.id.clone(),
+            });
+        }
+    }
+    wanted.extend(ui.wanted_preset_thumbnails());
+    let mut next = None;
+    for item in wanted {
+        if item.thumb.mark(item.generation, &item.key) && next.is_none() {
+            next = Some(item);
         }
     }
     if browser.busy.get() {
@@ -271,7 +339,14 @@ pub fn pump(ui: &Rc<Editor>) {
         };
         client
     };
-    let Some((grid, index, generation, mut command, key)) = next else {
+    let Some(Wanted {
+        thumb,
+        generation,
+        mut command,
+        key,
+        name,
+    }) = next
+    else {
         if let Some((started, count)) = browser.batch.take() {
             let ms = started.elapsed().as_secs_f64() * 1000.;
             ui.perf.detail("stock_thumbnails_last_batch", json!({"count":count,"ms":ms}));
@@ -303,7 +378,6 @@ pub fn pump(ui: &Rc<Editor>) {
         if ui.runtime.borrow().closing || !enabled(&ui) {
             return;
         }
-        let tile = &grid.tiles[index];
         // The photograph changed meanwhile: drop it, the next pump retries.
         let current = ui.runtime.borrow().source_generation == generation;
         match result {
@@ -318,13 +392,11 @@ pub fn pump(ui: &Rc<Editor>) {
                         frame.result["display_color_space"].as_str().unwrap_or(""),
                     ),
                 );
-                tile.picture.set_paintable(Some(&texture));
-                tile.picture.set_opacity(1.);
-                tile.shown.replace(Some((generation, key)));
+                thumb.show(Some(&texture), generation, key);
                 if std::env::var_os("NEGS_STOCK_THUMB_LOG").is_some() {
                     eprintln!(
                         "thumb {}: {:.0} ms {}",
-                        tile.stock.id,
+                        name,
                         frame.result["elapsed_ms"].as_f64().unwrap_or(0.),
                         frame.result["timing_ms"]
                     );
@@ -333,14 +405,10 @@ pub fn pump(ui: &Rc<Editor>) {
             Ok(Ok(_)) => {}
             // Leave the placeholder; a later edit retries. Don't spin on a failure.
             Ok(Err(error)) => {
-                eprintln!("stock thumbnail {}: {error}", tile.stock.id);
-                tile.picture.set_paintable(None::<&gdk::Paintable>);
-                tile.shown.replace(Some((generation, key)));
+                eprintln!("thumbnail {name}: {error}");
+                thumb.show(None, generation, key);
             }
-            Err(_) => {
-                tile.picture.set_paintable(None::<&gdk::Paintable>);
-                tile.shown.replace(Some((generation, key)));
-            }
+            Err(_) => thumb.show(None, generation, key),
         }
         pump(&ui);
     });
