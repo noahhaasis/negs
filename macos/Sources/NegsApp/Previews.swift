@@ -258,6 +258,7 @@ struct StockFoldout: View {
                 Text(paper ? model.paperName : model.filmName)
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
+            .help(paper ? ControlHelp.paper : ControlHelp.film)
             .contentShape(Rectangle())
             .onTapGesture { withAnimation { isExpanded.wrappedValue.toggle() } }
         }
