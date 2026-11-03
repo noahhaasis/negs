@@ -108,6 +108,10 @@ import UniformTypeIdentifiers
     var freshEditsForNewPhotos = UserDefaults.standard.object(forKey: "freshEditsForNewPhotos") as? Bool ?? true {
         didSet { UserDefaults.standard.set(freshEditsForNewPhotos, forKey: "freshEditsForNewPhotos") }
     }
+    /// Lab › Film format › Custom picked while the value is still a format's,
+    /// so the slider stays. Start fresh and Reset Adjustments clear it, as
+    /// they do the edits.
+    var customFilmFormat = false
     var error: String?
     var status = "Starting…"
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
@@ -549,6 +553,7 @@ import UniformTypeIdentifiers
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
         next.params[ImageSize.targetPath] = state.params[ImageSize.targetPath]
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        customFilmFormat = false
         apply(next, action: "Reset Adjustments")
     }
     private func apply(_ next: EditState, action: String) {
@@ -710,6 +715,7 @@ import UniformTypeIdentifiers
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         sourceGeneration += 1
         let generation = sourceGeneration
+        if freshEditsForNewPhotos { customFilmFormat = false }
         if let session {
             var restored = session.state
             let lensCorrection = restored.params[Self.lensCorrectionPath]
