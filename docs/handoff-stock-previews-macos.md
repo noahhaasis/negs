@@ -166,7 +166,7 @@ Not done: no notarized/packaged bundle was built, and an Intel Mac wasn't tried.
 
 ## Preset previews (macOS)
 
-Added 2026-11-01/02 (spec: [Preset previews](stock-previews.md#preset-previews-macos-done-linux-and-windows-to-follow)).
+Added 2026-11-01/02 (spec: [Preset previews](stock-previews.md#preset-previews-macos-linux-and-windows-done)).
 Measured with Noah's 12 presets (8 daylight, 3 as-shot, 1 custom white balance), release
 builds, on AC power.
 

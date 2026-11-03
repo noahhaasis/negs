@@ -19,6 +19,7 @@ use crate::histogram::Histogram;
 use crate::json;
 use crate::picture::Picture;
 use crate::presets::{self, PresetFile, Status as PresetStatus};
+use crate::previews::{self, Previews, Target};
 use crate::session::{CatalogCache, EditorSession, Preferences};
 use crate::rendered_preview::{self, Frame, RenderedPreviewCache};
 use crate::state::{self, EditState, Stock};
@@ -38,6 +39,8 @@ pub mod dirty {
     pub const CROP: u32 = 1 << 9;
     pub const LAYOUT: u32 = 1 << 10;
     pub const PRESETS: u32 = 1 << 11;
+    /// A preview tile changed, or what they should show may have.
+    pub const PREVIEWS: u32 = 1 << 12;
     pub const ALL: u32 = u32::MAX;
 }
 
@@ -344,6 +347,8 @@ pub struct Model {
     pub renaming_preset: Option<PathBuf>,
     /// New Preset's file while it is first named: Escape removes it.
     unnamed_preset: Option<PathBuf>,
+    /// The film, paper and preset thumbnails.
+    pub previews: Previews,
 }
 
 /// What the adjustments column shows.
@@ -435,6 +440,7 @@ impl Model {
             preset_status: HashMap::new(),
             renaming_preset: None,
             unnamed_preset: None,
+            previews: Previews::new(),
         }
     }
 
@@ -726,34 +732,17 @@ impl Model {
     }
 
     pub fn choose_film(&mut self, stock: &str) {
-        let mut next = self.state.clone();
-        next.film = stock.into();
-        json::set(&mut next.params, "film_render.development_time", Value::Null);
-        // A new film brings its own grain, DIR and halation presets, as upstream applies them.
-        for field in state::GRAIN_STOCK_FIELDS {
-            json::set(&mut next.params, &format!("film_render.grain.{field}"), Value::Null);
-        }
-        for path in state::DIR_HALATION_STOCK_PATHS {
-            json::set(&mut next.params, path, Value::Null);
-        }
-        self.pair_film(&mut next);
+        let next = state::choosing(&self.state, stock, false, &self.stocks);
         self.apply(next, "Change Film");
     }
 
     pub fn choose_paper(&mut self, stock: &str) {
-        let mut next = self.state.clone();
-        next.paper = stock.into();
-        json::set(&mut next.params, "print_render.development_time", Value::Null);
+        let next = state::choosing(&self.state, stock, true, &self.stocks);
         self.apply(next, "Change Paper");
     }
 
     fn pair_film(&self, state: &mut EditState) {
-        let Some(film) = self.stocks.iter().find(|s| !s.paper && s.id == state.film) else { return };
-        json::set(&mut state.params, "io.scan_film", Value::Bool(film.positive));
-        if self.stocks.iter().any(|s| s.paper && s.id == film.target) && state.paper != film.target {
-            state.paper = film.target.clone();
-            json::set(&mut state.params, "print_render.development_time", Value::Null);
-        }
+        state::pair_film(state, &self.stocks);
     }
 
     /// Original develops the source's own pixels; Longest side resizes the
@@ -1021,7 +1010,8 @@ impl Model {
         }
         let presets = &self.presets;
         self.preset_status.retain(|file, _| presets.contains(file));
-        self.mark(dirty::PRESETS);
+        self.previews.retain_presets(&self.presets.iter().map(|p| p.path.clone()).collect::<Vec<_>>());
+        self.mark(dirty::PRESETS | dirty::PREVIEWS);
         self.check_presets();
     }
 
@@ -1045,14 +1035,15 @@ impl Model {
                 }
             };
             self.preset_status.insert(preset.clone(), PresetStatus::Checking);
-            engine.request(json!({"command": "preset_import", "text": text}), engine::timeout_for("preset_import"), move |result| {
-                ui::post(move |app: &mut App| app.model.preset_checked(preset, result));
+            let command = json!({"command": "preset_import", "text": text});
+            engine.request(command, engine::timeout_for("preset_import"), move |result| {
+                ui::post(move |app: &mut App| app.model.preset_checked(preset, text, result));
             });
         }
         self.mark(dirty::PRESETS);
     }
 
-    fn preset_checked(&mut self, preset: PresetFile, result: Result<(u64, Value)>) {
+    fn preset_checked(&mut self, preset: PresetFile, text: String, result: Result<(u64, Value)>) {
         if !self.presets.contains(&preset) {
             return;
         }
@@ -1061,6 +1052,8 @@ impl Model {
                 film: json::string(&result["film"]).into(),
                 paper: json::string(&result["paper"]).into(),
                 scan: json::boolean(&result["params"]["io"]["scan_film"]),
+                text,
+                white_balance: result["params"]["io"]["raw_white_balance"].clone(),
             },
             Err(error) => PresetStatus::Invalid(format!("{error:#}")),
         };
@@ -1256,8 +1249,9 @@ impl Model {
         if name == preset.name() {
             return;
         }
-        if let Err(error) = self.preset_library.rename(preset, name) {
-            self.report(&error);
+        match self.preset_library.rename(preset, name) {
+            Ok(renamed) => self.previews.move_preset(&preset.path, &renamed.path),
+            Err(error) => self.report(&error),
         }
         self.refresh_presets();
     }
@@ -1523,6 +1517,179 @@ impl Model {
                 let picture = crate::thumbnail::original(&path, max_pixels);
                 ui::post(move |app: &mut App| finish(app, picture));
             });
+        }
+    }
+
+    // MARK: Previews
+
+    /// Settings › Film, paper and preset previews. Off shows the menus and
+    /// the plain preset list, and frees the thumbnails here and in the engine.
+    pub fn set_previews(&mut self, on: bool) {
+        if self.prefs.previews == on {
+            return;
+        }
+        self.prefs.previews = on;
+        self.prefs.save();
+        if !on && self.previews.clear() {
+            if let Some(engine) = &self.engine {
+                engine.request(json!({"command": "release_thumbnails"}), engine::timeout_for("release_thumbnails"), |_| {});
+            }
+        }
+        self.mark(dirty::STRUCTURE | dirty::PRESETS | dirty::PREVIEWS);
+    }
+
+    /// Opens or closes the Film or Paper foldout.
+    pub fn toggle_foldout(&mut self, paper: bool) {
+        let open = if paper { &mut self.previews.paper_open } else { &mut self.previews.film_open };
+        *open = !*open;
+        self.mark(dirty::STRUCTURE | dirty::PREVIEWS);
+    }
+
+    /// Whether the Film or Paper grid is open and on screen.
+    pub fn grid_shown(&self, paper: bool) -> bool {
+        self.prefs.previews
+            && self.previews.open(paper)
+            && self.inspector_visible
+            && self.pane() == Pane::Adjustments
+            && self.prefs.inspector_tab != "Post"
+            && !self.cropping()
+            && !(paper && json::boolean(self.value("io.scan_film")))
+    }
+
+    /// Whether any thumbnails are on screen.
+    pub fn previews_on_screen(&self) -> bool {
+        self.grid_shown(false) || self.grid_shown(true) || self.preset_thumbnails_shown()
+    }
+
+    /// Whether the Presets list, with its thumbnails, is on screen.
+    fn preset_thumbnails_shown(&self) -> bool {
+        self.prefs.previews && self.inspector_visible && self.pane() == Pane::Presets && !self.cropping()
+    }
+
+    /// The main preview has nothing to do: thumbnails may use the engine.
+    fn previews_may_render(&self) -> bool {
+        self.ready
+            && !self.closing
+            && !self.rendering
+            && !self.pending_render
+            && !self.interacting()
+            && self.image.is_some()
+            && (self.preview_current || self.render_failed)
+    }
+
+    /// The thumbnails on screen, in the order they're made, with their keys
+    /// and requests: the open grids top to bottom, then the presets once the
+    /// engine has checked them all.
+    fn wanted_previews(&self) -> Vec<(Target, previews::Key, Value)> {
+        let Some(source) = &self.source else { return vec![] };
+        let generation = self.source_generation;
+        let state = self.render_state();
+        let mut wanted = vec![];
+        for paper in [false, true] {
+            if !self.grid_shown(paper) {
+                continue;
+            }
+            let (films, papers) = (self.films(), self.papers());
+            let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
+            for stock in groups.iter().flat_map(|g| g.stocks.iter()) {
+                let command = previews::stock_command(&state, stock, &self.stocks, source, generation);
+                wanted.push((Target::Stock { id: stock.id.clone(), paper }, previews::Key::new(generation, &command), command));
+            }
+        }
+        let checking = self.presets.iter().any(|p| matches!(self.preset_status.get(p), None | Some(PresetStatus::Checking)));
+        if self.preset_thumbnails_shown() && !checking {
+            let kept: Option<Vec<String>> = self.catalog["preset_kept"].as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect());
+            let valid: Vec<(&PresetFile, &str, &Value)> = self
+                .presets
+                .iter()
+                .filter_map(|p| match self.preset_status.get(p) {
+                    Some(PresetStatus::Valid { text, white_balance, .. }) => Some((p, text.as_str(), white_balance)),
+                    _ => None,
+                })
+                .collect();
+            let photo = state.value("io.raw_white_balance");
+            for (preset, text, _) in previews::render_order(valid, self.is_raw, |p| Some(p.2.clone()), photo) {
+                let command = previews::preset_command(text, &state, source, generation);
+                wanted.push((Target::Preset(preset.path.clone()), previews::preset_key(&command, kept.as_deref(), generation), command));
+            }
+        }
+        wanted
+    }
+
+    /// Dims or blanks out-of-date thumbnails, and asks the engine for the
+    /// next one on screen: one request at a time, and only while the main
+    /// preview has nothing to do. True when a tile's look changed.
+    pub fn pump_previews(&mut self) -> bool {
+        if !self.prefs.previews {
+            return false;
+        }
+        let mut changed = false;
+        let mut next = None;
+        for (target, key, command) in self.wanted_previews() {
+            let (needs, look) = self.previews.thumb_mut(&target).mark(&key);
+            changed |= look;
+            if needs && next.is_none() {
+                next = Some((target, key, command));
+            }
+        }
+        if self.previews.busy || !self.previews_may_render() {
+            return changed;
+        }
+        if next.is_none() && let Some((started, count)) = self.previews.batch.take() {
+            self.previews.finished_batch = Some((count, engine::elapsed_ms(started)));
+        }
+        let (Some((target, key, mut command)), Some(engine)) = (next, self.engine.clone()) else { return changed };
+        let (started, count) = self.previews.batch.unwrap_or((Instant::now(), 0));
+        self.previews.batch = Some((started, count + 1));
+        self.previews.busy = true;
+        self.previews.requests += 1;
+        let buffer = engine.directory().join(format!("thumbnail-{}.rgba", self.previews.requests));
+        command["preview_path"] = json!(buffer);
+        let (color, rotation) = (self.previews.color.clone(), self.rotation());
+        engine.request(command, engine::timeout_for("thumbnail"), move |result| {
+            let bitmap = result.and_then(|(_, r)| {
+                let rgba = std::fs::read(&buffer)?;
+                let wide = crate::picture::is_wide(json::string(&r["display_color_space"]));
+                previews::Bitmap::from_rgba(&rgba, json::number(&r["width"]) as u32, json::number(&r["height"]) as u32, wide, color.as_deref(), rotation)
+            });
+            let _ = std::fs::remove_file(&buffer);
+            ui::post(move |app: &mut App| app.model.thumbnail_finished(target, key, bitmap));
+        });
+        changed
+    }
+
+    fn thumbnail_finished(&mut self, target: Target, key: previews::Key, bitmap: Result<previews::Bitmap>) {
+        self.previews.busy = false;
+        if self.closing || !self.prefs.previews {
+            return;
+        }
+        // The photograph changed meanwhile: drop it, the next pump asks again.
+        if key.generation == self.source_generation {
+            let bitmap = match bitmap {
+                Ok(bitmap) => Some(Arc::new(bitmap)),
+                // Leave the placeholder; a later edit retries. Don't spin on a failure.
+                Err(error) => {
+                    eprintln!("thumbnail {target:?}: {error:#}");
+                    None
+                }
+            };
+            self.previews.thumb_mut(&target).show(bitmap, key);
+        }
+        self.mark(dirty::PREVIEWS);
+    }
+
+    /// The canvas moved to a monitor with another profile: thumbnails are
+    /// made again through it.
+    pub fn set_preview_color(&mut self, color: Option<Arc<crate::icc::Transform>>) {
+        let same = match (&self.previews.color, &color) {
+            (Some(a), Some(b)) => a.profile == b.profile,
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.previews.color = color;
+            self.previews.clear();
+            self.mark(dirty::PREVIEWS);
         }
     }
 
@@ -2351,8 +2518,9 @@ mod preset_tests {
         let Some(mut live) = live("refused") else { return };
         let exotic = live.model.preset_library.add(br#"{"output_gamut_compress": {"algorithm": "jzazbz"}}"#, "Exotic").unwrap();
         live.model.refresh_presets();
-        let result = ask(&live.engine, json!({"command": "preset_import", "text": presets::text(&std::fs::read(&exotic.path).unwrap()).unwrap()}));
-        live.model.preset_checked(exotic.clone(), result.map(|v| (0, v)));
+        let text = presets::text(&std::fs::read(&exotic.path).unwrap()).unwrap();
+        let result = ask(&live.engine, json!({"command": "preset_import", "text": text}));
+        live.model.preset_checked(exotic.clone(), text, result.map(|v| (0, v)));
         match live.model.preset_status.get(&exotic) {
             Some(PresetStatus::Invalid(reason)) => assert!(reason.contains("jzazbz"), "{reason}"),
             other => panic!("accepted: {other:?}"),

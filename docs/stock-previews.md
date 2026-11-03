@@ -2,10 +2,10 @@
 
 Branch `stock-previews`. Film and paper previews: the Linux app is done and is the
 reference; macOS is done too ([handoff and results](handoff-stock-previews-macos.md#macos-results)).
-[Preset previews](#preset-previews-macos-and-linux-done-windows-to-follow): macOS and Linux.
-Windows ([handoff](handoff-stock-previews-windows.md)) does both, then
-[finishes the feature](handoff-stock-previews-windows.md#finishing-the-feature-last-agent)
-(removes the experiment hooks everywhere).
+[Preset previews](#preset-previews-macos-linux-and-windows-done): macOS, Linux and Windows.
+Windows did both on 2026-11-02 ([results](handoff-stock-previews-windows.md#windows-results)).
+Still to do: [finishing the feature](handoff-stock-previews-windows.md#finishing-the-feature-last-agent)
+(removing the experiment hooks everywhere).
 
 ## Behaviour (all platforms)
 
@@ -70,7 +70,7 @@ spectral LUT (`spektrafilm-core/src/input_gamut.rs`, `remap`) now runs rows in p
 The output is bit-identical (render hashes compared against `main`). It cut pipeline
 calibration from ~140 ms to ~45 ms, which also makes ordinary film changes faster.
 
-## Preset previews (macOS and Linux done; Windows to follow)
+## Preset previews (macOS, Linux and Windows done)
 
 - Each row of the Presets panel shows a thumbnail (72 × 48 pt, grey until it arrives) of
   the photograph **with that preset applied**, exactly what clicking it would produce,
