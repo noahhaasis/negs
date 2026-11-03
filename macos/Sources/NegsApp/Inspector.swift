@@ -251,7 +251,7 @@ struct LabeledSlider: View {
                         .help("Click to type a value")
                 }
             }
-            ResettableSlider(title: title, value: value, range: range, editing: editing, reset: reset)
+            ResettableSlider(title: title, value: value, range: range, neutral: defaultValue, editing: editing, reset: reset)
         }
         .padding(.vertical, 1)
         .resettable(modified: modified, reset: reset)
@@ -267,6 +267,9 @@ struct ResettableSlider: NSViewRepresentable {
     let title: String
     let value: Binding<Double>
     let range: ClosedRange<Double>
+    /// The default: on macOS 26 the track fills from here to the knob, so a
+    /// moved slider shows where it started.
+    var neutral: Double? = nil
     let editing: (Bool) -> Void
     let reset: () -> Void
 
@@ -290,6 +293,10 @@ struct ResettableSlider: NSViewRepresentable {
         if slider.controlSize != .small { slider.controlSize = .small }
         if slider.minValue != range.lowerBound { slider.minValue = range.lowerBound }
         if slider.maxValue != range.upperBound { slider.maxValue = range.upperBound }
+        if #available(macOS 26, *) {
+            let neutral = min(max(neutral ?? range.lowerBound, range.lowerBound), range.upperBound)
+            if slider.neutralValue != neutral { slider.neutralValue = neutral }
+        }
         slider.wanted = value.wrappedValue
     }
 
@@ -534,7 +541,7 @@ private extension View {
 struct AdjustmentInspector: View {
     let model: EditorModel
     @AppStorage("expandedAdjustments") private var expanded = "Enlarger"
-    @AppStorage("inspectorTab") private var tab = InspectorTab.lab
+    @AppStorage("inspectorTab") private var tab = InspectorTab.prep
 
     var body: some View {
         // The histogram and tab switch stay put above the tab's scrolling sections.
