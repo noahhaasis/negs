@@ -19,8 +19,10 @@ keeps the existing exposure. Manual Prep controls remain available.
 A failed match turns the button off and says why in a line below it, as
 long as trying again couldn't change the answer: for the photograph when the
 preview is the problem (none, too small, framed differently, no colour
-profile), until the next edit when no reliable match was found. An automatic
-match fails the same quiet way.
+profile, too few midtones), until the next edit when no reliable match was
+found or it would take more than ±3 EV. The engine's own reasons are mapped to
+these short notes, never shown as they are. An automatic match fails the same
+quiet way.
 
 Some cameras letterbox a 4:3 preview of their 3:2 frame in black bars: the
 Leica M8 (320×240, bars top and bottom), M (Typ 240) and Monochrom (Typ 246)

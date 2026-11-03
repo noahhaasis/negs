@@ -233,6 +233,26 @@ final class ExposurePlacementTests: XCTestCase {
         XCTAssertNotNil(model.exposurePlacementFailureMessage)
     }
 
+    func testEngineReasonsBecomeShortNotes() {
+        // The engine's wording, from exposure_placement.rs.
+        let cases: [(String, String, Bool)] = [
+            ("Camera preview has too few usable midtone quantiles; exposure unchanged",
+             "The camera preview is too dark or too bright to match.", true),
+            ("Camera brightness requires exposure outside the supported ±3 EV range",
+             "Matching would take more than ±3 EV.", false),
+            ("Selected film response is not reliably monotone for Auto exposure",
+             "No reliable brightness match with these settings.", false),
+        ]
+        for (reason, message, forPhoto) in cases {
+            let failure = CameraBrightnessReference.failure(EngineError(message: reason))
+            XCTAssertEqual(failure.message, message)
+            XCTAssertEqual(failure.forPhoto, forPhoto, reason)
+        }
+        let unusable = CameraBrightnessReference.failure(CameraPreviewUnusable(message: "This RAW has no camera preview to match."))
+        XCTAssertEqual(unusable.message, "This RAW has no camera preview to match.")
+        XCTAssertTrue(unusable.forPhoto)
+    }
+
     private func waitUntil(_ predicate: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(60)
         while !predicate(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }

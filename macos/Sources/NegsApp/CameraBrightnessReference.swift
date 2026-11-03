@@ -77,6 +77,20 @@ enum CameraBrightnessReference {
         return data as Data
     }
 
+    /// The note under the button for a failed match, and whether it holds for
+    /// the photograph (the camera preview is the problem) or until the next
+    /// edit. The engine's reasons are worded for logs, so they're matched on
+    /// phrases from `exposure_placement.rs` and never shown as they are.
+    static func failure(_ error: Error) -> (message: String, forPhoto: Bool) {
+        if let unusable = error as? CameraPreviewUnusable { return (unusable.message, true) }
+        let reason = error.localizedDescription
+        if reason.contains("midtone quantiles") {
+            return ("The camera preview is too dark or too bright to match.", true)
+        }
+        if reason.contains("±3 EV") { return ("Matching would take more than ±3 EV.", false) }
+        return ("No reliable brightness match with these settings.", false)
+    }
+
     static func sameShape(_ aspect: Double, _ expected: Double) -> Bool {
         max(aspect, expected) / min(aspect, expected) <= 1.02
     }

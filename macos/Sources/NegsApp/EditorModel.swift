@@ -1314,7 +1314,8 @@ import UniformTypeIdentifiers
                 guard let self, !self.closing, self.sourceGeneration == generation,
                       self.exposurePlacementID == id, self.editCount == edits else { return }
                 self.exposurePlacementMessage = nil
-                self.exposurePlacementFailure = (generation, error is CameraPreviewUnusable ? nil : edits, error.localizedDescription)
+                let failure = CameraBrightnessReference.failure(error)
+                self.exposurePlacementFailure = (generation, failure.forPhoto ? nil : edits, failure.message)
             }
         }
     }
