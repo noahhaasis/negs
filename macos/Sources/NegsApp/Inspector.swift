@@ -601,11 +601,25 @@ struct AdjustmentInspector: View {
             }
         }
         Section("Brightness") {
-            SliderRow(model: model, title: "Exposure (EV)", path: "prep.exposure_ev", range: -3...3, step: 0.05)
-            Button(model.placingExposure ? "Matching…" : "Match camera brightness", action: model.matchCameraBrightness)
-                .disabled(!model.canMatchCameraBrightness)
-            if let message = model.exposurePlacementMessage ?? model.exposurePlacementFailureMessage {
-                Text(message).font(.caption).foregroundStyle(.secondary)
+            Toggle(model.isRaw ? "Match camera brightness" : "Match original brightness",
+                   isOn: Binding(get: { model.matchesBrightness }, set: model.setMatchesBrightness))
+                .help(model.isRaw
+                      ? "Develops the RAW about as bright as the camera’s own preview, and keeps it there when you change film, paper or a preset. Exposure adds to it."
+                      : "Develops the photograph about as bright as the file itself, and keeps it there when you change film, paper or a preset. Exposure adds to it.")
+            LabeledSlider(title: "Exposure (EV)", value: model.exposureOffset, range: model.exposureOffsetRange, step: 0.05,
+                          defaultValue: 0, modified: model.exposureOffsetModified, reset: model.resetExposureOffset,
+                          editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+            if let note = model.brightnessMatchNote {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+            }
+            // While matched the meter only sets where the highlight limit
+            // starts, so it shows when matching is off, or when changed.
+            if !model.brightnessMatchActive || model.isModified("camera.auto_exposure") || model.isModified("camera.auto_exposure_method") {
+                Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
+                    .help("Meters the photograph and exposes the film so the metered area lands on mid-grey, as a camera's meter does. Exposure adds to it.")
+                if model.value("camera.auto_exposure").bool {
+                    control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
+                }
             }
         }
         Section("Tone") { ForEach(prepToneControls) { control($0) } }
@@ -665,13 +679,6 @@ struct AdjustmentInspector: View {
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
         Section("Camera") {
-            if shows("camera.auto_exposure") || shows("camera.auto_exposure_method") {
-                Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
-                    .help("Meters the photograph and exposes the film so the metered area lands on mid-grey, as a camera's meter does. Prep › Exposure and Match camera brightness work on top of it.")
-                if model.value("camera.auto_exposure").bool {
-                    control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
-                }
-            }
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
                 .help("Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative's density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.")
             if shows("camera.film_format_mm") { control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1)) }
