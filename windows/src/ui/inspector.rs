@@ -1593,6 +1593,9 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
         match msg {
             WM_COMMAND => {
                 let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
+                if code == CBN_DROPDOWN && theme::dark() {
+                    theme::combo_list(HWND(lparam.0 as *mut _));
+                }
                 with_app(|app| command(app, id, code, HWND(lparam.0 as *mut _)));
                 LRESULT(0)
             }
@@ -1655,6 +1658,14 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(0)
             }
             WM_CTLCOLOREDIT => draw::color_edit(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
+            WM_CTLCOLORLISTBOX => {
+                // A drop-down list's colours.
+                let dc = HDC(wparam.0 as *mut _);
+                let p = theme::palette();
+                SetTextColor(dc, COLORREF(p.text));
+                SetBkColor(dc, COLORREF(p.control));
+                LRESULT(theme::brush(p.control).0 as isize)
+            }
             WM_CTLCOLORSTATIC => {
                 let dc = HDC(wparam.0 as *mut _);
                 let control = HWND(lparam.0 as *mut _);

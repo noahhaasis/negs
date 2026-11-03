@@ -17,17 +17,71 @@ use windows::core::{PCWSTR, w};
 use super::theme::{self, Color};
 
 /// A back buffer for one control or part: GDI text and our shapes, then
-/// copied to the window in one go.
+/// copied to the window in one go. Paints share one buffer per thread
+/// (growing as needed), so painting a control allocates nothing.
 pub struct Canvas {
     pub dc: HDC,
     bitmap: HBITMAP,
     old: HGDIOBJ,
     bits: *mut u32,
+    /// Pixels per row of the buffer, which may be wider than `w`.
+    stride: i32,
     pub w: i32,
     pub h: i32,
     x: i32,
     y: i32,
     gdi: bool,
+    /// The thread's shared buffer, or one of its own (large or nested).
+    shared: bool,
+}
+
+struct Buffer {
+    dc: isize,
+    bitmap: isize,
+    old: isize,
+    bits: usize,
+    w: i32,
+    h: i32,
+}
+
+thread_local! {
+    static SHARED: std::cell::RefCell<Option<Buffer>> = const { std::cell::RefCell::new(None) };
+    static SHARED_IN_USE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Buffers above this many pixels aren't kept.
+const SHARED_LIMIT: i32 = 1 << 20;
+
+fn new_buffer(target: HDC, w: i32, h: i32) -> Buffer {
+    unsafe {
+        let dc = CreateCompatibleDC(target);
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w,
+                biHeight: -h,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0).unwrap_or_default();
+        let old = SelectObject(dc, bitmap);
+        SetBkMode(dc, TRANSPARENT);
+        Buffer { dc: dc.0 as isize, bitmap: bitmap.0 as isize, old: old.0 as isize, bits: bits as usize, w, h }
+    }
+}
+
+fn free_buffer(b: &Buffer) {
+    unsafe {
+        let dc = HDC(b.dc as *mut _);
+        SelectObject(dc, HGDIOBJ(b.old as *mut _));
+        let _ = DeleteObject(HBITMAP(b.bitmap as *mut _));
+        let _ = DeleteDC(dc);
+    }
 }
 
 impl Canvas {
@@ -35,26 +89,33 @@ impl Canvas {
     /// rectangle's corner.
     pub fn new(target: HDC, rect: RECT) -> Self {
         let (w, h) = ((rect.right - rect.left).max(1), (rect.bottom - rect.top).max(1));
-        unsafe {
-            let dc = CreateCompatibleDC(target);
-            let info = BITMAPINFO {
-                bmiHeader: BITMAPINFOHEADER {
-                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: w,
-                    biHeight: -h,
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            let mut bits = std::ptr::null_mut();
-            let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0).unwrap_or_default();
-            let old = SelectObject(dc, bitmap);
-            SetBkMode(dc, TRANSPARENT);
-            Self { dc, bitmap, old, bits: bits as *mut u32, w, h, x: rect.left, y: rect.top, gdi: false }
+        let canvas = |b: &Buffer, shared: bool| Canvas {
+            dc: HDC(b.dc as *mut _),
+            bitmap: HBITMAP(b.bitmap as *mut _),
+            old: HGDIOBJ(b.old as *mut _),
+            bits: b.bits as *mut u32,
+            stride: b.w,
+            w,
+            h,
+            x: rect.left,
+            y: rect.top,
+            gdi: false,
+            shared,
+        };
+        if w * h <= SHARED_LIMIT && !SHARED_IN_USE.with(|u| u.replace(true)) {
+            return SHARED.with(|cell| {
+                let mut cell = cell.borrow_mut();
+                if cell.as_ref().is_none_or(|b| b.w < w || b.h < h) {
+                    let (bw, bh) = cell.as_ref().map_or((w, h), |b| (b.w.max(w), b.h.max(h)));
+                    if let Some(old) = cell.take() {
+                        free_buffer(&old);
+                    }
+                    *cell = Some(new_buffer(target, bw, bh));
+                }
+                canvas(cell.as_ref().unwrap(), true)
+            });
         }
+        canvas(&new_buffer(target, w, h), false)
     }
 
     /// The DC for GDI drawing of one's own.
@@ -77,18 +138,26 @@ impl Canvas {
         if self.bits.is_null() {
             return &mut [];
         }
-        unsafe { std::slice::from_raw_parts_mut(self.bits, (self.w * self.h) as usize) }
+        unsafe { std::slice::from_raw_parts_mut(self.bits, (self.stride * self.h) as usize) }
+    }
+
+    /// The rows of the part in use.
+    fn rows(&mut self) -> impl Iterator<Item = &mut [u32]> {
+        let (w, stride) = (self.w as usize, self.stride as usize);
+        self.pixels().chunks_exact_mut(stride).map(move |row| &mut row[..w])
     }
 
     pub fn clear(&mut self, color: Color) {
         let bgr = bgr(color);
-        self.pixels().fill(bgr);
+        for row in self.rows() {
+            row.fill(bgr);
+        }
     }
 
     /// Blends `color` by the coverage `shape` gives each pixel centre
     /// (a signed distance: negative inside) within the box.
     fn cover(&mut self, bounds: (f32, f32, f32, f32), color: Color, alpha: f32, shape: impl Fn(f32, f32) -> f32) {
-        let (w, h) = (self.w, self.h);
+        let (w, h, stride) = (self.w, self.h, self.stride);
         let x0 = (bounds.0.floor() as i32 - 1).max(0);
         let y0 = (bounds.1.floor() as i32 - 1).max(0);
         let x1 = (bounds.2.ceil() as i32 + 1).min(w);
@@ -104,7 +173,7 @@ impl Canvas {
                 if coverage <= 0.0 {
                     continue;
                 }
-                let p = &mut pixels[(y * w + x) as usize];
+                let p = &mut pixels[(y * stride + x) as usize];
                 let (pb, pg, pr) = ((*p & 0xff) as f32, ((*p >> 8) & 0xff) as f32, ((*p >> 16) & 0xff) as f32);
                 let blend = |d: f32, s: f32| (d + (s - d) * coverage).round() as u32;
                 *p = blend(pb, b) | blend(pg, g) << 8 | blend(pr, r) << 16;
@@ -180,8 +249,10 @@ impl Canvas {
     /// Copies the buffer to `target`, opaque: buttons paint into 32-bit
     /// buffers whose alpha the system composes with.
     pub fn present(mut self, target: HDC) {
-        for p in self.pixels() {
-            *p |= 0xff00_0000;
+        for row in self.rows() {
+            for p in row {
+                *p |= 0xff00_0000;
+            }
         }
         unsafe {
             let _ = BitBlt(target, self.x, self.y, self.w, self.h, self.dc, 0, 0, SRCCOPY);
@@ -191,10 +262,10 @@ impl Canvas {
 
 impl Drop for Canvas {
     fn drop(&mut self) {
-        unsafe {
-            SelectObject(self.dc, self.old);
-            let _ = DeleteObject(self.bitmap);
-            let _ = DeleteDC(self.dc);
+        if self.shared {
+            SHARED_IN_USE.with(|u| u.set(false));
+        } else {
+            free_buffer(&Buffer { dc: self.dc.0 as isize, bitmap: self.bitmap.0 as isize, old: self.old.0 as isize, bits: 0, w: 0, h: 0 });
         }
     }
 }

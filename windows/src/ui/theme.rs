@@ -354,7 +354,7 @@ pub fn apply_window(hwnd: HWND) {
     let dark = dark();
     unsafe {
         if let Some(ux) = uxtheme() {
-            (ux.allow_dark_for_window)(hwnd, BOOL(dark as i32));
+            let _ = (ux.allow_dark_for_window)(hwnd, BOOL(dark as i32));
         }
         // DWMWA_USE_IMMERSIVE_DARK_MODE: 20, or 19 before 20H1.
         let attribute = if build() >= 18985 { 20 } else { 19 };
@@ -385,16 +385,36 @@ pub fn apply_control(hwnd: HWND, created: bool) {
     let Some(theme) = theme else { return };
     unsafe {
         if let Some(ux) = uxtheme() {
-            (ux.allow_dark_for_window)(hwnd, BOOL(dark as i32));
+            let _ = (ux.allow_dark_for_window)(hwnd, BOOL(dark as i32));
         }
         let _ = SetWindowTheme(hwnd, theme, PCWSTR::null());
-        if class == "ComboBox" {
-            // Its drop-down list.
-            let mut info = COMBOBOXINFO { cbSize: std::mem::size_of::<COMBOBOXINFO>() as u32, ..Default::default() };
-            if GetComboBoxInfo(hwnd, &mut info).is_ok() && !info.hwndList.is_invalid() {
-                let _ = SetWindowTheme(info.hwndList, if dark { w!("DarkMode_Explorer") } else { w!("Explorer") }, PCWSTR::null());
-            }
+        if class == "ComboBox" && !created {
+            combo_list(hwnd);
         }
+    }
+}
+
+/// A combo box's drop-down list, themed when it opens (`CBN_DROPDOWN`)
+/// rather than when the box is made.
+pub fn combo_list(combo: HWND) {
+    let dark = dark();
+    unsafe {
+        let mut info = COMBOBOXINFO { cbSize: std::mem::size_of::<COMBOBOXINFO>() as u32, ..Default::default() };
+        if GetComboBoxInfo(combo, &mut info).is_ok() && !info.hwndList.is_invalid() {
+            let _ = SetWindowTheme(info.hwndList, if dark { w!("DarkMode_Explorer") } else { w!("Explorer") }, PCWSTR::null());
+        }
+    }
+}
+
+/// A control just made with `class`: themed only if it is one that needs it
+/// (and only in dark), without asking the window for its class.
+pub fn apply_created(hwnd: HWND, class: PCWSTR) {
+    if !dark() || (class.0 as usize) < 0x10000 {
+        return;
+    }
+    let name = unsafe { class.to_string() }.unwrap_or_default().to_ascii_lowercase();
+    if matches!(name.as_str(), "combobox" | "syslistview32" | "tooltips_class32" | "negsrows" | "negsstrip" | "msctls_progress32" | "scrollbar") {
+        apply_control(hwnd, true);
     }
 }
 

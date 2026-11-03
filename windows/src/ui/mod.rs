@@ -925,7 +925,7 @@ pub fn create(class: PCWSTR, text: &str, style: WINDOW_STYLE, ex: WINDOW_EX_STYL
         if !font.is_invalid() {
             SendMessageW(hwnd, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(0));
         }
-        theme::apply_control(hwnd, true);
+        theme::apply_created(hwnd, class);
         hwnd
     }
 }
