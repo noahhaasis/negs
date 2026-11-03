@@ -166,6 +166,8 @@ pub struct Preferences {
     /// Old settings files lack it: off, the paper follows the film.
     #[serde(rename = "keep_paper")]
     pub keep_paper: bool,
+    /// The tone graph's channel: "rgb", "r", "g" or "b".
+    pub tone_graph_channel: String,
 }
 
 impl Default for Preferences {
@@ -191,6 +193,7 @@ impl Default for Preferences {
             image_size_long_side: None,
             previews: true,
             keep_paper: false,
+            tone_graph_channel: "rgb".into(),
         }
     }
 }

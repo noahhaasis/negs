@@ -16,6 +16,7 @@ mod folder_watch;
 pub mod inspector;
 mod presets;
 mod strip;
+mod tone_graph;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -354,7 +355,7 @@ impl App {
         if flags & (dirty::LAYOUT | dirty::CHROME) != 0 {
             self.layout();
         }
-        if flags & (dirty::STRUCTURE | dirty::INSPECTOR | dirty::CROP | dirty::LAYOUT) != 0 || flags & dirty::HISTOGRAM != 0 {
+        if flags & (dirty::STRUCTURE | dirty::INSPECTOR | dirty::CROP | dirty::LAYOUT | dirty::TONE_GRAPH) != 0 || flags & dirty::HISTOGRAM != 0 {
             let structure = flags & (dirty::STRUCTURE | dirty::CROP | dirty::LAYOUT) != 0;
             inspector::sync(self, structure, flags & dirty::HISTOGRAM != 0);
         }
@@ -1167,6 +1168,7 @@ pub fn run() {
         empty::register();
         strip::register();
         inspector::register();
+        tone_graph::register();
         presets::register();
 
         let (menu, recent) = build_menu();
