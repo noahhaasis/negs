@@ -4,9 +4,11 @@
 #![windows_subsystem = "windows"]
 
 mod border;
+mod brightness;
 mod crop;
 mod engine;
 mod gpu;
+mod help;
 mod histogram;
 mod icc;
 mod json;

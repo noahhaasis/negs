@@ -24,7 +24,7 @@ pub fn com_thread() {
     }
 }
 
-fn factory() -> Result<IWICImagingFactory> {
+pub(crate) fn factory() -> Result<IWICImagingFactory> {
     unsafe { Ok(CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?) }
 }
 
