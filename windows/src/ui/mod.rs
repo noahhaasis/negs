@@ -1354,6 +1354,7 @@ fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
 /// and the accelerators, which never fire while a text field has focus.
 fn pre_translate(msg: &MSG) -> bool {
     let main = main_hwnd();
+    draw::hover_message(msg);
     if titlebar::keys(main, msg) {
         return true;
     }

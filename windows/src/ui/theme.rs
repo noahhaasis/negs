@@ -376,7 +376,6 @@ pub fn apply_control(hwnd: HWND, created: bool) {
     let n = unsafe { GetClassNameW(hwnd, &mut name) } as usize;
     let class = String::from_utf16_lossy(&name[..n]);
     let theme: Option<PCWSTR> = match class.as_str() {
-        "ComboBox" => Some(if dark { w!("DarkMode_CFD") } else { w!("CFD") }),
         "SysListView32" | "tooltips_class32" | "NegsRows" | "NegsStrip" | "ScrollBar" | "Edit" | "msctls_progress32" => {
             Some(if dark { w!("DarkMode_Explorer") } else { w!("Explorer") })
         }
@@ -388,9 +387,6 @@ pub fn apply_control(hwnd: HWND, created: bool) {
             let _ = (ux.allow_dark_for_window)(hwnd, BOOL(dark as i32));
         }
         let _ = SetWindowTheme(hwnd, theme, PCWSTR::null());
-        if class == "ComboBox" && !created {
-            combo_list(hwnd);
-        }
     }
 }
 
@@ -413,7 +409,7 @@ pub fn apply_created(hwnd: HWND, class: PCWSTR) {
         return;
     }
     let name = unsafe { class.to_string() }.unwrap_or_default().to_ascii_lowercase();
-    if matches!(name.as_str(), "combobox" | "syslistview32" | "tooltips_class32" | "negsrows" | "negsstrip" | "msctls_progress32" | "scrollbar") {
+    if matches!(name.as_str(), "syslistview32" | "tooltips_class32" | "negsrows" | "negsstrip" | "msctls_progress32" | "scrollbar") {
         apply_control(hwnd, true);
     }
 }

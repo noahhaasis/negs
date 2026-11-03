@@ -629,6 +629,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         unsafe {
             SendMessageW(c, CB_SETMINVISIBLE, WPARAM(30), LPARAM(0));
         }
+        draw::paint_combo(c);
         c
     };
     let mut controls = vec![];
@@ -1593,8 +1594,14 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
         match msg {
             WM_COMMAND => {
                 let (id, code) = ((wparam.0 & 0xffff) as u16, ((wparam.0 >> 16) & 0xffff) as u32);
-                if code == CBN_DROPDOWN && theme::dark() {
-                    theme::combo_list(HWND(lparam.0 as *mut _));
+                if code == CBN_DROPDOWN {
+                    if theme::dark() {
+                        theme::combo_list(HWND(lparam.0 as *mut _));
+                    }
+                    let _ = InvalidateRect(HWND(lparam.0 as *mut _), None, false);
+                }
+                if code == CBN_CLOSEUP {
+                    let _ = InvalidateRect(HWND(lparam.0 as *mut _), None, false);
                 }
                 with_app(|app| command(app, id, code, HWND(lparam.0 as *mut _)));
                 LRESULT(0)

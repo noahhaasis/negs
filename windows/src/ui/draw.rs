@@ -423,17 +423,47 @@ enum ButtonKind {
 thread_local! {
     /// The control under the pointer, for the controls that don't track it.
     static HOT: Cell<isize> = const { Cell::new(0) };
+    /// The controls whose hover the message loop follows.
+    static TRACKED: std::cell::RefCell<std::collections::HashSet<isize>> = std::cell::RefCell::new(Default::default());
 }
 
 pub fn is_hot(hwnd: HWND) -> bool {
     HOT.with(Cell::get) == hwnd.0 as isize
 }
 
-/// Tracks the pointer over `hwnd` and repaints it (and a value box's field)
-/// when it enters, leaves, gains or loses focus.
+/// Tracks the pointer over `hwnd` and repaints it when it enters or
+/// leaves. The message loop follows it (`hover_message`), which costs
+/// nothing per control; value boxes are subclassed instead, since their
+/// field also repaints on focus.
 pub fn track_hover(hwnd: HWND) {
-    unsafe {
-        let _ = SetWindowSubclass(hwnd, Some(hover_subclass), 0x4e48, 0);
+    if is_field(hwnd) {
+        unsafe {
+            let _ = SetWindowSubclass(hwnd, Some(hover_subclass), 0x4e48, 0);
+        }
+    } else {
+        TRACKED.with(|t| t.borrow_mut().insert(hwnd.0 as isize));
+    }
+}
+
+/// The message loop's part of hover: entering a tracked control, and the
+/// `WM_MOUSELEAVE` it asked for.
+pub fn hover_message(msg: &MSG) {
+    let hwnd = msg.hwnd;
+    match msg.message {
+        WM_MOUSEMOVE if !is_hot(hwnd) && TRACKED.with(|t| t.borrow().contains(&(hwnd.0 as isize))) => unsafe {
+            let old = HWND(HOT.with(|h| h.replace(hwnd.0 as isize)) as *mut _);
+            if !old.is_invalid() {
+                repaint(old);
+            }
+            let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+            let _ = TrackMouseEvent(&mut track);
+            repaint(hwnd);
+        },
+        WM_MOUSELEAVE if is_hot(hwnd) && TRACKED.with(|t| t.borrow().contains(&(hwnd.0 as isize))) => {
+            HOT.with(|h| h.set(0));
+            repaint(hwnd);
+        }
+        _ => {}
     }
 }
 
@@ -803,6 +833,76 @@ fn paint_trackbar(draw: &NMCUSTOMDRAW) {
             c.ring(thumb_x, cy, radius + 3.0 * s, 2.0 * s, p.text);
         }
         c.present(draw.hdc);
+    }
+}
+
+// MARK: Combo boxes
+
+/// Paints a drop-down list's closed box from the palette (a rounded field
+/// like the value boxes, the choice and a chevron): no theme needed, in
+/// light or dark. The list itself takes `WM_CTLCOLORLISTBOX`.
+pub fn paint_combo(combo: HWND) {
+    unsafe {
+        let _ = SetWindowSubclass(combo, Some(combo_subclass), 0x4e43, 0);
+    }
+    track_hover(combo);
+}
+
+extern "system" fn combo_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let dc = BeginPaint(hwnd, &mut ps);
+                draw_combo(hwnd, dc);
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            WM_PRINTCLIENT => {
+                draw_combo(hwnd, HDC(wparam.0 as *mut _));
+                LRESULT(0)
+            }
+            WM_ERASEBKGND => LRESULT(1),
+            WM_SETFOCUS | WM_KILLFOCUS | WM_ENABLE => {
+                let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+                let _ = InvalidateRect(hwnd, None, false);
+                result
+            }
+            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
+fn draw_combo(hwnd: HWND, dc: HDC) {
+    let p = theme::palette();
+    let s = dpi_of(hwnd);
+    unsafe {
+        let mut client = RECT::default();
+        let _ = GetClientRect(hwnd, &mut client);
+        let enabled = IsWindowEnabled(hwnd).as_bool();
+        let dropped = SendMessageW(hwnd, CB_GETDROPPEDSTATE, WPARAM(0), LPARAM(0)).0 != 0;
+        let hot = is_hot(hwnd) && enabled;
+        let focused = GetFocus() == hwnd;
+        let mut c = Canvas::new(dc, client);
+        c.clear(parent_background(hwnd));
+        let r = RectF::of(c.rect());
+        let fill = if !enabled { p.panel } else if dropped { p.control_pressed } else if hot { p.control_hover } else { p.control };
+        c.round_rect(r, 4.0 * s, if focused && !focus_cues(hwnd) { p.strong_border } else { p.border });
+        c.round_rect(r.inset(s, s), 3.0 * s, fill);
+        let selected = SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0;
+        if selected >= 0 {
+            let length = SendMessageW(hwnd, CB_GETLBTEXTLEN, WPARAM(selected as usize), LPARAM(0)).0.max(0) as usize;
+            let mut text = vec![0u16; length + 1];
+            SendMessageW(hwnd, CB_GETLBTEXT, WPARAM(selected as usize), LPARAM(text.as_mut_ptr() as isize));
+            let text = String::from_utf16_lossy(&text[..length]);
+            let tr = RECT { left: (8.0 * s) as i32, top: 0, right: c.w - (26.0 * s) as i32, bottom: c.h };
+            c.text(&text, tr, font_of(hwnd), if enabled { p.text } else { p.disabled }, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS);
+        }
+        chevron(&mut c, r.w - 14.0 * s, r.h / 2.0, true, s, if enabled { p.secondary } else { p.disabled });
+        if focused && focus_cues(hwnd) {
+            focus_ring(&mut c, r, 4.0 * s, s);
+        }
+        c.present(dc);
     }
 }
 
