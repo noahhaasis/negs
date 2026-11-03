@@ -197,6 +197,10 @@ struct ScopePanelView: View {
     let histogram: Histogram?
     let waveform: Waveform?
     @AppStorage("scopeMode") private var mode = ScopeMode.histogram
+    /// Dragged with the handle below the scope; remembered.
+    @AppStorage("scopeHeight") private var height = ScopePanelView.defaultHeight
+    @State private var dragStart: Double?
+    static let defaultHeight = 190.0, heights = 88.0...420.0
 
     var body: some View {
         VStack(spacing: 6) {
@@ -215,12 +219,35 @@ struct ScopePanelView: View {
                 case .waveform: WaveformView(waveform: waveform)
                 }
             }
-            .frame(height: 190)
+            .frame(height: min(max(height, Self.heights.lowerBound), Self.heights.upperBound))
             .overlay {
                 if histogram == nil {
                     Text("No developed photograph").font(.caption).foregroundStyle(Color.white.opacity(0.6))
                 }
             }
+            resizeHandle
         }
+    }
+
+    /// A grabber under the scope: drag to resize, double-click for the default height.
+    private var resizeHandle: some View {
+        Capsule().fill(.tertiary).frame(width: 32, height: 4)
+            .frame(maxWidth: .infinity, minHeight: 8)
+            .contentShape(Rectangle())
+            .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
+            .gesture(DragGesture(minimumDistance: 1)
+                .onChanged { drag in
+                    let start = dragStart ?? height
+                    dragStart = start
+                    height = min(max(start + drag.translation.height, Self.heights.lowerBound), Self.heights.upperBound)
+                }
+                .onEnded { _ in dragStart = nil })
+            .onTapGesture(count: 2) { height = Self.defaultHeight }
+            .help("Drag to resize the scope")
+            .accessibilityLabel("Scope height")
+            .accessibilityValue("\(Int(height)) points")
+            .accessibilityAdjustableAction { direction in
+                height = min(max(height + (direction == .increment ? 20 : -20), Self.heights.lowerBound), Self.heights.upperBound)
+            }
     }
 }
