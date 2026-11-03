@@ -107,7 +107,7 @@ fn icon_font(dpi: u32) -> HFONT {
 fn build(app: &mut App) {
     let fonts = &app.fonts;
     let window = create(w!("NegsPresets"), "Presets", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), app.main, 0, HFONT::default());
-    let title = create(w!("STATIC"), "Presets", WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0 | SS_CENTERIMAGE.0), WINDOW_EX_STYLE(0), window, 0, fonts.bold);
+    let title = create(w!("STATIC"), "Presets", WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0 | SS_CENTERIMAGE.0), WINDOW_EX_STYLE(0), window, 0, fonts.section);
     let button = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32);
     let add = create(w!("BUTTON"), "\u{E710}", button, WINDOW_EX_STYLE(0), window, ADD, fonts.glyph_small);
     super::accessible_name(add, "New Preset");
@@ -124,6 +124,7 @@ fn build(app: &mut App) {
         SendMessageW(list, LVM_INSERTCOLUMNW, WPARAM(0), LPARAM(&column as *const _ as isize));
         let _ = SetWindowSubclass(list, Some(list_subclass), 1, 0);
     }
+    theme_list(list);
     let center = WS_CHILD | WINDOW_STYLE(SS_CENTER.0 | SS_NOPREFIX.0);
     let icon_font = icon_font(app.dpi);
     let empty_icon = create(w!("STATIC"), "\u{E81E}", center, WINDOW_EX_STYLE(0), window, 0, icon_font);
@@ -179,7 +180,7 @@ pub fn dpi_changed(app: &mut App) {
     let icon = icon_font(app.dpi);
     unsafe {
         let fonts = &app.fonts;
-        for (c, f) in [(p.title, fonts.bold), (p.add, fonts.glyph_small), (p.more, fonts.glyph_small), (p.list, fonts.ui), (p.empty_title, fonts.bold), (p.empty_text, fonts.ui), (p.empty_import, fonts.ui), (p.empty_icon, icon)] {
+        for (c, f) in [(p.title, fonts.section), (p.add, fonts.glyph_small), (p.more, fonts.glyph_small), (p.list, fonts.ui), (p.empty_title, fonts.bold), (p.empty_text, fonts.ui), (p.empty_import, fonts.ui), (p.empty_icon, icon)] {
             SendMessageW(c, WM_SETFONT, WPARAM(f.0 as usize), LPARAM(1));
         }
         let _ = DeleteObject(std::mem::replace(&mut p.icon_font, icon));
@@ -204,22 +205,32 @@ pub fn layout(app: &mut App, rect: RECT, visible: bool) {
         let _ = ShowWindow(p.window, if visible { SW_SHOWNA } else { SW_HIDE });
     }
     let px = |dip: f64| app.px(dip);
-    let (pad, header, button) = (px(16.0), px(44.0), px(28.0));
+    let (pad, header, button) = (px(16.0), px(48.0), px(32.0));
     unsafe {
         let top = (header - button) / 2;
-        let _ = MoveWindow(p.title, pad, top, w - 2 * pad - 2 * button - px(6.0), button, true);
-        let _ = MoveWindow(p.more, w - pad - button, top, button, button, true);
-        let _ = MoveWindow(p.add, w - pad - 2 * button - px(6.0), top, button, button, true);
+        let _ = MoveWindow(p.title, pad, top, w - 2 * pad - 2 * button - px(8.0), button, true);
+        let _ = MoveWindow(p.more, w - pad - button + px(8.0), top, button, button, true);
+        let _ = MoveWindow(p.add, w - pad - 2 * button, top, button, button, true);
         let _ = MoveWindow(p.list, 0, header, w, (h - header).max(0), true);
         let width = (w - 2 * px(24.0)).max(px(100.0));
         let x = (w - width) / 2;
         let mut y = header + ((h - header) - px(200.0)).max(0) / 3;
-        for (control, height) in [(p.empty_icon, 52.0), (p.empty_title, 26.0), (p.empty_text, 84.0)] {
+        for (control, height) in [(p.empty_icon, 56.0), (p.empty_title, 32.0), (p.empty_text, 80.0)] {
             let _ = MoveWindow(control, x, y, width, px(height), true);
             y += px(height);
         }
-        let _ = MoveWindow(p.empty_import, (w - px(150.0)) / 2, y + px(6.0), px(150.0), px(30.0), true);
+        let _ = MoveWindow(p.empty_import, (w - px(152.0)) / 2, y + px(8.0), px(152.0), px(32.0), true);
         fit_column(p.list);
+    }
+}
+
+/// The list on the column's colour.
+fn theme_list(list: HWND) {
+    let p = theme::palette();
+    unsafe {
+        SendMessageW(list, LVM_SETBKCOLOR, WPARAM(0), LPARAM(p.panel as isize));
+        SendMessageW(list, LVM_SETTEXTBKCOLOR, WPARAM(0), LPARAM(p.panel as isize));
+        SendMessageW(list, LVM_SETTEXTCOLOR, WPARAM(0), LPARAM(p.text as isize));
     }
 }
 
@@ -591,7 +602,7 @@ fn draw_row(draw: &NMLVCUSTOMDRAW) {
         let s = dpi as f32 / 96.0;
         let (text, detail) = if r.refused { (p.disabled, p.disabled) } else { (p.text, p.secondary) };
         let mut c = Canvas::new(dc, bounds);
-        c.clear(p.window);
+        c.clear(p.panel);
         let row = RectF::of(c.rect()).inset(4.0 * s, 2.0 * s);
         if chosen {
             c.round_rect(row, 4.0 * s, if focused { theme::mix(p.selection, p.accent, 0.12) } else { p.selection });
@@ -606,7 +617,7 @@ fn draw_row(draw: &NMLVCUSTOMDRAW) {
             Some((image, dimmed)) => {
                 let top = (c.h - px(THUMB_HEIGHT)) / 2;
                 let frame = RECT { left: px(12), top, right: px(12 + THUMB_WIDTH), bottom: top + px(THUMB_HEIGHT) };
-                let behind = if chosen { if focused { theme::mix(p.selection, p.accent, 0.12) } else { p.selection } } else if hot { p.subtle_hover } else { p.window };
+                let behind = if chosen { if focused { theme::mix(p.selection, p.accent, 0.12) } else { p.selection } } else if hot { p.subtle_hover } else { p.panel };
                 super::inspector::draw_thumbnail(&mut c, frame, 6.0 * s, image.as_deref(), *dimmed, p.well, behind);
                 if r.refused {
                     // A warning sign in the placeholder.

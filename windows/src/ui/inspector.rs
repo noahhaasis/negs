@@ -238,17 +238,19 @@ impl Inspector {
         let (w, h) = (self.rect.right - self.rect.left, self.rect.bottom - self.rect.top);
         let pad = self.px(16.0);
         let histogram = self.px(88.0);
-        let tabs = self.px(26.0);
+        let tabs = self.px(32.0);
         let reset = self.px(32.0);
-        let rows_top = pad / 2 + histogram + self.px(10.0) + tabs + self.px(8.0);
-        let rows_bottom = h - reset - self.px(20.0);
+        let top = self.px(8.0);
+        let tabs_top = top + histogram + self.px(8.0);
+        let rows_top = tabs_top + tabs + self.px(8.0);
+        let rows_bottom = h - reset - pad - self.px(8.0);
         unsafe {
-            let _ = MoveWindow(self.histogram, pad, pad / 2, w - 2 * pad, histogram, true);
+            let _ = MoveWindow(self.histogram, pad, top, w - 2 * pad, histogram, true);
             let half = (w - 2 * pad) / 2;
-            let _ = MoveWindow(self.tabs[0], pad, pad / 2 + histogram + self.px(10.0), half, tabs, true);
-            let _ = MoveWindow(self.tabs[1], pad + half, pad / 2 + histogram + self.px(10.0), w - 2 * pad - half, tabs, true);
+            let _ = MoveWindow(self.tabs[0], pad, tabs_top, half, tabs, true);
+            let _ = MoveWindow(self.tabs[1], pad + half, tabs_top, w - 2 * pad - half, tabs, true);
             let _ = MoveWindow(self.rows_panel, 0, rows_top, w, (rows_bottom - rows_top).max(0), true);
-            let _ = MoveWindow(self.reset, pad, h - reset - self.px(12.0), w - 2 * pad, reset, true);
+            let _ = MoveWindow(self.reset, pad, h - reset - pad, w - 2 * pad, reset, true);
             if let Some(crop) = &self.crop {
                 let _ = MoveWindow(crop.panel, 0, 0, w, h, true);
             }
@@ -379,11 +381,20 @@ pub fn dpi_changed(app: &mut App) {
     ins.dpi = dpi;
     ITEM_HEIGHT.with(|h| h.set(ins.px(20.0)));
     ins.line = app.fonts.line;
-    let font = app.fonts.ui;
+    let fonts = &app.fonts;
+    let font = fonts.ui;
     for row in &ins.rows {
-        for &c in &row.controls {
+        for (i, &c) in row.controls.iter().enumerate() {
+            // The font each control was created with, at the new size.
+            let f = match (row.kind, i) {
+                (Kind::Section(_), _) => fonts.section,
+                (Kind::Footer(_) | Kind::SizeNote | Kind::BorderStyles, _) => fonts.small,
+                (Kind::Group { .. }, 0) => fonts.bold,
+                (Kind::Slider(_) | Kind::BorderSlider(..), 3) => fonts.glyph_small,
+                _ => fonts.ui,
+            };
             unsafe {
-                SendMessageW(c, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+                SendMessageW(c, WM_SETFONT, WPARAM(f.0 as usize), LPARAM(1));
             }
         }
     }
@@ -596,7 +607,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
     };
     let mut controls = vec![];
     match kind {
-        Kind::Section(title) => controls.push(label(title, fonts.bold)),
+        Kind::Section(title) => controls.push(label(title, fonts.section)),
         Kind::Footer(text) => {
             let footer = create(w!("STATIC"), text, hidden | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(LABEL), fonts.small);
             controls.push(footer);
@@ -789,7 +800,7 @@ fn footer_height(ins: &Inspector, hwnd: HWND, width: i32) -> i32 {
         DrawTextW(dc, &mut text[..n as usize], &mut r, DT_CALCRECT | DT_WORDBREAK);
         SelectObject(dc, old);
         ReleaseDC(hwnd, dc);
-        r.bottom + ins.px(6.0)
+        r.bottom + ins.px(2.0)
     }
 }
 
@@ -799,103 +810,109 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
         let _ = GetClientRect(ins.rows_panel, &mut client);
     }
     let width = client.right;
+    // An 8 DIP grid: rows are multiples of 8 high, and every row's control
+    // starts at one column, grouped or not.
     let pad = ins.px(16.0);
-    let indent = ins.px(14.0);
-    let mut y = ins.px(4.0);
+    let indent = ins.px(16.0);
+    let column = pad + ins.px(128.0);
+    let text = ins.px(20.0);
+    let mut y = ins.px(8.0);
     let mut positions: Vec<(HWND, i32, i32, i32, i32)> = vec![];
     let mut grids_shown = [false; 2];
+    let mut first = true;
     for row in &ins.rows {
         if !row.shown || row.controls.is_empty() {
             continue;
         }
         let x = pad + if row.group.is_some() { indent } else { 0 };
         let right = width - pad;
+        let label = (column - x - ins.px(8.0)).max(ins.px(48.0));
         let c = &row.controls;
         let height = match row.kind {
             Kind::Section(_) => {
-                positions.push((c[0], pad, y + ins.px(10.0), right - pad, ins.px(18.0)));
-                ins.px(32.0)
+                // The first section needs no space above it.
+                let top = if first { 0 } else { ins.px(16.0) };
+                positions.push((c[0], pad, y + top, right - pad, ins.px(24.0)));
+                top + ins.px(32.0)
             }
             Kind::Footer(_) | Kind::SizeNote => {
                 let text_height = footer_height(ins, c[0], right - x);
                 positions.push((c[0], x, y, right - x, text_height));
-                text_height + ins.px(4.0)
+                text_height + ins.px(8.0)
             }
             Kind::LongestSide => {
-                let label = ins.px(108.0).min((right - x) / 2);
-                let (field, unit) = (ins.px(72.0), ins.px(22.0));
-                positions.push((c[0], x, y + ins.px(6.0), label - ins.px(4.0), ins.px(18.0)));
-                let r = ins.field(right - unit - field, y + ins.px(2.0), field);
+                let (field, unit) = (ins.px(72.0), ins.px(24.0));
+                positions.push((c[0], x, y + ins.px(6.0), label, text));
+                let r = ins.field(right - unit - field, y + ins.px(4.0), field);
                 positions.push((c[1], r.left, r.top, r.right - r.left, r.bottom - r.top));
-                positions.push((c[2], right - unit + ins.px(4.0), y + ins.px(6.0), unit - ins.px(4.0), ins.px(18.0)));
-                ins.px(30.0)
+                positions.push((c[2], right - unit + ins.px(6.0), y + ins.px(6.0), unit - ins.px(6.0), text));
+                ins.px(32.0)
             }
             Kind::Photograph => {
-                let label = ins.px(108.0).min((right - x) / 2);
-                positions.push((c[0], x, y + ins.px(4.0), label - ins.px(4.0), ins.px(18.0)));
-                positions.push((c[1], x + label, y + ins.px(4.0), right - x - label, ins.px(18.0)));
-                ins.px(26.0)
+                positions.push((c[0], x, y + ins.px(2.0), label, text));
+                positions.push((c[1], column, y + ins.px(2.0), right - column, text));
+                ins.px(24.0)
             }
             Kind::Group { enable, .. } => {
-                let check = if enable.is_some() { ins.px(46.0) } else { 0 };
-                positions.push((c[0], pad - ins.px(4.0), y + ins.px(2.0), right - pad + ins.px(4.0) - check, ins.px(26.0)));
+                let check = if enable.is_some() { ins.px(56.0) } else { 0 };
+                positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0) - check, ins.px(28.0)));
                 if enable.is_some() {
-                    positions.push((c[1], right - check + ins.px(6.0), y + ins.px(5.0), check - ins.px(6.0), ins.px(20.0)));
+                    positions.push((c[1], right - check + ins.px(8.0), y + ins.px(4.0), check - ins.px(8.0), ins.px(24.0)));
                 }
-                ins.px(30.0)
+                ins.px(32.0)
             }
             Kind::Slider(_) | Kind::BorderSlider(..) => {
                 let edit = ins.px(56.0);
-                let reset = ins.px(22.0);
-                positions.push((c[0], x, y + ins.px(2.0), right - x - reset, ins.px(18.0)));
-                positions.push((c[3], right - reset, y, reset, ins.px(20.0)));
-                positions.push((c[1], x - ins.px(6.0), y + ins.px(21.0), right - x - edit, ins.px(26.0)));
-                let r = ins.field(right - edit + ins.px(4.0), y + ins.px(22.0), edit - ins.px(4.0));
+                let reset = ins.px(24.0);
+                positions.push((c[0], x, y + ins.px(2.0), right - x - reset - edit, text));
+                positions.push((c[3], right - edit - reset, y, reset, ins.px(22.0)));
+                positions.push((c[1], x - ins.px(8.0), y + ins.px(22.0), right - x - edit, ins.px(24.0)));
+                let r = ins.field(right - edit, y + ins.px(22.0), edit);
                 positions.push((c[2], r.left, r.top, r.right - r.left, r.bottom - r.top));
-                ins.px(50.0)
+                ins.px(48.0)
             }
             Kind::Toggle(..) | Kind::LimitPreview | Kind::BorderToggle(..) => {
-                positions.push((c[0], x, y + ins.px(3.0), right - x, ins.px(20.0)));
-                ins.px(26.0)
+                positions.push((c[0], x, y + ins.px(4.0), right - x, ins.px(24.0)));
+                ins.px(32.0)
             }
             Kind::BalancePrint(..) => {
-                let button = ins.px(120.0).min(right - x);
-                positions.push((c[0], right - button, y + ins.px(3.0), button, ins.px(26.0)));
-                ins.px(34.0)
+                let button = ins.px(128.0).min(right - x);
+                positions.push((c[0], right - button, y + ins.px(4.0), button, ins.px(32.0)));
+                ins.px(40.0)
             }
             Kind::Foldout(paper) => {
-                positions.push((c[0], pad - ins.px(4.0), y + ins.px(2.0), right - pad + ins.px(4.0), ins.px(26.0)));
-                let header = ins.px(30.0);
+                positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0), ins.px(28.0)));
+                let header = ins.px(32.0);
                 match &ins.grids[paper as usize] {
                     Some(grid) if model.previews.open(paper) => {
                         grids_shown[paper as usize] = true;
                         let height = layout_grid(grid, right - x, ins.dpi);
                         positions.push((grid.window, x, y + header, right - x, height));
-                        header + height + ins.px(6.0)
+                        header + height + ins.px(8.0)
                     }
                     _ => header,
                 }
             }
             Kind::Choice(..) | Kind::Stock(_) | Kind::DevTime(_) | Kind::SizeMode | Kind::PreviewSpace => {
-                let label = ins.px(108.0).min((right - x) / 2);
-                positions.push((c[0], x, y + ins.px(6.0), label - ins.px(4.0), ins.px(18.0)));
-                positions.push((c[1], x + label, y + ins.px(2.0), right - x - label, ins.px(300.0)));
+                positions.push((c[0], x, y + ins.px(6.0), label, text));
+                positions.push((c[1], column, y + ins.px(4.0), right - column, ins.px(300.0)));
                 ins.px(32.0)
             }
             Kind::BorderStyles => {
-                let each = (right - x) / 4;
+                let gap = ins.px(8.0);
+                let each = (right - x + gap) / 4;
                 for (i, &b) in c.iter().enumerate() {
-                    positions.push((b, x + each * i as i32, y + ins.px(2.0), each - ins.px(4.0), ins.px(68.0)));
+                    positions.push((b, x + each * i as i32, y + ins.px(4.0), each - gap, ins.px(72.0)));
                 }
-                ins.px(74.0)
+                ins.px(80.0)
             }
             Kind::Color(_) => {
-                let label = ins.px(108.0);
-                positions.push((c[0], x, y + ins.px(6.0), label, ins.px(18.0)));
-                positions.push((c[1], x + label, y + ins.px(2.0), ins.px(64.0), ins.px(24.0)));
-                ins.px(30.0)
+                positions.push((c[0], x, y + ins.px(6.0), label, text));
+                positions.push((c[1], column, y + ins.px(4.0), ins.px(64.0), ins.px(24.0)));
+                ins.px(32.0)
             }
         };
+        first = false;
         y += height;
     }
     for (grid, shown) in ins.grids.iter().zip(grids_shown) {
@@ -2299,7 +2316,7 @@ fn build_crop(app: &mut App) {
         controls.push((id, c));
         c
     };
-    add(C_LABELS, w!("STATIC"), "Aspect Ratio", WINDOW_STYLE(0), fonts.bold);
+    add(C_LABELS, w!("STATIC"), "Aspect Ratio", WINDOW_STYLE(0), fonts.section);
     for (i, aspect) in CropAspect::ALL.iter().enumerate() {
         let text = match aspect.format() {
             Some(format) => format!("{}    {format}", aspect.title()),
@@ -2322,7 +2339,7 @@ fn build_crop(app: &mut App) {
     add(C_LABELS + 3, w!("STATIC"), "Orientation", WINDOW_STYLE(0), fonts.ui);
     add(C_LANDSCAPE, w!("BUTTON"), "Landscape", WS_TABSTOP | WS_GROUP | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32), fonts.ui);
     add(C_PORTRAIT, w!("BUTTON"), "Portrait", WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32), fonts.ui);
-    add(C_LABELS + 4, w!("STATIC"), "Straighten", WS_GROUP, fonts.bold);
+    add(C_LABELS + 4, w!("STATIC"), "Straighten", WS_GROUP, fonts.section);
     add(C_LABELS + 5, w!("STATIC"), "Angle", WINDOW_STYLE(0), fonts.ui);
     add(C_ANGLE_VALUE, w!("STATIC"), "0.0°", WINDOW_STYLE(SS_RIGHT.0), fonts.ui);
     let reset = add(C_ANGLE_RESET, w!("BUTTON"), "\u{E777}", WINDOW_STYLE(BS_PUSHBUTTON as u32 | BS_FLAT as u32), fonts.glyph_small);
@@ -2365,19 +2382,20 @@ fn layout_crop(app: &mut App) {
     let pad = ins.px(16.0);
     let right = w - pad;
     let row = ins.px(24.0);
-    let mut y = ins.px(12.0);
+    let mut y = ins.px(16.0);
     let place = |id: u16, x: i32, y: i32, w: i32, h: i32| unsafe {
         let _ = MoveWindow(crop.get(id), x, y, w.max(0), h.max(0), true);
     };
     unsafe {
         let _ = MoveWindow(crop.panel, 0, 0, w, h, true);
     }
-    place(C_LABELS, pad, y, right - pad, ins.px(18.0));
-    y += ins.px(26.0);
+    place(C_LABELS, pad, y, right - pad, ins.px(24.0));
+    y += ins.px(32.0);
     for i in 0..CropAspect::ALL.len() as u16 {
-        place(C_ASPECT + i, pad + ins.px(4.0), y, right - pad, ins.px(20.0));
-        y += row;
+        place(C_ASPECT + i, pad, y, right - pad, row);
+        y += row + ins.px(4.0);
     }
+    y += ins.px(4.0);
     let custom = app.model.crop_session.as_ref().is_some_and(|s| s.aspect == CropAspect::Custom);
     for id in [C_LABELS + 1, C_WIDTH, C_LABELS + 2, C_HEIGHT] {
         unsafe {
@@ -2386,38 +2404,38 @@ fn layout_crop(app: &mut App) {
     }
     if custom {
         let field = ins.px(56.0);
-        place(C_LABELS + 1, pad, y + ins.px(4.0), ins.px(90.0), ins.px(18.0));
+        place(C_LABELS + 1, pad, y + ins.px(2.0), ins.px(88.0), ins.px(20.0));
         let r = ins.field(pad + ins.px(96.0), y, field);
         place(C_WIDTH, r.left, r.top, r.right - r.left, r.bottom - r.top);
-        place(C_LABELS + 2, pad + ins.px(96.0) + field, y + ins.px(4.0), ins.px(20.0), ins.px(18.0));
+        place(C_LABELS + 2, pad + ins.px(96.0) + field, y + ins.px(2.0), ins.px(20.0), ins.px(20.0));
         let r = ins.field(pad + ins.px(116.0) + field, y, field);
         place(C_HEIGHT, r.left, r.top, r.right - r.left, r.bottom - r.top);
-        y += ins.px(30.0);
+        y += ins.px(32.0);
     }
-    place(C_LABELS + 3, pad, y + ins.px(5.0), ins.px(90.0), ins.px(18.0));
+    place(C_LABELS + 3, pad, y + ins.px(6.0), ins.px(88.0), ins.px(20.0));
     let half = (right - pad - ins.px(96.0)) / 2;
-    place(C_LANDSCAPE, pad + ins.px(96.0), y, half, ins.px(26.0));
-    place(C_PORTRAIT, pad + ins.px(96.0) + half, y, half, ins.px(26.0));
-    y += ins.px(42.0);
-    place(C_LABELS + 4, pad, y, right - pad, ins.px(18.0));
-    y += ins.px(26.0);
-    place(C_LABELS + 5, pad, y + ins.px(2.0), ins.px(90.0), ins.px(18.0));
-    place(C_ANGLE_RESET, right - ins.px(22.0) - ins.px(56.0), y, ins.px(22.0), ins.px(20.0));
-    place(C_ANGLE_VALUE, right - ins.px(56.0), y + ins.px(2.0), ins.px(56.0), ins.px(18.0));
+    place(C_LANDSCAPE, pad + ins.px(96.0), y, half, ins.px(32.0));
+    place(C_PORTRAIT, pad + ins.px(96.0) + half, y, half, ins.px(32.0));
+    y += ins.px(48.0);
+    place(C_LABELS + 4, pad, y, right - pad, ins.px(24.0));
+    y += ins.px(32.0);
+    place(C_LABELS + 5, pad, y + ins.px(2.0), ins.px(88.0), ins.px(20.0));
+    place(C_ANGLE_RESET, right - ins.px(24.0) - ins.px(56.0), y, ins.px(24.0), ins.px(22.0));
+    place(C_ANGLE_VALUE, right - ins.px(56.0), y + ins.px(2.0), ins.px(56.0), ins.px(20.0));
     y += ins.px(22.0);
-    place(C_ANGLE, pad - ins.px(6.0), y, right - pad + ins.px(12.0), ins.px(26.0));
+    place(C_ANGLE, pad - ins.px(8.0), y, right - pad + ins.px(16.0), ins.px(24.0));
     y += ins.px(40.0);
-    place(C_LABELS + 6, pad, y, ins.px(90.0), ins.px(18.0));
-    place(C_SIZE, pad + ins.px(90.0), y, right - pad - ins.px(90.0), ins.px(18.0));
-    y += ins.px(22.0);
+    place(C_LABELS + 6, pad, y, ins.px(88.0), ins.px(20.0));
+    place(C_SIZE, pad + ins.px(88.0), y, right - pad - ins.px(88.0), ins.px(20.0));
+    y += ins.px(24.0);
     place(C_SIZE_NOTE, pad, y, right - pad, ins.px(48.0));
     y += ins.px(56.0);
-    place(C_RESET, pad, y, right - pad, ins.px(28.0));
-    y += ins.px(40.0);
-    place(C_LABELS + 7, pad, y, right - pad, ins.px(90.0));
-    let button = ins.px(84.0);
-    place(C_DONE, right - button, h - ins.px(44.0), button, ins.px(28.0));
-    place(C_CANCEL, right - 2 * button - ins.px(8.0), h - ins.px(44.0), button, ins.px(28.0));
+    place(C_RESET, pad, y, right - pad, ins.px(32.0));
+    y += ins.px(48.0);
+    place(C_LABELS + 7, pad, y, right - pad, ins.px(88.0));
+    let button = ins.px(88.0);
+    place(C_DONE, right - button, h - pad - ins.px(32.0), button, ins.px(32.0));
+    place(C_CANCEL, right - 2 * button - ins.px(8.0), h - pad - ins.px(32.0), button, ins.px(32.0));
 }
 
 fn sync_crop(app: &mut App) {

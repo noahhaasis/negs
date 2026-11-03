@@ -62,7 +62,7 @@ pub fn build(app: &mut App) {
     e.tagline = create(w!("STATIC"), "Explore film stocks, shape the print, and make it your own.", center, WINDOW_EX_STYLE(0), parent, 0, fonts.ui);
     e.button = create(w!("BUTTON"), "Open Photograph…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id::EMPTY_OPEN, fonts.ui);
     e.hint = create(w!("STATIC"), "Or drop a RAW, TIFF, PNG, or JPEG file here", center, WINDOW_EX_STYLE(0), parent, 0, fonts.small);
-    e.recent_label = create(w!("STATIC"), "Recent", WS_CHILD | WINDOW_STYLE(SS_LEFT.0), WINDOW_EX_STYLE(0), parent, 0, fonts.bold);
+    e.recent_label = create(w!("STATIC"), "Recent", WS_CHILD | WINDOW_STYLE(SS_LEFT.0), WINDOW_EX_STYLE(0), parent, 0, fonts.section);
     sync_recent(app);
     layout(app);
 }
@@ -76,7 +76,7 @@ pub fn dpi_changed(app: &mut App) {
         if let Some(old) = e.big_glyph.replace(glyph) {
             let _ = DeleteObject(old);
         }
-        for (c, f) in [(e.title, fonts.title), (e.tagline, fonts.ui), (e.button, fonts.ui), (e.hint, fonts.small), (e.recent_label, fonts.bold)] {
+        for (c, f) in [(e.title, fonts.title), (e.tagline, fonts.ui), (e.button, fonts.ui), (e.hint, fonts.small), (e.recent_label, fonts.section)] {
             SendMessageW(c, WM_SETFONT, WPARAM(f.0 as usize), LPARAM(1));
         }
         for &c in &e.recent {
@@ -120,28 +120,28 @@ pub fn layout(app: &mut App) {
     let px = |dip: f64| app.px(dip);
     let width = px(460.0).min(r.right - px(40.0)).max(px(200.0));
     let x = (r.right - width) / 2;
-    let rows = [(e.icon, 70.0), (e.title, 40.0), (e.tagline, 24.0), (e.button, 0.0), (e.hint, 22.0)];
-    let recent = if e.recent.is_empty() { 0.0 } else { 34.0 + 24.0 * e.recent.len() as f64 };
-    let total = 70.0 + 40.0 + 24.0 + 46.0 + 22.0 + recent;
-    let mut y = ((r.bottom - px(total)) / 2).max(px(20.0));
+    let rows = [(e.icon, 72.0), (e.title, 48.0), (e.tagline, 24.0), (e.button, 0.0), (e.hint, 24.0)];
+    let recent = if e.recent.is_empty() { 0.0 } else { 56.0 + 24.0 * e.recent.len() as f64 };
+    let total = 72.0 + 48.0 + 24.0 + 64.0 + 24.0 + recent;
+    let mut y = ((r.bottom - px(total)) / 2).max(px(24.0));
     unsafe {
         for (hwnd, height) in rows {
             if hwnd == e.button {
-                let bw = px(170.0);
-                let _ = MoveWindow(hwnd, (r.right - bw) / 2, y + px(8.0), bw, px(32.0), true);
-                y += px(46.0);
+                let bw = px(176.0);
+                let _ = MoveWindow(hwnd, (r.right - bw) / 2, y + px(16.0), bw, px(32.0), true);
+                y += px(64.0);
             } else {
                 let _ = MoveWindow(hwnd, x, y, width, px(height), true);
                 y += px(height);
             }
         }
         if !e.recent.is_empty() {
-            y += px(14.0);
-            let left = (r.right - px(260.0)) / 2;
-            let _ = MoveWindow(e.recent_label, left, y, px(260.0), px(20.0), true);
-            y += px(22.0);
+            y += px(24.0);
+            let left = (r.right - px(264.0)) / 2;
+            let _ = MoveWindow(e.recent_label, left, y, px(264.0), px(24.0), true);
+            y += px(32.0);
             for &link in &e.recent {
-                let _ = MoveWindow(link, left, y, px(260.0), px(22.0), true);
+                let _ = MoveWindow(link, left, y, px(264.0), px(22.0), true);
                 y += px(24.0);
             }
         }

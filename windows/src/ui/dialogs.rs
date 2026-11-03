@@ -197,7 +197,7 @@ pub fn settings(app: &mut App) {
         };
         RegisterClassExW(&class);
     }
-    let (width, pad) = (px(440.0), px(20.0));
+    let (width, pad) = (px(448.0), px(24.0));
     let inner = width - 2 * pad;
     let title = wide("Settings");
     let style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
@@ -218,28 +218,28 @@ pub fn settings(app: &mut App) {
     // indent, the gap after it, and a width other than the whole row's.
     let mut rows: Vec<(HWND, Option<i32>, i32, i32, Option<i32>)> = vec![];
     let mut notes = vec![];
-    rows.push((label("Film & Paper", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
+    rows.push((label("Film & Paper", fonts.section), Some(px(24.0)), 0, px(8.0), None));
     let previews = check("Film, paper and preset previews", SETTINGS_PREVIEWS, app.model.prefs.previews);
-    rows.push((previews, Some(px(22.0)), 0, px(2.0), None));
+    rows.push((previews, Some(px(24.0)), 0, 0, None));
     let note = label("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.", fonts.small);
     notes.push(note);
-    rows.push((note, None, px(18.0), px(10.0), None));
+    rows.push((note, None, px(24.0), px(16.0), None));
     let keep_paper = check("Keep paper when changing film", SETTINGS_KEEP_PAPER, app.model.prefs.keep_paper);
-    rows.push((keep_paper, Some(px(22.0)), 0, px(2.0), None));
+    rows.push((keep_paper, Some(px(24.0)), 0, 0, None));
     let note = label("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.", fonts.small);
     notes.push(note);
-    rows.push((note, None, px(18.0), px(18.0), None));
-    rows.push((label("Updates", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
+    rows.push((note, None, px(24.0), px(24.0), None));
+    rows.push((label("Updates", fonts.section), Some(px(24.0)), 0, px(8.0), None));
     let mut automatic = HWND::default();
     if configured {
         automatic = check("Automatically check for updates", SETTINGS_AUTOMATIC, crate::updates::automatic());
-        rows.push((automatic, Some(px(22.0)), 0, px(2.0), None));
+        rows.push((automatic, Some(px(24.0)), 0, 0, None));
         let last = crate::updates::last_check().unwrap_or_else(|| "never".into());
         let note = label(&format!("Updates are installed only when you choose to restart Negs. Last checked: {last}."), fonts.small);
         notes.push(note);
-        rows.push((note, None, px(18.0), px(10.0), None));
+        rows.push((note, None, px(24.0), px(16.0), None));
         let button = make(windows::core::w!("BUTTON"), "Check for Updates…", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), SETTINGS_CHECK, fonts.ui);
-        rows.push((button, Some(px(28.0)), px(18.0), px(4.0), Some(px(160.0))));
+        rows.push((button, Some(px(32.0)), px(24.0), px(8.0), Some(px(160.0))));
     } else {
         let note = label("Updates are not configured for this build.", fonts.small);
         notes.push(note);
@@ -255,8 +255,8 @@ pub fn settings(app: &mut App) {
         }
         y += h + gap;
     }
-    let (button_w, button_h) = (px(88.0), px(28.0));
-    y += px(12.0);
+    let (button_w, button_h) = (px(88.0), px(32.0));
+    y += px(16.0);
     let ok = make(windows::core::w!("BUTTON"), "OK", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), IDOK.0 as u16, fonts.ui);
     let cancel = make(windows::core::w!("BUTTON"), "Cancel", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), IDCANCEL.0 as u16, fonts.ui);
     unsafe {

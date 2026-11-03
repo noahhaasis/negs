@@ -237,7 +237,10 @@ impl Report {
 
 pub struct Fonts {
     pub ui: HFONT,
+    /// Group headers: the UI size, semibold.
     pub bold: HFONT,
+    /// Section titles: semibold and a little larger.
+    pub section: HFONT,
     pub small: HFONT,
     pub title: HFONT,
     pub glyph: HFONT,
@@ -257,11 +260,19 @@ impl Fonts {
                 0,
                 dpi,
             );
-            let base = metrics.lfMessageFont;
+            // The system's size (so text scaling applies) in Segoe UI
+            // Variable where Windows 11 has it, unless the face was changed.
+            let mut base = metrics.lfMessageFont;
+            let mut display = base;
+            if platform::from_wide(&base.lfFaceName) == "Segoe UI" && font_exists("Segoe UI Variable Text") {
+                set_face(&mut base, "Segoe UI Variable Text");
+                set_face(&mut display, "Segoe UI Variable Display");
+            }
             let ui = CreateFontIndirectW(&base);
             let bold = CreateFontIndirectW(&LOGFONTW { lfWeight: 600, ..base });
+            let section = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 115 / 100, lfWeight: 600, ..display });
             let small = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 85 / 100, ..base });
-            let title = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 19 / 10, lfWeight: 600, ..base });
+            let title = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 19 / 10, lfWeight: 600, ..display });
             let glyph_face = if font_exists("Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" };
             let mut glyph = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: CLEARTYPE_QUALITY, ..Default::default() };
             let face = wide(glyph_face);
@@ -269,7 +280,7 @@ impl Fonts {
             let glyph_font = CreateFontIndirectW(&glyph);
             let glyph_small = CreateFontIndirectW(&LOGFONTW { lfHeight: -(11 * dpi as i32 / 96), ..glyph });
             let line = line_height(ui);
-            Fonts { ui, bold, small, title, glyph: glyph_font, glyph_small, line }
+            Fonts { ui, bold, section, small, title, glyph: glyph_font, glyph_small, line }
         }
     }
 }
@@ -286,7 +297,26 @@ fn line_height(font: HFONT) -> i32 {
     }
 }
 
+fn set_face(font: &mut LOGFONTW, face: &str) {
+    let w = wide(face);
+    font.lfFaceName = [0; 32];
+    font.lfFaceName[..w.len()].copy_from_slice(&w);
+}
+
+/// Whether a font family is installed (asked once per face).
 fn font_exists(face: &str) -> bool {
+    thread_local! {
+        static KNOWN: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
+    }
+    if let Some(known) = KNOWN.with(|k| k.borrow().iter().find(|(f, _)| f == face).map(|(_, e)| *e)) {
+        return known;
+    }
+    let exists = enumerate_font(face);
+    KNOWN.with(|k| k.borrow_mut().push((face.to_string(), exists)));
+    exists
+}
+
+fn enumerate_font(face: &str) -> bool {
     unsafe {
         let dc = GetDC(None);
         let mut lf = LOGFONTW { lfCharSet: DEFAULT_CHARSET, ..Default::default() };
