@@ -64,6 +64,9 @@ final class ExposurePlacementTests: XCTestCase {
         let model = EditorModel()
         defer { model.shutdown() }
         model.autoPlaceNewImages = true
+        let savedFresh = defaults.object(forKey: "freshEditsForNewPhotos")
+        defer { defaults.set(savedFresh, forKey: "freshEditsForNewPhotos") }
+        model.freshEditsForNewPhotos = true
         await model.start(paths: paths(), restoration: Task { nil })
         XCTAssertEqual(model.defaultValue("prep.exposure_ev"), .number(0))
         model.setLongestSide(512)
@@ -113,6 +116,46 @@ final class ExposurePlacementTests: XCTestCase {
         try await waitUntil { !model.placingExposure }
         XCTAssertEqual(model.value("prep.exposure_ev"), .number(-0.5), "A pending match must not replace a newer manual edit")
         XCTAssertEqual(model.value("prep.shadows"), .number(10))
+    }
+
+    /// An edit and its Undo restore an equal state, but the match was made
+    /// for the photograph as it was before them: it must not be applied.
+    func testEditThenUndoDuringMatchSkipsItAndUndoMatchDoesNotRematch() async throws {
+        guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW"] else { throw XCTSkip("Set NEGS_TEST_RAW") }
+        let defaults = UserDefaults.standard, savedPreference = defaults.object(forKey: "autoPlaceNewImages")
+        defer { defaults.set(savedPreference, forKey: "autoPlaceNewImages") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        model.autoPlaceNewImages = false
+        await model.start(paths: paths(), restoration: Task { nil })
+        model.setLongestSide(512)
+        model.open(URL(fileURLWithPath: path))
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        model.matchCameraBrightness()
+        XCTAssertTrue(model.placingExposure)
+        undo.beginUndoGrouping()
+        model.border(\.enabled).wrappedValue = !model.border.enabled
+        undo.endUndoGrouping()
+        undo.undo()
+        try await waitUntil { !model.placingExposure }
+        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
+        XCTAssertEqual(model.exposurePlacementMessage, "Adjustments changed; brightness match skipped.")
+
+        // The match is applied later, so its group stays open until then
+        // (an ungrouped registration raises with groupsByEvent off).
+        undo.beginUndoGrouping()
+        model.matchCameraBrightness()
+        try await waitUntil { !model.placingExposure }
+        undo.endUndoGrouping()
+        XCTAssertTrue(model.exposurePlacementMessage?.hasPrefix("Matched") == true, model.exposurePlacementMessage ?? "No match")
+        undo.undo()
+        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(model.placingExposure, "Undoing a match must not start another")
+        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
     }
 
     private func waitUntil(_ predicate: () -> Bool) async throws {

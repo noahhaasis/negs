@@ -153,6 +153,16 @@ struct UpdateSettings: View {
                 .padding(.top, 8)
             Text("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Picker("New photographs", selection: Binding(
+                get: { model.freshEditsForNewPhotos }, set: { model.freshEditsForNewPhotos = $0 })) {
+                Text("Keep the previous edits").tag(false)
+                Text("Start fresh").tag(true)
+            }
+            .padding(.top, 8)
+            Text(model.freshEditsForNewPhotos
+                 ? "Each photograph you open starts with default Prep, Lab and Post settings and no border. The film, paper, Image Size and output colour stay."
+                 : "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 8)
             Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
                 .disabled(model.saving || model.exporting || updates.installing || updates.sessionInProgress)
