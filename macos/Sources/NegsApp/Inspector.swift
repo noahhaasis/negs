@@ -584,6 +584,16 @@ struct AdjustmentInspector: View {
     }
 
     @ViewBuilder private var prep: some View {
+        if model.isRaw {
+            Section {
+                control(.choice("White balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
+                    .help("How the RAW's colours are balanced before the film. Presets set it too, as they do in the Python app.")
+                if model.value("io.raw_white_balance.mode").string == "custom" {
+                    control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
+                    control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
+                }
+            }
+        }
         Section("Brightness") {
             SliderRow(model: model, title: "Exposure (EV)", path: "prep.exposure_ev", range: -3...3, step: 0.05)
             Button(model.placingExposure ? "Matching…" : "Match camera brightness", action: model.matchCameraBrightness)
@@ -595,6 +605,17 @@ struct AdjustmentInspector: View {
         Section("Tone") { ForEach(prepToneControls) { control($0) } }
         Section("Color") { ForEach(prepColorControls) { control($0) } }
         Section("Detail") { ForEach(prepDetailControls) { control($0) } }
+        // How the file is read; set once per photograph.
+        if model.isRaw {
+            if model.lensCorrectionSupported {
+                Section("Lens") {
+                    control(.toggle("Lens corrections", EditorModel.lensCorrectionPath))
+                        .help("Corrects distortion and vignetting with the data the camera recorded for its lens.")
+                }
+            }
+        } else {
+            Section { inputColour }
+        }
     }
 
     /// Above the tabs: the stocks shape everything the tabs adjust.
@@ -637,7 +658,6 @@ struct AdjustmentInspector: View {
 
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
-        ImageSizeSection(model: model)
         Section("Camera") {
             Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
             if model.value("camera.auto_exposure").bool {
@@ -646,20 +666,6 @@ struct AdjustmentInspector: View {
             control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
             control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))
             control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1))
-            if !model.isRaw { inputColour }
-            if model.isRaw {
-                disclosure("RAW White Balance", symbol: "thermometer.sun") {
-                    control(.choice("White balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
-                    if model.value("io.raw_white_balance.mode").string == "custom" {
-                        control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
-                        control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
-                    }
-                }
-                if model.lensCorrectionSupported {
-                    control(.toggle("Lens corrections", EditorModel.lensCorrectionPath))
-                        .help("Corrects distortion and vignetting with the data the camera recorded for its lens.")
-                }
-            }
             groups(.camera)
         }
         Section("Film") { groups(.film) }
@@ -674,16 +680,12 @@ struct AdjustmentInspector: View {
         Section("Scan & Color") {
             groups(.scan)
             disclosure("Output", symbol: "square.and.arrow.down.on.square") {
-                Toggle("Limit preview to 12 MP", isOn: Binding(get: { model.limitsPreview }, set: model.limitPreview))
-                    .help("Develops the preview faster on large photographs. Export keeps the full Image Size.")
                 Picker("Colour space", selection: Binding(get: { model.previewSpace }, set: model.choosePreviewSpace)) {
                     ForEach(SaveSettings.colorSpaces, id: \.self) { Text($0).tag($0) }
                 }
                 .help("The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.")
                 Toggle("Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"))
                     .help("Off writes linear values, for further processing.")
-                Toggle("Use less memory for export", isOn: model.toggle("settings.serial_grain"))
-                    .help("Processes grain channels one at a time. Same result, less memory, longer export.")
             }
         }
     }
@@ -736,6 +738,7 @@ struct AdjustmentInspector: View {
         Section("Color") {
             control(.slider("Saturation", "post.saturation", -100...100, 1))
         }
+        ImageSizeSection(model: model)
         Section("Border") {
             Toggle("Add border", isOn: model.border(\.enabled))
             Group {

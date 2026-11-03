@@ -17,7 +17,21 @@ import UniformTypeIdentifiers
     }
     private(set) var film = EditState().film
     private(set) var paper = EditState().paper
-    private(set) var limitsPreview = false
+    /// Settings › Limit preview to 12 MP. A preference, not an edit, so Undo
+    /// and Reset Adjustments leave it; the edit state carries a copy so the
+    /// render and its cache follow it.
+    var limitsPreview = UserDefaults.standard.bool(forKey: "limitPreview") {
+        didSet {
+            UserDefaults.standard.set(limitsPreview, forKey: "limitPreview")
+            if !adoptingPreference { replaceState(state) }
+        }
+    }
+    @ObservationIgnored private var adoptingPreference = false
+    /// Settings › Use less memory for export: grain channels one at a time.
+    /// Only exports read it; previews always develop the channels together.
+    var lowMemoryExport = UserDefaults.standard.bool(forKey: "lowMemoryExport") {
+        didSet { UserDefaults.standard.set(lowMemoryExport, forKey: "lowMemoryExport") }
+    }
     private(set) var border = BorderSettings()
     private(set) var crop = CropSettings()
     /// The crop being drawn; nil unless cropping.
@@ -286,7 +300,7 @@ import UniformTypeIdentifiers
         interactionStart = nil; cropSession = nil
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         undoManager?.removeAllActions()
-        state = before.state; inspectorVisible = before.inspectorVisible; fitImage = before.fitImage; status = before.status
+        state = withPreferences(before.state); inspectorVisible = before.inspectorVisible; fitImage = before.fitImage; status = before.status
         if recentFiles != before.recentFiles { recentFiles = before.recentFiles; saveRecents() }
         updateHistogram()
     }
@@ -393,7 +407,6 @@ import UniformTypeIdentifiers
         }
         if film != state.film { film = state.film }
         if paper != state.paper { paper = state.paper }
-        if limitsPreview != state.limitPreview { limitsPreview = state.limitPreview }
         if border != state.border { border = state.border }
         if crop != state.crop { crop = state.crop; updateHistogram() }
         let rotation = Int(state.params["io.rotate_cw"].double)
@@ -513,8 +526,9 @@ import UniformTypeIdentifiers
     func choosePaper(_ stock: String) {
         apply(PreviewRules.choosing(stock, paper: true, keepPaper: previews.keepPaper, in: state, stocks: stocks), action: "Change Paper")
     }
-    func limitPreview(_ enabled: Bool) {
-        var next = state; next.limitPreview = enabled; apply(next, action: "Change Preview Resolution")
+    /// The state with the app's preferences that travel in it.
+    private func withPreferences(_ state: EditState) -> EditState {
+        var state = state; state.limitPreview = limitsPreview; return state
     }
     func border<Value>(_ setting: WritableKeyPath<BorderSettings, Value>) -> Binding<Value> {
         Binding(get: { self.border[keyPath: setting] }, set: {
@@ -548,7 +562,7 @@ import UniformTypeIdentifiers
     /// paper, and rotation.
     func reset() {
         guard !cropping else { return }
-        var next = state; next.params = defaults; next.limitPreview = false
+        var next = state; next.params = defaults
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
         next.params[ImageSize.targetPath] = state.params[ImageSize.targetPath]
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
@@ -563,6 +577,7 @@ import UniformTypeIdentifiers
     /// else re-renders.
     private func replaceState(_ next: EditState) {
         guard !closing else { return }
+        let next = withPreferences(next)
         if next != state { editCount += 1; exposurePlacementGate.edited(); exposurePlacementMessage = nil }
         let render = next.rendered != state.rendered
         state = next
@@ -571,6 +586,7 @@ import UniformTypeIdentifiers
     }
     private func registerUndo(restoring previous: EditState, action: String) {
         undoManager?.registerUndo(withTarget: self) { model in
+            let previous = model.withPreferences(previous)
             guard previous != model.state else { return }
             model.registerUndo(restoring: model.state, action: action)
             model.replaceState(previous)
@@ -721,7 +737,11 @@ import UniformTypeIdentifiers
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = defaults[ImageSize.factorPath]
             if factor != .null { restored.params[ImageSize.factorPath] = factor }
-            state = restored
+            // Sessions from before it was a preference carried it per photograph.
+            if UserDefaults.standard.object(forKey: "limitPreview") == nil, restored.limitPreview {
+                adoptingPreference = true; limitsPreview = true; adoptingPreference = false
+            }
+            state = withPreferences(restored)
             inspectorVisible = session.inspectorVisible
         } else {
             if freshEditsForNewPhotos {
@@ -1516,9 +1536,11 @@ import UniformTypeIdentifiers
         if exportEngine == .fast, await exportPreview(to: url, size: size, save: save) { return }
         guard !exporting, !saving, let source, let engine else { return }
         let job = ExportJob(); exportJob = job; exporting = true; exportStarted = Date()
+        var exportState = state
+        exportState.params["settings.serial_grain"] = .bool(lowMemoryExport)
         defer { exporting = false; exportJob = nil }
         do {
-            let outcome = try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: state,
+            let outcome = try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: exportState,
                                             crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: photoSize), size: size, save: save, engine: exportEngine)
             status = outcome.fellBackToCPU
                 ? "Exported \(url.lastPathComponent) on the CPU (32-bit): no GPU was available for Fast export"
