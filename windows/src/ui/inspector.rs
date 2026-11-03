@@ -942,7 +942,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         }
         Kind::PaperSkipped => {
             controls.push(label("Paper", fonts.ui));
-            let value = create(w!("STATIC"), "Skipped – scanning film", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0 | SS_ENDELLIPSIS.0), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
+            let value = create(w!("STATIC"), "Skipped – scanning film", hidden | WINDOW_STYLE(SS_RIGHT.0 | SS_NOPREFIX.0 | SS_ENDELLIPSIS.0), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
             super::dialogs::tooltip(value, "Scan film directly is on in the Lab’s Print section.");
             controls.push(value);
         }
@@ -1163,10 +1163,18 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                 positions.push((c[2], right - unit + ins.px(6.0), y + ins.px(6.0), unit - ins.px(6.0), text));
                 ins.px(32.0)
             }
-            Kind::Photograph | Kind::PaperSkipped => {
+            Kind::Photograph => {
                 positions.push((c[0], x, y + ins.px(2.0), label, text));
                 positions.push((c[1], column, y + ins.px(2.0), right - column, text));
                 ins.px(24.0)
+            }
+            Kind::PaperSkipped => {
+                // In the paper foldout's place: as tall, the title and the
+                // value where its title and its stock are.
+                let title = pad + ins.px(16.0);
+                positions.push((c[0], title, y + ins.px(6.0), column - title - ins.px(8.0), text));
+                positions.push((c[1], column, y + ins.px(6.0), right - column - ins.px(8.0), text));
+                ins.px(32.0)
             }
             Kind::Group { enable, .. } => {
                 let check = if enable.is_some() { ins.px(56.0) } else { 0 };
