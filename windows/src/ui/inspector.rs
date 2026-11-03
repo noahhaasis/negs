@@ -104,6 +104,8 @@ enum Kind {
     Color(bool),
     /// The Balance Print button: title, tooltip.
     BalancePrint(&'static str, &'static str),
+    /// The tone graph atop Print Curves, with its label and channel buttons.
+    ToneGraph,
 }
 
 struct Row {
@@ -324,6 +326,10 @@ fn rows() -> Vec<Row> {
         for group in ADJUSTMENT_GROUPS.iter().filter(|g| g.section == section) {
             let header = add(rows, Kind::Group { title: group.title, enable: group.enable }, lab, None, When::Always);
             rows[header].print = section == Section::Print;
+            if group.title == "Print Curves" {
+                let graph = add(rows, Kind::ToneGraph, lab, Some(header), When::Always);
+                rows[graph].print = true;
+            }
             for control in group.controls {
                 let kind = match *control {
                     Adjustment::Toggle { title, path } => Kind::Toggle(title, path),
@@ -541,6 +547,7 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
         }
     }
     if cropping {
+        app.model.show_tone_graph(false);
         return;
     }
     let current = tab(&app.model);
@@ -610,6 +617,9 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
         motion::fade_in(ins.rows_panel);
     }
     let t3 = crate::platform::qpc();
+    // Curves are computed only while the graph is on screen.
+    let graph = ins.rows.iter().any(|r| r.kind == Kind::ToneGraph && r.shown);
+    app.model.show_tone_graph(graph && app.model.inspector_visible && app.model.pane() == crate::model::Pane::Adjustments);
     if created {
         let ms = |a, b| crate::platform::qpc_ms(a, b);
         app.report.line(&format!("inspector sync: create {:.1} ms, layout {:.1} ms, values {:.1} ms", ms(t0, t1), ms(t1, t2), ms(t2, t3)));
@@ -695,6 +705,19 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 _ => {}
             }
             controls.push(c);
+        }
+        Kind::ToneGraph => {
+            let text = create(w!("STATIC"), "Tone graph", hidden | WINDOW_STYLE(SS_LEFT.0 | SS_ENDELLIPSIS.0 | SS_NOPREFIX.0), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.small);
+            controls.push(text);
+            controls.push(super::tone_graph::create(parent, id(ACTION), text));
+            let names = ["the neutral curve", "the red layer", "the green layer", "the blue layer"];
+            for (i, title) in ["RGB", "R", "G", "B"].into_iter().enumerate() {
+                let group = if i == 0 { WS_GROUP } else { WINDOW_STYLE(0) };
+                let style = hidden | WS_TABSTOP | group | WINDOW_STYLE((BS_AUTORADIOBUTTON | BS_PUSHLIKE) as u32);
+                let b = create(w!("BUTTON"), title, style, WINDOW_EX_STYLE(0), parent, id(i as u16), fonts.small);
+                super::dialogs::tooltip(b, &format!("Show {}", names[i]));
+                controls.push(b);
+            }
         }
         Kind::BalancePrint(title, help) => {
             let c = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), parent, id(ACTION), fonts.ui);
@@ -901,6 +924,16 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
             Kind::Toggle(..) | Kind::LimitPreview | Kind::BorderToggle(..) => {
                 positions.push((c[0], x, y + ins.px(4.0), right - x, ins.px(24.0)));
                 ins.px(32.0)
+            }
+            Kind::ToneGraph => {
+                let button = ins.px(30.0);
+                let buttons = 4 * button;
+                positions.push((c[0], x, y + ins.px(4.0), right - x - buttons - ins.px(6.0), ins.px(18.0)));
+                for (i, &b) in c[2..].iter().enumerate() {
+                    positions.push((b, right - buttons + button * i as i32, y + ins.px(1.0), button, ins.px(22.0)));
+                }
+                positions.push((c[1], x, y + ins.px(28.0), right - x, ins.px(170.0)));
+                ins.px(28.0 + 170.0 + 10.0)
             }
             Kind::BalancePrint(..) => {
                 let button = ins.px(128.0).min(right - x);
@@ -1189,6 +1222,16 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                 set_check(c[0], model.state.limit_preview);
                 enable(c[0], on);
             }
+            Kind::ToneGraph => {
+                // Not off with the print curves: a contrast drag turns them on.
+                let on = catalog && !scanning;
+                let channel = super::tone_graph::channel(&model.prefs.tone_graph_channel);
+                for (j, &b) in c[2..].iter().enumerate() {
+                    set_check(b, j.checked_sub(1) == channel);
+                }
+                enable_all(c, on);
+                super::tone_graph::update(c[1], model, on, ins.dpi, decimal);
+            }
             Kind::BalancePrint(title, _) => {
                 set_text(c[0], if model.balancing_print { "Balancing…" } else { title });
                 enable(c[0], on && model.can_balance_print());
@@ -1443,6 +1486,11 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
         (Kind::Toggle(_, path), CHECK) if code == BN_CLICKED => app.model.set(path, Value::Bool(checked())),
         (Kind::LimitPreview, CHECK) if code == BN_CLICKED => app.model.limit_preview(checked()),
         (Kind::BalancePrint(..), ACTION) if code == BN_CLICKED => app.model.balance_print(),
+        (Kind::ToneGraph, p) if code == BN_CLICKED && (p as usize) < super::tone_graph::CHANNELS.len() => {
+            app.model.prefs.tone_graph_channel = super::tone_graph::CHANNELS[p as usize].into();
+            app.model.prefs.save();
+            app.model.dirty |= dirty::INSPECTOR;
+        }
         (Kind::PreviewSpace, COMBO) if code == CBN_SELCHANGE => {
             let index = unsafe { SendMessageW(hwnd, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 };
             if let Some(space) = usize::try_from(index).ok().and_then(|i| crate::model::COLOR_SPACES.get(i)) {
@@ -1695,7 +1743,7 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
 /// Footers are drawn grey; a static row index tells which rows are footers.
 fn with_footer(index: usize) -> bool {
     thread_local! {
-        static FOOTERS: Vec<bool> = rows().iter().map(|r| matches!(r.kind, Kind::Footer(_))).collect();
+        static FOOTERS: Vec<bool> = rows().iter().map(|r| matches!(r.kind, Kind::Footer(_) | Kind::ToneGraph)).collect();
     }
     FOOTERS.with(|f| f.get(index).copied().unwrap_or(false))
 }

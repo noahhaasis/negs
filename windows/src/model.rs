@@ -23,6 +23,7 @@ use crate::previews::{self, Previews, Target};
 use crate::session::{CatalogCache, EditorSession, Preferences};
 use crate::rendered_preview::{self, Frame, RenderedPreviewCache};
 use crate::state::{self, EditState, Stock};
+use crate::tone_graph::{self, Controls, Curve, FilmHistogram};
 use spektrafilm_io::image_size::PHOTO_LONG_SIDE_RANGE;
 use crate::ui::{self, App};
 
@@ -41,6 +42,8 @@ pub mod dirty {
     pub const PRESETS: u32 = 1 << 11;
     /// A preview tile changed, or what they should show may have.
     pub const PREVIEWS: u32 = 1 << 12;
+    /// The tone graph's curve or film histogram arrived.
+    pub const TONE_GRAPH: u32 = 1 << 13;
     pub const ALL: u32 = u32::MAX;
 }
 
@@ -264,6 +267,11 @@ pub struct Model {
     /// The undeveloped photograph, shown in place of `image` while held.
     pub original: Option<Picture>,
     pub histogram: Option<Histogram>,
+    /// The tone graph's curve for the current film, paper and settings, or
+    /// the last ones until the next arrives.
+    pub tone_curve: Option<Curve>,
+    /// The photograph's film exposure, from the last render.
+    pub film_histogram: Option<FilmHistogram>,
     /// The developed preview's frame, uncropped, which the canvas lays out:
     /// the working frame, or less with the 12 MP limit.
     pub image_size: Size,
@@ -339,6 +347,10 @@ pub struct Model {
     original_cache: Option<(Value, Picture)>,
     original_loading: bool,
     histogram_request: u64,
+    tone_graph_shown: bool,
+    /// A curve is being computed; `tone_curve_stale` asks again when it arrives.
+    tone_curve_pending: bool,
+    tone_curve_stale: bool,
     /// When the app started and when the first developed photograph went on
     /// screen, for the startup report.
     pub first_render_shown: bool,
@@ -387,6 +399,8 @@ impl Model {
             placeholder: None,
             original: None,
             histogram: None,
+            tone_curve: None,
+            film_histogram: None,
             image_size: Size::ZERO,
             source_size: (0, 0),
             working_size: Size::ZERO,
@@ -439,6 +453,9 @@ impl Model {
             original_cache: None,
             original_loading: false,
             histogram_request: 0,
+            tone_graph_shown: false,
+            tone_curve_pending: false,
+            tone_curve_stale: false,
             first_render_shown: false,
             preset_library: presets::Library::default(),
             presets: vec![],
@@ -648,6 +665,7 @@ impl Model {
         self.pair_film(&mut next);
         self.state = next;
         self.mark(dirty::STRUCTURE | dirty::INSPECTOR | dirty::CHROME | dirty::STATUS);
+        self.schedule_tone_curve();
     }
 
     // MARK: Parameters
@@ -1352,6 +1370,9 @@ impl Model {
         self.showing_cached_preview = false;
         self.render_failed = false;
         self.update_histogram();
+        if self.film_histogram.take().is_some() {
+            self.mark(dirty::TONE_GRAPH);
+        }
         self.interaction_start = None;
         self.crop_session = None;
         self.original = None;
@@ -1769,6 +1790,7 @@ impl Model {
     }
 
     fn changed_with_cache(&mut self, invalidate: bool) {
+        self.schedule_tone_curve();
         if invalidate {
             self.preview_cache.invalidate();
             self.showing_cached_preview = false;
@@ -1879,6 +1901,11 @@ impl Model {
                 self.image = Some(rendered.picture);
                 self.placeholder = None;
                 self.update_histogram();
+                let film = FilmHistogram::parse(&result["film_histogram"]);
+                if film != self.film_histogram {
+                    self.film_histogram = film;
+                    self.mark(dirty::TONE_GRAPH);
+                }
                 let (shown, rotation) = (self.shown_image_size(), self.rotation());
                 if let Some(session) = &mut self.crop_session {
                     session.update(shown, rotation);
@@ -1957,6 +1984,73 @@ impl Model {
                 }
             });
         });
+    }
+
+    // MARK: Tone graph
+
+    /// The inspector shows the tone graph, or stopped showing it.
+    pub fn show_tone_graph(&mut self, shown: bool) {
+        if self.tone_graph_shown != shown {
+            self.tone_graph_shown = shown;
+            self.schedule_tone_curve();
+        }
+    }
+
+    /// What the tone graph's next curve is for.
+    fn tone_request(&self) -> Value {
+        let state = self.render_state();
+        tone_graph::request(&state.film, &state.paper, &state.params)
+    }
+
+    pub fn tone_controls(&self) -> Controls {
+        Controls::read(|path| self.value(path))
+    }
+
+    /// The shown curve is for the current settings, apart from the controls
+    /// its prediction follows; otherwise it stands in, dimmed, until the next.
+    pub fn tone_curve_current(&self) -> bool {
+        self.tone_curve.as_ref().is_some_and(|curve| curve.matches(&self.tone_request()))
+    }
+
+    /// Asks the helper for the current settings' curve, one request at a
+    /// time; edits made meanwhile ask again once it answers.
+    fn schedule_tone_curve(&mut self) {
+        if !self.tone_graph_shown || !self.has_catalog() || self.closing || !json::boolean(&self.catalog["capabilities"]["tone_curve"]) {
+            return;
+        }
+        let Some(engine) = self.engine.clone() else { return };
+        if self.tone_curve_pending {
+            self.tone_curve_stale = true;
+            return;
+        }
+        let request = self.tone_request();
+        if self.tone_curve.as_ref().is_some_and(|curve| json::same(&curve.request, &request)) {
+            return;
+        }
+        let controls = self.tone_controls();
+        self.tone_curve_pending = true;
+        self.tone_curve_stale = false;
+        let mut command = request.clone();
+        command["command"] = json!("tone_curve");
+        command["count"] = json!(tone_graph::POINTS);
+        engine.request(command, engine::timeout_for("tone_curve"), move |result| {
+            ui::post(move |app: &mut App| app.model.tone_curve_arrived(request, controls, result));
+        });
+    }
+
+    fn tone_curve_arrived(&mut self, request: Value, controls: Controls, result: Result<(u64, Value)>) {
+        self.tone_curve_pending = false;
+        // A curve that can't be computed leaves the last one; the render reports errors.
+        if let Ok((_, result)) = result
+            && let Some(curve) = Curve::parse(&result, request, controls)
+            && self.tone_curve.as_ref() != Some(&curve)
+        {
+            self.tone_curve = Some(curve);
+            self.mark(dirty::TONE_GRAPH);
+        }
+        if self.tone_curve_stale {
+            self.schedule_tone_curve();
+        }
     }
 
     /// Only mention an update once it has visibly taken a while.
@@ -2404,6 +2498,30 @@ mod tests {
             assert_eq!(model.preview_scale, scale);
         }
     }
+
+    /// The tone graph's histogram is the shown photograph's: each render
+    /// replaces it, and opening another photograph clears it at once.
+    #[test]
+    fn the_film_histogram_follows_the_shown_photograph() {
+        let mut model = Model::new(Preferences::default());
+        let (revision, generation) = (model.revision, model.source_generation);
+        let mut frame = rendered(&model, 1200, false);
+        frame.result["film_histogram"] = json!({"stops": [-8, 8], "ev": 0, "counts": [[1, 2], [3, 4], [5, 6]]});
+        model.render_finished(Ok(frame), revision, generation, false);
+        assert_eq!(model.film_histogram.as_ref().map(|h| h.bins(None)), Some(vec![3.0, 4.0]));
+        // A render for the previous photograph is dropped with its histogram.
+        let file = std::env::temp_dir().join(format!("negs-film-histogram-{}.png", std::process::id()));
+        std::fs::write(&file, b"not a photograph").unwrap();
+        model.dirty = 0;
+        model.open(&file);
+        let _ = std::fs::remove_file(&file);
+        assert!(model.film_histogram.is_none());
+        assert_ne!(model.dirty & dirty::TONE_GRAPH, 0);
+        let mut old = rendered(&model, 1200, false);
+        old.result["film_histogram"] = json!({"stops": [-8, 8], "ev": 0, "counts": [[9, 9], [9, 9], [9, 9]]});
+        model.render_finished(Ok(old), model.revision, generation, false);
+        assert!(model.film_histogram.is_none());
+    }
 }
 
 /// Presets through the real helper (`target\release`, built from this
@@ -2650,5 +2768,67 @@ mod preset_tests {
             let ev = |p: &Value| json::number(json::get(p, "camera.exposure_compensation_ev"));
             assert_eq!(ev(&live.model.state.params), ev(&params), "{name}");
         }
+    }
+
+    /// The tone graph through the real helper: one curve request at a time,
+    /// edits meanwhile ask again on its answer, and the prediction from the
+    /// last curve matches the helper's own for a new print exposure.
+    #[test]
+    fn tone_curves_are_asked_one_at_a_time_and_predicted_between() {
+        let Some(mut live) = live("tone") else { return };
+        let model = &mut live.model;
+        assert_eq!(model.catalog["capabilities"]["tone_curve"], json!(true), "the helper predates the tone graph");
+        // Hidden: nothing asked.
+        model.set(tone_graph::PRINT_EXPOSURE, json!(1.0));
+        assert!(!model.tone_curve_pending);
+        model.show_tone_graph(true);
+        assert!(model.tone_curve_pending);
+        let (first, controls) = (model.tone_request(), model.tone_controls());
+        // Edits while it's computed don't ask again yet.
+        model.set(tone_graph::PRINT_EXPOSURE, json!(2.0));
+        assert!(model.tone_curve_stale);
+
+        let mut command = first.clone();
+        command["command"] = json!("tone_curve");
+        command["count"] = json!(tone_graph::POINTS);
+        let reply = ask(&live.engine, command).unwrap();
+        let model = &mut live.model;
+        model.tone_curve_arrived(first.clone(), controls, Ok((0, reply)));
+        let curve = model.tone_curve.clone().unwrap();
+        assert!(json::same(&curve.request, &first));
+        // It stands in for print exposure 2 while that curve is asked for.
+        assert!(model.tone_curve_current());
+        assert!(model.tone_curve_pending && !model.tone_curve_stale);
+        // A failed answer keeps the last curve.
+        model.tone_curve_arrived(model.tone_request(), model.tone_controls(), Err(anyhow!("helper stopped")));
+        assert_eq!(model.tone_curve.as_ref(), Some(&curve));
+        assert!(!model.tone_curve_pending);
+
+        let display = curve.predicted(model.tone_controls());
+        let mut command = model.tone_request();
+        command["command"] = json!("tone_curve");
+        command["count"] = json!(tone_graph::POINTS);
+        let exact = Curve::parse(&ask(&live.engine, command).unwrap(), Value::Null, live.model.tone_controls()).unwrap();
+        // Over the stops the graph shows, where the shifted paper exposure is
+        // one the last curve reached: beyond it (the deepest shadows, where
+        // the paper's exposure flattens) the prediction holds the last value.
+        let paper = curve.paper.as_ref().unwrap();
+        let shift = 2f64.log10();
+        let reached = |c: usize, i: usize| (paper[c][paper[c].len() - 1]..=paper[c][0]).contains(&(paper[c][i] + shift));
+        let shown: Vec<(usize, usize)> = (0..3)
+            .flat_map(|c| (0..exact.stops.len()).map(move |i| (c, i)))
+            .filter(|&(c, i)| (tone_graph::SHOWN.0..=tone_graph::SHOWN.1).contains(&exact.stops[i]) && reached(c, i))
+            .collect();
+        assert!(shown.len() > 300);
+        let worst = shown.iter().map(|&(c, i)| (display.rgb[c][i] - exact.rgb[c][i]).abs()).fold(0.0, f64::max);
+        assert!(worst < 0.002, "predicted vs helper: {worst}");
+        let (_, middle, _) = exact.predicted(exact.controls).handles(None).unwrap();
+        assert!((display.handles(None).unwrap().1 - middle).abs() < 0.05);
+
+        // Another paper: the old curve no longer stands in.
+        let model = &mut live.model;
+        let other = model.papers().into_iter().map(|s| s.id.clone()).find(|id| *id != model.state.paper).unwrap();
+        model.choose_paper(&other);
+        assert!(!model.tone_curve_current());
     }
 }
