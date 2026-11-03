@@ -16,6 +16,20 @@ camera brightness, on by default. Restored sessions retain their saved edits. If
 missing, unusable, or the photo/settings change while analysis runs, the app
 keeps the existing exposure. Manual Prep controls remain available.
 
+A failed match turns the button off and says why in a line below it, as
+long as trying again couldn't change the answer: for the photograph when the
+preview is the problem (none, too small, framed differently, no colour
+profile), until the next edit when no reliable match was found. An automatic
+match fails the same quiet way.
+
+Some cameras letterbox a 4:3 preview of their 3:2 frame in black bars: the
+Leica M8 (320×240, bars top and bottom), M (Typ 240) and Monochrom (Typ 246)
+(160×120, one bar at the top), Sony A100, Minolta Dynax 7D and Nikon D1. Only
+when the preview's shape differs from the photo's, the bars are trimmed and the
+picture inside is used if it has the photo's shape. Size alone is no problem:
+shrinking 14 ordinary previews from 512 to 160 pixels this way moved their
+matches by 0–0.06 EV (median 0.02).
+
 ## Metering contract
 
 The method follows Sawmill's one-shot camera-preview exposure placement:

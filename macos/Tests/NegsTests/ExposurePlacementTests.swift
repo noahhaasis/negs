@@ -38,6 +38,55 @@ final class ExposurePlacementTests: XCTestCase {
         XCTAssertThrowsError(try CameraBrightnessReference.png(from: url, expectedSize: CGSize(width: 320, height: 240)))
     }
 
+    /// A grey test preview with a textured picture and black bars (value 2,
+    /// like the Leica previews) on the given edges.
+    private func preview(width: Int, height: Int, top: Int = 0, bottom: Int = 0, left: Int = 0, right: Int = 0) throws -> CGImage {
+        var pixels = [UInt8](repeating: 2, count: width * height)
+        for y in top..<(height - bottom) {
+            for x in left..<(width - right) { pixels[y * width + x] = UInt8(60 + (x * 7 + y * 13) % 150) }
+        }
+        let context = try XCTUnwrap(CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue))
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    func testLetterboxedPreviewsAreTrimmedToThePicture() throws {
+        let leicaM240 = 5976.0 / 3992, leicaM8 = 3916.0 / 2634
+        // M (Typ 240) / Monochrom (Typ 246): 160×120, 14 black rows at the top only.
+        let m240 = try XCTUnwrap(CameraBrightnessReference.trimmingBars(try preview(width: 160, height: 120, top: 14), toAspect: leicaM240))
+        XCTAssertEqual([m240.width, m240.height], [160, 106])
+        // M8: 320×240, 13 rows top and bottom.
+        let m8 = try XCTUnwrap(CameraBrightnessReference.trimmingBars(try preview(width: 320, height: 240, top: 13, bottom: 13), toAspect: leicaM8))
+        XCTAssertEqual([m8.width, m8.height], [320, 214])
+        // Pillarboxed: a 4:3 picture in a 3:2 preview.
+        let sides = try XCTUnwrap(CameraBrightnessReference.trimmingBars(try preview(width: 512, height: 341, left: 29, right: 28), toAspect: 4.0 / 3))
+        XCTAssertEqual([sides.width, sides.height], [455, 341])
+    }
+
+    func testCroppedOrDarkEdgedPreviewIsNotTrimmed() throws {
+        // A real crop has no bars to remove.
+        XCTAssertNil(CameraBrightnessReference.trimmingBars(try preview(width: 160, height: 120), toAspect: 1.5))
+        // Black at the top that leaves the wrong shape (a night sky, say) is refused.
+        XCTAssertNil(CameraBrightnessReference.trimmingBars(try preview(width: 160, height: 120, top: 30), toAspect: 1.5))
+        // What's left after the bars must still be big enough to meter.
+        XCTAssertNil(CameraBrightnessReference.trimmingBars(try preview(width: 90, height: 68, top: 4, bottom: 4), toAspect: 1.5))
+    }
+
+    /// Optional: colon-separated RAWs with letterboxed previews (Leica M8,
+    /// M (Typ 240); samples on raw.pixls.us) must give a reference of the photo's shape.
+    func testRealLetterboxedPreviewsGiveAReference() throws {
+        guard let paths = ProcessInfo.processInfo.environment["NEGS_TEST_LETTERBOX_RAWS"] else { throw XCTSkip("Set NEGS_TEST_LETTERBOX_RAWS") }
+        for path in paths.split(separator: ":").map(String.init) {
+            let source = try XCTUnwrap(CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+            let size = CGSize(width: try XCTUnwrap(properties[kCGImagePropertyPixelWidth] as? Double),
+                              height: try XCTUnwrap(properties[kCGImagePropertyPixelHeight] as? Double))
+            let data = try CameraBrightnessReference.png(from: URL(fileURLWithPath: path), expectedSize: size)
+            let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil)), 0, nil))
+            XCTAssertTrue(CameraBrightnessReference.sameShape(Double(image.width) / Double(image.height), size.width / size.height), path)
+        }
+    }
+
     /// Optional real-camera fixture: tests exercise the same ImageIO path used
     /// by the app, with no camera files stored in the repository.
     func testRealEmbeddedReferenceHasBoundedTaggedSRGBOutput() throws {
@@ -156,6 +205,32 @@ final class ExposurePlacementTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(model.placingExposure, "Undoing a match must not start another")
         XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
+    }
+
+    /// Optional: a RAW without an embedded preview (the Sigma fp's DNG on
+    /// raw.pixls.us). The automatic match fails quietly: the button stays off
+    /// for this photograph, edits included, with the reason under it.
+    func testRawWithoutPreviewDisablesMatchingForThePhoto() async throws {
+        guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW_NO_PREVIEW"] else { throw XCTSkip("Set NEGS_TEST_RAW_NO_PREVIEW") }
+        let defaults = UserDefaults.standard, savedPreference = defaults.object(forKey: "autoPlaceNewImages")
+        defer { defaults.set(savedPreference, forKey: "autoPlaceNewImages") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        model.autoPlaceNewImages = true
+        await model.start(paths: paths(), restoration: Task { nil })
+        model.setLongestSide(512)
+        model.open(URL(fileURLWithPath: path))
+        try await waitUntil { model.exposurePlacementFailureMessage != nil || model.error != nil }
+        try await waitUntil { model.previewCurrent && !model.placingExposure || model.error != nil }
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.exposurePlacementFailureMessage, "This RAW has no camera preview to match.")
+        XCTAssertNil(model.exposurePlacementMessage)
+        XCTAssertFalse(model.canMatchCameraBrightness)
+        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
+        model.set("prep.shadows", .number(10))
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertFalse(model.canMatchCameraBrightness, "Another try can't find a preview either")
+        XCTAssertNotNil(model.exposurePlacementFailureMessage)
     }
 
     private func waitUntil(_ predicate: () -> Bool) async throws {
