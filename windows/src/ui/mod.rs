@@ -9,13 +9,18 @@
 //! separately (`canvas::VIEW`) so it can paint at any time.
 
 pub mod canvas;
+mod chrome;
 mod dialogs;
+mod draw;
 mod drop;
 mod empty;
 mod folder_watch;
 pub mod inspector;
+mod motion;
 mod presets;
 mod strip;
+mod theme;
+mod titlebar;
 mod tone_graph;
 
 use std::cell::RefCell;
@@ -61,6 +66,8 @@ pub fn accessible_name(hwnd: HWND, name: &str) {
 
 pub const WM_APP_RUN: u32 = WM_APP + 1;
 const WM_APP_BUILD: u32 = WM_APP + 2;
+/// Opens a menu bar menu (index, from the keyboard), outside the App borrow.
+pub const WM_APP_MENU: u32 = WM_APP + 3;
 const TIMER_RUN: usize = 1;
 const TIMER_EXPORT: usize = 2;
 const COPYDATA_OPEN: usize = 0x4e45_4753; // "NEGS"
@@ -236,11 +243,16 @@ impl Report {
 
 pub struct Fonts {
     pub ui: HFONT,
+    /// Group headers: the UI size, semibold.
     pub bold: HFONT,
+    /// Section titles: semibold and a little larger.
+    pub section: HFONT,
     pub small: HFONT,
     pub title: HFONT,
     pub glyph: HFONT,
     pub glyph_small: HFONT,
+    /// The UI font's line height in pixels.
+    pub line: i32,
 }
 
 impl Fonts {
@@ -254,23 +266,63 @@ impl Fonts {
                 0,
                 dpi,
             );
-            let base = metrics.lfMessageFont;
+            // The system's size (so text scaling applies) in Segoe UI
+            // Variable where Windows 11 has it, unless the face was changed.
+            let mut base = metrics.lfMessageFont;
+            let mut display = base;
+            if platform::from_wide(&base.lfFaceName) == "Segoe UI" && font_exists("Segoe UI Variable Text") {
+                set_face(&mut base, "Segoe UI Variable Text");
+                set_face(&mut display, "Segoe UI Variable Display");
+            }
             let ui = CreateFontIndirectW(&base);
             let bold = CreateFontIndirectW(&LOGFONTW { lfWeight: 600, ..base });
+            let section = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 115 / 100, lfWeight: 600, ..display });
             let small = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 85 / 100, ..base });
-            let title = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 19 / 10, lfWeight: 600, ..base });
+            let title = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 19 / 10, lfWeight: 600, ..display });
             let glyph_face = if font_exists("Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" };
             let mut glyph = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: CLEARTYPE_QUALITY, ..Default::default() };
             let face = wide(glyph_face);
             glyph.lfFaceName[..face.len()].copy_from_slice(&face);
             let glyph_font = CreateFontIndirectW(&glyph);
             let glyph_small = CreateFontIndirectW(&LOGFONTW { lfHeight: -(11 * dpi as i32 / 96), ..glyph });
-            Fonts { ui, bold, small, title, glyph: glyph_font, glyph_small }
+            let line = line_height(ui);
+            Fonts { ui, bold, section, small, title, glyph: glyph_font, glyph_small, line }
         }
     }
 }
 
+fn line_height(font: HFONT) -> i32 {
+    unsafe {
+        let dc = GetDC(None);
+        let old = SelectObject(dc, font);
+        let mut metrics = TEXTMETRICW::default();
+        let _ = GetTextMetricsW(dc, &mut metrics);
+        SelectObject(dc, old);
+        ReleaseDC(None, dc);
+        metrics.tmHeight
+    }
+}
+
+fn set_face(font: &mut LOGFONTW, face: &str) {
+    let w = wide(face);
+    font.lfFaceName = [0; 32];
+    font.lfFaceName[..w.len()].copy_from_slice(&w);
+}
+
+/// Whether a font family is installed (asked once per face).
 fn font_exists(face: &str) -> bool {
+    thread_local! {
+        static KNOWN: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
+    }
+    if let Some(known) = KNOWN.with(|k| k.borrow().iter().find(|(f, _)| f == face).map(|(_, e)| *e)) {
+        return known;
+    }
+    let exists = enumerate_font(face);
+    KNOWN.with(|k| k.borrow_mut().push((face.to_string(), exists)));
+    exists
+}
+
+fn enumerate_font(face: &str) -> bool {
     unsafe {
         let dc = GetDC(None);
         let mut lf = LOGFONTW { lfCharSet: DEFAULT_CHARSET, ..Default::default() };
@@ -291,6 +343,8 @@ pub struct App {
     pub model: Model,
     pub main: HWND,
     toolbar: HWND,
+    /// The menu bar in the title bar.
+    menubar: HWND,
     status: HWND,
     progress: HWND,
     cancel: HWND,
@@ -498,14 +552,14 @@ impl App {
         unsafe {
             let mut client = RECT::default();
             let _ = GetClientRect(self.main, &mut client);
-            SendMessageW(self.toolbar, TB_AUTOSIZE, WPARAM(0), LPARAM(0));
+            titlebar::layout(self.main, self.menubar, self.toolbar);
             SendMessageW(self.status, WM_SIZE, WPARAM(0), LPARAM(0));
             let height = |hwnd: HWND| {
                 let mut r = RECT::default();
                 let _ = GetWindowRect(hwnd, &mut r);
                 if IsWindowVisible(hwnd).as_bool() { r.bottom - r.top } else { 0 }
             };
-            let top = height(self.toolbar);
+            let top = titlebar::height(self.main);
             let bottom = client.bottom - height(self.status);
             let inspector_width = if self.model.inspector_visible { self.px(self.model.prefs.inspector_width.clamp(300.0, 440.0)) } else { 0 };
             let splitter = if self.model.inspector_visible { self.px(5.0) } else { 0 };
@@ -629,7 +683,6 @@ impl App {
                 SetWindowLongW(self.main, GWL_STYLE, style);
                 let _ = SetWindowPlacement(self.main, &placement);
                 let _ = SetWindowPos(self.main, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-                let _ = SetMenu(self.main, self.menu);
             } else {
                 let mut placement = WINDOWPLACEMENT { length: std::mem::size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
                 let _ = GetWindowPlacement(self.main, &mut placement);
@@ -638,7 +691,6 @@ impl App {
                 let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
                 let _ = GetMonitorInfoW(monitor, &mut info);
                 SetWindowLongW(self.main, GWL_STYLE, style & !(WS_OVERLAPPEDWINDOW.0 as i32));
-                let _ = SetMenu(self.main, None);
                 let r = info.rcMonitor;
                 let _ = SetWindowPos(self.main, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED);
                 self.full_screen = Some((placement, style));
@@ -874,6 +926,7 @@ pub fn create(class: PCWSTR, text: &str, style: WINDOW_STYLE, ex: WINDOW_EX_STYL
         if !font.is_invalid() {
             SendMessageW(hwnd, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(0));
         }
+        theme::apply_created(hwnd, class);
         hwnd
     }
 }
@@ -977,10 +1030,10 @@ fn accelerators() -> HACCEL {
     unsafe { CreateAcceleratorTableW(&accels).unwrap_or_default() }
 }
 
-/// Segoe icon glyphs drawn at the window's DPI, for the toolbar.
+/// Segoe icon glyphs drawn at the window's DPI: they size the toolbar's
+/// buttons (`chrome` paints them from the palette).
 fn toolbar_images(dpi: u32) -> HIMAGELIST {
-    // Open, Film Strip, Fit, Actual Size, Rotate, Crop, Export, Adjustments, Presets
-    let glyphs = ['\u{E838}', '\u{E8B9}', '\u{E9A6}', '\u{E71E}', '\u{E7AD}', '\u{E7A8}', '\u{E78C}', '\u{E9E9}', '\u{E81E}'];
+    let glyphs = chrome::TOOL_GLYPHS;
     let size = (20 * dpi / 96) as i32;
     unsafe {
         let list = ImageList_Create(size, size, ILC_COLOR32, glyphs.len() as i32, 0);
@@ -1041,7 +1094,7 @@ fn build_toolbar(main: HWND, dpi: u32) -> HWND {
         let toolbar = create(
             TOOLBARCLASSNAMEW,
             "",
-            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(TBSTYLE_FLAT | TBSTYLE_LIST | TBSTYLE_TOOLTIPS | CCS_NODIVIDER as u32 | CCS_TOP as u32),
+            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(TBSTYLE_FLAT | TBSTYLE_LIST | TBSTYLE_TOOLTIPS | CCS_NODIVIDER as u32 | CCS_NOPARENTALIGN as u32 | CCS_NORESIZE as u32),
             WINDOW_EX_STYLE(0),
             main,
             0,
@@ -1050,6 +1103,7 @@ fn build_toolbar(main: HWND, dpi: u32) -> HWND {
         SendMessageW(toolbar, TB_BUTTONSTRUCTSIZE, WPARAM(std::mem::size_of::<TBBUTTON>()), LPARAM(0));
         SendMessageW(toolbar, TB_SETEXTENDEDSTYLE, WPARAM(0), LPARAM((TBSTYLE_EX_MIXEDBUTTONS | 0x80 /* TBSTYLE_EX_DOUBLEBUFFER */) as isize));
         SendMessageW(toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
+        theme::apply_control(HWND(SendMessageW(toolbar, TB_GETTOOLTIPS, WPARAM(0), LPARAM(0)).0 as *mut _), true);
         let tips: Vec<Vec<u16>> = [
             "Open photograph (Ctrl+O)",
             "Show or hide film strip (F6)",
@@ -1088,7 +1142,7 @@ fn build_toolbar(main: HWND, dpi: u32) -> HWND {
             button(8, id::PRESETS, BTNS_CHECK, 8),
         ];
         SendMessageW(toolbar, TB_ADDBUTTONSW, WPARAM(buttons.len()), LPARAM(buttons.as_ptr() as isize));
-        SendMessageW(toolbar, TB_AUTOSIZE, WPARAM(0), LPARAM(0));
+        titlebar::tool_metrics(main, toolbar);
         toolbar
     }
 }
@@ -1160,7 +1214,6 @@ pub fn run() {
             lpszClassName: w!("NegsMainWindow"),
             hCursor: cursor,
             hIcon: icon,
-            hbrBackground: GetSysColorBrush(COLOR_BTNFACE),
             ..Default::default()
         };
         RegisterClassExW(&class);
@@ -1171,6 +1224,7 @@ pub fn run() {
         tone_graph::register();
         presets::register();
 
+        theme::init();
         let (menu, recent) = build_menu();
         let main = CreateWindowExW(
             WINDOW_EX_STYLE(0),
@@ -1182,21 +1236,27 @@ pub fn run() {
             1320,
             860,
             None,
-            menu,
+            None,
             instance(),
             None,
         )
         .unwrap();
         MAIN.store(main.0 as isize, Ordering::Relaxed);
+        theme::apply_window(main);
+        titlebar::round_corners(main);
         let dpi = GetDpiForWindow(main).max(96);
         restore_placement(main, &model.prefs, dpi);
         report.stamp("main_window");
         let fonts = Fonts::new(dpi);
         report.stamp("fonts");
+        let menubar = titlebar::create_menubar(main, menu, fonts.ui);
+        titlebar::set_fonts(fonts.ui, fonts.glyph_small);
         let toolbar = build_toolbar(main, dpi);
+        chrome::subclass_toolbar(toolbar, fonts.glyph);
         report.stamp("toolbar");
-        let status = create(STATUSCLASSNAMEW, "", WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SBARS_SIZEGRIP), WINDOW_EX_STYLE(0), main, 0, fonts.ui);
+        let status = create(STATUSCLASSNAMEW, "", WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WINDOW_STYLE(SBARS_SIZEGRIP), WINDOW_EX_STYLE(0), main, 0, fonts.ui);
         empty::subclass_status(status);
+        chrome::subclass_status(status);
         let progress = create(PROGRESS_CLASSW, "", WS_CHILD | WINDOW_STYLE(PBS_MARQUEE), WINDOW_EX_STYLE(0), status, 0, HFONT::default());
         SendMessageW(progress, PBM_SETMARQUEE, WPARAM(1), LPARAM(30));
         let cancel = create(w!("BUTTON"), "Cancel", WS_CHILD | WS_TABSTOP, WINDOW_EX_STYLE(0), status, id::CANCEL_EXPORT, fonts.ui);
@@ -1213,6 +1273,7 @@ pub fn run() {
             model,
             main,
             toolbar,
+            menubar,
             status,
             progress,
             cancel,
@@ -1295,6 +1356,10 @@ fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
 /// and the accelerators, which never fire while a text field has focus.
 fn pre_translate(msg: &MSG) -> bool {
     let main = main_hwnd();
+    draw::hover_message(msg);
+    if titlebar::keys(main, msg) {
+        return true;
+    }
     let mut accelerators = None;
     let handled = with_app(|app| {
         if matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MOUSEWHEEL) {
@@ -1356,6 +1421,41 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| app.update_status());
                 LRESULT(0)
             }
+            WM_APP_MENU => {
+                titlebar::open(hwnd, wparam.0, lparam.0 != 0);
+                LRESULT(0)
+            }
+            WM_NCCALCSIZE => titlebar::nccalcsize(hwnd, wparam, lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            WM_NCHITTEST => titlebar::nchittest(hwnd, wparam, lparam),
+            WM_NCMOUSEMOVE | WM_NCMOUSELEAVE | WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK | WM_NCLBUTTONUP => {
+                titlebar::ncmouse(hwnd, msg, wparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam))
+            }
+            WM_NCACTIVATE => {
+                // No caption to repaint; lParam -1 keeps the system from drawing one.
+                titlebar::invalidate(hwnd);
+                DefWindowProcW(hwnd, msg, wparam, LPARAM(-1))
+            }
+            WM_SETTEXT | WM_SETICON => {
+                // The system would draw its caption over the band.
+                let style = GetWindowLongW(hwnd, GWL_STYLE);
+                SetWindowLongW(hwnd, GWL_STYLE, style & !(WS_VISIBLE.0 as i32));
+                let result = DefWindowProcW(hwnd, msg, wparam, lparam);
+                SetWindowLongW(hwnd, GWL_STYLE, style);
+                titlebar::invalidate(hwnd);
+                result
+            }
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let dc = BeginPaint(hwnd, &mut ps);
+                titlebar::paint(hwnd, dc);
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            WM_SYSCOMMAND if (wparam.0 & 0xfff0) as u32 == SC_KEYMENU && titlebar::key_menu(hwnd, lparam.0 as u32) => LRESULT(0),
+            WM_MENUSELECT => {
+                titlebar::menu_select(wparam, lparam);
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_APP_BUILD => {
                 with_app(|app| {
                     app.report.stamp("first_frame_done");
@@ -1384,6 +1484,12 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| app.layout());
                 LRESULT(0)
             }
+            WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
+            WM_SETTINGCHANGE | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
+                // The app theme ("ImmersiveColorSet"), high contrast or the accent.
+                post(|app: &mut App| app.retheme());
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_GETMINMAXINFO => {
                 let info = &mut *(lparam.0 as *mut MINMAXINFO);
                 let dpi = GetDpiForWindow(hwnd).max(96) as i32;
@@ -1405,6 +1511,9 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(0)
             }
             WM_NOTIFY => {
+                if let Some(result) = titlebar::dropdown(hwnd, lparam) {
+                    return result;
+                }
                 let header = &*(lparam.0 as *const NMHDR);
                 if header.code == NM_CLICK || header.code == NM_RETURN {
                     if let Ok(id) = u16::try_from(header.idFrom) {
@@ -1452,7 +1561,9 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             WM_ACTIVATE => {
                 if wparam.0 & 0xffff == WA_INACTIVE as usize {
                     with_app(|app| app.release_original());
+                    titlebar::deactivated(hwnd);
                 }
+                titlebar::invalidate(hwnd);
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_MOVE | WM_DISPLAYCHANGE => {
@@ -1480,6 +1591,7 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
+                titlebar::ncmouse(hwnd, msg, wparam);
                 let x = (lparam.0 & 0xffff) as i16 as i32;
                 with_app(|app| app.drag_splitter(x));
                 LRESULT(0)
@@ -1551,6 +1663,11 @@ impl App {
         self.fonts = Fonts::new(dpi);
         unsafe {
             SendMessageW(self.toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
+            chrome::subclass_toolbar(self.toolbar, self.fonts.glyph);
+            titlebar::tool_metrics(self.main, self.toolbar);
+            SendMessageW(self.menubar, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
+            titlebar::set_metrics(self.main, self.menubar);
+            titlebar::set_fonts(self.fonts.ui, self.fonts.glyph_small);
             SendMessageW(self.status, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             SendMessageW(self.cancel, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             SendMessageW(self.original_button, WM_SETFONT, WPARAM(self.fonts.glyph_small.0 as usize), LPARAM(1));
@@ -1560,6 +1677,19 @@ impl App {
         presets::dpi_changed(self);
         empty::dpi_changed(self);
         self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::CANVAS | dirty::STRIP;
+    }
+
+    /// Follows a change of the system's theme, contrast or accent.
+    fn retheme(&mut self) {
+        if !theme::refresh() {
+            return;
+        }
+        theme::apply_all();
+        presets::retheme(self);
+        unsafe {
+            let _ = InvalidateRect(self.canvas, None, false);
+        }
+        self.model.dirty |= dirty::LAYOUT | dirty::STRUCTURE | dirty::STRIP | dirty::CANVAS;
     }
 
     fn status_menu(&mut self) {
