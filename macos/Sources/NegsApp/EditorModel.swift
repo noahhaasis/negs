@@ -1135,8 +1135,8 @@ import UniformTypeIdentifiers
         // Each wanted tile: its look's key, the request, and a name for logs.
         var wanted: [(tile: PreviewTile, key: PreviewTile.Key, command: [String: JSONValue], name: String)] = []
         var entries: [StockEntry] = []
-        if previews.filmOpen, previews.filmShown { entries += previews.films }
-        if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papers }
+        if previews.filmOpen, previews.filmShown { entries += previews.filmsFavoritesFirst }
+        if previews.paperOpen, previews.paperShown, !scanning { entries += previews.papersFavoritesFirst }
         for entry in entries {
             let command = PreviewRules.request(for: entry.stock, keepPaper: previews.keepPaper, state: rendered, stocks: stocks,
                                                source: source, generation: generation)
