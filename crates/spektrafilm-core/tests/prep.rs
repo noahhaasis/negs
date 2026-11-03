@@ -289,3 +289,36 @@ fn resident_and_submitted_gpu_apply_prep_and_invalidate_source_uploads() {
         }
     }
 }
+#[test]
+fn a_prepared_frame_is_reused_only_while_what_prep_reads_is_unchanged() {
+    let Some(gpu) = WgpuBackend::new() else {
+        eprintln!("no GPU adapter available; skipping prepared-frame reuse");
+        return;
+    };
+    let source = image();
+    let bits = |image: &ImageBuf| image.data.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+    let render = |p: &RuntimeParams, frame: Option<&prep::PreparedFrame>| {
+        let mut pipe = pipeline(p.clone()).with_autoexposure_ev(0.4);
+        if let Some(frame) = frame {
+            pipe = pipe.with_prepared_frame(frame.clone());
+        }
+        bits(&pipe.process_resident_borrowed(&source, &gpu).expect("GPU resident Prep"))
+    };
+    let frame = prep::PreparedFrame::default();
+    let mut edits: Vec<Box<dyn Fn(&mut RuntimeParams)>> = vec![
+        Box::new(|_| {}),
+        Box::new(|_| {}), // reused
+        Box::new(|p| p.enlarger.print_exposure = 1.3), // reused: after Prep
+        Box::new(|p| p.camera.exposure_compensation_ev = 0.2),
+        Box::new(|p| p.prep.exposure_ev = 0.3),
+        Box::new(|p| p.prep.shadows = -45.),
+        Box::new(|p| p.io.input_cctf_decoding = false),
+        Box::new(|p| p.prep = Default::default()), // neutral: the slot is emptied
+    ];
+    edits.push(Box::new(|_| {}));
+    for edit in &edits {
+        let mut p = params();
+        edit(&mut p);
+        assert_eq!(render(&p, Some(&frame)), render(&p, None));
+    }
+}
