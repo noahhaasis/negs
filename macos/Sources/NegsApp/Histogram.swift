@@ -199,7 +199,8 @@ struct ScopePanelView: View {
     @AppStorage("scopeMode") private var mode = ScopeMode.histogram
     /// Dragged with the handle below the scope; remembered.
     @AppStorage("scopeHeight") private var height = ScopePanelView.defaultHeight
-    @State private var dragStart: Double?
+    /// The height while the handle is dragged, saved to `height` when it's let go.
+    @State private var dragHeight: Double?
     static let defaultHeight = 190.0, heights = 88.0...420.0
 
     var body: some View {
@@ -219,7 +220,7 @@ struct ScopePanelView: View {
                 case .waveform: WaveformView(waveform: waveform)
                 }
             }
-            .frame(height: min(max(height, Self.heights.lowerBound), Self.heights.upperBound))
+            .frame(height: Self.clamped(dragHeight ?? height))
             .overlay {
                 if histogram == nil {
                     Text("No developed photograph").font(.caption).foregroundStyle(Color.white.opacity(0.6))
@@ -235,19 +236,27 @@ struct ScopePanelView: View {
             .frame(maxWidth: .infinity, minHeight: 8)
             .contentShape(Rectangle())
             .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
-            .gesture(DragGesture(minimumDistance: 1)
+            // Measured in the window: the handle moves with the height, so in its own
+            // coordinates the translation shrank as the scope grew (half speed, jitter).
+            .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { drag in
-                    let start = dragStart ?? height
-                    dragStart = start
-                    height = min(max(start + drag.translation.height, Self.heights.lowerBound), Self.heights.upperBound)
+                    dragHeight = Self.clamped(height + drag.translation.height)
                 }
-                .onEnded { _ in dragStart = nil })
+                .onEnded { drag in
+                    height = Self.clamped(height + drag.translation.height)
+                    dragHeight = nil
+                })
             .onTapGesture(count: 2) { height = Self.defaultHeight }
             .help("Drag to resize the scope")
             .accessibilityLabel("Scope height")
             .accessibilityValue("\(Int(height)) points")
             .accessibilityAdjustableAction { direction in
-                height = min(max(height + (direction == .increment ? 20 : -20), Self.heights.lowerBound), Self.heights.upperBound)
+                height = Self.clamped(height + (direction == .increment ? 20 : -20))
             }
+    }
+
+    /// Whole points keep the grid lines and plot edges from shimmering mid-drag.
+    private static func clamped(_ height: Double) -> Double {
+        min(max(height.rounded(), heights.lowerBound), heights.upperBound)
     }
 }
