@@ -6,6 +6,7 @@
 //! edge replication and coefficient equations, not GPU/MPS rounding bit-for-bit.
 //! It requires the complete frame: using a cropped tile changes its context.
 //! From yosoyelchris's Negs fork (`prep-raw-scopes`, d2a144d); see docs/prep.md.
+use rayon::prelude::*;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -32,6 +33,8 @@ fn schedule(w: usize, h: usize) -> (usize, usize, usize) {
 // Fixed-size (2r+1) box mean, edge pixels replicated. Resolve uses MPSImageBox
 // with edgeMode=Clamp or equivalent separable box kernels. f64 running sums
 // avoid long-row drift; each directional result is rounded back to f32.
+// Rows, then strips of columns, run in parallel: each running sum still adds
+// the same values in the same order, so the result doesn't depend on threads.
 fn box_mean(
     src: &[f32],
     w: usize,
@@ -41,37 +44,61 @@ fn box_mean(
 ) -> Result<Vec<f32>, String> {
     let divisor = (2 * r + 1) as f64;
     let mut horizontal = vec![0.0_f32; src.len()];
-    for y in 0..h {
-        cancelled(cancel)?;
-        let row = &src[y * w..(y + 1) * w];
-        let mut sum = row[0] as f64 * (r + 1) as f64;
-        sum += row[1..=r.min(w - 1)].iter().map(|&v| v as f64).sum::<f64>();
-        sum += row[w - 1] as f64 * r.saturating_sub(w - 1) as f64;
-        for x in 0..w {
-            horizontal[y * w + x] = (sum / divisor) as f32;
-            sum += row[(x + r + 1).min(w - 1)] as f64 - row[x.saturating_sub(r)] as f64;
-        }
-    }
-    let mut sums = vec![0.0_f64; w];
-    for x in 0..w {
-        sums[x] = horizontal[x] as f64 * (r + 1) as f64
-            + horizontal[(h - 1) * w + x] as f64 * r.saturating_sub(h - 1) as f64;
-    }
-    for y in 1..=r.min(h - 1) {
-        for x in 0..w {
-            sums[x] += horizontal[y * w + x] as f64;
-        }
-    }
+    horizontal
+        .par_chunks_mut(w)
+        .zip(src.par_chunks(w))
+        .try_for_each(|(out, row)| {
+            cancelled(cancel)?;
+            let mut sum = row[0] as f64 * (r + 1) as f64;
+            sum += row[1..=r.min(w - 1)].iter().map(|&v| v as f64).sum::<f64>();
+            sum += row[w - 1] as f64 * r.saturating_sub(w - 1) as f64;
+            for x in 0..w {
+                out[x] = (sum / divisor) as f32;
+                sum += row[(x + r + 1).min(w - 1)] as f64 - row[x.saturating_sub(r)] as f64;
+            }
+            Ok::<_, String>(())
+        })?;
+    // Each strip of columns keeps its own running sums down the frame and
+    // writes its columns, row by row, into a strip-major buffer.
+    const STRIP: usize = 64;
+    let strips: Vec<Vec<f32>> = (0..w.div_ceil(STRIP))
+        .into_par_iter()
+        .map(|strip| {
+            let x0 = strip * STRIP;
+            let sw = STRIP.min(w - x0);
+            let mut sums = vec![0.0_f64; sw];
+            for (i, sum) in sums.iter_mut().enumerate() {
+                let x = x0 + i;
+                *sum = horizontal[x] as f64 * (r + 1) as f64
+                    + horizontal[(h - 1) * w + x] as f64 * r.saturating_sub(h - 1) as f64;
+            }
+            for y in 1..=r.min(h - 1) {
+                for (i, sum) in sums.iter_mut().enumerate() {
+                    *sum += horizontal[y * w + x0 + i] as f64;
+                }
+            }
+            let mut out = vec![0.0_f32; sw * h];
+            for y in 0..h {
+                cancelled(cancel)?;
+                let incoming = (y + r + 1).min(h - 1) * w + x0;
+                let outgoing = y.saturating_sub(r) * w + x0;
+                for (i, sum) in sums.iter_mut().enumerate() {
+                    out[y * sw + i] = (*sum / divisor) as f32;
+                    *sum += horizontal[incoming + i] as f64 - horizontal[outgoing + i] as f64;
+                }
+            }
+            Ok(out)
+        })
+        .collect::<Result<_, String>>()?;
+    drop(horizontal);
     let mut output = vec![0.0_f32; src.len()];
-    for y in 0..h {
-        cancelled(cancel)?;
-        let incoming = (y + r + 1).min(h - 1) * w;
-        let outgoing = y.saturating_sub(r) * w;
-        for x in 0..w {
-            output[y * w + x] = (sums[x] / divisor) as f32;
-            sums[x] += horizontal[incoming + x] as f64 - horizontal[outgoing + x] as f64;
+    output.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        for (strip, values) in strips.iter().enumerate() {
+            let x0 = strip * STRIP;
+            let sw = STRIP.min(w - x0);
+            row[x0..x0 + sw].copy_from_slice(&values[y * sw..(y + 1) * sw]);
         }
-    }
+    });
     Ok(output)
 }
 
@@ -118,12 +145,13 @@ fn resize(
     let xs = axis(w, dw);
     let ys = axis(h, dh);
     let mut dst = vec![0.0; dw * dh];
-    for y in 0..dh {
+    dst.par_chunks_mut(dw).zip(&ys).try_for_each(|(row, &y)| {
         cancelled(cancel)?;
-        for x in 0..dw {
-            dst[y * dw + x] = bilinear(src, w, xs[x], ys[y]);
+        for (out, &x) in row.iter_mut().zip(&xs) {
+            *out = bilinear(src, w, x, y);
         }
-    }
+        Ok::<_, String>(())
+    })?;
     Ok(dst)
 }
 
@@ -142,27 +170,31 @@ pub(super) fn base_luma(
     {
         return Err("Invalid RAW guided-base dimensions".into());
     }
-    for block in luma.chunks(16384) {
+    luma.par_chunks(16384).try_for_each(|block| {
         cancelled(cancel)?;
         if block
             .iter()
             .any(|v| !v.is_finite() || !(*v * *v).is_finite())
         {
-            return Err("Non-finite RAW guided-base input".into());
+            return Err("Non-finite RAW guided-base input".to_owned());
         }
-    }
+        Ok(())
+    })?;
     let (lw, lh, radius) = schedule(w, h);
     let small = if (lw, lh) == (w, h) {
         Cow::Borrowed(luma)
     } else {
         Cow::Owned(resize(luma, w, h, lw, lh, cancel)?)
     };
-    let mut b = box_mean(&small, lw, lh, radius, cancel)?;
-    let square: Vec<f32> = small.iter().map(|&v| v * v).collect();
-    let mut a = box_mean(&square, lw, lh, radius, cancel)?;
+    let square: Vec<f32> = small.par_iter().map(|&v| v * v).collect();
+    let (b, a) = rayon::join(
+        || box_mean(&small, lw, lh, radius, cancel),
+        || box_mean(&square, lw, lh, radius, cancel),
+    );
+    let (mut b, mut a) = (b?, a?);
     drop(square);
     drop(small);
-    for (aa, bb) in a.chunks_mut(16384).zip(b.chunks_mut(16384)) {
+    a.par_chunks_mut(16384).zip(b.par_chunks_mut(16384)).try_for_each(|(aa, bb)| {
         cancelled(cancel)?;
         for (a, b) in aa.iter_mut().zip(bb) {
             // Variance(...,true) selects varianceClampedNegativeKernel.
@@ -170,32 +202,46 @@ pub(super) fn base_luma(
             *a = variance / (variance + 0.01).max(0.0001);
             *b = *b - *a * *b;
         }
-    }
-    let mean_a = box_mean(&a, lw, lh, radius, cancel)?;
-    drop(a);
-    let mean_b = box_mean(&b, lw, lh, radius, cancel)?;
-    drop(b);
+        Ok::<_, String>(())
+    })?;
+    let (mean_a, mean_b) = rayon::join(
+        || box_mean(&a, lw, lh, radius, cancel),
+        || box_mean(&b, lw, lh, radius, cancel),
+    );
+    let (mean_a, mean_b) = (mean_a?, mean_b?);
+    drop((a, b));
     let mut output = vec![0.0; luma.len()];
     if (lw, lh) == (w, h) {
-        for y in 0..h {
-            cancelled(cancel)?;
-            for i in y * w..(y + 1) * w {
-                output[i] = mean_a[i] * luma[i] + mean_b[i];
-            }
-        }
+        output
+            .par_chunks_mut(w)
+            .zip(luma.par_chunks(w))
+            .enumerate()
+            .try_for_each(|(y, (out, luma))| {
+                cancelled(cancel)?;
+                let (a, b) = (&mean_a[y * w..(y + 1) * w], &mean_b[y * w..(y + 1) * w]);
+                for x in 0..w {
+                    out[x] = a[x] * luma[x] + b[x];
+                }
+                Ok::<_, String>(())
+            })?;
     } else {
         // Sample both small coefficient fields directly, avoiding two full-frame
         // intermediates while preserving the observed upsample-then-combine math.
         let xs = axis(lw, w);
         let ys = axis(lh, h);
-        for y in 0..h {
-            cancelled(cancel)?;
-            for x in 0..w {
-                let a = bilinear(&mean_a, lw, xs[x], ys[y]);
-                let b = bilinear(&mean_b, lw, xs[x], ys[y]);
-                output[y * w + x] = a * luma[y * w + x] + b;
-            }
-        }
+        output
+            .par_chunks_mut(w)
+            .zip(luma.par_chunks(w))
+            .zip(&ys)
+            .try_for_each(|((out, luma), &y)| {
+                cancelled(cancel)?;
+                for ((out, &luma), &x) in out.iter_mut().zip(luma).zip(&xs) {
+                    let a = bilinear(&mean_a, lw, x, y);
+                    let b = bilinear(&mean_b, lw, x, y);
+                    *out = a * luma + b;
+                }
+                Ok::<_, String>(())
+            })?;
     }
     cancelled(cancel)?;
     Ok(output)

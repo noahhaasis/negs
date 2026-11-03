@@ -99,6 +99,58 @@ impl PrepParams {
     }
 }
 
+/// Everything [`crate::stages::filming::prepare_input`] reads besides the
+/// pixels, bit for bit, and the frame size.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedKey {
+    size: (u32, u32),
+    input_cctf_decoding: bool,
+    input_color_space: String,
+    autoexposure_ev: u64,
+    exposure_compensation_ev: u32,
+    prep: [u32; 9],
+}
+
+impl PreparedKey {
+    pub fn new(image: &ImageBuf, params: &crate::params::RuntimeParams, autoexposure_ev: f64) -> Self {
+        let p = &params.prep;
+        Self {
+            size: (image.width, image.height),
+            input_cctf_decoding: params.io.input_cctf_decoding,
+            input_color_space: params.io.input_color_space.clone(),
+            autoexposure_ev: autoexposure_ev.to_bits(),
+            exposure_compensation_ev: params.camera.exposure_compensation_ev.to_bits(),
+            prep: [
+                p.exposure_ev, p.highlights, p.shadows, p.contrast, p.lift, p.gain,
+                p.color_boost, p.saturation, p.midtone_detail,
+            ]
+            .map(f32::to_bits),
+        }
+    }
+}
+
+/// A caller's slot for one working frame's Prep output, shared by the
+/// pipelines that render that frame
+/// ([`crate::pipeline::Pipeline::with_prepared_frame`]).
+#[derive(Clone, Default)]
+pub struct PreparedFrame(std::sync::Arc<std::sync::Mutex<Option<Prepared>>>);
+type Prepared = (PreparedKey, std::sync::Arc<ImageBuf>);
+
+impl PreparedFrame {
+    /// The kept output if it was made with `key`; any other is dropped first,
+    /// so it never lives beside the frame that replaces it.
+    pub(crate) fn take(&self, key: &PreparedKey) -> Option<std::sync::Arc<ImageBuf>> {
+        let mut slot = self.0.lock().unwrap();
+        slot.take().filter(|(kept, _)| kept == key).map(|(_, image)| image)
+    }
+    pub(crate) fn put(&self, key: PreparedKey, image: std::sync::Arc<ImageBuf>) {
+        *self.0.lock().unwrap() = Some((key, image));
+    }
+    pub fn clear(&self) {
+        *self.0.lock().unwrap() = None;
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct Settings {
     highlights: f32,
@@ -239,7 +291,12 @@ fn core(
     y += detail * (s.detail / 100.) * (y * (1. - y)).max(0.) * 4.;
     let boost = s.boost / 100.;
     let weight = if boost >= 0. { 0.7 * boost } else { boost };
-    c = (c + c.powf(0.4) * weight * 0.25).max(0.);
+    // c is a length, never -0, and finite (the guided base rejects frames with
+    // a non-finite pixel), so with no boost the term adds ±0 and leaves c's
+    // bits unchanged: skip its powf.
+    if weight != 0. {
+        c = (c + c.powf(0.4) * weight * 0.25).max(0.);
+    }
     c = (c * (1. + s.saturation / 100.)).max(0.);
     let mut out = [y; 3];
     if c > 0. {
@@ -320,23 +377,30 @@ pub fn apply_linear(
     let lut = tone_lut(s.highlights, s.shadows);
     let affine = affine(s.lift, s.gain);
     let contrast = 1.5f32.powf(s.contrast / 100.);
-    image
+    let finite = image
         .data
-        .par_chunks_mut(3)
-        .enumerate()
-        .try_for_each(|(i, p)| -> Result<(), String> {
-            let rgb = core(encoded[i], base[i], s, &lut, affine, contrast).map(decode709);
-            let result = if same_space {
-                rgb.map(from_f32)
-            } else {
-                mat3_vec_f64(&from709, rgb.map(|v| v as f64)).map(from_f64)
-            };
-            if result.iter().any(|v| !v.is_finite()) {
-                return Err("Prep adjustments produced a non-finite result".into());
+        .par_chunks_mut(3 * w)
+        .zip(encoded.par_chunks(w))
+        .zip(base.par_chunks(w))
+        .map(|((row, encoded), base)| {
+            let mut finite = true;
+            for ((p, &encoded), &base) in row.chunks_exact_mut(3).zip(encoded).zip(base) {
+                let rgb = core(encoded, base, s, &lut, affine, contrast).map(decode709);
+                let result = if same_space {
+                    rgb.map(from_f32)
+                } else {
+                    mat3_vec_f64(&from709, rgb.map(|v| v as f64)).map(from_f64)
+                };
+                finite &= result.iter().all(|v| v.is_finite());
+                p.copy_from_slice(&result);
             }
-            p.copy_from_slice(&result);
-            Ok(())
+            finite
         })
+        .reduce(|| true, |a, b| a && b);
+    if !finite {
+        return Err("Prep adjustments produced a non-finite result".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -49,7 +49,12 @@ Preview, Fast export, and Reference export share the same Prep stage. Active
 Prep invalidates source-only GPU upload keys; successive edits cannot reuse
 stale prepared pixels. Reference builds retain the recovered f32 control math
 inside the otherwise f64 pipeline. Whole-frame spatial processing runs on CPU
-before the GPU film stage. Interactive previews apply it at preview resolution.
+(in parallel) before the GPU film stage. Interactive previews apply it at
+preview resolution. The macOS helper keeps the prepared photograph-size and
+interactive frames (`Pipeline::with_prepared_frame`) keyed by everything Prep
+reads, bit for bit: the Prep settings, both exposures before it, the input
+decoding and the frame size. Lab edits that change none of those (print
+exposure, filters, grain, …) skip Prep entirely.
 
 Prep values are saved with the photograph's session and undo history. Film/Lab
 presets preserve the photograph's existing Prep, just as they preserve Post.

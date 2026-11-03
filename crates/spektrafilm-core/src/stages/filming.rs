@@ -405,6 +405,34 @@ pub(crate) fn prepare_input(
     Ok(rgb)
 }
 
+/// [`prepare_input`] of a borrowed frame: the input decoding and both
+/// exposures in one pass into a new buffer, each value rounded in the same
+/// order, then Prep.
+pub(crate) fn prepare_input_from(
+    image: &ImageBuf,
+    params: &RuntimeParams,
+    autoexposure_ev: f64,
+) -> Result<ImageBuf, String> {
+    let cctf = RgbColourspace::input(&params.io.input_color_space).cctf;
+    let decode = params.io.input_cctf_decoding && cctf != colorspace::Cctf::Linear;
+    let scale = (autoexposure_ev != 0.0).then(|| from_f64(autoexposure_ev.exp2()));
+    let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev));
+    let data = image
+        .data
+        .par_iter()
+        .map(|&v| {
+            let mut v = if decode { from_f64(cctf.decode(to_f64(v))) } else { v };
+            if let Some(scale) = scale {
+                v *= scale;
+            }
+            v * exp_comp
+        })
+        .collect();
+    let mut rgb = ImageBuf::from_data(image.width, image.height, data);
+    crate::prep::apply_linear(&mut rgb, &params.prep, &params.io.input_color_space)?;
+    Ok(rgb)
+}
+
 /// Expose: convert RGB to film raw exposure.
 ///
 /// `autoexposure_ev` is the metered compensation (0 with auto exposure off;
