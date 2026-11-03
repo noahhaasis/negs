@@ -11,8 +11,8 @@ through the selected film and paper. Repeating the action replaces that value;
 it does not add exposure to the previous result. The resulting value is saved
 with the edit and used by preview, Fast export and Reference export.
 
-Fresh RAW imports can run this once automatically. The Prep preference controls
-that behavior. Restored sessions retain their saved edits. If a reference is
+Fresh RAW imports can run this once automatically: Settings › Match new RAWs to
+camera brightness, on by default. Restored sessions retain their saved edits. If a reference is
 missing, unusable, or the photo/settings change while analysis runs, the app
 keeps the existing exposure. Manual Prep controls remain available.
 

@@ -582,7 +582,6 @@ struct AdjustmentInspector: View {
             SliderRow(model: model, title: "Exposure (EV)", path: "prep.exposure_ev", range: -3...3, step: 0.05)
             Button(model.placingExposure ? "Matching…" : "Match camera brightness", action: model.matchCameraBrightness)
                 .disabled(!model.canMatchCameraBrightness)
-            Toggle("Match new RAWs to camera brightness", isOn: Binding(get: { model.autoPlaceNewImages }, set: { model.autoPlaceNewImages = $0 }))
             if let message = model.exposurePlacementMessage {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }
