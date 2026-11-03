@@ -139,8 +139,10 @@ final class RenderedPreviewCache: @unchecked Sendable {
 final class LaunchFrame: @unchecked Sendable {
     struct Loaded: @unchecked Sendable {
         var frame: RenderedPreviewCache.Frame
-        var histogram: Histogram
-        var histogramCrop: CropSettings
+        /// Both scopes, counted for this crop and rotation as the frame was read.
+        var scopes: ImageScopes
+        var scopesCrop: CropSettings
+        var scopesRotation: Int
     }
 
     private let done = DispatchSemaphore(value: 0)

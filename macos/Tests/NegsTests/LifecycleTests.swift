@@ -4,10 +4,19 @@ import XCTest
 @testable import NegsApp
 
 @MainActor final class LifecycleTests: XCTestCase {
+    /// Settings › New photographs, restored after each test.
+    private func withFreshEdits(_ fresh: Bool, _ model: EditorModel) -> () -> Void {
+        let saved = UserDefaults.standard.object(forKey: "freshEditsForNewPhotos")
+        model.freshEditsForNewPhotos = fresh
+        return { UserDefaults.standard.set(saved, forKey: "freshEditsForNewPhotos") }
+    }
+
     func testNewPhotographResetsAdjustmentsAndIndividualResetIsUndoable() async throws {
         guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
         let model = EditorModel()
         defer { model.shutdown() }
+        let restore = withFreshEdits(true, model)
+        defer { restore() }
         await model.start(paths: paths(), restoration: Task { nil })
         let first = try makeFixture(), second = try makeFixture()
         defer { try? FileManager.default.removeItem(at: first); try? FileManager.default.removeItem(at: second) }
@@ -38,6 +47,32 @@ import XCTest
         try await waitUntil { model.previewCurrent || model.error != nil }
         XCTAssertNil(model.error)
         XCTAssertTrue(model.previewCurrent)
+    }
+
+    func testKeepingEditsCarriesThemToTheNextPhotographAndBack() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths().helper.path) else { throw XCTSkip("Build the release helper first") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let restore = withFreshEdits(false, model)
+        defer { restore() }
+        await model.start(paths: paths(), restoration: Task { nil })
+        let first = try makeFixture(), second = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: first); try? FileManager.default.removeItem(at: second) }
+        model.open(first)
+        model.set("prep.highlights", .number(-80))
+        model.set("post.contrast", .number(40))
+        model.border(\.enabled).wrappedValue = true
+        // A → B → A: Negs keeps one session, so each selection is a fresh open
+        // that takes the edits of the photograph before it.
+        for url in [second, first] {
+            model.open(url)
+            XCTAssertEqual(model.value("prep.highlights"), .number(-80))
+            XCTAssertEqual(model.value("post.contrast"), .number(40))
+            XCTAssertTrue(model.border.enabled)
+            XCTAssertEqual(model.crop, CropSettings())
+        }
+        try await waitUntil { model.previewCurrent || model.error != nil }
+        XCTAssertNil(model.error)
     }
 
     private func paths() -> EnginePaths {

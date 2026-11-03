@@ -1,3 +1,4 @@
+// From yosoyelchris's Negs fork (`prep-raw-scopes`, d2a144d); see docs/prep.md.
 import CoreGraphics
 import Foundation
 import ImageIO
