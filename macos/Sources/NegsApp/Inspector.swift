@@ -663,7 +663,13 @@ struct AdjustmentInspector: View {
             if model.previews.enabled {
                 StockFoldout(model: model, paper: false)
             } else {
-                Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
+                Picker("Film", selection: Binding(get: { model.film }, set: { model.chooseFilm(StockFoldout.stockID(tag: $0)) })) {
+                    // The favourites first, starred; each stays in its group too. Their
+                    // own tags leave the selection on the group's entry, so the closed
+                    // menu shows the plain name.
+                    Section {
+                        ForEach(model.previews.favorites(in: model.films, paper: false)) { Label($0.name, systemImage: "star.fill").tag(StockFoldout.favoriteID($0.id)) }
+                    }
                     ForEach(model.filmGroups) { group in
                         Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
                     }
@@ -676,7 +682,10 @@ struct AdjustmentInspector: View {
                 if model.previews.enabled {
                     StockFoldout(model: model, paper: true)
                 } else {
-                    Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
+                    Picker("Paper", selection: Binding(get: { model.paper }, set: { model.choosePaper(StockFoldout.stockID(tag: $0)) })) {
+                        Section {
+                            ForEach(model.previews.favorites(in: model.papers, paper: true)) { Label($0.name, systemImage: "star.fill").tag(StockFoldout.favoriteID($0.id)) }
+                        }
                         ForEach(model.paperGroups) { group in
                             Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
                         }
