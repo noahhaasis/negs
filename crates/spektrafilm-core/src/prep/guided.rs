@@ -5,6 +5,7 @@
 //! shipped ImageFilters source. This preserves the observed schedule, radius,
 //! edge replication and coefficient equations, not GPU/MPS rounding bit-for-bit.
 //! It requires the complete frame: using a cropped tile changes its context.
+//! From yosoyelchris's Negs fork (`prep-raw-scopes`, d2a144d); see docs/prep.md.
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 

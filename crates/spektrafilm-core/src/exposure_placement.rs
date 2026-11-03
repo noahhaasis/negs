@@ -2,6 +2,7 @@
 //! The verified camera preview supplies luminance intent, not colour or a
 //! fitted curve. The result is an absolute Prep exposure, independent of the
 //! previous placement and excluded from camera/print exposure compensation.
+//! From yosoyelchris's Negs fork (`prep-raw-scopes`, d2a144d); see docs/prep.md.
 use crate::{
     pipeline::{Pipeline, clip_to_display},
     preview,

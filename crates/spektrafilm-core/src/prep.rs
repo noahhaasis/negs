@@ -4,6 +4,7 @@
 //! This is control-math parity, not decoder or complete Resolve-render parity.
 //! The self-guided base needs the complete frame, never independently cropped tiles.
 //! Arithmetic stays f32 in reference builds, matching Sawmill's recovered core.
+//! From yosoyelchris's Negs fork (`prep-raw-scopes`, d2a144d); see docs/prep.md.
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use spektrafilm_math::{
@@ -15,8 +16,12 @@ mod guided;
 
 /// Zero is an exact bypass. Exposure is scene placement in stops; Highlights
 /// has Sawmill's extended negative travel and the other controls use -100..100.
+///
+/// Deserializing validates: params from the app, CLI, presets or the web
+/// worker can't carry an out-of-range Prep into the render, where the film
+/// exposure has no error path.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, try_from = "UncheckedPrepParams")]
 pub struct PrepParams {
     /// Absolute scene placement after camera metering/EV, before recovered
     /// controls. Unlike camera EV, this is excluded from print compensation.
@@ -29,6 +34,40 @@ pub struct PrepParams {
     pub color_boost: f32,
     pub saturation: f32,
     pub midtone_detail: f32,
+}
+
+/// [`PrepParams`] as read, before validation.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct UncheckedPrepParams {
+    exposure_ev: f32,
+    highlights: f32,
+    shadows: f32,
+    contrast: f32,
+    lift: f32,
+    gain: f32,
+    color_boost: f32,
+    saturation: f32,
+    midtone_detail: f32,
+}
+
+impl TryFrom<UncheckedPrepParams> for PrepParams {
+    type Error = String;
+    fn try_from(p: UncheckedPrepParams) -> Result<Self, String> {
+        let params = PrepParams {
+            exposure_ev: p.exposure_ev,
+            highlights: p.highlights,
+            shadows: p.shadows,
+            contrast: p.contrast,
+            lift: p.lift,
+            gain: p.gain,
+            color_boost: p.color_boost,
+            saturation: p.saturation,
+            midtone_detail: p.midtone_detail,
+        };
+        params.validate()?;
+        Ok(params)
+    }
 }
 
 impl PrepParams {
@@ -305,6 +344,15 @@ mod tests {
     use super::*;
     // Generated from the unchanged shipped shader core, compiled as an independent
     // C++ oracle. See rawcontrols-trace-oracle.py and its provenance receipt.
+    #[test]
+    fn deserializing_rejects_invalid_values() {
+        let ok: PrepParams = serde_json::from_str(r#"{"highlights": -180}"#).unwrap();
+        assert_eq!(ok.highlights, -180.0);
+        assert!(serde_json::from_str::<PrepParams>(r#"{"gain": 101}"#).is_err());
+        assert!(serde_json::from_str::<PrepParams>(r#"{"exposure_ev": 3.5}"#).is_err());
+        assert!(serde_json::from_str::<crate::params::RuntimeParams>(r#"{"prep": {"lift": -101}}"#).is_err());
+    }
+
     #[test]
     fn controls_match_shipped_source_goldens() {
         let cases: [([f32; 8], [f32; 3]); 16] = [
