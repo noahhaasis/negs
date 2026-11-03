@@ -146,6 +146,62 @@ is on for each newly opened photograph and after Reset Adjustments, off for sess
 before it, and kept when a preset is applied. Details:
 [lens-corrections-plan.md](lens-corrections-plan.md#windows-ui-done-2026-11-02).
 
+## Tone graph (prototype)
+
+A port of the Mac's ticket 20 prototype (`d351348`, `ToneGraph.swift`). Print Curves opens
+with a graph of the paper's response to a ramp of greys. Behind it is the photograph's film
+exposure, which comes from the render's `film_histogram`. The RGB, R, G and B buttons show the
+neutral curve or one layer; the choice is the `toneGraphChannel` preference. Drag the yellow
+middle handle sideways to set Print exposure. Drag a side handle up or down to set Slow or
+Fast gamma, or drag the curve anywhere else to set Gamma. A contrast drag also turns Print
+Curves on. Each drag is one `Change Tone Curve` undo step, and double-clicking a handle resets
+it. The cursor shows which way a handle moves.
+
+![Tone graph on a D750 NEF](windows-tone-graph.png)
+
+`src/tone_graph.rs` holds the logic, kept free of windows so it can be tested. It covers
+parsing the helper's `tone_curve` reply and the histogram, the local prediction, the handle
+geometry, hit testing and the drag solve, all ported line for line. `ui/tone_graph.rs` is the
+window. GDI only draws aliased lines, so the window draws into a pixel buffer with
+antialiased strokes and composites it the way the histogram does. The inspector row holds the
+label and the buttons.
+
+The model asks for a curve only while the graph is on screen. That means Print Curves is
+expanded, Adjustments is shown, the Lab tab is open and no crop is in progress, and the
+helper advertises `tone_curve`. Only one request runs at a time. Edits made while it runs set
+a stale flag, so the curve is requested again when the answer arrives. An identical request is
+never sent twice. While a drag waits for the next curve, the last curve is predicted to the
+current controls. That curve is drawn dimmed if anything else changed since it was computed,
+such as the film, paper or filters. A failed reply keeps the last curve. Opening another
+photograph clears the histogram at once, and renders of an earlier photograph are already
+dropped. While the film is scanned directly, the graph is disabled and dimmed with the print
+groups.
+
+Limitations, as upstream: the histogram ignores the crop and spatial effects, and the curve
+hasn't been checked against the GPU render. Toe and shoulder drags are sensitive and
+approximate. In the release app, dragging the shadows handle 25 px took Slow gamma to its
+0.5 limit. Once the helper's curve for the new value arrived, the handle sat a few pixels
+short of the pointer, because the engine's slow and fast gammas change the print less than the
+prediction's scaling of paper exposure assumes. Doubling print exposure also pushes the
+deepest shadows beyond the last curve's paper exposure. The prediction holds the darkest
+value it knows there, about 0.01 too bright, until the next curve arrives.
+
+Validation (2026-11-03, this machine, helper rebuilt from `f0d0ff9`): 101 Windows tests pass,
+13 of them new. Eight test the pure rules: prediction exact for print exposure and gamma on a
+linear curve, handle placement, hit testing, the middle drag, the curve and side-handle solves,
+and malformed replies. Three test the drawing. One tests the histogram across a photo change.
+The last drives the model with the release helper. It checks that one request runs at a time,
+that an edit meanwhile re-asks on the answer, that a failed reply keeps the curve, and that the
+predicted curve for print exposure 2 is within 0.002 of the helper's own wherever the shifted
+paper exposure is one the last curve reached.
+
+In the release app (`NEGS_PROFILE_DIR` profile, D750 NEF, driven by synthetic input) each
+of the four drags moved only its own control. The middle handle moved one stop gave Print
+exposure 1.47. Undo and redo stepped one drag at a time, and a contrast drag's automatic
+Print Curves On was undone with it. Double-clicking reset Print exposure. Hover labels named
+each handle. R emphasised the red layer and was saved. Scanning film directly disabled the
+graph. Collapsing Print Curves hid it.
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,

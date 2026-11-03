@@ -21,6 +21,7 @@ mod session;
 mod state;
 mod text;
 mod thumbnail;
+mod tone_graph;
 mod ui;
 mod updates;
 
