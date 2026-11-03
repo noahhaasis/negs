@@ -163,10 +163,10 @@ struct UpdateSettings: View {
                  ? "Each photograph you open starts with default Prep and Lab settings and no border. The film, paper, Image Size and output colour stay."
                  : "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Match new RAWs to camera brightness", isOn: Binding(
+            Toggle("Match new photographs to camera brightness", isOn: Binding(
                 get: { model.autoPlaceNewImages }, set: { model.autoPlaceNewImages = $0 }))
                 .padding(.top, 8)
-            Text("Opening a RAW sets Prep › Exposure so the photograph is about as bright as the camera's own preview.")
+            Text("New photographs start with Prep › Match camera brightness on: a RAW develops about as bright as the camera's own preview, a JPEG or TIFF as the file itself.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 8)
             Toggle("Limit preview to 12 MP", isOn: Binding(

@@ -5,26 +5,6 @@ import XCTest
 @testable import NegsApp
 
 final class ExposurePlacementTests: XCTestCase {
-    func testOnlyFreshRawSelectionGetsOneAutomaticAttempt() {
-        var gate = ExposurePlacementGate()
-        gate.opened(generation: 1, restored: false, raw: true, enabled: true)
-        XCTAssertTrue(gate.takeAutomatic(generation: 1, raw: true, enabled: true))
-        XCTAssertFalse(gate.takeAutomatic(generation: 1, raw: true, enabled: true))
-        for (restored, raw, enabled) in [(true, true, true), (false, false, true), (false, true, false)] {
-            gate.opened(generation: 2, restored: restored, raw: raw, enabled: enabled)
-            XCTAssertFalse(gate.takeAutomatic(generation: 2, raw: true, enabled: true))
-        }
-    }
-
-    func testEditDuringLoadAndOlderRenderCannotTriggerAutomaticPlacement() {
-        var gate = ExposurePlacementGate()
-        gate.opened(generation: 2, restored: false, raw: true, enabled: true)
-        XCTAssertFalse(gate.takeAutomatic(generation: 1, raw: true, enabled: true))
-        XCTAssertEqual(gate.automaticGeneration, 2, "An old render must not consume a new photograph's attempt")
-        gate.edited()
-        XCTAssertFalse(gate.takeAutomatic(generation: 2, raw: true, enabled: true))
-    }
-
     func testReferenceDoesNotGenerateThumbnailWhenNoneIsEmbedded() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -98,6 +78,53 @@ final class ExposurePlacementTests: XCTestCase {
         XCTAssertEqual(image.colorSpace?.name, CGColorSpace.sRGB)
         XCTAssertThrowsError(try CameraBrightnessReference.png(from: URL(fileURLWithPath: path), expectedSize: CGSize(width: 3, height: 4)))
     }
+
+    private func writeImage(_ image: CGImage, to url: URL, type: UTType, properties: [CFString: Any] = [:]) throws {
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+    private func gradient(width: Int, height: Int, space: CGColorSpace, alpha: Bool = false) throws -> CGImage {
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: space, bitmapInfo: (alpha ? CGImageAlphaInfo.premultipliedLast : .noneSkipLast).rawValue))
+        for x in 0..<width {
+            context.setFillColor(CGColor(colorSpace: space, components: [CGFloat(x) / CGFloat(width), 0.5, 0.3, alpha ? 0.5 : 1])!)
+            context.fill(CGRect(x: x, y: 0, width: 1, height: height))
+        }
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    /// Non-RAW files are their own reference: any profile, read into a
+    /// bounded sRGB PNG; the EXIF orientation is applied, as the engine does.
+    func testFileReferenceReadsProfilesAndOrientation() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let p3 = directory.appendingPathComponent("p3.jpg")
+        try writeImage(try gradient(width: 1200, height: 800, space: CGColorSpace(name: CGColorSpace.displayP3)!), to: p3, type: .jpeg)
+        let data = try CameraBrightnessReference.filePNG(from: p3, expectedSize: CGSize(width: 1200, height: 800))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil)), 0, nil))
+        XCTAssertEqual([image.width, image.height], [512, 341])
+        XCTAssertEqual(image.colorSpace?.name, CGColorSpace.sRGB)
+        // Stored landscape, shown portrait (orientation 6): the engine's source is portrait.
+        let rotated = directory.appendingPathComponent("rotated.jpg")
+        try writeImage(try gradient(width: 600, height: 400, space: CGColorSpace(name: CGColorSpace.sRGB)!), to: rotated, type: .jpeg,
+                       properties: [kCGImagePropertyOrientation: 6])
+        XCTAssertNoThrow(try CameraBrightnessReference.filePNG(from: rotated, expectedSize: CGSize(width: 400, height: 600)))
+        XCTAssertThrowsError(try CameraBrightnessReference.filePNG(from: rotated, expectedSize: CGSize(width: 600, height: 400)))
+    }
+
+    func testTransparentFilesAreNotMatched() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("alpha.png")
+        try writeImage(try gradient(width: 200, height: 100, space: CGColorSpace(name: CGColorSpace.sRGB)!, alpha: true), to: url, type: .png)
+        XCTAssertThrowsError(try CameraBrightnessReference.filePNG(from: url, expectedSize: CGSize(width: 200, height: 100))) {
+            XCTAssertEqual(CameraBrightnessReference.failure($0).message, "Transparent images can’t be matched.")
+            XCTAssertTrue(CameraBrightnessReference.failure($0).forPhoto)
+        }
+    }
 }
 
 @MainActor final class ExposurePlacementLifecycleTests: XCTestCase {
@@ -106,131 +133,171 @@ final class ExposurePlacementTests: XCTestCase {
         return EnginePaths(helper: root.appendingPathComponent("target/release/spektrafilm-native"), exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: root.appendingPathComponent("data"))
     }
 
-    func testFreshRawIsMatchedOnceAndRestoredExposureIsPreserved() async throws {
+    /// Settings for a test: auto-match on, fresh edits, restored afterwards.
+    private func preferences(_ model: EditorModel, match: Bool = true) -> () -> Void {
+        let defaults = UserDefaults.standard
+        let saved = ["autoPlaceNewImages", "freshEditsForNewPhotos"].map { ($0, defaults.object(forKey: $0)) }
+        model.autoPlaceNewImages = match
+        model.freshEditsForNewPhotos = true
+        return { for (key, value) in saved { defaults.set(value, forKey: key) } }
+    }
+    private func settled(_ model: EditorModel) async throws {
+        try await waitUntil { model.error != nil || model.previewCurrent && !model.matchingBrightness && !model.brightnessMatchPending }
+        try await Task.sleep(for: .milliseconds(100))
+        try await waitUntil { model.error != nil || model.previewCurrent && !model.matchingBrightness && !model.brightnessMatchPending }
+        XCTAssertNil(model.error)
+    }
+    private func offset(_ model: EditorModel) -> Double { model.exposureOffset.wrappedValue }
+    private func total(_ model: EditorModel) -> Double { model.value("prep.exposure_ev").double }
+
+    func testNewRawIsMatchedAndTheMatchIsSavedWithTheSession() async throws {
         guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW"] else { throw XCTSkip("Set NEGS_TEST_RAW") }
-        let defaults = UserDefaults.standard, savedPreference = UserDefaults.standard.object(forKey: "autoPlaceNewImages")
-        defer { defaults.set(savedPreference, forKey: "autoPlaceNewImages") }
         let model = EditorModel()
         defer { model.shutdown() }
-        model.autoPlaceNewImages = true
-        let savedFresh = defaults.object(forKey: "freshEditsForNewPhotos")
-        defer { defaults.set(savedFresh, forKey: "freshEditsForNewPhotos") }
-        model.freshEditsForNewPhotos = true
+        let restore = preferences(model)
+        defer { restore() }
         await model.start(paths: paths(), restoration: Task { nil })
-        XCTAssertEqual(model.defaultValue("prep.exposure_ev"), .number(0))
         model.setLongestSide(512)
-        model.set("prep.exposure_ev", .number(-1))
         model.open(URL(fileURLWithPath: path))
-        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0), "New photographs start with no inherited exposure placement")
-        try await waitUntil { model.exposurePlacementMessage != nil || model.error != nil }
-        try await waitUntil { !model.placingExposure && model.previewCurrent || model.error != nil }
-        XCTAssertNil(model.error)
-        XCTAssertTrue(model.exposurePlacementMessage?.hasPrefix("Matched") == true, model.exposurePlacementMessage ?? "No automatic match")
-        let matched = model.value("prep.exposure_ev")
-        model.set("prep.shadows", .number(10))
-        try await waitUntil { model.previewCurrent || model.error != nil }
-        XCTAssertEqual(model.value("prep.exposure_ev"), matched, "A later render must not repeat or compound the match")
-        var session = try XCTUnwrap(model.session)
-        session.state.params["prep.exposure_ev"] = .number(1.25)
+        XCTAssertTrue(model.matchesBrightness)
+        try await settled(model)
+        let ev = try XCTUnwrap(model.state.brightnessMatch?.ev)
+        XCTAssertEqual(total(model), ev, accuracy: 1e-9)
+        XCTAssertEqual(offset(model), 0, accuracy: 1e-9)
+        XCTAssertFalse(model.exposureOffsetModified)
+        XCTAssertTrue(model.brightnessMatchNote?.hasPrefix("Starts at") == true, model.brightnessMatchNote ?? "No note")
+        // Prep edits never re-solve.
+        model.set("prep.shadows", .number(30))
+        model.exposureOffset.wrappedValue = 0.5
+        try await settled(model)
+        XCTAssertEqual(model.state.brightnessMatch?.ev, ev)
+        XCTAssertEqual(offset(model), 0.5, accuracy: 1e-9)
+        XCTAssertTrue(model.exposureOffsetModified)
+
+        let session = try XCTUnwrap(model.session)
         let restored = EditorModel()
         defer { restored.shutdown() }
         await restored.start(paths: paths(), restoration: Task { session })
-        try await waitUntil { restored.previewCurrent || restored.error != nil }
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertNil(restored.error)
-        XCTAssertEqual(restored.value("prep.exposure_ev"), .number(1.25))
-        XCTAssertNil(restored.exposurePlacementMessage, "Restoring a saved edit must never auto-match")
+        try await settled(restored)
+        XCTAssertEqual(restored.state.brightnessMatch, model.state.brightnessMatch, "A current match restores without a new solve")
+        XCTAssertEqual(total(restored), total(model), accuracy: 1e-9)
     }
 
-    func testEditingDuringLoadSuppressesAutoAndManualStaleResult() async throws {
+    /// Changing the film re-solves the match and keeps the user's exposure
+    /// above it; Undo restores the film together with its match.
+    func testFilmChangeReSolvesKeepingTheOffsetAndUndoRestoresBoth() async throws {
         guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW"] else { throw XCTSkip("Set NEGS_TEST_RAW") }
-        let defaults = UserDefaults.standard, savedPreference = UserDefaults.standard.object(forKey: "autoPlaceNewImages")
-        defer { defaults.set(savedPreference, forKey: "autoPlaceNewImages") }
         let model = EditorModel()
         defer { model.shutdown() }
-        model.autoPlaceNewImages = true
+        let restore = preferences(model)
+        defer { restore() }
         await model.start(paths: paths(), restoration: Task { nil })
         model.setLongestSide(512)
         model.open(URL(fileURLWithPath: path))
-        model.set("prep.shadows", .number(10))
-        try await waitUntil { model.previewCurrent || model.error != nil }
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertNil(model.error)
-        XCTAssertNil(model.exposurePlacementMessage)
-        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
-        model.matchCameraBrightness()
-        XCTAssertTrue(model.placingExposure)
-        XCTAssertTrue(model.canSave, "Analysing brightness must keep the finished preview saveable")
-        model.set("prep.exposure_ev", .number(-0.5))
-        try await waitUntil { !model.placingExposure }
-        XCTAssertEqual(model.value("prep.exposure_ev"), .number(-0.5), "A pending match must not replace a newer manual edit")
-        XCTAssertEqual(model.value("prep.shadows"), .number(10))
-    }
-
-    /// An edit and its Undo restore an equal state, but the match was made
-    /// for the photograph as it was before them: it must not be applied.
-    func testEditThenUndoDuringMatchSkipsItAndUndoMatchDoesNotRematch() async throws {
-        guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW"] else { throw XCTSkip("Set NEGS_TEST_RAW") }
-        let defaults = UserDefaults.standard, savedPreference = defaults.object(forKey: "autoPlaceNewImages")
-        defer { defaults.set(savedPreference, forKey: "autoPlaceNewImages") }
-        let model = EditorModel()
-        defer { model.shutdown() }
-        model.autoPlaceNewImages = false
-        await model.start(paths: paths(), restoration: Task { nil })
-        model.setLongestSide(512)
-        model.open(URL(fileURLWithPath: path))
-        try await waitUntil { model.previewCurrent || model.error != nil }
-        XCTAssertNil(model.error)
+        try await settled(model)
         let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
-        model.matchCameraBrightness()
-        XCTAssertTrue(model.placingExposure)
-        undo.beginUndoGrouping()
-        model.border(\.enabled).wrappedValue = !model.border.enabled
-        undo.endUndoGrouping()
+        undo.beginUndoGrouping(); model.exposureOffset.wrappedValue = 0.3; undo.endUndoGrouping()
+        let before = model.state
+        undo.beginUndoGrouping(); model.choosePaper("kodak_2302"); undo.endUndoGrouping()
+        try await settled(model)
+        let match = try XCTUnwrap(model.state.brightnessMatch)
+        XCTAssertEqual(match.inputs, model.matchInputs(model.state))
+        XCTAssertEqual(offset(model), 0.3, accuracy: 1e-9)
+        XCTAssertGreaterThan(abs((match.ev ?? 0) - (before.brightnessMatch?.ev ?? 0)), 0.05, "This paper prints much brighter")
         undo.undo()
-        try await waitUntil { !model.placingExposure }
-        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
-        XCTAssertEqual(model.exposurePlacementMessage, "Adjustments changed; brightness match skipped.")
+        XCTAssertEqual(model.state, before)
+        try await settled(model)
+        XCTAssertEqual(model.state, before, "A restored state with a current match isn't solved again")
+    }
 
-        // The match is applied later, so its group stays open until then
-        // (an ungrouped registration raises with groupsByEvent off).
-        undo.beginUndoGrouping()
-        model.matchCameraBrightness()
-        try await waitUntil { !model.placingExposure }
-        undo.endUndoGrouping()
-        XCTAssertTrue(model.exposurePlacementMessage?.hasPrefix("Matched") == true, model.exposurePlacementMessage ?? "No match")
+    /// An edit made while a solve is pending, then undone: the restored
+    /// state's match is stale, so it is solved again and stays consistent.
+    func testEditDuringASolveAndItsUndoConverge() async throws {
+        guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW"] else { throw XCTSkip("Set NEGS_TEST_RAW") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let restore = preferences(model)
+        defer { restore() }
+        await model.start(paths: paths(), restoration: Task { nil })
+        model.setLongestSide(512)
+        model.open(URL(fileURLWithPath: path))
+        try await settled(model)
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        undo.beginUndoGrouping(); model.choosePaper("kodak_2302"); undo.endUndoGrouping()
+        undo.beginUndoGrouping(); model.set("prep.highlights", .number(-40)); undo.endUndoGrouping()
+        try await settled(model)
+        let solved = try XCTUnwrap(model.state.brightnessMatch)
+        XCTAssertEqual(solved.inputs, model.matchInputs(model.state))
         undo.undo()
-        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
-        try await waitUntil { model.previewCurrent || model.error != nil }
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertFalse(model.placingExposure, "Undoing a match must not start another")
-        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
+        XCTAssertEqual(model.value("prep.highlights"), .number(0))
+        try await settled(model)
+        XCTAssertEqual(model.state.brightnessMatch?.inputs, model.matchInputs(model.state))
+        XCTAssertEqual(offset(model), 0, accuracy: 1e-9)
+        XCTAssertEqual(model.state.brightnessMatch?.ev ?? 0, solved.ev ?? 0, accuracy: 0.05)
+    }
+
+    func testTurningMatchingOffKeepsTheBrightnessAndShowsTheMeter() async throws {
+        guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW"] else { throw XCTSkip("Set NEGS_TEST_RAW") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let restore = preferences(model)
+        defer { restore() }
+        await model.start(paths: paths(), restoration: Task { nil })
+        model.setLongestSide(512)
+        model.open(URL(fileURLWithPath: path))
+        try await settled(model)
+        let matched = total(model)
+        model.setMatchesBrightness(false)
+        XCTAssertFalse(model.brightnessMatchActive)
+        XCTAssertEqual(total(model), matched, accuracy: 1e-9)
+        XCTAssertEqual(offset(model), matched, accuracy: 1e-9, "Off, Exposure shows all of it")
+        model.choosePaper("kodak_2302")
+        try await settled(model)
+        XCTAssertEqual(total(model), matched, accuracy: 1e-9, "Off, nothing re-solves")
+        model.setMatchesBrightness(true)
+        XCTAssertEqual(total(model), 0)
+        try await settled(model)
+        XCTAssertEqual(offset(model), 0, accuracy: 1e-9)
+        XCTAssertNotNil(model.state.brightnessMatch?.ev)
     }
 
     /// Optional: a RAW without an embedded preview (the Sigma fp's DNG on
-    /// raw.pixls.us). The automatic match fails quietly: the button stays off
-    /// for this photograph, edits included, with the reason under it.
+    /// raw.pixls.us). Matching is unavailable for the photograph, with the
+    /// reason, and the meter shows.
     func testRawWithoutPreviewDisablesMatchingForThePhoto() async throws {
         guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW_NO_PREVIEW"] else { throw XCTSkip("Set NEGS_TEST_RAW_NO_PREVIEW") }
-        let defaults = UserDefaults.standard, savedPreference = defaults.object(forKey: "autoPlaceNewImages")
-        defer { defaults.set(savedPreference, forKey: "autoPlaceNewImages") }
         let model = EditorModel()
         defer { model.shutdown() }
-        model.autoPlaceNewImages = true
+        let restore = preferences(model)
+        defer { restore() }
         await model.start(paths: paths(), restoration: Task { nil })
         model.setLongestSide(512)
         model.open(URL(fileURLWithPath: path))
-        try await waitUntil { model.exposurePlacementFailureMessage != nil || model.error != nil }
-        try await waitUntil { model.previewCurrent && !model.placingExposure || model.error != nil }
-        XCTAssertNil(model.error)
-        XCTAssertEqual(model.exposurePlacementFailureMessage, "This RAW has no camera preview to match.")
-        XCTAssertNil(model.exposurePlacementMessage)
-        XCTAssertFalse(model.canMatchCameraBrightness)
-        XCTAssertEqual(model.value("prep.exposure_ev"), .number(0))
+        try await settled(model)
+        XCTAssertEqual(model.brightnessMatchUnavailable, "This RAW has no camera preview to match.")
+        XCTAssertFalse(model.brightnessMatchActive)
+        XCTAssertTrue(model.canSave)
+        XCTAssertEqual(total(model), 0)
         model.set("prep.shadows", .number(10))
-        try await waitUntil { model.previewCurrent || model.error != nil }
-        XCTAssertFalse(model.canMatchCameraBrightness, "Another try can't find a preview either")
-        XCTAssertNotNil(model.exposurePlacementFailureMessage)
+        try await settled(model)
+        XCTAssertNotNil(model.brightnessMatchUnavailable, "Another try can't find a preview either")
+    }
+
+    /// Optional: a real JPEG (`NEGS_TEST_JPEG`) is matched to itself.
+    func testJPEGIsMatchedToItself() async throws {
+        guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_JPEG"] else { throw XCTSkip("Set NEGS_TEST_JPEG") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let restore = preferences(model)
+        defer { restore() }
+        await model.start(paths: paths(), restoration: Task { nil })
+        model.setLongestSide(512)
+        model.open(URL(fileURLWithPath: path))
+        try await settled(model)
+        XCTAssertNil(model.brightnessMatchUnavailable)
+        XCTAssertNotNil(model.state.brightnessMatch?.ev, model.brightnessMatchNote ?? "No note")
+        XCTAssertTrue(model.brightnessMatchNote?.hasSuffix("match the original.") == true
+                      || model.brightnessMatchNote?.contains("held back") == true, model.brightnessMatchNote ?? "No note")
     }
 
     func testEngineReasonsBecomeShortNotes() {

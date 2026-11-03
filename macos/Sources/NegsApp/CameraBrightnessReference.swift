@@ -52,6 +52,43 @@ enum CameraBrightnessReference {
               sourceSpace.copyICCData() != nil else {
             throw CameraPreviewUnusable(message: "The camera preview has no color profile.")
         }
+        return try encoded(preview, unusable: "The camera preview couldn’t be read.")
+    }
+
+    /// A JPEG, PNG or TIFF as its own brightness reference: the file is what
+    /// the camera (or the editor before Negs) made, so the developed photo
+    /// should be about as bright. Read through ImageIO with its colour
+    /// profile, untagged as sRGB, as the engine's Automatic reading does.
+    /// Transparent and floating-point files are refused: the engine drops
+    /// alpha and reads untagged floats as linear, which ImageIO doesn't.
+    static func filePNG(from url: URL, expectedSize: CGSize) throws -> Data {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            throw CameraPreviewUnusable(message: "The photograph couldn’t be read for matching.")
+        }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        if (properties?[kCGImagePropertyHasAlpha] as? NSNumber)?.boolValue == true {
+            throw CameraPreviewUnusable(message: "Transparent images can’t be matched.")
+        }
+        if (properties?[kCGImagePropertyIsFloat] as? NSNumber)?.boolValue == true {
+            throw CameraPreviewUnusable(message: "Floating-point images can’t be matched.")
+        }
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 512,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary),
+              image.width >= 2, image.height >= 2, expectedSize.width > 0, expectedSize.height > 0 else {
+            throw CameraPreviewUnusable(message: "The photograph couldn’t be read for matching.")
+        }
+        guard sameShape(Double(image.width) / Double(image.height), expectedSize.width / expectedSize.height) else {
+            throw CameraPreviewUnusable(message: "The photograph’s orientation couldn’t be matched.")
+        }
+        return try encoded(image, unusable: "The photograph couldn’t be read for matching.")
+    }
+
+    /// At most 512 px, 8-bit sRGB PNG, as the helper's reference.
+    private static func encoded(_ preview: CGImage, unusable: String) throws -> Data {
         let scale = min(1, 512.0 / Double(max(preview.width, preview.height)))
         let width = max(1, Int((Double(preview.width) * scale).rounded()))
         let height = max(1, Int((Double(preview.height) * scale).rounded()))
@@ -59,20 +96,20 @@ enum CameraBrightnessReference {
               let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                 bytesPerRow: width * 4, space: sRGB,
                 bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else {
-            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
+            throw CameraPreviewUnusable(message: unusable)
         }
         context.interpolationQuality = .high
         context.draw(preview, in: CGRect(x: 0, y: 0, width: width, height: height))
         guard let image = context.makeImage() else {
-            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
+            throw CameraPreviewUnusable(message: unusable)
         }
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
-            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
+            throw CameraPreviewUnusable(message: unusable)
         }
         CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: 1] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
-            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
+            throw CameraPreviewUnusable(message: unusable)
         }
         return data as Data
     }
@@ -127,20 +164,3 @@ enum CameraBrightnessReference {
         return image.cropping(to: CGRect(x: left, y: top, width: inside.width, height: inside.height))
     }
 }
-
-/// A fresh selection receives at most one automatic attempt. Restoration and
-/// user edits never become eligible again when a render finishes or is retried.
-struct ExposurePlacementGate {
-    private(set) var automaticGeneration: Int?
-
-    mutating func opened(generation: Int, restored: Bool, raw: Bool, enabled: Bool) {
-        automaticGeneration = !restored && raw && enabled ? generation : nil
-    }
-    mutating func edited() { automaticGeneration = nil }
-    mutating func takeAutomatic(generation: Int, raw: Bool, enabled: Bool) -> Bool {
-        guard automaticGeneration == generation else { return false }
-        automaticGeneration = nil
-        return raw && enabled
-    }
-}
-

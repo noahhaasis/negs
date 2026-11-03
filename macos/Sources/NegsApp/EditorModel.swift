@@ -92,28 +92,15 @@ import UniformTypeIdentifiers
     private(set) var saving = false
     private(set) var exporting = false
     private(set) var exportStarted = Date()
-    private(set) var placingExposure = false
-    private(set) var exposurePlacementMessage: String?
-    /// A failed match that trying again can't change. A preview problem holds
-    /// for the photograph (`edits` nil); no reliable answer holds until an edit.
-    private var exposurePlacementFailure: (generation: Int, edits: Int?, message: String)?
-    private var exposurePlacementBlocked: Bool {
-        guard let failure = exposurePlacementFailure, failure.generation == sourceGeneration else { return false }
-        return failure.edits.map { $0 == editCount } ?? true
-    }
-    /// Why Match camera brightness is unavailable, shown under the button.
-    var exposurePlacementFailureMessage: String? { exposurePlacementBlocked ? exposurePlacementFailure?.message : nil }
+    /// A brightness solve is with the helper.
+    private(set) var matchingBrightness = false
+    /// A failed solve that trying again can't change: for the photograph
+    /// (`inputs` nil, e.g. no camera preview) or for these match inputs.
+    private(set) var brightnessMatchFailure: (generation: Int, inputs: JSONValue?, message: String)?
+    /// Settings › Match new photographs to camera brightness: whether a new
+    /// photograph starts with Prep › Match camera brightness on.
     var autoPlaceNewImages = UserDefaults.standard.object(forKey: "autoPlaceNewImages") as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages")
-            if !autoPlaceNewImages {
-                exposurePlacementGate.edited()
-                if exposurePlacementAutomatic {
-                    exposurePlacementTask?.cancel(); exposurePlacementTask = nil; exposurePlacementID = nil
-                    exposurePlacementAutomatic = false; placingExposure = false
-                }
-            }
-        }
+        didSet { UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages") }
     }
     /// Settings › New photographs: Start fresh (true, the default) or keep the
     /// previous photograph's edits (false, as earlier versions did). A
@@ -157,14 +144,9 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var exportJob: ExportJob?
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var sourceGeneration = 0
-    @ObservationIgnored private var exposurePlacementGate = ExposurePlacementGate()
-    @ObservationIgnored private var exposurePlacementTask: Task<Void, Never>?
-    @ObservationIgnored private var exposurePlacementID: UUID?
-    @ObservationIgnored private var exposurePlacementAutomatic = false
-    /// Counts the user's edits, Undo and Redo included, and drags as they
-    /// start. A camera brightness match started at one count is dropped at
-    /// another, even if an Undo restored an equal state meanwhile.
-    @ObservationIgnored private var editCount = 0
+    /// The one brightness solve in flight; its completion looks again.
+    @ObservationIgnored private var matchTask: Task<Void, Never>?
+    @ObservationIgnored private var matchRequest: UUID?
     @ObservationIgnored private var renderID = 0
     /// The last render is at export size: saving it gives the same file as
     /// a Fast export, byte for byte.
@@ -508,7 +490,7 @@ import UniformTypeIdentifiers
     }
 
     func beginInteraction() {
-        if interactionStart == nil { interactionStart = state; editCount += 1 }
+        if interactionStart == nil { interactionStart = state }
         hideActivity()
     }
     func endInteraction(action: String = "Change Adjustment") {
@@ -563,6 +545,7 @@ import UniformTypeIdentifiers
     func reset() {
         guard !cropping else { return }
         var next = state; next.params = defaults
+        next.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
         next.params[ImageSize.targetPath] = state.params[ImageSize.targetPath]
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
@@ -578,11 +561,11 @@ import UniformTypeIdentifiers
     private func replaceState(_ next: EditState) {
         guard !closing else { return }
         let next = withPreferences(next)
-        if next != state { editCount += 1; exposurePlacementGate.edited(); exposurePlacementMessage = nil }
         let render = next.rendered != state.rendered
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
         if render { changed() } else { pumpPreviews() }
+        reconcileBrightnessMatch()
     }
     private func registerUndo(restoring previous: EditState, action: String) {
         undoManager?.registerUndo(withTarget: self) { model in
@@ -718,8 +701,7 @@ import UniformTypeIdentifiers
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
-        exposurePlacementTask?.cancel(); exposurePlacementTask = nil; exposurePlacementID = nil
-        placingExposure = false; exposurePlacementAutomatic = false; exposurePlacementMessage = nil
+        cancelBrightnessMatch(); brightnessMatchFailure = nil
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
@@ -747,6 +729,9 @@ import UniformTypeIdentifiers
             state = withPreferences(restored)
             inspectorVisible = session.inspectorVisible
         } else {
+            // The exposure the user set above the previous photograph's match
+            // carries with Keep the previous edits; the match is solved anew.
+            let previousOffset = state.params["prep.exposure_ev"].double - (state.brightnessMatch?.ev ?? 0)
             if freshEditsForNewPhotos {
                 // Film/paper and output preferences belong to the workflow;
                 // the previous photograph's Prep, Lab and Post edits do not.
@@ -763,9 +748,10 @@ import UniformTypeIdentifiers
             if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
             state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
             state.crop = CropSettings()
+            state.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
+            if !freshEditsForNewPhotos { state.params["prep.exposure_ev"] = .number(min(3, max(-3, previousOffset))) }
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
-        exposurePlacementGate.opened(generation: generation, restored: session != nil, raw: isRaw, enabled: autoPlaceNewImages)
         undoManager?.removeAllActions()
         zoom(fit: session?.fitImage ?? true)
         recentFiles.removeAll { $0 == url }; recentFiles.insert(url, at: 0)
@@ -941,8 +927,6 @@ import UniformTypeIdentifiers
     /// next save.
     func choosePreviewSpace(_ name: String) {
         guard name != previewSpace, let index = SaveSettings.colorSpaces.firstIndex(of: name) else { return }
-        exposurePlacementGate.edited()
-        exposurePlacementMessage = nil
         SaveSettings.chosenSpace = index
         previewSpace = name
         changed()
@@ -982,6 +966,9 @@ import UniformTypeIdentifiers
         defer {
             rendering = false
             if revision != currentRevision || (interactiveScale != nil && !interacting), !closing { scheduleRender() }
+            // The settled preview of the current settings is shown: the helper
+            // holds their decode, so a stale brightness match can be solved.
+            reconcileBrightnessMatch()
         }
         do {
             let cacheKey = await Task.detached(priority: .utility) {
@@ -1036,9 +1023,6 @@ import UniformTypeIdentifiers
             status = interactiveScale != nil
                 ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
                 : "\(Int(photograph.width)) × \(Int(photograph.height))\(previewScale < 1 ? " · shown at \(Self.percent(previewScale))" : "") · \(time)"
-            if revision == currentRevision, interactiveScale == nil {
-                scheduleAutomaticExposurePlacement(generation: generation)
-            }
         } catch {
             if currentRevision == revision, generation == sourceGeneration, !closing {
                 renderFailed = true; hideActivity(); report(error)
@@ -1266,81 +1250,162 @@ import UniformTypeIdentifiers
 
     // MARK: Camera brightness
 
-    var canMatchCameraBrightness: Bool {
-        ready && engine != nil && isRaw && previewCurrent && !rendering && !placingExposure && !cropping && !interacting && !closing
-            && !exposurePlacementBlocked
-    }
-
-    private func scheduleAutomaticExposurePlacement(generation: Int) {
-        guard exposurePlacementGate.takeAutomatic(generation: generation, raw: isRaw, enabled: autoPlaceNewImages) else { return }
-        let edits = editCount
-        Task { [weak self] in
-            await Task.yield() // Let the first render finish publishing its frame.
-            guard let self, self.sourceGeneration == generation, self.editCount == edits,
-                  self.autoPlaceNewImages else { return }
-            self.matchCameraBrightness(automatic: true)
+    /// Prep › Match camera brightness for this photograph.
+    var matchesBrightness: Bool { state.brightnessMatch != nil }
+    /// Why matching can't run for this photograph, or nil.
+    var brightnessMatchUnavailable: String? {
+        if let failure = brightnessMatchFailure, failure.generation == sourceGeneration, failure.inputs == nil { return failure.message }
+        if !isRaw, state.params["io.input_interpretation.mode"].string != "auto" {
+            return "Matching reads the file’s own colour tags. Set Input Colour to Automatic to use it."
         }
+        return nil
+    }
+    private var brightnessMatchFailedHere: Bool {
+        guard let failure = brightnessMatchFailure, failure.generation == sourceGeneration, let inputs = failure.inputs else { return false }
+        return inputs == matchInputs(state)
+    }
+    /// On, possible, and not failed for the current settings: the meter then
+    /// only sets where the highlight limit starts.
+    var brightnessMatchActive: Bool { matchesBrightness && brightnessMatchUnavailable == nil && !brightnessMatchFailedHere }
+    /// On and not yet solved for the current settings. Save and Export wait.
+    var brightnessMatchPending: Bool {
+        guard brightnessMatchActive, let match = state.brightnessMatch else { return false }
+        return match.ev == nil || match.inputs != matchInputs(state)
+    }
+    /// The note under the Exposure slider.
+    var brightnessMatchNote: String? {
+        guard matchesBrightness else { return nil }
+        if let unavailable = brightnessMatchUnavailable { return unavailable }
+        if brightnessMatchFailedHere, let failure = brightnessMatchFailure { return failure.message }
+        if brightnessMatchPending || matchingBrightness { return "Matching…" }
+        guard let match = state.brightnessMatch, let ev = match.ev else { return nil }
+        let value = ev.formatted(.number.precision(.fractionLength(2)).sign(strategy: .always()))
+        let reference = isRaw ? "the camera" : "the original"
+        return match.highlightLimited
+            ? "Starts at \(value) EV to match \(reference), held back to protect highlights."
+            : "Starts at \(value) EV to match \(reference)."
     }
 
-    func matchCameraBrightness() { matchCameraBrightness(automatic: false) }
+    /// Turns matching on (from the match, Exposure back to 0) or off (the
+    /// brightness stays; Exposure then shows all of it). One undo step.
+    func setMatchesBrightness(_ on: Bool) {
+        guard on != matchesBrightness else { return }
+        var next = state
+        if on {
+            next.brightnessMatch = BrightnessMatch()
+            next.params["prep.exposure_ev"] = .number(0)
+        } else {
+            next.brightnessMatch = nil
+        }
+        apply(next, action: on ? "Match Camera Brightness" : "Stop Matching Camera Brightness")
+    }
 
-    private func matchCameraBrightness(automatic: Bool) {
-        guard canMatchCameraBrightness, let engine, let source else { return }
-        exposurePlacementGate.edited()
-        let id = UUID(), generation = sourceGeneration, edits = editCount
-        let snapshot = renderState, size = sourceSize
+    /// The Exposure slider: the user's exposure above the match.
+    private var matchedEV: Double { brightnessMatchActive ? state.brightnessMatch?.ev ?? 0 : 0 }
+    /// Keeps the engine's total within its ±3 EV.
+    var exposureOffsetRange: ClosedRange<Double> {
+        let matched = matchedEV
+        return (-3 - matched)...(3 - matched)
+    }
+    var exposureOffset: Binding<Double> {
+        Binding(get: { self.value("prep.exposure_ev").double - self.matchedEV }, set: { value in
+            let range = self.exposureOffsetRange
+            let offset = min(max((value / 0.05).rounded() * 0.05, range.lowerBound), range.upperBound)
+            let total = abs(offset) < 1e-9 ? self.matchedEV : self.matchedEV + offset
+            self.set("prep.exposure_ev", .number(min(3, max(-3, total))))
+        })
+    }
+    var exposureOffsetModified: Bool { abs(value("prep.exposure_ev").double - matchedEV) > 1e-6 }
+    func resetExposureOffset() { set("prep.exposure_ev", .number(matchedEV)) }
+
+    /// What the match depends on: everything that changes how bright the
+    /// developed photograph is, except the brightness edits that are the
+    /// user's own (Prep, and the enlarger's print exposure) and settings that
+    /// can't change it. A change re-solves the match; Prep edits never do.
+    func matchInputs(_ state: EditState) -> JSONValue {
+        var params = state.params
+        for path in ["prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.crop",
+                     "io.crop_center", "io.crop_size", "io.output_color_space", "io.output_cctf_encoding",
+                     "settings.serial_grain"] {
+            params[path] = .null
+        }
+        return .object(["film": .string(state.film), "paper": .string(state.paper), "params": params])
+    }
+
+    private func cancelBrightnessMatch() {
+        matchTask?.cancel(); matchTask = nil; matchRequest = nil; matchingBrightness = false
+    }
+
+    /// Solves the match when it's on and stale, once the preview of the
+    /// current settings is shown (the helper then holds their decode). One
+    /// solve at a time; its completion looks again, so edits made meanwhile
+    /// coalesce. A result is applied only if the inputs it was solved for
+    /// are still current, without an undo step of its own: Undo restores a
+    /// state together with the match solved for it, and a restored state
+    /// whose match is stale is solved again.
+    func reconcileBrightnessMatch() {
+        // Cheap checks first: this runs on every edit, drag frames included.
+        guard matchTask == nil, !interacting, previewCurrent, !rendering, ready, !cropping, !closing,
+              let engine, let source, brightnessMatchPending else { return }
+        let inputs = matchInputs(state)
+        let id = UUID(), generation = sourceGeneration, size = sourceSize, raw = isRaw
+        var request = renderState
+        request.params["prep"] = defaults["prep"]
+        request.params["enlarger.print_exposure"] = defaults["enlarger.print_exposure"]
         let reference = engine.directory.appendingPathComponent("camera-brightness-\(id.uuidString).png")
-        exposurePlacementID = id; exposurePlacementAutomatic = automatic; placingExposure = true; exposurePlacementMessage = nil
-        exposurePlacementTask = Task { [weak self] in
+        matchRequest = id; matchingBrightness = true
+        matchTask = Task { [weak self] in
             defer {
                 try? FileManager.default.removeItem(at: reference)
-                if let self, self.exposurePlacementID == id {
-                    self.placingExposure = false; self.exposurePlacementTask = nil; self.exposurePlacementID = nil; self.exposurePlacementAutomatic = false
+                if let self, self.matchRequest == id {
+                    self.matchTask = nil; self.matchRequest = nil; self.matchingBrightness = false
+                    self.reconcileBrightnessMatch()
                 }
             }
             do {
                 let data = try await Task.detached(priority: .userInitiated) {
-                    try CameraBrightnessReference.png(from: source, expectedSize: size)
+                    raw ? try CameraBrightnessReference.png(from: source, expectedSize: size)
+                        : try CameraBrightnessReference.filePNG(from: source, expectedSize: size)
                 }.value
                 try Task.checkCancellation()
-                guard let self, !self.closing, self.sourceGeneration == generation, self.exposurePlacementID == id else { return }
-                guard self.editCount == edits, !automatic || self.autoPlaceNewImages else {
-                    self.exposurePlacementMessage = "Adjustments changed; brightness match skipped."
-                    return
-                }
+                guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
                 try data.write(to: reference, options: .atomic)
                 let (_, result) = try await engine.request([
                     "command": .string("place_exposure"), "input": .string(source.path),
-                    "source_generation": .number(Double(generation)), "film": .string(snapshot.film),
-                    "paper": .string(snapshot.paper), "params": snapshot.params,
+                    "source_generation": .number(Double(generation)), "film": .string(request.film),
+                    "paper": .string(request.paper), "params": request.params,
                     "reference_path": .string(reference.path)
                 ])
                 try Task.checkCancellation()
-                guard !self.closing, self.sourceGeneration == generation, self.exposurePlacementID == id else { return }
-                guard self.editCount == edits, !automatic || self.autoPlaceNewImages else {
-                    self.exposurePlacementMessage = "Adjustments changed; brightness match skipped."
-                    return
-                }
+                guard !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
                 guard case .number(let exposure) = result["exposure_ev"], exposure.isFinite, (-3...3).contains(exposure) else {
                     throw EngineError(message: "No reliable brightness match with these settings.")
                 }
-                var next = self.state
-                next.params["prep.exposure_ev"] = .number(exposure)
-                self.apply(next, action: "Match Camera Brightness")
-                let value = exposure.formatted(.number.precision(.fractionLength(2)).sign(strategy: .always()))
-                self.exposurePlacementMessage = result["highlight_limited"].bool
-                    ? "Matched \(value) EV · limited to protect highlights."
-                    : "Matched camera brightness: \(value) EV."
+                self.applyBrightnessMatch(exposure, limited: result["highlight_limited"].bool, inputs: inputs)
             } catch is CancellationError {
                 // A different photograph or shutdown supersedes this request.
             } catch {
-                guard let self, !self.closing, self.sourceGeneration == generation,
-                      self.exposurePlacementID == id, self.editCount == edits else { return }
-                self.exposurePlacementMessage = nil
+                guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id,
+                      self.matchInputs(self.state) == inputs else { return }
                 let failure = CameraBrightnessReference.failure(error)
-                self.exposurePlacementFailure = (generation, failure.forPhoto ? nil : edits, failure.message)
+                self.brightnessMatchFailure = (generation, failure.forPhoto ? nil : inputs, failure.message)
             }
         }
+    }
+
+    /// Moves the total with the match, keeping the user's exposure above it.
+    /// A change under 0.05 EV keeps the values and only marks them current.
+    private func applyBrightnessMatch(_ ev: Double, limited: Bool, inputs: JSONValue) {
+        guard var match = state.brightnessMatch, matchInputs(state) == inputs else { return }
+        var next = state
+        let offset = next.params["prep.exposure_ev"].double - (match.ev ?? 0)
+        if match.ev.map({ abs(ev - $0) >= 0.05 }) ?? true {
+            match.ev = ev
+            next.params["prep.exposure_ev"] = .number(min(3, max(-3, abs(offset) < 1e-9 ? ev : ev + offset)))
+        }
+        match.inputs = inputs; match.highlightLimited = limited
+        next.brightnessMatch = match
+        replaceState(next)
     }
 
     // MARK: Print balance
@@ -1502,7 +1567,17 @@ import UniformTypeIdentifiers
         (fraction * 100).formatted(.number.precision(.fractionLength(fraction < 0.1 ? 1 : 0))) + "%"
     }
 
+    /// A pending brightness match changes the exposure: Save and Export
+    /// wait for it and its preview, so they write what the inspector shows.
+    private func settleBrightnessMatch() async {
+        let deadline = Date().addingTimeInterval(30)
+        while !closing, Date() < deadline, brightnessMatchPending || matchingBrightness || !previewCurrent && brightnessMatchActive {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     private func savePreview(to url: URL, size: ExportSize = .full, save: SaveSettings = SaveSettings()) async {
+        await settleBrightnessMatch()
         guard canSave, let engine else { return }
         saving = true
         defer { saving = false }
@@ -1535,6 +1610,7 @@ import UniformTypeIdentifiers
     }
 
     func export(to url: URL, engine exportEngine: ExportEngine, size: ExportSize = .full, save: SaveSettings = SaveSettings()) async {
+        await settleBrightnessMatch()
         // An edit made meanwhile makes the save fail; develop the photograph then.
         if exportEngine == .fast, await exportPreview(to: url, size: size, save: save) { return }
         guard !exporting, !saving, let source, let engine else { return }
@@ -1772,8 +1848,7 @@ import UniformTypeIdentifiers
     }
 
     func shutdown() {
-        exposurePlacementTask?.cancel(); exposurePlacementTask = nil; exposurePlacementID = nil
-        exposurePlacementGate.edited(); placingExposure = false
+        cancelBrightnessMatch()
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
         exportJob?.cancel(); engine?.stop()
