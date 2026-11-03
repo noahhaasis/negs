@@ -1240,6 +1240,7 @@ pub fn run() {
         .unwrap();
         MAIN.store(main.0 as isize, Ordering::Relaxed);
         theme::apply_window(main);
+        titlebar::round_corners(main);
         let dpi = GetDpiForWindow(main).max(96);
         restore_placement(main, &model.prefs, dpi);
         report.stamp("main_window");

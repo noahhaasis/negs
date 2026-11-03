@@ -400,6 +400,20 @@ pub fn invalidate(main: HWND) {
     }
 }
 
+/// Windows 11 (22000 and later): rounded corners, asked for explicitly.
+/// Mica (`DWMWA_SYSTEMBACKDROP_TYPE`, 22621) is left out: it shows only
+/// where nothing paints opaquely, and the band's text, glyphs and the two
+/// toolbars are GDI, which paints opaque. See docs/windows-app.md.
+pub fn round_corners(main: HWND) {
+    if theme::build() < 22000 {
+        return;
+    }
+    let round = 2i32; // DWMWCP_ROUND
+    unsafe {
+        let _ = DwmSetWindowAttribute(main, DWMWINDOWATTRIBUTE(33), &round as *const _ as *const _, 4);
+    }
+}
+
 // MARK: Menus
 
 fn menubar() -> HWND {
