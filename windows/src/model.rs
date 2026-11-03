@@ -732,17 +732,18 @@ impl Model {
     }
 
     pub fn choose_film(&mut self, stock: &str) {
-        let next = state::choosing(&self.state, stock, false, &self.stocks);
+        let next = state::choosing(&self.state, stock, false, self.prefs.keep_paper, &self.stocks);
         self.apply(next, "Change Film");
     }
 
     pub fn choose_paper(&mut self, stock: &str) {
-        let next = state::choosing(&self.state, stock, true, &self.stocks);
+        let next = state::choosing(&self.state, stock, true, self.prefs.keep_paper, &self.stocks);
         self.apply(next, "Change Paper");
     }
 
+    /// When the catalog loads, the film brings its own paper whatever the setting.
     fn pair_film(&self, state: &mut EditState) {
-        state::pair_film(state, &self.stocks);
+        state::pair_film(state, &self.stocks, true);
     }
 
     /// Original develops the source's own pixels; Longest side resizes the
@@ -1538,6 +1539,16 @@ impl Model {
         self.mark(dirty::STRUCTURE | dirty::PRESETS | dirty::PREVIEWS);
     }
 
+    /// Settings › Keep paper when changing film. The film tiles show what a
+    /// click would develop, so they follow it: their keys include the paper.
+    pub fn set_keep_paper(&mut self, on: bool) {
+        if self.prefs.keep_paper != on {
+            self.prefs.keep_paper = on;
+            self.prefs.save();
+            self.mark(dirty::PREVIEWS);
+        }
+    }
+
     /// Opens or closes the Film or Paper foldout.
     pub fn toggle_foldout(&mut self, paper: bool) {
         let open = if paper { &mut self.previews.paper_open } else { &mut self.previews.film_open };
@@ -1592,7 +1603,7 @@ impl Model {
             let (films, papers) = (self.films(), self.papers());
             let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
             for stock in groups.iter().flat_map(|g| g.stocks.iter()) {
-                let command = previews::stock_command(&state, stock, &self.stocks, source, generation);
+                let command = previews::stock_command(&state, stock, &self.stocks, self.prefs.keep_paper, source, generation);
                 wanted.push((Target::Stock { id: stock.id.clone(), paper }, previews::Key::new(generation, &command), command));
             }
         }
@@ -2301,6 +2312,28 @@ mod tests {
 
     /// The Image Size notice describes the settled preview, so reduced drag
     /// frames don't insert or reword it and move the sliders below it.
+    /// Settings › Keep paper when changing film, through the film menu.
+    #[test]
+    fn keep_paper_leaves_the_paper_alone() {
+        let stock = |id: &str, paper: bool, target: &str| Stock {
+            id: id.into(), name: id.into(), paper, positive: false, bw: false, target: target.into(), times: vec![], grain: Value::Null,
+        };
+        for keep in [false, true] {
+            let mut model = Model::new(Preferences { keep_paper: keep, ..Preferences::default() });
+            model.stocks = vec![stock("portra", false, "endura"), stock("vision", false, "print_film"), stock("endura", true, ""), stock("crystal", true, ""), stock("print_film", true, "")];
+            model.state = EditState { film: "portra".into(), paper: "crystal".into(), params: json!({"print_render": {"development_time": 2.0}}), ..Default::default() };
+            model.choose_film("vision");
+            assert_eq!(model.state.film, "vision");
+            assert_eq!(model.state.paper, if keep { "crystal" } else { "print_film" });
+            assert_eq!(model.state.value("print_render.development_time").is_null(), !keep);
+            assert_eq!(model.undo_title(), Some("Change Film"));
+            // Loading a catalog still pairs the film with its paper.
+            let mut loaded = model.state.clone();
+            model.pair_film(&mut loaded);
+            assert_eq!(loaded.paper, "print_film");
+        }
+    }
+
     #[test]
     fn drag_frames_keep_the_preview_scale() {
         for settled in [2400, 1200] {

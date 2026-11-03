@@ -171,6 +171,7 @@ pub fn about(owner: HWND) {
 const SETTINGS_PREVIEWS: u16 = 10;
 const SETTINGS_AUTOMATIC: u16 = 11;
 const SETTINGS_CHECK: u16 = 12;
+const SETTINGS_KEEP_PAPER: u16 = 13;
 
 thread_local! {
     /// The open Settings dialog's result: None while open, then whether OK closed it.
@@ -179,7 +180,7 @@ thread_local! {
     static SETTINGS_NOTES: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Settings (the Mac's Settings window): previews and updates, in a modal
+/// Settings (the Mac's Settings window): previews, keeping the paper and updates, in a modal
 /// dialog with OK and Cancel. Updates show only in builds that have them.
 pub fn settings(app: &mut App) {
     let configured = crate::updates::configured();
@@ -218,10 +219,15 @@ pub fn settings(app: &mut App) {
     // indent, the gap after it, and a width other than the whole row's.
     let mut rows: Vec<(HWND, Option<i32>, i32, i32, Option<i32>)> = vec![];
     let mut notes = vec![];
-    rows.push((label("Previews", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
+    rows.push((label("Film & Paper", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
     let previews = check("Film, paper and preset previews", SETTINGS_PREVIEWS, app.model.prefs.previews);
     rows.push((previews, Some(px(22.0)), 0, px(2.0), None));
     let note = label("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(18.0), px(10.0), None));
+    let keep_paper = check("Keep paper when changing film", SETTINGS_KEEP_PAPER, app.model.prefs.keep_paper);
+    rows.push((keep_paper, Some(px(22.0)), 0, px(2.0), None));
+    let note = label("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.", fonts.small);
     notes.push(note);
     rows.push((note, None, px(18.0), px(18.0), None));
     rows.push((label("Updates", fonts.bold), Some(px(20.0)), 0, px(6.0), None));
@@ -283,7 +289,7 @@ pub fn settings(app: &mut App) {
         }
         let accepted = SETTINGS_DONE.with(Cell::get).unwrap_or(false);
         let checked = |c: HWND| SendMessageW(c, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
-        let (previews_on, automatic_on) = (checked(previews), configured && checked(automatic));
+        let (previews_on, keep_paper_on, automatic_on) = (checked(previews), checked(keep_paper), configured && checked(automatic));
         let _ = EnableWindow(app.main, true);
         let _ = DestroyWindow(dialog);
         let _ = SetForegroundWindow(app.main);
@@ -296,6 +302,7 @@ pub fn settings(app: &mut App) {
             app.model.prefs.save();
         }
         app.model.set_previews(previews_on);
+        app.model.set_keep_paper(keep_paper_on);
     }
 }
 

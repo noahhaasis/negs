@@ -135,6 +135,8 @@ preset row has a thumbnail, as on macOS and Linux ([stock-previews.md](stock-pre
 File ▸ Settings… turns them off ("Film, paper and preset previews", the `previews`
 preference), which brings back the menus and the plain preset list. Design, measurements and
 screenshots: [the handoff's Windows results](handoff-stock-previews-windows.md#windows-results).
+Settings also has "Keep paper when changing film" (`keep_paper`, off by default; see
+[handoff-keep-paper.md](handoff-keep-paper.md)).
 
 ## Packaging
 
