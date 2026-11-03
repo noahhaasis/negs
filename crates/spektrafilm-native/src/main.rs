@@ -801,20 +801,28 @@ impl Session {
                 }
                 // The tone graph's histogram: the photograph's film exposure,
                 // from the metering frame (the whole frame, before spatial effects).
+                // Prep's exposure is a uniform gain, so it shifts the stops like
+                // the camera's; its other controls reshape them, so then the
+                // frame goes through Prep and is counted as exposed.
                 let histogram = {
-                    let stops_key = format!("{}|{source_generation}|{}", input.display(), self.pipeline.as_ref().unwrap().0);
+                    let metering = self
+                        .metering
+                        .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(source));
+                    let ae = if params.camera.auto_exposure { pipeline.metering_film_raw(metering).1 } else { 0.0 };
+                    let reshaped = !spektrafilm_core::prep::PrepParams { exposure_ev: 0.0, ..params.prep }.is_identity();
+                    let mut stops_key = format!("{}|{source_generation}|{}", input.display(), self.pipeline.as_ref().unwrap().0);
+                    if reshaped {
+                        stops_key += &format!("|{:?}|{ae}|{}", params.prep, params.camera.exposure_compensation_ev);
+                    }
                     if self.film_stops.as_ref().is_none_or(|(old, _)| old != &stops_key) {
-                        let metering = self
-                            .metering
-                            .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(source));
-                        let (raw, _) = pipeline.metering_film_raw(metering);
+                        let raw = if reshaped {
+                            pipeline.metering_film_raw_prepared(metering, ae).map_err(anyhow::Error::msg)?
+                        } else {
+                            pipeline.metering_film_raw(metering).0
+                        };
                         self.film_stops = Some((stops_key, spektrafilm_core::tone_curve::raw_stops(&raw)));
                     }
-                    let ae = match &self.metering {
-                        Some(metering) if params.camera.auto_exposure => pipeline.metering_film_raw(metering).1,
-                        _ => 0.0,
-                    };
-                    let ev = ae + params.camera.exposure_compensation_ev as f64;
+                    let ev = if reshaped { 0.0 } else { ae + params.camera.exposure_compensation_ev as f64 + params.prep.exposure_ev as f64 };
                     let counts = spektrafilm_core::tone_curve::film_histogram(&self.film_stops.as_ref().unwrap().1, ev, 128);
                     json!({"stops": spektrafilm_core::tone_curve::STOPS, "ev": ev, "counts": counts})
                 };

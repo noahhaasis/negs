@@ -994,6 +994,24 @@ impl Pipeline {
         (raw, ev)
     }
 
+    /// The film's raw exposure of a metering frame after the whole exposure
+    /// and Prep, as the render exposes the film: for the tone graph's
+    /// histogram when Prep reshapes the tones (more than its uniform
+    /// exposure), so [`Self::metering_film_raw`]'s stops can't simply be
+    /// shifted. `autoexposure_ev` is the EV metered before Prep. On the CPU.
+    pub fn metering_film_raw_prepared(&self, preview: &ImageBuf, autoexposure_ev: f64) -> Result<ImageBuf, String> {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let rgb = stages::filming::prepare_input(preview.clone(), &self.params, autoexposure_ev)?;
+        Ok(stages::filming::rgb_to_film_raw(
+            &rgb,
+            &self.params,
+            &CPU,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+        )
+        .unwrap_or(rgb))
+    }
+
     /// Run only the GPU-resident path from a borrowed image. This is used by
     /// the live GUI when it has already decided the working resolution, so a
     /// full-resolution preview does not need to deep-clone the loaded image
