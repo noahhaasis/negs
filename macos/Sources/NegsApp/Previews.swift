@@ -228,6 +228,8 @@ struct StockEntry {
 struct StockFoldout: View {
     let model: EditorModel
     let paper: Bool
+    /// About two and a half rows of tiles, so the cut-off row shows it scrolls.
+    static let gridHeight: CGFloat = 290
 
     var body: some View {
         let previews = model.previews
@@ -238,7 +240,17 @@ struct StockFoldout: View {
                 model.pumpPreviews()
             })
         DisclosureGroup(isExpanded: isExpanded) {
-            StockGrid(model: model, paper: paper)
+            // A fixed window onto the grid keeps the header, and the tab
+            // switch below, in reach however far down the stocks go. It
+            // opens on the current stock.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    StockGrid(model: model, paper: paper)
+                }
+                .scrollDisabled(false)
+                .frame(height: StockFoldout.gridHeight)
+                .onAppear { proxy.scrollTo(paper ? model.paper : model.film, anchor: .center) }
+            }
         } label: {
             HStack {
                 Text(paper ? "Paper" : "Film")
@@ -268,6 +280,7 @@ private struct StockGrid: View {
                             StockTileView(stock: stock, tile: tile, selected: stock.id == selected) {
                                 if paper { model.choosePaper(stock.id) } else { model.chooseFilm(stock.id) }
                             }
+                            .id(stock.id)
                         }
                     }
                 } header: {
