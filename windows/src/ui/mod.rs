@@ -19,6 +19,7 @@ pub mod inspector;
 mod presets;
 mod strip;
 mod theme;
+mod titlebar;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -63,6 +64,8 @@ pub fn accessible_name(hwnd: HWND, name: &str) {
 
 pub const WM_APP_RUN: u32 = WM_APP + 1;
 const WM_APP_BUILD: u32 = WM_APP + 2;
+/// Opens a menu bar menu (index, from the keyboard), outside the App borrow.
+pub const WM_APP_MENU: u32 = WM_APP + 3;
 const TIMER_RUN: usize = 1;
 const TIMER_EXPORT: usize = 2;
 const COPYDATA_OPEN: usize = 0x4e45_4753; // "NEGS"
@@ -338,6 +341,8 @@ pub struct App {
     pub model: Model,
     pub main: HWND,
     toolbar: HWND,
+    /// The menu bar in the title bar.
+    menubar: HWND,
     status: HWND,
     progress: HWND,
     cancel: HWND,
@@ -545,14 +550,14 @@ impl App {
         unsafe {
             let mut client = RECT::default();
             let _ = GetClientRect(self.main, &mut client);
-            SendMessageW(self.toolbar, TB_AUTOSIZE, WPARAM(0), LPARAM(0));
+            titlebar::layout(self.main, self.menubar, self.toolbar);
             SendMessageW(self.status, WM_SIZE, WPARAM(0), LPARAM(0));
             let height = |hwnd: HWND| {
                 let mut r = RECT::default();
                 let _ = GetWindowRect(hwnd, &mut r);
                 if IsWindowVisible(hwnd).as_bool() { r.bottom - r.top } else { 0 }
             };
-            let top = height(self.toolbar);
+            let top = titlebar::height(self.main);
             let bottom = client.bottom - height(self.status);
             let inspector_width = if self.model.inspector_visible { self.px(self.model.prefs.inspector_width.clamp(300.0, 440.0)) } else { 0 };
             let splitter = if self.model.inspector_visible { self.px(5.0) } else { 0 };
@@ -676,7 +681,6 @@ impl App {
                 SetWindowLongW(self.main, GWL_STYLE, style);
                 let _ = SetWindowPlacement(self.main, &placement);
                 let _ = SetWindowPos(self.main, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-                let _ = SetMenu(self.main, self.menu);
             } else {
                 let mut placement = WINDOWPLACEMENT { length: std::mem::size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
                 let _ = GetWindowPlacement(self.main, &mut placement);
@@ -685,7 +689,6 @@ impl App {
                 let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
                 let _ = GetMonitorInfoW(monitor, &mut info);
                 SetWindowLongW(self.main, GWL_STYLE, style & !(WS_OVERLAPPEDWINDOW.0 as i32));
-                let _ = SetMenu(self.main, None);
                 let r = info.rcMonitor;
                 let _ = SetWindowPos(self.main, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED);
                 self.full_screen = Some((placement, style));
@@ -1089,7 +1092,7 @@ fn build_toolbar(main: HWND, dpi: u32) -> HWND {
         let toolbar = create(
             TOOLBARCLASSNAMEW,
             "",
-            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(TBSTYLE_FLAT | TBSTYLE_LIST | TBSTYLE_TOOLTIPS | CCS_NODIVIDER as u32 | CCS_TOP as u32),
+            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(TBSTYLE_FLAT | TBSTYLE_LIST | TBSTYLE_TOOLTIPS | CCS_NODIVIDER as u32 | CCS_NOPARENTALIGN as u32 | CCS_NORESIZE as u32),
             WINDOW_EX_STYLE(0),
             main,
             0,
@@ -1137,7 +1140,7 @@ fn build_toolbar(main: HWND, dpi: u32) -> HWND {
             button(8, id::PRESETS, BTNS_CHECK, 8),
         ];
         SendMessageW(toolbar, TB_ADDBUTTONSW, WPARAM(buttons.len()), LPARAM(buttons.as_ptr() as isize));
-        SendMessageW(toolbar, TB_AUTOSIZE, WPARAM(0), LPARAM(0));
+        titlebar::tool_metrics(main, toolbar);
         toolbar
     }
 }
@@ -1230,7 +1233,7 @@ pub fn run() {
             1320,
             860,
             None,
-            menu,
+            None,
             instance(),
             None,
         )
@@ -1242,6 +1245,8 @@ pub fn run() {
         report.stamp("main_window");
         let fonts = Fonts::new(dpi);
         report.stamp("fonts");
+        let menubar = titlebar::create_menubar(main, menu, fonts.ui);
+        titlebar::set_fonts(fonts.ui, fonts.glyph_small);
         let toolbar = build_toolbar(main, dpi);
         chrome::subclass_toolbar(toolbar, fonts.glyph);
         report.stamp("toolbar");
@@ -1264,6 +1269,7 @@ pub fn run() {
             model,
             main,
             toolbar,
+            menubar,
             status,
             progress,
             cancel,
@@ -1346,6 +1352,9 @@ fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
 /// and the accelerators, which never fire while a text field has focus.
 fn pre_translate(msg: &MSG) -> bool {
     let main = main_hwnd();
+    if titlebar::keys(main, msg) {
+        return true;
+    }
     let mut accelerators = None;
     let handled = with_app(|app| {
         if matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MOUSEWHEEL) {
@@ -1407,6 +1416,41 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| app.update_status());
                 LRESULT(0)
             }
+            WM_APP_MENU => {
+                titlebar::open(hwnd, wparam.0, lparam.0 != 0);
+                LRESULT(0)
+            }
+            WM_NCCALCSIZE => titlebar::nccalcsize(hwnd, wparam, lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            WM_NCHITTEST => titlebar::nchittest(hwnd, wparam, lparam),
+            WM_NCMOUSEMOVE | WM_NCMOUSELEAVE | WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK | WM_NCLBUTTONUP => {
+                titlebar::ncmouse(hwnd, msg, wparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam))
+            }
+            WM_NCACTIVATE => {
+                // No caption to repaint; lParam -1 keeps the system from drawing one.
+                titlebar::invalidate(hwnd);
+                DefWindowProcW(hwnd, msg, wparam, LPARAM(-1))
+            }
+            WM_SETTEXT | WM_SETICON => {
+                // The system would draw its caption over the band.
+                let style = GetWindowLongW(hwnd, GWL_STYLE);
+                SetWindowLongW(hwnd, GWL_STYLE, style & !(WS_VISIBLE.0 as i32));
+                let result = DefWindowProcW(hwnd, msg, wparam, lparam);
+                SetWindowLongW(hwnd, GWL_STYLE, style);
+                titlebar::invalidate(hwnd);
+                result
+            }
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let dc = BeginPaint(hwnd, &mut ps);
+                titlebar::paint(hwnd, dc);
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            WM_SYSCOMMAND if (wparam.0 & 0xfff0) as u32 == SC_KEYMENU && titlebar::key_menu(hwnd, lparam.0 as u32) => LRESULT(0),
+            WM_MENUSELECT => {
+                titlebar::menu_select(wparam, lparam);
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_APP_BUILD => {
                 with_app(|app| {
                     app.report.stamp("first_frame_done");
@@ -1462,6 +1506,9 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(0)
             }
             WM_NOTIFY => {
+                if let Some(result) = titlebar::dropdown(hwnd, lparam) {
+                    return result;
+                }
                 let header = &*(lparam.0 as *const NMHDR);
                 if header.code == NM_CLICK || header.code == NM_RETURN {
                     if let Ok(id) = u16::try_from(header.idFrom) {
@@ -1509,7 +1556,9 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             WM_ACTIVATE => {
                 if wparam.0 & 0xffff == WA_INACTIVE as usize {
                     with_app(|app| app.release_original());
+                    titlebar::deactivated(hwnd);
                 }
+                titlebar::invalidate(hwnd);
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_MOVE | WM_DISPLAYCHANGE => {
@@ -1537,6 +1586,7 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
+                titlebar::ncmouse(hwnd, msg, wparam);
                 let x = (lparam.0 & 0xffff) as i16 as i32;
                 with_app(|app| app.drag_splitter(x));
                 LRESULT(0)
@@ -1609,6 +1659,10 @@ impl App {
         unsafe {
             SendMessageW(self.toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
             chrome::subclass_toolbar(self.toolbar, self.fonts.glyph);
+            titlebar::tool_metrics(self.main, self.toolbar);
+            SendMessageW(self.menubar, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
+            titlebar::set_metrics(self.main, self.menubar);
+            titlebar::set_fonts(self.fonts.ui, self.fonts.glyph_small);
             SendMessageW(self.status, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             SendMessageW(self.cancel, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             SendMessageW(self.original_button, WM_SETFONT, WPARAM(self.fonts.glyph_small.0 as usize), LPARAM(1));
