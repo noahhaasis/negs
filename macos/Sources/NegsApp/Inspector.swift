@@ -50,12 +50,15 @@ struct AdjustmentGroup: Identifiable {
     let section: InspectorSection
     /// Switches the whole effect on and off from the group's header.
     var enable: String?
+    /// How many of the leading controls the Lab shows without Show all
+    /// controls; a group with none shows only then (or once it's changed).
+    var basic = 0
     let controls: [Adjustment]
     var id: String { title }
 }
 
 let adjustmentGroups: [AdjustmentGroup] = [
-    .init(title: "Lens Diffusion", symbol: "camera.filters", section: .camera, enable: "camera.diffusion_filter.active", controls: [
+    .init(title: "Lens Diffusion", symbol: "camera.filters", section: .camera, enable: "camera.diffusion_filter.active", basic: 2, controls: [
         .choice("Filter", "camera.diffusion_filter.filter_family", ["black_pro_mist", "glimmerglass", "pro_mist", "cinebloom"]),
         .slider("Strength", "camera.diffusion_filter.strength", 0...2, 0.01),
         .slider("Spatial scale", "camera.diffusion_filter.spatial_scale", 0.1...3, 0.01),
@@ -66,7 +69,7 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Halo size", "camera.diffusion_filter.halo_size", 0.1...3, 0.01),
         .slider("Bloom size", "camera.diffusion_filter.bloom_size", 0.1...3, 0.01)
     ]),
-    .init(title: "Film Curves", symbol: "chart.xyaxis.line", section: .film, enable: "film_render.density_curves_morph.active", controls: [
+    .init(title: "Film Curves", symbol: "chart.xyaxis.line", section: .film, enable: "film_render.density_curves_morph.active", basic: 1, controls: [
         .slider("Gamma", "film_render.density_curves_morph.gamma_factor", 0.5...2, 0.01),
         .slider("Fast gamma", "film_render.density_curves_morph.gamma_factor_fast", 0.5...2, 0.01),
         .slider("Slow gamma", "film_render.density_curves_morph.gamma_factor_slow", 0.5...2, 0.01),
@@ -75,7 +78,7 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Blue gamma", "film_render.density_curves_morph.gamma_factor_blue", 0.5...2, 0.01),
         .slider("Developer exhaustion", "film_render.density_curves_morph.developer_exhaustion", 0...1, 0.01)
     ]),
-    .init(title: "Grain", symbol: "circle.dotted", section: .film, enable: "film_render.grain.active", controls: [
+    .init(title: "Grain", symbol: "circle.dotted", section: .film, enable: "film_render.grain.active", basic: 3, controls: [
         .stockSlider("Red granularity", "film_render.grain.rms_granularity", 0, 0...80, 0.1, bw: "Granularity"),
         .stockSlider("Green granularity", "film_render.grain.rms_granularity", 1, 0...80, 0.1, bw: nil),
         .stockSlider("Blue granularity", "film_render.grain.rms_granularity", 2, 0...80, 0.1, bw: nil),
@@ -92,7 +95,7 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Clump blur (µm)", "film_render.grain.micro_structure.0", 0...1, 0.01),
         .slider("Clump size (nm)", "film_render.grain.micro_structure.1", 0...100, 1)
     ]),
-    .init(title: "Halation", symbol: "sun.haze", section: .film, enable: "film_render.halation.active", controls: [
+    .init(title: "Halation", symbol: "sun.haze", section: .film, enable: "film_render.halation.active", basic: 1, controls: [
         .slider("Amount", "film_render.halation.halation_amount", 0...3, 0.01),
         .slider("Spatial scale", "film_render.halation.halation_spatial_scale", 0.1...5, 0.01),
         .slider("Scatter amount", "film_render.halation.scatter_amount", 0...3, 0.01),
@@ -100,30 +103,30 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Bounces", "film_render.halation.halation_n_bounces", 1...5, 1),
         .slider("Bounce decay", "film_render.halation.halation_bounce_decay", 0...1, 0.01)
     ]),
-    .init(title: "DIR Couplers", symbol: "circle.hexagongrid", section: .film, enable: "film_render.dir_couplers.active", controls: [
+    .init(title: "DIR Couplers", symbol: "circle.hexagongrid", section: .film, enable: "film_render.dir_couplers.active", basic: 1, controls: [
         .slider("Amount", "film_render.dir_couplers.amount", 0...2, 0.01),
         .slider("Diffusion (µm)", "film_render.dir_couplers.diffusion_size_um", 0...100, 0.1),
         .slider("Tail (µm)", "film_render.dir_couplers.diffusion_tail_um", 0...400, 1),
         .slider("Tail weight", "film_render.dir_couplers.diffusion_tail_weight", 0...1, 0.01)
     ]),
-    .init(title: "Film Base", symbol: "square.stack.3d.down.right", section: .film, enable: "film_render.base.active", controls: [
+    .init(title: "Film Base", symbol: "square.stack.3d.down.right", section: .film, enable: "film_render.base.active", basic: 1, controls: [
         .slider("Density", "film_render.base.scale", 0...2, 0.01),
         .slider("Tilt", "film_render.base.tilt", -1...1, 0.01),
         .slider("Cyan", "film_render.base.cyan", 0...2, 0.01),
         .slider("Magenta", "film_render.base.magenta", 0...2, 0.01),
         .slider("Yellow", "film_render.base.yellow", 0...2, 0.01)
     ]),
-    .init(title: "Enlarger", symbol: "light.overhead.left", section: .print, controls: [
+    .init(title: "Enlarger", symbol: "light.overhead.left", section: .print, basic: 4, controls: [
         .slider("Print exposure", "enlarger.print_exposure", 0.1...5, 0.01),
-        .toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
         .slider("Magenta shift", "enlarger.m_filter_shift", -50...50, 0.1),
         .slider("Yellow shift", "enlarger.y_filter_shift", -50...50, 0.1),
+        .balancePrint("Balance Print", "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base."),
+        .toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
         .slider("Preflash exposure", "enlarger.preflash_exposure", 0...0.5, 0.01),
         .slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50...50, 0.1),
-        .slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50...50, 0.1),
-        .balancePrint("Balance Print", "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.")
+        .slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50...50, 0.1)
     ]),
-    .init(title: "Print Curves", symbol: "chart.xyaxis.line", section: .print, enable: "print_render.density_curves_morph.active", controls: [
+    .init(title: "Print Curves", symbol: "chart.xyaxis.line", section: .print, enable: "print_render.density_curves_morph.active", basic: 1, controls: [
         .slider("Gamma", "print_render.density_curves_morph.gamma_factor", 0.5...2, 0.01),
         .slider("Fast gamma", "print_render.density_curves_morph.gamma_factor_fast", 0.5...2, 0.01),
         .slider("Slow gamma", "print_render.density_curves_morph.gamma_factor_slow", 0.5...2, 0.01),
@@ -132,13 +135,13 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .slider("Blue gamma", "print_render.density_curves_morph.gamma_factor_blue", 0.5...2, 0.01),
         .slider("Developer exhaustion", "print_render.density_curves_morph.developer_exhaustion", 0...1, 0.01)
     ]),
-    .init(title: "Print Base", symbol: "square.stack.3d.down.right", section: .print, enable: "print_render.base.active", controls: [
+    .init(title: "Print Base", symbol: "square.stack.3d.down.right", section: .print, enable: "print_render.base.active", basic: 1, controls: [
         .slider("Density", "print_render.base.scale", 0...2, 0.01),
         .slider("Cyan", "print_render.base.cyan", 0...2, 0.01),
         .slider("Magenta", "print_render.base.magenta", 0...2, 0.01),
         .slider("Yellow", "print_render.base.yellow", 0...2, 0.01)
     ]),
-    .init(title: "Glare", symbol: "light.max", section: .print, enable: "print_render.glare.active", controls: [
+    .init(title: "Glare", symbol: "light.max", section: .print, enable: "print_render.glare.active", basic: 1, controls: [
         .slider("Amount", "print_render.glare.percent", 0...0.2, 0.001),
         .slider("Roughness", "print_render.glare.roughness", 0...2, 0.01),
         .slider("Blur (px)", "print_render.glare.blur", 0...5, 0.01)
@@ -542,6 +545,9 @@ struct AdjustmentInspector: View {
     let model: EditorModel
     @AppStorage("expandedAdjustments") private var expanded = "Enlarger"
     @AppStorage("inspectorTab") private var tab = InspectorTab.prep
+    /// Off, the Lab shows the few controls most photographs need, plus any
+    /// setting that is off its default.
+    @AppStorage("labAllControls") private var allControls = false
 
     var body: some View {
         // The histogram, film and paper, and tab switch stay put above the
@@ -659,35 +665,68 @@ struct AdjustmentInspector: View {
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
         Section("Camera") {
-            Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
-            if model.value("camera.auto_exposure").bool {
-                control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
+            if shows("camera.auto_exposure") || shows("camera.auto_exposure_method") {
+                Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
+                    .help("Meters the photograph and exposes the film so the metered area lands on mid-grey, as a camera's meter does. Prep › Exposure and Match camera brightness work on top of it.")
+                if model.value("camera.auto_exposure").bool {
+                    control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
+                }
             }
             control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
-            control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))
-            control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1))
+                .help("Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative's density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.")
+            if shows("camera.film_format_mm") { control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1)) }
+            if shows("camera.lens_blur_um") { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
             groups(.camera)
         }
         Section("Film") { groups(.film) }
         Section {
             // Here rather than beside the stocks: few photographs want it.
-            Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
-                .help("Skip printing and scan the developed film, as for slides.")
+            if allControls || scanning {
+                Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
+                    .help("Skip printing and scan the developed film, as for slides.")
+            }
             groups(.print).disabled(scanning)
         } header: { Text("Print") } footer: {
             if scanning { Text("Printing and the paper are skipped while scanning film directly.").font(.caption).foregroundStyle(.secondary) }
         }
-        Section("Scan & Color") {
-            groups(.scan)
-            disclosure("Output", symbol: "square.and.arrow.down.on.square") {
-                Picker("Colour space", selection: Binding(get: { model.previewSpace }, set: model.choosePreviewSpace)) {
-                    ForEach(SaveSettings.colorSpaces, id: \.self) { Text($0).tag($0) }
+        let outputChanged = model.previewSpace != SaveSettings.colorSpaces[0] || model.isModified("io.output_cctf_encoding")
+        if allControls || outputChanged || adjustmentGroups.contains(where: { $0.section == .scan && shows($0) }) {
+            Section("Scan & Color") {
+                groups(.scan)
+                if allControls || outputChanged {
+                    disclosure("Output", symbol: "square.and.arrow.down.on.square") {
+                        Picker("Colour space", selection: Binding(get: { model.previewSpace }, set: model.choosePreviewSpace)) {
+                            ForEach(SaveSettings.colorSpaces, id: \.self) { Text($0).tag($0) }
+                        }
+                        .help("The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.")
+                        Toggle("Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"))
+                            .help("Off writes linear values, for further processing.")
+                    }
                 }
-                .help("The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.")
-                Toggle("Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"))
-                    .help("Off writes linear values, for further processing.")
             }
         }
+        Section {
+            Toggle("Show all controls", isOn: $allControls)
+        } footer: {
+            Text(allControls
+                 ? "Every camera, film, print and scan setting."
+                 : "The settings most photographs need. Any setting you or a preset changed also shows.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Whether the Lab shows a control that isn't one of the basics.
+    private func shows(_ path: String) -> Bool { allControls || model.isModified(path) }
+    private func isModified(_ adjustment: Adjustment) -> Bool {
+        switch adjustment {
+        case .slider(_, let path, _, _), .toggle(_, let path), .choice(_, let path, _): model.isModified(path)
+        case .stockSlider(_, let path, let index, _, _, _): model.isStockModified(path, index)
+        case .balancePrint: false
+        }
+    }
+    /// Whether the Lab shows a group: it has basics, or something in it changed.
+    private func shows(_ group: AdjustmentGroup) -> Bool {
+        allControls || group.basic > 0 || group.enable.map(model.isModified) == true || group.controls.contains(where: isModified)
     }
 
     /// How a non-RAW photograph's values are read: automatically from its
@@ -723,21 +762,9 @@ struct AdjustmentInspector: View {
         }
     }
 
-    /// Finishing edits on the scan, after the film. They shape the tones the
-    /// film produced; detail the paper clipped comes back only in the Lab.
+    /// The size and frame of the finished photograph. Tone and colour edits
+    /// live in Prep, before the film, where nothing has clipped yet.
     @ViewBuilder private var post: some View {
-        Section {
-            control(.slider("Brightness", "post.brightness", -100...100, 1))
-            control(.slider("Contrast", "post.contrast", -100...100, 1))
-            control(.slider("Whites", "post.whites", -100...100, 1))
-            control(.slider("Blacks", "post.blacks", -100...100, 1))
-        } header: { Text("Tone") } footer: {
-            Text("Adjusts the finished scan/print. To recover a clipped highlight, use exposure in the Lab.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        Section("Color") {
-            control(.slider("Saturation", "post.saturation", -100...100, 1))
-        }
         ImageSizeSection(model: model)
         Section("Border") {
             Toggle("Add border", isOn: model.border(\.enabled))
@@ -795,10 +822,11 @@ struct AdjustmentInspector: View {
     }
 
     @ViewBuilder private func groups(_ section: InspectorSection) -> some View {
-        ForEach(adjustmentGroups.filter { $0.section == section }) { group in
+        ForEach(adjustmentGroups.filter { $0.section == section && shows($0) }) { group in
             disclosure(group.title, symbol: group.symbol, enable: group.enable) {
                 if group.title == "Print Curves" { ToneGraphView(model: model) }
-                ForEach(group.controls) { control($0) }
+                let shown = group.controls.enumerated().filter { allControls || $0.offset < group.basic || isModified($0.element) }.map(\.element)
+                ForEach(shown) { control($0) }
                     .disabled(group.enable.map { !model.value($0).bool } ?? false)
             }
         }

@@ -160,7 +160,7 @@ struct UpdateSettings: View {
             }
             .padding(.top, 8)
             Text(model.freshEditsForNewPhotos
-                 ? "Each photograph you open starts with default Prep, Lab and Post settings and no border. The film, paper, Image Size and output colour stay."
+                 ? "Each photograph you open starts with default Prep and Lab settings and no border. The film, paper, Image Size and output colour stay."
                  : "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Match new RAWs to camera brightness", isOn: Binding(

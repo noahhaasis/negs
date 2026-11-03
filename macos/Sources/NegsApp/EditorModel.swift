@@ -115,10 +115,10 @@ import UniformTypeIdentifiers
             }
         }
     }
-    /// Settings › New photographs: Start fresh (true) or keep the previous
-    /// photograph's edits (false, as Negs always did). A restored session
-    /// keeps its own edits either way.
-    var freshEditsForNewPhotos = UserDefaults.standard.bool(forKey: "freshEditsForNewPhotos") {
+    /// Settings › New photographs: Start fresh (true, the default) or keep the
+    /// previous photograph's edits (false, as earlier versions did). A
+    /// restored session keeps its own edits either way.
+    var freshEditsForNewPhotos = UserDefaults.standard.object(forKey: "freshEditsForNewPhotos") as? Bool ?? true {
         didSet { UserDefaults.standard.set(freshEditsForNewPhotos, forKey: "freshEditsForNewPhotos") }
     }
     var error: String?
@@ -737,6 +737,9 @@ import UniformTypeIdentifiers
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = defaults[ImageSize.factorPath]
             if factor != .null { restored.params[ImageSize.factorPath] = factor }
+            // The Post tab no longer edits tone or colour; an older session's
+            // Post edits would otherwise stay applied with no control to undo them.
+            if defaults["post"] != .null { restored.params["post"] = defaults["post"] }
             // Sessions from before it was a preference carried it per photograph.
             if UserDefaults.standard.object(forKey: "limitPreview") == nil, restored.limitPreview {
                 adoptingPreference = true; limitsPreview = true; adoptingPreference = false
