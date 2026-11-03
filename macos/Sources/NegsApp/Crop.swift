@@ -700,7 +700,7 @@ struct CropInspector: View {
                             .monospacedDigit().foregroundStyle(.secondary).frame(minWidth: 40, alignment: .trailing)
                     }
                     ResettableSlider(title: "Angle", value: Binding(get: { session.angle }, set: session.straighten),
-                                     range: -CropSettings.maxAngle...CropSettings.maxAngle,
+                                     range: -CropSettings.maxAngle...CropSettings.maxAngle, neutral: 0,
                                      editing: { $0 ? session.beginStraightening() : session.endStraightening() },
                                      reset: { session.beginStraightening(); session.straighten(to: 0); session.endStraightening() })
                 }

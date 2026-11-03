@@ -156,6 +156,18 @@ func optionTitle(_ option: String) -> String {
     return titles[option] ?? option.replacingOccurrences(of: "_", with: " ").capitalized
 }
 
+/// The exposure that matches the camera's brightness, solved live for the
+/// settings it depends on. `prep.exposure_ev` holds the total the engine
+/// sees; the Exposure slider shows and edits the part above `ev`.
+struct BrightnessMatch: Codable, Equatable, Sendable {
+    /// The solved Prep exposure; nil until the first solve.
+    var ev: Double?
+    /// `EditorModel.matchInputs` the value was solved for.
+    var inputs: JSONValue?
+    /// The solve held exposure back to keep highlights off paper white.
+    var highlightLimited = false
+}
+
 struct EditState: Codable, Equatable, Sendable {
     var params: JSONValue = .object([:])
     var film = "kodak_gold_200"
@@ -165,6 +177,9 @@ struct EditState: Codable, Equatable, Sendable {
     var border = BorderSettings()
     /// Trims the developed photograph; not part of the render.
     var crop = CropSettings()
+    /// Prep › Match camera brightness: present while it's on. Sessions from
+    /// before it decode as off and keep their exposure.
+    var brightnessMatch: BrightnessMatch?
 
     /// The state without presentation-only settings, to decide whether an
     /// edit needs a new render. The preview is never rotated: the canvas
@@ -172,7 +187,7 @@ struct EditState: Codable, Equatable, Sendable {
     /// Size target the crop's extent sets the working size, so it stays; its
     /// position, angle and ratio never change the render.
     var rendered: EditState {
-        var state = self; state.border = BorderSettings(); state.crop = CropSettings()
+        var state = self; state.border = BorderSettings(); state.crop = CropSettings(); state.brightnessMatch = nil
         if ImageSize.mode(of: params) == .longestSide, crop.cropped {
             state.crop.rect = CGRect(origin: .zero, size: crop.rect.size)
         }

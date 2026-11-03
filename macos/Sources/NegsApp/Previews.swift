@@ -170,6 +170,12 @@ struct StockEntry {
     /// Settings › Keep paper when changing film; a missing value means off.
     /// Here because the film tiles follow it too.
     var keepPaper: Bool { didSet { defaults.set(keepPaper, forKey: Self.keepPaperKey) } }
+    static let favoriteFilmsKey = "favoriteFilms"
+    static let favoritePapersKey = "favoritePapers"
+    /// Starred stock ids, in the order starred. Ids the catalog no longer
+    /// has are kept, in case it brings them back.
+    private(set) var favoriteFilms: [String] { didSet { defaults.set(favoriteFilms, forKey: Self.favoriteFilmsKey) } }
+    private(set) var favoritePapers: [String] { didSet { defaults.set(favoritePapers, forKey: Self.favoritePapersKey) } }
     @ObservationIgnored private let defaults: UserDefaults
     /// Collapsed at every launch.
     var filmOpen = false
@@ -189,6 +195,28 @@ struct StockEntry {
         self.defaults = defaults
         enabled = defaults.object(forKey: Self.defaultsKey) as? Bool ?? true
         keepPaper = defaults.object(forKey: Self.keepPaperKey) as? Bool ?? false
+        favoriteFilms = defaults.stringArray(forKey: Self.favoriteFilmsKey) ?? []
+        favoritePapers = defaults.stringArray(forKey: Self.favoritePapersKey) ?? []
+    }
+
+    func isFavorite(_ id: String, paper: Bool) -> Bool { (paper ? favoritePapers : favoriteFilms).contains(id) }
+    /// Stars `id` (last among the favourites) or unstars it.
+    func toggleFavorite(_ id: String, paper: Bool) {
+        var ids = paper ? favoritePapers : favoriteFilms
+        if let index = ids.firstIndex(of: id) { ids.remove(at: index) } else { ids.append(id) }
+        if paper { favoritePapers = ids } else { favoriteFilms = ids }
+    }
+    /// The starred stocks among `stocks`, in the order starred.
+    func favorites(in stocks: [Stock], paper: Bool) -> [Stock] {
+        (paper ? favoritePapers : favoriteFilms).compactMap { id in stocks.first { $0.paper == paper && $0.id == id } }
+    }
+    /// The tiles of one kind, favourites first, so their thumbnails come first.
+    var filmsFavoritesFirst: [StockEntry] { favoritesFirst(films, paper: false) }
+    var papersFavoritesFirst: [StockEntry] { favoritesFirst(papers, paper: true) }
+    private func favoritesFirst(_ entries: [StockEntry], paper: Bool) -> [StockEntry] {
+        let ids = paper ? favoritePapers : favoriteFilms
+        let starred = ids.compactMap { id in entries.first { $0.stock.id == id } }
+        return starred + entries.filter { !ids.contains($0.stock.id) }
     }
 
     /// Tiles for the catalog's stocks, kept across catalog reloads by id.
@@ -228,6 +256,16 @@ struct StockEntry {
 struct StockFoldout: View {
     let model: EditorModel
     let paper: Bool
+    /// About two and a half rows of tiles, so the cut-off row shows it scrolls.
+    static let gridHeight: CGFloat = 290
+    static func favoriteID(_ id: String) -> String { "favorite:\(id)" }
+    /// The stock a tile or menu tag stands for.
+    static func stockID(tag: String) -> String { tag.hasPrefix("favorite:") ? String(tag.dropFirst("favorite:".count)) : tag }
+    /// The current stock's tile, the copy among the favourites if starred.
+    private var scrollID: String {
+        let id = paper ? model.paper : model.film
+        return model.previews.isFavorite(id, paper: paper) ? Self.favoriteID(id) : id
+    }
 
     var body: some View {
         let previews = model.previews
@@ -238,7 +276,17 @@ struct StockFoldout: View {
                 model.pumpPreviews()
             })
         DisclosureGroup(isExpanded: isExpanded) {
-            StockGrid(model: model, paper: paper)
+            // A fixed window onto the grid keeps the header, and the tab
+            // switch below, in reach however far down the stocks go. It
+            // opens on the current stock.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    StockGrid(model: model, paper: paper)
+                }
+                .scrollDisabled(false)
+                .frame(height: StockFoldout.gridHeight)
+                .onAppear { proxy.scrollTo(scrollID, anchor: .center) }
+            }
         } label: {
             HStack {
                 Text(paper ? "Paper" : "Film")
@@ -246,6 +294,7 @@ struct StockFoldout: View {
                 Text(paper ? model.paperName : model.filmName)
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
+            .help(paper ? ControlHelp.paper : ControlHelp.film)
             .contentShape(Rectangle())
             .onTapGesture { withAnimation { isExpanded.wrappedValue.toggle() } }
         }
@@ -258,18 +307,16 @@ private struct StockGrid: View {
 
     var body: some View {
         let previews = model.previews
-        let selected = paper ? model.paper : model.film
+        let favorites = previews.favorites(in: paper ? model.papers : model.films, paper: paper)
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), spacing: 8, alignment: .top)],
                   alignment: .leading, spacing: 8) {
+            // The favourites first, untitled; each stays in its group too.
+            if !favorites.isEmpty {
+                Section { tiles(favorites, favorites: true) }
+            }
             ForEach(paper ? model.paperGroups : model.filmGroups) { group in
                 Section {
-                    ForEach(group.stocks) { stock in
-                        if let tile = previews.tile(stock.id, paper: paper) {
-                            StockTileView(stock: stock, tile: tile, selected: stock.id == selected) {
-                                if paper { model.choosePaper(stock.id) } else { model.chooseFilm(stock.id) }
-                            }
-                        }
-                    }
+                    tiles(group.stocks)
                 } header: {
                     Text(group.title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
@@ -279,6 +326,23 @@ private struct StockGrid: View {
         .padding(.vertical, 4)
         .onAppear { setShown(true) }
         .onDisappear { setShown(false) }
+    }
+
+    /// A favourite's tile is in the grid twice, so the copy on top has its
+    /// own scroll id (`StockFoldout.scrollID`).
+    private func tiles(_ stocks: [Stock], favorites: Bool = false) -> some View {
+        let previews = model.previews
+        let selected = paper ? model.paper : model.film
+        return ForEach(stocks) { stock in
+            if let tile = previews.tile(stock.id, paper: paper) {
+                StockTileView(stock: stock, tile: tile, selected: stock.id == selected,
+                              favorite: previews.isFavorite(stock.id, paper: paper),
+                              toggleFavorite: { previews.toggleFavorite(stock.id, paper: paper) }) {
+                    if paper { model.choosePaper(stock.id) } else { model.chooseFilm(stock.id) }
+                }
+                .id(favorites ? StockFoldout.favoriteID(stock.id) : stock.id)
+            }
+        }
     }
 
     private func setShown(_ shown: Bool) {
@@ -291,7 +355,10 @@ private struct StockTileView: View {
     let stock: Stock
     let tile: PreviewTile
     let selected: Bool
+    let favorite: Bool
+    let toggleFavorite: () -> Void
     let choose: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: choose) {
@@ -320,5 +387,24 @@ private struct StockTileView: View {
         .help(stock.name)
         .accessibilityLabel(stock.name)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        // The star sits over the thumbnail's corner, outside the tile's own
+        // button so a click stars rather than chooses. Shown on a favourite,
+        // or while the pointer is over the tile.
+        .overlay(alignment: .topTrailing) {
+            if favorite || hovering {
+                Button(action: toggleFavorite) {
+                    Image(systemName: favorite ? "star.fill" : "star")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(favorite ? Color.yellow : Color.white)
+                        .shadow(color: .black.opacity(0.6), radius: 1.5)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(favorite ? "Remove from favorites" : "Add to favorites")
+                .accessibilityLabel(favorite ? "Remove \(stock.name) from favorites" : "Add \(stock.name) to favorites")
+            }
+        }
+        .onHover { hovering = $0 }
     }
 }

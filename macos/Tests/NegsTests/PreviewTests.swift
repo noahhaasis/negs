@@ -204,4 +204,42 @@ final class PreviewTests: XCTestCase {
         XCTAssertTrue(Previews(defaults: defaults).keepPaper)
         XCTAssertEqual(defaults.object(forKey: "keep_paper") as? Bool, true)
     }
+
+    @MainActor func testFavoritesKeepTheOrderStarredAndPersist() {
+        let suite = "negs-favorites-\(UUID().uuidString)", defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let previews = Previews(defaults: defaults)
+        XCTAssertTrue(previews.favorites(in: stocks, paper: false).isEmpty)
+        previews.toggleFavorite("trix", paper: false)
+        previews.toggleFavorite("gold", paper: false)
+        previews.toggleFavorite("ilford", paper: true)
+        // A film id among the papers isn't a favourite paper.
+        XCTAssertFalse(previews.isFavorite("trix", paper: true))
+
+        let reloaded = Previews(defaults: defaults)
+        XCTAssertEqual(reloaded.favorites(in: stocks, paper: false).map(\.id), ["trix", "gold"])
+        XCTAssertEqual(reloaded.favorites(in: stocks, paper: true).map(\.id), ["ilford"])
+        reloaded.update(stocks: stocks)
+        XCTAssertEqual(reloaded.filmsFavoritesFirst.map(\.stock.id), ["trix", "gold", "velvia"])
+
+        reloaded.toggleFavorite("trix", paper: false)
+        reloaded.toggleFavorite("trix", paper: false)
+        XCTAssertEqual(Previews(defaults: defaults).favorites(in: stocks, paper: false).map(\.id), ["gold", "trix"])
+    }
+
+    func testAFavoritesOwnTagStandsForItsStock() {
+        XCTAssertEqual(StockFoldout.stockID(tag: StockFoldout.favoriteID("kodak_gold_200")), "kodak_gold_200")
+        XCTAssertEqual(StockFoldout.stockID(tag: "kodak_gold_200"), "kodak_gold_200")
+        XCTAssertNotEqual(StockFoldout.favoriteID("kodak_gold_200"), "kodak_gold_200")
+    }
+
+    @MainActor func testAFavoriteMissingFromTheCatalogIsKeptButNotShown() {
+        let suite = "negs-favorites-missing-\(UUID().uuidString)", defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(["gone", "velvia"], forKey: Previews.favoriteFilmsKey)
+        let previews = Previews(defaults: defaults)
+        XCTAssertEqual(previews.favorites(in: stocks, paper: false).map(\.id), ["velvia"])
+        previews.toggleFavorite("gold", paper: false)
+        XCTAssertEqual(defaults.stringArray(forKey: Previews.favoriteFilmsKey), ["gone", "velvia", "gold"])
+    }
 }

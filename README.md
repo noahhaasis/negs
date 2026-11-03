@@ -224,6 +224,8 @@ The film model at the heart of Negs comes from two open-source projects. Negs bu
 
 The default spectral-upsampling table is by [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt). The optional Arctic 2026 table is by Andrea Volpato, from spektrafilm, and the Mallett 2019 table is spektrafilm's tabulation of the spectral primary decomposition by Ian Mallett and Cem Yuksel (2019). The profiles and tables from spektrafilm are under CC BY-SA 4.0 ([license](data/SPEKTRAFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). Parts of the maths are ported from numpy, scipy, scikit-image and colour-science. RAW files Apple can't read are decoded with [rawler](https://github.com/dnglab/dnglab); the Sony, Fujifilm, OM/Olympus and Panasonic lens corrections on Windows and Linux are ported from [darktable](https://www.darktable.org)'s embedded-metadata lens correction; and updates are delivered with [Sparkle](https://sparkle-project.org).
 
+The Prep tab, camera brightness matching, the RGB waveform and the Apple RAW 9 → 8 fallback come from [yosoyelchris](https://github.com/yosoyelchris)'s fork of Negs ([details](docs/prep.md)).
+
 ## License
 
 Negs is free software under the **GNU General Public License, version 3** ([full text](LICENSE)), the same license as spektrafilm and spektrafilm-rs, which it builds on.
@@ -233,6 +235,7 @@ That means you can use Negs for anything, including commercial work. The photos 
 - Copyright © Andrea Volpato (spektrafilm)
 - Copyright © turbasvin (spektrafilm-rs)
 - Copyright © 2026 Noah Haasis (Negs: the apps and the changes to the engine)
+- Copyright © 2026 yosoyelchris (the Prep controls, camera brightness matching and scopes)
 
 Third-party components keep their own licenses. Sparkle, the update framework bundled in the Mac app, is under the MIT license.
 

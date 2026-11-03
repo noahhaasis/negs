@@ -13,7 +13,7 @@ import XCTest
     }
 
     /// Exercise the real form and helper through a reduced drag frame and
-    /// the settled render. The Image Size row is above the visible controls.
+    /// the settled render.
     private func checkInspectorLayout(limited: Bool) async throws {
         _ = NSApplication.shared
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -22,7 +22,7 @@ import XCTest
                                 data: root.appendingPathComponent("data"))
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build the release helper first") }
         let defaults = UserDefaults.standard
-        let saved = ["expandedAdjustments", "inspectorTab", "imageSizeLongestSide"].map { ($0, defaults.object(forKey: $0)) }
+        let saved = ["expandedAdjustments", "inspectorTab", "imageSizeLongestSide", "limitPreview"].map { ($0, defaults.object(forKey: $0)) }
         defaults.set("Enlarger", forKey: "expandedAdjustments")
         defaults.set("Lab", forKey: "inspectorTab")
         defer { for (key, value) in saved { defaults.set(value, forKey: key) } }
@@ -36,7 +36,7 @@ import XCTest
         XCTAssertTrue(model.ready, model.error ?? "No engine")
         model.set("film_render.grain.active", .bool(false))
         model.set("film_render.halation.active", .bool(false))
-        model.limitPreview(limited)
+        model.limitsPreview = limited
         model.setLongestSide(limited ? 4800 : 2400)
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 64,
             bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false,
@@ -62,7 +62,8 @@ import XCTest
         try await Task.sleep(for: .milliseconds(700))
         let inspector = split.splitViewItems[1].viewController.view
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-        let scroll = try XCTUnwrap(descendants(inspector).compactMap { $0 as? NSScrollView }.first)
+        // The tab's form, below the pinned Film & Paper form.
+        let scroll = try XCTUnwrap(descendants(inspector).compactMap { $0 as? NSScrollView }.max { $0.frame.height < $1.frame.height })
         let document = try XCTUnwrap(scroll.documentView)
         // Only Enlarger is expanded; its last slider is Preflash yellow.
         let slider = try XCTUnwrap(descendants(inspector).compactMap { $0 as? NSSlider }.last)
