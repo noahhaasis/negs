@@ -1,8 +1,10 @@
-# Negs Prep fork
+# Prep
 
-Based on `noahhaasis/negs` at `d3f06c7`. This fork adds preparation and scopes to
-the native macOS app. The shared Rust engine also accepts the Prep parameters;
-the web and legacy egui inspectors have not been changed.
+The Prep tab, camera brightness matching, the scopes and the Apple RAW 9 → 8 →
+rawler fallback come from yosoyelchris's fork of Negs (branch `prep-raw-scopes`,
+commit `d2a144d`, based on `d3f06c7`). The shared Rust engine accepts the Prep
+parameters on every platform; for now only the native macOS inspector shows
+them. Product spec: ticket 26.
 
 - **Prep / Lab / Post:** Prep sits immediately before Lab. Tone has Highlights,
   Shadows, Contrast, Lift and Gain; Color has Color Boost and Saturation; Detail
@@ -12,16 +14,18 @@ the web and legacy egui inspectors have not been changed.
   **Match camera brightness**. Fresh RAWs can automatically place their graded
   brightness against the embedded camera preview while limiting highlight
   crowding. See [exposure placement](exposure-placement.md).
-- **Double-click reset:** double-click a slider's track, thumb or title to return
-  to its default. Film-dependent sliders return to that stock's default. Reset
-  participates in Undo; dragging still updates continuously as one undo step.
-- **New photograph:** selecting a photograph starts fresh Prep, Lab and Post
-  adjustments, white balance, crop, rotation and border, then optionally places
-  the new RAW's exposure. Film/paper selection,
-  Image Size and output colour preferences remain. Relaunching the current saved
-  session restores its edits, including Prep.
-- **Scopes:** a 190-point RGB histogram replaces the old 88-point plot. The
-  dropdown switches to RGB waveform and remembers the choice. Both use the
+- **Default marker:** on macOS 26 each slider's track fills from its default
+  (`NSSlider.neutralValue`), so a moved slider shows where it started.
+- **New photograph:** Settings › New photographs. *Keep the previous edits*
+  (the default) carries Prep, Lab and Post over as Negs always did; *Start
+  fresh* resets Prep, Lab and Post adjustments, white balance and the border,
+  keeping film/paper, Image Size and output colour. Crop, rotation and lens
+  corrections reset either way. Relaunching restores the current session's
+  edits, including Prep. Fresh RAW opens are then matched to the camera's
+  brightness when that's on.
+- **Scopes:** a 190-point RGB histogram replaces the old 88-point plot; drag the
+  handle below it to resize it (88–420 pt, remembered). The dropdown switches
+  to RGB waveform and remembers the choice. Both use the
   developed preview, honour crop/straightening, exclude borders, and update off
   the main thread. The waveform follows quarter-turn rotation and uses bounded
   sampling even for very wide or tall images.
@@ -50,32 +54,10 @@ Prep values are saved with the photograph's session and undo history. Film/Lab
 presets preserve the photograph's existing Prep, just as they preserve Post.
 Film-look LUT export excludes Prep because it is image-specific and spatial.
 
-## Build this fork
-
-```sh
-bash scripts/package_prep_macos.sh
-open 'dist/negs-prep/Negs Prep.app'
-```
-
-This builds for the current Mac, bundles all three engines and the data, and
-ad-hoc signs the app. It uses a separate bundle identifier and has no upstream
-update feed. The installed Negs app's session and preferences remain separate.
-Corresponding source, including vendored rawler, is beside the app.
-Set `NEGS_DIST_DIR` to package into a different directory when keeping a running
-build available during validation.
-
-The build machine's Command Line Tools macOS 27 SDK lacks the SwiftUI macro
-plugin. Its installed 26.5 SDK builds the app successfully:
-
-```sh
-NEGS_SWIFT_SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk bash scripts/package_prep_macos.sh
-```
-
 ## Verification
 
 The implementation includes numerical golden tests, full-frame guided-filter
 references, signed/HDR and colour-space checks, default/old-params compatibility,
 CPU/GPU output checks, GPU cache transitions, RAW fallback tests, scope geometry
-tests and slider/session lifecycle tests. See the companion validation report
-for the checks actually run on this machine:
-[validation results](prep-validation-2026-11-01.md).
+tests and slider/session lifecycle tests. The fork's own validation report, from before the port, lists the checks run
+on its build machine: [validation results](prep-validation-2026-11-01.md).

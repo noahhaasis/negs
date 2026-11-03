@@ -1,5 +1,8 @@
 # Negs Prep validation — 1 November 2026
 
+*Results from yosoyelchris's fork (`d2a144d`), before the port into Negs; kept as
+that build's record. The port's own checks are in ticket 26.*
+
 Validated on this Apple silicon Mac using actual Metal/Core Image rendering.
 
 | Check | Result |
@@ -65,7 +68,7 @@ environment. No claim is made that the complete Swift suite passed.
 
 The default macOS 27 SDK also lacks its SwiftUI macro plugin in this toolchain;
 the installed macOS 26.5 SDK successfully builds the unchanged application
-structure. See [build instructions](prep-fork.md). The local package is for the
+structure. See the fork's build instructions (not part of Negs). The local package is for the
 current Mac architecture, ad-hoc signed, and not notarized. Other operating
 systems and the web UI were not exercised.
 
