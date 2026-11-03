@@ -162,9 +162,9 @@ it. The cursor shows which way a handle moves.
 `src/tone_graph.rs` holds the logic, kept free of windows so it can be tested. It covers
 parsing the helper's `tone_curve` reply and the histogram, the local prediction, the handle
 geometry, hit testing and the drag solve, all ported line for line. `ui/tone_graph.rs` is the
-window. GDI only draws aliased lines, so the window draws into a pixel buffer with
-antialiased strokes and composites it the way the histogram does. The inspector row holds the
-label and the buttons.
+window. GDI only draws aliased lines, so the window draws with the shared anti-aliased
+`Canvas` of the UI polish (see [Visual polish](#tone-graph-in-the-polished-look)). The
+inspector row holds the label and the buttons.
 
 The model asks for a curve only while the graph is on screen. That means Print Curves is
 expanded, Adjustments is shown, the Lab tab is open and no crop is in progress, and the
@@ -351,6 +351,66 @@ checked states. Narrator itself wasn't run.
 - **F7 and F8:** F7 hid the column, but the second F7 and F8 left it hidden, the same
   on `origin/main`. This is probably the posted messages: the focused control had
   been hidden.
+
+### Tone graph in the polished look
+
+The tone graph (above) landed on main while the polish was on its branch. After merging
+`origin/main` (`6ec07ac`), its row was brought into the same look:
+
+- **Graph** (`ui/tone_graph.rs`): painted into the shared `Canvas` instead of its own pixel
+  raster. `Canvas` gained `stroke` (a translucent polyline whose segments merge before they
+  are blended, so joints don't darken), `fill_under` and `shape`, all through one reused
+  coverage mask. The graph's corners take the panel colour (they were `COLOR_BTNFACE`, light
+  in dark mode). The well stays dark in light and dark, like the histogram and the Mac's
+  graph. High contrast draws the well, grid, curve and handles in the system colours only
+  (window, window text, highlight) with a window-text outline, and leaves out the faint
+  layers behind the chosen one.
+- **RGB | R | G | B** is one segmented switch. Segments gained a middle part
+  (`Role::SegmentMiddle`); before, R and G drew as right-hand ends of a two-part switch. A
+  disabled switch now keeps its chosen segment's text readable (it was grey on grey).
+- **Grid:** the label and the switch share a 32 DIP line (the label centred on the switch),
+  the graph is 168 DIP high, with 8 below.
+- **Disabled labels:** a disabled static control embosses its text (white over grey) whatever
+  colour `WM_CTLCOLORSTATIC` gives it. In dark that showed on every disabled row, for example
+  all of Print Curves while it is off. Labels now stay enabled and are dimmed instead
+  (`draw::enable`, `draw::is_dimmed`), and a dimmed label's double-click no longer resets its
+  disabled row. MSAA no longer reports such labels as unavailable; their controls still are.
+
+**Results** (2026-11-03, this machine, as above): `cargo test --locked` passes all 102
+Windows tests (main's 101 plus one for the high-contrast colours; the graph's two raster
+tests now test `Canvas`). The release build has 15 warnings, all pre-existing; `origin/main`
+(`6ec07ac`) has 16. Startup, `origin/main` (`6ec07ac`, built fresh) against this branch,
+ABBA order, a warm-up each and 12 measured runs per build, medians in ms. Every run was in
+the slow GPU mode (`gpu_ready` 618–664 ms), so the photograph's times compare directly:
+
+| Build | first window composited | adjustments column shown | GPU ready | photograph on screen |
+|---|---|---|---|---|
+| session 1: `origin/main` (`6ec07ac`) | 98.1 | 286.5 | 637.2 | 952.0 |
+| session 1: this branch, system theme (dark) | 104.2 | 293.1 | 642.7 | 955.4 |
+| session 2: `origin/main` (`6ec07ac`) | 104.7 | 298.2 | 643.2 | 955.3 |
+| session 2: this branch, `NEGS_THEME=light` | 101.9 | 295.5 | 639.8 | 956.1 |
+
+The differences (+6.1/+6.6/+3.5 ms in session 1, −2.8/−2.7/+0.8 ms in session 2) are within
+the 10 ms allowed and of the size of the run-to-run noise. The graph isn't on screen at
+startup with the default profile (Print Curves is closed), so its painting isn't in these
+numbers.
+
+**Screenshots** (window only, Print Curves open, `docs/card.jpg`):
+[light](windows-ui-polish/after-light-tone-graph.jpg),
+[dark](windows-ui-polish/after-dark-tone-graph.jpg),
+[dark, R layer](windows-ui-polish/after-dark-tone-graph-red.jpg),
+[light, scanning film directly (disabled)](windows-ui-polish/after-light-tone-graph-scanning.jpg).
+Main's look, for comparison: [windows-tone-graph.png](windows-tone-graph.png).
+
+**Behaviour**, through posted messages in the release build: hovering the middle handle
+names it ("Print exposure 1.00 · drag sideways"); dragging it 30 px set Print exposure to
+1.64–1.76, with the label following during the drag; double-clicking the handle reset it to
+1.00. The same steps on the merged build before this restyling behaved the same.
+
+**Not verified here:** high contrast (it needs the system setting; the colours are checked
+by a unit test only), the live light/dark switch (as above; the graph reads the palette on
+every paint and is repainted by the theme switch's `RedrawWindow`), 150 % scaling, and
+Narrator.
 
 ## Packaging
 
