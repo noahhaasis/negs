@@ -82,6 +82,22 @@ impl EditState {
 pub const SIZE_TARGET: &str = "io.photo_long_side_px";
 pub const SIZE_FACTOR: &str = "io.upscale_factor";
 
+/// The camera's own lens corrections for a RAW (`io.lens_correction`), as on
+/// macOS and Linux. Per photograph: on for each newly opened one and after
+/// Reset, kept when a preset is applied (the engine's `presets::KEPT`).
+pub const LENS_CORRECTION: &str = "io.lens_correction.enabled";
+
+/// A saved edit's params on today's defaults. A session from before lens
+/// corrections was developed without them, so they stay off and its crop
+/// keeps its place.
+pub fn restored_params(defaults: &Value, saved: &Value, nullable: &[String]) -> Value {
+    let mut params = json::restoring(defaults, saved, nullable);
+    if json::get(saved, LENS_CORRECTION).is_null() {
+        json::set(&mut params, LENS_CORRECTION, Value::Bool(false));
+    }
+    params
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SizeMode {
     Original,
@@ -169,6 +185,41 @@ impl Stock {
 
     pub fn is_motion_picture_print(&self) -> bool {
         self.paper && (self.name.contains("Vision") || self.name.contains("Print Film"))
+    }
+}
+
+/// The edit with stock `id` chosen, exactly as choosing it from the menu or
+/// a preview tile makes it (`PreviewRules.choosing`). A film resets its
+/// development time and its grain, DIR and halation presets, sets scanning
+/// for slides and brings its own paper unless `keep_paper` (Settings › Keep
+/// paper when changing film); a paper keeps the film.
+pub fn choosing(state: &EditState, id: &str, paper: bool, keep_paper: bool, stocks: &[Stock]) -> EditState {
+    let mut next = state.clone();
+    if paper {
+        next.paper = id.into();
+        json::set(&mut next.params, "print_render.development_time", Value::Null);
+        return next;
+    }
+    next.film = id.into();
+    json::set(&mut next.params, "film_render.development_time", Value::Null);
+    // A new film brings its own grain, DIR and halation presets, as upstream applies them.
+    for field in GRAIN_STOCK_FIELDS {
+        json::set(&mut next.params, &format!("film_render.grain.{field}"), Value::Null);
+    }
+    for path in DIR_HALATION_STOCK_PATHS {
+        json::set(&mut next.params, path, Value::Null);
+    }
+    pair_film(&mut next, stocks, !keep_paper);
+    next
+}
+
+/// Scanning for slides, and the film's own paper unless `paper` is false.
+pub fn pair_film(state: &mut EditState, stocks: &[Stock], paper: bool) {
+    let Some(film) = stocks.iter().find(|s| !s.paper && s.id == state.film) else { return };
+    json::set(&mut state.params, "io.scan_film", Value::Bool(film.positive));
+    if paper && stocks.iter().any(|s| s.paper && s.id == film.target) && state.paper != film.target {
+        state.paper = film.target.clone();
+        json::set(&mut state.params, "print_render.development_time", Value::Null);
     }
 }
 
@@ -539,6 +590,17 @@ pub fn ratio_name(width: f64, height: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sessions_before_lens_corrections_keep_them_off() {
+        let defaults = serde_json::json!({"io": {"lens_correction": {"enabled": true}, "rotate_cw": 0}});
+        let old = serde_json::json!({"io": {"rotate_cw": 1}});
+        assert_eq!(restored_params(&defaults, &old, &[]), serde_json::json!({"io": {"lens_correction": {"enabled": false}, "rotate_cw": 1}}));
+        for saved in [true, false] {
+            let current = serde_json::json!({"io": {"lens_correction": {"enabled": saved}, "rotate_cw": 1}});
+            assert_eq!(json::get(&restored_params(&defaults, &current, &[]), LENS_CORRECTION), &Value::Bool(saved));
+        }
+    }
     use serde_json::json;
 
     /// The same values as the macOS app's slider tests.

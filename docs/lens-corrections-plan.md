@@ -8,7 +8,8 @@ see "Phase 0 results". Phase 1b and the Sony/Fujifilm half of Phase 2
 implemented for Linux on 2026-11-01 (see "Phase 1b/2 results"), then
 OM/Olympus and Panasonic the same day. On macOS the Rust stage also covers
 files Apple decodes but cannot correct (see "macOS: Rust stage for files
-Apple cannot correct"). Windows UI and Phase 3 are not started.
+Apple cannot correct"). The Windows UI followed on 2026-11-02 (see
+"Windows UI"). Phase 3 is not started.
 
 **Decided 2026-11-01 (Noah):** ship this stage; Phase 3 (lensfun, for Nikon,
 Canon and others) waits.
@@ -404,7 +405,7 @@ vendor curves: darktable's fitted scale, which may zoom out slightly).
   Negs iterates to convergence.
 - OM/Olympus E-M1 Mark III ORF (`3119563425.orf`): lateral CA only (the
   distortion entry is the null '0 0 0 1'); sub-pixel, not visible.
-- Still open: Windows UI; DNG `GainMap` (Android lens shading, see below);
+- Still open: DNG `GainMap` (Android lens shading, see below);
   Fujifilm 1.25× crop modes. Apple-decoded files on macOS keep Apple's
   correction where Apple has one; the others now get the Rust stage.
 
@@ -476,6 +477,36 @@ Only do this if users ask for Nikon/Canon coverage after Phase 2.
 - **Memory:** correction can run in place except for the resample, which needs
   one extra full-size buffer briefly (720 MB at 60 MP, f32 RGB). Check against
   `docs/handoff-memory.md` limits; tile the resample if needed.
+
+## Windows UI (done 2026-11-02)
+
+The Windows app uses the helper's Rust stage, so only the UI was new; it
+follows Linux and macOS:
+
+- "Lens corrections" checkbox after the RAW White Balance group, shown only
+  when the last render reports `lens_correction_supported` (also kept with the
+  saved preview, so a restored session shows it before its first render). Its
+  tooltip says what it corrects.
+- `io.lens_correction.enabled` (`state::LENS_CORRECTION`) is set on in the
+  app's copy of the catalog defaults, so it is on for newly opened photographs
+  and after Reset Adjustments. Opening a photograph sets it from the defaults.
+- Sessions keep their full params, so no schema bump: a session whose params
+  lack the key restores with it off (`state::restored_params`), as on macOS.
+  Sessions saved by the app since the engine gained the field already carry
+  `false`.
+- Applying a preset keeps it (the engine's `presets::KEPT`; the live preset
+  test now covers it). Show Original decodes through the helper with the
+  current params; its cache is now keyed on the decode settings (white
+  balance, lens corrections, input colour, preview limit, output space), so it
+  no longer shows a stale original after changing any of them.
+
+Checked 2026-11-02 in the release build, with its own profile: a test DNG
+(`web/sample/DSC_6377.dng` with an added `OpcodeList3` warp and vignette) shows
+the checkbox on, and unchecking it re-renders with the original framing; the
+session saves `false` and restores off; opening the file again turns it on; a
+session with the key removed restores off; a D750 NEF and a JPEG hide it. No
+local Sony, Fujifilm, OM or Panasonic file was available; those share the
+helper path the Linux check covered. Show Original was not checked by hand.
 
 ## macOS: Rust stage for files Apple cannot correct (done 2026-11-01)
 

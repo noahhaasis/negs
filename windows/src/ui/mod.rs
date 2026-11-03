@@ -314,6 +314,8 @@ pub struct App {
     pub drop_target_active: bool,
     started: Instant,
     quitting: bool,
+    /// The monitor the thumbnails were last made for.
+    preview_monitor: isize,
 }
 
 impl App {
@@ -369,8 +371,29 @@ impl App {
         if flags & (dirty::STRIP | dirty::CHROME) != 0 {
             strip::sync(self);
         }
+        // What the preview tiles show follows the edit, the panels and the main render.
+        let previews = dirty::PREVIEWS | dirty::INSPECTOR | dirty::STRUCTURE | dirty::CHROME | dirty::LAYOUT | dirty::PRESETS | dirty::CANVAS;
+        if flags & previews != 0 && self.model.prefs.previews {
+            // Only once tiles are on screen: reading the profile costs launch time.
+            if self.model.previews_on_screen() {
+                self.follow_preview_monitor();
+            }
+            if self.model.pump_previews() || flags & dirty::PREVIEWS != 0 {
+                inspector::redraw_previews(self);
+                presets::redraw_previews(self);
+            }
+        }
         if self.model.dirty != 0 {
             self.refresh();
+        }
+    }
+
+    /// Thumbnails are drawn through the profile of the monitor the window is on.
+    fn follow_preview_monitor(&mut self) {
+        let monitor = unsafe { MonitorFromWindow(self.main, MONITOR_DEFAULTTONEAREST).0 as isize };
+        if monitor != self.preview_monitor {
+            self.preview_monitor = monitor;
+            self.model.set_preview_color(crate::icc::for_window(self.main).map(std::sync::Arc::new));
         }
     }
 
@@ -1211,6 +1234,7 @@ pub fn run() {
             drop_target_active: false,
             started: Instant::now(),
             quitting: false,
+            preview_monitor: 0,
         };
         let _ = recent;
         empty::build(&mut app);

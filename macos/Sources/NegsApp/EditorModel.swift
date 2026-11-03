@@ -1044,19 +1044,7 @@ import UniformTypeIdentifiers
             if item.tile.mark(wanted: item.key), next == nil { next = item }
         }
         guard !previews.busy, ready, previewCurrent, !rendering, pendingRender == nil, !interacting, let engine else { return }
-        guard let (tile, key, request, name) = next else {
-            if let batch = previews.batch {
-                previews.batch = nil
-                let ms = Date().timeIntervalSince(batch.started) * 1000
-                previews.lastBatch = (batch.count, ms)
-                if ProcessInfo.processInfo.environment["NEGS_STOCK_THUMB_LOG"] != nil {
-                    FileHandle.standardError.write(Data(String(format: "thumbnails: %d in %.0f ms (%.0f ms each)\n", batch.count, ms, ms / Double(max(batch.count, 1))).utf8))
-                }
-            }
-            return
-        }
-        let started = previews.batch?.started ?? Date()
-        previews.batch = (started, (previews.batch?.count ?? 0) + 1)
+        guard let (tile, key, request, name) = next else { return }
         previews.busy = true
         let buffer = engine.directory.appendingPathComponent("thumbnail-\(UUID().uuidString).rgba")
         var command = request
@@ -1071,9 +1059,6 @@ import UniformTypeIdentifiers
                     defer { try? FileManager.default.removeItem(at: buffer) }
                     return try? Self.thumbnailImage(Data(contentsOf: buffer), width: width, height: height, displaySpace: display)
                 }.value
-                if ProcessInfo.processInfo.environment["NEGS_STOCK_THUMB_LOG"] != nil {
-                    FileHandle.standardError.write(Data("thumb \(name): \(Int(result["elapsed_ms"].double)) ms \(result["timing_ms"])\n".utf8))
-                }
             } catch {
                 try? FileManager.default.removeItem(at: buffer)
                 FileHandle.standardError.write(Data("thumbnail \(name): \(error.localizedDescription)\n".utf8))

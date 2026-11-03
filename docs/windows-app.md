@@ -128,6 +128,24 @@ photograph was on screen, all exits clean):
 | presets, Adjustments panel | 97.7 | 333.4 | 947.9 |
 | presets, Presets panel remembered (8 presets) | 98.4 | 307.9 | 925.5 |
 
+## Film, paper and preset previews
+
+Film and Paper are foldouts of thumbnails of the photograph under each stock, and each
+preset row has a thumbnail, as on macOS and Linux ([stock-previews.md](stock-previews.md)).
+File ▸ Settings… turns them off ("Film, paper and preset previews", the `previews`
+preference), which brings back the menus and the plain preset list. Design, measurements and
+screenshots: [the handoff's Windows results](handoff-stock-previews-windows.md#windows-results).
+Settings also has "Keep paper when changing film" (`keep_paper`, off by default; see
+[handoff-keep-paper.md](handoff-keep-paper.md)).
+
+## Lens corrections
+
+A RAW whose decode finds the camera's lens data (DNG opcodes; Sony, Fujifilm, OM/Olympus
+and Panasonic maker notes) shows a "Lens corrections" checkbox after RAW White Balance. It
+is on for each newly opened photograph and after Reset Adjustments, off for sessions saved
+before it, and kept when a preset is applied. Details:
+[lens-corrections-plan.md](lens-corrections-plan.md#windows-ui-done-2026-11-02).
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,

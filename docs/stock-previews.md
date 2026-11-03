@@ -2,10 +2,9 @@
 
 Branch `stock-previews`. Film and paper previews: the Linux app is done and is the
 reference; macOS is done too ([handoff and results](handoff-stock-previews-macos.md#macos-results)).
-[Preset previews](#preset-previews-macos-and-linux-done-windows-to-follow): macOS and Linux.
-Windows ([handoff](handoff-stock-previews-windows.md)) does both, then
-[finishes the feature](handoff-stock-previews-windows.md#finishing-the-feature-last-agent)
-(removes the experiment hooks everywhere).
+[Preset previews](#preset-previews-macos-linux-and-windows-done): macOS, Linux and Windows.
+Windows did both on 2026-11-02 ([results](handoff-stock-previews-windows.md#windows-results)).
+The experiment hooks are gone on all three platforms ([finishing the feature](handoff-stock-previews-windows.md#finishing-the-feature-last-agent)).
 
 ## Behaviour (all platforms)
 
@@ -70,7 +69,7 @@ spectral LUT (`spektrafilm-core/src/input_gamut.rs`, `remap`) now runs rows in p
 The output is bit-identical (render hashes compared against `main`). It cut pipeline
 calibration from ~140 ms to ~45 ms, which also makes ordinary film changes faster.
 
-## Preset previews (macOS and Linux done; Windows to follow)
+## Preset previews (macOS, Linux and Windows done)
 
 - Each row of the Presets panel shows a thumbnail (72 × 48 pt, grey until it arrives) of
   the photograph **with that preset applied**, exactly what clicking it would produce,
@@ -130,11 +129,7 @@ white balances ≈ 2.4 s (as-shot ones first in ~0.2 s, then ~1 s per extra deco
 | Memory, both grids open | helper ≈ +60 MB, app ≈ +15 MB |
 | Startup | unchanged (window appears ~335–360 ms either way; inspector build +~2 ms) |
 
-Tools: `linux/bench_stock_previews.py PHOTO` (helper only, any platform with Python) and
-`linux/measure_stock_browser.py PHOTO` (Linux app). Measure the same rows on your
-platform and add them to your handoff's results section.
-
-**Experiment-only hooks, to remove before shipping** (don't port them as product
-features): `NEGS_STOCK_EXPAND`, `NEGS_STOCK_THUMB_PX`, `NEGS_STOCK_THUMB_LOG`,
-`NEGS_WIDGET_CAPTURE_MS`, and the two measurement scripts. Equivalent debug hooks on your
-platform are fine while measuring, but list them so they can come out together.
+Measured with `linux/bench_stock_previews.py` (helper only) and `linux/measure_stock_browser.py`
+(Linux app), which, with the apps' measurement-only switches (`NEGS_STOCK_EXPAND`,
+`NEGS_STOCK_THUMB_PX`, `NEGS_STOCK_THUMB_LOG`, `NEGS_WIDGET_CAPTURE_MS`), were removed on 2026-11-02 once all three platforms were measured.
+Get them from the history (`git log -- linux/bench_stock_previews.py`) to measure again.

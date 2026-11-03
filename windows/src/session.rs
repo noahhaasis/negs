@@ -159,6 +159,13 @@ pub struct Preferences {
     /// The last Image Size Longest side chosen, offered when switching to it
     /// again. Never switches the mode by itself.
     pub image_size_long_side: Option<u32>,
+    /// Settings › Film, paper and preset previews (the Mac's `previews`).
+    /// Old settings files lack it: on.
+    pub previews: bool,
+    /// Settings › Keep paper when changing film (the Mac's `keep_paper`).
+    /// Old settings files lack it: off, the paper follows the film.
+    #[serde(rename = "keep_paper")]
+    pub keep_paper: bool,
 }
 
 impl Default for Preferences {
@@ -182,6 +189,8 @@ impl Default for Preferences {
             inspector_width: 340.0,
             check_for_updates: true,
             image_size_long_side: None,
+            previews: true,
+            keep_paper: false,
         }
     }
 }
@@ -352,5 +361,19 @@ mod tests {
         prefs.set_expanded("Grain", true);
         prefs.set_expanded("Enlarger", false);
         assert_eq!(prefs.expanded_adjustments, "Grain");
+    }
+
+    #[test]
+    fn settings_from_before_previews_turn_them_on() {
+        let old: Preferences = serde_json::from_str(r#"{"recentFiles": [], "checkForUpdates": false}"#).unwrap();
+        assert!(old.previews && !old.check_for_updates);
+        let off: Preferences = serde_json::from_str(r#"{"previews": false}"#).unwrap();
+        assert!(!off.previews);
+        assert!(serde_json::to_string(&off).unwrap().contains(r#""previews":false"#));
+        // Keep paper: off unless saved on, under the Mac's key.
+        assert!(!old.keep_paper);
+        let kept: Preferences = serde_json::from_str(r#"{"keep_paper": true}"#).unwrap();
+        assert!(kept.keep_paper);
+        assert!(serde_json::to_string(&kept).unwrap().contains(r#""keep_paper":true"#));
     }
 }
