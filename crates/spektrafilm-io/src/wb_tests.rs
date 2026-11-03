@@ -282,15 +282,28 @@ fn camera_raw_smoke() {
                 (image.width, image.height),
                 (baseline.width, baseline.height)
             );
-            assert!(image.data.iter().all(|v| v.is_finite() && *v >= 0.0));
+            // Colours outside sRGB arrive as negative coordinates on purpose
+            // (raw/apple.rs keeps the decode unclamped for the spectral model).
+            // A wrong white balance raises their share (Tungsten on a daylight
+            // Z 6 frame: 12 %); only a broken decode makes them the majority.
+            assert!(image.data.iter().all(|v| v.is_finite()));
+            let negative = image.data.iter().filter(|v| **v < 0.0).count();
+            let negative_share = negative as f64 / image.data.len() as f64;
+            assert!(
+                negative_share < 0.25,
+                "{}: {mode:?}: {:.1} % negative",
+                path.display(),
+                100.0 * negative_share
+            );
             if mode == RawWhiteBalanceMode::AsShot {
                 assert_eq!(image.data, baseline.data);
             }
             eprintln!(
-                "{}: {mode:?}, {}x{} OK",
+                "{}: {mode:?}, {}x{}, {:.2} % negative, OK",
                 path.display(),
                 image.width,
-                image.height
+                image.height,
+                100.0 * negative_share
             );
         }
     }
