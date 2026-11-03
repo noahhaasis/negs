@@ -169,6 +169,16 @@ struct UpdateSettings: View {
             Text("Opening a RAW sets Prep › Exposure so the photograph is about as bright as the camera's own preview.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 8)
+            Toggle("Limit preview to 12 MP", isOn: Binding(
+                get: { model.limitsPreview }, set: { model.limitsPreview = $0 }))
+            Text("Develops the preview faster on large photographs. Export keeps the full Image Size.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Use less memory for export", isOn: Binding(
+                get: { model.lowMemoryExport }, set: { model.lowMemoryExport = $0 }))
+                .padding(.top, 8)
+            Text("Develops the grain one colour at a time. Same result, less memory, longer export.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 8)
             Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
                 .disabled(model.saving || model.exporting || updates.installing || updates.sessionInProgress)
             Text("Removes settings, the saved editing session, and caches. Your original photographs and exported images are kept.")
