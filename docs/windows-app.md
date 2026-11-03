@@ -146,6 +146,156 @@ is on for each newly opened photograph and after Reset Adjustments, off for sess
 before it, and kept when a preset is applied. Details:
 [lens-corrections-plan.md](lens-corrections-plan.md#windows-ui-done-2026-11-02).
 
+## Visual polish (2026-11-03)
+
+[handoff-windows-ui-polish.md](handoff-windows-ui-polish.md), on Win32 and GDI as before.
+Every control stays the real one (window class, focus, keys, accessible name); only
+its painting changed.
+
+- **Painting** (`ui/theme.rs`, `ui/draw.rs`): one palette for every owner-draw,
+  custom-draw and `WM_CTLCOLOR*` handler, and an anti-aliased back buffer (rounded
+  shapes, GDI text) shared by all control paints on the UI thread. Trackbars, push
+  buttons, checkboxes, radio buttons and the two-part switches are drawn through
+  `NM_CUSTOMDRAW`; group headers, foldouts, swatches, border samples and tiles through
+  `WM_DRAWITEM`; drop-down lists' closed boxes, the toolbar, the status bar and the
+  menu bar through `WM_PAINT` subclasses.
+- **Controls:** sliders are a thin track with the accent from the default value to
+  the round thumb (centre-out for Exposure), with hover, pressed and focus states;
+  double-click and Alt-click reset and wheel routing are unchanged. Lab | Post and
+  Landscape | Portrait are segmented switches (still radio buttons). Open Photograph…,
+  Done and OK are accent filled; other buttons have a subtle fill and border. Value
+  boxes are borderless until hovered or focused; reset glyphs are grey until hovered.
+  Recent photographs in the empty state are link-styled buttons (a SysLink's colour
+  can't follow the theme), so they read as buttons, not links.
+- **Typography and spacing:** Segoe UI Variable Text and Display where installed
+  (Windows 11; the size still comes from `SystemParametersInfoForDpi`), a semibold
+  section size, one secondary grey. The column, crop panel, Presets panel, empty
+  state and Settings use an 8 DIP grid with one control column for all rows. A DPI
+  change now gives each inspector control back its own font (before, all got the
+  UI font: section titles lost their weight and reset glyphs became letters).
+- **Dark mode** follows `AppsUseLightTheme` and switches on `WM_SETTINGCHANGE`
+  ("ImmersiveColorSet"), `WM_SYSCOLORCHANGE` and accent changes. High contrast uses the
+  system colours only. Title bars use `DWMWA_USE_IMMERSIVE_DARK_MODE` (20, or 19 before
+  build 18985). Scroll bars, lists, tooltips and the progress bar use
+  `DarkMode_Explorer`. Popup menus use the undocumented uxtheme exports by ordinal:
+  `AllowDarkModeForWindow` (#133), `SetPreferredAppMode` (#135) and `FlushMenuThemes`
+  (#136). They're looked up only on build 18362 and later, and menus stay light if
+  they are missing. **Risk:** these ordinals are not a public API and a Windows
+  update could change them; the lookup fails safe to light menus. The canvas surround
+  is `#2b2b2b` in dark (the photograph's pixels and colour management don't change).
+  `NEGS_THEME=light|dark` overrides the system, for tests and screenshots.
+- **Windows 11** (build 22000 and later): `DWMWA_WINDOW_CORNER_PREFERENCE` = round.
+  Mica is not used: it only shows where nothing paints opaquely, and the band's text,
+  glyphs and toolbars are GDI, which paints opaque. Making them alpha-correct is more
+  work than it's worth without a Windows 11 machine to check it on.
+- **Title bar** (`ui/titlebar.rs`): `WM_NCCALCSIZE` gives the caption's place (and
+  the old menu bar's) to a 40 DIP band holding the icon, the menu bar, the tools, the
+  title and the caption buttons. The side and bottom frame stay the system's, and a
+  maximised window is kept on its monitor. `WM_NCHITTEST` returns `HTCAPTION`, top
+  edge resize, and `HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE` (for Windows 11 snap
+  layouts); the caption buttons' clicks are handled in `WM_NCLBUTTONDOWN/UP` so the
+  system draws no classic buttons. The menu bar is a toolbar control (MSAA shows
+  File … Help as menu items) that opens the same popups with `TrackPopupMenuEx`; a
+  `WH_MSGFILTER` hook moves between menus on the pointer and Left/Right. Alt and F10
+  give the menu bar the keyboard, and Alt+letter opens a menu; it's taken before
+  dialog navigation, which swallowed it. Full screen keeps the band without caption
+  buttons (the old menu bar was hidden in full screen).
+- **Motion** (`ui/motion.rs`): about 140 ms, ease-out, on the timed tasks. Lab | Post
+  and entering or leaving crop fade the panel in (a layered child while it runs);
+  opening or closing a group or foldout slides the rows below, and the revealed rows
+  show when they arrive. Off when `SPI_GETCLIENTAREAANIMATION` is off; nothing runs
+  while idle.
+
+### Results
+
+Validation (2026-11-03, this machine, Windows 10 22H2 build 19045, one 3440 × 1440
+monitor at 100 %, system app theme dark): `cargo test --locked` passes all 88
+Windows tests (`NEGS_PROFILE_DIR` scratch profile, `NEGS_ALLOW_MULTIPLE=1`). The
+release build has 15 warnings, all pre-existing; `origin/main` had 16, and one went
+away with the replaced accent code.
+
+**Startup:** release builds, `docs/card.jpg` on the command line, warm profile and
+pipeline cache, scratch profiles, `NEGS_STARTUP_REPORT` stamps from process start.
+Each window was closed once the photograph was on screen (all exits 0). This machine
+was shared with other work, and single runs vary by ±20 ms or more. So the two builds
+ran interleaved in ABBA order (each first and second equally often), with one warm-up
+each and 12 measured runs, rather than as separate batches of 6. Medians in ms:
+
+| Build | first window composited | adjustments column shown | GPU ready | photograph on screen |
+|---|---|---|---|---|
+| session 1: `origin/main` (`c721589`) | 105.2 | 295.2 | 632.5 | 912.2 |
+| session 1: this branch, system theme (dark) | 104.5 | 292.8 | 543.5 | 898.2 |
+| session 2: `origin/main` (`c721589`) | 106.4 | 296.0 | 541.0 | 879.5 |
+| session 2: this branch, `NEGS_THEME=light` | 105.9 | 296.5 | 639.8 | 916.9 |
+
+GPU initialisation is bimodal in both builds: about 540 or about 635 ms, whichever
+build runs. The photograph's time follows it, so whichever build gets more fast runs
+in a session wins its median. Within one mode the builds match: slow-mode medians of
+the photograph on screen were 920.5 vs 918.2, 916.3 vs 909.9 and 917.9 vs 918.2 ms
+(`origin/main` vs branch) in three sessions. Two earlier sessions, before the shared
+paint buffer, drawn combo boxes and message-loop hover, measured the adjustments
+column at +7.9 and +10.5 ms. Those three changes took out per-control DIB sections,
+per-combo dark themes (about 3.6 ms in dark) and per-control subclasses (about 1.7 ms).
+
+**Screenshots** (window only, `docs/windows-ui-polish/`): before is `origin/main`,
+which has no dark mode; it was captured with the system in dark and looks the same in
+light.
+
+| | before | after, light | after, dark |
+|---|---|---|---|
+| Empty state | [before](windows-ui-polish/before-empty.png) | [light](windows-ui-polish/after-light-empty.png) | [dark](windows-ui-polish/after-dark-empty.png) |
+| Lab, film foldout open | [before](windows-ui-polish/before-lab.jpg) | [light](windows-ui-polish/after-light-lab.jpg) | [dark](windows-ui-polish/after-dark-lab.jpg) |
+| Lab, groups open | [before](windows-ui-polish/before-groups.jpg) | [light](windows-ui-polish/after-light-groups.jpg) | [dark](windows-ui-polish/after-dark-groups.jpg) |
+| Post, border on | [before](windows-ui-polish/before-post.jpg) | [light](windows-ui-polish/after-light-post.jpg) | [dark](windows-ui-polish/after-dark-post.jpg) |
+| Presets with thumbnails | [before](windows-ui-polish/before-presets.jpg) | [light](windows-ui-polish/after-light-presets.jpg) | [dark](windows-ui-polish/after-dark-presets.jpg) |
+| Crop | [before](windows-ui-polish/before-crop.jpg) | [light](windows-ui-polish/after-light-crop.jpg) | [dark](windows-ui-polish/after-dark-crop.jpg) |
+| Settings | [before](windows-ui-polish/before-settings.png) | [light](windows-ui-polish/after-light-settings.png) | [dark](windows-ui-polish/after-dark-settings.png) |
+
+**Behaviour**, checked in the release build:
+- **Window management** (real pointer and keys): maximise and restore by the caption
+  button and by double-clicking the band (a maximised client starts at the monitor's
+  top), minimise and close (exit 0), F11 in and out. Menus open by click and follow
+  the pointer to the next menu. Alt+F opens File and Right moves to Edit. F10 then
+  Right, Right, Down opens View. Popup menus are dark in dark mode.
+- **Adjustments column**, the same steps on `origin/main` and the branch, through
+  posted input messages: real input was withheld once the window lost the foreground
+  to another app. Results were identical:
+  - Tab order through the column (21 distinct stops in 30 Tabs from Exposure).
+  - Slider Right/Left keys and the value box following.
+  - Double-click reset back to the default.
+  - Typing into the value box with Enter (value and slider follow).
+  - F6 hides and shows the film strip.
+- **Dark drop-down lists:** a combo box's list is dark when it opens.
+- **Focus rings** show after keyboard use (screenshots with the Film foldout,
+  Add border and the Settings checkbox focused).
+
+**Accessibility:** the MSAA tree was dumped on both builds (Lab and Post tabs, every
+visible element's role, name, value and state; Narrator reads Win32 controls through
+these). It is the same apart from the menu bar, which now appears in the client area
+as File, Edit, View, Image and Help menu items. Sliders keep their names and values,
+value boxes their names ("Exposure (EV)", value "0"), and foldouts their "Film: Kodak
+Gold 200, collapsed". Checkboxes, radio buttons and buttons keep their roles and
+checked states. Narrator itself wasn't run.
+
+**Not verified here:**
+- **Windows 11:** rounded corners, Segoe UI Variable and snap layouts on the maximise
+  button (this PC is Windows 10).
+- **Live switching between light and dark:** that needs the system setting changed.
+  The handler re-reads the theme and re-themes every window, but only
+  `NEGS_THEME=light/dark` launches were seen.
+- **High contrast and 150 % scaling screenshots, and a DPI change between monitors:**
+  these need system settings changed or a second monitor.
+- **Real-input checks** (the foreground was in use): Alt-click reset, Escape in a
+  value box, the context menu's Reset to Default, and Show Original by holding O or \
+  (PrintWindow doesn't re-capture the Vulkan canvas, on either build).
+- **Drag and drop** onto the canvas and the Presets panel (`ui/drop.rs` is unchanged).
+- **System dialogs:** whether task dialogs and the colour dialog follow dark mode
+  (they're system dialogs, not themed by the app; task dialogs are light on Windows 10
+  as far as is known). The file dialogs follow the system.
+- **F7 and F8:** F7 hid the column, but the second F7 and F8 left it hidden, the same
+  on `origin/main`. This is probably the posted messages: the focused control had
+  been hidden.
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,
