@@ -382,9 +382,6 @@ impl App {
                 inspector::redraw_previews(self);
                 presets::redraw_previews(self);
             }
-            if let Some((count, ms)) = self.model.previews.finished_batch.take() {
-                self.report.line(&format!("previews_batch {count} {ms:.0}"));
-            }
         }
         if self.model.dirty != 0 {
             self.refresh();

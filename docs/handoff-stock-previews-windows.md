@@ -220,6 +220,17 @@ round trip through the window's message queue.
   edits, stale vs placeholder, render order, rotation) and
   `session::tests::settings_from_before_previews_turn_them_on`. 83 Windows tests pass.
 
-Windows experiment-only hooks, for the wrap-up: `NEGS_STOCK_EXPAND` (`Previews::new`) and
-the `previews_batch` lines in the `NEGS_STARTUP_REPORT` file (`Previews::batch` /
-`finished_batch`, written in `App::refresh`).
+The app numbers used two measurement-only switches, `NEGS_STOCK_EXPAND` and batch timings
+in the `NEGS_STARTUP_REPORT` file, removed on 2026-11-02 once all three platforms were measured.
+
+### Finishing (2026-11-02)
+
+Removed on all three platforms: `NEGS_STOCK_EXPAND`, `NEGS_STOCK_THUMB_PX`,
+`NEGS_STOCK_THUMB_LOG`, `NEGS_WIDGET_CAPTURE_MS` (the widget capture keeps its fixed 2 s),
+the batch bookkeeping that only fed them (Linux `Browser::batch` and its perf detail, macOS
+`Previews.batch` / `lastBatch`, Windows `Previews::batch`), `StockPreviewBenchmark.swift` and
+its call, and `linux/bench_stock_previews.py` / `linux/measure_stock_browser.py`. The
+per-thumbnail error line on stderr stays. Built and tested here: Windows only. The Linux and
+Swift edits are plain deletions; they need `cargo build` on Linux (or the Linux workflow) and
+on a Mac `swift build --package-path macos`, the benchmark-flag build
+(`-Xswiftc -DSPEKTRAFILM_BENCHMARK`) and `swift test --package-path macos --filter PreviewTests`.

@@ -184,18 +184,11 @@ struct StockEntry {
     /// By preset file (`moveTile` follows a rename).
     @ObservationIgnored private(set) var presets: [URL: PreviewTile] = [:]
     @ObservationIgnored var busy = false
-    /// The current batch: when its first thumbnail was requested, and how many.
-    @ObservationIgnored var batch: (started: Date, count: Int)?
-    /// The last finished batch, for measurements.
-    @ObservationIgnored var lastBatch: (count: Int, ms: Double)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         enabled = defaults.object(forKey: Self.defaultsKey) as? Bool ?? true
         keepPaper = defaults.object(forKey: Self.keepPaperKey) as? Bool ?? false
-        // Measurement hook (remove before shipping): NEGS_STOCK_EXPAND=film,paper opens the grids.
-        let expand = ProcessInfo.processInfo.environment["NEGS_STOCK_EXPAND"]?.split(separator: ",") ?? []
-        filmOpen = expand.contains("film"); paperOpen = expand.contains("paper")
     }
 
     /// Tiles for the catalog's stocks, kept across catalog reloads by id.

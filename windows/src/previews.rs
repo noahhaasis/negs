@@ -296,20 +296,9 @@ pub struct Previews {
     pub color: Option<Arc<Transform>>,
     /// For the scratch files' names.
     pub requests: u64,
-    /// Measurement hook (remove before shipping): the current batch, since
-    /// its first request, and the last finished one, for the startup report.
-    pub batch: Option<(std::time::Instant, u32)>,
-    pub finished_batch: Option<(u32, f64)>,
 }
 
 impl Previews {
-    /// Measurement hook (remove before shipping): NEGS_STOCK_EXPAND=film,paper opens the grids.
-    pub fn new() -> Self {
-        let expand = std::env::var("NEGS_STOCK_EXPAND").unwrap_or_default();
-        let has = |k: &str| expand.split(',').any(|v| v == k);
-        Self { film_open: has("film"), paper_open: has("paper"), ..Self::default() }
-    }
-
     pub fn open(&self, paper: bool) -> bool {
         if paper { self.paper_open } else { self.film_open }
     }
