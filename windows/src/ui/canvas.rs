@@ -884,12 +884,7 @@ fn picture_texture<'a>(picture: &Picture) -> Option<&'a GpuImage> {
 
 /// The Windows accent colour, for the drop outline and the dial's needle.
 pub fn accent_color() -> [u8; 3] {
-    let mut color = 0u32;
-    let mut opaque = windows::Win32::Foundation::BOOL(0);
-    if unsafe { windows::Win32::Graphics::Dwm::DwmGetColorizationColor(&mut color, &mut opaque) }.is_ok() {
-        return [(color >> 16) as u8, (color >> 8) as u8, color as u8];
-    }
-    [0x00, 0x78, 0xd4]
+    super::theme::accent_rgb()
 }
 
 fn point(lparam: LPARAM) -> (i32, i32) {

@@ -10,12 +10,14 @@
 
 pub mod canvas;
 mod dialogs;
+mod draw;
 mod drop;
 mod empty;
 mod folder_watch;
 pub mod inspector;
 mod presets;
 mod strip;
+mod theme;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -240,6 +242,8 @@ pub struct Fonts {
     pub title: HFONT,
     pub glyph: HFONT,
     pub glyph_small: HFONT,
+    /// The UI font's line height in pixels.
+    pub line: i32,
 }
 
 impl Fonts {
@@ -264,8 +268,21 @@ impl Fonts {
             glyph.lfFaceName[..face.len()].copy_from_slice(&face);
             let glyph_font = CreateFontIndirectW(&glyph);
             let glyph_small = CreateFontIndirectW(&LOGFONTW { lfHeight: -(11 * dpi as i32 / 96), ..glyph });
-            Fonts { ui, bold, small, title, glyph: glyph_font, glyph_small }
+            let line = line_height(ui);
+            Fonts { ui, bold, small, title, glyph: glyph_font, glyph_small, line }
         }
+    }
+}
+
+fn line_height(font: HFONT) -> i32 {
+    unsafe {
+        let dc = GetDC(None);
+        let old = SelectObject(dc, font);
+        let mut metrics = TEXTMETRICW::default();
+        let _ = GetTextMetricsW(dc, &mut metrics);
+        SelectObject(dc, old);
+        ReleaseDC(None, dc);
+        metrics.tmHeight
     }
 }
 
@@ -1159,7 +1176,6 @@ pub fn run() {
             lpszClassName: w!("NegsMainWindow"),
             hCursor: cursor,
             hIcon: icon,
-            hbrBackground: GetSysColorBrush(COLOR_BTNFACE),
             ..Default::default()
         };
         RegisterClassExW(&class);
@@ -1382,6 +1398,7 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 with_app(|app| app.layout());
                 LRESULT(0)
             }
+            WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             WM_GETMINMAXINFO => {
                 let info = &mut *(lparam.0 as *mut MINMAXINFO);
                 let dpi = GetDpiForWindow(hwnd).max(96) as i32;

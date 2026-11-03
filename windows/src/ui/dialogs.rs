@@ -193,7 +193,6 @@ pub fn settings(app: &mut App) {
             hInstance: super::instance(),
             lpszClassName: windows::core::w!("NegsSettings"),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hbrBackground: windows::Win32::Graphics::Gdi::GetSysColorBrush(windows::Win32::Graphics::Gdi::COLOR_BTNFACE),
             ..Default::default()
         };
         RegisterClassExW(&class);
@@ -344,9 +343,12 @@ extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
                 let dc = HDC(wparam.0 as *mut _);
                 SetBkMode(dc, TRANSPARENT);
                 let note = SETTINGS_NOTES.with(|n| n.borrow().contains(&lparam.0));
-                SetTextColor(dc, COLORREF(if note { 0x6d6d6d } else { GetSysColor(COLOR_WINDOWTEXT) }));
-                LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+                let p = super::theme::palette();
+                SetTextColor(dc, COLORREF(if note { p.secondary } else { p.text }));
+                LRESULT(super::theme::brush(p.panel).0 as isize)
             }
+            WM_NOTIFY => super::draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            WM_ERASEBKGND => super::draw::erase(hwnd, wparam, super::theme::palette().panel),
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }

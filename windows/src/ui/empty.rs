@@ -10,6 +10,8 @@ use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
+use super::draw;
+use super::theme;
 use super::{App, create, id, post, with_app};
 use crate::platform::wide;
 
@@ -35,7 +37,6 @@ pub fn register() {
             hInstance: super::instance(),
             lpszClassName: w!("NegsEmpty"),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hbrBackground: GetSysColorBrush(COLOR_WINDOW),
             ..Default::default()
         };
         RegisterClassExW(&class);
@@ -168,6 +169,9 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_NOTIFY => {
+                if let Some(result) = draw::custom_draw(lparam) {
+                    return result;
+                }
                 let header = &*(lparam.0 as *const NMHDR);
                 if header.code == NM_CLICK || header.code == NM_RETURN {
                     let command = header.idFrom as u16;
@@ -183,26 +187,24 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                     control == app.empty_view.tagline || control == app.empty_view.hint || control == app.empty_view.icon
                 })
                 .unwrap_or(false);
-                SetTextColor(dc, if grey { COLORREF(0x707070) } else { COLORREF(GetSysColor(COLOR_WINDOWTEXT)) });
-                LRESULT(GetSysColorBrush(COLOR_WINDOW).0 as isize)
+                let p = theme::palette();
+                SetTextColor(dc, COLORREF(if grey { p.secondary } else { p.text }));
+                LRESULT(theme::brush(p.window).0 as isize)
             }
+            WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let dc = BeginPaint(hwnd, &mut ps);
-                FillRect(dc, &ps.rcPaint, GetSysColorBrush(COLOR_WINDOW));
+                let p = theme::palette();
+                FillRect(dc, &ps.rcPaint, theme::brush(p.window));
                 if with_app(|app| app.empty_view.highlighted).unwrap_or(false) {
-                    let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as i32;
-                    let accent = super::canvas::accent_color();
-                    let pen = CreatePen(PS_SOLID, 3 * dpi / 96, COLORREF(accent[0] as u32 | (accent[1] as u32) << 8 | (accent[2] as u32) << 16));
-                    let old = SelectObject(dc, pen);
-                    let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
                     let mut r = RECT::default();
                     let _ = GetClientRect(hwnd, &mut r);
-                    let inset = 8 * dpi / 96;
-                    let _ = RoundRect(dc, r.left + inset, r.top + inset, r.right - inset, r.bottom - inset, 24 * dpi / 96, 24 * dpi / 96);
-                    SelectObject(dc, old_brush);
-                    SelectObject(dc, old);
-                    let _ = DeleteObject(pen);
+                    let s = draw::dpi_of(hwnd);
+                    let mut c = draw::Canvas::new(dc, r);
+                    c.clear(p.window);
+                    c.round_frame(draw::RectF::of(c.rect()).inset(8.0 * s, 8.0 * s), 12.0 * s, 3.0 * s, p.accent);
+                    c.present(dc);
                 }
                 let _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
@@ -274,6 +276,11 @@ extern "system" fn status_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
     unsafe {
         if msg == WM_COMMAND {
             return SendMessageW(super::main_hwnd(), msg, wparam, lparam);
+        }
+        if msg == WM_NOTIFY {
+            if let Some(result) = draw::custom_draw(lparam) {
+                return result;
+            }
         }
         DefSubclassProc(hwnd, msg, wparam, lparam)
     }

@@ -18,6 +18,8 @@ use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
+use super::draw::{self, Canvas, RectF, Role};
+use super::theme;
 use super::{App, TBM_GETPOS, create, post, with_app};
 use crate::border::{self, BorderColor, BorderStyle};
 use crate::crop::CropAspect;
@@ -136,6 +138,8 @@ pub struct Inspector {
     grids: [Option<StockGrid>; 2],
     dev_times: [Vec<f64>; 2],
     decimal: char,
+    /// The UI font's line height, for value boxes inside their fields.
+    line: i32,
 }
 
 thread_local! {
@@ -150,21 +154,21 @@ thread_local! {
 
 pub fn register() {
     unsafe {
-        let classes: [(PCWSTR, WNDPROC, SYS_COLOR_INDEX); 5] = [
-            (w!("NegsInspector"), Some(panel_proc), COLOR_BTNFACE),
-            (w!("NegsRows"), Some(rows_proc), COLOR_BTNFACE),
-            (w!("NegsHistogram"), Some(histogram_proc), COLOR_BTNFACE),
-            (w!("NegsCropPanel"), Some(crop_proc), COLOR_BTNFACE),
-            (w!("NegsStockGrid"), Some(grid_proc), COLOR_BTNFACE),
+        // Their backgrounds are painted from the palette.
+        let classes: [(PCWSTR, WNDPROC); 5] = [
+            (w!("NegsInspector"), Some(panel_proc)),
+            (w!("NegsRows"), Some(rows_proc)),
+            (w!("NegsHistogram"), Some(histogram_proc)),
+            (w!("NegsCropPanel"), Some(crop_proc)),
+            (w!("NegsStockGrid"), Some(grid_proc)),
         ];
-        for (name, proc_, background) in classes {
+        for (name, proc_) in classes {
             let class = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
                 lpfnWndProc: proc_,
                 hInstance: super::instance(),
                 lpszClassName: name,
                 hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-                hbrBackground: GetSysColorBrush(background),
                 ..Default::default()
             };
             RegisterClassExW(&class);
@@ -183,7 +187,6 @@ impl Inspector {
     /// The empty column for the first frame; `build` fills it.
     pub fn create(main: HWND, fonts: &super::Fonts, dpi: u32) -> Self {
         let panel = create(w!("NegsInspector"), "Adjustments", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), main, 0, HFONT::default());
-        let _ = fonts;
         Self {
             panel,
             histogram: HWND::default(),
@@ -201,11 +204,17 @@ impl Inspector {
             grids: [None, None],
             dev_times: [vec![], vec![]],
             decimal: '.',
+            line: fonts.line,
         }
     }
 
     fn px(&self, dip: f64) -> i32 {
         (dip * self.dpi as f64 / 96.0).round() as i32
+    }
+
+    /// A value box's rectangle inside a 24 DIP field at `x`, `y`.
+    fn field(&self, x: i32, y: i32, width: i32) -> RECT {
+        draw::edit_in_field(RECT { left: x, top: y, right: x + width, bottom: y + self.px(24.0) }, self.line, self.dpi as f64 / 96.0)
     }
 
     pub fn built(&self) -> bool {
@@ -369,6 +378,7 @@ pub fn dpi_changed(app: &mut App) {
     let ins = &mut app.inspector;
     ins.dpi = dpi;
     ITEM_HEIGHT.with(|h| h.set(ins.px(20.0)));
+    ins.line = app.fonts.line;
     let font = app.fonts.ui;
     for row in &ins.rows {
         for &c in &row.controls {
@@ -593,6 +603,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         }
         Kind::Group { title, enable } => {
             let header = create(w!("BUTTON"), title, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.bold);
+            draw::track_hover(header);
             controls.push(header);
             if enable.is_some() {
                 let on = check("On");
@@ -619,14 +630,18 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 SendMessageW(slider, TBM_SETPAGESIZE, WPARAM(0), LPARAM((steps / 10).max(1)));
                 let _ = SetWindowSubclass(slider, Some(trackbar_subclass), 1, id(RESET) as usize);
             }
+            draw::track_hover(slider);
             controls.push(slider);
-            let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), WINDOW_EX_STYLE(WS_EX_CLIENTEDGE.0), parent, id(EDIT), fonts.ui);
+            let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
+            draw::set_role(edit, Role::Value);
+            draw::track_hover(edit);
             super::accessible_name(edit, title);
             unsafe {
                 let _ = SetWindowSubclass(edit, Some(edit_subclass), 1, 0);
             }
             controls.push(edit);
             let reset = create(w!("BUTTON"), "\u{E777}", hidden | WINDOW_STYLE(BS_PUSHBUTTON as u32 | BS_FLAT as u32), WINDOW_EX_STYLE(0), parent, id(RESET), fonts.glyph_small);
+            draw::track_hover(reset);
             super::accessible_name(reset, &format!("Reset {title} to Default"));
             controls.push(reset);
         }
@@ -679,7 +694,9 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         }
         Kind::LongestSide => {
             controls.push(label("Longest side", fonts.ui));
-            let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL | ES_NUMBER) as u32), WINDOW_EX_STYLE(WS_EX_CLIENTEDGE.0), parent, id(EDIT), fonts.ui);
+            let edit = create(w!("EDIT"), "", hidden | WS_TABSTOP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL | ES_NUMBER) as u32), WINDOW_EX_STYLE(0), parent, id(EDIT), fonts.ui);
+            draw::set_role(edit, Role::Field);
+            draw::track_hover(edit);
             super::accessible_name(edit, "Longest side in pixels");
             super::dialogs::tooltip(edit, "The cropped photograph’s longest side, before any border. Press Enter to apply. Exports can still be reduced in the save dialog.");
             unsafe {
@@ -723,18 +740,21 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
                 SetWindowLongPtrW(header, GWLP_USERDATA, (paper as isize) << 1);
             }
             super::dialogs::tooltip(header, &format!("Show each {} on your photograph", title.to_lowercase()));
+            draw::track_hover(header);
             controls.push(header);
         }
         Kind::BorderStyles => {
             for (i, style) in border::STYLES.iter().enumerate() {
                 let b = create(w!("BUTTON"), border::title(*style), hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(i as u16), fonts.small);
                 super::dialogs::tooltip(b, border::help(*style));
+                draw::track_hover(b);
                 controls.push(b);
             }
         }
         Kind::Color(line) => {
             controls.push(label(if line { "Line color" } else { "Color" }, fonts.ui));
             let b = create(w!("BUTTON"), if line { "Line color" } else { "Color" }, hidden | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), parent, id(HEADER), fonts.ui);
+            draw::track_hover(b);
             controls.push(b);
         }
     }
@@ -805,7 +825,8 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 let label = ins.px(108.0).min((right - x) / 2);
                 let (field, unit) = (ins.px(72.0), ins.px(22.0));
                 positions.push((c[0], x, y + ins.px(6.0), label - ins.px(4.0), ins.px(18.0)));
-                positions.push((c[1], right - unit - field, y + ins.px(2.0), field, ins.px(23.0)));
+                let r = ins.field(right - unit - field, y + ins.px(2.0), field);
+                positions.push((c[1], r.left, r.top, r.right - r.left, r.bottom - r.top));
                 positions.push((c[2], right - unit + ins.px(4.0), y + ins.px(6.0), unit - ins.px(4.0), ins.px(18.0)));
                 ins.px(30.0)
             }
@@ -829,7 +850,8 @@ fn layout_rows(ins: &mut Inspector, model: &Model) {
                 positions.push((c[0], x, y + ins.px(2.0), right - x - reset, ins.px(18.0)));
                 positions.push((c[3], right - reset, y, reset, ins.px(20.0)));
                 positions.push((c[1], x - ins.px(6.0), y + ins.px(21.0), right - x - edit, ins.px(26.0)));
-                positions.push((c[2], right - edit + ins.px(4.0), y + ins.px(22.0), edit - ins.px(4.0), ins.px(23.0)));
+                let r = ins.field(right - edit + ins.px(4.0), y + ins.px(22.0), edit - ins.px(4.0));
+                positions.push((c[2], r.left, r.top, r.right - r.left, r.bottom - r.top));
                 ins.px(50.0)
             }
             Kind::Toggle(..) | Kind::LimitPreview | Kind::BorderToggle(..) => {
@@ -1024,6 +1046,7 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     set_text(c[0], if model.film_is_bw() { bw } else { title });
                 }
                 let pos = ((value - low) / step).round() as isize;
+                draw::set_default_pos(c[1], ((default - low) / step).round() as isize);
                 unsafe {
                     if SendMessageW(c[1], TBM_GETPOS, WPARAM(0), LPARAM(0)).0 != pos {
                         SendMessageW(c[1], TBM_SETPOS, WPARAM(1), LPARAM(pos));
@@ -1437,6 +1460,8 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 }
                 LRESULT(0)
             }
+            WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
@@ -1502,14 +1527,26 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 draw_item(&*(lparam.0 as *const DRAWITEMSTRUCT));
                 LRESULT(1)
             }
+            WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            WM_ERASEBKGND => LRESULT(1),
+            WM_PAINT => {
+                draw::paint_panel(hwnd, theme::palette().panel);
+                LRESULT(0)
+            }
+            WM_CTLCOLOREDIT => draw::color_edit(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
             WM_CTLCOLORSTATIC => {
                 let dc = HDC(wparam.0 as *mut _);
                 let control = HWND(lparam.0 as *mut _);
+                if draw::is_field(control) {
+                    return draw::color_edit(dc, control);
+                }
                 let id = GetDlgCtrlID(control) as u16;
                 SetBkMode(dc, TRANSPARENT);
+                let p = theme::palette();
                 let footer = row_of(id).is_some_and(|(index, _)| with_footer(index));
-                SetTextColor(dc, if footer { COLORREF(0x6d6d6d) } else { COLORREF(GetSysColor(COLOR_WINDOWTEXT)) });
-                LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+                let color = if !IsWindowEnabled(control).as_bool() { p.disabled } else if footer { p.secondary } else { p.text };
+                SetTextColor(dc, COLORREF(color));
+                LRESULT(theme::brush(p.panel).0 as isize)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
@@ -1526,10 +1563,10 @@ fn with_footer(index: usize) -> bool {
 
 fn draw_item(item: &DRAWITEMSTRUCT) {
     unsafe {
-        let dc = item.hDC;
         let r = item.rcItem;
+        let p = theme::palette();
         let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
-        let focused = item.itemState.0 & ODS_FOCUS.0 != 0;
+        let focused = item.itemState.0 & ODS_FOCUS.0 != 0 && item.itemState.0 & ODS_NOFOCUSRECT.0 == 0;
         let mut text = [0u16; 128];
         if item.CtlType == ODT_COMBOBOX {
             if item.itemID == u32::MAX {
@@ -1539,93 +1576,70 @@ fn draw_item(item: &DRAWITEMSTRUCT) {
             let n = SendMessageW(item.hwndItem, CB_GETLBTEXT, WPARAM(item.itemID as usize), LPARAM(text.as_mut_ptr() as isize)).0.max(0) as usize;
             let selected = item.itemState.0 & ODS_SELECTED.0 != 0 && !header;
             let in_edit = item.itemState.0 & ODS_COMBOBOXEDIT.0 != 0;
-            FillRect(dc, &r, GetSysColorBrush(if selected { COLOR_HIGHLIGHT } else { COLOR_WINDOW }));
-            SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, COLORREF(GetSysColor(if disabled { COLOR_GRAYTEXT } else if selected { COLOR_HIGHLIGHTTEXT } else if header { COLOR_GRAYTEXT } else { COLOR_WINDOWTEXT })));
-            let indent = if header || in_edit { 4 } else { 14 };
-            let mut tr = RECT { left: r.left + indent, ..r };
-            let font = SendMessageW(item.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0));
-            let old = SelectObject(dc, HGDIOBJ(font.0 as *mut _));
-            DrawTextW(dc, &mut text[..n], &mut tr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-            SelectObject(dc, old);
-            if focused && in_edit {
-                let _ = DrawFocusRect(dc, &r);
+            let s = draw::dpi_of(item.hwndItem);
+            let mut c = Canvas::new(item.hDC, r);
+            c.clear(p.control);
+            if selected && !in_edit {
+                c.round_rect(RectF::of(c.rect()).inset(2.0 * s, s), 3.0 * s, p.accent);
             }
+            let ink = if disabled { p.disabled } else if selected && !in_edit { p.on_accent } else if header { p.secondary } else { p.text };
+            let indent = (if header || in_edit { 4.0 } else { 14.0 } * s) as i32;
+            let label = String::from_utf16_lossy(&text[..n]);
+            let tr = RECT { left: indent, top: 0, right: c.w, bottom: c.h };
+            c.text(&label, tr, draw::font_of(item.hwndItem), ink, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            c.present(item.hDC);
             return;
         }
         let id = GetDlgCtrlID(item.hwndItem) as u16;
         let Some((_, part)) = row_of(id) else { return };
         let n = GetWindowTextW(item.hwndItem, &mut text) as usize;
-        FillRect(dc, &r, GetSysColorBrush(COLOR_BTNFACE));
-        SetBkMode(dc, TRANSPARENT);
-        let label_color = COLORREF(GetSysColor(if disabled { COLOR_GRAYTEXT } else { COLOR_WINDOWTEXT }));
+        let title = String::from_utf16_lossy(&text[..n]);
+        let s = draw::dpi_of(item.hwndItem);
+        let pressed = item.itemState.0 & ODS_SELECTED.0 != 0;
+        let mut c = Canvas::new(item.hDC, r);
+        c.clear(p.panel);
+        let whole = RectF::of(c.rect());
+        let label_color = if disabled { p.disabled } else { p.text };
         if part == ACTION {
-            draw_foldout(item, &mut text[..n], label_color);
-            return;
-        }
-        if part == HEADER && n > 0 && !["Color", "Line color"].contains(&String::from_utf16_lossy(&text[..n]).as_str()) {
+            draw::header_background(&mut c, item.hwndItem, pressed, disabled);
+            draw_foldout(&mut c, item, &title, label_color);
+        } else if part == HEADER && n > 0 && !["Color", "Line color"].contains(&title.as_str()) {
             // A group header: chevron, then the title.
+            draw::header_background(&mut c, item.hwndItem, pressed, disabled);
             let open = GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA) != 0;
-            let glyph_font = with_app_fonts_glyph();
-            let old = SelectObject(dc, glyph_font);
-            SetTextColor(dc, label_color);
-            let mut chevron: Vec<u16> = (if open { "\u{E70D}" } else { "\u{E76C}" }).encode_utf16().collect();
-            let height = r.bottom - r.top;
-            let mut cr = RECT { left: r.left + 2, top: r.top, right: r.left + height, bottom: r.bottom };
-            DrawTextW(dc, &mut chevron, &mut cr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-            SelectObject(dc, old);
-            let font = SendMessageW(item.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0));
-            let old = SelectObject(dc, HGDIOBJ(font.0 as *mut _));
-            let mut tr = RECT { left: r.left + height + 2, ..r };
-            DrawTextW(dc, &mut text[..n], &mut tr, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-            SelectObject(dc, old);
-            if focused {
-                let _ = DrawFocusRect(dc, &r);
-            }
-            return;
-        }
-        let (mat, line, selected) = SWATCHES.with(|s| s.get());
-        if part == HEADER {
+            let height = c.h as f32;
+            draw::chevron(&mut c, 12.0 * s, height / 2.0, open, s, if disabled { p.disabled } else { p.secondary });
+            let tr = RECT { left: (24.0 * s) as i32, top: 0, right: c.w - (4.0 * s) as i32, bottom: c.h };
+            c.text(&title, tr, draw::font_of(item.hwndItem), label_color, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+        } else if part == HEADER {
             // A colour swatch button.
-            let is_line = String::from_utf16_lossy(&text[..n]) == "Line color";
-            let color = if is_line { line } else { mat };
-            let pushed = item.itemState.0 & ODS_SELECTED.0 != 0;
-            DrawFrameControl(dc, &mut r.clone(), DFC_BUTTON, DFCS_BUTTONPUSH | if pushed { DFCS_PUSHED } else { DFCS_STATE(0) });
-            let inner = RECT { left: r.left + 5, top: r.top + 5, right: r.right - 5, bottom: r.bottom - 5 };
-            let brush = CreateSolidBrush(COLORREF(if disabled { GetSysColor(COLOR_BTNSHADOW) } else { color }));
-            FillRect(dc, &inner, brush);
-            let _ = DeleteObject(brush);
-            FrameRect(dc, &inner, GetSysColorBrush(COLOR_BTNSHADOW));
-            if focused {
-                let _ = DrawFocusRect(dc, &RECT { left: r.left + 3, top: r.top + 3, right: r.right - 3, bottom: r.bottom - 3 });
+            let (mat, line, _) = SWATCHES.with(|s| s.get());
+            let color = if title == "Line color" { line } else { mat };
+            let fill = if pressed { p.control_pressed } else if draw::is_hot(item.hwndItem) && !disabled { p.control_hover } else { p.control };
+            c.round_rect(whole, 4.0 * s, p.border);
+            c.round_rect(whole.inset(s, s), 3.0 * s, fill);
+            let swatch = whole.inset(5.0 * s, 5.0 * s);
+            c.round_rect(swatch, 2.0 * s, if disabled { p.border } else { color });
+            c.round_frame(swatch, 2.0 * s, s, theme::mix(p.border, p.strong_border, 0.3));
+        } else {
+            // A border style sample with its caption.
+            let (mat, line, selected) = SWATCHES.with(|s| s.get());
+            let style = part as usize;
+            let caption = (20.0 * s) as i32;
+            let sample = RECT { left: (6.0 * s) as i32, top: (6.0 * s) as i32, right: c.w - (6.0 * s) as i32, bottom: c.h - caption - (2.0 * s) as i32 };
+            if style as u32 == selected {
+                c.round_frame(RectF::of(sample).inset(-4.0 * s, -4.0 * s), 6.0 * s, 2.0 * s, if disabled { p.disabled } else { p.accent });
+            } else if draw::is_hot(item.hwndItem) && !disabled {
+                c.round_rect(RectF::of(sample).inset(-4.0 * s, -4.0 * s), 6.0 * s, p.subtle_hover);
             }
-            return;
+            draw_swatch(&mut c, sample, style, mat, line, disabled);
+            let tr = RECT { top: c.h - caption, ..c.rect() };
+            c.text(&title, tr, draw::font_of(item.hwndItem), if disabled { p.disabled } else if style as u32 == selected { p.text } else { p.secondary }, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
         }
-        // A border style sample with its caption.
-        let style = part as usize;
-        let is_selected = style as u32 == selected;
-        let caption = (r.bottom - r.top) / 4;
-        let sample = RECT { left: r.left + 6, top: r.top + 4, right: r.right - 6, bottom: r.bottom - caption - 4 };
-        if is_selected {
-            let accent = super::canvas::accent_color();
-            let pen = CreatePen(PS_SOLID, 2, COLORREF(accent[0] as u32 | (accent[1] as u32) << 8 | (accent[2] as u32) << 16));
-            let old = SelectObject(dc, pen);
-            let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-            let _ = RoundRect(dc, sample.left - 3, sample.top - 3, sample.right + 3, sample.bottom + 3, 8, 8);
-            SelectObject(dc, old_brush);
-            SelectObject(dc, old);
-            let _ = DeleteObject(pen);
-        }
-        draw_swatch(dc, sample, style, mat, line, disabled);
-        let font = SendMessageW(item.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0));
-        let old = SelectObject(dc, HGDIOBJ(font.0 as *mut _));
-        SetTextColor(dc, label_color);
-        let mut tr = RECT { top: r.bottom - caption - 2, ..r };
-        DrawTextW(dc, &mut text[..n], &mut tr, DT_SINGLELINE | DT_CENTER | DT_TOP);
-        SelectObject(dc, old);
         if focused {
-            let _ = DrawFocusRect(dc, &r);
+            draw::focus_ring(&mut c, whole, 4.0 * s, s);
         }
+        c.present(item.hDC);
     }
 }
 
@@ -1649,65 +1663,54 @@ fn with_app_fonts_glyph() -> HGDIOBJ {
 
 /// The drawn samples of `BorderStylePicker`: a photograph (a sky-to-sand
 /// gradient) inside each style.
-fn draw_swatch(dc: HDC, r: RECT, style: usize, mat: u32, line: u32, disabled: bool) {
-    unsafe {
-        let fill = |rect: RECT, color: u32| {
-            let brush = CreateSolidBrush(COLORREF(color));
-            FillRect(dc, &rect, brush);
-            let _ = DeleteObject(brush);
-        };
-        let inset = |rect: RECT, d: i32| RECT { left: rect.left + d, top: rect.top + d, right: rect.right - d, bottom: rect.bottom - d };
-        let photo = |rect: RECT| {
-            let vertices = [
-                TRIVERTEX { x: rect.left, y: rect.top, Red: 0x8c00, Green: 0xad00, Blue: 0xc700, Alpha: 0 },
-                TRIVERTEX { x: rect.right, y: rect.bottom, Red: 0xdb00, Green: 0xbd00, Blue: 0x8f00, Alpha: 0 },
-            ];
-            let rect_index = GRADIENT_RECT { UpperLeft: 0, LowerRight: 1 };
-            let _ = GradientFill(dc, &vertices, &rect_index as *const _ as *const _, 1, GRADIENT_FILL_RECT_V);
-        };
-        let s = ((r.bottom - r.top) / 9).max(2);
-        match style {
-            0 => {
-                fill(r, mat);
-                photo(inset(r, s + 1));
-            }
-            1 => {
-                fill(r, 0);
-                photo(inset(r, s / 2 + 1));
-            }
-            2 => {
-                fill(r, mat);
-                let inner = inset(r, s);
-                fill(inner, line);
-                photo(inset(inner, 1));
-            }
-            _ => {
-                fill(r, 0);
-                let band = (r.bottom - r.top) / 5;
-                for edge in [r.top + band / 4, r.bottom - band * 3 / 4] {
-                    let mut x = r.left + 2;
-                    while x + 3 < r.right {
-                        fill(RECT { left: x, top: edge, right: x + 3, bottom: edge + band / 2 }, 0xf2f2f2);
-                        x += 6;
-                    }
+fn draw_swatch(c: &mut Canvas, r: RECT, style: usize, mat: u32, line: u32, disabled: bool) {
+    let p = theme::palette();
+    let s = ((r.bottom - r.top) / 9).max(2) as f32;
+    let rf = RectF::of(r);
+    let fill = |c: &mut Canvas, rect: RectF, color: u32| c.round_rect(rect, 0.0, color);
+    let photo = |c: &mut Canvas, rect: RectF| {
+        // The gradient, a band per row.
+        let (top, bottom) = (rect.y.round() as i32, (rect.y + rect.h).round() as i32);
+        for y in top..bottom {
+            let t = (y - top) as f64 / (bottom - top).max(1) as f64;
+            let color = theme::mix(theme::rgb(0x8c, 0xad, 0xc7), theme::rgb(0xdb, 0xbd, 0x8f), t);
+            c.round_rect(RectF::new(rect.x, y as f32, rect.w, 1.0), 0.0, color);
+        }
+    };
+    let corner = 3.0 * draw::dpi_of(super::main_hwnd());
+    match style {
+        0 => {
+            fill(c, rf, mat);
+            photo(c, rf.inset(s + 1.0, s + 1.0));
+        }
+        1 => {
+            fill(c, rf, 0);
+            photo(c, rf.inset(s / 2.0 + 1.0, s / 2.0 + 1.0));
+        }
+        2 => {
+            fill(c, rf, mat);
+            let inner = rf.inset(s, s);
+            fill(c, inner, line);
+            photo(c, inner.inset(1.0, 1.0));
+        }
+        _ => {
+            fill(c, rf, 0);
+            let band = rf.h / 5.0;
+            for edge in [rf.y + band / 4.0, rf.y + rf.h - band * 3.0 / 4.0] {
+                let mut x = rf.x + 2.0;
+                while x + 3.0 < rf.x + rf.w {
+                    c.round_rect(RectF::new(x, edge, 3.0, band / 2.0), 0.5, 0xf2f2f2);
+                    x += 6.0;
                 }
-                photo(RECT { left: r.left + 1, top: r.top + band, right: r.right - 1, bottom: r.bottom - band });
             }
+            photo(c, RectF::new(rf.x + 1.0, rf.y + band, rf.w - 2.0, rf.h - 2.0 * band));
         }
-        FrameRect(dc, &r, GetSysColorBrush(COLOR_BTNSHADOW));
-        if disabled {
-            // Faded like the Mac's disabled samples.
-            let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 160, AlphaFormat: 0 };
-            let mem = CreateCompatibleDC(dc);
-            let bitmap = CreateCompatibleBitmap(dc, 1, 1);
-            let old = SelectObject(mem, bitmap);
-            let brush = GetSysColorBrush(COLOR_BTNFACE);
-            FillRect(mem, &RECT { left: 0, top: 0, right: 1, bottom: 1 }, brush);
-            let _ = AlphaBlend(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, mem, 0, 0, 1, 1, blend);
-            SelectObject(mem, old);
-            let _ = DeleteObject(bitmap);
-            let _ = DeleteDC(mem);
-        }
+    }
+    c.round_corners(rf, corner, p.panel);
+    c.round_frame(rf, corner, 1.0, theme::mix(p.border, p.strong_border, 0.3));
+    if disabled {
+        // Faded like the Mac's disabled samples.
+        c.round_rect_alpha(rf.inset(-1.0, -1.0), corner, p.panel, 0.62);
     }
 }
 
@@ -1905,6 +1908,7 @@ fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, ca
         for stock in group.stocks {
             let id = TILE_FIRST + tiles.len() as u16;
             let tile = create(w!("BUTTON"), &stock.name, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_OWNERDRAW as u32), WINDOW_EX_STYLE(0), window, id, fonts.small);
+            draw::track_hover(tile);
             super::dialogs::tooltip(tile, &stock.name);
             unsafe {
                 let _ = SetWindowSubclass(tile, Some(tile_subclass), 1, 0);
@@ -2004,32 +2008,26 @@ pub fn redraw_previews(app: &mut App) {
 }
 
 /// A foldout's header: chevron and title, the current stock at the right.
-fn draw_foldout(item: &DRAWITEMSTRUCT, title: &mut [u16], color: COLORREF) {
+fn draw_foldout(c: &mut Canvas, item: &DRAWITEMSTRUCT, title: &str, color: u32) {
     unsafe {
-        let (dc, r) = (item.hDC, item.rcItem);
+        let p = theme::palette();
+        let s = draw::dpi_of(item.hwndItem);
         let data = GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA);
         let (open, paper) = (data & 1 != 0, data & 2 != 0);
-        let height = r.bottom - r.top;
-        let old = SelectObject(dc, with_app_fonts_glyph());
-        SetTextColor(dc, color);
-        let mut chevron: Vec<u16> = (if open { "\u{E70D}" } else { "\u{E76C}" }).encode_utf16().collect();
-        let mut cr = RECT { left: r.left + 2, top: r.top, right: r.left + height, bottom: r.bottom };
-        DrawTextW(dc, &mut chevron, &mut cr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-        SelectObject(dc, HGDIOBJ(SendMessageW(item.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _));
+        let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
+        let height = c.h as f32;
+        draw::chevron(c, 12.0 * s, height / 2.0, open, s, if disabled { p.disabled } else { p.secondary });
+        let font = draw::font_of(item.hwndItem);
         let mut measure = RECT::default();
-        DrawTextW(dc, title, &mut measure, DT_SINGLELINE | DT_CALCRECT);
-        let mut tr = RECT { left: r.left + height + 2, ..r };
-        DrawTextW(dc, title, &mut tr, DT_SINGLELINE | DT_VCENTER);
-        let mut name: Vec<u16> = FOLDOUT_NAMES.with(|n| n.borrow()[paper as usize].encode_utf16().collect());
-        if !name.is_empty() {
-            SetTextColor(dc, COLORREF(if item.itemState.0 & ODS_DISABLED.0 != 0 { GetSysColor(COLOR_GRAYTEXT) } else { 0x6d6d6d }));
-            let mut nr = RECT { left: r.left + height + 2 + measure.right + height / 2, right: r.right - 4, ..r };
-            DrawTextW(dc, &mut name, &mut nr, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS | DT_NOPREFIX);
-        }
-        SelectObject(dc, old);
-        if item.itemState.0 & ODS_FOCUS.0 != 0 {
-            let _ = DrawFocusRect(dc, &r);
-        }
+        let mut wide_title: Vec<u16> = title.encode_utf16().collect();
+        let old = SelectObject(c.dc, font);
+        DrawTextW(c.dc, &mut wide_title, &mut measure, DT_SINGLELINE | DT_CALCRECT);
+        SelectObject(c.dc, old);
+        let left = (24.0 * s) as i32;
+        c.text(title, RECT { left, top: 0, right: c.w, bottom: c.h }, font, color, DT_SINGLELINE | DT_VCENTER);
+        let name = FOLDOUT_NAMES.with(|n| n.borrow()[paper as usize].clone());
+        let nr = RECT { left: left + measure.right + (16.0 * s) as i32, top: 0, right: c.w - (8.0 * s) as i32, bottom: c.h };
+        c.text(&name, nr, font, if disabled { p.disabled } else { p.secondary }, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
     }
 }
 
@@ -2037,54 +2035,42 @@ fn draw_foldout(item: &DRAWITEMSTRUCT, title: &mut [u16], color: COLORREF) {
 /// arrives, dimmed while out of date), the accent outline on the current
 /// stock, and the name below, cut with an ellipsis.
 fn draw_tile(item: &DRAWITEMSTRUCT, look: &TileLook) {
-    unsafe {
-        let (dc, r) = (item.hDC, item.rcItem);
-        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(item.hwndItem).max(96) as i32;
-        let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
-        FillRect(dc, &r, GetSysColorBrush(COLOR_BTNFACE));
-        let inset = px(2.0);
-        let frame = RECT { left: r.left + inset, top: r.top + inset, right: r.right - inset, bottom: r.top + px(TILE_IMAGE) - inset };
-        let radius = px(10.0);
-        draw_thumbnail(dc, frame, radius, look.image.as_deref(), look.dimmed, COLORREF(0xdedede));
-        if look.selected {
-            let accent = super::canvas::accent_color();
-            let pen = CreatePen(PS_SOLID, px(2.0), COLORREF(accent[0] as u32 | (accent[1] as u32) << 8 | (accent[2] as u32) << 16));
-            let old = SelectObject(dc, pen);
-            let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-            let _ = RoundRect(dc, frame.left, frame.top, frame.right, frame.bottom, radius, radius);
-            SelectObject(dc, old_brush);
-            SelectObject(dc, old);
-            let _ = DeleteObject(pen);
-        }
-        let mut text = [0u16; 128];
-        let n = GetWindowTextW(item.hwndItem, &mut text) as usize;
-        let font = SendMessageW(item.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0));
-        let old = SelectObject(dc, HGDIOBJ(font.0 as *mut _));
-        SetBkMode(dc, TRANSPARENT);
-        let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
-        SetTextColor(dc, COLORREF(if disabled { GetSysColor(COLOR_GRAYTEXT) } else if look.selected { GetSysColor(COLOR_WINDOWTEXT) } else { 0x5a5a5a }));
-        let mut tr = RECT { left: r.left + inset, top: frame.bottom + px(2.0), right: r.right - inset, bottom: r.bottom };
-        DrawTextW(dc, &mut text[..n], &mut tr, DT_SINGLELINE | DT_TOP | DT_LEFT | DT_END_ELLIPSIS | DT_NOPREFIX);
-        SelectObject(dc, old);
-        if item.itemState.0 & ODS_FOCUS.0 != 0 {
-            let _ = DrawFocusRect(dc, &RECT { left: r.left, top: r.top, right: r.right, bottom: r.bottom });
-        }
+    let p = theme::palette();
+    let s = draw::dpi_of(item.hwndItem);
+    let px = |dip: f64| (dip * s as f64).round() as i32;
+    let mut c = Canvas::new(item.hDC, item.rcItem);
+    c.clear(p.panel);
+    let inset = px(2.0);
+    let frame = RECT { left: inset, top: inset, right: c.w - inset, bottom: px(TILE_IMAGE) - inset };
+    let radius = 6.0 * s;
+    let hot = draw::is_hot(item.hwndItem);
+    draw_thumbnail(&mut c, frame, radius, look.image.as_deref(), look.dimmed, p.well, p.panel);
+    if look.selected {
+        c.round_frame(RectF::of(frame).inset(-inset as f32, -inset as f32), radius + inset as f32, 2.0 * s, p.accent);
+    } else if hot {
+        c.round_frame(RectF::of(frame), radius, s, p.strong_border);
     }
+    let disabled = item.itemState.0 & ODS_DISABLED.0 != 0;
+    let ink = if disabled { p.disabled } else if look.selected || hot { p.text } else { p.secondary };
+    let tr = RECT { left: inset, top: frame.bottom + px(4.0), right: c.w - inset, bottom: c.h };
+    c.text(&draw::window_text(item.hwndItem), tr, draw::font_of(item.hwndItem), ink, DT_SINGLELINE | DT_TOP | DT_LEFT | DT_END_ELLIPSIS);
+    if item.itemState.0 & ODS_FOCUS.0 != 0 && item.itemState.0 & ODS_NOFOCUSRECT.0 == 0 {
+        let whole = RectF::of(c.rect());
+        draw::focus_ring(&mut c, whole, radius, s);
+    }
+    c.present(item.hDC);
 }
 
-/// A thumbnail cropped to fill `frame` with rounded corners, or the grey
+/// A thumbnail cropped to fill `frame` with rounded corners, or the
 /// placeholder; dimmed (55 % opacity over the background) while out of date.
-pub fn draw_thumbnail(dc: HDC, frame: RECT, radius: i32, image: Option<&crate::previews::Bitmap>, dimmed: bool, placeholder: COLORREF) {
+pub fn draw_thumbnail(c: &mut Canvas, frame: RECT, radius: f32, image: Option<&crate::previews::Bitmap>, dimmed: bool, placeholder: u32, background: u32) {
     unsafe {
         let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
         if fw <= 0 || fh <= 0 {
             return;
         }
-        let region = CreateRoundRectRgn(frame.left, frame.top, frame.right + 1, frame.bottom + 1, radius, radius);
-        let _ = SelectClipRgn(dc, region);
-        let brush = CreateSolidBrush(placeholder);
-        FillRect(dc, &frame, brush);
-        let _ = DeleteObject(brush);
+        let f = RectF::of(frame);
+        c.round_rect(f, 0.0, placeholder);
         if let Some(image) = image {
             // Cover: the largest centred part of the image with the frame's shape.
             let (iw, ih) = (image.width as f64, image.height as f64);
@@ -2103,6 +2089,7 @@ pub fn draw_thumbnail(dc: HDC, frame: RECT, radius: i32, image: Option<&crate::p
                 },
                 ..Default::default()
             };
+            let dc = c.hdc();
             let previous = SetStretchBltMode(dc, HALFTONE);
             let _ = SetBrushOrgEx(dc, 0, 0, None);
             StretchDIBits(
@@ -2122,19 +2109,10 @@ pub fn draw_thumbnail(dc: HDC, frame: RECT, radius: i32, image: Option<&crate::p
             );
             SetStretchBltMode(dc, STRETCH_BLT_MODE(previous));
             if dimmed {
-                let mem = CreateCompatibleDC(dc);
-                let bitmap = CreateCompatibleBitmap(dc, 1, 1);
-                let old = SelectObject(mem, bitmap);
-                FillRect(mem, &RECT { left: 0, top: 0, right: 1, bottom: 1 }, GetSysColorBrush(COLOR_BTNFACE));
-                let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 115, AlphaFormat: 0 };
-                let _ = AlphaBlend(dc, frame.left, frame.top, fw, fh, mem, 0, 0, 1, 1, blend);
-                SelectObject(mem, old);
-                let _ = DeleteObject(bitmap);
-                let _ = DeleteDC(mem);
+                c.round_rect_alpha(f, 0.0, background, 0.45);
             }
         }
-        let _ = SelectClipRgn(dc, None);
-        let _ = DeleteObject(region);
+        c.round_corners(f, radius, background);
     }
 }
 
@@ -2178,9 +2156,11 @@ extern "system" fn grid_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             WM_CTLCOLORSTATIC => {
                 let dc = HDC(wparam.0 as *mut _);
                 SetBkMode(dc, TRANSPARENT);
-                SetTextColor(dc, COLORREF(0x6d6d6d));
-                LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+                let p = theme::palette();
+                SetTextColor(dc, COLORREF(p.secondary));
+                LRESULT(theme::brush(p.panel).0 as isize)
             }
+            WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
@@ -2247,12 +2227,10 @@ extern "system" fn histogram_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     },
                     ..Default::default()
                 };
-                let region = CreateRoundRectRgn(0, 0, w as i32 + 1, h as i32 + 1, 12, 12);
-                FillRect(dc, &r, GetSysColorBrush(COLOR_BTNFACE));
-                SelectClipRgn(dc, region);
-                SetDIBitsToDevice(dc, 0, 0, w as u32, h as u32, 0, 0, 0, h as u32, pixels.as_ptr() as *const _, &info, DIB_RGB_COLORS);
-                SelectClipRgn(dc, None);
-                let _ = DeleteObject(region);
+                let mut c = Canvas::new(dc, r);
+                SetDIBitsToDevice(c.hdc(), 0, 0, w as u32, h as u32, 0, 0, 0, h as u32, pixels.as_ptr() as *const _, &info, DIB_RGB_COLORS);
+                c.round_corners(RectF::of(r), 6.0 * draw::dpi_of(hwnd), theme::palette().panel);
+                c.present(dc);
                 let _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
             }
@@ -2332,7 +2310,9 @@ fn build_crop(app: &mut App) {
     }
     add(C_LABELS + 1, w!("STATIC"), "Ratio", WINDOW_STYLE(0), fonts.ui);
     for id in [C_WIDTH, C_HEIGHT] {
-        let e = add(id, w!("EDIT"), "", WS_TABSTOP | WS_GROUP | WS_BORDER | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), fonts.ui);
+        let e = add(id, w!("EDIT"), "", WS_TABSTOP | WS_GROUP | WINDOW_STYLE((ES_RIGHT | ES_AUTOHSCROLL) as u32), fonts.ui);
+        draw::set_role(e, Role::Field);
+        draw::track_hover(e);
         super::accessible_name(e, if id == C_WIDTH { "Custom crop ratio width" } else { "Custom crop ratio height" });
         unsafe {
             let _ = SetWindowSubclass(e, Some(ratio_subclass), 1, 0);
@@ -2346,6 +2326,7 @@ fn build_crop(app: &mut App) {
     add(C_LABELS + 5, w!("STATIC"), "Angle", WINDOW_STYLE(0), fonts.ui);
     add(C_ANGLE_VALUE, w!("STATIC"), "0.0°", WINDOW_STYLE(SS_RIGHT.0), fonts.ui);
     let reset = add(C_ANGLE_RESET, w!("BUTTON"), "\u{E777}", WINDOW_STYLE(BS_PUSHBUTTON as u32 | BS_FLAT as u32), fonts.glyph_small);
+    draw::track_hover(reset);
     super::dialogs::tooltip(reset, "Straighten to 0°");
     let angle = add(C_ANGLE, TRACKBAR_CLASSW, "Angle", WS_TABSTOP | WINDOW_STYLE(TBS_NOTICKS | TBS_HORZ | TBS_BOTH), HFONT::default());
     unsafe {
@@ -2355,6 +2336,8 @@ fn build_crop(app: &mut App) {
         SendMessageW(angle, TBM_SETPAGESIZE, WPARAM(0), LPARAM(50));
         let _ = SetWindowSubclass(angle, Some(trackbar_subclass), 1, C_ANGLE_RESET as usize);
     }
+    draw::track_hover(angle);
+    draw::set_default_pos(angle, 0);
     super::dialogs::tooltip(angle, "Turns the photograph to level a crooked horizon. The crop shrinks to stay on the photograph.");
     add(C_LABELS + 6, w!("STATIC"), "Size", WINDOW_STYLE(0), fonts.ui);
     let size = add(C_SIZE, w!("STATIC"), "", WINDOW_STYLE(SS_RIGHT.0), fonts.ui);
@@ -2404,9 +2387,11 @@ fn layout_crop(app: &mut App) {
     if custom {
         let field = ins.px(56.0);
         place(C_LABELS + 1, pad, y + ins.px(4.0), ins.px(90.0), ins.px(18.0));
-        place(C_WIDTH, pad + ins.px(96.0), y, field, ins.px(23.0));
+        let r = ins.field(pad + ins.px(96.0), y, field);
+        place(C_WIDTH, r.left, r.top, r.right - r.left, r.bottom - r.top);
         place(C_LABELS + 2, pad + ins.px(96.0) + field, y + ins.px(4.0), ins.px(20.0), ins.px(18.0));
-        place(C_HEIGHT, pad + ins.px(116.0) + field, y, field, ins.px(23.0));
+        let r = ins.field(pad + ins.px(116.0) + field, y, field);
+        place(C_HEIGHT, r.left, r.top, r.right - r.left, r.bottom - r.top);
         y += ins.px(30.0);
     }
     place(C_LABELS + 3, pad, y + ins.px(5.0), ins.px(90.0), ins.px(18.0));
@@ -2551,12 +2536,26 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 });
                 LRESULT(0)
             }
+            WM_CTLCOLOREDIT => draw::color_edit(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
             WM_CTLCOLORSTATIC => {
                 let dc = HDC(wparam.0 as *mut _);
+                let control = HWND(lparam.0 as *mut _);
+                if draw::is_field(control) {
+                    return draw::color_edit(dc, control);
+                }
                 SetBkMode(dc, TRANSPARENT);
-                let footer = GetDlgCtrlID(HWND(lparam.0 as *mut _)) as u16 == C_LABELS + 7;
-                SetTextColor(dc, if footer { COLORREF(0x6d6d6d) } else { COLORREF(GetSysColor(COLOR_WINDOWTEXT)) });
-                LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+                let p = theme::palette();
+                let id = GetDlgCtrlID(control) as u16;
+                let footer = id == C_LABELS + 7 || id == C_SIZE_NOTE;
+                let color = if !IsWindowEnabled(control).as_bool() { p.disabled } else if footer { p.secondary } else { p.text };
+                SetTextColor(dc, COLORREF(color));
+                LRESULT(theme::brush(p.panel).0 as isize)
+            }
+            WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            WM_ERASEBKGND => LRESULT(1),
+            WM_PAINT => {
+                draw::paint_panel(hwnd, theme::palette().panel);
+                LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
