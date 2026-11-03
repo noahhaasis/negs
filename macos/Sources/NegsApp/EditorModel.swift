@@ -737,7 +737,7 @@ import UniformTypeIdentifiers
             // Sessions from before Image Size may carry the old working-resolution factor.
             let factor = defaults[ImageSize.factorPath]
             if factor != .null { restored.params[ImageSize.factorPath] = factor }
-            // The Post tab no longer edits tone or colour; an older session's
+            // The inspector no longer edits Post tone or colour; an older session's
             // Post edits would otherwise stay applied with no control to undo them.
             if defaults["post"] != .null { restored.params["post"] = defaults["post"] }
             // Sessions from before it was a preference carried it per photograph.
@@ -1590,7 +1590,7 @@ import UniformTypeIdentifiers
 
     /// The film, paper and Lab settings of a preset, as one undo step. The
     /// photograph's own settings stay: Image Size, rotation, crop, border,
-    /// output encoding, the preview limit and the Post tab.
+    /// output encoding, the preview limit and the Post values.
     func applyPreset(_ preset: PresetFile) {
         guard canChangePresets, let engine else { return }
         Task {

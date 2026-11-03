@@ -26,7 +26,7 @@ enum InspectorSection: String, CaseIterable {
 
 /// Prepare the photograph, develop the film, then finish the scan.
 enum InspectorTab: String, CaseIterable {
-    case prep = "Prep", lab = "Lab", post = "Post"
+    case prep = "Prep", lab = "Lab", output = "Output"
 }
 
 let prepToneControls: [Adjustment] = [
@@ -573,7 +573,7 @@ struct AdjustmentInspector: View {
                 switch tab {
                 case .prep: prep
                 case .lab: lab
-                case .post: post
+                case .output: output
                 }
             }
             .formStyle(.grouped)
@@ -672,7 +672,7 @@ struct AdjustmentInspector: View {
                     control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
                 }
             }
-            control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
+            control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
                 .help("Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative's density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.")
             if shows("camera.film_format_mm") { control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1)) }
             if shows("camera.lens_blur_um") { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
@@ -764,7 +764,7 @@ struct AdjustmentInspector: View {
 
     /// The size and frame of the finished photograph. Tone and colour edits
     /// live in Prep, before the film, where nothing has clipped yet.
-    @ViewBuilder private var post: some View {
+    @ViewBuilder private var output: some View {
         ImageSizeSection(model: model)
         Section("Border") {
             Toggle("Add border", isOn: model.border(\.enabled))
