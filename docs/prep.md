@@ -11,9 +11,10 @@ them. Product spec: ticket 26.
   has Midtone Detail. All eight default to zero. Highlights spans −180…100,
   retaining Sawmill's extended recovery range; the others span −100…100.
 - **Starting brightness:** Prep also has an independent Exposure control and
-  **Match camera brightness**. Fresh RAWs can automatically place their graded
-  brightness against the embedded camera preview while limiting highlight
-  crowding. See [exposure placement](exposure-placement.md).
+  **Match camera brightness**, which places the graded brightness against the
+  RAW's embedded camera preview while limiting highlight crowding. Settings ›
+  *Match new RAWs to camera brightness* (on by default) runs it once on every
+  fresh RAW open. See [exposure placement](exposure-placement.md).
 - **Default marker:** on macOS 26 each slider's track fills from its default
   (`NSSlider.neutralValue`), so a moved slider shows where it started.
 - **New photograph:** Settings › New photographs. *Keep the previous edits*
