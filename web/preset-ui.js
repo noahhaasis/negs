@@ -10,7 +10,7 @@ export function createPresets(app) {
   const $ = (id) => document.getElementById(id);
   const menu = $("preset-menu"), more = $("more");
   const exportDialog = $("export-dialog"), incomingDialog = $("incoming-dialog");
-  const items = () => [...menu.querySelectorAll("[role=menuitem]")];
+  const items = () => [...menu.querySelectorAll("[role^=menuitem]")];
   // Applying runs one at a time; a newer one makes an older one's result stale.
   let applying = null, applies = 0;
   // The name of the preset last imported, to name an export after.
@@ -76,7 +76,8 @@ export function createPresets(app) {
   function sync() {
     $("preset-menu-anchor").hidden = app.cropping();
     more.disabled = !app.ready();
-    for (const b of items()) b.disabled = !ready();
+    // The previews' switch (app.js) works whenever the menu opens.
+    for (const b of items()) if (b.getAttribute("role") === "menuitem") b.disabled = !ready();
     $("export-lut").disabled ||= lutting;
   }
 

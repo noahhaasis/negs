@@ -341,6 +341,15 @@ struct State {
     input_colour: Option<spektrafilm_io::InputColour>,
     /// The spectral pipeline of the last render, by `preview_pipeline_cache_key`.
     pipeline: Option<(String, Pipeline)>,
+    /// The source reduced for the stock previews ([`Engine::thumbnail`]).
+    thumbnail_source: Option<Rc<ImageBuf>>,
+    /// Their calibrated pipelines, most recent last, by the same key: a
+    /// stock's outlives edits that don't change it (exposure, grain…), and
+    /// the render takes one when a tile's stock is chosen.
+    thumbnail_pipelines: Vec<(String, Pipeline)>,
+    /// Their metered auto-exposure EVs, by [`metered_key`], most recent
+    /// last: metering is a CPU spectral pass, most of a tile's time.
+    thumbnail_autoexposure: Vec<(String, f64)>,
     /// The frame on the canvas, when the GPU made it from a scan it still
     /// may hold: everything it was rendered from but the Post settings
     /// ([`look_key`]), and its size. A change to Post alone then makes it
@@ -377,6 +386,9 @@ impl Engine {
             autoexposure: None,
             input_colour: None,
             pipeline: None,
+            thumbnail_source: None,
+            thumbnail_pipelines: Vec::new(),
+            thumbnail_autoexposure: Vec::new(),
             shown: None,
         };
         Engine { state: Rc::new(RefCell::new(state)) }
@@ -594,6 +606,8 @@ impl Engine {
         state.autoexposure = None;
         state.shown = None;
         state.input_colour = None;
+        state.thumbnail_source = None;
+        state.thumbnail_autoexposure.clear();
     }
 
     /// The loaded photograph before any film, as the native helper's
@@ -717,13 +731,7 @@ async fn place_exposure(state: &RefCell<State>, film: &str, paper: &str, params_
             Some((cached, pipeline)) if *cached == key => pipeline.clone().with_params(params.clone()),
             _ => {
                 data_fs::take_missing();
-                let data = Path::new(DATA_DIR);
-                let built = (|| -> Result<Pipeline, String> {
-                    let film_profile = profile::load_profile_by_name(data, film).map_err(|e| e.to_string())?;
-                    let print = if params.io.scan_film { film } else { paper };
-                    let print_profile = profile::load_profile_by_name(data, print).map_err(|e| e.to_string())?;
-                    Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data)
-                })();
+                let built = calibrate(film, paper, &params);
                 if !missing().is_empty() {
                     return Err(JsError::new("Render the photograph with these stocks before matching"));
                 }
@@ -769,6 +777,195 @@ impl spektrafilm_core::exposure_placement::Renderer for Trials {
             Ok(pipeline.process(image, &CpuBackend))
         })
     }
+}
+
+/// Everything an auto-exposure metering reads but the photograph: the film
+/// side of the calibration and the settings metering uses. Not the paper:
+/// the film's raw exposure never sees it (the EV of four films came out
+/// bit-identical on nine papers), so a paper change doesn't meter again.
+fn metered_key(film: &str, params: &RuntimeParams) -> String {
+    let io = &params.io;
+    let calibration = preview::preview_pipeline_cache_key(film, "", params);
+    serde_json::json!([calibration, params.camera.auto_exposure_method, io.input_color_space, io.input_cctf_decoding, params.settings])
+        .to_string()
+}
+
+/// The calibrated spectral pipeline for these stocks, from the registered
+/// data; read [`missing`] after it.
+fn calibrate(film: &str, paper: &str, params: &RuntimeParams) -> Result<Pipeline, String> {
+    let data = Path::new(DATA_DIR);
+    let film_profile = profile::load_profile_by_name(data, film).map_err(|e| e.to_string())?;
+    let print = if params.io.scan_film { film } else { paper };
+    let print_profile = profile::load_profile_by_name(data, print).map_err(|e| e.to_string())?;
+    Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data)
+}
+
+#[wasm_bindgen]
+impl Engine {
+    /// A film or paper preview (web/stocks.js): the loaded photograph with
+    /// these stocks and params, the whole frame within `long_side` pixels
+    /// (16–1280; the page crops it), as display bytes, as the helper's
+    /// `thumbnail` makes one. It never presents, and leaves the render's
+    /// pipeline, uploads and prepared frames as they are. It keeps the
+    /// source reduced to the last size, and up to `pipelines` calibrated
+    /// pipelines (at least one).
+    pub fn thumbnail(&self, film: String, paper: String, params_json: String, long_side: u32, pipelines: u32) -> js_sys::Promise {
+        let state = self.state.clone();
+        wasm_bindgen_futures::future_to_promise(async move {
+            thumbnail(&state, &film, &paper, &params_json, long_side, pipelines.max(1) as usize)
+                .await
+                .map(JsValue::from)
+                .map_err(JsValue::from)
+        })
+    }
+
+    /// Frees what the previews keep (they were turned off).
+    #[wasm_bindgen(js_name = releaseThumbnails)]
+    pub fn release_thumbnails(&self) {
+        let mut state = self.state.borrow_mut();
+        state.thumbnail_source = None;
+        state.thumbnail_pipelines = Vec::new();
+        state.thumbnail_autoexposure = Vec::new();
+    }
+}
+
+/// [`Engine::thumbnail`].
+async fn thumbnail(state: &RefCell<State>, film: &str, paper: &str, params_json: &str, long_side: u32, pipelines: usize) -> Result<Rendered, JsError> {
+    let started = web_time::Instant::now();
+    let mut stages = Stages::new(started);
+    if !(16..=1280).contains(&long_side) {
+        return Err(JsError::new("Invalid thumbnail size"));
+    }
+    let mut params = parse_params(params_json).map_err(js_error)?;
+    params.prep.validate().map_err(|e| JsError::new(&e))?;
+    // Not the helper's `serial_grain = false`: the CPU grain then spawns
+    // threads, which this target can't.
+    spektrafilm_core::image_size::clear(&mut params);
+    let (pipeline, source, backend) = {
+        let mut state = state.borrow_mut();
+        let size = state.size_at(long_side).ok_or_else(|| JsError::new("no image loaded"))?;
+        let source = match state.thumbnail_source.clone() {
+            Some(image) if (image.width, image.height) == size => image,
+            _ => {
+                state.thumbnail_source = None;
+                let full = &state.source.as_ref().unwrap().0;
+                let image = Rc::new(if size == (full.width, full.height) {
+                    (**full).clone()
+                } else {
+                    preview::downsample_area(full, size)
+                });
+                state.thumbnail_source = Some(image.clone());
+                stages.mark("resample");
+                image
+            }
+        };
+        if let Some(colour) = &state.input_colour {
+            params.io.apply_input_colour(colour);
+        }
+        let key = preview::preview_pipeline_cache_key(film, paper, &params);
+        let calibrated = match state.thumbnail_pipelines.iter().position(|(k, _)| *k == key) {
+            Some(index) => state.thumbnail_pipelines.remove(index).1,
+            None => match &state.pipeline {
+                Some((cached, pipeline)) if *cached == key => pipeline.clone(),
+                _ => {
+                    data_fs::take_missing();
+                    let built = calibrate(film, paper, &params);
+                    let missing = missing();
+                    if !missing.is_empty() {
+                        return Ok(Rendered::missing(missing));
+                    }
+                    let built = built.map_err(|e| JsError::new(&e))?;
+                    stages.mark("pipeline");
+                    built
+                }
+            },
+        };
+        let mut pipeline = calibrated.clone().with_params(params.clone());
+        while state.thumbnail_pipelines.len() >= pipelines {
+            state.thumbnail_pipelines.remove(0);
+        }
+        if params.camera.auto_exposure {
+            let full = state.source.as_ref().unwrap().0.clone();
+            let metering = state.metering.get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(&full)).clone();
+            pipeline = pipeline.with_metering_preview(metering.clone());
+            // The render's EV when it metered these stocks, else this
+            // stock's last.
+            let metered = metered_key(film, &params);
+            let ev = match state.autoexposure.as_ref().filter(|(k, _)| *k == metered) {
+                Some((_, ev)) => *ev,
+                None => match state.thumbnail_autoexposure.iter().position(|(k, _)| *k == metered) {
+                    Some(index) => state.thumbnail_autoexposure.remove(index).1,
+                    None => {
+                        let ev = pipeline.frame_autoexposure_ev(&metering);
+                        stages.mark("meter");
+                        ev
+                    }
+                },
+            };
+            while state.thumbnail_autoexposure.len() >= pipelines {
+                state.thumbnail_autoexposure.remove(0);
+            }
+            state.thumbnail_autoexposure.push((metered, ev));
+            pipeline = pipeline.with_autoexposure_ev(ev);
+        }
+        state.thumbnail_pipelines.push((key, calibrated));
+        (pipeline, source, state.backend.clone())
+    };
+    stages.mark("prepare");
+    let (mapped_tx, mapped_rx) = futures_channel::oneshot::channel();
+    let on_mapped = Box::new(move || {
+        let _ = mapped_tx.send(());
+    });
+    let encoded = params.io.output_cctf_encoding;
+    let output = if pipeline.display_on_gpu(backend.as_ref()) {
+        ChainOutput::Rgba8 { encoded, post: pipeline.display_post().map(std::sync::Arc::new) }
+    } else {
+        ChainOutput::Scan
+    };
+    let submitted = if backend.is_gpu() {
+        pipeline.submit_resident(&source, None, backend.as_ref(), output, on_mapped)
+    } else {
+        None
+    };
+    let (result, used_backend) = match submitted {
+        Some(pending) => {
+            mapped_rx.await.map_err(|_| JsError::new("GPU readback was cancelled"))?;
+            stages.mark("gpu");
+            (pipeline.finish_submitted(pending, backend.as_ref()), backend.name().to_owned())
+        }
+        None => {
+            let (output, used) = pipeline
+                .try_process_with_backend((*source).clone(), &CpuBackend)
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            stages.mark("cpu");
+            (ChainResult::Scan(output), used.to_owned())
+        }
+    };
+    let missing = missing();
+    if !missing.is_empty() {
+        return Ok(Rendered::missing(missing));
+    }
+    let (width, height, rgba) = match result {
+        ChainResult::Scan(output) => {
+            let encoding = Encoding::new(&params.io.output_color_space, encoded);
+            let (width, height, rgba) = preview::display_rgba(&output, usize::MAX, encoding);
+            (width as u32, height as u32, rgba)
+        }
+        ChainResult::Rgba8 { width, height, rgba } => (width, height, rgba),
+        ChainResult::Presented { .. } => return Err(JsError::new("A preview was presented")),
+    };
+    stages.mark("display");
+    Ok(Rendered {
+        width,
+        height,
+        rgba,
+        scan: Vec::new(),
+        presented: false,
+        missing,
+        backend: used_backend,
+        elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+        stages: stages.text,
+    })
 }
 
 /// A camera-brightness reference: linear sRGB pixels, at most 512 px.
@@ -1040,16 +1237,12 @@ async fn render(
             params.io.apply_input_colour(colour);
         }
         data_fs::take_missing();
-        let data = Path::new(DATA_DIR);
         let key = preview::preview_pipeline_cache_key(film, paper, &params);
         if state.pipeline.as_ref().is_none_or(|(old, _)| old != &key) {
             state.pipeline = None;
-            let built = (|| -> Result<Pipeline, String> {
-                let film_profile = profile::load_profile_by_name(data, film).map_err(|e| e.to_string())?;
-                let print = if params.io.scan_film { film } else { paper };
-                let print_profile = profile::load_profile_by_name(data, print).map_err(|e| e.to_string())?;
-                Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data)
-            })();
+            // A stock preview's, when a tile's stock was chosen.
+            let previewed = state.thumbnail_pipelines.iter().find(|(k, _)| *k == key).map(|(_, p)| Ok(p.clone()));
+            let built = previewed.unwrap_or_else(|| calibrate(film, paper, &params));
             let missing = missing();
             if !missing.is_empty() {
                 return Ok(Rendered::missing(missing));
@@ -1065,17 +1258,11 @@ async fn render(
             .with_prepared_frame(state.prepared[interactive as usize].clone());
         if let Some(metering) = state.metering.clone().filter(|_| params.camera.auto_exposure) {
             pipeline = pipeline.with_metering_preview(metering);
-            let io = &params.io;
-            let metered = serde_json::json!([
-                key_of(&state.pipeline),
-                params.camera.auto_exposure_method,
-                io.input_color_space,
-                io.input_cctf_decoding,
-                params.settings,
-            ])
-            .to_string();
-            let ev = match &state.autoexposure {
-                Some((key, ev)) if *key == metered => *ev,
+            let metered = metered_key(film, &params);
+            let previewed = state.thumbnail_autoexposure.iter().find(|(k, _)| *k == metered).map(|(_, ev)| *ev);
+            let ev = match (&state.autoexposure, previewed) {
+                (Some((key, ev)), _) if *key == metered => *ev,
+                (_, Some(ev)) => ev,
                 _ => {
                     let ev = pipeline.frame_autoexposure_ev(&source.0);
                     stages.mark("meter");
@@ -1238,10 +1425,6 @@ fn look_key(state: &State, film: &str, paper: &str, params: &RuntimeParams) -> S
     params.post = Default::default();
     let photo = state.source.as_ref().map_or(0, |(_, key)| *key);
     serde_json::json!([photo, film, paper, params]).to_string()
-}
-
-fn key_of(pipeline: &Option<(String, Pipeline)>) -> &str {
-    pipeline.as_ref().map_or("", |(key, _)| key)
 }
 
 struct Stages {

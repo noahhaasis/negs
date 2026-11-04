@@ -1,6 +1,8 @@
 # Plan: camera brightness, the Prep tab and stock previews on the web
 
-**Status (2026-11-04):** plan only, nothing built. Main at `c92b539`. Template:
+**Status (2026-11-04):** built on branch `web-prep-port` (worktree `web-preview-size`): Prep |
+Lab | Output, Match camera brightness and the film and paper previews. Results in
+[Built](#built-2026-11-04); open items at its end. Main at `c92b539`. Template:
 [the Windows port plan](windows-prep-port-plan.md), which shipped the same Mac features on
 Windows.
 
@@ -82,6 +84,76 @@ Portra 400 → Endura. Settled frame times; drag frames cost the same at the sam
   the phone: its CPU side (encode + guided base, `submit` 285 vs 187 ms at 1 MP) costs more
   than the CPU core it replaces there. Needs profiling before it helps phones.
 - wasm has no prepared-frame cache, so every frame with Prep on redoes Prep (all rows above).
+
+## Built (2026-11-04)
+
+iPhone 13 Pro, Safari 26.6, Fuji RAF 6240×4160, Portra 400 → Endura, fitted 1200 px frame;
+Mac: Chrome on the M1 Pro. Footprint: the tab's WebContent process (`web/checks/footprint.py`).
+
+**Prep | Lab | Output.** Post's Tone and Saturation are gone; Prep comes first (RAW White
+Balance, Brightness, Tone, Color, Detail); Camera's exposure is *Negative exposure (EV)*.
+The phone sheet's tabs are Stock · Prep · Camera · Film · Print · Scan · Output.
+
+- Exposure-only Prep folds into the GPU front pass (decision 6, approved), and the wasm
+  engine keeps the prepared frame like the helper (`State::prepared`, keyed uploads), so a
+  Lab edit with Prep on skips Prep.
+- Phone frames: plain 135 ms; exposure-only Prep 141 ms; a Lab edit with full Prep 139 ms
+  (347 ms before the prepared frame); a Prep drag 325–340 ms (2048: 950 ms; 2560: 1.6 s).
+- **Touch cap 4.4 MP** (2560×1707, was 12 MP): 3072 px frames and a 12 MP export after edits
+  killed the tab from ~1.4 GiB. At the cap: open 1.11 GiB, fitted ~0.5, 2560 ~1.12, export
+  1.33 GiB peak.
+
+**Match camera brightness.** `spektrafilm-io::brightness` is the shared reference (Windows
+uses it too): rawler's embedded preview, its declared colour space, Adobe RGB → sRGB,
+trimmed bars, ≤ 512 px. The placement's trials are async (`place_exposure_with`, a
+`Renderer`), so the browser renders them on WebGPU: the CPU solve took 4.4 s in wasm.
+
+| | Mac Chrome | iPhone |
+|---|---|---|
+| Reference (decoder worker, once per photograph) | ~410 ms | 2.1–2.5 s |
+| Solve | 330–367 ms | 250–410 ms |
+| Re-solve after a film change | – | 260–340 ms |
+| EV: Portra 400 / Gold 200 / Pro 400H (native 0.68 / – / 0.72) | 0.69 | 0.69 / 0.68 / 0.71 |
+
+One first-run "No reliable brightness match" for Pro 400H on the phone didn't come back in
+two reruns; `negs.match().reason` now records the engine's reason.
+
+**Film and paper previews.** `Engine.thumbnail` in wasm (not the helper's module: its
+preset and white-balance parts don't apply on the web yet), `web/stocks.js` for the
+foldouts, `pumpPreviews` in `app.js`. A tile renders on the GPU through its own reduced
+source and a 40-stock pipeline cache, never presents, and doesn't touch the render's
+pipeline, uploads or prepared frames. Tiles and renders take turns: the GPU's shared caches
+(the tc LUT) release buffers a concurrent render would still use.
+
+- Auto exposure was most of a tile (130 ms of metering, a CPU spectral pass). It's cached
+  per film: the EV never depends on the paper (four films × nine papers, bit-identical), so
+  paper tiles meter once and a paper change no longer meters the main render again.
+- The web's GPU pool keeps up to three small (≤ 512²) sets beside the two frame sizes, so
+  tiles and the match's trials don't evict a frame's buffers.
+- Choosing a tile's stock takes its calibrated pipeline and EV (phone: `pipeline 2` ms).
+
+| | Mac Chrome | iPhone |
+|---|---|---|
+| First open, all 33 tiles | 4.4 s (165 ms/tile: calibrate 25, meter 120–130) | ~6.5 s (31 tiles in 6.3 s, median 111 ms) |
+| After an edit, all 33 | 33 × 9–15 ms | 2.1 s (median 19 ms) |
+| A slider frame while tiles fill | | waited 18 ms beyond its own render |
+| wasm memory | unchanged (657 MiB) | +46–69 MiB (124 → 170–193) |
+| Footprint with both grids open | | **+150–180 MiB** (≈650–685 vs ≈490–530 MiB off) |
+
+Speed passes the gates; memory doesn't (gate +100 MiB). Keeping 4 pipelines instead of 40
+didn't lower the footprint, so the rest is GPU sets, the tile canvases or transfer garbage;
+the sampler lost the phone before that was pinned down. So, per decision 5, previews are
+**off by default on touch screens** (on with ⋯ › Film and paper previews) and on elsewhere.
+
+**Open:**
+
+- Where the previews' 150–180 MiB goes on the phone, and the Phase 4 runs: an export with
+  the grids open, the `prep`, `match` and `stocks` phases in `ipad.mjs`, the iPad and the
+  other desktop browsers.
+- JPEG/PNG "Match original brightness": not on the web yet (the switch shows for RAWs only).
+- *Match new RAWs* is remembered from the switch; there's no settings page for it.
+- `web/checks/post.mjs` tests the removed Post controls; `golden.py` keeps 12 MP.
+- Windows: `cargo check` only for the shared brightness module; its tests didn't run.
 
 ## Phase 0: measure before building UI (go / no-go)
 

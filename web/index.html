@@ -129,6 +129,19 @@
   .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
   .stock label.row { display: flex; }
   .stock label[hidden] { display: none; }
+  /* Film and paper previews (web/stocks.js). */
+  /* The panel's foldout look (summary, below), within the stock area's padding. */
+  .stock-fold summary { padding: 0; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .stock-current { margin-left: auto; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stock-fold h3 { margin: 12px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .stock-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stock-tile { display: grid; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+  .stock-tile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A blank tile's canvas is cleared: the grey shows. */
+  .stock-thumb { width: 100%; height: 92px; object-fit: cover; border-radius: 5px; background: var(--field); }
+  .stock-tile.stale .stock-thumb { opacity: .55; }
+  .stock-tile.selected .stock-thumb { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .stock-tile.selected { color: var(--fg); }
   select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
   select:disabled { color: var(--faint); }
   fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
@@ -214,6 +227,8 @@
   .menu button { padding: 7px 10px; border: 0; border-radius: 5px; background: none; color: var(--fg); text-align: left; font: inherit; cursor: pointer; }
   .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--field); outline: none; }
   .menu button:disabled { color: var(--faint); cursor: default; }
+  .menu [role=menuitemcheckbox]::before { content: "✓"; display: inline-block; width: 1.2em; visibility: hidden; }
+  .menu [role=menuitemcheckbox][aria-checked=true]::before { visibility: visible; }
   .dialog { width: min(420px, calc(100vw - 32px)); padding: 0; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--fg);
     box-shadow: 0 12px 40px rgb(0 0 0 / .5); }
   .dialog::backdrop { background: rgb(0 0 0 / .55); }
@@ -355,6 +370,7 @@
           <button type="button" role="menuitem" id="import-preset" tabindex="-1">Import preset…</button>
           <button type="button" role="menuitem" id="export-preset" tabindex="-1">Export preset…</button>
           <button type="button" role="menuitem" id="export-lut" tabindex="-1" title="A 33 × 33 × 33 CUBE file, sRGB in and out, with the current film and paper color settings. Excludes auto exposure, print filter shifts, preflash, grain, halation, glare, diffusion, blur, sharpening, RAW development and Post edits.">Export LUT…</button>
+          <button type="button" role="menuitemcheckbox" id="previews" tabindex="-1" aria-checked="true" title="Show each film and paper on your photograph. Turn off to use simple menus on slower devices.">Film and paper previews</button>
         </div>
       </div>
       <button class="btn" id="crop-cancel" hidden>Cancel</button>

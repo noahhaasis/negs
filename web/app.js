@@ -10,6 +10,7 @@ import { createView } from "./view.js";
 import { placeholder } from "./placeholder.js";
 import * as Border from "./border.js";
 import * as Crop from "./crop.js";
+import * as Stocks from "./stocks.js";
 import { createCropEditor } from "./crop-editor.js";
 import { fetchFailed } from "./engine.js";
 import { DEFAULT_SAMPLE, createSamplePicker } from "./samples.js";
@@ -214,26 +215,27 @@ function isModified(path) {
 const params = () => JSON.stringify({ ...state.params, io: { ...state.params.io, rotate_cw: 0 } });
 
 // A new film brings its own grain, DIR and halation presets, as upstream
-// applies them (macOS EditorModel.chooseFilm).
-function chooseFilm(id) {
-  state.film = id;
-  set("film_render.development_time", null);
-  for (const path of PRESET_PATHS) set(path, null);
-  pairFilm();
+// applies them (macOS EditorModel.chooseFilm). `into`: the edit, or a copy
+// (a preview tile's).
+function chooseFilm(id, into = state) {
+  into.film = id;
+  set("film_render.development_time", null, into.params);
+  for (const path of PRESET_PATHS) set(path, null, into.params);
+  pairFilm(into);
 }
-function choosePaper(id) {
-  state.paper = id;
-  set("print_render.development_time", null);
+function choosePaper(id, into = state) {
+  into.paper = id;
+  set("print_render.development_time", null, into.params);
 }
 // A slide scans directly; a film with a target paper prints on it. Others
 // keep the paper, as on desktop.
-function pairFilm() {
-  const f = stock(state.film);
+function pairFilm(into = state) {
+  const f = stock(into.film);
   if (!f) return;
-  set("io.scan_film", f.positive);
-  if (papers().some((p) => p.id === f.target_print) && state.paper !== f.target_print) {
-    state.paper = f.target_print;
-    set("print_render.development_time", null);
+  set("io.scan_film", f.positive, into.params);
+  if (papers().some((p) => p.id === f.target_print) && into.paper !== f.target_print) {
+    into.paper = f.target_print;
+    set("print_render.development_time", null, into.params);
   }
 }
 
@@ -673,6 +675,7 @@ function fillStocks() {
   };
   fill($("film"), filmGroups());
   fill($("paper"), paperGroups());
+  buildPreviews();
   developmentTime("film", "film_render.development_time", () => state.film);
   developmentTime("paper", "print_render.development_time", () => state.paper);
   state.params = structuredClone(catalog.defaults);
@@ -682,9 +685,7 @@ function fillStocks() {
   syncs.push(() => {
     $("film").value = state.film;
     $("paper").value = state.paper;
-    // Scanned film isn't printed: no paper.
     $("scan-film").checked = get("io.scan_film");
-    $("paper-row").hidden = get("io.scan_film");
   });
   sync();
 }
@@ -820,7 +821,7 @@ function buildSheet() {
 // 8 ms whatever its size, so it goes no smaller than a quarter.
 const BUDGET_MS = 90;
 let interactiveScale = 0.5, minScale = 0.15;
-let wanted = null, running = false, settleTimer = 0, exporting = false;
+let wanted = null, running = false, settleTimer = 0, exporting = false, lastSlide = -Infinity;
 const renders = [];
 let renderFailures = 0;
 
@@ -831,7 +832,10 @@ function schedule(mode) {
   if (!photo) return;
   clearTimeout(settleTimer);
   // A slider that stops without a change event (keyboard, wheel) settles anyway.
-  if (mode === "interactive") settleTimer = setTimeout(() => schedule("settled"), 250);
+  if (mode === "interactive") {
+    settleTimer = setTimeout(() => schedule("settled"), 250);
+    lastSlide = performance.now();
+  }
   wanted = mode;
   pump();
 }
@@ -839,7 +843,7 @@ function schedule(mode) {
 async function pump() {
   // Not while the engine's GPU solves the brightness match either: its
   // trials share the chain's buffers.
-  if (running || exporting || matching?.engine) return;
+  if (running || exporting || matching?.engine || previewing) return;
   running = true;
   $("busy").classList.add("on");
   // Not while the engine's photograph is being replaced: the next frame is
@@ -869,6 +873,7 @@ async function pump() {
   running = false;
   $("busy").classList.remove("on");
   reconcileMatch();
+  pumpPreviews();
 }
 
 // The longest side to render, in photograph pixels: as many as the device
@@ -1548,7 +1553,7 @@ function cameraReference(target) {
 // a time; its end looks again, so edits made meanwhile coalesce. A result
 // applies only if the inputs it was solved for are still current.
 async function reconcileMatch({ force = false } = {}) {
-  if (matching || !matchPending() || !sourceCurrent() || !host || cropSession) return;
+  if (matching || previewing || !matchPending() || !sourceCurrent() || !host || cropSession) return;
   if (!force && (running || wanted || exporting || !developed || renders.at(-1)?.interactive !== false)) return;
   const inputs = matchInputs(), target = photo, opening = opens, engine = host;
   const stale = () => photo !== target || opening !== opens || host !== engine;
@@ -1587,7 +1592,7 @@ async function reconcileMatch({ force = false } = {}) {
     matching = null;
     sync();
     if (wanted) pump();
-    queueMicrotask(() => reconcileMatch());
+    queueMicrotask(() => { reconcileMatch(); pumpPreviews(); });
   }
 }
 
@@ -1613,6 +1618,119 @@ async function matchSettled() {
     reconcileMatch({ force: true });
     await new Promise((r) => setTimeout(r, 25));
   }
+}
+
+// ---- Film and paper previews ----------------------------------------------
+
+// The foldouts of web/stocks.js beside the menus, one tile request at a
+// time and only while the photograph has nothing else to render: no frame
+// running or wanted, no slider moving, no brightness match or export
+// (docs/stock-previews.md). Off: the menus, and the engine lets go of what
+// the previews kept.
+const PREVIEW_SIDE = 320;
+// The calibrated stocks the engine keeps for them: every film with its
+// paper, and every paper with the current film.
+const PREVIEW_PIPELINES = 40;
+// Off by default on touch screens: on the iPhone 13 Pro they added
+// 150–180 MiB to the tab (docs/web-prep-port-plan.md).
+let previewsOn = remembered("stockPreviews", !matchMedia("(pointer: coarse)").matches);
+let previewing = false, previewTimer = 0, previewRefresh = 0;
+const previewStats = [];
+let folds = null;
+
+function buildPreviews() {
+  const opened = remembered("stockFolds", {});
+  const fold = (which, title, groups, choose) => {
+    const f = Stocks.foldout(title, groups, (id) => { choose(id); sync(); schedule("settled"); }, refreshPreviews, !!opened[which]);
+    f.root.addEventListener("toggle", () => remember("stockFolds", { ...remembered("stockFolds", {}), [which]: f.root.open }));
+    return f;
+  };
+  folds = { film: fold("film", "Film", filmGroups(), chooseFilm), paper: fold("paper", "Paper", paperGroups(), choosePaper) };
+  $("film").closest("label").after(folds.film.root);
+  $("paper-row").after(folds.paper.root);
+  $("previews").addEventListener("click", () => setPreviews(!previewsOn));
+  syncs.push(() => {
+    // Scanned film isn't printed: no paper.
+    $("film").closest("label").hidden = previewsOn;
+    $("paper-row").hidden = previewsOn || get("io.scan_film");
+    folds.film.root.hidden = !previewsOn;
+    folds.paper.root.hidden = !previewsOn || get("io.scan_film");
+    folds.film.select(state.film);
+    folds.paper.select(state.paper);
+    $("previews").setAttribute("aria-checked", previewsOn);
+    refreshPreviews();
+  });
+}
+
+function setPreviews(on) {
+  previewsOn = on;
+  remember("stockPreviews", on);
+  if (!on) {
+    for (const t of [...folds.film.tiles.values(), ...folds.paper.tiles.values()]) Stocks.markStale(t, null, null);
+    host?.call("releaseThumbnails").catch(() => {});
+  }
+  sync();
+}
+
+// What tile `id` of `which` renders: the edit with that stock chosen.
+function tileRequest(which, id) {
+  const into = { film: state.film, paper: state.paper, params: structuredClone(state.params) };
+  (which === "film" ? chooseFilm : choosePaper)(id, into);
+  const request = { film: into.film, paper: into.paper, params: JSON.stringify({ ...into.params, io: { ...into.params.io, rotate_cw: 0 } }) };
+  return { ...request, key: JSON.stringify([request, crop, rotation()]) };
+}
+
+// The tiles on screen, each with its request and whether its picture is
+// current; stale ones dimmed. Once per frame, however many changes.
+function previewTiles() {
+  if (!previewsOn || !folds || !photo) return [];
+  const out = [];
+  for (const which of ["film", "paper"]) {
+    for (const tile of folds[which].onScreen()) {
+      const request = tileRequest(which, tile.id);
+      Stocks.markStale(tile, photo, request.key);
+      out.push({ tile, request });
+    }
+  }
+  return out;
+}
+function refreshPreviews() {
+  if (previewRefresh) return;
+  previewRefresh = requestAnimationFrame(() => {
+    previewRefresh = 0;
+    pumpPreviews();
+  });
+}
+
+// Renders the next tile on screen whose picture isn't current, then looks
+// again.
+async function pumpPreviews() {
+  clearTimeout(previewTimer);
+  const tiles = previewTiles();
+  if (previewing || !photo || !host || !developed || loading || running || wanted || exporting || matching || cropSession || !sourceCurrent()) return;
+  const quiet = performance.now() - lastSlide;
+  if (quiet < 400) {
+    previewTimer = setTimeout(pumpPreviews, 400 - quiet);
+    return;
+  }
+  const next = tiles.find(({ tile, request }) => tile.key !== request.key && tile.failed !== request.key);
+  if (!next) return;
+  const { tile, request } = next, target = photo, engine = host;
+  previewing = true;
+  try {
+    const side = Stocks.frameSide(photo.width, photo.height, crop, PREVIEW_SIDE);
+    const r = await engine.call("thumbnail", request.film, request.paper, request.params, side, PREVIEW_PIPELINES, structuredClone(crop), rotation());
+    previewStats.push({ id: tile.id, elapsedMs: r.elapsedMs, stages: r.stages, memoryMiB: r.memoryMiB, at: performance.now() });
+    if (photo === target && previewsOn) Stocks.paint(tile, target, request.key, r);
+  } catch (e) {
+    if (!e.restarted) console.warn(`no preview of ${tile.id}: ${e.message}`);
+    tile.failed = request.key;
+  } finally {
+    previewing = false;
+  }
+  if (wanted) pump();
+  reconcileMatch();
+  refreshPreviews();
 }
 
 // ---- Tutorial adapter ------------------------------------------------------
@@ -2038,7 +2156,7 @@ async function exportJpeg() {
   showMessage(`Rendering ${photo.exportWidth}×${photo.exportHeight} for export…`);
   $("busy").classList.add("on");
   try {
-    while (running) await new Promise((r) => setTimeout(r, 20));
+    while (running || previewing) await new Promise((r) => setTimeout(r, 20));
     await matchSettled();
     const r = await exportRender();
     const canvas = new OffscreenCanvas(r.width, r.height);
@@ -2403,6 +2521,21 @@ globalThis.negs = {
   },
   keptPixels: () => keptPixels(),
   // Prep › Match camera brightness: its state and note, and the switch.
+  // The stock previews: whether they're on, the tiles on screen and how
+  // many are current, and each tile render's time.
+  previews: () => {
+    const tiles = previewTiles();
+    const every = folds ? ["film", "paper"].flatMap((which) => [...folds[which].tiles.values()].map((tile) => ({ which, tile, key: tileRequest(which, tile.id).key }))) : [];
+    return { on: previewsOn, onScreen: tiles.length, current: tiles.filter(({ tile, request }) => tile.key === request.key).length,
+      // Every tile, on screen or not, and the ones whose picture is out of date.
+      all: every.length, outdated: every.filter(({ tile, key }) => tile.key !== key).map(({ which, tile }) => `${which}:${tile.id}${tile.key ? " (stale)" : ""}`),
+      failed: tiles.filter(({ tile, request }) => tile.failed === request.key).length, previewing, stats: previewStats.slice() };
+  },
+  setPreviews: (on) => setPreviews(!!on),
+  // One preview of the whole frame within `side`, for measurements.
+  thumbnail: (side, film = state.film, paper = state.paper) => host.call("thumbnail", film, paper, params(), side, PREVIEW_PIPELINES, Crop.defaults(), 0),
+  // Opens or folds the Film and Paper foldouts.
+  openStocks: (film = true, paper = true) => { folds.film.root.open = film; folds.paper.root.open = paper; },
   match: () => ({ match: structuredClone(state.match), note: matchNote(), pending: matchPending(), active: matchActive(), solving: !!matching,
     exposure: get("prep.exposure_ev"), failure: matchFailure?.photo === photo ? matchFailure.message : null,
     reason: matchFailure?.photo === photo ? matchFailure.reason : null, lastSolve }),

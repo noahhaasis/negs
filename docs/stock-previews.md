@@ -42,6 +42,16 @@ The experiment hooks are gone on all three platforms ([finishing the feature](ha
 - While "Scan film directly" is on, the paper control (menu or foldout) is hidden, as
   before.
 
+## Web (branch `web-prep-port`)
+
+Film and paper previews, no preset previews yet. `web/stocks.js` builds the foldouts beside
+the menus (both are built; the switch shows one), `app.js` `pumpPreviews` schedules the
+tiles on screen (an IntersectionObserver), and the wasm engine's `thumbnail` renders them
+on WebGPU with its own reduced source, 40 cached pipelines and per-film auto-exposure EVs.
+The setting is ⋯ › *Film and paper previews*: on by default, **off on touch screens**, where
+the tiles added 150–180 MiB to the iPhone's tab. Measurements and open items:
+[web Prep port](web-prep-port-plan.md#built-2026-11-04). Check: `web/checks/stocks.test.mjs`.
+
 ## Helper protocol (`crates/spektrafilm-native`)
 
 ```json
