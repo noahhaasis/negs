@@ -234,6 +234,9 @@ function pairFilm(into = state) {
   const f = stock(into.film);
   if (!f) return;
   set("io.scan_film", f.positive, into.params);
+  // The film set Scan film directly, not you: its row shows while on and
+  // hides again with a negative film.
+  if (into === state) revealed.delete("io.scan_film");
   if (papers().some((p) => p.id === f.target_print) && into.paper !== f.target_print) {
     into.paper = f.target_print;
     set("print_render.development_time", null, into.params);
