@@ -10,7 +10,7 @@ use anyhow::{Result, ensure};
 
 use crate::crop::CropSettings;
 use crate::gpu::{self, GpuImage};
-use crate::histogram::Histogram;
+use crate::histogram::Scopes;
 
 pub const MAX_PREVIEW: u32 = 8192;
 /// The histogram samples at most a million pixels; this copy has them.
@@ -91,9 +91,11 @@ impl Picture {
         cpu.as_deref().map(f)
     }
 
-    pub fn histogram(&self, crop: &CropSettings) -> Histogram {
+    /// The histogram and waveform of the crop, the waveform across the
+    /// photograph as shown after `rotation` quarter turns.
+    pub fn scopes(&self, crop: &CropSettings, rotation: i32) -> Scopes {
         let (rgba, w, h) = &self.inner.small;
-        Histogram::of(rgba, *w as usize, *h as usize, crop, 1 << 20)
+        Scopes::of(rgba, *w as usize, *h as usize, crop, rotation, 1 << 20)
     }
 
     pub fn same(&self, other: &Picture) -> bool {

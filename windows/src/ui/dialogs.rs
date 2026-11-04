@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::UI::Controls::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -54,6 +55,13 @@ pub fn tooltip(hwnd: HWND, text: &str) {
                 )
                 .unwrap_or_default();
                 SendMessageW(tip, TTM_SETMAXTIPWIDTH, WPARAM(0), LPARAM(420));
+                // At the system's half second (a tenth from tip to tip), a
+                // pointer resting on a slider before pressing it showed the
+                // tip, and the press hid it at once: a box flashed by.
+                for delay in [TTDT_INITIAL, TTDT_RESHOW] {
+                    SendMessageW(tip, TTM_SETDELAYTIME, WPARAM(delay as usize), LPARAM(1000));
+                }
+                super::theme::apply_control(tip, true);
                 t.set(tip.0 as isize);
             }
             HWND(t.get() as *mut _)
@@ -167,44 +175,321 @@ pub fn about(owner: HWND) {
     task_dialog(owner, "Negs", &content, None, TD_INFORMATION_ICON, &[], TASKDIALOG_FLAGS(0));
 }
 
-/// Settings: the update preferences, like the Mac's Settings window.
+const SETTINGS_PREVIEWS: u16 = 10;
+const SETTINGS_AUTOMATIC: u16 = 11;
+const SETTINGS_CHECK: u16 = 12;
+const SETTINGS_KEEP_PAPER: u16 = 13;
+const SETTINGS_NEW_PHOTOS: u16 = 14;
+const SETTINGS_MATCH: u16 = 15;
+const SETTINGS_LIMIT: u16 = 16;
+const SETTINGS_LOW_MEMORY: u16 = 17;
+const SETTINGS_NEW_NOTE: u16 = 18;
+const SETTINGS_BACKGROUND: u16 = 19;
+const SETTINGS_BACKGROUND_COLOR: u16 = 20;
+
+/// Settings › New photographs: what each choice does.
+const NEW_PHOTOS_NOTES: [&str; 2] = [
+    "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections.",
+    "Each photograph you open starts with default Prep and Lab settings and no border. The film, paper, Image Size and output colour stay.",
+];
+
+thread_local! {
+    /// The open Settings dialog's result: None while open, then whether OK closed it.
+    static SETTINGS_DONE: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The dialog's descriptions, drawn grey.
+    static SETTINGS_NOTES: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) };
+    /// The viewer background colour chosen in the open dialog, and its swatch.
+    static SETTINGS_SWATCH: Cell<(isize, [u8; 3])> = const { Cell::new((0, [0; 3])) };
+}
+
+/// Settings (the Mac's Settings window): previews, keeping the paper, new
+/// photographs, the preview and export, and updates, in a modal dialog with
+/// OK and Cancel. Updates show only in builds that have them.
 pub fn settings(app: &mut App) {
     let configured = crate::updates::configured();
-    if !configured {
-        task_dialog(app.main, "Settings", "Updates are not configured for this build.", None, PCWSTR::null(), &[], TASKDIALOG_FLAGS(0));
-        return;
-    }
-    let last = crate::updates::last_check().map_or("never".to_string(), |t| t);
-    let title = wide("Negs");
-    let instruction = wide("Settings");
-    let content = wide(format!("Updates are installed only when you choose to restart Negs.\n\nLast checked: {last}"));
-    let verification = wide("Automatically check for updates");
-    let check = wide("Check for Updates…");
-    let close = wide("Close");
-    let buttons = [TASKDIALOG_BUTTON { nButtonID: 100, pszButtonText: pcwstr(&check) }, TASKDIALOG_BUTTON { nButtonID: 101, pszButtonText: pcwstr(&close) }];
-    let automatic = crate::updates::automatic();
-    let config = TASKDIALOGCONFIG {
-        cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
-        hwndParent: app.main,
-        dwFlags: TDF_POSITION_RELATIVE_TO_WINDOW | if automatic { TDF_VERIFICATION_FLAG_CHECKED } else { TASKDIALOG_FLAGS(0) },
-        pszWindowTitle: pcwstr(&title),
-        pszMainInstruction: pcwstr(&instruction),
-        pszContent: pcwstr(&content),
-        pszVerificationText: pcwstr(&verification),
-        cButtons: 2,
-        pButtons: buttons.as_ptr(),
-        nDefaultButton: 101,
-        ..Default::default()
-    };
-    let (mut pressed, mut checked) = (0, BOOL(0));
+    let px = |dip: f64| app.px(dip);
+    let fonts = &app.fonts;
     unsafe {
-        let _ = TaskDialogIndirect(&config, Some(&mut pressed), None, Some(&mut checked));
+        let class = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(settings_proc),
+            hInstance: super::instance(),
+            lpszClassName: windows::core::w!("NegsSettings"),
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            ..Default::default()
+        };
+        RegisterClassExW(&class);
     }
-    crate::updates::set_automatic(checked.as_bool());
-    app.model.prefs.check_for_updates = checked.as_bool();
-    app.model.prefs.save();
-    if pressed == 100 {
-        crate::updates::check(true);
+    let (width, pad) = (px(448.0), px(24.0));
+    let inner = width - 2 * pad;
+    let title = wide("Settings");
+    let style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+    let ex = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
+    let dialog = unsafe {
+        CreateWindowExW(ex, windows::core::w!("NegsSettings"), pcwstr(&title), style, 0, 0, width, px(200.0), app.main, None, super::instance(), None).unwrap_or_default()
+    };
+    super::theme::apply_window(dialog);
+    let make = |class: PCWSTR, text: &str, style: WINDOW_STYLE, id: u16, font| super::create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), dialog, id, font);
+    let label = |text: &str, font| make(windows::core::w!("STATIC"), text, WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFT.0 | windows::Win32::System::SystemServices::SS_NOPREFIX.0), 0, font);
+    let check = |text: &str, id: u16, on: bool| {
+        let c = make(windows::core::w!("BUTTON"), text, WS_TABSTOP | WINDOW_STYLE(BS_AUTOCHECKBOX as u32), id, fonts.ui);
+        unsafe {
+            SendMessageW(c, BM_SETCHECK, WPARAM(on as usize), LPARAM(0));
+        }
+        c
+    };
+    // Each row: the control, its height (None: measure the wrapped text), its
+    // indent, the gap after it, and a width other than the whole row's.
+    let mut rows: Vec<(HWND, Option<i32>, i32, i32, Option<i32>)> = vec![];
+    let mut notes = vec![];
+    rows.push((label("Film & Paper", fonts.section), Some(px(24.0)), 0, px(8.0), None));
+    let previews = check("Film, paper and preset previews", SETTINGS_PREVIEWS, app.model.prefs.previews);
+    rows.push((previews, Some(px(24.0)), 0, 0, None));
+    let note = label("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(24.0), px(16.0), None));
+    let keep_paper = check("Keep paper when changing film", SETTINGS_KEEP_PAPER, app.model.prefs.keep_paper);
+    rows.push((keep_paper, Some(px(24.0)), 0, 0, None));
+    let note = label("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(24.0), px(24.0), None));
+    rows.push((label("New Photographs", fonts.section), Some(px(24.0)), 0, px(8.0), None));
+    let new_photos = make(windows::core::w!("COMBOBOX"), "", WS_TABSTOP | WS_VSCROLL | WINDOW_STYLE(CBS_DROPDOWNLIST as u32), SETTINGS_NEW_PHOTOS, fonts.ui);
+    for title in ["Keep the previous edits", "Start fresh"] {
+        let text = wide(title);
+        unsafe {
+            SendMessageW(new_photos, CB_ADDSTRING, WPARAM(0), LPARAM(text.as_ptr() as isize));
+        }
+    }
+    let fresh = app.model.prefs.fresh_edits;
+    unsafe {
+        SendMessageW(new_photos, CB_SETCURSEL, WPARAM(fresh as usize), LPARAM(0));
+    }
+    super::draw::paint_combo(new_photos);
+    super::accessible_name(new_photos, "New photographs");
+    // The drop-down's height is its list's; the next row starts 32 below.
+    rows.push((new_photos, Some(px(200.0)), 0, px(32.0) - px(200.0), Some(px(224.0))));
+    // The note's text follows the choice; it is laid out for the longer one.
+    let note = make(windows::core::w!("STATIC"), NEW_PHOTOS_NOTES[1], WINDOW_STYLE(windows::Win32::System::SystemServices::SS_LEFT.0 | windows::Win32::System::SystemServices::SS_NOPREFIX.0), SETTINGS_NEW_NOTE, fonts.small);
+    notes.push(note);
+    rows.push((note, None, 0, px(16.0), None));
+    let match_new = check("Match new photographs to camera brightness", SETTINGS_MATCH, app.model.prefs.match_new_photos);
+    rows.push((match_new, Some(px(24.0)), 0, 0, None));
+    let note = label("New photographs start with Prep › Match camera brightness on: a RAW develops about as bright as the camera's own preview, a JPEG or TIFF as the file itself.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(24.0), px(24.0), None));
+    rows.push((label("Preview & Export", fonts.section), Some(px(24.0)), 0, px(8.0), None));
+    let prefs = &app.model.prefs;
+    let custom_background = check("Custom viewer background", SETTINGS_BACKGROUND, prefs.viewer_background_custom);
+    rows.push((custom_background, Some(px(24.0)), 0, px(4.0), None));
+    let choose = make(windows::core::w!("BUTTON"), "Choose Colour…", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), SETTINGS_BACKGROUND_COLOR, fonts.ui);
+    super::accessible_name(choose, "Viewer background colour");
+    unsafe {
+        let _ = EnableWindow(choose, prefs.viewer_background_custom);
+    }
+    rows.push((choose, Some(px(32.0)), px(24.0), px(4.0), Some(px(160.0))));
+    // The colour, beside its button.
+    let swatch = make(windows::core::w!("STATIC"), "", WS_BORDER, 0, fonts.ui);
+    let color = crate::border::BorderColor::from_hex(&prefs.viewer_background).map_or([0x24; 3], |c| c.0);
+    SETTINGS_SWATCH.with(|s| s.set((swatch.0 as isize, color)));
+    let note = label("The colour behind the photograph. Off, it follows the light or dark theme.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(24.0), px(16.0), None));
+    let limit = check("Limit preview to 12 MP", SETTINGS_LIMIT, app.model.prefs.limits_preview());
+    rows.push((limit, Some(px(24.0)), 0, 0, None));
+    let note = label("Develops the preview faster on large photographs. Export keeps the full Image Size.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(24.0), px(16.0), None));
+    let low_memory = check("Use less memory for export", SETTINGS_LOW_MEMORY, app.model.prefs.low_memory_export);
+    rows.push((low_memory, Some(px(24.0)), 0, 0, None));
+    let note = label("Develops the grain one colour at a time. Same result, less memory, longer export.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(24.0), px(24.0), None));
+    rows.push((label("Updates", fonts.section), Some(px(24.0)), 0, px(8.0), None));
+    let mut automatic = HWND::default();
+    if configured {
+        automatic = check("Automatically check for updates", SETTINGS_AUTOMATIC, crate::updates::automatic());
+        rows.push((automatic, Some(px(24.0)), 0, 0, None));
+        let last = crate::updates::last_check().unwrap_or_else(|| "never".into());
+        let note = label(&format!("Updates are installed only when you choose to restart Negs. Last checked: {last}."), fonts.small);
+        notes.push(note);
+        rows.push((note, None, px(24.0), px(16.0), None));
+        let button = make(windows::core::w!("BUTTON"), "Check for Updates…", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), SETTINGS_CHECK, fonts.ui);
+        rows.push((button, Some(px(32.0)), px(24.0), px(8.0), Some(px(160.0))));
+    } else {
+        let note = label("Updates are not configured for this build.", fonts.small);
+        notes.push(note);
+        rows.push((note, None, 0, px(4.0), None));
+    }
+    SETTINGS_NOTES.with(|n| *n.borrow_mut() = notes.iter().map(|h| h.0 as isize).collect());
+    let mut y = pad;
+    for (control, height, indent, gap, fixed) in rows {
+        let w = fixed.unwrap_or(inner - indent);
+        let h = height.unwrap_or_else(|| wrapped_height(control, w));
+        unsafe {
+            let _ = MoveWindow(control, pad + indent, y, w, h, false);
+            if control == choose {
+                let side = px(20.0);
+                let _ = MoveWindow(swatch, pad + indent + w + px(12.0), y + (h - side) / 2, side, side, false);
+            }
+        }
+        y += h + gap;
+    }
+    set_new_photos_note(dialog, fresh);
+    let (button_w, button_h) = (px(88.0), px(32.0));
+    y += px(16.0);
+    let ok = make(windows::core::w!("BUTTON"), "OK", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), IDOK.0 as u16, fonts.ui);
+    let cancel = make(windows::core::w!("BUTTON"), "Cancel", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), IDCANCEL.0 as u16, fonts.ui);
+    unsafe {
+        let _ = MoveWindow(ok, width - pad - 2 * button_w - px(8.0), y, button_w, button_h, false);
+        let _ = MoveWindow(cancel, width - pad - button_w, y, button_w, button_h, false);
+        // Size the window around the client area, centred on the editor.
+        let mut frame = RECT { left: 0, top: 0, right: width, bottom: y + button_h + pad };
+        let _ = windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi(&mut frame, style, false, ex, app.dpi);
+        let (fw, fh) = (frame.right - frame.left, frame.bottom - frame.top);
+        let mut owner = RECT::default();
+        let _ = GetWindowRect(app.main, &mut owner);
+        let (x, top) = (owner.left + (owner.right - owner.left - fw) / 2, owner.top + (owner.bottom - owner.top - fh) / 3);
+        let _ = SetWindowPos(dialog, None, x, top.max(owner.top), fw, fh, SWP_NOZORDER | SWP_NOACTIVATE);
+        SETTINGS_DONE.with(|d| d.set(None));
+        let _ = EnableWindow(app.main, false);
+        let _ = ShowWindow(dialog, SW_SHOW);
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(previews);
+        let mut msg = MSG::default();
+        while SETTINGS_DONE.with(Cell::get).is_none() {
+            if !GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                // WM_QUIT: leave it for the main loop.
+                PostQuitMessage(msg.wParam.0 as i32);
+                break;
+            }
+            if !IsDialogMessageW(dialog, &msg).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        let accepted = SETTINGS_DONE.with(Cell::get).unwrap_or(false);
+        let checked = |c: HWND| SendMessageW(c, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
+        let (previews_on, keep_paper_on, automatic_on) = (checked(previews), checked(keep_paper), configured && checked(automatic));
+        let fresh_on = SendMessageW(new_photos, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 == 1;
+        let (match_on, limit_on, low_memory_on) = (checked(match_new), checked(limit), checked(low_memory));
+        let background_on = checked(custom_background);
+        let background = crate::border::BorderColor(SETTINGS_SWATCH.with(Cell::get).1);
+        let _ = EnableWindow(app.main, true);
+        let _ = DestroyWindow(dialog);
+        let _ = SetForegroundWindow(app.main);
+        if !accepted {
+            return;
+        }
+        if configured {
+            crate::updates::set_automatic(automatic_on);
+            app.model.prefs.check_for_updates = automatic_on;
+            app.model.prefs.save();
+        }
+        app.model.set_previews(previews_on);
+        app.model.set_keep_paper(keep_paper_on);
+        app.model.set_fresh_edits(fresh_on);
+        app.model.set_match_new_photos(match_on);
+        app.model.set_limit_preview(limit_on);
+        app.model.set_low_memory_export(low_memory_on);
+        let prefs = &mut app.model.prefs;
+        if prefs.viewer_background_custom != background_on || prefs.viewer_background != background.hex() {
+            prefs.viewer_background_custom = background_on;
+            prefs.viewer_background = background.hex();
+            prefs.save();
+        }
+        super::canvas::set_custom_background(app.canvas, app.model.prefs.custom_viewer_background());
+    }
+}
+
+/// The New photographs note for the choice in the open dialog.
+fn set_new_photos_note(dialog: HWND, fresh: bool) {
+    unsafe {
+        if let Ok(note) = GetDlgItem(dialog, SETTINGS_NEW_NOTE as i32) {
+            let text = wide(NEW_PHOTOS_NOTES[fresh as usize]);
+            let _ = SetWindowTextW(note, pcwstr(&text));
+        }
+    }
+}
+
+/// The height `control`'s text needs, wrapped at `width`.
+fn wrapped_height(control: HWND, width: i32) -> i32 {
+    use windows::Win32::Graphics::Gdi::*;
+    unsafe {
+        let mut text = [0u16; 512];
+        let n = GetWindowTextW(control, &mut text) as usize;
+        let dc = GetDC(control);
+        let font = HFONT(SendMessageW(control, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _);
+        let old = SelectObject(dc, font);
+        let mut r = RECT { left: 0, top: 0, right: width, bottom: 0 };
+        DrawTextW(dc, &mut text[..n], &mut r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+        SelectObject(dc, old);
+        ReleaseDC(control, dc);
+        r.bottom
+    }
+}
+
+extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    use windows::Win32::Graphics::Gdi::*;
+    unsafe {
+        match msg {
+            WM_COMMAND => {
+                let id = (wparam.0 & 0xffff) as i32;
+                if id == IDOK.0 || id == IDCANCEL.0 {
+                    SETTINGS_DONE.with(|d| d.set(Some(id == IDOK.0)));
+                } else if id == SETTINGS_NEW_PHOTOS as i32 && ((wparam.0 >> 16) & 0xffff) as u32 == CBN_DROPDOWN {
+                    super::theme::combo_list(HWND(lparam.0 as *mut _));
+                } else if id == SETTINGS_NEW_PHOTOS as i32 && ((wparam.0 >> 16) & 0xffff) as u32 == CBN_SELCHANGE {
+                    let fresh = SendMessageW(HWND(lparam.0 as *mut _), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 == 1;
+                    set_new_photos_note(hwnd, fresh);
+                } else if id == SETTINGS_CHECK as i32 {
+                    crate::updates::check(true);
+                } else if id == SETTINGS_BACKGROUND as i32 {
+                    let on = SendMessageW(HWND(lparam.0 as *mut _), BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
+                    if let Ok(choose) = GetDlgItem(hwnd, SETTINGS_BACKGROUND_COLOR as i32) {
+                        let _ = EnableWindow(choose, on);
+                    }
+                    let _ = InvalidateRect(HWND(SETTINGS_SWATCH.with(Cell::get).0 as *mut _), None, true);
+                } else if id == SETTINGS_BACKGROUND_COLOR as i32 {
+                    let (swatch, color) = SETTINGS_SWATCH.with(Cell::get);
+                    if let Some(chosen) = super::inspector::choose_color(hwnd, crate::border::BorderColor(color)) {
+                        SETTINGS_SWATCH.with(|s| s.set((swatch, chosen.0)));
+                        let _ = InvalidateRect(HWND(swatch as *mut _), None, true);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_CLOSE => {
+                SETTINGS_DONE.with(|d| d.set(Some(false)));
+                LRESULT(0)
+            }
+            WM_CTLCOLORLISTBOX => {
+                // The New Photographs list, as the column's lists.
+                let dc = HDC(wparam.0 as *mut _);
+                let p = super::theme::palette();
+                SetTextColor(dc, COLORREF(p.text));
+                SetBkColor(dc, COLORREF(p.control));
+                LRESULT(super::theme::brush(p.control).0 as isize)
+            }
+            WM_CTLCOLORSTATIC if lparam.0 == SETTINGS_SWATCH.with(Cell::get).0 => {
+                // The chosen colour, faded while the custom background is off.
+                let (_, [r, g, b]) = SETTINGS_SWATCH.with(Cell::get);
+                let on = GetDlgItem(hwnd, SETTINGS_BACKGROUND as i32).is_ok_and(|c| SendMessageW(c, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1);
+                let p = super::theme::palette();
+                let color = if on { r as u32 | (g as u32) << 8 | (b as u32) << 16 } else { p.disabled };
+                LRESULT(super::theme::brush(color).0 as isize)
+            }
+            WM_CTLCOLORSTATIC => {
+                let dc = HDC(wparam.0 as *mut _);
+                SetBkMode(dc, TRANSPARENT);
+                let note = SETTINGS_NOTES.with(|n| n.borrow().contains(&lparam.0));
+                let p = super::theme::palette();
+                SetTextColor(dc, COLORREF(if note { p.secondary } else { p.text }));
+                LRESULT(super::theme::brush(p.panel).0 as isize)
+            }
+            WM_NOTIFY => super::draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
+            WM_ERASEBKGND => super::draw::erase(hwnd, wparam, super::theme::palette().panel),
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
     }
 }
 
@@ -652,7 +937,6 @@ pub fn save(app: &mut App, export: bool) {
     } else {
         app.model.save_preview(path, size, settings);
     }
-    app.model.follow_preview_space();
 }
 
 /// Import Presets…: several files, saved by Negs or by spektrafilm.

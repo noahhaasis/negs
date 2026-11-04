@@ -10,18 +10,11 @@ use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// The thumbnail's long edge: two columns of a ~340 px inspector at 2× scale.
 pub const LONG_SIDE: u32 = 320;
-fn long_side() -> u32 {
-    std::env::var("NEGS_STOCK_THUMB_PX")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|v| (16..=1024).contains(v))
-        .unwrap_or(LONG_SIDE)
-}
 
 /// One thumbnail: a stock's tile or a preset's.
 pub struct Thumb {
@@ -88,8 +81,6 @@ pub struct Browser {
     /// Each stock's menu and grid; the preference shows one of them.
     pairs: RefCell<Vec<(gtk::Widget, gtk::Widget)>>,
     busy: Cell<bool>,
-    /// Since the first stale thumbnail of the current batch was requested.
-    batch: Cell<Option<(Instant, u32)>>,
 }
 
 pub fn enabled(ui: &Editor) -> bool {
@@ -109,7 +100,7 @@ fn request(ui: &Editor, stock: &Stock) -> Option<(u64, serde_json::Value, String
     let paper = crate::catalog::selected(&state, true).id.clone();
     let crop = (state.crop.is_some() || state.straighten != 0.).then(|| parameters::crop(&state));
     let command = json!({"command":"thumbnail","input":source,"source_generation":r.source_generation,
-        "film":film,"paper":paper,"params":params,"long_side":long_side(),"crop":crop});
+        "film":film,"paper":paper,"params":params,"long_side":LONG_SIDE,"crop":crop});
     let key = command.to_string();
     Some((r.source_generation, command, key))
 }
@@ -156,10 +147,6 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
     let row = adw::ExpanderRow::builder()
         .title(if paper { "Paper" } else { "Film" })
         .build();
-    // Measurement hook: NEGS_STOCK_EXPAND=film,paper opens the grids.
-    row.set_expanded(std::env::var("NEGS_STOCK_EXPAND").is_ok_and(|v| {
-        v.split(',').any(|k| k == if paper { "paper" } else { "film" })
-    }));
     let current = gtk::Label::new(None);
     current.add_css_class("dim-label");
     current.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -348,17 +335,8 @@ pub fn pump(ui: &Rc<Editor>) {
         name,
     }) = next
     else {
-        if let Some((started, count)) = browser.batch.take() {
-            let ms = started.elapsed().as_secs_f64() * 1000.;
-            ui.perf.detail("stock_thumbnails_last_batch", json!({"count":count,"ms":ms}));
-            if std::env::var_os("NEGS_STOCK_THUMB_LOG").is_some() {
-                eprintln!("stock thumbnails: {count} in {ms:.0} ms ({:.0} ms each)", ms / count.max(1) as f64);
-            }
-        }
         return;
     };
-    let (started, count) = browser.batch.get().unwrap_or((Instant::now(), 0));
-    browser.batch.set(Some((started, count + 1)));
     browser.busy.set(true);
     let buffer = client
         .scratch
@@ -394,14 +372,6 @@ pub fn pump(ui: &Rc<Editor>) {
                     ),
                 );
                 thumb.show(Some(&texture), generation, key);
-                if std::env::var_os("NEGS_STOCK_THUMB_LOG").is_some() {
-                    eprintln!(
-                        "thumb {}: {:.0} ms {}",
-                        name,
-                        frame.result["elapsed_ms"].as_f64().unwrap_or(0.),
-                        frame.result["timing_ms"]
-                    );
-                }
             }
             Ok(Ok(_)) => {}
             // Leave the placeholder; a later edit retries. Don't spin on a failure.

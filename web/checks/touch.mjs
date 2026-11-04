@@ -46,7 +46,7 @@ export default async function ({ send, evaluate }) {
   // Drag Exposure's thumb to the right by touch.
   await tap(await page(`return center([...document.querySelectorAll("#tabs button")].find((b) => b.textContent === "Camera"));`));
   const thumb = await page(`
-    const range = rowOf("Exposure (EV)").querySelector("input[type=range]");
+    const range = rowOf("Negative exposure (EV)").querySelector("input[type=range]");
     const c = center(range), f = (Number(range.value) - Number(range.min)) / (range.max - range.min);
     return { x: c.left + 13 + (c.width - 26) * f, y: c.y, width: c.width, n: negs.renders.length };`);
   await drag([thumb.x, thumb.y], [thumb.x + thumb.width / 4, thumb.y]);
@@ -55,7 +55,7 @@ export default async function ({ send, evaluate }) {
 
   // The reset button puts Exposure back.
   await page(`document.querySelector("#scroll").scrollTop = 0; await wait(100);`);
-  await tap(await page(`return center(rowOf("Exposure (EV)").querySelector(".reset"));`));
+  await tap(await page(`return center(rowOf("Negative exposure (EV)").querySelector(".reset"));`));
   out.reset = await page(`await settle(); return g("camera.exposure_compensation_ev");`);
 
   // The grabber: drag up snaps the sheet high; a tap steps on to the lowest.

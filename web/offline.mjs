@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 
 // The app's own files, at the site's root as in web/.
-export const SHELL = ["index.html", "credits.html", "app.js", "border.js", "crop.js", "crop-editor.js", "controls.js", "engine.js", "view.js", "placeholder.js", "samples.js",
+export const SHELL = ["index.html", "credits.html", "app.js", "border.js", "crop.js", "crop-editor.js", "controls.js", "help.js", "stocks.js", "engine.js", "view.js", "placeholder.js", "samples.js",
   "raw-wb.js", "presets.js", "preset-ui.js", "tutorial.js", "tutorial.css", "worker.js", "decoder.js", "pool.js", "catalog.json", "manifest.webmanifest", "icons", "fonts", "pkg", "pkg-threads"];
 // The spectral table the defaults use; the others are downloaded when chosen.
 const DEFAULT_LUT = "data/luts/spectral_upsampling/hanatos2025_irradiance_xy_tc";

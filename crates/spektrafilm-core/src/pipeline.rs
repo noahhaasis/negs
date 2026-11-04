@@ -188,6 +188,9 @@ pub struct Pipeline {
     /// The auto-exposure EV already metered for this frame by a caller that
     /// renders it repeatedly; see [`Self::with_autoexposure_ev`].
     autoexposure_ev: Option<f64>,
+    /// The caller's slot for this frame's Prep output; see
+    /// [`Self::with_prepared_frame`].
+    prepared_frame: Option<crate::prep::PreparedFrame>,
 }
 
 impl Pipeline {
@@ -298,6 +301,18 @@ impl Pipeline {
     /// colour space and settings.
     pub fn with_autoexposure_ev(mut self, ev: f64) -> Self {
         self.autoexposure_ev = Some(ev);
+        self
+    }
+
+    /// Keep the GPU path's Prep output in `frame` and reuse it while nothing
+    /// Prep reads changes (its settings, the exposure before it, the input
+    /// decoding and the frame size), so other edits skip Prep. The caller
+    /// promises that every image it renders with `frame` at one size has the
+    /// same pixels, and uses a new slot when they change. The kept frame
+    /// stays uploaded on a GPU that keeps keyed inputs, under a key of its
+    /// own (`1 << 63` and up: the caller's image keys stay below).
+    pub fn with_prepared_frame(mut self, frame: crate::prep::PreparedFrame) -> Self {
+        self.prepared_frame = Some(frame);
         self
     }
 
@@ -441,6 +456,7 @@ impl Pipeline {
             output_gamut,
             metering_preview: None,
             autoexposure_ev: None,
+            prepared_frame: None,
         };
         pipeline.apply_film_curves_morph();
         pipeline
@@ -633,6 +649,7 @@ impl Pipeline {
             output_gamut,
             metering_preview: None,
             autoexposure_ev: None,
+            prepared_frame: None,
         };
         // The enlarger illuminant with its dichroic filters, and the preflash.
         pipeline.filter_enlarger();
@@ -925,6 +942,93 @@ impl Pipeline {
         Ok((result, backend.name()))
     }
 
+    /// The CPU chain on a small image, keeping its taps: the film's log10
+    /// exposure, the paper's log10 exposure (`None` when the film is
+    /// scanned directly), and the scan. For the tone graph
+    /// ([`crate::tone_curve`]), so the params should be per-pixel; auto
+    /// exposure isn't applied.
+    pub fn process_taps(&self, image: ImageBuf) -> (ImageBuf, Option<ImageBuf>, ImageBuf) {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let backend: &dyn ComputeBackend = &CPU;
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+        );
+        let log_film = stages::filming::expose(
+            image,
+            &self.film,
+            &self.params,
+            backend,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+            color_ref.filming_exposure_correction,
+            0.0,
+        );
+        let filmed = stages::filming::develop(log_film.clone(), &self.film, &self.params, backend);
+        if self.params.io.scan_film {
+            let scan = stages::scanning::process(filmed, &self.film, &self.params, backend, &color_ref, &self.output_gamut);
+            return (log_film, None, scan);
+        }
+        let log_paper = stages::printing::expose_calibrated(
+            filmed,
+            &self.film,
+            &self.print,
+            &self.params,
+            backend,
+            &self.print_illuminant,
+            self.print_exposure_factor,
+            self.preflash_raw,
+            color_ref.printing_exposure_correction,
+        );
+        let printed = stages::printing::develop(&log_paper, &self.print, &self.params, backend);
+        let scan = stages::scanning::process(printed, &self.print, &self.params, backend, &color_ref, &self.output_gamut);
+        (log_film, Some(log_paper), scan)
+    }
+
+    /// The film's raw exposure of an auto-exposure metering frame
+    /// ([`stages::filming::metering_preview`]) before any exposure scale, and
+    /// the auto-exposure EV metered on it (0 with auto exposure off), as
+    /// [`Self::autoexposure_ev`] meters it. On the CPU.
+    pub fn metering_film_raw(&self, preview: &ImageBuf) -> (ImageBuf, f64) {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let raw = stages::filming::encoded_rgb_to_film_raw(
+            preview,
+            &self.params,
+            &CPU,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+        )
+        .unwrap_or_else(|| preview.clone());
+        let ev = if self.params.camera.auto_exposure {
+            stages::filming::measure_raw_autoexposure_ev(&raw, &self.params.camera.auto_exposure_method, 1.0)
+        } else {
+            0.0
+        };
+        (raw, ev)
+    }
+
+    /// The film's raw exposure of a metering frame after the whole exposure
+    /// and Prep, as the render exposes the film: for the tone graph's
+    /// histogram when Prep reshapes the tones (more than its uniform
+    /// exposure), so [`Self::metering_film_raw`]'s stops can't simply be
+    /// shifted. `autoexposure_ev` is the EV metered before Prep. On the CPU.
+    pub fn metering_film_raw_prepared(&self, preview: &ImageBuf, autoexposure_ev: f64) -> Result<ImageBuf, String> {
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let rgb = stages::filming::prepare_input(preview.clone(), &self.params, autoexposure_ev)?;
+        Ok(stages::filming::rgb_to_film_raw(
+            &rgb,
+            &self.params,
+            &CPU,
+            self.tc_lut.as_ref(),
+            &select_illuminant(&self.front_illuminant),
+        )
+        .unwrap_or(rgb))
+    }
+
     /// Run only the GPU-resident path from a borrowed image. This is used by
     /// the live GUI when it has already decided the working resolution, so a
     /// full-resolution preview does not need to deep-clone the loaded image
@@ -1051,8 +1155,29 @@ impl Pipeline {
         // The front pass expects linear RGB. Decoded pixels aren't the
         // caller's, so they have no key.
         let decoded;
-        let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding);
-        let image = if self.params.io.input_cctf_decoding {
+        let prepared;
+        // Exposure-only Prep is a uniform gain: it joins the exposure scale
+        // below (float rounding from the CPU's per-pixel multiply, approved
+        // for the GPU path), so the upload keeps its source key.
+        let fold_prep_exposure = self.params.prep.is_exposure_only();
+        let prep_active = !self.params.prep.is_identity() && !fold_prep_exposure;
+        // Other Prep changes the upload, including through its whole-frame spatial base.
+        // A source-image cache key cannot identify these newly prepared pixels;
+        // a kept prepared frame has its own, so a Lab edit doesn't upload it again.
+        let mut image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active);
+        let image = if prep_active {
+            let key = crate::prep::PreparedKey::new(image, &self.params, autoexposure_ev);
+            let cached = self.prepared_frame.as_ref().and_then(|frame| frame.take(&key));
+            let upload = cached.as_ref().map(|(_, upload)| *upload);
+            prepared = match cached {
+                Some((image, _)) => image,
+                None => std::sync::Arc::new(stages::filming::prepare_input_from(image, &self.params, autoexposure_ev)?),
+            };
+            if let Some(frame) = &self.prepared_frame {
+                image_key = Some(frame.put(key, prepared.clone(), upload));
+            }
+            &*prepared
+        } else if self.params.io.input_cctf_decoding {
             let mut d = image.clone();
             stages::filming::decode_input_cctf(&mut d, &self.params);
             decoded = d;
@@ -1060,18 +1185,27 @@ impl Pipeline {
         } else {
             image
         };
-        // Bake the exposure scale (auto-exposure × manual EV compensation)
+        if !prep_active && let Some(frame) = &self.prepared_frame {
+            frame.clear(); // neutral Prep needs no copy of the frame
+        }
+        // Bake the exposure scale (auto-exposure × manual EV compensation ×
+        // an exposure-only Prep)
         // into the front-pass matrix. The upsampler is homogeneous in the
         // input RGB, so scaling the matrix is
         // equivalent to scaling the input — saves a separate "scale" compute
         // pass at the head of the chain. The auto exposure is metered on the
         // CPU, on the ≤256 px metering frame, by the caller.
         let mut exposure_scale_f64 = 1.0f64;
-        if autoexposure_ev != 0.0 {
-            exposure_scale_f64 *= autoexposure_ev.exp2();
-        }
-        if self.params.camera.exposure_compensation_ev != 0.0 {
-            exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
+        if !prep_active {
+            if autoexposure_ev != 0.0 {
+                exposure_scale_f64 *= autoexposure_ev.exp2();
+            }
+            if self.params.camera.exposure_compensation_ev != 0.0 {
+                exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
+            }
+            if fold_prep_exposure {
+                exposure_scale_f64 *= (self.params.prep.exposure_ev as f64).exp2();
+            }
         }
         // B&W/slide filming exposure correction is a linear scale on the raw
         // film exposure (CPU: `raw *= factor` before log10). Since the

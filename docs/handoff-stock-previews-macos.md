@@ -141,32 +141,16 @@ The script needed a macOS memory fallback (`ps` + `footprint`); `/proc` doesn't 
   edits but not the border, dim vs blank, failures aren't retried, missing setting = on).
   The full suite passes except the two `InspectorLayoutTests` that fail on `main` too.
 
-**Experiment-only hooks to remove with the Linux ones:** `NEGS_STOCK_EXPAND` (opens the
-grids at launch, `Previews.init`), `NEGS_STOCK_THUMB_LOG` (stderr timings in
-`pumpPreviews`), `Previews.lastBatch`, and
-`macos/Sources/NegsApp/StockPreviewBenchmark.swift` (`NEGS_STOCK_MEASURE=PHOTO`, compiled
-only with `-DSPEKTRAFILM_BENCHMARK`), plus the macOS memory fallback in
-`linux/bench_stock_previews.py`.
-
-How the app numbers were taken (benchmark build, isolated home so nothing touches Noah's
-session or caches):
-
-```sh
-MACOSX_DEPLOYMENT_TARGET=14.0 swift build --package-path macos -c release \
-  --scratch-path target/swift-bench -Xswiftc -DSPEKTRAFILM_BENCHMARK
-HOME=$TMP CFFIXED_USER_HOME=$TMP SPEKTRAFILM_ROOT=$PWD SPEKTRAFILM_F64_CLI=/usr/bin/true \
-  NEGS_STOCK_MEASURE=~/Downloads/DSC_0144.jpg NEGS_STOCK_EXPAND=film,paper \
-  target/swift-bench/release/NegsApp -inspectorTab lab   # add -previews '<false/>' for "off"
-```
-
-Startup and drags used the existing `SPEKTRAFILM_BENCHMARK_PHOTO` drag benchmark on both
-builds, with a `CGWindowList` poller for exec → window.
+The app numbers came from a benchmark build (`-DSPEKTRAFILM_BENCHMARK`) with
+`StockPreviewBenchmark.swift`, `NEGS_STOCK_EXPAND` and `NEGS_STOCK_THUMB_LOG`, all
+removed on 2026-11-02 once all three platforms were measured; startup and drags used the existing `SPEKTRAFILM_BENCHMARK_PHOTO` drag
+benchmark, with a `CGWindowList` poller for exec → window.
 
 Not done: no notarized/packaged bundle was built, and an Intel Mac wasn't tried.
 
 ## Preset previews (macOS)
 
-Added 2026-11-01/02 (spec: [Preset previews](stock-previews.md#preset-previews-macos-done-linux-and-windows-to-follow)).
+Added 2026-11-01/02 (spec: [Preset previews](stock-previews.md#preset-previews-macos-linux-and-windows-done)).
 Measured with Noah's 12 presets (8 daylight, 3 as-shot, 1 custom white balance), release
 builds, on AC power.
 

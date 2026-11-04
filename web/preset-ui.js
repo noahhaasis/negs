@@ -10,7 +10,7 @@ export function createPresets(app) {
   const $ = (id) => document.getElementById(id);
   const menu = $("preset-menu"), more = $("more");
   const exportDialog = $("export-dialog"), incomingDialog = $("incoming-dialog");
-  const items = () => [...menu.querySelectorAll("[role=menuitem]")];
+  const items = () => [...menu.querySelectorAll("[role^=menuitem]")];
   // Applying runs one at a time; a newer one makes an older one's result stale.
   let applying = null, applies = 0;
   // The name of the preset last imported, to name an export after.

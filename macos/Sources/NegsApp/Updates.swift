@@ -125,6 +125,8 @@ struct UpdateSettings: View {
     @ObservedObject var updates: UpdateController
     var model: EditorModel
     var removeAppData: () -> Void
+    @AppStorage(ViewerBackground.customKey) private var customBackground = false
+    @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
 
     var body: some View {
         Form {
@@ -147,6 +149,48 @@ struct UpdateSettings: View {
             Toggle("Film, paper and preset previews", isOn: Binding(
                 get: { model.previews.enabled }, set: { model.setPreviews($0) }))
             Text("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Keep paper when changing film", isOn: Binding(
+                get: { model.previews.keepPaper }, set: { model.setKeepPaper($0) }))
+                .padding(.top, 8)
+            Text("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Picker("New photographs", selection: Binding(
+                get: { model.freshEditsForNewPhotos }, set: { model.freshEditsForNewPhotos = $0 })) {
+                Text("Keep the previous edits").tag(false)
+                Text("Start fresh").tag(true)
+            }
+            .padding(.top, 8)
+            Text(model.freshEditsForNewPhotos
+                 ? "Each photograph you open starts with default Prep and Lab settings and no border. The film, paper, Image Size and output colour stay."
+                 : "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Match new photographs to camera brightness", isOn: Binding(
+                get: { model.autoPlaceNewImages }, set: { model.autoPlaceNewImages = $0 }))
+                .padding(.top, 8)
+            Text("New photographs start with Prep › Match camera brightness on: a RAW develops about as bright as the camera's own preview, a JPEG or TIFF as the file itself.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 8)
+            HStack(spacing: 8) {
+                Toggle("Custom viewer background", isOn: $customBackground)
+                ColorPicker("Viewer background colour", selection: Binding(
+                    get: { ViewerBackground.color(hex: backgroundHex) ?? Color(nsColor: .underPageBackgroundColor) },
+                    set: { backgroundHex = ViewerBackground.hex($0) }), supportsOpacity: false)
+                    .labelsHidden()
+                    .disabled(!customBackground)
+                    .help("The colour behind the photograph.")
+            }
+            Text("The colour behind the photograph. Off, it follows the system's light or dark appearance.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Divider().padding(.vertical, 8)
+            Toggle("Limit preview to 12 MP", isOn: Binding(
+                get: { model.limitsPreview }, set: { model.limitsPreview = $0 }))
+            Text("Develops the preview faster on large photographs. Export keeps the full Image Size.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Use less memory for export", isOn: Binding(
+                get: { model.lowMemoryExport }, set: { model.lowMemoryExport = $0 }))
+                .padding(.top, 8)
+            Text("Develops the grain one colour at a time. Same result, less memory, longer export.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Divider().padding(.vertical, 8)
             Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)

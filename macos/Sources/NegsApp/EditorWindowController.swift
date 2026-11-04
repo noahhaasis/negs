@@ -31,6 +31,12 @@ import SwiftUI
     private var appearing: NSObjectProtocol?
     private var resigning: NSObjectProtocol?
     private var keyMonitor: Any?
+    /// The narrowest canvas, and the narrowest the content can be with the
+    /// inspector shown beside it. The split view can't keep both columns at
+    /// their minimums in a narrower window, so the window enforces the sum.
+    private let canvasMinimum: CGFloat
+    private let columnsMinimum: CGFloat
+    private static let minimumHeight: CGFloat = 560
     /// The key held to show the original, so its release is found even if
     /// a modifier (⌥⇧ on some layouts) was let go first.
     private var originalKey: UInt16?
@@ -56,6 +62,8 @@ import SwiftUI
         split.addSplitViewItem(canvasItem)
         split.addSplitViewItem(inspector)
         split.splitView.autosaveName = "editor"
+        canvasMinimum = canvasItem.minimumThickness
+        columnsMinimum = canvasItem.minimumThickness + inspector.minimumThickness + split.splitView.dividerThickness
 
         let window = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: true)
@@ -64,6 +72,9 @@ import SwiftUI
         window.isRestorable = false
         // Place the window before adding its content, so the first layout is at the final size.
         if !window.setFrameUsingName("editor") { window.center() }
+        // A saved frame from before the minimum, or from a smaller screen,
+        // grows to it.
+        Self.fitMinimum(of: window, width: inspector.isCollapsed ? canvasMinimum : columnsMinimum)
         split.view.frame = NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size)
         window.contentViewController = split
         window.setFrameAutosaveName("editor")
@@ -79,7 +90,12 @@ import SwiftUI
         // Dragging the inspector closed hides the adjustments, like the toolbar button.
         collapsing = inspector.observe(\.isCollapsed) { [weak self] item, _ in
             MainActor.assumeIsolated {
-                guard let self, self.model.inspectorVisible == item.isCollapsed else { return }
+                guard let self else { return }
+                // A hidden inspector lets the window narrow to the canvas alone.
+                if let window = self.window {
+                    Self.fitMinimum(of: window, width: item.isCollapsed ? self.canvasMinimum : self.columnsMinimum)
+                }
+                guard self.model.inspectorVisible == item.isCollapsed else { return }
                 self.model.inspectorVisible = !item.isCollapsed
             }
         }
@@ -183,7 +199,32 @@ import SwiftUI
             cancelButton.keyEquivalent = session.typing ? "" : "\u{1b}"
             doneButton.keyEquivalent = session.typing ? "" : "\r"
         }
-        if inspector.isCollapsed == model.inspectorVisible { inspector.animator().isCollapsed = !model.inspectorVisible }
+        if inspector.isCollapsed == model.inspectorVisible {
+            // Make room before the inspector slides in, so neither column is
+            // squeezed below its minimum.
+            if model.inspectorVisible { Self.fitMinimum(of: window, width: columnsMinimum) }
+            inspector.animator().isCollapsed = !model.inspectorVisible
+        }
+    }
+
+    /// Sets the window's minimum content size and grows the window to it when
+    /// it's smaller, keeping the top-left corner in place and the window on
+    /// its screen. Full screen already fills the screen.
+    private static func fitMinimum(of window: NSWindow, width: CGFloat) {
+        let minimum = NSSize(width: width, height: minimumHeight)
+        window.contentMinSize = minimum
+        guard !window.styleMask.contains(.fullScreen) else { return }
+        let content = window.contentRect(forFrameRect: window.frame)
+        guard content.width < minimum.width || content.height < minimum.height else { return }
+        let height = max(content.height, minimum.height)
+        var frame = window.frameRect(forContentRect: NSRect(x: content.minX, y: content.maxY - height,
+                                                            width: max(content.width, minimum.width), height: height))
+        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
+            // Slide left or down rather than off the screen's edge.
+            frame.origin.x = max(min(frame.origin.x, visible.maxX - frame.width), visible.minX)
+            frame.origin.y = max(min(frame.origin.y, visible.maxY - frame.height), visible.minY)
+        }
+        window.setFrame(frame, display: window.isVisible)
     }
 
     private func setEnabled(_ id: NSToolbarItem.Identifier, _ enabled: Bool) {

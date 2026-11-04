@@ -12,9 +12,10 @@ enum PreviewRules {
     static let longSide = 320
 
     /// The edit with `id` chosen, exactly as choosing it from the menu makes
-    /// it. A film brings its own paper and grain/DIR/halation presets and sets
-    /// scanning for slides; a paper keeps the film.
-    static func choosing(_ id: String, paper: Bool, in state: EditState, stocks: [Stock]) -> EditState {
+    /// it. A film brings its own grain/DIR/halation presets, sets scanning for
+    /// slides, and brings its own paper unless `keepPaper` (Settings › Keep
+    /// paper when changing film); a paper keeps the film.
+    static func choosing(_ id: String, paper: Bool, keepPaper: Bool, in state: EditState, stocks: [Stock]) -> EditState {
         var next = state
         if paper {
             next.paper = id; next.params["print_render.development_time"] = .null
@@ -24,15 +25,15 @@ enum PreviewRules {
         next.params["film_render.development_time"] = .null
         // A new film brings its own grain, DIR and halation presets, as upstream applies them.
         for path in Stock.presetPaths { next.params[path] = .null }
-        pairFilm(in: &next, stocks: stocks)
+        pairFilm(in: &next, stocks: stocks, paper: !keepPaper)
         return next
     }
 
-    /// Scanning for slides, and the film's own paper.
-    static func pairFilm(in state: inout EditState, stocks: [Stock]) {
+    /// Scanning for slides, and the film's own paper unless `paper` is false.
+    static func pairFilm(in state: inout EditState, stocks: [Stock], paper: Bool = true) {
         guard let film = stocks.first(where: { !$0.paper && $0.id == state.film }) else { return }
         state.params["io.scan_film"] = .bool(film.positive)
-        if stocks.contains(where: { $0.paper && $0.id == film.target }), state.paper != film.target {
+        if paper, stocks.contains(where: { $0.paper && $0.id == film.target }), state.paper != film.target {
             state.paper = film.target; state.params["print_render.development_time"] = .null
         }
     }
@@ -40,9 +41,10 @@ enum PreviewRules {
     /// The helper request for `stock`'s tile, without its scratch file. It
     /// identifies the thumbnail: the photograph (path and generation), every
     /// render setting with the stock chosen, and the crop and straighten.
-    /// `state` is the edit as rendered (`EditorModel.renderState`).
-    static func request(for stock: Stock, state: EditState, stocks: [Stock], source: URL, generation: Int) -> [String: JSONValue] {
-        let chosen = choosing(stock.id, paper: stock.paper, in: state, stocks: stocks)
+    /// `state` is the edit as rendered (`EditorModel.renderState`); `keepPaper`
+    /// as for `choosing`, so a film's tile shows what a click would develop.
+    static func request(for stock: Stock, keepPaper: Bool, state: EditState, stocks: [Stock], source: URL, generation: Int) -> [String: JSONValue] {
+        let chosen = choosing(stock.id, paper: stock.paper, keepPaper: keepPaper, in: state, stocks: stocks)
         var command: [String: JSONValue] = [
             "command": .string("thumbnail"), "input": .string(source.path),
             "source_generation": .number(Double(generation)),
@@ -159,11 +161,21 @@ struct StockEntry {
     let tile: PreviewTile
 }
 
-/// The tiles, the foldouts' open state and the setting.
+/// The tiles, the foldouts' open state and the settings.
 @MainActor @Observable final class Previews {
     static let defaultsKey = "previews"
+    static let keepPaperKey = "keep_paper"
     /// Settings › Film, paper and preset previews; a missing value means on.
     var enabled: Bool { didSet { defaults.set(enabled, forKey: Self.defaultsKey) } }
+    /// Settings › Keep paper when changing film; a missing value means off.
+    /// Here because the film tiles follow it too.
+    var keepPaper: Bool { didSet { defaults.set(keepPaper, forKey: Self.keepPaperKey) } }
+    static let favoriteFilmsKey = "favoriteFilms"
+    static let favoritePapersKey = "favoritePapers"
+    /// Starred stock ids, in the order starred. Ids the catalog no longer
+    /// has are kept, in case it brings them back.
+    private(set) var favoriteFilms: [String] { didSet { defaults.set(favoriteFilms, forKey: Self.favoriteFilmsKey) } }
+    private(set) var favoritePapers: [String] { didSet { defaults.set(favoritePapers, forKey: Self.favoritePapersKey) } }
     @ObservationIgnored private let defaults: UserDefaults
     /// Collapsed at every launch.
     var filmOpen = false
@@ -178,17 +190,33 @@ struct StockEntry {
     /// By preset file (`moveTile` follows a rename).
     @ObservationIgnored private(set) var presets: [URL: PreviewTile] = [:]
     @ObservationIgnored var busy = false
-    /// The current batch: when its first thumbnail was requested, and how many.
-    @ObservationIgnored var batch: (started: Date, count: Int)?
-    /// The last finished batch, for measurements.
-    @ObservationIgnored var lastBatch: (count: Int, ms: Double)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         enabled = defaults.object(forKey: Self.defaultsKey) as? Bool ?? true
-        // Measurement hook (remove before shipping): NEGS_STOCK_EXPAND=film,paper opens the grids.
-        let expand = ProcessInfo.processInfo.environment["NEGS_STOCK_EXPAND"]?.split(separator: ",") ?? []
-        filmOpen = expand.contains("film"); paperOpen = expand.contains("paper")
+        keepPaper = defaults.object(forKey: Self.keepPaperKey) as? Bool ?? false
+        favoriteFilms = defaults.stringArray(forKey: Self.favoriteFilmsKey) ?? []
+        favoritePapers = defaults.stringArray(forKey: Self.favoritePapersKey) ?? []
+    }
+
+    func isFavorite(_ id: String, paper: Bool) -> Bool { (paper ? favoritePapers : favoriteFilms).contains(id) }
+    /// Stars `id` (last among the favourites) or unstars it.
+    func toggleFavorite(_ id: String, paper: Bool) {
+        var ids = paper ? favoritePapers : favoriteFilms
+        if let index = ids.firstIndex(of: id) { ids.remove(at: index) } else { ids.append(id) }
+        if paper { favoritePapers = ids } else { favoriteFilms = ids }
+    }
+    /// The starred stocks among `stocks`, in the order starred.
+    func favorites(in stocks: [Stock], paper: Bool) -> [Stock] {
+        (paper ? favoritePapers : favoriteFilms).compactMap { id in stocks.first { $0.paper == paper && $0.id == id } }
+    }
+    /// The tiles of one kind, favourites first, so their thumbnails come first.
+    var filmsFavoritesFirst: [StockEntry] { favoritesFirst(films, paper: false) }
+    var papersFavoritesFirst: [StockEntry] { favoritesFirst(papers, paper: true) }
+    private func favoritesFirst(_ entries: [StockEntry], paper: Bool) -> [StockEntry] {
+        let ids = paper ? favoritePapers : favoriteFilms
+        let starred = ids.compactMap { id in entries.first { $0.stock.id == id } }
+        return starred + entries.filter { !ids.contains($0.stock.id) }
     }
 
     /// Tiles for the catalog's stocks, kept across catalog reloads by id.
@@ -228,6 +256,16 @@ struct StockEntry {
 struct StockFoldout: View {
     let model: EditorModel
     let paper: Bool
+    /// About two and a half rows of tiles, so the cut-off row shows it scrolls.
+    static let gridHeight: CGFloat = 290
+    static func favoriteID(_ id: String) -> String { "favorite:\(id)" }
+    /// The stock a tile or menu tag stands for.
+    static func stockID(tag: String) -> String { tag.hasPrefix("favorite:") ? String(tag.dropFirst("favorite:".count)) : tag }
+    /// The current stock's tile, the copy among the favourites if starred.
+    private var scrollID: String {
+        let id = paper ? model.paper : model.film
+        return model.previews.isFavorite(id, paper: paper) ? Self.favoriteID(id) : id
+    }
 
     var body: some View {
         let previews = model.previews
@@ -238,7 +276,17 @@ struct StockFoldout: View {
                 model.pumpPreviews()
             })
         DisclosureGroup(isExpanded: isExpanded) {
-            StockGrid(model: model, paper: paper)
+            // A fixed window onto the grid keeps the header, and the tab
+            // switch below, in reach however far down the stocks go. It
+            // opens on the current stock.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    StockGrid(model: model, paper: paper)
+                }
+                .scrollDisabled(false)
+                .frame(height: StockFoldout.gridHeight)
+                .onAppear { proxy.scrollTo(scrollID, anchor: .center) }
+            }
         } label: {
             HStack {
                 Text(paper ? "Paper" : "Film")
@@ -246,6 +294,7 @@ struct StockFoldout: View {
                 Text(paper ? model.paperName : model.filmName)
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
+            .help(paper ? ControlHelp.paper : ControlHelp.film)
             .contentShape(Rectangle())
             .onTapGesture { withAnimation { isExpanded.wrappedValue.toggle() } }
         }
@@ -258,18 +307,16 @@ private struct StockGrid: View {
 
     var body: some View {
         let previews = model.previews
-        let selected = paper ? model.paper : model.film
+        let favorites = previews.favorites(in: paper ? model.papers : model.films, paper: paper)
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), spacing: 8, alignment: .top)],
                   alignment: .leading, spacing: 8) {
+            // The favourites first, untitled; each stays in its group too.
+            if !favorites.isEmpty {
+                Section { tiles(favorites, favorites: true) }
+            }
             ForEach(paper ? model.paperGroups : model.filmGroups) { group in
                 Section {
-                    ForEach(group.stocks) { stock in
-                        if let tile = previews.tile(stock.id, paper: paper) {
-                            StockTileView(stock: stock, tile: tile, selected: stock.id == selected) {
-                                if paper { model.choosePaper(stock.id) } else { model.chooseFilm(stock.id) }
-                            }
-                        }
-                    }
+                    tiles(group.stocks)
                 } header: {
                     Text(group.title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
@@ -279,6 +326,23 @@ private struct StockGrid: View {
         .padding(.vertical, 4)
         .onAppear { setShown(true) }
         .onDisappear { setShown(false) }
+    }
+
+    /// A favourite's tile is in the grid twice, so the copy on top has its
+    /// own scroll id (`StockFoldout.scrollID`).
+    private func tiles(_ stocks: [Stock], favorites: Bool = false) -> some View {
+        let previews = model.previews
+        let selected = paper ? model.paper : model.film
+        return ForEach(stocks) { stock in
+            if let tile = previews.tile(stock.id, paper: paper) {
+                StockTileView(stock: stock, tile: tile, selected: stock.id == selected,
+                              favorite: previews.isFavorite(stock.id, paper: paper),
+                              toggleFavorite: { previews.toggleFavorite(stock.id, paper: paper) }) {
+                    if paper { model.choosePaper(stock.id) } else { model.chooseFilm(stock.id) }
+                }
+                .id(favorites ? StockFoldout.favoriteID(stock.id) : stock.id)
+            }
+        }
     }
 
     private func setShown(_ shown: Bool) {
@@ -291,20 +355,26 @@ private struct StockTileView: View {
     let stock: Stock
     let tile: PreviewTile
     let selected: Bool
+    let favorite: Bool
+    let toggleFavorite: () -> Void
     let choose: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: choose) {
             VStack(alignment: .leading, spacing: 3) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 5).fill(.quaternary)
-                    if let image = tile.image {
-                        Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
-                            .opacity(tile.dimmed ? 0.55 : 1)
+                // The thumbnail is an overlay so its fill can't widen the
+                // tile past its column (as a ZStack child it did, and the
+                // tiles overlapped).
+                RoundedRectangle(cornerRadius: 5).fill(.quaternary)
+                    .frame(maxWidth: .infinity).frame(height: 92)
+                    .overlay {
+                        if let image = tile.image {
+                            Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill)
+                                .opacity(tile.dimmed ? 0.55 : 1)
+                        }
                     }
-                }
-                .frame(maxWidth: .infinity).frame(height: 92)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay {
                     if selected { RoundedRectangle(cornerRadius: 5).strokeBorder(Color.accentColor, lineWidth: 2) }
                 }
@@ -317,5 +387,24 @@ private struct StockTileView: View {
         .help(stock.name)
         .accessibilityLabel(stock.name)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        // The star sits over the thumbnail's corner, outside the tile's own
+        // button so a click stars rather than chooses. Shown on a favourite,
+        // or while the pointer is over the tile.
+        .overlay(alignment: .topTrailing) {
+            if favorite || hovering {
+                Button(action: toggleFavorite) {
+                    Image(systemName: favorite ? "star.fill" : "star")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(favorite ? Color.yellow : Color.white)
+                        .shadow(color: .black.opacity(0.6), radius: 1.5)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(favorite ? "Remove from favorites" : "Add to favorites")
+                .accessibilityLabel(favorite ? "Remove \(stock.name) from favorites" : "Add \(stock.name) to favorites")
+            }
+        }
+        .onHover { hovering = $0 }
     }
 }

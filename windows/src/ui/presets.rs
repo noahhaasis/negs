@@ -16,10 +16,14 @@ use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PWSTR, w};
 
+use super::draw::{self, Canvas, RectF};
+use super::theme;
 use super::{App, create, id, post, with_app};
 use crate::model::{Model, Pane};
 use crate::platform::{pcwstr, wide};
 use crate::presets::{PresetFile, Status, name};
+use crate::previews::{Bitmap, Target};
+use std::sync::Arc;
 
 const LIST: u16 = 1;
 const ADD: u16 = 2;
@@ -54,6 +58,8 @@ pub struct Panel {
     click_selected: Option<usize>,
     /// The row being dragged to a new place.
     drag: Option<usize>,
+    /// The rows have room for thumbnails (Settings › previews).
+    thumbnails: bool,
 }
 
 thread_local! {
@@ -68,7 +74,14 @@ thread_local! {
     static EDIT_PENDING: Cell<bool> = const { Cell::new(false) };
     /// The row whose name is being edited: its name isn't drawn under the field.
     static EDITING: Cell<Option<usize>> = const { Cell::new(None) };
+    /// Each row's thumbnail while previews are on: the picture, and whether
+    /// it is out of date. None when previews are off.
+    static THUMBS: RefCell<Option<Vec<(Option<Arc<Bitmap>>, bool)>>> = const { RefCell::new(None) };
 }
+
+/// The thumbnail at the start of a row, in DIPs (`PresetThumbnail`).
+const THUMB_WIDTH: i32 = 72;
+const THUMB_HEIGHT: i32 = 48;
 
 pub fn register() {
     unsafe {
@@ -78,7 +91,6 @@ pub fn register() {
             hInstance: super::instance(),
             lpszClassName: w!("NegsPresets"),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hbrBackground: GetSysColorBrush(COLOR_BTNFACE),
             ..Default::default()
         };
         RegisterClassExW(&class);
@@ -95,7 +107,7 @@ fn icon_font(dpi: u32) -> HFONT {
 fn build(app: &mut App) {
     let fonts = &app.fonts;
     let window = create(w!("NegsPresets"), "Presets", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), app.main, 0, HFONT::default());
-    let title = create(w!("STATIC"), "Presets", WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0 | SS_CENTERIMAGE.0), WINDOW_EX_STYLE(0), window, 0, fonts.bold);
+    let title = create(w!("STATIC"), "Presets", WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT.0 | SS_NOPREFIX.0 | SS_CENTERIMAGE.0), WINDOW_EX_STYLE(0), window, 0, fonts.section);
     let button = WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32);
     let add = create(w!("BUTTON"), "\u{E710}", button, WINDOW_EX_STYLE(0), window, ADD, fonts.glyph_small);
     super::accessible_name(add, "New Preset");
@@ -112,6 +124,7 @@ fn build(app: &mut App) {
         SendMessageW(list, LVM_INSERTCOLUMNW, WPARAM(0), LPARAM(&column as *const _ as isize));
         let _ = SetWindowSubclass(list, Some(list_subclass), 1, 0);
     }
+    theme_list(list);
     let center = WS_CHILD | WINDOW_STYLE(SS_CENTER.0 | SS_NOPREFIX.0);
     let icon_font = icon_font(app.dpi);
     let empty_icon = create(w!("STATIC"), "\u{E81E}", center, WINDOW_EX_STYLE(0), window, 0, icon_font);
@@ -140,18 +153,21 @@ fn build(app: &mut App) {
         shown: vec![],
         click_selected: None,
         drag: None,
+        thumbnails: app.model.prefs.previews,
     });
     set_metrics(app);
     super::drop::register_presets(window, list);
 }
 
 /// Fonts for drawing, and the row height: a one-pixel-wide image list of
-/// that height is how a report view gets taller rows.
+/// that height is how a report view gets taller rows. Rows with thumbnails
+/// are taller.
 fn set_metrics(app: &mut App) {
     let Some(p) = &app.presets_view else { return };
     FONTS.with(|f| f.set((app.fonts.ui.0 as isize, app.fonts.small.0 as isize)));
+    let height = if p.thumbnails { THUMB_HEIGHT as f64 + 12.0 } else { 42.0 };
     unsafe {
-        let images = ImageList_Create(1, app.px(42.0), ILC_COLOR, 1, 0);
+        let images = ImageList_Create(1, app.px(height), ILC_COLOR, 1, 0);
         let old = SendMessageW(p.list, LVM_SETIMAGELIST, WPARAM(LVSIL_SMALL as usize), LPARAM(images.0));
         if old.0 != 0 {
             let _ = ImageList_Destroy(HIMAGELIST(old.0));
@@ -164,7 +180,7 @@ pub fn dpi_changed(app: &mut App) {
     let icon = icon_font(app.dpi);
     unsafe {
         let fonts = &app.fonts;
-        for (c, f) in [(p.title, fonts.bold), (p.add, fonts.glyph_small), (p.more, fonts.glyph_small), (p.list, fonts.ui), (p.empty_title, fonts.bold), (p.empty_text, fonts.ui), (p.empty_import, fonts.ui), (p.empty_icon, icon)] {
+        for (c, f) in [(p.title, fonts.section), (p.add, fonts.glyph_small), (p.more, fonts.glyph_small), (p.list, fonts.ui), (p.empty_title, fonts.bold), (p.empty_text, fonts.ui), (p.empty_import, fonts.ui), (p.empty_icon, icon)] {
             SendMessageW(c, WM_SETFONT, WPARAM(f.0 as usize), LPARAM(1));
         }
         let _ = DeleteObject(std::mem::replace(&mut p.icon_font, icon));
@@ -189,22 +205,32 @@ pub fn layout(app: &mut App, rect: RECT, visible: bool) {
         let _ = ShowWindow(p.window, if visible { SW_SHOWNA } else { SW_HIDE });
     }
     let px = |dip: f64| app.px(dip);
-    let (pad, header, button) = (px(16.0), px(44.0), px(28.0));
+    let (pad, header, button) = (px(16.0), px(48.0), px(32.0));
     unsafe {
         let top = (header - button) / 2;
-        let _ = MoveWindow(p.title, pad, top, w - 2 * pad - 2 * button - px(6.0), button, true);
-        let _ = MoveWindow(p.more, w - pad - button, top, button, button, true);
-        let _ = MoveWindow(p.add, w - pad - 2 * button - px(6.0), top, button, button, true);
+        let _ = MoveWindow(p.title, pad, top, w - 2 * pad - 2 * button - px(8.0), button, true);
+        let _ = MoveWindow(p.more, w - pad - button + px(8.0), top, button, button, true);
+        let _ = MoveWindow(p.add, w - pad - 2 * button, top, button, button, true);
         let _ = MoveWindow(p.list, 0, header, w, (h - header).max(0), true);
         let width = (w - 2 * px(24.0)).max(px(100.0));
         let x = (w - width) / 2;
         let mut y = header + ((h - header) - px(200.0)).max(0) / 3;
-        for (control, height) in [(p.empty_icon, 52.0), (p.empty_title, 26.0), (p.empty_text, 84.0)] {
+        for (control, height) in [(p.empty_icon, 56.0), (p.empty_title, 32.0), (p.empty_text, 80.0)] {
             let _ = MoveWindow(control, x, y, width, px(height), true);
             y += px(height);
         }
-        let _ = MoveWindow(p.empty_import, (w - px(150.0)) / 2, y + px(6.0), px(150.0), px(30.0), true);
+        let _ = MoveWindow(p.empty_import, (w - px(152.0)) / 2, y + px(8.0), px(152.0), px(32.0), true);
         fit_column(p.list);
+    }
+}
+
+/// The list on the column's colour.
+fn theme_list(list: HWND) {
+    let p = theme::palette();
+    unsafe {
+        SendMessageW(list, LVM_SETBKCOLOR, WPARAM(0), LPARAM(p.panel as isize));
+        SendMessageW(list, LVM_SETTEXTBKCOLOR, WPARAM(0), LPARAM(p.panel as isize));
+        SendMessageW(list, LVM_SETTEXTCOLOR, WPARAM(0), LPARAM(p.text as isize));
     }
 }
 
@@ -220,7 +246,7 @@ fn row(model: &Model, file: &PresetFile) -> Row {
     let stock = |id: &str, paper: bool| model.stocks.iter().find(|s| s.paper == paper && s.id == id).map_or_else(|| id.to_owned(), |s| s.name.clone());
     let status = model.preset_status.get(file);
     let (detail, valid) = match status {
-        Some(Status::Valid { film, paper, scan }) => {
+        Some(Status::Valid { film, paper, scan, .. }) => {
             (if *scan { format!("{} · film scan", stock(film, false)) } else { format!("{} → {}", stock(film, false), stock(paper, true)) }, true)
         }
         Some(Status::Invalid(reason)) => (reason.clone(), false),
@@ -254,6 +280,12 @@ pub fn sync(app: &mut App) {
     if !unsafe { IsWindowVisible(p.window) }.as_bool() {
         return;
     }
+    if p.thumbnails != app.model.prefs.previews {
+        p.thumbnails = app.model.prefs.previews;
+        set_metrics(app);
+        redraw_previews(app);
+    }
+    let Some(p) = &mut app.presets_view else { return };
     let model = &app.model;
     let rows: Vec<Row> = model.presets.iter().map(|f| row(model, f)).collect();
     let enabled = model.can_change_presets();
@@ -290,7 +322,10 @@ pub fn sync(app: &mut App) {
         unsafe {
             let _ = InvalidateRect(p.list, None, false);
         }
+        redraw_previews(app);
     }
+    let Some(p) = &mut app.presets_view else { return };
+    let model = &app.model;
     // New Preset: rename the new row at once.
     let renaming = model.renaming_preset.as_ref().and_then(|path| p.shown.iter().position(|r| &r.file.path == path));
     if let Some(index) = renaming {
@@ -562,42 +597,47 @@ fn draw_row(draw: &NMLVCUSTOMDRAW) {
         let state = SendMessageW(list, LVM_GETITEMSTATE, WPARAM(index), LPARAM(LVIS_SELECTED.0 as isize)).0 as u32;
         let chosen = state & LVIS_SELECTED.0 != 0;
         let focused = GetFocus() == list;
-        let (background, text, detail) = match (chosen, focused) {
-            (true, true) => (GetSysColor(COLOR_HIGHLIGHT), GetSysColor(COLOR_HIGHLIGHTTEXT), GetSysColor(COLOR_HIGHLIGHTTEXT)),
-            (true, false) => (0xe5e5e5, GetSysColor(COLOR_WINDOWTEXT), 0x606060),
-            _ => (GetSysColor(COLOR_WINDOW), GetSysColor(COLOR_WINDOWTEXT), 0x707070),
-        };
-        let text = if !r.refused || (chosen && focused) { text } else { GetSysColor(COLOR_GRAYTEXT) };
-        let brush = CreateSolidBrush(COLORREF(background));
-        FillRect(dc, &bounds, brush);
-        let _ = DeleteObject(brush);
-        SetBkMode(dc, TRANSPARENT);
-        let (ui, small) = FONTS.with(Cell::get);
-        let inner = RECT { left: bounds.left + px(16), right: bounds.right - px(12), ..bounds };
-        let middle = (bounds.top + bounds.bottom) / 2;
-        let old = SelectObject(dc, HGDIOBJ(ui as *mut _));
-        SetTextColor(dc, COLORREF(text));
-        if EDITING.with(Cell::get) != Some(index) {
-            draw_line(dc, &r.name, RECT { top: bounds.top + px(3), bottom: middle + px(1), ..inner }, DT_BOTTOM);
+        let hot = draw.nmcd.uItemState.0 & CDIS_HOT.0 != 0;
+        let p = theme::palette();
+        let s = dpi as f32 / 96.0;
+        let (text, detail) = if r.refused { (p.disabled, p.disabled) } else { (p.text, p.secondary) };
+        let mut c = Canvas::new(dc, bounds);
+        c.clear(p.panel);
+        let row = RectF::of(c.rect()).inset(4.0 * s, 2.0 * s);
+        if chosen {
+            c.round_rect(row, 4.0 * s, if focused { theme::mix(p.selection, p.accent, 0.12) } else { p.selection });
+            // The selection's accent pill, as in Windows lists.
+            c.round_rect(RectF::new(row.x, row.y + row.h / 2.0 - 8.0 * s, 3.0 * s, 16.0 * s), 1.5 * s, p.accent);
+        } else if hot {
+            c.round_rect(row, 4.0 * s, p.subtle_hover);
         }
-        SelectObject(dc, HGDIOBJ(small as *mut _));
-        SetTextColor(dc, COLORREF(detail));
-        draw_line(dc, &r.detail, RECT { top: middle + px(2), bottom: bounds.bottom - px(3), ..inner }, DT_TOP);
-        SelectObject(dc, old);
+        let (ui, small) = FONTS.with(Cell::get);
+        let thumb = THUMBS.with(|t| t.borrow().as_ref().map(|t| t.get(index).cloned().unwrap_or_default()));
+        let text_left = match &thumb {
+            Some((image, dimmed)) => {
+                let top = (c.h - px(THUMB_HEIGHT)) / 2;
+                let frame = RECT { left: px(12), top, right: px(12 + THUMB_WIDTH), bottom: top + px(THUMB_HEIGHT) };
+                let behind = if chosen { if focused { theme::mix(p.selection, p.accent, 0.12) } else { p.selection } } else if hot { p.subtle_hover } else { p.panel };
+                super::inspector::draw_thumbnail(&mut c, frame, 6.0 * s, image.as_deref(), *dimmed, p.well, behind);
+                if r.refused {
+                    // A warning sign in the placeholder.
+                    c.text("\u{E7BA}", frame, HFONT(super::inspector::glyph_font().0), p.secondary, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                }
+                px(12 + THUMB_WIDTH + 10)
+            }
+            None => px(16),
+        };
+        let inner = RECT { left: text_left, top: 0, right: c.w - px(12), bottom: c.h };
+        let middle = c.h / 2;
+        let line = DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS;
+        if EDITING.with(Cell::get) != Some(index) {
+            c.text(&r.name, RECT { top: px(3), bottom: middle + px(1), ..inner }, HFONT(ui as *mut _), text, line | DT_BOTTOM);
+        }
+        c.text(&r.detail, RECT { top: middle + px(2), bottom: c.h - px(3), ..inner }, HFONT(small as *mut _), detail, line | DT_TOP);
+        c.present(dc);
     }
 }
 
-/// One line, cut with an ellipsis. Nothing for empty text: `DrawTextW`
-/// reads an empty slice's dangling pointer.
-fn draw_line(dc: HDC, text: &str, mut rect: RECT, align: DRAW_TEXT_FORMAT) {
-    if text.is_empty() {
-        return;
-    }
-    let mut text: Vec<u16> = text.encode_utf16().collect();
-    unsafe {
-        DrawTextW(dc, &mut text, &mut rect, DT_LEFT | align | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-    }
-}
 
 /// The line where a dragged row or dropped files would go.
 fn draw_insert(list: HWND, dc: HDC) {
@@ -611,12 +651,9 @@ fn draw_insert(list: HWND, dc: HDC) {
         SendMessageW(list, LVM_GETITEMRECT, WPARAM(at.min(count - 1)), LPARAM(&mut r as *mut _ as isize));
         let y = if at >= count { r.bottom } else { r.top };
         let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(list).max(96) as i32;
-        let accent = super::canvas::accent_color();
-        let brush = CreateSolidBrush(COLORREF(accent[0] as u32 | (accent[1] as u32) << 8 | (accent[2] as u32) << 16));
         let thick = 2 * dpi / 96;
         let line = RECT { left: r.left + 8 * dpi / 96, top: y - thick / 2 - thick % 2, right: r.right - 8 * dpi / 96, bottom: y + thick / 2 };
-        FillRect(dc, &line, brush);
-        let _ = DeleteObject(brush);
+        FillRect(dc, &line, theme::brush(theme::palette().accent));
     }
 }
 
@@ -698,7 +735,10 @@ fn notify(hwnd: HWND, header: &NMHDR, lparam: LPARAM) -> Option<LRESULT> {
                     let mut r = RECT { left: LVIR_BOUNDS as i32, ..Default::default() };
                     SendMessageW(list, LVM_GETITEMRECT, WPARAM(info.item.iItem.max(0) as usize), LPARAM(&mut r as *mut _ as isize));
                     let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(list).max(96) as i32;
-                    let (x, y) = (r.left + 13 * dpi / 96, r.top + 3 * dpi / 96);
+                    let thumbnails = THUMBS.with(|t| t.borrow().is_some());
+                    let left = if thumbnails { 12 + THUMB_WIDTH + 7 } else { 13 };
+                    let name_top = if thumbnails { (r.bottom - r.top) / 2 - 18 * dpi / 96 } else { 3 * dpi / 96 };
+                    let (x, y) = (r.left + left * dpi / 96, r.top + name_top);
                     let _ = SetWindowSubclass(edit, Some(edit_subclass), 2, (x as u32 as usize) << 32 | y as u32 as usize);
                     EDITING.with(|e| e.set(Some(info.item.iItem.max(0) as usize)));
                     let _ = InvalidateRect(list, Some(&r), false);
@@ -762,6 +802,9 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             WM_NOTIFY => {
+                if let Some(result) = draw::custom_draw(lparam) {
+                    return result;
+                }
                 let header = &*(lparam.0 as *const NMHDR);
                 if header.idFrom == LIST as usize {
                     if let Some(result) = notify(hwnd, header, lparam) {
@@ -805,26 +848,24 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 let dc = HDC(wparam.0 as *mut _);
                 SetBkMode(dc, TRANSPARENT);
                 let grey = with_app(|app| app.presets_view.as_ref().is_some_and(|p| [p.empty_text, p.empty_icon].contains(&HWND(lparam.0 as *mut _)))).unwrap_or(false);
-                SetTextColor(dc, if grey { COLORREF(0x707070) } else { COLORREF(GetSysColor(COLOR_WINDOWTEXT)) });
-                LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
+                let p = theme::palette();
+                SetTextColor(dc, COLORREF(if grey { p.secondary } else { p.text }));
+                LRESULT(theme::brush(p.panel).0 as isize)
             }
+            WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let dc = BeginPaint(hwnd, &mut ps);
-                FillRect(dc, &ps.rcPaint, GetSysColorBrush(COLOR_BTNFACE));
+                let p = theme::palette();
+                FillRect(dc, &ps.rcPaint, theme::brush(p.panel));
                 if DROP_HIGHLIGHT.with(Cell::get) {
-                    let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd).max(96) as i32;
-                    let accent = super::canvas::accent_color();
-                    let pen = CreatePen(PS_SOLID, 3 * dpi / 96, COLORREF(accent[0] as u32 | (accent[1] as u32) << 8 | (accent[2] as u32) << 16));
-                    let old = SelectObject(dc, pen);
-                    let old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
                     let mut r = RECT::default();
                     let _ = GetClientRect(hwnd, &mut r);
-                    let inset = 3 * dpi / 96;
-                    let _ = RoundRect(dc, r.left + inset, r.top + inset, r.right - inset, r.bottom - inset, 12 * dpi / 96, 12 * dpi / 96);
-                    SelectObject(dc, old_brush);
-                    SelectObject(dc, old);
-                    let _ = DeleteObject(pen);
+                    let s = draw::dpi_of(hwnd);
+                    let mut c = Canvas::new(dc, r);
+                    c.clear(p.panel);
+                    c.round_frame(RectF::of(c.rect()).inset(3.0 * s, 3.0 * s), 6.0 * s, 3.0 * s, p.accent);
+                    c.present(dc);
                 }
                 let _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
@@ -834,8 +875,53 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
     }
 }
 
+/// Brings the rows' thumbnails up to date with the model's.
+pub fn redraw_previews(app: &mut App) {
+    let Some(p) = &app.presets_view else { return };
+    let thumbs = p.thumbnails.then(|| {
+        p.shown
+            .iter()
+            .map(|r| {
+                let thumb = app.model.previews.thumb(&Target::Preset(r.file.path.clone()));
+                (thumb.and_then(|t| t.image.clone()), thumb.is_some_and(|t| t.dimmed))
+            })
+            .collect::<Vec<_>>()
+    });
+    let same = THUMBS.with(|t| {
+        let old = t.borrow();
+        match (old.as_ref(), thumbs.as_ref()) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.len() == b.len()
+                    && a.iter().zip(b).all(|(x, y)| {
+                        x.1 == y.1
+                            && match (&x.0, &y.0) {
+                                (Some(i), Some(j)) => Arc::ptr_eq(i, j),
+                                (None, None) => true,
+                                _ => false,
+                            }
+                    })
+            }
+            _ => false,
+        }
+    });
+    if !same {
+        THUMBS.with(|t| *t.borrow_mut() = thumbs);
+        unsafe {
+            let _ = InvalidateRect(p.list, None, false);
+        }
+    }
+}
+
 /// Whether the column shows the presets: not while cropping, which needs
 /// the crop panel.
 pub fn shown(model: &Model) -> bool {
     model.inspector_visible && model.pane() == Pane::Presets && !model.cropping()
+}
+
+/// After a theme change: the list's own colours.
+pub fn retheme(app: &mut App) {
+    if let Some(p) = &app.presets_view {
+        theme_list(p.list);
+    }
 }

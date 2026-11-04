@@ -1,6 +1,6 @@
 //! Software counterpart of the canvas shaders. Uses the same ordered draw
 //! list and uniforms; only presentation changes, never helper/export pixels.
-use super::{BACKGROUND, Draw};
+use super::{Draw, background};
 use std::{collections::HashMap, sync::Arc};
 
 type Mip = (Arc<Vec<u8>>, u32, u32);
@@ -252,7 +252,7 @@ pub(super) fn render(
     let mut out = Raster {
         w,
         h,
-        pixels: BACKGROUND
+        pixels: background()
             .iter()
             .rev()
             .copied()

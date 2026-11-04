@@ -6,10 +6,17 @@ and returns a full-resolution, top-row-first, linear-sRGB `ImageBuf`. It must
 not return a camera JPEG preview. The film engine, preview sizing and export
 writers do not depend on native framework types.
 
-`RawDecoderPreference::Auto` selects Apple's implementation on macOS and rawler
-elsewhere. An explicitly unsupported Apple profile may fall back to rawler;
-I/O and failed rendering remain errors. The returned `DecodedRaw` records the
-actual backend used. Explicit `Apple` or `Rawler` requests never fall back.
+`RawDecoderPreference::Auto` tries Apple RAW 9, Apple RAW 8, then rawler on
+macOS, and rawler elsewhere. Each Apple attempt creates a fresh filter, checks
+the file's `supportedDecoderVersions` (including the separate DNG identifiers),
+sets that version explicitly, and requires a completed render with finite
+pixels. An unsupported version, missing output or failed render advances to
+the next decoder; file I/O, excessive dimensions and allocation failures stay
+fatal. There is no camera-model or extension allowlist.
+
+The returned `DecodedRaw` records the actual backend and Apple's exact
+`decoder_version`. Explicit `Apple` tries 9 then 8 without rawler; `Apple9`,
+`Apple8` and `Rawler` force one decoder for compatibility diagnostics.
 Additional platform/vendor implementations can implement `RawDecoder` and be
 registered in this routing module without altering film processing.
 
@@ -46,8 +53,8 @@ default photographic look. Noise is intentionally retained.
 Core Image works and renders in extended linear sRGB at float32 RGBA precision;
 the bridge drops alpha into float RGB without an 8/16-bit image roundtrip.
 Rendering is checked through `CIRenderTask` completion. Rust rejects non-finite
-pixels and clamps negative values to zero, matching the existing loader's
-contract. There is no upper clamp in the bridge or Rust conversion. The f64
+pixels and retains signed values outside the sRGB gamut. There is no upper
+clamp in the bridge or Rust conversion. The f64
 export widens these same decoded f32 values; it does not invent additional RAW
 precision. Apple's internal camera processing remains Apple's implementation.
 
@@ -73,6 +80,9 @@ Apple's internal allocations and decoding are controlled by the OS framework.
 ```bash
 MACOSX_DEPLOYMENT_TARGET=14.0 cargo build --release -p spektrafilm-io --example raw_decoder_probe
 target/release/examples/raw_decoder_probe --decoder apple --iterations 6 /path/photo.NEF
+target/release/examples/raw_decoder_probe --decoder apple9 /path/photo.ORF
+target/release/examples/raw_decoder_probe --decoder apple8 /path/photo.ORF
+target/release/examples/raw_decoder_probe --decoder auto /path/photo.ORF
 target/release/examples/raw_decoder_probe --decoder rawler --iterations 6 /path/photo.NEF
 python3 scripts/parity/compare_raw_decoders.py --output-dir /tmp/raw-study \
   --input 'he_star=/path/HE.NEF' --input 'lossless=/path/lossless.NEF' --artifacts
@@ -90,7 +100,8 @@ JSON report for closer inspection. `--no-orient`, `--lens-correction`, `--wb`,
 `--temperature` and `--tint` exercise development options. Do not publish personal photographs or
 their absolute paths when sharing reports.
 
-Tests include fallback classification, malformed WB, existing generated DNG
+Tests include ordered fallback/early-stop behavior, fatal-error classification,
+explicit generation parsing, malformed WB, existing generated DNG
 preview/export parity, portable builds, and an explicitly opt-in real-file test:
 
 ```bash

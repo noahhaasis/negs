@@ -12,7 +12,7 @@ with each preset applied, in the Presets panel), the setting was renamed to cove
 the code names went neutral. Please:
 
 1. **Build preset previews on Windows as well** (`ui/presets.rs`), after or together with
-   the film/paper grids. Spec: [Preset previews](stock-previews.md#preset-previews-macos-done-linux-and-windows-to-follow).
+   the film/paper grids. Spec: [Preset previews](stock-previews.md#preset-previews-macos-linux-and-windows-done).
    The helper side is done (`thumbnail` takes `"preset"`; the catalog lists `preset_kept`).
    Reference: the Mac app (`macos/Sources/NegsApp/Previews.swift`: `PreviewRules.presetCommand`
    / `presetKey` / `renderOrder`; the preset part of `EditorModel.pumpPreviews`;
@@ -139,3 +139,98 @@ Linux already has preset previews, the new label and the `previews` preference
 
 **Tell Noah what's left**, and which platforms' builds you couldn't run. Don't merge into
 main; Noah decides that.
+
+## Windows results
+
+Done 2026-11-02 on Noah's Windows box (Windows 10, Ryzen 5 3600, GTX 1660 SUPER on Vulkan),
+release builds, the helper rebuilt from this checkout. Photographs: Nikon D750 NEFs from
+`Downloads\102ND750` (6016 × 4016, 24 MP RAW). 23 films + 10 papers, 320 px thumbnails.
+The 24 test presets from `%USERPROFILE%\negs-presets-test` (not in the repository).
+
+What users get: in Film & Paper, Film and Paper are collapsed foldouts with the current stock
+on the right of the header. Opened, each shows a two-column grid of the photograph under
+every stock, grouped like the menus, the current one outlined in the accent colour. Out-of-date
+tiles dim while the main preview develops; a click, or Enter or Space on a focused tile, is the
+same "Change Film" / "Change Paper" undo step as the menu. The Presets panel shows a 72 × 48
+thumbnail at the start of each row (a warning sign for files the engine refuses). File ▸
+Settings… is now a real dialog (OK / Cancel) with "Film, paper and preset previews" (on by
+default) and, in builds that have them, the update settings. Off brings back the menus and the
+plain preset list at once and frees the thumbnails here and in the helper.
+
+Screenshots: [grids open](stock-previews-windows/grids-open.jpg),
+[paper grid](stock-previews-windows/paper-grid.jpg),
+[dimmed after an exposure edit](stock-previews-windows/dimmed-after-edit.jpg),
+[presets on a RAW](stock-previews-windows/presets-raw.jpg),
+[Settings](stock-previews-windows/settings.png),
+[setting off](stock-previews-windows/setting-off.jpg).
+
+### In the app
+
+| | Windows | macOS / Linux (for comparison) |
+|---|---|---|
+| First open, both grids, all 33 | **2.4 s**, starting once the main preview is done | 1.2 s / ~2 s |
+| After a film change (the 10 paper tiles; film tiles stay current) | **0.7 s** | — |
+| After an exposure edit, all 33 | **0.84 s** | 0.5 s / ~0.25 s |
+| 24 presets on the NEF | **3.9 s**, as-shot ones first, then one RAW decode per other white balance | 3.2 s for 12 on a 60 MP DNG |
+| Memory, both grids open vs setting off | app +2 MB private (372 vs 370 MB), helper +25 MB (828 vs 803 MB) | app +15–45, helper +30–45 MB |
+| Memory, grids and presets shown vs setting off | app +9 MB, helper +82 MB | — |
+| First window composited (median of 5, alternating) | **82 ms** vs 83 ms with previews off | — |
+| Adjustments column shown | **222 ms** vs 277 ms with previews off (the stock menus aren't built) | — |
+| Photograph on screen | **2.73 s** vs 2.73 s | — |
+
+Memory is private bytes from `Get-Process`, a few seconds after things settle. Previews off is
+the same code path as before the feature (the foldout rows are never created), so it stands in
+for `main` in the startup rows. Crop timings in the app weren't driven (no desktop control in
+this session); the helper rows below cover them.
+
+### Helper only (`linux/bench_stock_previews.py`, adapted for the `.exe` and `Get-Process`)
+
+| | films (23) | papers (10) | per thumbnail |
+|---|---|---|---|
+| Cold | 1306 ms | 533 ms | median 56 ms (pipeline 45, process 7–11) |
+| After an exposure edit | 352 ms | 143 ms | median 15 ms |
+| Crop 80 % + 3° | 434 ms | 182 ms | median 17 ms |
+| Crop 50 % | 519 ms | 193 ms | median 21 ms |
+
+The main render after all of them was still a pipeline-cache hit (255 ms). The app adds about
+10 ms per tile on top of the helper: reading the buffer, converting it for the screen, and one
+round trip through the window's message queue.
+
+### Implementation
+
+- `windows/src/previews.rs`: the pure rules (`stock_command`, `preset_command`, `preset_key`
+  on the catalog's `preset_kept`, `render_order`, `display`), `Thumb` (shown / dimmed /
+  placeholder), `Bitmap` (the helper's RGBA through the monitor profile like the canvas, Rec.
+  2020 proxies included, turned with the photograph's rotation), and `Previews`.
+- `state::choosing` / `state::pair_film`: what choosing a stock does, shared by the menu, the
+  tiles and their requests.
+- `Model::pump_previews` (`// MARK: Previews`): one request at a time, only while the main
+  render is idle and current and no slider moves; stock tiles of the open grids top to bottom,
+  then the presets once every file is checked. `App::refresh` runs it whenever the edit, the
+  panels or the main render change. The monitor profile is read only once tiles are on screen.
+- `ui/inspector.rs`: `Kind::Foldout` rows (owner-drawn header) and `StockGrid`, a container of
+  owner-drawn tile buttons built the first time a foldout opens (tab order, tooltips, accessible
+  names, Enter via a subclass since `IsDialogMessage` doesn't treat them as push buttons).
+- `ui/presets.rs`: taller rows with the thumbnail while previews are on; the label edit moves
+  past it.
+- `ui/dialogs.rs` `settings`: a modal dialog with its own message loop; the setting is
+  `Preferences::previews` (`#[serde(default)]`, so old settings files mean on).
+- Tests: `previews::tests` (film tile pairs its paper and resets presets, paper keeps the film,
+  the key follows the crop and the photograph but not the border, preset keys ignore Lab
+  edits, stale vs placeholder, render order, rotation) and
+  `session::tests::settings_from_before_previews_turn_them_on`. 83 Windows tests pass.
+
+The app numbers used two measurement-only switches, `NEGS_STOCK_EXPAND` and batch timings
+in the `NEGS_STARTUP_REPORT` file, removed on 2026-11-02 once all three platforms were measured.
+
+### Finishing (2026-11-02)
+
+Removed on all three platforms: `NEGS_STOCK_EXPAND`, `NEGS_STOCK_THUMB_PX`,
+`NEGS_STOCK_THUMB_LOG`, `NEGS_WIDGET_CAPTURE_MS` (the widget capture keeps its fixed 2 s),
+the batch bookkeeping that only fed them (Linux `Browser::batch` and its perf detail, macOS
+`Previews.batch` / `lastBatch`, Windows `Previews::batch`), `StockPreviewBenchmark.swift` and
+its call, and `linux/bench_stock_previews.py` / `linux/measure_stock_browser.py`. The
+per-thumbnail error line on stderr stays. Built and tested here: Windows only. The Linux and
+Swift edits are plain deletions; they need `cargo build` on Linux (or the Linux workflow) and
+on a Mac `swift build --package-path macos`, the benchmark-flag build
+(`-Xswiftc -DSPEKTRAFILM_BENCHMARK`) and `swift test --package-path macos --filter PreviewTests`.

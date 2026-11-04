@@ -537,7 +537,9 @@ pub fn apply_grain(
 
     let channels: Vec<usize> = if monochrome { vec![0] } else { vec![0, 1, 2] };
     let n_layers = lp.n_layers();
-    let mut out_planes: Vec<(usize, Vec<Scalar>)> = if serial_channels {
+    // wasm can't spawn the parallel path's OS threads (the browser's CPU
+    // engine panicked on any grain); the paths are bit-identical.
+    let mut out_planes: Vec<(usize, Vec<Scalar>)> = if serial_channels || cfg!(target_arch = "wasm32") {
         channels
             .iter()
             .map(|&ch| (ch, finalize_channel(ch, &mut (0..n_layers).map(|l| sub_layer(ch, l)))))

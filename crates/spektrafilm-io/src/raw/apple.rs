@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use spektrafilm_math::precision::from_f32;
 use spektrafilm_math::{image::ImageBuf, precision::Scalar};
 
-use super::{RawDecodeOptions, RawDecoder, RawImage, UnsupportedRaw};
+use super::{RawDecodeOptions, RawDecoder, RawImage, UnsupportedRaw, decode_compatible};
 
 #[repr(C)]
 struct NativeImage {
@@ -28,6 +28,7 @@ struct NativeImage {
 unsafe extern "C" {
     fn sf_apple_raw_decode(
         path: *const c_char,
+        decoder_major: i32,
         orient: i32,
         as_shot: i32,
         lens_correction: i32,
@@ -47,9 +48,23 @@ impl Drop for NativeImage {
 
 pub struct AppleRawDecoder;
 
+/// An exact generation for compatibility diagnostics. Normal imports use
+/// AppleRawDecoder, which tries 9 and then 8 for every individual file.
+pub(crate) struct AppleRawVersion(pub i32);
+
 impl RawDecoder for AppleRawDecoder {
     fn name(&self) -> &'static str {
         "apple"
+    }
+
+    fn decode(&self, path: &Path, options: RawDecodeOptions) -> Result<RawImage> {
+        decode_compatible(&[&AppleRawVersion(9), &AppleRawVersion(8)], path, options)
+    }
+}
+
+impl RawDecoder for AppleRawVersion {
+    fn name(&self) -> &'static str {
+        if self.0 == 9 { "Apple RAW 9" } else { "Apple RAW 8" }
     }
 
     /// Apple's own lens correction where it supports the file; otherwise the
@@ -75,6 +90,7 @@ impl RawDecoder for AppleRawDecoder {
         let status = unsafe {
             sf_apple_raw_decode(
                 path.as_ptr(),
+                self.0,
                 options.apply_orientation.into(),
                 (options.white_balance.mode == crate::RawWhiteBalanceMode::AsShot).into(),
                 options.lens_correction.enabled.into(),
@@ -100,11 +116,9 @@ impl RawDecoder for AppleRawDecoder {
         // Successful native rendering owns exactly width*height*4 float32
         // components. Drop releases the buffer on every Rust error path.
         let rgba = unsafe { std::slice::from_raw_parts(native.pixels, count * 4) };
-        ensure!(
-            rgba.par_chunks_exact(4)
-                .all(|p| p[..3].iter().all(|v| v.is_finite())),
-            "Apple RAW returned non-finite RGB values"
-        );
+        if !rgba.par_chunks_exact(4).all(|p| p[..3].iter().all(|v| v.is_finite())) {
+            return Err(UnsupportedRaw("Apple RAW returned non-finite RGB values".into()).into());
+        }
         let mut rgb = vec![0.0f32; count * 3];
         rgb.par_chunks_exact_mut(3)
             .zip(rgba.par_chunks_exact(4))
@@ -117,6 +131,8 @@ impl RawDecoder for AppleRawDecoder {
         // Apple rotated the pixels by a quarter turn, so its unoriented extent
         // is transposed.
         let transposed = native.oriented != 0 && native.orientation >= 5;
+        let decoder_version = Some(unsafe { CStr::from_ptr(native.version.as_ptr()) }
+            .to_string_lossy().into_owned());
         drop(native);
         // Unclamped: colours outside sRGB arrive as negative coordinates and
         // the spectral model takes them; only non-finite values are refused.
@@ -143,6 +159,7 @@ impl RawDecoder for AppleRawDecoder {
         Ok(RawImage {
             image: image.oriented(pending),
             lens_correction_supported,
+            decoder_version,
         })
     }
 }

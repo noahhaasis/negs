@@ -4,9 +4,11 @@
 #![windows_subsystem = "windows"]
 
 mod border;
+mod brightness;
 mod crop;
 mod engine;
 mod gpu;
+mod help;
 mod histogram;
 mod icc;
 mod json;
@@ -15,11 +17,13 @@ mod picture;
 mod platform;
 mod platform_events;
 mod presets;
+mod previews;
 mod rendered_preview;
 mod session;
 mod state;
 mod text;
 mod thumbnail;
+mod tone_graph;
 mod ui;
 mod updates;
 

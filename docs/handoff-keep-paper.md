@@ -38,6 +38,13 @@ tiles, and the tile click).
 
 ## macOS
 
+**Done 2026-11-02** (uncommitted on `main` at the time of writing): `PreviewRules.choosing`
+and `request(for:)` take `keepPaper`, and `pairFilm` takes `paper:` (default true, so the
+catalog-load pairing is unchanged). The setting is `Previews.keepPaper` (UserDefaults
+`keep_paper`), toggled through `EditorModel.setKeepPaper`, which re-pumps the tiles. Tests:
+`testKeepPaperLeavesThePaperAlone` and `testMissingSettingMeansThePaperFollowsTheFilm` in
+`PreviewTests.swift`.
+
 - Pairing lives in `macos/Sources/NegsApp/Previews.swift`: `PreviewRules.choosing(_:paper:in:stocks:)`
   calls `pairFilm(in:stocks:)`, which sets scan mode **and** the paper. Split it (or add a
   `keepPaper` parameter) so `choosing` skips only the paper part when the setting is on.
@@ -53,6 +60,18 @@ tiles, and the tile click).
   with it off, it switches as today.
 
 ## Windows
+
+**Done 2026-11-02.** `state::choosing` takes `keep_paper` and `state::pair_film` a `paper`
+flag; the catalog-load pairing (`Model::pair_film`) always pairs. The film menu, the film
+tiles and their thumbnail requests all go through `choosing`, so with the setting on the film
+tiles render on the current paper and redraw when it changes (their key includes the paper).
+The preference is `keep_paper` in `settings.json` (`#[serde(rename)]`, the Mac's key; missing
+means off), set through File ▸ Settings… next to the previews switch, under a "Film & Paper"
+heading. Tests: `model::tests::keep_paper_leaves_the_paper_alone` (film menu, one "Change
+Film" step, catalog load still pairs), `previews::tests::keep_paper_leaves_the_paper_alone`,
+`a_film_tile_follows_the_keep_paper_setting`, and the settings-file test. Checked by hand in
+the release build with a D750 NEF: with it on, Kodak Vision3 250D kept Fujifilm Crystal
+Archive Type II; off, Kodak Vision3 500T switched to Kodak Vision 2383; the setting persisted.
 
 - Pairing lives in `windows/src/model.rs`: `choose_film` calls `pair_film`, which sets
   `io.scan_film` **and** the paper. Skip only the paper part in `choose_film` when the

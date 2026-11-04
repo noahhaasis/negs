@@ -3000,6 +3000,11 @@ struct ImagePool(std::sync::Arc<std::sync::Mutex<Vec<ImageSet>>>);
 #[cfg(feature = "wgpu-backend")]
 const MAX_POOLED_BYTES: u64 = 512 << 20;
 
+/// Sets up to this size (a stock preview's, the brightness match's ≤ 256 px
+/// trials) are pooled beside the frames'.
+#[cfg(feature = "wgpu-backend")]
+const SMALL_POOLED_PIXELS: u64 = 512 * 512;
+
 #[cfg(feature = "wgpu-backend")]
 impl ImagePool {
     /// The pooled buffers for an image of `size`, which a render in flight
@@ -3053,8 +3058,20 @@ impl ImagePool {
         let unused = std::mem::take(&mut set.free);
         let mut sets = self.0.lock().unwrap();
         sets.insert(0, set);
-        let kept = sets.len().min(2);
-        let evicted = sets.split_off(kept);
+        // The last two frame sizes (a slider's and the settled one) and, on
+        // the side, the last few small ones: the stock previews' and the
+        // brightness match's renders then don't push out a frame's.
+        let (mut frames, mut small) = (0, 0);
+        let (kept, evicted): (Vec<_>, Vec<_>) = std::mem::take(&mut *sets).into_iter().partition(|set| {
+            let (count, most) = if u64::from(set.size.0) * u64::from(set.size.1) <= SMALL_POOLED_PIXELS {
+                (&mut small, 3)
+            } else {
+                (&mut frames, 2)
+            };
+            *count += 1;
+            *count <= most
+        });
+        *sets = kept;
         Self::trim(&mut sets, MAX_POOLED_BYTES);
         for (_, buffer) in unused.iter().chain(evicted.iter().flat_map(|set| &set.used)) {
             release(buffer);

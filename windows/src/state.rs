@@ -22,6 +22,10 @@ pub struct EditState {
     /// Trims the developed photograph; not part of the render.
     #[serde(default)]
     pub crop: CropSettings,
+    /// Prep › Match camera brightness: present while it's on. Sessions from
+    /// before it read as off and keep their exposure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness_match: Option<BrightnessMatch>,
 }
 
 impl Default for EditState {
@@ -33,6 +37,7 @@ impl Default for EditState {
             limit_preview: false,
             border: BorderSettings::default(),
             crop: CropSettings::default(),
+            brightness_match: None,
         }
     }
 }
@@ -45,7 +50,54 @@ impl PartialEq for EditState {
             && self.limit_preview == other.limit_preview
             && self.border == other.border
             && self.crop == other.crop
+            && self.brightness_match == other.brightness_match
     }
+}
+
+/// The exposure that matches the camera's brightness, solved live for the
+/// settings it depends on (`BrightnessMatch` in `Parameters.swift`).
+/// `prep.exposure_ev` holds the total the engine sees; the Exposure slider
+/// shows and edits the part above `ev`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrightnessMatch {
+    /// The solved Prep exposure; None until the first solve.
+    #[serde(default)]
+    pub ev: Option<f64>,
+    /// `match_inputs` the value was solved for.
+    #[serde(default)]
+    pub inputs: Option<Value>,
+    /// The solve held exposure back to keep highlights off paper white.
+    #[serde(default)]
+    pub highlight_limited: bool,
+}
+
+impl PartialEq for BrightnessMatch {
+    fn eq(&self, other: &Self) -> bool {
+        self.ev == other.ev
+            && self.highlight_limited == other.highlight_limited
+            && match (&self.inputs, &other.inputs) {
+                (Some(a), Some(b)) => json::same(a, b),
+                (a, b) => a.is_none() && b.is_none(),
+            }
+    }
+}
+
+pub const PREP_EXPOSURE: &str = "prep.exposure_ev";
+
+/// What a brightness match depends on: everything that changes how bright
+/// the developed photograph is, except the brightness edits that are the
+/// user's own (Prep, and the enlarger's print exposure) and settings that
+/// can't change it. A change solves the match again; Prep edits never do.
+pub fn match_inputs(state: &EditState) -> Value {
+    let mut params = state.params.clone();
+    for path in [
+        "prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.crop", "io.crop_center",
+        "io.crop_size", "io.output_color_space", "io.output_cctf_encoding", "settings.serial_grain",
+    ] {
+        json::set(&mut params, path, Value::Null);
+    }
+    serde_json::json!({"film": state.film, "paper": state.paper, "params": params})
 }
 
 impl EditState {
@@ -58,6 +110,7 @@ impl EditState {
         let mut state = self.clone();
         state.border = BorderSettings::default();
         state.crop = CropSettings::default();
+        state.brightness_match = None;
         if size_mode(&self.params) == SizeMode::LongestSide && self.crop.cropped() {
             state.crop.rect.width = self.crop.rect.width;
             state.crop.rect.height = self.crop.rect.height;
@@ -81,6 +134,22 @@ impl EditState {
 /// in the app; restoring a session resets it.
 pub const SIZE_TARGET: &str = "io.photo_long_side_px";
 pub const SIZE_FACTOR: &str = "io.upscale_factor";
+
+/// The camera's own lens corrections for a RAW (`io.lens_correction`), as on
+/// macOS and Linux. Per photograph: on for each newly opened one and after
+/// Reset, kept when a preset is applied (the engine's `presets::KEPT`).
+pub const LENS_CORRECTION: &str = "io.lens_correction.enabled";
+
+/// A saved edit's params on today's defaults. A session from before lens
+/// corrections was developed without them, so they stay off and its crop
+/// keeps its place.
+pub fn restored_params(defaults: &Value, saved: &Value, nullable: &[String]) -> Value {
+    let mut params = json::restoring(defaults, saved, nullable);
+    if json::get(saved, LENS_CORRECTION).is_null() {
+        json::set(&mut params, LENS_CORRECTION, Value::Bool(false));
+    }
+    params
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SizeMode {
@@ -169,6 +238,41 @@ impl Stock {
 
     pub fn is_motion_picture_print(&self) -> bool {
         self.paper && (self.name.contains("Vision") || self.name.contains("Print Film"))
+    }
+}
+
+/// The edit with stock `id` chosen, exactly as choosing it from the menu or
+/// a preview tile makes it (`PreviewRules.choosing`). A film resets its
+/// development time and its grain, DIR and halation presets, sets scanning
+/// for slides and brings its own paper unless `keep_paper` (Settings › Keep
+/// paper when changing film); a paper keeps the film.
+pub fn choosing(state: &EditState, id: &str, paper: bool, keep_paper: bool, stocks: &[Stock]) -> EditState {
+    let mut next = state.clone();
+    if paper {
+        next.paper = id.into();
+        json::set(&mut next.params, "print_render.development_time", Value::Null);
+        return next;
+    }
+    next.film = id.into();
+    json::set(&mut next.params, "film_render.development_time", Value::Null);
+    // A new film brings its own grain, DIR and halation presets, as upstream applies them.
+    for field in GRAIN_STOCK_FIELDS {
+        json::set(&mut next.params, &format!("film_render.grain.{field}"), Value::Null);
+    }
+    for path in DIR_HALATION_STOCK_PATHS {
+        json::set(&mut next.params, path, Value::Null);
+    }
+    pair_film(&mut next, stocks, !keep_paper);
+    next
+}
+
+/// Scanning for slides, and the film's own paper unless `paper` is false.
+pub fn pair_film(state: &mut EditState, stocks: &[Stock], paper: bool) {
+    let Some(film) = stocks.iter().find(|s| !s.paper && s.id == state.film) else { return };
+    json::set(&mut state.params, "io.scan_film", Value::Bool(film.positive));
+    if paper && stocks.iter().any(|s| s.paper && s.id == film.target) && state.paper != film.target {
+        state.paper = film.target.clone();
+        json::set(&mut state.params, "print_render.development_time", Value::Null);
     }
 }
 
@@ -327,6 +431,9 @@ pub struct AdjustmentGroup {
     pub section: Section,
     /// Switches the whole effect on and off from the group's header.
     pub enable: Option<&'static str>,
+    /// How many of the leading controls the Lab shows without Show all
+    /// controls; a group with none shows only then (or once it's changed).
+    pub basic: usize,
     pub controls: &'static [Adjustment],
 }
 
@@ -337,6 +444,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Lens Diffusion",
         section: Section::Camera,
         enable: Some("camera.diffusion_filter.active"),
+        basic: 2,
         controls: &[
             choice("Filter", "camera.diffusion_filter.filter_family", &["black_pro_mist", "glimmerglass", "pro_mist", "cinebloom"]),
             slider("Strength", "camera.diffusion_filter.strength", 0.0, 2.0, 0.01),
@@ -353,6 +461,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Film Curves",
         section: Section::Film,
         enable: Some("film_render.density_curves_morph.active"),
+        basic: 1,
         controls: &[
             slider("Gamma", "film_render.density_curves_morph.gamma_factor", 0.5, 2.0, 0.01),
             slider("Fast gamma", "film_render.density_curves_morph.gamma_factor_fast", 0.5, 2.0, 0.01),
@@ -367,6 +476,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Grain",
         section: Section::Film,
         enable: Some("film_render.grain.active"),
+        basic: 3,
         controls: &[
             slider("Red granularity", "film_render.grain.rms_granularity.0", 0.0, 80.0, 0.1),
             slider("Green granularity", "film_render.grain.rms_granularity.1", 0.0, 80.0, 0.1),
@@ -389,6 +499,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Halation",
         section: Section::Film,
         enable: Some("film_render.halation.active"),
+        basic: 1,
         controls: &[
             slider("Amount", "film_render.halation.halation_amount", 0.0, 3.0, 0.01),
             slider("Spatial scale", "film_render.halation.halation_spatial_scale", 0.1, 5.0, 0.01),
@@ -402,6 +513,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "DIR Couplers",
         section: Section::Film,
         enable: Some("film_render.dir_couplers.active"),
+        basic: 1,
         controls: &[
             slider("Amount", "film_render.dir_couplers.amount", 0.0, 2.0, 0.01),
             slider("Diffusion (µm)", "film_render.dir_couplers.diffusion_size_um", 0.0, 100.0, 0.1),
@@ -413,6 +525,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Film Base",
         section: Section::Film,
         enable: Some("film_render.base.active"),
+        basic: 1,
         controls: &[
             slider("Density", "film_render.base.scale", 0.0, 2.0, 0.01),
             slider("Tilt", "film_render.base.tilt", -1.0, 1.0, 0.01),
@@ -425,24 +538,26 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Enlarger",
         section: Section::Print,
         enable: None,
+        basic: 4,
         controls: &[
             slider("Print exposure", "enlarger.print_exposure", 0.1, 5.0, 0.01),
-            toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
             slider("Magenta shift", "enlarger.m_filter_shift", -50.0, 50.0, 0.1),
             slider("Yellow shift", "enlarger.y_filter_shift", -50.0, 50.0, 0.1),
-            slider("Preflash exposure", "enlarger.preflash_exposure", 0.0, 0.5, 0.01),
-            slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50.0, 50.0, 0.1),
-            slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50.0, 50.0, 0.1),
             Adjustment::BalancePrint {
                 title: "Balance Print",
                 help: "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base.",
             },
+            toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
+            slider("Preflash exposure", "enlarger.preflash_exposure", 0.0, 0.5, 0.01),
+            slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50.0, 50.0, 0.1),
+            slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50.0, 50.0, 0.1),
         ],
     },
     AdjustmentGroup {
         title: "Print Base",
         section: Section::Print,
         enable: Some("print_render.base.active"),
+        basic: 1,
         controls: &[
             slider("Density", "print_render.base.scale", 0.0, 2.0, 0.01),
             slider("Cyan", "print_render.base.cyan", 0.0, 2.0, 0.01),
@@ -454,6 +569,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Print Curves",
         section: Section::Print,
         enable: Some("print_render.density_curves_morph.active"),
+        basic: 1,
         controls: &[
             slider("Gamma", "print_render.density_curves_morph.gamma_factor", 0.5, 2.0, 0.01),
             slider("Fast gamma", "print_render.density_curves_morph.gamma_factor_fast", 0.5, 2.0, 0.01),
@@ -468,6 +584,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Glare",
         section: Section::Print,
         enable: Some("print_render.glare.active"),
+        basic: 1,
         controls: &[
             slider("Amount", "print_render.glare.percent", 0.0, 0.2, 0.001),
             slider("Roughness", "print_render.glare.roughness", 0.0, 2.0, 0.01),
@@ -478,6 +595,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Scanner",
         section: Section::Scan,
         enable: None,
+        basic: 0,
         controls: &[
             slider("Lens blur (px)", "scanner.lens_blur", 0.0, 5.0, 0.01),
             slider("Unsharp radius (px)", "scanner.unsharp_mask.0", 0.0, 3.0, 0.01),
@@ -492,6 +610,7 @@ pub const ADJUSTMENT_GROUPS: &[AdjustmentGroup] = &[
         title: "Color Management",
         section: Section::Scan,
         enable: None,
+        basic: 0,
         controls: &[
             choice("Output gamut", "io.output_gamut_compress.algorithm", &["off", "oklch", "oklrab", "cam16ucs", "aces_rgc"]),
             choice("Input gamut", "io.input_gamut_compress.algorithm", &["off", "xy"]),
@@ -510,20 +629,42 @@ pub const ASSUMED_SPACES: &[&str] = &["sRGB", "Display P3", "Adobe RGB (1998)", 
 pub const MANUAL_SPACES: &[&str] = &["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020", "ACES2065-1", "ACEScg"];
 pub const WHITE_BALANCE: &[&str] = &["as_shot", "daylight", "tungsten", "custom"];
 
-pub const CAMERA_SLIDERS: &[Adjustment] = &[
-    slider("Exposure (EV)", "camera.exposure_compensation_ev", -5.0, 5.0, 0.1),
-    slider("Film format (mm)", "camera.film_format_mm", 4.0, 120.0, 0.1),
-    slider("Lens blur (µm)", "camera.lens_blur_um", 0.0, 100.0, 0.1),
-];
+pub const NEGATIVE_EXPOSURE: Adjustment = slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5.0, 5.0, 0.1);
+pub const LENS_BLUR: Adjustment = slider("Lens blur (µm)", "camera.lens_blur_um", 0.0, 100.0, 0.1);
 pub const WB_TEMPERATURE: Adjustment = slider("Temperature (K)", "io.raw_white_balance.temperature", 1667.0, 25000.0, 1.0);
 pub const WB_TINT: Adjustment = slider("Tint", "io.raw_white_balance.tint", 0.01, 4.0, 0.01);
-pub const POST_TONE: &[Adjustment] = &[
-    slider("Brightness", "post.brightness", -100.0, 100.0, 1.0),
-    slider("Contrast", "post.contrast", -100.0, 100.0, 1.0),
-    slider("Whites", "post.whites", -100.0, 100.0, 1.0),
-    slider("Blacks", "post.blacks", -100.0, 100.0, 1.0),
+
+/// Prep's controls (`prepToneControls` and the rest in `Inspector.swift`),
+/// applied to the scene before the film. Highlights keeps the recovered
+/// extended travel (docs/prep.md).
+pub const PREP_TONE: &[Adjustment] = &[
+    slider("Highlights", "prep.highlights", -180.0, 100.0, 1.0),
+    slider("Shadows", "prep.shadows", -100.0, 100.0, 1.0),
+    slider("Contrast", "prep.contrast", -100.0, 100.0, 1.0),
+    slider("Lift", "prep.lift", -100.0, 100.0, 1.0),
+    slider("Gain", "prep.gain", -100.0, 100.0, 1.0),
 ];
-pub const POST_SATURATION: Adjustment = slider("Saturation", "post.saturation", -100.0, 100.0, 1.0);
+pub const PREP_COLOR: &[Adjustment] = &[
+    slider("Color Boost", "prep.color_boost", -100.0, 100.0, 1.0),
+    slider("Saturation", "prep.saturation", -100.0, 100.0, 1.0),
+];
+pub const PREP_DETAIL: &[Adjustment] = &[slider("Midtone Detail", "prep.midtone_detail", -100.0, 100.0, 1.0)];
+/// The engine keeps Prep's exposure within ±3 EV; the slider moves in 0.05 EV.
+pub const PREP_EXPOSURE_RANGE: (f64, f64) = (-3.0, 3.0);
+pub const PREP_EXPOSURE_STEP: f64 = 0.05;
+
+/// Lab › Camera › Film format (`FilmFormatPicker`): stills formats by the long
+/// edge of the image area, in mm. 135 stays at the engine's 35 (not the gate's
+/// 36) so existing edits render as before; 6×4.5 and 6×6 share 56. Custom…
+/// shows the slider.
+pub const FILM_FORMAT: Adjustment = slider("Long edge (mm)", "camera.film_format_mm", 4.0, 120.0, 0.1);
+pub const FILM_FORMATS: &[(&str, f64)] =
+    &[("110", 17.0), ("Half frame", 24.0), ("35 mm (135)", 35.0), ("6×4.5 / 6×6", 56.0), ("6×7", 70.0), ("6×9", 84.0), ("4×5", 120.0)];
+
+/// The format with this long edge; None reads as Custom.
+pub fn film_format(mm: f64) -> Option<usize> {
+    FILM_FORMATS.iter().position(|(_, edge)| (edge - mm).abs() < 0.05)
+}
 
 /// A photograph's aspect ratio as people name it, such as 16:9.
 pub fn ratio_name(width: f64, height: f64) -> String {
@@ -539,6 +680,17 @@ pub fn ratio_name(width: f64, height: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sessions_before_lens_corrections_keep_them_off() {
+        let defaults = serde_json::json!({"io": {"lens_correction": {"enabled": true}, "rotate_cw": 0}});
+        let old = serde_json::json!({"io": {"rotate_cw": 1}});
+        assert_eq!(restored_params(&defaults, &old, &[]), serde_json::json!({"io": {"lens_correction": {"enabled": false}, "rotate_cw": 1}}));
+        for saved in [true, false] {
+            let current = serde_json::json!({"io": {"lens_correction": {"enabled": saved}, "rotate_cw": 1}});
+            assert_eq!(json::get(&restored_params(&defaults, &current, &[]), LENS_CORRECTION), &Value::Bool(saved));
+        }
+    }
     use serde_json::json;
 
     /// The same values as the macOS app's slider tests.
@@ -609,6 +761,55 @@ mod tests {
         assert!(!color_only("film_render.grain.particle_scale_sublayers.2"));
         let lanes: Vec<_> = ADJUSTMENT_GROUPS.iter().flat_map(|g| g.controls).filter_map(|c| grain_lane(c.path())).collect();
         assert_eq!(lanes.len(), 9);
+    }
+
+    /// `FilmFormatTests`: formats read back from the long edge.
+    #[test]
+    fn film_formats_read_back_from_the_long_edge() {
+        let name = |mm: f64| film_format(mm).map(|i| FILM_FORMATS[i].0);
+        assert_eq!(name(35.0), Some("35 mm (135)"), "The engine default is 135");
+        assert_eq!(name(56.0), Some("6×4.5 / 6×6"));
+        assert_eq!(name(120.0), Some("4×5"));
+        assert_eq!(name(24.0f32 as f64), Some("Half frame"));
+        assert_eq!((name(45.0), name(36.0)), (None, None));
+        let Adjustment::Slider { low, high, .. } = FILM_FORMAT else { unreachable!() };
+        assert!(FILM_FORMATS.iter().all(|(_, mm)| (low..=high).contains(mm)));
+        let mut edges: Vec<i64> = FILM_FORMATS.iter().map(|(_, mm)| *mm as i64).collect();
+        edges.dedup();
+        assert_eq!(edges.len(), FILM_FORMATS.len());
+    }
+
+    /// The match depends on what changes the developed brightness, not on
+    /// the user's own exposure edits or the frame.
+    #[test]
+    fn match_inputs_leave_out_the_users_own_brightness() {
+        let mut state = EditState { params: json!({"prep": {"exposure_ev": 0.5}, "enlarger": {"print_exposure": 1.0, "m_filter_shift": 0.0},
+            "io": {"rotate_cw": 0, "output_color_space": "sRGB"}, "camera": {"exposure_compensation_ev": 0.0}}), ..Default::default() };
+        let inputs = match_inputs(&state);
+        for (path, value) in [("prep.exposure_ev", json!(2.0)), ("prep.shadows", json!(30)), ("enlarger.print_exposure", json!(1.4)),
+            ("io.rotate_cw", json!(2)), ("io.output_color_space", json!("Display P3"))] {
+            let mut edited = state.clone();
+            json::set(&mut edited.params, path, value);
+            assert!(json::same(&match_inputs(&edited), &inputs), "{path}");
+        }
+        state.crop.angle = 3.0;
+        assert!(json::same(&match_inputs(&state), &inputs));
+        for (path, value) in [("camera.exposure_compensation_ev", json!(1.0)), ("enlarger.m_filter_shift", json!(5.0))] {
+            let mut edited = state.clone();
+            json::set(&mut edited.params, path, value);
+            assert!(!json::same(&match_inputs(&edited), &inputs), "{path}");
+        }
+        let mut paper = state.clone();
+        paper.paper = "other".into();
+        assert!(!json::same(&match_inputs(&paper), &inputs));
+        // The match never re-renders by itself, and saves with the session.
+        let mut matched = state.clone();
+        matched.brightness_match = Some(BrightnessMatch { ev: Some(0.5), inputs: Some(inputs), highlight_limited: false });
+        assert_eq!(matched.rendered(), state.rendered());
+        let text = serde_json::to_string(&matched).unwrap();
+        assert!(text.contains(r#""brightnessMatch":{"ev":0.5"#));
+        assert_eq!(serde_json::from_str::<EditState>(&text).unwrap(), matched);
+        assert!(!serde_json::to_string(&state).unwrap().contains("brightnessMatch"));
     }
 
     #[test]

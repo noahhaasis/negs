@@ -29,26 +29,30 @@ export default async ({ send, evaluate }) => {
   `);
   check(started.film === 'kodak_portra_400' && started.paper === 'kodak_portra_endura' && !started.scan && !started.shown && started.choice.status === 'started', 'tutorial did not start from rendered default negative');
   const layouts = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 11; i++) {
     if (i) await evaluate(`document.getElementById('tour-next').click(); await tourReady(${i});`);
     const layout = await evaluate(`
       const nav = document.getElementById('tutorial-nav').getBoundingClientRect();
       const preview = document.getElementById('view').getBoundingClientRect();
       const controls = [...document.querySelectorAll('.tour-control')].filter((n) => n.getBoundingClientRect().height > 0);
       const scroll = document.getElementById('scroll');
-      const targets = controls.map((n) => {
+      // A stock grid counts by its header: the open grid may be taller than the sheet.
+      const targets = controls.map((n) => n.matches('.stock-fold') ? n.querySelector('summary') : n).map((n) => {
         n.scrollIntoView({ block: 'nearest' });
-        const r = n.getBoundingClientRect(), s = scroll.getBoundingClientRect();
+        // Desktop pins the stock area (the film and paper grids) above the scroll.
+        const r = n.getBoundingClientRect(), s = scroll.contains(n) ? scroll.getBoundingClientRect() : { top: 0, bottom: innerHeight };
         return r.left >= -1 && r.right <= innerWidth + 1 && r.bottom <= s.bottom + 1 && r.top >= s.top - 1;
       });
       scroll.scrollTop = 0;
       return { step: negs.tutorial().index, targets, controls: controls.length,
         navFits: nav.left >= 0 && nav.right <= innerWidth + 1 && nav.bottom <= innerHeight + 1 && nav.height >= 44,
         previewHeight: preview.height, overflow: document.documentElement.scrollWidth > innerWidth,
-        defaults: negs.state().params.camera.exposure_compensation_ev === 0 && negs.state().params.enlarger.print_exposure === 1 };
+        defaults: negs.state().params.camera.exposure_compensation_ev === 0 && negs.state().params.prep.exposure_ev === 0 && negs.state().params.enlarger.print_exposure === 1,
+        gear: document.getElementById('settings').getBoundingClientRect().height > 0 };
     `);
     check(layout.navFits && layout.previewHeight >= 90 && !layout.overflow && layout.defaults && layout.targets.every(Boolean), `layout/defaults failed: ${JSON.stringify(layout)}`);
-    check(i === 8 || layout.controls > 0, `no actual control for step ${i}`);
+    check(i >= 9 || layout.controls > 0, `no actual control for step ${i}`);
+    check(i !== 9 || layout.gear, 'Advanced controls step hides the Settings button');
     layouts.push(layout);
     if (i === 0) {
       await evaluate(`
@@ -58,7 +62,26 @@ export default async ({ send, evaluate }) => {
       `);
     }
     if (i === 3) {
-      await evaluate(`negs.edit('camera.exposure_compensation_ev', 2); await until(() => negs.idle()); document.getElementById('tour-reset').click(); await tourReady(3);`);
+      await evaluate(`negs.edit('prep.exposure_ev', 1); await until(() => negs.idle()); document.getElementById('tour-reset').click(); await tourReady(3);`);
+      check(await evaluate(`return negs.state().params.prep.exposure_ev === 0;`), 'Reset step did not reset Prep exposure');
+    }
+    if (i === 2) {
+      // Match on hides the meter; the user's setting for new RAWs stays.
+      const matched = await evaluate(`
+        globalThis.matchSetting = localStorage.getItem('negs.matchNewRaws');
+        document.querySelector('[data-tutorial-path=match] input').click();
+        await until(() => negs.state().match?.ev != null && negs.idle());
+        return { metering: document.querySelector('[data-tutorial-path="camera.auto_exposure_method"]').getBoundingClientRect().height, ev: negs.state().match.ev };
+      `);
+      check(matched.metering === 0, `Match on did not hide the meter: ${JSON.stringify(matched)}`);
+      await evaluate(`document.getElementById('tour-reset').click(); await tourReady(2);`);
+      check(await evaluate(`return !negs.state().match && localStorage.getItem('negs.matchNewRaws') === matchSetting;`), 'Reset step kept Match, or the tour changed the new-RAW setting');
+    }
+    if (i === 7) {
+      check(await evaluate(`return negs.state().params.camera.diffusion_filter.active === true;`), 'mist step did not turn Lens Diffusion on');
+    }
+    if (i === 4) {
+      await evaluate(`negs.edit('camera.exposure_compensation_ev', 2); await until(() => negs.idle()); document.getElementById('tour-reset').click(); await tourReady(4);`);
       check(await evaluate(`return negs.state().params.camera.exposure_compensation_ev === 0;`), 'Reset step did not reset exposure');
     }
   }
@@ -78,12 +101,16 @@ export default async ({ send, evaluate }) => {
     negs.beginCrop();
     const aspect = document.getElementById('crop-aspect'); aspect.value = 'square'; aspect.dispatchEvent(new Event('change'));
     negs.endCrop(true); await until(() => negs.idle());
+    // New RAWs match camera brightness: compare once it has.
+    await until(() => negs.state().match?.ev != null && negs.idle()); await wait(500); await until(() => negs.idle());
     globalThis.rawEdit = JSON.stringify(negs.state()); globalThis.rawCrop = JSON.stringify(negs.crop());
     globalThis.rawWb = JSON.stringify(negs.source().wb);
     document.getElementById('tutorial').click(); document.getElementById('confirm-tutorial').click(); await tourReady(0);
     document.getElementById('tour-end').click(); await until(() => negs.tutorial().phase === 'idle');
   `);
-  check(await evaluate(`return JSON.stringify(negs.state()) === rawEdit && JSON.stringify(negs.crop()) === rawCrop && JSON.stringify(negs.source().wb) === rawWb && negs.source().current;`), 'RAW white balance/crop restoration failed');
+  const rawRestored = await evaluate(`return { edit: JSON.stringify(negs.state()) === rawEdit, crop: JSON.stringify(negs.crop()) === rawCrop, wb: JSON.stringify(negs.source().wb) === rawWb, current: negs.source().current,
+    match: [JSON.parse(rawEdit).match, negs.state().match] };`);
+  check(rawRestored.edit && rawRestored.crop && rawRestored.wb && rawRestored.current, `RAW white balance/crop restoration failed: ${JSON.stringify(rawRestored)}`);
 
   // A local edit survives a complete tutorial round trip, including finishing.
   await evaluate(`

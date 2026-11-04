@@ -23,6 +23,9 @@ pub enum RawDecoderPreference {
     #[default]
     Auto,
     Apple,
+    /// Force one Apple generation for compatibility diagnostics.
+    Apple9,
+    Apple8,
     Rawler,
 }
 
@@ -33,8 +36,10 @@ impl FromStr for RawDecoderPreference {
         match value {
             "auto" => Ok(Self::Auto),
             "apple" => Ok(Self::Apple),
+            "apple9" => Ok(Self::Apple9),
+            "apple8" => Ok(Self::Apple8),
             "rawler" => Ok(Self::Rawler),
-            _ => bail!("Unknown RAW decoder {value:?}; choose auto, apple, or rawler"),
+            _ => bail!("Unknown RAW decoder {value:?}; choose auto, apple, apple9, apple8, or rawler"),
         }
     }
 }
@@ -65,8 +70,8 @@ impl Default for RawDecodeOptions {
     }
 }
 
-/// A backend may decline an unsupported format. A failed render must not be
-/// silently retried with different colour processing.
+/// A decoder may decline an unsupported format or a file it cannot render.
+/// I/O, allocation and unsafe image dimensions remain fatal errors.
 #[derive(Debug)]
 pub struct UnsupportedRaw(pub String);
 
@@ -89,6 +94,8 @@ pub struct RawImage {
     /// The decoder can apply [`LensCorrection`] to this file, whether or not
     /// it was requested.
     pub lens_correction_supported: bool,
+    /// Actual Apple decoder identifier, including the DNG suffix where used.
+    pub decoder_version: Option<String>,
 }
 
 pub struct RawlerDecoder;
@@ -104,6 +111,7 @@ impl RawDecoder for RawlerDecoder {
         Ok(RawImage {
             image: raw.image,
             lens_correction_supported: raw.lens.is_some(),
+            decoder_version: None,
         })
     }
 }
@@ -112,6 +120,7 @@ pub struct DecodedRaw {
     pub image: ImageBuf,
     pub decoder: &'static str,
     pub lens_correction_supported: bool,
+    pub decoder_version: Option<String>,
 }
 
 impl DecodedRaw {
@@ -120,8 +129,31 @@ impl DecodedRaw {
             image: raw.image,
             decoder: decoder.name(),
             lens_correction_supported: raw.lens_correction_supported,
+            decoder_version: raw.decoder_version,
         }
     }
+}
+
+/// Ordered compatibility attempts. Every failure is retained if all versions
+/// decline; fatal errors stop immediately rather than hiding damaged input or
+/// an exhausted allocation behind a different decoder.
+#[cfg(any(test, all(target_os = "macos", feature = "apple-raw")))]
+fn decode_compatible(
+    decoders: &[&dyn RawDecoder],
+    path: &Path,
+    options: RawDecodeOptions,
+) -> Result<RawImage> {
+    let mut failures = Vec::new();
+    for decoder in decoders {
+        match decoder.decode(path, options) {
+            Ok(raw) => return Ok(raw),
+            Err(error) if error.is::<UnsupportedRaw>() => {
+                failures.push(format!("{}: {error:#}", decoder.name()));
+            }
+            Err(error) => return Err(error.context(format!("{} failed", decoder.name()))),
+        }
+    }
+    Err(UnsupportedRaw(failures.join("; ")).into())
 }
 
 #[cfg(any(test, all(target_os = "macos", feature = "apple-raw")))]
@@ -146,9 +178,10 @@ fn decode_with_fallback(
     }
 }
 
-/// Auto prefers Apple on macOS, and uses rawler elsewhere. Only an explicit
-/// unsupported-format response permits fallback; I/O and rendering failures
-/// remain errors. An explicit preference never falls back.
+/// On macOS Auto tries Apple RAW 9, Apple RAW 8, then rawler, per file.
+/// Unsupported versions and incompatible renders permit fallback; I/O and
+/// resource failures remain errors. Apple stays within those two Apple versions;
+/// Apple9/Apple8 force one generation for diagnostics. Elsewhere Auto uses rawler.
 pub fn decode_raw(
     path: &Path,
     options: RawDecodeOptions,
@@ -162,8 +195,12 @@ pub fn decode_raw(
         return AppleRawDecoder
             .decode(path, options)
             .map(|raw| DecodedRaw::new(raw, &AppleRawDecoder));
+    } else if matches!(preference, RawDecoderPreference::Apple9 | RawDecoderPreference::Apple8) {
+        let decoder = apple::AppleRawVersion(if preference == RawDecoderPreference::Apple9 { 9 } else { 8 });
+        return decoder.decode(path, options)
+            .map(|raw| DecodedRaw::new(raw, &AppleRawDecoder));
     }
-    if preference == RawDecoderPreference::Apple {
+    if matches!(preference, RawDecoderPreference::Apple | RawDecoderPreference::Apple9 | RawDecoderPreference::Apple8) {
         bail!("Apple RAW decoding requires macOS and the apple-raw Cargo feature");
     }
     RawlerDecoder
@@ -194,6 +231,7 @@ mod tests {
                 _ => Ok(RawImage {
                     image: ImageBuf::new(1, 1),
                     lens_correction_supported: false,
+                    decoder_version: None,
                 }),
             }
         }
@@ -223,6 +261,40 @@ mod tests {
                 usize::from(mode >= 1)
             );
         }
+    }
+
+    #[test]
+    fn compatibility_order_stops_after_first_success_or_fatal_error() {
+        // 0 success, 1 incompatible, 2 fatal: exercise 9 → 8 → rawler
+        // independently of the host OS and installed camera support.
+        for (modes, expected_calls, success) in [
+            ([0, 0, 0], [1, 0, 0], true),
+            ([1, 0, 0], [1, 1, 0], true),
+            ([1, 1, 0], [1, 1, 1], true),
+            ([1, 1, 1], [1, 1, 1], false),
+            ([2, 0, 0], [1, 0, 0], false),
+            ([1, 2, 0], [1, 1, 0], false),
+        ] {
+            let backends = modes.map(|mode| Backend { calls: AtomicUsize::new(0), mode });
+            let result = decode_compatible(
+                &[&backends[0], &backends[1], &backends[2]],
+                Path::new("test.orf"), RawDecodeOptions::default(),
+            );
+            assert_eq!(result.is_ok(), success, "{modes:?}");
+            assert_eq!(backends.each_ref().map(|b| b.calls.load(Ordering::SeqCst)), expected_calls);
+            if modes == [1, 1, 1] {
+                let error = result.err().unwrap();
+                assert!(error.is::<UnsupportedRaw>());
+                assert_eq!(error.to_string().matches("unsupported profile").count(), 3);
+            }
+        }
+    }
+
+    #[test]
+    fn forced_apple_generations_are_explicit_diagnostic_preferences() {
+        assert_eq!("apple9".parse::<RawDecoderPreference>().unwrap(), RawDecoderPreference::Apple9);
+        assert_eq!("apple8".parse::<RawDecoderPreference>().unwrap(), RawDecoderPreference::Apple8);
+        assert!("apple7".parse::<RawDecoderPreference>().is_err());
     }
 
     #[test]

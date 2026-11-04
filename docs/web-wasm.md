@@ -1052,6 +1052,13 @@ crop-before-turn exports; border sizing; new-photo reset; and pixel-exact
 100% cropped/turned previews. Also checked with threaded WebGPU and
 `?present=0`.
 
+## Prep, camera brightness and stock previews
+
+Prep | Lab | Output with Prep first, Match camera brightness (solved on WebGPU in the engine
+worker, the reference made by a short-lived decoder worker) and the film and paper previews
+(off by default on touch screens): [web Prep port](web-prep-port-plan.md#built-2026-11-04),
+with the iPhone measurements.
+
 ## Limits and open problems
 
 - **Memory.** wasm32 caps memory at 4 GB. The GPU path peaks at 0.65 GB for
@@ -1059,8 +1066,9 @@ crop-before-turn exports; border sizing; new-photo reset; and pixel-exact
   reading back floats, before that). The CPU path needs 2.8 GB at 24 MP, so it can't
   render much past 30 MP. Most of this is copies: source, decoded clone, f32
   upload, readback, output and RGBA. Memory64 is not usable with
-  wgpu/wasm-bindgen yet. Preview frames are capped at 40 MP, 12 MP on
-  touch screens (item 14); the decoded source and an export aren't.
+  wgpu/wasm-bindgen yet. Preview frames are capped at 40 MP, 4.4 MP on
+  touch screens (item 14; 12 MP until Prep, see
+  [web Prep port](web-prep-port-plan.md#built-2026-11-04)); the decoded source and an export aren't.
 - **Panics abort.** On this target a panic is `unreachable`, which kills the
   module. `catch_unwind` around rawler's develop doesn't help. A panic on one
   of rayon's threads is worse: it aborts that thread and leaves the engine

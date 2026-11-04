@@ -65,7 +65,6 @@ import SwiftUI
         if let path = Self.pathArgument { model.open(URL(fileURLWithPath: path)) }
         #if SPEKTRAFILM_BENCHMARK
         InteractionBenchmark.start(model)
-        StockPreviewBenchmark.start(model)
         #endif
         updates.schedule(afterStartupOf: model)
     }
@@ -209,10 +208,13 @@ struct InspectorPanel: View {
 /// Reads only the preview state, so edits don't re-evaluate the canvas.
 struct CanvasArea: View {
     let model: EditorModel
+    /// Settings › Custom viewer background.
+    @AppStorage(ViewerBackground.customKey) private var customBackground = false
+    @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
 
     var body: some View {
         ZStack {
-            Color(nsColor: .underPageBackgroundColor)
+            ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
             if let session = model.cropSession, let image = model.image {
                 CropEditor(session: session, image: image)
             } else if let image = model.image {

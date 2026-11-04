@@ -384,7 +384,8 @@ fn paint(app: &App, hwnd: HWND) {
         let dc = CreateCompatibleDC(screen);
         let buffer = CreateCompatibleBitmap(screen, r.right.max(1), r.bottom.max(1));
         let old_buffer = SelectObject(dc, buffer);
-        FillRect(dc, &r, GetSysColorBrush(COLOR_WINDOW));
+        let p = super::theme::palette();
+        FillRect(dc, &r, super::theme::brush(p.window));
         let strip = &app.strip_view;
         let dpi = app.dpi;
         let px = |dip: f64| strip.px(dpi, dip);
@@ -400,7 +401,7 @@ fn paint(app: &App, hwnd: HWND) {
         if let Some(message) = message {
             let mut text = wide(message);
             let len = text.len() - 1;
-            SetTextColor(dc, COLORREF(0x707070));
+            SetTextColor(dc, COLORREF(p.secondary));
             let mut tr = r;
             DrawTextW(dc, &mut text[..len], &mut tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
@@ -415,9 +416,7 @@ fn paint(app: &App, hwnd: HWND) {
             }
             let top = px(8.0);
             let cell = RECT { left: x, top, right: x + px(CELL), bottom: top + px(THUMB_HEIGHT) };
-            let well = CreateSolidBrush(COLORREF(0xf3f3f3));
-            FillRect(dc, &cell, well);
-            let _ = DeleteObject(well);
+            FillRect(dc, &cell, super::theme::brush(p.well));
             match strip.thumbs.get(path) {
                 Some(Some(thumb)) => {
                     let inner = (cell.right - cell.left - px(6.0), cell.bottom - cell.top - px(6.0));
@@ -431,7 +430,7 @@ fn paint(app: &App, hwnd: HWND) {
                     let mut glyph = wide("\u{E8B9}");
                     let len = glyph.len() - 1;
                     let old = SelectObject(dc, app.fonts.glyph);
-                    SetTextColor(dc, COLORREF(0xb0b0b0));
+                    SetTextColor(dc, COLORREF(p.disabled));
                     let mut gr = cell;
                     DrawTextW(dc, &mut glyph[..len], &mut gr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                     SelectObject(dc, old);
@@ -451,7 +450,7 @@ fn paint(app: &App, hwnd: HWND) {
             let shown = middle_truncated(dc, &name, px(CELL));
             let mut text = wide(&shown);
             let len = text.len() - 1;
-            SetTextColor(dc, COLORREF(if !enabled { 0xa0a0a0 } else if selected { 0x202020 } else { 0x6a6a6a }));
+            SetTextColor(dc, COLORREF(if !enabled { p.disabled } else if selected { p.text } else { p.secondary }));
             let mut tr = RECT { left: x - px(4.0), top: cell.bottom + px(4.0), right: x + px(CELL + 4.0), bottom: cell.bottom + px(22.0) };
             DrawTextW(dc, &mut text[..len], &mut tr, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
