@@ -233,8 +233,11 @@ struct CanvasArea: View {
         PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale,
                       pins: model.pinsToShow,
+                      dragged: model.zoneDrag,
+                      draggedRadius: model.sampleRadius,
                       onSelectPin: { model.selectPin($0) },
                       onMovePin: { index, centre in Task { await model.movePin(index, to: centre) } },
+                      onScrollPin: { model.resizeSelectedPin(scrollDelta: $0, precise: $1) },
                       onEscapeKey: { model.clearToneSelection() },
                       onDeleteKey: { model.removeSelectedPin() },
                       onFitChanged: { model.fitImage = $0 })
