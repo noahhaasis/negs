@@ -125,42 +125,67 @@ struct UpdateSettings: View {
     @ObservedObject var updates: UpdateController
     var model: EditorModel
     var removeAppData: () -> Void
+    /// Settings › Viewer background.
+    @AppStorage(ViewerBackground.customKey) private var customBackground = false
+    @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
 
     var body: some View {
         Form {
-            if updates.configured {
-                Toggle("Automatically check for updates", isOn: Binding(
-                    get: { updates.automaticChecks }, set: { updates.setAutomaticChecks($0) }))
-                Text("Updates are installed only when you choose to restart Negs.")
-                    .font(.callout).foregroundStyle(.secondary)
-                if let lastCheck = updates.lastCheck {
-                    Text("Last checked: \(lastCheck.formatted(date: .abbreviated, time: .shortened))")
+            Section("Updates") {
+                if updates.configured {
+                    Toggle("Automatically check for updates", isOn: Binding(
+                        get: { updates.automaticChecks }, set: { updates.setAutomaticChecks($0) }))
+                    Text("Updates are installed only when you choose to restart Negs.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    if let lastCheck = updates.lastCheck {
+                        Text("Last checked: \(lastCheck.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck)
+                    if let error = updates.configurationError { Text(error).foregroundStyle(.red) }
+                } else {
+                    Text("Updates are not configured for this build.")
+                    Text("Install a release build to receive updates.").foregroundStyle(.secondary)
+                }
+            }
+            Section("Previews") {
+                Toggle("Film, paper and preset previews", isOn: Binding(
+                    get: { model.previews.enabled }, set: { model.setPreviews($0) }))
+                Text("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Viewer") {
+                HStack(spacing: 12) {
+                    Toggle("Custom background", isOn: $customBackground)
+                    Spacer(minLength: 0)
+                    ColorPicker("Background colour", selection: Binding(
+                        get: { ViewerBackground.color(hex: backgroundHex) ?? Color(nsColor: .underPageBackgroundColor) },
+                        set: { backgroundHex = ViewerBackground.hex($0) }
+                    ), supportsOpacity: false)
+                    .labelsHidden()
+                    .disabled(!customBackground)
+                    .help("The colour behind the photograph.")
+                    .accessibilityLabel("Background colour")
+                }
+                Text("The default background follows the system's light or dark appearance.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section("App Data") {
+                Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
+                    .disabled(model.saving || model.exporting || updates.installing || updates.sessionInProgress)
+                Text("Removes settings, the saved editing session, and caches. Your original photographs and exported images are kept.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if model.saving || model.exporting {
+                    Text("Wait for the current save or export to finish before removing app data.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else if updates.sessionInProgress || updates.installing {
+                    Text("Finish or close the update dialog before removing app data.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
-                Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck)
-                if let error = updates.configurationError { Text(error).foregroundStyle(.red) }
-            } else {
-                Text("Updates are not configured for this build.")
-                Text("Install a release build to receive updates.").foregroundStyle(.secondary)
-            }
-            Divider().padding(.vertical, 8)
-            Toggle("Film, paper and preset previews", isOn: Binding(
-                get: { model.previews.enabled }, set: { model.setPreviews($0) }))
-            Text("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Divider().padding(.vertical, 8)
-            Button("Remove All App Data and Quit…", role: .destructive, action: removeAppData)
-                .disabled(model.saving || model.exporting || updates.installing || updates.sessionInProgress)
-            Text("Removes settings, the saved editing session, and caches. Your original photographs and exported images are kept.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if model.saving || model.exporting {
-                Text("Wait for the current save or export to finish before removing app data.")
-                    .font(.callout).foregroundStyle(.secondary)
-            } else if updates.sessionInProgress || updates.installing {
-                Text("Finish or close the update dialog before removing app data.")
-                    .font(.callout).foregroundStyle(.secondary)
             }
         }
-        .padding(24).frame(width: 420)
+        .formStyle(.grouped)
+        .toggleStyle(.checkbox)
+        .frame(width: 480, height: 620)
     }
 }
