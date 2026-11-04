@@ -232,6 +232,9 @@ struct CanvasArea: View {
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
         PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale,
+                      selection: model.selection,
+                      onSelection: { model.setSelection($0, picking: $1) },
+                      onPick: { model.pickTone($0) },
                       onFitChanged: { model.fitImage = $0 })
     }
 }
