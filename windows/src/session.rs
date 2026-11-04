@@ -198,6 +198,13 @@ pub struct Preferences {
     /// are kept, in case it brings them back.
     pub favorite_films: Vec<String>,
     pub favorite_papers: Vec<String>,
+    /// Settings › Custom viewer background (the Mac's key). Off, the canvas
+    /// follows the light or dark theme.
+    #[serde(rename = "viewerBackgroundCustom")]
+    pub viewer_background_custom: bool,
+    /// The custom colour behind the photograph, "#rrggbb" in sRGB.
+    #[serde(rename = "viewerBackgroundColor")]
+    pub viewer_background: String,
 }
 
 /// The scope's heights in DIPs; it starts at the smallest, leaving the room
@@ -238,11 +245,20 @@ impl Default for Preferences {
             scope_height: SCOPE_HEIGHTS.0,
             favorite_films: vec![],
             favorite_papers: vec![],
+            viewer_background_custom: false,
+            // A neutral dark grey, near the dark theme's.
+            viewer_background: "#242424".into(),
         }
     }
 }
 
 impl Preferences {
+    /// The colour behind the photograph when Custom viewer background is on
+    /// and its colour reads.
+    pub fn custom_viewer_background(&self) -> Option<[u8; 3]> {
+        self.viewer_background_custom.then(|| crate::border::BorderColor::from_hex(&self.viewer_background)).flatten().map(|c| c.0)
+    }
+
     fn path() -> PathBuf {
         settings_dir().join("settings.json")
     }

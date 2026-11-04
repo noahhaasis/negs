@@ -14,7 +14,7 @@
 //! maximise button; their clicks are handled here, since the system would
 //! draw classic buttons over them.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::*;
@@ -62,6 +62,10 @@ thread_local! {
     /// Where the title goes, and the fonts of the title and caption glyphs.
     static TITLE_AREA: Cell<RECT> = const { Cell::new(RECT { left: 0, top: 0, right: 0, bottom: 0 }) };
     static FONTS: Cell<(isize, isize)> = const { Cell::new((0, 0)) };
+    /// The hairline between the menus and Open.
+    static DIVIDER: Cell<i32> = const { Cell::new(0) };
+    /// The toolbars' tooltips, as (toolbar, tooltip).
+    static TIPS: RefCell<Vec<(isize, isize)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The title's and the caption glyphs' fonts (after a DPI change too).
@@ -140,6 +144,64 @@ pub fn tool_metrics(main: HWND, toolbar: HWND) {
         let (w, h) = (px(main, 36.0), px(main, 32.0));
         SendMessageW(toolbar, TB_SETPADDING, WPARAM(0), LPARAM((((w - image) & 0xffff) | ((h - image) << 16)) as isize));
         SendMessageW(toolbar, TB_SETBUTTONSIZE, WPARAM(0), LPARAM(((w & 0xffff) | (h << 16)) as isize));
+        // Labelled buttons size themselves to their words (`BTNS_AUTOSIZE`).
+        SendMessageW(toolbar, TB_AUTOSIZE, WPARAM(0), LPARAM(0));
+    }
+    place_tips(toolbar);
+}
+
+/// Tooltips for a toolbar's buttons, by command. The toolbar's own
+/// (`TBSTYLE_TOOLTIPS`) never showed in the title bar; a tooltip that
+/// watches the toolbar itself (`TTF_SUBCLASS`) does, as on the canvas.
+pub fn add_tips(toolbar: HWND, tips: Vec<(u16, &'static str)>) {
+    unsafe {
+        let Ok(tip) = CreateWindowExW(
+            WS_EX_TOPMOST,
+            TOOLTIPS_CLASSW,
+            None,
+            WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP | TTS_NOPREFIX),
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            toolbar,
+            None,
+            super::instance(),
+            None,
+        ) else {
+            return;
+        };
+        theme::apply_control(tip, true);
+        for (command, text) in tips {
+            // The tooltip keeps the pointer: the text lives as long as it.
+            let text: &'static [u16] = Box::leak(wide(text).into_boxed_slice());
+            let info = TTTOOLINFOW {
+                cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+                uFlags: TTF_SUBCLASS,
+                hwnd: toolbar,
+                uId: command as usize,
+                lpszText: windows::core::PWSTR(text.as_ptr() as *mut _),
+                ..Default::default()
+            };
+            SendMessageW(tip, TTM_ADDTOOLW, WPARAM(0), LPARAM(&info as *const _ as isize));
+        }
+        TIPS.with(|t| t.borrow_mut().push((toolbar.0 as isize, tip.0 as isize)));
+    }
+}
+
+/// Puts each button's tip over the button, after the toolbar sized them.
+fn place_tips(toolbar: HWND) {
+    let Some(tip) = TIPS.with(|t| t.borrow().iter().find(|(b, _)| *b == toolbar.0 as isize).map(|(_, tip)| HWND(*tip as *mut _))) else { return };
+    unsafe {
+        let count = SendMessageW(toolbar, TB_BUTTONCOUNT, WPARAM(0), LPARAM(0)).0 as usize;
+        for i in 0..count {
+            let mut button = TBBUTTON::default();
+            SendMessageW(toolbar, TB_GETBUTTON, WPARAM(i), LPARAM(&mut button as *mut _ as isize));
+            let mut rect = RECT::default();
+            SendMessageW(toolbar, TB_GETITEMRECT, WPARAM(i), LPARAM(&mut rect as *mut _ as isize));
+            let info = TTTOOLINFOW { cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32, hwnd: toolbar, uId: button.idCommand as usize, rect, ..Default::default() };
+            SendMessageW(tip, TTM_NEWTOOLRECTW, WPARAM(0), LPARAM(&info as *const _ as isize));
+        }
     }
 }
 
@@ -151,9 +213,10 @@ fn size_of(bar: HWND) -> SIZE {
     size
 }
 
-/// Places the menu bar and the tools in the band; returns where the title
-/// may go (between the tools and the caption buttons).
-pub fn layout(main: HWND, bar: HWND, tools: HWND) -> RECT {
+/// Places the menu bar, Open after it and the actions (Export, the panel)
+/// before the caption buttons; returns where the title may go, between them.
+/// The photograph's own tools are on the canvas.
+pub fn layout(main: HWND, bar: HWND, tools: HWND, actions: HWND) -> RECT {
     let band = height(main);
     let mut client = RECT::default();
     unsafe {
@@ -162,10 +225,15 @@ pub fn layout(main: HWND, bar: HWND, tools: HWND) -> RECT {
         let x = px(main, ICON);
         let _ = MoveWindow(bar, x, (band - menus.cy) / 2, menus.cx, menus.cy, true);
         let tools_size = size_of(tools);
-        let tools_x = x + menus.cx + px(main, 16.0);
+        let divider = x + menus.cx + px(main, 8.0);
+        DIVIDER.with(|d| d.set(divider));
+        let tools_x = divider + px(main, 8.0);
         let _ = MoveWindow(tools, tools_x, (band - tools_size.cy) / 2, tools_size.cx, tools_size.cy, true);
         let captions = if full_screen(main) { 0 } else { 3 * px(main, CAPTION_BUTTON) };
-        let area = RECT { left: tools_x + tools_size.cx + px(main, 16.0), top: 0, right: client.right - captions - px(main, 8.0), bottom: band };
+        let actions_size = size_of(actions);
+        let actions_x = client.right - captions - px(main, 8.0) - actions_size.cx;
+        let _ = MoveWindow(actions, actions_x, (band - actions_size.cy) / 2, actions_size.cx, actions_size.cy, true);
+        let area = RECT { left: tools_x + tools_size.cx + px(main, 16.0), top: 0, right: actions_x - px(main, 16.0), bottom: band };
         TITLE_AREA.with(|t| t.set(area));
         let _ = InvalidateRect(main, Some(&RECT { left: 0, top: 0, right: client.right, bottom: band }), false);
         area
@@ -335,6 +403,10 @@ pub fn paint(main: HWND, dc: HDC) {
         let size = px(main, 16.0);
         let x = (px(main, ICON) - size) / 2;
         let _ = DrawIconEx(c.hdc(), x, (band - size) / 2, icon, size, size, 0, None, DI_NORMAL);
+    }
+    let divider = DIVIDER.with(Cell::get) as f32;
+    if divider > 0.0 {
+        c.round_rect(RectF::new(divider, band as f32 * 0.3, s.max(1.0).floor(), band as f32 * 0.4), 0.0, p.border);
     }
     // The title, centred in its space when it fits.
     let ink = if active { p.text } else { p.disabled };

@@ -1108,6 +1108,17 @@ impl Model {
         }
     }
 
+    /// The title bar's panel button: hide the column, or show it with the
+    /// panel it last showed.
+    pub fn toggle_inspector(&mut self) {
+        if self.inspector_visible {
+            self.inspector_visible = false;
+            self.mark(dirty::LAYOUT | dirty::CHROME);
+        } else {
+            self.show_pane(self.pane());
+        }
+    }
+
     /// Shows a panel, remembered across launches. Opening Presets lists the
     /// folder again, so files copied in by hand appear.
     pub fn show_pane(&mut self, pane: Pane) {

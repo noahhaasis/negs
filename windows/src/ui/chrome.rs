@@ -12,9 +12,12 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use super::draw::{self, Canvas, RectF};
 use super::theme;
 
-/// The toolbar's glyphs by image index: Open, Film Strip, Fit, Actual Size,
-/// Rotate, Crop, Export, Adjustments, Presets.
-pub const TOOL_GLYPHS: [char; 9] = ['\u{E838}', '\u{E8B9}', '\u{E9A6}', '\u{E71E}', '\u{E7AD}', '\u{E7A8}', '\u{E78C}', '\u{E9E9}', '\u{E81E}'];
+/// The title bar's glyphs by image index: Open, Export, the panel.
+pub const TOOL_GLYPHS: [char; 3] = ['\u{E8B7}', '\u{E896}', '\u{E90D}'];
+/// The words beside them; the panel's button is the glyph alone.
+pub const TOOL_LABELS: [Option<&str>; 3] = [Some("Open"), Some("Export"), None];
+/// Between a glyph and its label, in DIPs.
+const LABEL_GAP: f32 = 6.0;
 
 /// Paints `toolbar` with `glyphs` (the font, updated on DPI changes).
 pub fn subclass_toolbar(toolbar: HWND, glyphs: HFONT) {
@@ -72,19 +75,51 @@ fn paint_toolbar(hwnd: HWND, dc: HDC, font: HFONT) {
             let pressed = button.fsState & TBSTATE_PRESSED as u8 != 0;
             let is_hot = hot == i as isize && enabled;
             let face = rf.inset(2.0 * s, 2.0 * s);
-            if pressed {
+            // Export, the way out of the window, in the accent.
+            let primary = button.idCommand == super::id::EXPORT as i32;
+            let mut ink = if !enabled { p.disabled } else if checked { theme::mix(p.text, p.accent, 0.6) } else { p.text };
+            if primary && enabled {
+                c.round_rect(face, 4.0 * s, if pressed { p.accent_pressed } else if is_hot { p.accent_hover } else { p.accent });
+                ink = p.on_accent;
+            } else if primary {
+                c.round_frame(face, 4.0 * s, s.max(1.0), p.border);
+            } else if pressed {
                 c.round_rect(face, 4.0 * s, p.subtle_pressed);
             } else if checked {
                 c.round_rect(face, 4.0 * s, if is_hot { theme::mix(p.subtle_hover, p.accent, 0.22) } else { theme::mix(p.panel, p.accent, 0.16) });
             } else if is_hot {
                 c.round_rect(face, 4.0 * s, p.subtle_hover);
             }
-            let glyph = TOOL_GLYPHS.get(button.iBitmap as usize).copied().unwrap_or(' ');
-            let ink = if !enabled { p.disabled } else if checked { theme::mix(p.text, p.accent, 0.6) } else { p.text };
-            c.text(&glyph.to_string(), r, font, ink, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            let glyph = TOOL_GLYPHS.get(button.iBitmap as usize).copied().unwrap_or(' ').to_string();
+            match TOOL_LABELS.get(button.iBitmap as usize).copied().flatten() {
+                Some(label) => {
+                    // Glyph and words centred together in the button the toolbar sized.
+                    let words_font = draw::font_of(hwnd);
+                    let (glyph_w, gap) = ((20.0 * s) as i32, (LABEL_GAP * s) as i32);
+                    let left = r.left + (r.right - r.left - glyph_w - gap - text_width(hwnd, words_font, label)) / 2;
+                    let glyph_box = RECT { left, right: left + glyph_w, ..r };
+                    c.text(&glyph, glyph_box, font, ink, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    let words = RECT { left: glyph_box.right + gap, ..r };
+                    c.text(label, words, words_font, ink, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                }
+                None => c.text(&glyph, r, font, ink, DT_CENTER | DT_VCENTER | DT_SINGLELINE),
+            }
         }
         c.present(dc);
     }
+}
+
+fn text_width(hwnd: HWND, font: HFONT, text: &str) -> i32 {
+    let text: Vec<u16> = text.encode_utf16().collect();
+    let mut size = SIZE::default();
+    unsafe {
+        let dc = GetDC(hwnd);
+        let old = SelectObject(dc, font);
+        let _ = GetTextExtentPoint32W(dc, &text, &mut size);
+        SelectObject(dc, old);
+        ReleaseDC(hwnd, dc);
+    }
+    size.cx
 }
 
 /// Paints the status bar: its texts in the secondary grey on the panel,

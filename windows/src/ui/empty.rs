@@ -5,14 +5,13 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::SystemServices::*;
 use windows::Win32::UI::Controls::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
 use super::draw;
 use super::theme;
-use super::{App, create, id, post, with_app};
+use super::{App, create, id, with_app};
 use crate::platform::wide;
 
 #[derive(Default)]
@@ -213,57 +212,6 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
-        }
-    }
-}
-
-/// Press and hold to compare with the photograph before developing. The
-/// decode starts when the pointer arrives; the keyboard (and so screen
-/// readers) toggle it instead.
-pub fn subclass_original_button(button: HWND) {
-    unsafe {
-        let _ = SetWindowSubclass(button, Some(original_subclass), 1, 0);
-    }
-    super::dialogs::tooltip(button, "Hold to show the original (\\ or O)");
-}
-
-extern "system" fn original_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, data: usize) -> LRESULT {
-    unsafe {
-        match msg {
-            WM_MOUSEMOVE if data == 0 => {
-                let _ = SetWindowSubclass(hwnd, Some(original_subclass), 1, 1);
-                let mut track = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
-                let _ = TrackMouseEvent(&mut track);
-                post(|app: &mut App| app.model.prepare_original());
-                DefSubclassProc(hwnd, msg, wparam, lparam)
-            }
-            WM_MOUSELEAVE => {
-                let _ = SetWindowSubclass(hwnd, Some(original_subclass), 1, 0);
-                DefSubclassProc(hwnd, msg, wparam, lparam)
-            }
-            WM_LBUTTONDOWN => {
-                with_app(|app| app.model.hold_original(true));
-                SetCapture(hwnd);
-                let _ = SetWindowSubclass(hwnd, Some(original_subclass), 1, 2);
-                LRESULT(0)
-            }
-            WM_LBUTTONUP | WM_CAPTURECHANGED if data == 2 => {
-                let _ = SetWindowSubclass(hwnd, Some(original_subclass), 1, 1);
-                if msg == WM_LBUTTONUP {
-                    let _ = ReleaseCapture();
-                }
-                with_app(|app| app.model.hold_original(false));
-                LRESULT(0)
-            }
-            WM_KEYUP if wparam.0 == 0x20 || wparam.0 == 0x0d => {
-                with_app(|app| {
-                    let held = !app.model.holding_original;
-                    app.model.hold_original(held);
-                });
-                LRESULT(0)
-            }
-            WM_KEYDOWN | WM_CHAR if wparam.0 == 0x20 || wparam.0 == 0x0d => LRESULT(0),
-            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
         }
     }
 }

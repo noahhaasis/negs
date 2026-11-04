@@ -197,10 +197,9 @@ pub struct Inspector {
     decimal: char,
     /// The UI font's line height, for value boxes inside their fields.
     line: i32,
-    /// Motion: the next layout slides rows to their places; the next sync
-    /// fades the rows in (Lab | Post); the slide running.
+    /// Motion: the next layout slides rows to their places; the slide
+    /// running.
     slide: bool,
-    fade: bool,
     sliding: Option<Slide>,
     /// Where the last layout put each control (its top), to slide from.
     placed: std::collections::HashMap<isize, i32>,
@@ -235,12 +234,14 @@ thread_local! {
 pub fn register() {
     unsafe {
         // Their backgrounds are painted from the palette.
-        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 6] = [
+        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 7] = [
             (w!("NegsInspector"), Some(panel_proc), WNDCLASS_STYLES(0)),
             (w!("NegsRows"), Some(rows_proc), WNDCLASS_STYLES(0)),
             (w!("NegsScope"), Some(scope_proc), WNDCLASS_STYLES(0)),
             (w!("NegsScopeGrip"), Some(grip_proc), CS_DBLCLKS),
             (w!("NegsCropPanel"), Some(crop_proc), WNDCLASS_STYLES(0)),
+            // Its own class only so its scroll bar takes the dark theme.
+            (w!("NegsCropRows"), Some(crop_proc), WNDCLASS_STYLES(0)),
             (w!("NegsStockGrid"), Some(grid_proc), WNDCLASS_STYLES(0)),
         ];
         for (name, proc_, style) in classes {
@@ -294,7 +295,6 @@ impl Inspector {
             decimal: '.',
             line: fonts.line,
             slide: false,
-            fade: false,
             sliding: None,
             placed: Default::default(),
             crop_shown: false,
@@ -316,11 +316,24 @@ impl Inspector {
 
     pub fn layout(&mut self, x: i32, y: i32, width: i32, height: i32, visible: bool) {
         self.rect = RECT { left: x, top: y, right: x + width, bottom: y + height };
+        let rows_panel = self.rows_panel;
+        let rows_height = move || {
+            let mut client = RECT::default();
+            unsafe {
+                let _ = GetClientRect(rows_panel, &mut client);
+            }
+            client.bottom
+        };
+        let before = rows_height();
         unsafe {
             let _ = MoveWindow(self.panel, x, y, width, height, true);
             let _ = ShowWindow(self.panel, if visible { SW_SHOWNA } else { SW_HIDE });
         }
         self.layout_frame();
+        // A resized window: the rows' scroll range and position follow.
+        if self.built && rows_height() != before {
+            post(|app: &mut App| layout_rows(&mut app.inspector, &app.model));
+        }
     }
 
     /// The scope, the pinned stocks, the tab switch, the rows and the reset
@@ -340,30 +353,33 @@ impl Inspector {
         let tabs = self.px(32.0);
         let reset = self.px(32.0);
         let mut y = self.px(8.0);
-        unsafe {
-            let _ = MoveWindow(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0), true);
-            let _ = MoveWindow(self.scope_label, w - pad - self.px(40.0), y + self.px(4.0), self.px(40.0), self.px(16.0), true);
-            y += mode + self.px(8.0);
-            let _ = MoveWindow(self.scope, pad, y, inner, scope, true);
-            y += scope;
-            let _ = MoveWindow(self.grip, pad, y, inner, grip, true);
-            y += grip;
-            let _ = MoveWindow(self.pinned, 0, y, w, self.pinned_height, true);
-            y += self.pinned_height + self.px(8.0);
-            let each = inner / 3;
-            for (i, &tab) in self.tabs.iter().enumerate() {
-                let x = pad + each * i as i32;
-                let width = if i == 2 { inner - 2 * each } else { each };
-                let _ = MoveWindow(tab, x, y, width, tabs, true);
-            }
-            y += tabs + self.px(8.0);
-            let rows_bottom = h - reset - pad - self.px(8.0);
-            let _ = MoveWindow(self.rows_panel, 0, y, w, (rows_bottom - y).max(0), true);
-            let _ = MoveWindow(self.reset, pad, h - reset - pad, inner, reset, true);
-            if let Some(crop) = &self.crop {
-                let _ = MoveWindow(crop.panel, 0, 0, w, h, true);
-            }
+        // Moved together (`DeferWindowPos`): one at a time, each move
+        // repainted what it uncovered before the next filled it, which
+        // flickered on every step of dragging the scope's grabber.
+        let mut positions = vec![(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0))];
+        positions.push((self.scope_label, w - pad - self.px(40.0), y + self.px(4.0), self.px(40.0), self.px(16.0)));
+        y += mode + self.px(8.0);
+        positions.push((self.scope, pad, y, inner, scope));
+        y += scope;
+        positions.push((self.grip, pad, y, inner, grip));
+        y += grip;
+        positions.push((self.pinned, 0, y, w, self.pinned_height));
+        y += self.pinned_height + self.px(8.0);
+        let each = inner / 3;
+        for (i, &tab) in self.tabs.iter().enumerate() {
+            let x = pad + each * i as i32;
+            let width = if i == 2 { inner - 2 * each } else { each };
+            positions.push((tab, x, y, width, tabs));
         }
+        y += tabs + self.px(8.0);
+        let rows_bottom = h - reset - pad - self.px(8.0);
+        positions.push((self.rows_panel, 0, y, w, (rows_bottom - y).max(0)));
+        positions.push((self.reset, pad, h - reset - pad, inner, reset));
+        if let Some(crop) = &self.crop {
+            positions.push((crop.panel, 0, 0, w, h));
+        }
+        place(&positions, 0);
+        layout_crop(self);
     }
 }
 
@@ -720,6 +736,34 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     if !app.inspector.built {
         return;
     }
+    // Entering or leaving crop swaps the whole column while it doesn't
+    // draw, then it paints once, like a tab's rows below. The incoming side
+    // used to fade in, a layered window: entering showed the old controls
+    // through it and repainted the crop panel piece by piece when the fade
+    // ended; leaving blanked the column for a few frames.
+    let swap = app.inspector.crop_shown != app.model.cropping();
+    let panel = app.inspector.panel;
+    if swap {
+        hold_redraw(panel, true);
+    }
+    sync_column(app, structure, swap);
+    if swap {
+        hold_redraw(panel, false);
+    }
+}
+
+/// Stops the column drawing, or starts it again and paints it once.
+fn hold_redraw(panel: HWND, hold: bool) {
+    unsafe {
+        SendMessageW(panel, WM_SETREDRAW, WPARAM(!hold as usize), LPARAM(0));
+        if !hold {
+            let _ = RedrawWindow(panel, None, None, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        }
+    }
+}
+
+/// `sync` past the scope; `held` when the column already doesn't draw.
+fn sync_column(app: &mut App, structure: bool, held: bool) {
     sync_crop(app);
     let cropping = app.model.cropping();
     let ins = &mut app.inspector;
@@ -753,6 +797,19 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
         let shown = on_tab && visible(row, model, &|g| want[g] && expanded[g]);
         want[i] = shown;
     }
+    // Rows and grids appearing and going (a tab, a group, a foldout) change
+    // while the column doesn't draw, then it paints once: shown one by one,
+    // rows drew at their old places, over a part-cleared panel, before the
+    // layout moved them. The tabs used to fade the rows in instead, a
+    // layered window that blanked them first and flashed again when it ended.
+    let foldout_changed = |paper: bool| {
+        let open = model.previews.open(paper) && ins.rows.iter().zip(&want).any(|(r, w)| r.kind == Kind::Foldout(paper) && *w);
+        open != ins.grids[paper as usize].as_ref().is_some_and(|g| g.was_open)
+    };
+    let lock = !held && (want.iter().zip(&ins.rows).any(|(w, r)| *w != r.shown) || foldout_changed(false) || foldout_changed(true));
+    if lock {
+        hold_redraw(ins.panel, true);
+    }
     let t0 = crate::platform::qpc();
     let mut created = false;
     for i in 0..ins.rows.len() {
@@ -780,15 +837,27 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     for paper in [false, true] {
         let key = grid_key(model, paper);
         let open = model.previews.open(paper) && ins.rows.iter().any(|r| r.kind == Kind::Foldout(paper) && r.shown);
+        // A grid rebuilt while open keeps its scroll and the tile under the
+        // pointer, rather than jumping back to the current stock.
+        let mut kept = None;
         if ins.grids[paper as usize].as_ref().is_some_and(|g| g.key != key) {
             if let Some(grid) = ins.grids[paper as usize].take() {
+                kept = grid.was_open.then(|| (grid.scroll, pointed_tile(&grid)));
+                // The hovered tile's position now names another tile.
+                if HOVER_TILE.get().is_some_and(|(p, _)| p == paper) {
+                    HOVER_TILE.set(None);
+                }
                 unsafe {
                     let _ = DestroyWindow(grid.window);
                 }
             }
         }
         if open && ins.grids[paper as usize].is_none() && model.has_catalog() {
-            ins.grids[paper as usize] = Some(build_grid(ins.pinned, &app.fonts, model, paper, key));
+            let mut grid = build_grid(ins.pinned, &app.fonts, model, paper, key);
+            if let Some((scroll, anchor)) = kept {
+                (grid.scroll, grid.was_open, grid.anchor) = (scroll, true, anchor);
+            }
+            ins.grids[paper as usize] = Some(grid);
             created = true;
             fix_z_order(ins);
         }
@@ -810,8 +879,8 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     }
     let t2 = crate::platform::qpc();
     update_values(ins, model, &expanded);
-    if std::mem::take(&mut ins.fade) {
-        motion::fade_in(ins.rows_panel);
+    if lock {
+        hold_redraw(ins.panel, false);
     }
     let t3 = crate::platform::qpc();
     // Curves are computed only while the graph is on screen.
@@ -1189,7 +1258,8 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                 let reset = ins.px(24.0);
                 positions.push((c[0], x, y + ins.px(2.0), right - x - reset - edit, text));
                 positions.push((c[3], right - edit - reset, y, reset, ins.px(22.0)));
-                positions.push((c[1], x - ins.px(8.0), y + ins.px(22.0), right - x - edit, ins.px(24.0)));
+                // 26 DIPs: the thumb's focus ring, uncut.
+                positions.push((c[1], x - ins.px(8.0), y + ins.px(22.0), right - x - edit, ins.px(26.0)));
                 let r = ins.field(right - edit, y + ins.px(22.0), edit);
                 positions.push((c[2], r.left, r.top, r.right - r.left, r.bottom - r.top));
                 ins.px(48.0)
@@ -1291,7 +1361,9 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                     None => reveal.push(hwnd),
                 }
             }
-            if let Some(d) = defer {
+            if let Some(d) = defer
+                && !combo_in_place(hwnd, x, at, w.max(0))
+            {
                 defer = DeferWindowPos(d, hwnd, None, x, at, w.max(0), h.max(0), SWP_NOZORDER | SWP_NOACTIVATE).ok();
             }
             if interrupted.contains(&hwnd) {
@@ -1330,7 +1402,9 @@ fn place(positions: &[(HWND, i32, i32, i32, i32)], scroll: i32) {
     unsafe {
         let mut defer = BeginDeferWindowPos(positions.len() as i32).ok();
         for &(hwnd, x, y, w, h) in positions {
-            if let Some(d) = defer {
+            if let Some(d) = defer
+                && !combo_in_place(hwnd, x, y - scroll, w.max(0))
+            {
                 defer = DeferWindowPos(d, hwnd, None, x, y - scroll, w.max(0), h.max(0), SWP_NOZORDER | SWP_NOACTIVATE).ok();
             }
         }
@@ -1397,6 +1471,65 @@ fn scroll_to(ins: &mut Inspector, target: i32) {
         }
         let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nPos: target, ..Default::default() };
         SetScrollInfo(ins.rows_panel, SB_VERT, &info, true);
+    }
+}
+
+/// Scrolls the rows, or the crop panel's, so the focused control's row is in
+/// view. Only after keys: a click may be starting a drag.
+pub fn reveal_focus(app: &mut App) {
+    let ins = &mut app.inspector;
+    let crop_rows = ins.crop.as_ref().map(|c| c.rows);
+    unsafe {
+        // The scrolling panel's child that holds the focus.
+        let mut child = GetFocus();
+        let panel = loop {
+            let Ok(parent) = GetParent(child) else { return };
+            if parent == ins.rows_panel || Some(parent) == crop_rows {
+                break parent;
+            }
+            child = parent;
+        };
+        // Measured where a running slide ends.
+        finish_slide(ins);
+        // Top and bottom in the panel's client area, as scrolled now.
+        let span = |hwnds: &[HWND]| {
+            hwnds.iter().filter(|&&h| IsWindowVisible(h).as_bool()).fold(None, |span: Option<(i32, i32)>, &h| {
+                let mut r = RECT::default();
+                let _ = GetWindowRect(h, &mut r);
+                let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
+                MapWindowPoints(None, panel, &mut corners);
+                let (top, bottom) = (corners[0].y, corners[1].y);
+                Some(span.map_or((top, bottom), |(t, b)| (t.min(top), b.max(bottom))))
+            })
+        };
+        let margin = ins.px(8.0);
+        let mut client = RECT::default();
+        let _ = GetClientRect(panel, &mut client);
+        // A row taller than the panel shows the focused control's top.
+        let target = |scroll: i32, (top, bottom): (i32, i32), own: i32| {
+            let (top, bottom) = (top - margin + scroll, bottom + margin + scroll);
+            if top < scroll {
+                Some(top)
+            } else if bottom > scroll + client.bottom {
+                Some((bottom - client.bottom).min(own - margin + scroll))
+            } else {
+                None
+            }
+        };
+        let Some(own) = span(&[child]) else { return };
+        if panel == ins.rows_panel {
+            let row = ins.rows.iter().find(|r| r.controls.contains(&child));
+            let whole = row.and_then(|r| span(&r.controls)).unwrap_or(own);
+            if let Some(to) = target(ins.scroll, whole, own.0) {
+                scroll_to(ins, to);
+            }
+        } else if let Some(crop) = ins.crop.as_mut() {
+            // The angle's label is above it.
+            let whole = if child == crop.get(C_ANGLE) { span(&[child, crop.get(C_LABELS + 5)]).unwrap_or(own) } else { own };
+            if let Some(to) = target(crop.scroll, whole, own.0) {
+                scroll_crop(crop, to);
+            }
+        }
     }
 }
 
@@ -1792,7 +1925,6 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.prefs.choose_tab(next);
             app.model.prefs.save();
             app.inspector.scroll = 0;
-            app.inspector.fade = true;
             app.model.dirty |= dirty::STRUCTURE;
         }
         return;
@@ -1906,7 +2038,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
 }
 
 /// The common colour dialog; one undo step per OK.
-fn choose_color(owner: HWND, current: BorderColor) -> Option<BorderColor> {
+pub(super) fn choose_color(owner: HWND, current: BorderColor) -> Option<BorderColor> {
     thread_local! {
         static CUSTOM: RefCell<[COLORREF; 16]> = RefCell::new([COLORREF(0xffffff); 16]);
     }
@@ -2002,6 +2134,7 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 SetTextColor(dc, COLORREF(p.secondary));
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -2083,6 +2216,7 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 draw_item(&*(lparam.0 as *const DRAWITEMSTRUCT));
                 LRESULT(1)
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
@@ -2310,6 +2444,12 @@ unsafe fn second_click(hwnd: HWND, lparam: LPARAM) -> bool {
 /// subclass's data. A double-click's first click still moves the thumb.
 extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, reset: usize) -> LRESULT {
     unsafe {
+        // `paint_trackbar` covers the whole control. Its class erases in
+        // the system's light button face, which showed as white bars when
+        // the rows moved (dragging the scope's grabber, opening a foldout).
+        if msg == WM_ERASEBKGND {
+            return LRESULT(1);
+        }
         if msg == WM_MOUSEWHEEL && GetFocus() != hwnd {
             return SendMessageW(GetParent(hwnd).unwrap_or_default(), msg, wparam, lparam);
         }
@@ -2328,7 +2468,36 @@ extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             RESET_TRACKBAR.set(0);
             return LRESULT(0);
         }
-        DefSubclassProc(hwnd, msg, wparam, lparam)
+        // The control repaints only its own narrow thumb when it moves,
+        // leaving pieces of the round thumb and the accent fill behind:
+        // the whole slider repaints when its position, press or focus changes.
+        if !matches!(msg, WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_CAPTURECHANGED | WM_KEYDOWN | WM_TIMER | WM_MOUSEWHEEL | WM_SETFOCUS | WM_KILLFOCUS | TBM_SETPOS) {
+            return DefSubclassProc(hwnd, msg, wparam, lparam);
+        }
+        let state = || (DefSubclassProc(hwnd, TBM_GETPOS, WPARAM(0), LPARAM(0)).0, GetCapture() == hwnd);
+        let before = state();
+        let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+        if matches!(msg, WM_SETFOCUS | WM_KILLFOCUS) || state() != before {
+            let _ = InvalidateRect(hwnd, None, false);
+        }
+        result
+    }
+}
+
+/// Whether `hwnd` is a drop-down list already at this place and width.
+/// Layouts leave those alone: a move asks for the list's height; the box
+/// sizes itself back to its field at once, and what it covered meanwhile
+/// is erased and repainted, a flash of the controls below it.
+fn combo_in_place(hwnd: HWND, x: i32, y: i32, width: i32) -> bool {
+    if draw::class_of(hwnd) != "ComboBox" {
+        return false;
+    }
+    unsafe {
+        let mut r = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut r);
+        let mut points = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
+        MapWindowPoints(None, GetParent(hwnd).unwrap_or_default(), &mut points);
+        (points[0].x, points[0].y, points[1].x - points[0].x) == (x, y, width)
     }
 }
 
@@ -2450,6 +2619,8 @@ struct StockGrid {
     /// It was on screen at the last layout; opening it again scrolls to the
     /// current stock.
     was_open: bool,
+    /// The tile to keep in place at the next layout (`pointed_tile`).
+    anchor: Option<(String, bool, i32)>,
 }
 
 /// A tile as drawn.
@@ -2506,7 +2677,7 @@ fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, ke
         })
         .collect();
     TILES.with(|t| t.borrow_mut()[paper as usize] = looks);
-    let grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false };
+    let grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false, anchor: None };
     select_tile(&grid, if paper { &model.state.paper } else { &model.state.film });
     grid
 }
@@ -2549,7 +2720,12 @@ fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
     }
     grid.content = content;
     grid.view = content.min(limit);
-    if !grid.was_open {
+    if let Some((id, favorite, top)) = grid.anchor.take() {
+        let index = (0..grid.tiles.len()).find(|&i| grid.tiles[i].0 == id && among_favorites(grid, i) == favorite);
+        if let Some(&(_, _, y, _, _)) = index.and_then(|i| positions.iter().find(|p| p.0 == grid.tiles[i].1)) {
+            grid.scroll = y - top;
+        }
+    } else if !grid.was_open {
         let selected = TILES.with(|t| {
             let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
             t.borrow()[paper as usize].iter().position(|look| look.selected)
@@ -2573,6 +2749,33 @@ fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
         let _ = InvalidateRect(grid.window, None, true);
     }
     grid.view
+}
+
+/// Whether the tile at `index` is among the favourites, the untitled section.
+fn among_favorites(grid: &StockGrid, index: usize) -> bool {
+    match grid.headings.first() {
+        Some(&(None, _)) => index < grid.headings.get(1).map_or(grid.tiles.len(), |h| h.1),
+        _ => false,
+    }
+}
+
+/// The tile under the pointer: its stock, whether it is the copy among the
+/// favourites, and its top in the grid's view. Starring adds a tile above
+/// it; the rebuilt grid scrolls so this one stays under the pointer.
+fn pointed_tile(grid: &StockGrid) -> Option<(String, bool, i32)> {
+    unsafe {
+        let mut p = POINT::default();
+        GetCursorPos(&mut p).ok()?;
+        let _ = ScreenToClient(grid.window, &mut p);
+        grid.tiles.iter().enumerate().find_map(|(i, (id, tile))| {
+            let mut r = RECT::default();
+            let _ = GetWindowRect(*tile, &mut r);
+            let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
+            MapWindowPoints(None, grid.window, &mut corners);
+            let inside = p.x >= corners[0].x && p.x < corners[1].x && p.y >= corners[0].y && p.y < corners[1].y;
+            inside.then(|| (id.clone(), among_favorites(grid, i), corners[0].y))
+        })
+    }
 }
 
 /// Scrolls an open grid to `target`.
@@ -2827,6 +3030,9 @@ extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
             return LRESULT(0);
         }
         match msg {
+            // `draw_tile` covers the whole tile; erasing first blanked the
+            // thumbnails for a frame whenever the grid moved.
+            WM_ERASEBKGND => return LRESULT(1),
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if on_star(hwnd, lparam) => {
                 toggle_tile_favorite(hwnd);
                 return LRESULT(0);
@@ -2907,6 +3113,7 @@ extern "system" fn grid_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 SetTextColor(dc, COLORREF(p.secondary));
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             WM_VSCROLL | WM_MOUSEWHEEL => {
                 with_app(|app| {
@@ -3194,10 +3401,17 @@ pub fn report_geometry(app: &mut App) {
 
 // MARK: Crop panel
 
-/// Replaces the adjustments while cropping (`CropInspector`).
+/// Replaces the adjustments while cropping (`CropInspector`). Cancel and
+/// Done stay at the bottom, like Reset below the adjustments; the controls
+/// above them scroll when the column is short.
 struct CropPanel {
     panel: HWND,
+    rows: HWND,
     controls: Vec<(u16, HWND)>,
+    /// The custom ratio's fields show.
+    custom: bool,
+    scroll: i32,
+    content: i32,
 }
 
 const C_ASPECT: u16 = CROP_FIRST; // ..+8
@@ -3225,9 +3439,11 @@ fn build_crop(app: &mut App) {
     let fonts = &app.fonts;
     let parent = app.inspector.panel;
     let panel = create(w!("NegsCropPanel"), "Crop", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), parent, 0, HFONT::default());
+    let rows = create(w!("NegsCropRows"), "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), panel, 0, HFONT::default());
     let mut controls = vec![];
     let mut add = |id: u16, class: PCWSTR, text: &str, style: WINDOW_STYLE, font: HFONT| {
-        let c = create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), panel, id, font);
+        let parent = if matches!(id, C_CANCEL | C_DONE) { panel } else { rows };
+        let c = create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), parent, id, font);
         controls.push((id, c));
         c
     };
@@ -3286,24 +3502,76 @@ fn build_crop(app: &mut App) {
     );
     add(C_CANCEL, w!("BUTTON"), "Cancel", WS_TABSTOP | WS_GROUP, fonts.ui);
     add(C_DONE, w!("BUTTON"), "Done", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), fonts.ui);
-    app.inspector.crop = Some(CropPanel { panel, controls });
-    layout_crop(app);
+    let custom = app.model.crop_session.as_ref().is_some_and(|s| s.aspect == CropAspect::Custom);
+    let ins = &mut app.inspector;
+    unsafe {
+        let _ = MoveWindow(panel, 0, 0, ins.rect.right - ins.rect.left, ins.rect.bottom - ins.rect.top, false);
+    }
+    ins.crop = Some(CropPanel { panel, rows, controls, custom, scroll: 0, content: 0 });
+    layout_crop(ins);
 }
 
-fn layout_crop(app: &mut App) {
-    let ins = &app.inspector;
+/// Pins Cancel and Done, then places the controls above them.
+fn layout_crop(ins: &mut Inspector) {
     let Some(crop) = &ins.crop else { return };
     let (w, h) = (ins.rect.right - ins.rect.left, ins.rect.bottom - ins.rect.top);
     let pad = ins.px(16.0);
-    let right = w - pad;
+    let (button, tall) = (ins.px(88.0), ins.px(32.0));
+    let footer = h - pad - tall;
+    let rows = crop.rows;
+    place(
+        &[
+            (rows, 0, 0, w, (footer - ins.px(8.0)).max(0)),
+            (crop.get(C_CANCEL), w - pad - 2 * button - ins.px(8.0), footer, button, tall),
+            (crop.get(C_DONE), w - pad - button, footer, button, tall),
+        ],
+        0,
+    );
+    // Once more when the scroll bar comes or goes, which changes the width.
+    for _ in 0..2 {
+        let mut client = RECT::default();
+        unsafe {
+            let _ = GetClientRect(rows, &mut client);
+        }
+        let (positions, content) = crop_rows(ins, client.right);
+        let Some(crop) = ins.crop.as_mut() else { return };
+        crop.content = content;
+        crop.scroll = crop.scroll.clamp(0, (content - client.bottom).max(0));
+        place(&positions, crop.scroll);
+        let mut after = RECT::default();
+        unsafe {
+            let info = SCROLLINFO {
+                cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+                fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
+                nMin: 0,
+                nMax: content,
+                nPage: client.bottom.max(0) as u32,
+                nPos: crop.scroll,
+                ..Default::default()
+            };
+            SetScrollInfo(rows, SB_VERT, &info, true);
+            let _ = GetClientRect(rows, &mut after);
+        }
+        if after.right == client.right {
+            break;
+        }
+    }
+    // The panel draws the fields' frames, which reach past the fields.
+    unsafe {
+        let _ = InvalidateRect(rows, None, false);
+    }
+}
+
+/// Where the controls above Cancel and Done go in a `width` wide panel,
+/// unscrolled, and the height they take.
+fn crop_rows(ins: &Inspector, width: i32) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
+    let Some(crop) = &ins.crop else { return (vec![], 0) };
+    let pad = ins.px(16.0);
+    let right = width - pad;
     let row = ins.px(24.0);
     let mut y = ins.px(16.0);
-    let place = |id: u16, x: i32, y: i32, w: i32, h: i32| unsafe {
-        let _ = MoveWindow(crop.get(id), x, y, w.max(0), h.max(0), true);
-    };
-    unsafe {
-        let _ = MoveWindow(crop.panel, 0, 0, w, h, true);
-    }
+    let mut positions = vec![];
+    let mut place = |id: u16, x: i32, y: i32, w: i32, h: i32| positions.push((crop.get(id), x, y, w, h));
     place(C_LABELS, pad, y, right - pad, ins.px(24.0));
     y += ins.px(32.0);
     for i in 0..CropAspect::ALL.len() as u16 {
@@ -3311,13 +3579,12 @@ fn layout_crop(app: &mut App) {
         y += row + ins.px(4.0);
     }
     y += ins.px(4.0);
-    let custom = app.model.crop_session.as_ref().is_some_and(|s| s.aspect == CropAspect::Custom);
     for id in [C_LABELS + 1, C_WIDTH, C_LABELS + 2, C_HEIGHT] {
         unsafe {
-            let _ = ShowWindow(crop.get(id), if custom { SW_SHOWNA } else { SW_HIDE });
+            let _ = ShowWindow(crop.get(id), if crop.custom { SW_SHOWNA } else { SW_HIDE });
         }
     }
-    if custom {
+    if crop.custom {
         let field = ins.px(56.0);
         place(C_LABELS + 1, pad, y + ins.px(2.0), ins.px(88.0), ins.px(20.0));
         let r = ins.field(pad + ins.px(96.0), y, field);
@@ -3338,7 +3605,7 @@ fn layout_crop(app: &mut App) {
     place(C_ANGLE_RESET, right - ins.px(24.0) - ins.px(56.0), y, ins.px(24.0), ins.px(22.0));
     place(C_ANGLE_VALUE, right - ins.px(56.0), y + ins.px(2.0), ins.px(56.0), ins.px(20.0));
     y += ins.px(22.0);
-    place(C_ANGLE, pad - ins.px(8.0), y, right - pad + ins.px(16.0), ins.px(24.0));
+    place(C_ANGLE, pad - ins.px(8.0), y, right - pad + ins.px(16.0), ins.px(26.0));
     y += ins.px(40.0);
     place(C_LABELS + 6, pad, y, ins.px(88.0), ins.px(20.0));
     place(C_SIZE, pad + ins.px(88.0), y, right - pad - ins.px(88.0), ins.px(20.0));
@@ -3347,10 +3614,11 @@ fn layout_crop(app: &mut App) {
     y += ins.px(56.0);
     place(C_RESET, pad, y, right - pad, ins.px(32.0));
     y += ins.px(48.0);
-    place(C_LABELS + 7, pad, y, right - pad, ins.px(88.0));
-    let button = ins.px(88.0);
-    place(C_DONE, right - button, h - pad - ins.px(32.0), button, ins.px(32.0));
-    place(C_CANCEL, right - 2 * button - ins.px(8.0), h - pad - ins.px(32.0), button, ins.px(32.0));
+    // The hint wraps to as many lines as the width needs.
+    let hint = footer_height(ins, crop.get(C_LABELS + 7), right - pad);
+    place(C_LABELS + 7, pad, y, right - pad, hint);
+    y += hint + ins.px(8.0);
+    (positions, y)
 }
 
 fn sync_crop(app: &mut App) {
@@ -3362,12 +3630,7 @@ fn sync_crop(app: &mut App) {
     unsafe {
         let _ = ShowWindow(crop.panel, if cropping { SW_SHOWNA } else { SW_HIDE });
     }
-    let panel = crop.panel;
-    if app.inspector.crop_shown != cropping {
-        app.inspector.crop_shown = cropping;
-        motion::fade_in(if cropping { panel } else { app.inspector.rows_panel });
-    }
-    let Some(crop) = &app.inspector.crop else { return };
+    app.inspector.crop_shown = cropping;
     let Some(session) = &app.model.crop_session else { return };
     let decimal = app.inspector.decimal;
     for (i, aspect) in CropAspect::ALL.iter().enumerate() {
@@ -3418,9 +3681,31 @@ fn sync_crop(app: &mut App) {
     set_text(crop.get(C_SIZE), &format!("{} × {} px", size.0.round() as i64, size.1.round() as i64));
     set_text(crop.get(C_SIZE_NOTE), &note);
     enable(crop.get(C_RESET), session.modified());
-    let custom_visible = unsafe { IsWindowVisible(crop.get(C_WIDTH)).as_bool() };
-    if custom_visible != (session.aspect == CropAspect::Custom) {
-        layout_crop(app);
+    let custom = session.aspect == CropAspect::Custom;
+    if let Some(crop) = app.inspector.crop.as_mut()
+        && crop.custom != custom
+    {
+        crop.custom = custom;
+        layout_crop(&mut app.inspector);
+    }
+}
+
+/// Scrolls the controls above Cancel and Done to `target`.
+fn scroll_crop(crop: &mut CropPanel, target: i32) {
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(crop.rows, &mut client);
+    }
+    let target = target.clamp(0, (crop.content - client.bottom).max(0));
+    if target == crop.scroll {
+        return;
+    }
+    let delta = crop.scroll - target;
+    crop.scroll = target;
+    unsafe {
+        ScrollWindowEx(crop.rows, 0, delta, None, None, None, None, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+        let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nPos: target, ..Default::default() };
+        SetScrollInfo(crop.rows, SB_VERT, &info, true);
     }
 }
 
@@ -3475,6 +3760,40 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 });
                 LRESULT(0)
             }
+            WM_VSCROLL => {
+                with_app(|app| {
+                    let line = app.inspector.px(40.0);
+                    let Some(crop) = app.inspector.crop.as_mut() else { return };
+                    if hwnd != crop.rows {
+                        return;
+                    }
+                    let mut info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, ..Default::default() };
+                    let _ = GetScrollInfo(hwnd, SB_VERT, &mut info);
+                    let target = match SCROLLBAR_COMMAND((wparam.0 & 0xffff) as i32) {
+                        SB_LINEUP => info.nPos - line,
+                        SB_LINEDOWN => info.nPos + line,
+                        SB_PAGEUP => info.nPos - info.nPage as i32,
+                        SB_PAGEDOWN => info.nPos + info.nPage as i32,
+                        SB_THUMBTRACK | SB_THUMBPOSITION => info.nTrackPos,
+                        SB_TOP => 0,
+                        SB_BOTTOM => i32::MAX / 2,
+                        _ => info.nPos,
+                    };
+                    scroll_crop(crop, target);
+                });
+                LRESULT(0)
+            }
+            // From the controls, the angle slider without focus, or Cancel and Done.
+            WM_MOUSEWHEEL => {
+                let delta = ((wparam.0 >> 16) & 0xffff) as i16 as i32;
+                with_app(|app| {
+                    let step = delta * app.inspector.px(60.0) / 120;
+                    if let Some(crop) = app.inspector.crop.as_mut() {
+                        scroll_crop(crop, crop.scroll - step);
+                    }
+                });
+                LRESULT(0)
+            }
             WM_CTLCOLOREDIT => draw::color_edit(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
             WM_CTLCOLORSTATIC => {
                 let dc = HDC(wparam.0 as *mut _);
@@ -3490,6 +3809,7 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 SetTextColor(dc, COLORREF(color));
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {

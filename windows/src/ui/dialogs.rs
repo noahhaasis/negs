@@ -55,6 +55,12 @@ pub fn tooltip(hwnd: HWND, text: &str) {
                 )
                 .unwrap_or_default();
                 SendMessageW(tip, TTM_SETMAXTIPWIDTH, WPARAM(0), LPARAM(420));
+                // At the system's half second (a tenth from tip to tip), a
+                // pointer resting on a slider before pressing it showed the
+                // tip, and the press hid it at once: a box flashed by.
+                for delay in [TTDT_INITIAL, TTDT_RESHOW] {
+                    SendMessageW(tip, TTM_SETDELAYTIME, WPARAM(delay as usize), LPARAM(1000));
+                }
                 super::theme::apply_control(tip, true);
                 t.set(tip.0 as isize);
             }
@@ -178,6 +184,8 @@ const SETTINGS_MATCH: u16 = 15;
 const SETTINGS_LIMIT: u16 = 16;
 const SETTINGS_LOW_MEMORY: u16 = 17;
 const SETTINGS_NEW_NOTE: u16 = 18;
+const SETTINGS_BACKGROUND: u16 = 19;
+const SETTINGS_BACKGROUND_COLOR: u16 = 20;
 
 /// Settings › New photographs: what each choice does.
 const NEW_PHOTOS_NOTES: [&str; 2] = [
@@ -190,6 +198,8 @@ thread_local! {
     static SETTINGS_DONE: Cell<Option<bool>> = const { Cell::new(None) };
     /// The dialog's descriptions, drawn grey.
     static SETTINGS_NOTES: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) };
+    /// The viewer background colour chosen in the open dialog, and its swatch.
+    static SETTINGS_SWATCH: Cell<(isize, [u8; 3])> = const { Cell::new((0, [0; 3])) };
 }
 
 /// Settings (the Mac's Settings window): previews, keeping the paper, new
@@ -269,6 +279,22 @@ pub fn settings(app: &mut App) {
     notes.push(note);
     rows.push((note, None, px(24.0), px(24.0), None));
     rows.push((label("Preview & Export", fonts.section), Some(px(24.0)), 0, px(8.0), None));
+    let prefs = &app.model.prefs;
+    let custom_background = check("Custom viewer background", SETTINGS_BACKGROUND, prefs.viewer_background_custom);
+    rows.push((custom_background, Some(px(24.0)), 0, px(4.0), None));
+    let choose = make(windows::core::w!("BUTTON"), "Choose Colour…", WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), SETTINGS_BACKGROUND_COLOR, fonts.ui);
+    super::accessible_name(choose, "Viewer background colour");
+    unsafe {
+        let _ = EnableWindow(choose, prefs.viewer_background_custom);
+    }
+    rows.push((choose, Some(px(32.0)), px(24.0), px(4.0), Some(px(160.0))));
+    // The colour, beside its button.
+    let swatch = make(windows::core::w!("STATIC"), "", WS_BORDER, 0, fonts.ui);
+    let color = crate::border::BorderColor::from_hex(&prefs.viewer_background).map_or([0x24; 3], |c| c.0);
+    SETTINGS_SWATCH.with(|s| s.set((swatch.0 as isize, color)));
+    let note = label("The colour behind the photograph. Off, it follows the light or dark theme.", fonts.small);
+    notes.push(note);
+    rows.push((note, None, px(24.0), px(16.0), None));
     let limit = check("Limit preview to 12 MP", SETTINGS_LIMIT, app.model.prefs.limits_preview());
     rows.push((limit, Some(px(24.0)), 0, 0, None));
     let note = label("Develops the preview faster on large photographs. Export keeps the full Image Size.", fonts.small);
@@ -302,6 +328,10 @@ pub fn settings(app: &mut App) {
         let h = height.unwrap_or_else(|| wrapped_height(control, w));
         unsafe {
             let _ = MoveWindow(control, pad + indent, y, w, h, false);
+            if control == choose {
+                let side = px(20.0);
+                let _ = MoveWindow(swatch, pad + indent + w + px(12.0), y + (h - side) / 2, side, side, false);
+            }
         }
         y += h + gap;
     }
@@ -342,6 +372,8 @@ pub fn settings(app: &mut App) {
         let (previews_on, keep_paper_on, automatic_on) = (checked(previews), checked(keep_paper), configured && checked(automatic));
         let fresh_on = SendMessageW(new_photos, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 == 1;
         let (match_on, limit_on, low_memory_on) = (checked(match_new), checked(limit), checked(low_memory));
+        let background_on = checked(custom_background);
+        let background = crate::border::BorderColor(SETTINGS_SWATCH.with(Cell::get).1);
         let _ = EnableWindow(app.main, true);
         let _ = DestroyWindow(dialog);
         let _ = SetForegroundWindow(app.main);
@@ -359,6 +391,13 @@ pub fn settings(app: &mut App) {
         app.model.set_match_new_photos(match_on);
         app.model.set_limit_preview(limit_on);
         app.model.set_low_memory_export(low_memory_on);
+        let prefs = &mut app.model.prefs;
+        if prefs.viewer_background_custom != background_on || prefs.viewer_background != background.hex() {
+            prefs.viewer_background_custom = background_on;
+            prefs.viewer_background = background.hex();
+            prefs.save();
+        }
+        super::canvas::set_custom_background(app.canvas, app.model.prefs.custom_viewer_background());
     }
 }
 
@@ -404,6 +443,18 @@ extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
                     set_new_photos_note(hwnd, fresh);
                 } else if id == SETTINGS_CHECK as i32 {
                     crate::updates::check(true);
+                } else if id == SETTINGS_BACKGROUND as i32 {
+                    let on = SendMessageW(HWND(lparam.0 as *mut _), BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
+                    if let Ok(choose) = GetDlgItem(hwnd, SETTINGS_BACKGROUND_COLOR as i32) {
+                        let _ = EnableWindow(choose, on);
+                    }
+                    let _ = InvalidateRect(HWND(SETTINGS_SWATCH.with(Cell::get).0 as *mut _), None, true);
+                } else if id == SETTINGS_BACKGROUND_COLOR as i32 {
+                    let (swatch, color) = SETTINGS_SWATCH.with(Cell::get);
+                    if let Some(chosen) = super::inspector::choose_color(hwnd, crate::border::BorderColor(color)) {
+                        SETTINGS_SWATCH.with(|s| s.set((swatch, chosen.0)));
+                        let _ = InvalidateRect(HWND(swatch as *mut _), None, true);
+                    }
                 }
                 LRESULT(0)
             }
@@ -418,6 +469,14 @@ extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
                 SetTextColor(dc, COLORREF(p.text));
                 SetBkColor(dc, COLORREF(p.control));
                 LRESULT(super::theme::brush(p.control).0 as isize)
+            }
+            WM_CTLCOLORSTATIC if lparam.0 == SETTINGS_SWATCH.with(Cell::get).0 => {
+                // The chosen colour, faded while the custom background is off.
+                let (_, [r, g, b]) = SETTINGS_SWATCH.with(Cell::get);
+                let on = GetDlgItem(hwnd, SETTINGS_BACKGROUND as i32).is_ok_and(|c| SendMessageW(c, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1);
+                let p = super::theme::palette();
+                let color = if on { r as u32 | (g as u32) << 8 | (b as u32) << 16 } else { p.disabled };
+                LRESULT(super::theme::brush(color).0 as isize)
             }
             WM_CTLCOLORSTATIC => {
                 let dc = HDC(wparam.0 as *mut _);
