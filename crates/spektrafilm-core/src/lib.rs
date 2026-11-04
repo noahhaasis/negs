@@ -22,5 +22,6 @@ pub mod print_morph;
 pub mod profile;
 pub mod spectral_service;
 pub mod stages;
+pub mod tone_curve;
 
 pub mod preview;

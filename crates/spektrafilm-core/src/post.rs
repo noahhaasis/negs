@@ -53,7 +53,7 @@ const LUT_SIZE: usize = 4096;
 
 /// Luminance weights of an output colour space: the Y row of its RGB → XYZ
 /// matrix. Unknown names fall back to sRGB, as the scan's output does.
-fn luminance_weights(color_space: &str) -> [f32; 3] {
+pub(crate) fn luminance_weights(color_space: &str) -> [f32; 3] {
     RgbColourspace::output(color_space).rgb_to_xyz[1].map(|v| v as f32)
 }
 
