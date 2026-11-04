@@ -218,15 +218,17 @@ of the tab's WebContent footprint, MiB:
    has `reduced` and `linear` for it; the page side is `cameraReference` in `app.js`.
 3. **`web/checks/post.mjs`** still drives the removed Post Tone/Saturation controls. Delete
    it or turn it into a Prep check (Prep sliders, the match note, Exposure as an offset).
-4. **The walkthrough** (`web/tutorial.js`, steps rendered by `tutorialAdapter` in `app.js`):
-   - The film and paper steps highlight `#film` / `#paper`'s rows, which are hidden on
-     desktop now that the foldouts replace them (`app.js`, `step.target === "film"`).
-     Highlight the foldout, or open it for the step.
-   - No step covers Prep or Match camera brightness; the metering step moved to Prep and
-     the exposure step's control is now *Negative exposure (EV)*. Its text ("Change how the
-     film sees light") still fits; check the others against the new tabs.
-   - Run `web/checks/tutorial-layouts.mjs`, `tutorial.mjs` and `tutorial-discovery.mjs`;
-     they weren't run after the tab change.
+4. ~~**The walkthrough**~~ (done 2026-11-04): eleven steps. Print exposure's step went.
+   *Start from the right brightness* shows Match camera brightness with Auto exposure and
+   Metering (the tour starts with Match off; turning it on hides the meter, as outside the
+   tour, and doesn't change the new-RAW setting). *Make it brighter or darker* (Prep ›
+   Exposure) follows, and Negative exposure's text points to it. *Soften with a mist
+   filter* comes after halation, with Lens Diffusion on (a step's `set`). *Find every
+   control* outlines the ⚙ and names Settings › Advanced controls. The film and paper
+   steps open and outline their grid when the previews show (the menu otherwise); the tour
+   keeps the grids' open state, hides the "Some settings are hidden" note and waits for a
+   pending match. `tutorial.mjs` (desktop, 320×568, 390×844, 844×390),
+   `tutorial-layouts.mjs`, `tutorial-discovery.mjs` and `tutorial.test.mjs` pass in Chrome.
 5. **The menus.**
    - ⋯ holds presets and the LUT only again; settings moved to the gear's sheet (above).
    - The tab layout itself: Noah wants to refine it later ("the mac simplified a lot of

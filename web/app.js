@@ -399,7 +399,7 @@ function helpFor(c) {
 
 function buildControl(c) {
   const row = buildRow(c);
-  if (c.path) row.dataset.tutorialPath = c.path;
+  if (c.path ?? c.tutorial) row.dataset.tutorialPath = c.path ?? c.tutorial;
   const help = helpFor(c);
   if (help) {
     const button = info(c.label, help);
@@ -602,7 +602,7 @@ function remembered(key, fallback) {
   try { return JSON.parse(localStorage.getItem(`negs.${key}`)) ?? fallback; } catch { return fallback; }
 }
 function remember(key, value) {
-  if ((tutorialPresentation || tutorialRestoring) && ["groups", "pane", "tab", "sheet"].includes(key)) return;
+  if ((tutorialPresentation || tutorialRestoring) && ["groups", "pane", "tab", "sheet", "stockFolds", "matchNewRaws"].includes(key)) return;
   try { localStorage.setItem(`negs.${key}`, JSON.stringify(value)); } catch {}
 }
 
@@ -1981,7 +1981,7 @@ async function tourWait(test, signal, failures = renderFailures) {
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
 }
-const tourIdle = () => !loading && !running && !wanted && !source.busy && !developing;
+const tourIdle = () => !loading && !running && !wanted && !source.busy && !developing && !matching;
 const layoutSettled = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
 function tutorialAdapter() {
@@ -1997,6 +1997,7 @@ function tutorialAdapter() {
     holdOriginal(false);
   }
   function reveal(step) {
+    for (const fold of Object.values(folds)) fold.root.open = false;
     for (const node of document.querySelectorAll(".tour-control, .tour-group, .tour-section, .tour-stock")) {
       node.classList.remove("tour-control", "tour-group", "tour-section", "tour-stock");
     }
@@ -2005,8 +2006,11 @@ function tutorialAdapter() {
     showTab(step.tab);
     $("preset-menu").hidden = true;
     $("more").setAttribute("aria-expanded", "false");
+    // The film and paper steps: the menu, or with previews its grid, opened.
     if (step.target === "film" || step.target === "paper") {
-      $(step.target).closest("label").classList.add("tour-control");
+      const fold = folds[step.target].root;
+      if (fold.hidden) $(step.target).closest("label").classList.add("tour-control");
+      else { fold.classList.add("tour-control"); fold.open = true; }
       $(step.target).closest(".stock").classList.add("tour-stock");
     }
     for (const path of step.paths ?? []) {
@@ -2036,7 +2040,8 @@ function tutorialAdapter() {
     capture() {
       return { edit: structuredClone(state), photo, crop: structuredClone(crop), border: { ...border }, view: view.snapshot(),
         pane: $("side").dataset.pane, tab: $("side").dataset.tab, sheet, scroll: $("scroll").scrollTop,
-        groups: [...document.querySelectorAll("[data-tutorial-group]")].map((node) => [node, node.open]) };
+        groups: [...document.querySelectorAll("[data-tutorial-group]")].map((node) => [node, node.open]),
+        folds: Object.values(folds).map((fold) => [fold.root, fold.root.open]) };
     },
     async enter(signal) {
       tutorialPresentation = true;
@@ -2061,6 +2066,9 @@ function tutorialAdapter() {
     async step(step, signal) {
       await tourWait(tourIdle, signal);
       baseline();
+      // A step can start with an effect on, to show it.
+      for (const [path, value] of Object.entries(step.set ?? {})) set(path, value);
+      sync(); // reveal() reads what the baseline shows (the stock grids).
       reveal(step);
       sync();
       view.fit();
@@ -2088,7 +2096,7 @@ function tutorialAdapter() {
       $("tutorial-nav").hidden = true;
       $("preset-menu").hidden = true;
       $("more").setAttribute("aria-expanded", "false");
-      for (const [node, opened] of saved.groups) node.open = opened;
+      for (const [node, opened] of [...saved.groups, ...saved.folds]) node.open = opened;
       showPane(saved.pane);
       showTab(saved.tab);
       setSheet(saved.sheet);
@@ -2139,7 +2147,7 @@ function tutorialAdapter() {
       samplePicker.sync();
       presets.sync();
     },
-    completed: () => showMessage("You’re ready. Film and paper shape the look; Print exposure sets the final brightness. Reopen Tutorial whenever you like.", false, 8000),
+    completed: () => showMessage("You’re ready. Film and paper shape the look; Prep’s Exposure sets the brightness. Reopen Tutorial whenever you like.", false, 8000),
   };
 }
 

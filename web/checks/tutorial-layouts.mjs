@@ -13,7 +13,7 @@ export default async ({ send, evaluate }) => {
     await until(() => negs.tutorial().phase === 'active' && negs.tutorial().index === 2);
     document.getElementById('tour-next').click();
     await until(() => negs.tutorial().phase === 'active' && negs.tutorial().index === 3);
-    negs.edit('camera.exposure_compensation_ev', 0.4);
+    negs.edit('prep.exposure_ev', 0.4);
     await until(() => negs.idle());
   `);
   const sizes = [[320,568],[390,844],[844,390],[768,1024],[1024,768],[1440,900]];
@@ -38,7 +38,7 @@ export default async ({ send, evaluate }) => {
         nav:nav.bottom <= innerHeight+1 && nav.right <= innerWidth+1,
         overflow:document.documentElement.scrollWidth > innerWidth,
         photo:view.height >=90 && view.width >=100,
-        step:negs.tutorial().index, exposure:negs.state().params.camera.exposure_compensation_ev };
+        step:negs.tutorial().index, exposure:negs.state().params.prep.exposure_ev };
     `);
   }
   for (const [width,height] of sizes) {

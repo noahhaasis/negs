@@ -54,7 +54,7 @@ export const PREP_SECTIONS = [
     { ...slider("Tint", "io.raw_white_balance.tint", 0.01, 4, 0.01), when: ["io.raw_white_balance.mode", "custom"] },
   ] },
   { title: "Brightness", tab: "Prep", controls: [
-    { kind: "match", label: "Match camera brightness",
+    { kind: "match", label: "Match camera brightness", tutorial: "match",
       help: "Develops the RAW about as bright as the camera’s own preview, and keeps it there when you change film, paper or a preset. Exposure adds to it." },
     { kind: "offset", label: "Exposure (EV)", path: "prep.exposure_ev", min: -3, max: 3, step: 0.05 },
     { kind: "note", label: "Camera brightness" },

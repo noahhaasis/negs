@@ -24,11 +24,16 @@ test('recognizes only explicit tutorial choices, including older versions', () =
   for (const status of ['started', 'dismissed', 'completed']) assert.equal(tutorialChoice({ version: 0, status }), true);
 });
 
-test('nine stable steps; normal paper and print exposure have their own lessons', () => {
-  assert.equal(STEPS.length, 9);
-  assert.equal(new Set(STEPS.map((s) => s.id)).size, 9);
+test('eleven stable steps; paper, Prep exposure, the mist filter and Advanced controls have their own lessons', () => {
+  assert.equal(STEPS.length, 11);
+  assert.equal(new Set(STEPS.map((s) => s.id)).size, 11);
+  assert.deepEqual(STEPS[2].paths, ['match', 'camera.auto_exposure', 'camera.auto_exposure_method']);
   assert.equal(STEPS[1].target, 'paper');
-  assert.deepEqual(STEPS[7].paths, ['enlarger.print_exposure']);
+  assert.deepEqual(STEPS[3].paths, ['prep.exposure_ev']);
+  assert.equal(STEPS[7].group, 'Camera/Lens Diffusion');
+  assert.deepEqual(STEPS[7].set, { 'camera.diffusion_filter.active': true });
+  assert.equal(STEPS[9].target, 'settings');
+  assert.ok(STEPS.every((s) => !s.paths?.includes('enlarger.print_exposure')));
 });
 
 test('start, reset, back, finish: no edit is required to continue', async () => {

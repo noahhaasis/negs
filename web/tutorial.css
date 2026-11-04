@@ -34,12 +34,15 @@
 .tutorial-mode[data-tour-step=preset] #import-preset { display: none; }
 .tutorial-mode[data-tour-step=preset] #more { border-color: var(--accent); }
 .tutorial-mode[data-tour-step=preset] #export-preset { background: rgb(224 164 88 / .12); }
+.tutorial-mode[data-tour-step=advanced] #settings { color: var(--accent); box-shadow: 0 0 0 1px rgb(224 164 88 / .55); }
 .tutorial-mode .stock:not(.tour-stock),
 .tutorial-mode .stock > label:not(.tour-control),
+.tutorial-mode .stock > details:not(.tour-control),
 .tutorial-mode .section:not(.tour-section),
 .tutorial-mode .section > .ctl:not(.tour-control),
 .tutorial-mode .section > details:not(.tour-group),
 .tutorial-mode .section > .footer,
+.tutorial-mode .advanced-hint,
 .tutorial-mode .controls > .ctl:not(.tour-control),
 .tutorial-mode #post-sections { display: none !important; }
 .tutorial-mode .section > h2 { display: none; }
@@ -64,7 +67,7 @@
   .tutorial-welcome .empty { max-height: 100%; overflow-y: auto; }
   .side .top { gap: 5px; }
   .tutorial-mode .top { display: none; }
-  .tutorial-mode[data-tour-step=preset] .top { display: flex; }
+  .tutorial-mode:is([data-tour-step=preset], [data-tour-step=advanced]) .top { display: flex; }
   .tutorial-mode .side { padding-bottom: env(safe-area-inset-bottom); }
   .tutorial-mode .tour-nav { padding-block: 8px; }
   .tutorial-mode .grabber { height: 18px; }
