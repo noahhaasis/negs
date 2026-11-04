@@ -8,7 +8,6 @@ Also runs on Windows; pass the .exe paths with the three executable options.
 import argparse
 import copy
 import json
-import math
 import os
 import queue
 from pathlib import Path
@@ -173,7 +172,7 @@ def main():
                                env=dict(os.environ, SPEKTRAFILM_BACKEND=os.environ.get("SPEKTRAFILM_BACKEND", "wgpu")), check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
                 assert placed_preview.read_bytes() == placed_fast.read_bytes(), "Placement must keep export parity"
-                # A pinned print tone (the zone bands) is part of the look, so
+                # A pin is part of the look, so
                 # the preview export must still equal the Fast export.
                 pinned = copy.deepcopy(grain_params)
                 pinned["post"]["tone_anchors"] = [{"input": 49.0, "target": 36.35}]
@@ -188,11 +187,6 @@ def main():
                                env=dict(os.environ, SPEKTRAFILM_BACKEND=os.environ.get("SPEKTRAFILM_BACKEND", "wgpu")), check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
                 assert pinned_preview.read_bytes() == pinned_fast.read_bytes(), "Pinned print tones must keep export parity"
-                # The zone readout inverts this curve: 385 finite samples.
-                _, curve = request("tone_curve", film="kodak_gold_200", paper="kodak_portra_endura", params=placed)
-                assert (curve["ev_min"], curve["ev_step"]) == (-16.0, 0.0625), curve
-                assert len(curve["lstar"]) == 385 and len(curve["green"]) == 385, curve
-                assert all(math.isfinite(v) for v in curve["lstar"] + curve["green"]), "tone curve must be finite"
                 export_params = work / "params.json"
                 export_params.write_text(json.dumps(params))
                 exported = work / "reference.png"

@@ -20,10 +20,7 @@ use spektrafilm_io::{
     resize::{self, Fit},
 };
 use spektrafilm_core::stages::scanning::convert_output;
-use spektrafilm_math::{
-    colorspace::{self, RgbColourspace},
-    image::ImageBuf,
-};
+use spektrafilm_math::{colorspace::RgbColourspace, image::ImageBuf};
 use std::{
     io::{BufRead, Write},
     path::{Path, PathBuf},
@@ -75,14 +72,14 @@ enum Command {
         paper: String,
         params: Box<RuntimeParams>,
     },
-    /// The film-and-print tone curve, measured by developing a neutral ramp:
-    /// output L\* at each of 385 scene values (see
-    /// `spektrafilm_core::tone_curve`). Needs no image unless auto exposure is
-    /// on, when it meters the loaded source.
-    ToneCurve {
-        film: String,
-        paper: String,
-        params: Box<RuntimeParams>,
+    /// The mean L\* of a circle of the render `render_id`, as a pin reads it
+    /// (`spektrafilm_core::post::measured_lstar`): `x` and `y` are fractions of
+    /// the uncropped photograph, `radius` a fraction of its shorter side.
+    SampleTone {
+        render_id: u64,
+        x: f64,
+        y: f64,
+        radius: f64,
     },
     Original {
         input: PathBuf,
@@ -494,53 +491,15 @@ impl Session {
                 let text = presets::export(&film, &paper, &params, data).map_err(anyhow::Error::msg)?;
                 Ok(json!({"text": text}))
             }
-            Command::ToneCurve { film, paper, mut params } => {
-                let started = Instant::now();
-                // Applied to the display and on save, so the pipeline runs
-                // without them, as `render` does.
-                let post = std::mem::take(&mut params.post);
-                // The ramp develops the input the preview does.
-                if let Some(Source { colour, .. }) = self.source.as_ref() {
-                    params.io.apply_input_colour(colour);
-                }
-                ensure!(
-                    !params.camera.auto_exposure || self.metering.is_some(),
-                    "Measuring the tone curve with auto exposure needs a rendered source"
-                );
-                let key = preview_pipeline_cache_key(&film, &paper, &params);
-                let calibrated = match self.pipeline.as_ref() {
-                    Some((old, pipeline)) if old == &key => pipeline.clone(),
-                    _ => {
-                        let film_profile = profile::load_profile_by_name(data, &film)?;
-                        let print_profile = profile::load_profile_by_name(
-                            data,
-                            if params.io.scan_film { &film } else { &paper },
-                        )?;
-                        Pipeline::new_with_spectral(
-                            film_profile,
-                            print_profile,
-                            (*params).clone(),
-                            data,
-                        )
-                        .map_err(anyhow::Error::msg)?
-                    }
-                };
-                let mut pipeline = calibrated.with_params((*params).clone());
-                if let Some(metering) = &self.metering {
-                    pipeline = pipeline.with_metering_preview(metering.clone());
-                }
-                let auto_ev = self
-                    .metering
-                    .as_ref()
-                    .map_or(0.0, |metering| pipeline.frame_autoexposure_ev(metering));
-                let ramp = spektrafilm_core::tone_curve::measure(&pipeline, &post, auto_ev);
-                Ok(json!({
-                    "ev_min": spektrafilm_core::tone_curve::EV_MIN,
-                    "ev_step": spektrafilm_core::tone_curve::EV_STEP,
-                    "lstar": ramp.lstar,
-                    "green": ramp.green,
-                    "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
-                }))
+            Command::SampleTone { render_id, x, y, radius } => {
+                let Rendered { id, encoding, post, image, .. } =
+                    self.output.as_ref().context("No preview to measure")?;
+                ensure!(*id == render_id, "The preview changed; wait for the current render and try again");
+                let lstar = spektrafilm_core::post::measured_lstar(
+                    image, post, encoding.encoded, encoding.space.name, (x, y), radius,
+                )
+                .context("That point is outside the photograph")?;
+                Ok(json!({"lstar": lstar}))
             }
             Command::Original { input, params, limit_preview, preview_path } => {
                 ensure!(input != preview_path, "Choose a different preview path to preserve the source");
@@ -792,7 +751,6 @@ impl Session {
                 // rendering again. The display proxy's limit doesn't matter:
                 // Save uses this float output.
                 let export_resolution = (output.width, output.height) == size.working;
-                let (display_to_output, output_encode) = output_mapping(encoding);
                 let response = json!({
                     "width": width, "height": height, "output_width": output.width, "output_height": output.height,
                     "photo_width": photo_dimensions.0, "photo_height": photo_dimensions.1,
@@ -800,7 +758,6 @@ impl Session {
                     "photo_crop_width": size.photo.0, "photo_crop_height": size.photo.1,
                     "source_width": source_width, "source_height": source_height,
                     "export_resolution": export_resolution,
-                    "display_to_output": display_to_output, "output_encode": output_encode,
                     "raw": spektrafilm_io::is_raw(&input), "backend": used_backend,
                     "input_colour": input_colour,
                     "lens_correction_supported": lens_correction_supported,
@@ -832,29 +789,6 @@ fn parse_request(line: &str) -> Result<Request> {
         spektrafilm_core::params::infer_input_interpretation(params);
     }
     Ok(serde_json::from_value(value)?)
-}
-
-/// How the app turns a proxy's bytes into the output space's code values:
-/// the matrix from the proxy's linear RGB to the output space's linear RGB,
-/// and a 1024-entry table on √linear giving the output-encoded value. The
-/// square root spends the table's resolution where the transfer curves bend.
-fn output_mapping(encoding: Encoding) -> (Value, Value) {
-    let rec2020 = RgbColourspace::find("ITU-R BT.2020").expect("BT.2020 is a colour space");
-    let matrix = match DisplaySpace::of(encoding) {
-        DisplaySpace::Srgb => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        DisplaySpace::Rec2020SrgbTransfer => colorspace::icc_rgb_to_rgb(rec2020, encoding.space),
-    };
-    let encode: Vec<f64> = (0..1024)
-        .map(|i| {
-            let linear = (i as f64 / 1023.0).powi(2);
-            if encoding.encoded {
-                encoding.space.cctf.encode(linear)
-            } else {
-                linear
-            }
-        })
-        .collect();
-    (json!(matrix), json!(encode))
 }
 
 /// Writes the preview for the app as raw RGBA, avoiding PNG compression on
@@ -1156,69 +1090,31 @@ mod tests {
     }
 
     #[test]
-    fn tone_curve_after_render_returns_385_samples() {
+    fn sample_tone_reads_the_render_before_its_pins() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
-        let dir = std::env::temp_dir().join(format!("negs-tone-curve-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("negs-sample-tone-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (input, preview) = (dir.join("input.png"), dir.join("preview.rgba"));
         let pixels = (0..32 * 24 * 3).map(|i| ((i * 37) % 255) as spektrafilm_math::Scalar / 255.0).collect();
         spektrafilm_io::save_image(&ImageBuf::from_data(32, 24, pixels), &input, None).unwrap();
         let mut session = Session::default();
-        let response = session
-            .handle(Request { id: 1, command: render(&input, &preview, None, None, None) }, &data)
-            .unwrap();
-        // The display mapping is part of every render, so the app can read
-        // the proxy's bytes as the output space's colours.
-        assert_eq!(response["display_to_output"].as_array().map(Vec::len), Some(3));
-        assert_eq!(response["output_encode"].as_array().map(Vec::len), Some(1024));
-        let curve = session
-            .handle(
-                Request {
-                    id: 2,
-                    command: Command::ToneCurve {
-                        film: "kodak_portra_400".into(),
-                        paper: "kodak_portra_endura".into(),
-                        params: {
-                            let mut params = RuntimeParams::default();
-                            params.camera.auto_exposure = false;
-                            Box::new(params)
-                        },
-                    },
-                },
-                &data,
-            )
-            .unwrap();
-        let lstar = curve["lstar"].as_array().unwrap();
-        assert_eq!(lstar.len(), 385);
-        assert!(lstar.iter().all(|v| v.as_f64().is_some_and(f64::is_finite)));
-        assert_eq!(curve["green"].as_array().map(Vec::len), Some(385));
-        assert_eq!(curve["ev_min"].as_f64(), Some(-16.0));
-        assert_eq!(curve["ev_step"].as_f64(), Some(0.0625));
-        if !cfg!(debug_assertions) {
-            assert!(curve["elapsed_ms"].as_f64().unwrap() < 50.0, "{}", curve["elapsed_ms"]);
-        }
-        std::fs::remove_dir_all(dir).unwrap();
-    }
+        let mut send = |id, command| session.handle(Request { id, command }, &data);
+        send(1, render(&input, &preview, None, None, None)).unwrap();
+        let sample = |id, x| Command::SampleTone { render_id: id, x, y: 0.5, radius: 0.1 };
+        let before = send(2, sample(1, 0.5)).unwrap()["lstar"].as_f64().unwrap();
 
-    #[test]
-    fn tone_curve_without_a_source_fails_under_auto_exposure() {
-        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
-        let mut session = Session::default();
-        let command = |params: RuntimeParams| Command::ToneCurve {
-            film: "kodak_portra_400".into(),
-            paper: "kodak_portra_endura".into(),
-            params: Box::new(params),
-        };
-        let error = session
-            .handle(Request { id: 1, command: command(RuntimeParams::default()) }, &data)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("source"), "{error}");
-        // With auto exposure off the ramp is image-independent.
+        // A render that only adds a pin is the same scan: the tone reads the same.
         let mut params = RuntimeParams::default();
-        params.camera.auto_exposure = false;
-        let curve = session.handle(Request { id: 2, command: command(params) }, &data).unwrap();
-        assert_eq!(curve["lstar"].as_array().map(Vec::len), Some(385));
+        params.post.tone_anchors = vec![spektrafilm_core::post::ToneAnchor { input: 60.0, target: 10.0, source: None }];
+        let Command::Render { input: i, source_generation, film, paper, limit_preview, preview_path, interactive_scale, crop, .. } =
+            render(&input, &preview, None, None, None) else { unreachable!() };
+        send(3, Command::Render { input: i, source_generation, film, paper, params: Box::new(params), limit_preview, preview_path, interactive_scale, crop }).unwrap();
+        let after = send(4, sample(3, 0.5)).unwrap()["lstar"].as_f64().unwrap();
+        assert!((before - after).abs() < 1e-6, "{before} vs {after}");
+
+        assert!(send(5, sample(1, 0.5)).unwrap_err().to_string().contains("preview changed"));
+        assert!(send(6, sample(3, 1.5)).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

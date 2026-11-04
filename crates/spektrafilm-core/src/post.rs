@@ -37,10 +37,8 @@ pub struct PostParams {
     /// Scales colourfulness at constant luminance; -100 is monochrome.
     #[serde(default)]
     pub saturation: f32,
-    /// Tones this print pins, as measured L\* → printed L\*. They replace the
-    /// four knobs above when present: the first pin to target 0 sets the
-    /// black point, the first to target 100 the white point, and both stay
-    /// put while the pins between them bend the curve (see [`AnchorCurve`]).
+    /// Tones this print pins, as L\* after the knobs above → printed L\*: a
+    /// curve that can set the black and white points (see [`AnchorCurve`]).
     #[serde(default)]
     pub tone_anchors: Vec<ToneAnchor>,
 }
@@ -48,23 +46,21 @@ pub struct PostParams {
 /// One pin of the tone curve, in CIE Lab lightness.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ToneAnchor {
-    /// The tone as the preview measured it, L\* 0…100.
+    /// The tone as [`measured_lstar`] read it, L\* 0…100.
     pub input: f32,
     /// Where it should print, L\* 0…100.
     pub target: f32,
     /// Where the tone was measured, for the app to outline; the pipeline
-    /// never reads it. Fractions of the photograph in the crop's turned
-    /// frame, as `CropSettings` stores them.
+    /// never reads it.
     #[serde(default)]
     pub source: Option<AnchorSource>,
 }
 
-/// Where a pin's tone was measured — app metadata, never read by the
-/// pipeline: a circle on the photograph, in fractions of its width and
-/// height, that the pin averaged.
+/// The circle on the uncropped photograph that a pin averaged.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AnchorSource {
-    /// The circle's centre.
+    /// The circle's centre, in fractions of the width and height, from the
+    /// top left.
     #[serde(default)]
     pub x: f32,
     #[serde(default)]
@@ -168,11 +164,11 @@ fn luminance_of(value: f64) -> f64 {
     }
 }
 
-/// The pins as a rising curve in L\*, with **sticky end points**: the first
-/// pin to target 0 fixes the black point, the first to target 100 the white
-/// point, and later pins only bend the curve between them. Tones outside the
-/// ends clamp, which is what setting a black or white point means. With no
-/// pins it is the identity.
+/// The pins as a rising curve in L\*. The brightest pin aimed at 0 is the
+/// black point and the darkest aimed at 100 the white point, whatever order
+/// they were made in; the others bend the curve between them. Tones outside
+/// the ends clamp, which is what setting a black or white point means. With
+/// no pins it is the identity.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AnchorCurve {
     black: f64,
@@ -295,13 +291,10 @@ impl PostProcess {
             encoded,
             decode: samples(&|v| space.decode(v)),
             encode: samples(&|s| space.encode(s * s)),
-            tone: if params.tone_anchors.is_empty() {
-                samples(&|s| srgb_decode(tone(params, srgb_encode(s * s))))
-            } else {
-                // Pins replace the knobs: they can set the black and white
-                // points themselves.
+            // The pins bend what the knobs produced.
+            tone: {
                 let curve = AnchorCurve::new(&params.tone_anchors);
-                samples(&|s| curve.map_luminance(s * s))
+                samples(&|s| curve.map_luminance(srgb_decode(tone(params, srgb_encode(s * s)))))
             },
         }
     }
@@ -374,6 +367,59 @@ impl PostProcess {
         self.apply(&mut image);
         image
     }
+}
+
+/// The most pixels [`measured_lstar`] reads; a larger circle is sampled on an
+/// even grid.
+const MEASURE_SAMPLES: f64 = 65_536.0;
+
+/// The mean L\* of the pixels in a circle, as the pins read it: after the
+/// four knobs, before any pin. `centre` is in fractions of the image and
+/// `radius` a fraction of its shorter side; 0 is the pixel under the centre.
+/// None outside the image.
+pub fn measured_lstar(
+    image: &ImageBuf,
+    post: &PostParams,
+    encoded: bool,
+    color_space: &str,
+    centre: (f64, f64),
+    radius: f64,
+) -> Option<f64> {
+    let (width, height) = (image.width as f64, image.height as f64);
+    if !(0.0..=1.0).contains(&centre.0) || !(0.0..=1.0).contains(&centre.1) || width < 1.0 || height < 1.0 {
+        return None;
+    }
+    let (cx, cy) = (centre.0 * width, centre.1 * height);
+    let reach = radius.max(0.0) * width.min(height);
+    let knobs = PostProcess::new(&PostParams { tone_anchors: Vec::new(), ..post.clone() }, encoded, color_space);
+    let transfer = Transfer(RgbColourspace::output(color_space));
+    let luma = luminance_weights(color_space);
+    let (lo, hi) = crate::pipeline::display_range(encoded);
+    let lstar = |x: u32, y: u32| {
+        let rgb = knobs.apply_rgb(image.get(x, y).map(|v| to_f32(v.clamp(lo, hi))));
+        let linear = rgb.map(|v| if encoded { transfer.decode(f64::from(v)) } else { f64::from(v) });
+        lstar_of((0..3).map(|c| f64::from(luma[c]) * linear[c]).sum())
+    };
+    let last = (image.width - 1, image.height - 1);
+    if reach < 0.5 {
+        return Some(lstar((cx as u32).min(last.0), (cy as u32).min(last.1)));
+    }
+    let span = |c: f64, end: u32| ((c - reach).max(0.0) as u32, ((c + reach).ceil() as u32).min(end));
+    let (x0, x1) = span(cx, last.0);
+    let (y0, y1) = span(cy, last.1);
+    let area = f64::from(x1 - x0 + 1) * f64::from(y1 - y0 + 1);
+    let stride = (area / MEASURE_SAMPLES).sqrt().ceil().max(1.0) as usize;
+    let (mut sum, mut count) = (0.0, 0u32);
+    for y in (y0..=y1).step_by(stride) {
+        for x in (x0..=x1).step_by(stride) {
+            let (dx, dy) = (f64::from(x) + 0.5 - cx, f64::from(y) + 0.5 - cy);
+            if dx * dx + dy * dy <= reach * reach {
+                sum += lstar(x, y);
+                count += 1;
+            }
+        }
+    }
+    (count > 0).then(|| sum / f64::from(count))
 }
 
 #[cfg(test)]
@@ -506,6 +552,55 @@ mod tests {
         }
     }
     // MARK: The pinned tone curve
+
+    /// Pins bend the tones the four knobs produced, so a pin that holds its
+    /// tone leaves a photograph with Post edits exactly as it was.
+    #[test]
+    fn a_holding_pin_keeps_the_knobs_edit() {
+        let knobs = params(|p| p.brightness = 40.0);
+        let plain = PostProcess::new(&knobs, true, "sRGB");
+        let tone = measured_lstar(
+            &ImageBuf::from_data(1, 1, vec![from_f32(0.4); 3]), &knobs, true, "sRGB", (0.5, 0.5), 0.0,
+        )
+        .unwrap() as f32;
+        let mut pinned = knobs.clone();
+        pinned.tone_anchors = vec![pin(tone, tone)];
+        let pinned = PostProcess::new(&pinned, true, "sRGB");
+        for v in [0.2f32, 0.4, 0.6, 0.8] {
+            let (a, b) = (plain.apply_rgb([v; 3]), pinned.apply_rgb([v; 3]));
+            assert!((a[0] - b[0]).abs() < 2e-3, "{v}: {a:?} vs {b:?}");
+        }
+    }
+
+    /// A pin's input is the tone before the pins: the curve it joins must not
+    /// change what it reads.
+    #[test]
+    fn measuring_ignores_the_pins_already_on_the_curve() {
+        let image = ImageBuf::from_data(2, 1, vec![from_f32(0.2), from_f32(0.2), from_f32(0.2), from_f32(0.6), from_f32(0.6), from_f32(0.6)]);
+        let mut pinned = PostParams::default();
+        let before = measured_lstar(&image, &pinned, true, "sRGB", (0.25, 0.5), 0.0).unwrap();
+        pinned.tone_anchors = vec![pin(70.0, 20.0)];
+        let after = measured_lstar(&image, &pinned, true, "sRGB", (0.25, 0.5), 0.0).unwrap();
+        assert!((before - after).abs() < 1e-6, "{before} vs {after}");
+        // sRGB 0.2 is L* 21.2.
+        assert!((before - 21.2).abs() < 0.2, "{before}");
+    }
+
+    #[test]
+    fn measuring_averages_the_circle_and_stays_on_the_photograph() {
+        let mut image = ImageBuf::new(40, 40);
+        for y in 0..40 { for x in 0..40 {
+            let v = from_f32(if x < 20 { 0.2 } else { 0.6 });
+            image.set(x, y, [v, v, v]);
+        } }
+        let post = PostParams::default();
+        let dark = measured_lstar(&image, &post, true, "sRGB", (0.1, 0.5), 0.0).unwrap();
+        let light = measured_lstar(&image, &post, true, "sRGB", (0.9, 0.5), 0.0).unwrap();
+        let both = measured_lstar(&image, &post, true, "sRGB", (0.5, 0.5), 0.25).unwrap();
+        assert!((both - (dark + light) / 2.0).abs() < 1.0, "{dark} {light} {both}");
+        assert!(measured_lstar(&image, &post, true, "sRGB", (1.5, 0.5), 0.0).is_none());
+        assert!(measured_lstar(&image, &post, true, "sRGB", (0.5, -0.5), 0.0).is_none());
+    }
 
     fn pin(input: f32, target: f32) -> ToneAnchor {
         ToneAnchor { input, target, source: None }
