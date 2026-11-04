@@ -169,6 +169,10 @@ struct Session {
     /// The same for interactive renders, kept beside `scaled` so a drag
     /// after a full-size render doesn't resample the source again.
     interactive: Option<((u32, u32), ImageBuf)>,
+    /// Prep's output for the photograph-size and interactive frames; each
+    /// slot sees one resample of the source per size and is replaced with it.
+    prepared_photo: spektrafilm_core::prep::PreparedFrame,
+    prepared_interactive: spektrafilm_core::prep::PreparedFrame,
     /// The source's auto-exposure metering frame. Every render of the source,
     /// at any preview or working size, meters it, as the exporter does, so
     /// the preview's exposure is the export's.
@@ -301,6 +305,8 @@ impl Session {
             self.source = None;
             self.scaled = None;
             self.interactive = None;
+            self.prepared_photo = Default::default();
+            self.prepared_interactive = Default::default();
             self.metering = None;
             self.thumbnail_source = None;
             self.thumbnail_wb_sources = Vec::new();
@@ -716,6 +722,7 @@ impl Session {
                     pipeline = pipeline.with_metering_preview(metering.clone());
                 }
                 let working = if dimensions == photo_dimensions {
+                    pipeline = pipeline.with_prepared_frame(self.prepared_photo.clone());
                     working_source(
                         source,
                         &mut self.scaled,
@@ -723,6 +730,7 @@ impl Session {
                         rescale_preview_input_fast,
                     )
                 } else {
+                    pipeline = pipeline.with_prepared_frame(self.prepared_interactive.clone());
                     working_source(source, &mut self.interactive, dimensions, downsample_area)
                 };
                 let backend = self

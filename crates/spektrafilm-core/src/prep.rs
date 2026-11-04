@@ -136,7 +136,6 @@ impl PreparedKey {
 pub struct PreparedFrame(std::sync::Arc<std::sync::Mutex<Option<Prepared>>>);
 type Prepared = (PreparedKey, std::sync::Arc<ImageBuf>);
 
-#[allow(dead_code)]
 impl PreparedFrame {
     /// The kept output if it was made with `key`; any other is dropped first,
     /// so it never lives beside the frame that replaces it.
@@ -409,6 +408,22 @@ mod tests {
     use super::*;
     // Generated from the unchanged shipped shader core, compiled as an independent
     // C++ oracle. See rawcontrols-trace-oracle.py and its provenance receipt.
+    #[test]
+    fn prepared_frame_reuses_only_its_key() {
+        let image = ImageBuf::from_data(2, 2, vec![0.5; 12]);
+        let params = crate::params::RuntimeParams::default();
+        let frame = PreparedFrame::default();
+        let prepared = std::sync::Arc::new(image.clone());
+        frame.put(PreparedKey::new(&image, &params, 0.0), prepared.clone());
+        assert!(std::sync::Arc::ptr_eq(&frame.take(&PreparedKey::new(&image, &params, 0.0)).unwrap(), &prepared));
+        assert!(frame.take(&PreparedKey::new(&image, &params, 0.0)).is_none(), "a taken frame is gone");
+
+        frame.put(PreparedKey::new(&image, &params, 0.0), prepared);
+        let mut changed = params.clone();
+        changed.prep.midtone_detail = 10.0;
+        assert!(frame.take(&PreparedKey::new(&image, &changed, 0.0)).is_none(), "different Prep settings must not reuse it");
+    }
+
     #[test]
     fn deserializing_rejects_invalid_values() {
         let ok: PrepParams = serde_json::from_str(r#"{"highlights": -180}"#).unwrap();
