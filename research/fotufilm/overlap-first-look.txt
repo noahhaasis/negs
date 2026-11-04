@@ -1,0 +1,22 @@
+portra400     R pk 650/645 mean|dlog|=0.127 | G pk 550/545 mean|dlog|=0.071 | B pk 405/400 mean|dlog|=0.106 | dye pk C,M,Y ['695/695', '540/540', '455/450'] | fotu gamma [0.45, 0.08, 0.63] kind=separatedBase
+gold200       R pk 655/655 mean|dlog|=0.010 | G pk 550/550 mean|dlog|=0.008 | B pk 470/470 mean|dlog|=0.009 | dye pk C,M,Y ['690/695', '540/535', '450/450'] | fotu gamma [0.54, 0.28, 0.83] kind=separatedBase
+ektar100      R pk 650/650 mean|dlog|=0.005 | G pk 545/545 mean|dlog|=0.022 | B pk 470/470 mean|dlog|=0.007 | dye pk C,M,Y ['690/690', '540/540', '450/455'] | fotu gamma [0.56, 0.56, 0.67] kind=separatedBase
+ultramax400   R pk 650/655 mean|dlog|=0.004 | G pk 550/550 mean|dlog|=0.006 | B pk 470/470 mean|dlog|=0.009 | dye pk C,M,Y ['695/695', '540/540', '460/450'] | fotu gamma [0.55, 0.34, 0.46] kind=separatedBase
+c200          R pk 640/640 mean|dlog|=0.010 | G pk 560/560 mean|dlog|=0.007 | B pk 470/470 mean|dlog|=0.097 | dye pk C,M,Y ['705/700', '555/545', '455/450'] | fotu gamma [1.5, 0.51, 0.43] kind=separatedBase
+pro400h       R pk 610/610 mean|dlog|=0.004 | G pk 555/555 mean|dlog|=0.004 | B pk 470/470 mean|dlog|=0.003 | dye pk C,M,Y ['695/695', '545/545', '455/455'] | fotu gamma [0.19, 0.33, 0.6] kind=separatedBase
+vision250d    R pk 655/655 mean|dlog|=0.005 | G pk 550/550 mean|dlog|=0.016 | B pk 465/470 mean|dlog|=0.006 | dye pk C,M,Y ['680/685', '540/540', '450/450'] | fotu gamma [0.22, 0.24, 0.14] kind=separatedBase
+vision500t    R pk 655/655 mean|dlog|=0.022 | G pk 550/550 mean|dlog|=0.013 | B pk 405/405 mean|dlog|=0.003 | dye pk C,M,Y ['685/685', '540/535', '450/445'] | fotu gamma [0.19, 0.26, 0.24] kind=separatedBase
+verita200d    R pk 650/650 mean|dlog|=0.010 | G pk 550/550 mean|dlog|=0.008 | B pk 470/470 mean|dlog|=0.009 | dye pk C,M,Y ['690/690', '540/535', '440/450'] | fotu gamma [1.08, 0.56, 0.24] kind=separatedBase
+provia100f    R pk 640/645 mean|dlog|=0.111 | G pk 545/550 mean|dlog|=0.078 | B pk 455/460 mean|dlog|=0.103 | dye pk C,M,Y ['660/650', '540/535', '445/440'] | fotu gamma [0.76, 0.79, 0.77] kind=samples
+kodachrome64  R pk 650/650 mean|dlog|=0.007 | G pk 555/555 mean|dlog|=0.005 | B pk 425/425 mean|dlog|=0.105 | dye pk C,M,Y ['640/640', '540/540', '445/445'] | fotu gamma [1.43, 1.35, 1.35] kind=samples
+portra400     C max|d|=0.378 scale=0.000-1.438 | M max|d|=0.193 scale=0.304-1.298 | Y max|d|=0.478 scale=0.534-1.953 | dmin-base -0.002..+0.008
+gold200       C max|d|=0.356 scale=0.000-1.385 | M max|d|=0.168 scale=0.274-1.354 | Y max|d|=0.439 scale=0.547-2.262 | dmin-base -0.005..+0.006
+ektar100      C max|d|=0.499 scale=0.000-1.779 | M max|d|=0.278 scale=0.781-1.373 | Y max|d|=0.458 scale=0.451-2.074 | dmin-base -0.003..-0.000
+ultramax400   C max|d|=0.349 scale=0.000-1.416 | M max|d|=0.159 scale=0.296-1.287 | Y max|d|=0.439 scale=0.486-2.103 | dmin-base -0.001..+0.001
+c200          C max|d|=0.249 scale=0.081-1.529 | M max|d|=0.306 scale=0.757-1.507 | Y max|d|=0.374 scale=0.076-1.758 | dmin-base -0.009..+0.004
+pro400h       C max|d|=0.281 scale=0.000-1.207 | M max|d|=0.307 scale=0.756-1.420 | Y max|d|=0.517 scale=0.083-2.317 | dmin-base -0.033..+0.003
+vision250d    C max|d|=0.135 scale=0.626-1.090 | M max|d|=0.104 scale=0.568-0.855 | Y max|d|=0.178 scale=0.833-1.162 | dmin-base -0.040..+0.101
+vision500t    C max|d|=0.101 scale=0.855-1.148 | M max|d|=0.084 scale=0.554-0.732 | Y max|d|=0.261 scale=0.786-1.462 | dmin-base -0.017..+0.172
+verita200d    C max|d|=0.452 scale=0.000-1.569 | M max|d|=0.352 scale=0.105-2.047 | Y max|d|=0.392 scale=0.847-1.847 | dmin-base -0.003..+0.004
+provia100f    C max|d|=0.046 scale=0.803-0.909 | M max|d|=0.070 scale=0.871-1.029 | Y max|d|=0.036 scale=0.819-0.926 | 
+kodachrome64  C max|d|=0.003 scale=0.966-0.973 | M max|d|=0.005 scale=0.982-1.000 | Y max|d|=0.006 scale=0.669-0.682 | 

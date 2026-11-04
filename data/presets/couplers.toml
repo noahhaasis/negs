@@ -83,3 +83,72 @@ gamma_samelayer_rgb = [0.2786, 0.1257, 0.3480]
 gamma_interlayer_r_to_gb = [0.1448, 0.2003]
 gamma_interlayer_g_to_rb = [0.0516, 0.1250]
 gamma_interlayer_b_to_rg = [0.0518, 0.3089]
+
+# --- Fotufilm ports (CC BY-SA 4.0 profiles by MUAStudio Inc.): class defaults scaled so the
+# --- DIR pre-correction does not fold on these steep curves (tools/fotufilm_port/coupler_presets.py)
+[agfa_agfachrome_50]  # ported: class default x 0.899 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.2060, 0.0925, 0.2384]
+gamma_interlayer_r_to_gb = [0.1303, 0.1403]
+gamma_interlayer_g_to_rb = [0.0446, 0.0786]
+gamma_interlayer_b_to_rg = [0.0514, 0.2214]
+
+[agfa_agfachrome_100]  # ported: class default x 0.894 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.2048, 0.0920, 0.2369]
+gamma_interlayer_r_to_gb = [0.1295, 0.1394]
+gamma_interlayer_g_to_rb = [0.0443, 0.0781]
+gamma_interlayer_b_to_rg = [0.0510, 0.2200]
+
+[agfa_agfachrome_200]  # ported: class default x 0.937 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.2146, 0.0964, 0.2483]
+gamma_interlayer_r_to_gb = [0.1357, 0.1461]
+gamma_interlayer_g_to_rb = [0.0465, 0.0819]
+gamma_interlayer_b_to_rg = [0.0535, 0.2306]
+
+[fotufilm_infrared_color]  # ported: class default x 0.559 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.1281, 0.0576, 0.1483]
+gamma_interlayer_r_to_gb = [0.0810, 0.0873]
+gamma_interlayer_g_to_rb = [0.0277, 0.0489]
+gamma_interlayer_b_to_rg = [0.0319, 0.1377]
+
+[fujifilm_astia_100f]  # ported: class default x 0.793 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.1816, 0.0815, 0.2101]
+gamma_interlayer_r_to_gb = [0.1148, 0.1236]
+gamma_interlayer_g_to_rb = [0.0393, 0.0693]
+gamma_interlayer_b_to_rg = [0.0453, 0.1951]
+
+[fujifilm_superia_200]  # ported: class default x 0.898 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.4632, 0.5328, 0.2540]
+gamma_interlayer_r_to_gb = [0.3620, 0.2234]
+gamma_interlayer_g_to_rb = [0.1999, 0.3896]
+gamma_interlayer_b_to_rg = [0.1642, 0.1615]
+
+[fujifilm_velvia_50]  # ported: class default x 0.696 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.1596, 0.0717, 0.1846]
+gamma_interlayer_r_to_gb = [0.1009, 0.1087]
+gamma_interlayer_g_to_rb = [0.0345, 0.0609]
+gamma_interlayer_b_to_rg = [0.0398, 0.1715]
+
+[harman_phoenix_200]  # ported: class default x 0.522 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.2695, 0.3100, 0.1478]
+gamma_interlayer_r_to_gb = [0.2107, 0.1300]
+gamma_interlayer_g_to_rb = [0.1163, 0.2267]
+gamma_interlayer_b_to_rg = [0.0956, 0.0940]
+
+[kodak_kodachrome_25]  # ported: class default x 0.800 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.1833, 0.0823, 0.2121]
+gamma_interlayer_r_to_gb = [0.1159, 0.1248]
+gamma_interlayer_g_to_rb = [0.0397, 0.0699]
+gamma_interlayer_b_to_rg = [0.0457, 0.1970]
+
+[kodak_kodachrome_200]  # ported: class default x 0.831 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.1904, 0.0855, 0.2204]
+gamma_interlayer_r_to_gb = [0.1205, 0.1297]
+gamma_interlayer_g_to_rb = [0.0412, 0.0727]
+gamma_interlayer_b_to_rg = [0.0475, 0.2047]
+
+[kodak_aerochrome_1443]  # ported: class default x 0.421 so the DIR pre-correction does not fold
+gamma_samelayer_rgb = [0.0965, 0.0433, 0.1116]
+gamma_interlayer_r_to_gb = [0.0610, 0.0657]
+gamma_interlayer_g_to_rb = [0.0209, 0.0368]
+gamma_interlayer_b_to_rg = [0.0240, 0.1037]
+

@@ -1,6 +1,70 @@
 {
-  "attribution": "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, CC BY-SA 4.0. See data/profiles and SPEKTRAFILM_LICENSE.txt. Metadata extraction only; no modifications to profile values.",
+  "attribution": "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, and from Fotufilm film profiles by MUAStudio Inc. (https://fotufilm.com), both CC BY-SA 4.0. See data/profiles, SPEKTRAFILM_LICENSE.txt and FOTUFILM_LICENSE.txt. Metadata extraction only; no modifications to profile values.",
   "profiles": [
+    {
+      "id": "cinestill_400d",
+      "name": "CineStill 400D",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "cinestill_800t",
+      "name": "CineStill 800T",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.3,
+          0.25
+        ],
+        "rms_granularity": [
+          9.0,
+          13.0,
+          30.0
+        ],
+        "uniformity": [
+          0.93,
+          0.97,
+          0.99
+        ]
+      }
+    },
     {
       "id": "fujifilm_c200",
       "name": "Fujifilm C200",
@@ -34,8 +98,104 @@
       }
     },
     {
+      "id": "fujifilm_pro_160ns",
+      "name": "Fujifilm Pro 160NS",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "fujifilm_crystal_archive_typeii",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.0,
+          3.0,
+          3.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "fujifilm_pro_400h",
       "name": "Fujifilm Pro 400H",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "fujifilm_crystal_archive_typeii",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_superia_200",
+      "name": "Fujifilm Superia 200",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "fujifilm_crystal_archive_typeii",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_reala_100",
+      "name": "Fujifilm Superia Reala 100",
       "paper": false,
       "positive": false,
       "bw": false,
@@ -98,6 +258,70 @@
       }
     },
     {
+      "id": "harman_phoenix_200",
+      "name": "Harman Phoenix 200",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          9.5,
+          9.5,
+          9.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "kodak_aerocolor_2460",
+      "name": "Kodak Aerocolor IV 2460",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          8.5,
+          8.5,
+          8.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "kodak_ektar_100",
       "name": "Kodak Ektar 100",
       "paper": false,
@@ -132,6 +356,38 @@
     {
       "id": "kodak_gold_200",
       "name": "Kodak Gold 200",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          5.0,
+          5.0,
+          5.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "kodak_kodacolor_100",
+      "name": "Kodak Kodacolor 100",
       "paper": false,
       "positive": false,
       "bw": false,
@@ -354,6 +610,230 @@
       }
     },
     {
+      "id": "lomography_lomochrome_metropolis",
+      "name": "LomoChrome Metropolis",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "lomography_lomochrome_turquoise",
+      "name": "LomoChrome Turquoise",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          6.5,
+          6.5,
+          6.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "lomography_color_100",
+      "name": "Lomography Color Negative 100",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Color Negative",
+      "target": "kodak_portra_endura",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          3.5,
+          3.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "agfa_agfachrome_100",
+      "name": "Agfa Agfachrome 100",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          10.0,
+          10.0,
+          10.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "agfa_agfachrome_200",
+      "name": "Agfa Agfachrome 200",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          12.0,
+          12.0,
+          12.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "agfa_agfachrome_50",
+      "name": "Agfa Agfachrome 50",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          10.0,
+          10.0,
+          10.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_astia_100f",
+      "name": "Fujifilm Astia 100F",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          7.0,
+          7.0,
+          7.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "fujifilm_provia_100f",
       "name": "Fujifilm Provia 100F",
       "paper": false,
@@ -418,6 +898,102 @@
       }
     },
     {
+      "id": "fujifilm_velvia_50",
+      "name": "Fujifilm Velvia 50",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          9.0,
+          9.0,
+          9.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fotufilm_infrared_color",
+      "name": "Infrared Color (creative)",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          8.5,
+          8.5,
+          8.5
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "kodak_aerochrome_1443",
+      "name": "Kodak Aerochrome III 1443 (infrared)",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          23.0,
+          23.0,
+          23.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "kodak_ektachrome_100",
       "name": "Kodak Ektachrome 100",
       "paper": false,
@@ -450,6 +1026,70 @@
       }
     },
     {
+      "id": "kodak_kodachrome_200",
+      "name": "Kodak Kodachrome 200",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          16.0,
+          16.0,
+          16.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "kodak_kodachrome_25",
+      "name": "Kodak Kodachrome 25",
+      "paper": false,
+      "positive": true,
+      "bw": false,
+      "group": "Color Slide",
+      "target": "",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          9.0,
+          9.0,
+          9.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
       "id": "kodak_kodachrome_64",
       "name": "Kodak Kodachrome 64",
       "paper": false,
@@ -473,6 +1113,134 @@
           10.0,
           10.0,
           10.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_eterna_500",
+      "name": "Fujifilm Eterna 500",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          5.5,
+          7.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_eterna_vivid_500",
+      "name": "Fujifilm Eterna Vivid 500",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          3.5,
+          5.5,
+          7.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_f64d",
+      "name": "Fujifilm F-64D",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          2.5,
+          4.0,
+          5.0
+        ],
+        "uniformity": [
+          0.97,
+          0.97,
+          0.97
+        ]
+      }
+    },
+    {
+      "id": "fujifilm_reala_500d",
+      "name": "Fujifilm Reala 500D",
+      "paper": false,
+      "positive": false,
+      "bw": false,
+      "group": "Motion Picture",
+      "target": "kodak_2383",
+      "times": [],
+      "grain": {
+        "density_min": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          4.0,
+          6.0,
+          8.0
         ],
         "uniformity": [
           0.97,
@@ -642,6 +1410,151 @@
       }
     },
     {
+      "id": "fujifilm_acros_100_ii",
+      "name": "Fujifilm Neopan 100 Acros II",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        4.0,
+        7.0,
+        10.0
+      ],
+      "grain": {
+        "density_min": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          7.0,
+          7.0,
+          7.0
+        ],
+        "uniformity": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      }
+    },
+    {
+      "id": "ilford_delta_3200",
+      "name": "Ilford Delta 3200 Professional",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        7.0,
+        9.0,
+        12.0,
+        16.0
+      ],
+      "grain": {
+        "density_min": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          19.0,
+          19.0,
+          19.0
+        ],
+        "uniformity": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      }
+    },
+    {
+      "id": "ilford_fp4_plus",
+      "name": "Ilford FP4 Plus",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        6.0,
+        8.0,
+        9.0
+      ],
+      "grain": {
+        "density_min": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          10.0,
+          10.0,
+          10.0
+        ],
+        "uniformity": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      }
+    },
+    {
+      "id": "ilford_hp5_plus",
+      "name": "Ilford HP5 Plus",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        6.5,
+        9.5,
+        14.0
+      ],
+      "grain": {
+        "density_min": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          16.0,
+          16.0,
+          16.0
+        ],
+        "uniformity": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      }
+    },
+    {
       "id": "kodak_doublex",
       "name": "Kodak Double-X Negative Film 5222",
       "paper": false,
@@ -680,6 +1593,41 @@
       }
     },
     {
+      "id": "kodak_tmax_100",
+      "name": "Kodak T-MAX 100",
+      "paper": false,
+      "positive": false,
+      "bw": true,
+      "group": "Black & White",
+      "target": "ilford_mgrc_deluxe_grade2",
+      "times": [
+        6.0,
+        7.5
+      ],
+      "grain": {
+        "density_min": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "particle_scale_sublayers": [
+          1.0,
+          0.4,
+          0.25
+        ],
+        "rms_granularity": [
+          8.0,
+          8.0,
+          8.0
+        ],
+        "uniformity": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      }
+    },
+    {
       "id": "kodak_trix400_d76_8min",
       "name": "Kodak Tri-X 400 (experimental)",
       "paper": false,
@@ -692,24 +1640,24 @@
       ],
       "grain": {
         "density_min": [
-          0.03,
-          0.03,
-          0.03
+          0.01,
+          0.01,
+          0.01
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          6.0,
-          6.0
+          17.0,
+          17.0,
+          17.0
         ],
         "uniformity": [
-          0.97,
-          0.97,
-          0.97
+          0.6,
+          0.6,
+          0.6
         ]
       }
     },

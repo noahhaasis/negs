@@ -202,6 +202,19 @@ mod tests {
         let s = grain_settings(&film("kodak_verita_200d"), &g);
         assert_eq!(s.rms_granularity, [6.0, 8.0, 10.0]);
         assert_eq!(s.particle_scale_sublayers, [1.0, 0.5, 0.25]);
+        // Negs-only sections (the Fotufilm B&W ports) take the B&W defaults.
+        let s = grain_settings(&film("ilford_delta_3200"), &g);
+        let lanes = (s.rms_granularity, s.density_min, s.uniformity);
+        assert_eq!(lanes, ([19.0; 3], [0.01; 3], [0.6; 3]));
+        assert_eq!(s.particle_scale_sublayers, [1.0, 0.4, 0.25]);
+        // The colour ports take the colour defaults; CineStill 800T is Vision3 500T.
+        let s = grain_settings(&film("kodak_kodachrome_25"), &g);
+        let lanes = (s.rms_granularity, s.density_min, s.uniformity);
+        assert_eq!(lanes, ([9.0; 3], [0.03; 3], [0.97; 3]));
+        let s = grain_settings(&film("cinestill_800t"), &g);
+        let t = grain_settings(&film("kodak_vision3_500t"), &g);
+        assert_eq!((s.rms_granularity, s.uniformity), (t.rms_granularity, t.uniformity));
+        assert_eq!(s.particle_scale_sublayers, t.particle_scale_sublayers);
         // A value in the params overrides the preset.
         let g = GrainParams { rms_granularity: Some([1.0, 2.0, 3.0]), ..GrainParams::default() };
         assert_eq!(grain_settings(&film("kodak_portra_400"), &g).rms_granularity, [1.0, 2.0, 3.0]);

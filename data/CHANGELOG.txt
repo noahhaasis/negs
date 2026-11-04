@@ -28,6 +28,10 @@ Negs-only data, not from spektrafilm:
   profiles/ilford_mgrc_deluxe_grade2.json are new preparations from Kodak and
   Ilford datasheets, in spektrafilm's profile format. Sources and method:
   profile-sources/bw-expansion/README.md.
+- presets/grain.toml: a kodak_trix400_d76_8min section (rms_granularity 17,
+  Kodak F-4017's figure, as Fotufilm's; the rest from upstream's B&W
+  defaults), in the Negs-only block at the end of the file. Before it, Tri-X 400 got the schema
+  defaults and was about as fine-grained as T-MAX 100.
 - filters/neutral_print_filters.json: entries for kodak_trix400_d76_8min on
   every colour paper under TH-KG3, derived with upstream's own solver
   (runtime/print_balance.solve_neutral_filter_shifts at 28bf883) by
@@ -35,3 +39,61 @@ Negs-only data, not from spektrafilm:
   entries for Double-X and three colour negatives to check the method. B&W
   papers (kodak_2302, ilford_mgrc_deluxe_grade2) have no colour to balance,
   so they get no entries and keep the C0 M50 Y50 fallback.
+
+Fotufilm film profiles (CC BY-SA 4.0, by MUAStudio Inc., https://fotufilm.com;
+see FOTUFILM_LICENSE.txt):
+
+- profiles/: 24 colour films converted from fotufilm-engine commit 96623ba
+  by tools/fotufilm_port (convert.py, port_stocks.py, ship.py). Films Negs
+  already had from spektrafilm keep their spektrafilm profiles; the matching
+  Fotufilm profiles are not shipped. Changes from the Fotufilm originals:
+  sensitivities rebalanced to Negs' neutral-exposure convention; curves
+  resampled onto Negs' log-exposure grid and fitted with three norm_cdfs
+  sub-layers; slide curves shifted so mid-grey is neutral at Y = 0.18;
+  spectral adaptation window fitted per stock (fit_window.py); Fotufilm's
+  donor fourth layer (Reala 500D) and per-stock engine features (couplers,
+  grain, halation) are not carried over; each profile's antihalation class
+  is chosen from Fotufilm's halation strength (CineStill, which has no
+  anti-halation layer, gets "no"). LomoChrome, CineStill 400D,
+  Lomography Color 100, Phoenix 200, Aerochrome and Infrared Color are marked
+  approximate in their metadata, as Fotufilm models them from samples;
+  Superia 200 is too, as it renders further from Fotufilm than the others.
+  LomoChrome Purple is held back (it renders about a stop darker than
+  Fotufilm; cause not yet found).
+- profiles/: 5 black-and-white films from the same commit: HP5 Plus,
+  FP4 Plus, Delta 3200, T-MAX 100 and Acros 100 II (ilford_hp5_plus,
+  ilford_fp4_plus, ilford_delta_3200, kodak_tmax_100, fujifilm_acros_100_ii).
+  Changes from the Fotufilm originals: one channel (Fotufilm's three layers
+  are identical); sensitivity rebalanced as above; curves resampled and
+  fitted with four norm_cdfs sub-layers; the reference curve and Fotufilm's
+  development conditions gathered into a development-time family, with the
+  datasheet's normal time as default_development_time; base+fog per time
+  from each curve's dMin; antihalation "strong", as Negs' Tri-X; target
+  print Ilford Multigrade RC grade 2. Fotufilm's B&W paper curve, grain,
+  adjacency and halation are not carried over. Each reference curve was
+  checked against its manufacturer datasheet graph
+  (research/fotufilm/bw-datasheet-check.md). HP5 Plus 9.5/14 min and
+  FP4 Plus 6/9 min are Fotufilm's estimates, recorded in their metadata.
+- filters/neutral_print_filters.json: TH-KG3 entries for the 15 ported colour
+  negatives on every colour paper, from upstream's solver
+  (crates/spektrafilm-cli/src/bin/solve_neutral_filters.rs). Existing entries
+  unchanged.
+- presets/couplers.toml: 11 ported stocks with steep curves get the class
+  default DIR-coupler gammas scaled down (factor in each entry's comment), so
+  the coupler pre-correction stays well defined (tools/fotufilm_port/fold_check.py).
+- presets/grain.toml: grain sections for the 5 B&W films, in a marked
+  Negs-only block at the end; upstream's sections unchanged. Each sets
+  rms_granularity to the datasheet's RMS granularity (Fotufilm's
+  grainStrength x 1000; T-MAX 100 and Acros 100 II checked against the Kodak
+  and Fujifilm datasheets) and takes the rest from upstream's B&W defaults.
+- presets/grain.toml: grain sections for the 24 colour films, in a second
+  Negs-only block. Fotufilm's datasheet figures (Fujifilm still negatives,
+  slide films, Aerocolor 2460) are used x 1000, as they match upstream 1:1
+  on the films both have; Fotufilm's other figures are scaled by 0.525,
+  fitted on Gold 200, UltraMax 400, Ektar 100 and Portra 400; the Fujifilm
+  cine films take a fit on Vision3 250D/500T with Fotufilm's layer weights;
+  CineStill 800T takes Vision3 500T's section. The rest from upstream's
+  colour defaults. Before, every one got the schema defaults.
+- borders/35mm/: edge-print strips for the 24 ported colour films (product
+  codes or names) and the 5 B&W films (Fotufilm's edge texts),
+  crates/spektrafilm-io/src/film35.rs.

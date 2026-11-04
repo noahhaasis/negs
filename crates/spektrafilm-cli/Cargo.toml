@@ -29,6 +29,11 @@ path = "src/bin/golden_compare.rs"
 name = "golden_probes"
 path = "src/bin/golden_probes.rs"
 
+[[bin]]
+name = "solve_neutral_filters"
+path = "src/bin/solve_neutral_filters.rs"
+required-features = ["precision-f64"]
+
 [features]
 precision-f64 = [
     "spektrafilm-math/precision-f64",

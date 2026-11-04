@@ -221,7 +221,7 @@ fn resolved(film: &Profile, paper: &Profile, params: &RuntimeParams) -> RuntimeP
     // A family's default time; a colour stock has none and stays null.
     let default_time = |stock: &Profile| {
         let times = &stock.data.development_time;
-        (times.len() > 1).then(|| times[profile::development_time_index(times, None)])
+        (times.len() > 1).then(|| times[stock.data.development_index(None)])
     };
     params.film_render.development_time = params.film_render.development_time.or_else(|| default_time(film));
     params.print_render.development_time = params.print_render.development_time.or_else(|| default_time(paper));

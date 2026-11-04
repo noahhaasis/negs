@@ -414,6 +414,8 @@ impl App {
             .unwrap_or_else(|| pick_default_stock(&papers, "fujifilm_crystal_archive_typeii"));
         let mut params = RuntimeParams::default();
         params.io.scan_film = film_profile.as_ref().is_some_and(|f| f.is_positive());
+        params.film_render.development_time =
+            film_profile.as_ref().and_then(|f| f.data.default_development_time);
         let film_dev_times = film_profile
             .as_ref()
             .map(|f| f.data.development_time.clone())
@@ -1253,6 +1255,9 @@ impl App {
                         // a paperless slide, a failed) render.
                         self.params.io.scan_film = film.is_positive();
                         self.film_dev_times = film.data.development_time.clone();
+                        // Name a non-middle default so the picker shows it.
+                        self.params.film_render.development_time =
+                            film.data.default_development_time;
                         if let Some(target) = film.info.target_print.as_deref()
                             && self.papers.iter().any(|p| p.stock == target)
                             && self.print_name != target
@@ -2046,8 +2051,9 @@ fn profile_dev_times(data_dir: &Path, stock: &str) -> Vec<f64> {
 }
 
 /// Development-time picker for a B&W development-time family. `selection`
-/// of `None` means the profile's default (the floor-middle entry, matching
-/// upstream's `select_development_time`). Returns true when changed.
+/// of `None` means the floor-middle entry, matching upstream's
+/// `select_development_time`; the film picker pre-sets a profile's
+/// `default_development_time` instead. Returns true when changed.
 fn dev_time_combo(
     ui: &mut egui::Ui,
     salt: &str,
@@ -2715,10 +2721,20 @@ mod reset_tests {
             .collect();
         assert_eq!(
             bw_films,
-            ["kodak_doublex", "kodak_trix400_d76_8min", "kodak_trix"]
+            [
+                "fujifilm_acros_100_ii",
+                "ilford_delta_3200",
+                "ilford_fp4_plus",
+                "ilford_hp5_plus",
+                "kodak_doublex",
+                "kodak_tmax_100",
+                "kodak_trix400_d76_8min",
+                "kodak_trix",
+            ]
         );
         assert_eq!(bw_prints, ["ilford_mgrc_deluxe_grade2", "kodak_2302"]);
-        assert_eq!(films.len() + prints.len(), 33);
+        // 33, plus the 24 colour and 5 B&W films ported from Fotufilm.
+        assert_eq!(films.len() + prints.len(), 62);
         assert_eq!(
             films
                 .iter()
