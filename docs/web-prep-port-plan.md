@@ -2,7 +2,7 @@
 
 **Status (2026-11-04):** built on branch `web-prep-port` (worktree `web-preview-size`): Prep |
 Lab | Output, Match camera brightness and the film and paper previews. Results in
-[Built](#built-2026-11-04); open items at its end. Main at `c92b539`. Template:
+[Built](#built-2026-11-04); what's left in [Left to do](#left-to-do). Main at `c92b539`. Template:
 [the Windows port plan](windows-prep-port-plan.md), which shipped the same Mac features on
 Windows.
 
@@ -145,15 +145,36 @@ didn't lower the footprint, so the rest is GPU sets, the tile canvases or transf
 the sampler lost the phone before that was pinned down. So, per decision 5, previews are
 **off by default on touch screens** (on with ⋯ › Film and paper previews) and on elsewhere.
 
-**Open:**
+## Left to do
 
-- Where the previews' 150–180 MiB goes on the phone, and the Phase 4 runs: an export with
-  the grids open, the `prep`, `match` and `stocks` phases in `ipad.mjs`, the iPad and the
-  other desktop browsers.
-- JPEG/PNG "Match original brightness": not on the web yet (the switch shows for RAWs only).
-- *Match new RAWs* is remembered from the switch; there's no settings page for it.
-- `web/checks/post.mjs` tests the removed Post controls; `golden.py` keeps 12 MP.
-- Windows: `cargo check` only for the shared brightness module; its tests didn't run.
+1. **The previews' memory on the iPhone**, then an export with both grids open and the
+   default on phones: [handoff](handoff-web-previews-memory.md).
+2. **JPEG/PNG "Match original brightness".** The match switch shows for RAWs only. Plan
+   step 3: use the source the engine already decoded, reduced to 512 px and converted to
+   linear sRGB, as the reference (no second decode), and check it against the Mac's EVs
+   (`CameraBrightnessReference.swift`, Windows `file_reference`). `spektrafilm-io::brightness`
+   has `reduced` and `linear` for it; the page side is `cameraReference` in `app.js`.
+3. **`web/checks/post.mjs`** still drives the removed Post Tone/Saturation controls. Delete
+   it or turn it into a Prep check (Prep sliders, the match note, Exposure as an offset).
+4. **The walkthrough** (`web/tutorial.js`, steps rendered by `tutorialAdapter` in `app.js`):
+   - The film and paper steps highlight `#film` / `#paper`'s rows, which are hidden on
+     desktop now that the foldouts replace them (`app.js`, `step.target === "film"`).
+     Highlight the foldout, or open it for the step.
+   - No step covers Prep or Match camera brightness; the metering step moved to Prep and
+     the exposure step's control is now *Negative exposure (EV)*. Its text ("Change how the
+     film sees light") still fits; check the others against the new tabs.
+   - Run `web/checks/tutorial-layouts.mjs`, `tutorial.mjs` and `tutorial-discovery.mjs`;
+     they weren't run after the tab change.
+5. **The menus.**
+   - ⋯ is still labelled "Presets and LUT" but now holds the *Film and paper previews*
+     switch, whose label wraps to two lines. A small settings group there could also hold
+     *Match new RAWs to camera brightness*, which today is only remembered from the switch.
+   - The tab layout itself: Noah wants to refine it later ("the mac simplified a lot of
+     things"); the phone's tab strip is Stock · Prep · Camera · Film · Print · Scan · Output.
+6. **Smaller:** `golden.py` still keeps 12 MP (the touch cap is 4.4 MP); the shared
+   brightness module only has `cargo check` on Windows, its tests didn't run there; the
+   Phase 4 runs (`prep`, `match`, `stocks` phases in `ipad.mjs`, the iPad, desktop Safari
+   and Firefox).
 
 ## Phase 0: measure before building UI (go / no-go)
 
