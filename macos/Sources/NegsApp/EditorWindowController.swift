@@ -49,7 +49,8 @@ import SwiftUI
         let canvasItem = NSSplitViewItem(viewController: canvas)
         canvasItem.minimumThickness = 680
         inspector = NSSplitViewItem(inspectorWithViewController: panel)
-        inspector.minimumThickness = 300
+        // Wide enough for the six workflow tabs and their labels.
+        inspector.minimumThickness = 340
         inspector.maximumThickness = 440
         inspector.isCollapsed = !model.inspectorVisible
         let split = NSSplitViewController()
@@ -66,7 +67,7 @@ import SwiftUI
         if !window.setFrameUsingName("editor") { window.center() }
         // The split view cannot keep both columns at their minimums in a
         // narrower window, so the window itself enforces their sum.
-        let minimum = NSSize(width: 680 + 300 + split.splitView.dividerThickness, height: 560)
+        let minimum = NSSize(width: 680 + 340 + split.splitView.dividerThickness, height: 560)
         window.contentMinSize = minimum
         let restored = window.contentRect(forFrameRect: window.frame).size
         if restored.width < minimum.width || restored.height < minimum.height {
