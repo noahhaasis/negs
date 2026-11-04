@@ -372,7 +372,7 @@ final class PhotographView: NSView {
             chip.position = centre
             chip.name = "pin \(marker.number)"
             chip.cornerRadius = diameter / 2
-            chip.backgroundColor = Self.tone(marker.lstar).cgColor
+            chip.backgroundColor = ZoneScale.grey(lstar: marker.lstar).cgColor
             // A chip sits on the tone it's filled with, so it needs an edge
             // of its own to be seen.
             chip.borderWidth = (marker.selected ? 2 : 1) / zoom
@@ -414,14 +414,6 @@ final class PhotographView: NSView {
         clip.addSublayer(chip)
         chips[index] = chip
         return chip
-    }
-
-    /// The grey a pin's tone looks like, as sRGB.
-    static func tone(_ lstar: Double) -> NSColor {
-        let y = lstar > 8 ? pow((lstar + 16) / 116, 3) : lstar * 27.0 / 24389
-        let encoded = y <= 0.003_130_8 ? 12.92 * y : 1.055 * pow(y, 1 / 2.4) - 0.055
-        let v = min(max(encoded, 0), 1)
-        return NSColor(srgbRed: v, green: v, blue: v, alpha: 1)
     }
 
     /// The pin whose chip is under `point`, if any. Only the chip takes the

@@ -2,6 +2,19 @@ import Foundation
 import IOSurface
 @testable import NegsApp
 
+private func luminanceWeights(_ displaySpace: String) -> SIMD3<Float> {
+    displaySpace == "Rec. 2020 (sRGB transfer)" ? SIMD3(0.2627, 0.6780, 0.0593) : SIMD3(0.2126, 0.7152, 0.0722)
+}
+
+private func srgbDecode(_ v: Float) -> Float {
+    v <= 0.040_45 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+}
+
+private func lstar(_ y: Float) -> Double {
+    let y = Double(max(y, 0))
+    return y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
+}
+
 /// The tone a circle of a preview shows, for tests to check what printed. The
 /// app measures pins in the helper, before the curve.
 enum TonePick: Equatable, Sendable {

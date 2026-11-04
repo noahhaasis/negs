@@ -643,13 +643,7 @@ struct AdjustmentInspector: View {
         // The histogram and workflow tabs stay put above the tab's scrolling sections.
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                ZoneHistogramView(
-                    histogram: model.histogram.map(ToneHistogram.init) ?? .empty,
-                    canPin: model.canPin,
-                    pins: model.pins,
-                    selectedPin: model.selectedPin,
-                    onAim: { model.aimSelectedPin(atZone: $0) }
-                )
+                HistogramView(histogram: model.histogram).frame(height: 88)
                 InspectorTabBar(model: model)
             }
             .padding(.horizontal, 20)
