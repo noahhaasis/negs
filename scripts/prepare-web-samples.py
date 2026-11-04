@@ -2,7 +2,7 @@
 """Regenerate the six additional web samples and their metadata (not fetched at startup).
 
 Python 3.11+, numpy, pillow, rawpy, and the exiv2 executable are required.
-The original DSC_6377.dng is deliberately left unchanged.
+The original DSC_6377.dng is deliberately not regenerated.
 """
 import argparse
 import hashlib

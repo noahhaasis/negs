@@ -11,7 +11,7 @@ Sizes are decimal MB. Dimensions below include EXIF orientation.
 
 | Sample | File | Dimensions | Size |
 | --- | --- | --- | --- |
-| 1 | DSC_6377.dng (existing, unchanged) | 6048 × 4032 | 3.36 MB |
+| 1 | DSC_6377.dng (existing, not regenerated) | 6048 × 4032 | 3.36 MB |
 | 2 | IMG_0316.dng | 1707 × 2560 | 0.48 MB |
 | 3 | DSC_2498.dng | 1709 × 2560 | 0.48 MB |
 | 4 | DSC_6008.dng | 2560 × 1707 | 0.59 MB |
@@ -27,6 +27,14 @@ The DNG keeps as-shot white balance, a D65 camera matrix, orientation, and an
 embedded camera preview (at most 1280 px). The original sensor mosaic and
 full-resolution detail are not retained. GPS, serial numbers and editing-history
 metadata are not copied. An existing Artist tag is retained where provided.
+
+The preview's EXIF ColorSpace declares its colour space: the camera's own
+setting, or for a DNG original its PreviewColorSpace. All seven are sRGB.
+Prep › Match camera brightness now reads an untagged preview as sRGB anyway
+(`spektrafilm-io` `brightness.rs`), but refused it on the web and Windows
+when the samples had no tag. The seven files were given the tag in place on
+2026-11-04: an EXIF directory and the main directory's pointer to it, with the
+image data byte-identical and the developed pixels unchanged.
 
 **Do not replace these with ordinary Adobe Converter `-lossy -side` output.**
 Those files may use per-channel polynomial opcodes that this rawler version
@@ -100,7 +108,7 @@ python3.13 -m venv /tmp/negs-sample-venv
 ```
 
 Use `--raw-dir PATH` and `--downloads PATH` to override the original locations.
-The script leaves the existing default unchanged. `--catalog-only` rebuilds
+The script doesn't regenerate the existing default. `--catalog-only` rebuilds
 metadata from the existing DNGs without regeneration. To prepare one input:
 
 ```sh
