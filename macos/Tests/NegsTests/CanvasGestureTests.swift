@@ -140,6 +140,50 @@ extension CanvasGestureTests {
             XCTAssertEqual(actual.y, expected.y, accuracy: 0.5, "y at \(unit)")
         }
     }
+    /// A chip is the same size on screen at any zoom, rotation or border.
+    func testAChipKeepsItsScreenSize() throws {
+        let scroll = ImageScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        scroll.allowsMagnification = true; scroll.minMagnification = 0.01; scroll.maxMagnification = 16
+        let view = PhotographView()
+        scroll.documentView = view
+        let marker = TonePinMarker(index: 0, number: 1, lstar: 50, source: PinSource(centre: CGPoint(x: 0.5, y: 0.5), radius: 0), selected: false)
+        for (rotation, border) in [(0, false), (1, false), (0, true)] as [(Int, Bool)] {
+            let frame = rotation == 1 ? CGSize(width: 200, height: 800) : CGSize(width: 800, height: 200)
+            view.show(NSObject(), size: CGSize(width: 800, height: 200), rotation: rotation)
+            view.setFrameSize(border ? CGSize(width: frame.width * 2, height: frame.height * 2) : frame)
+            view.layoutSubtreeIfNeeded(); view.layout()
+            view.setPins([marker])
+            for zoom: CGFloat in [0.25, 1, 2] {
+                scroll.magnification = zoom
+                let chip = try XCTUnwrap(view.chipLayers.first)
+                XCTAssertEqual(chip.bounds.width * zoom, 18, accuracy: 0.01, "rotation \(rotation) border \(border) zoom \(zoom)")
+            }
+        }
+    }
+
+    /// Its number reads upright on a turned photograph.
+    func testAChipStaysUprightOnATurnedPhotograph() throws {
+        let view = makeView()
+        view.show(NSObject(), size: CGSize(width: 800, height: 200), rotation: 1)
+        view.setFrameSize(CGSize(width: 200, height: 800)); view.layout()
+        view.setPins([TonePinMarker(index: 0, number: 1, lstar: 50, source: PinSource(centre: CGPoint(x: 0.5, y: 0.5), radius: 0), selected: false)])
+        let chip = try XCTUnwrap(view.chipLayers.first)
+        let total = chip.affineTransform().concatenating(view.clipLayer.affineTransform())
+        XCTAssertEqual(total.b, 0, accuracy: 1e-6)
+        XCTAssertEqual(total.a, 1, accuracy: 1e-6)
+    }
+
+    /// Only the chip takes the pointer: a plain drag inside a large circle
+    /// still pans.
+    func testARingDoesNotTakeThePointer() throws {
+        let view = makeView()
+        let centre = CGPoint(x: 0.5, y: 0.5)
+        view.setPins([TonePinMarker(index: 0, number: 1, lstar: 50, source: PinSource(centre: centre, radius: 0.4), selected: false)])
+        let point = viewPoint(centre, in: view)
+        XCTAssertEqual(view.pinIndex(at: point), 0)
+        XCTAssertNil(view.pinIndex(at: CGPoint(x: point.x + 30, y: point.y)))
+    }
+
     /// The unit point reads the photograph as shown: near the top of a
     /// top-black gradient is a dark tone, near the bottom a light one.
     func testUnitPointIsNotMirrored() throws {

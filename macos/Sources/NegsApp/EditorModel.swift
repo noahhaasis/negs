@@ -38,19 +38,6 @@ import UniformTypeIdentifiers
     private(set) var original: IOSurface?
     /// The tones of `image` within the crop; nil until it develops.
     private(set) var histogram: Histogram?
-    /// The zone band being clicked: with a pin selected, the click aims it
-    /// there. Reading a zone is hover.
-    var selectedZone: Int? {
-        didSet {
-            guard let zone = selectedZone else { return }
-            guard let index = selectedPin, pins.indices.contains(index) else {
-                selectedZone = nil
-                return
-            }
-            movePin(index, to: zone)
-        }
-    }
-
     /// The print's pinned tones, in parameter order.
     var pins: [TonePin] {
         let anchors = state.params["post.tone_anchors"].array
@@ -88,13 +75,12 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// Whether the chart draws the pins (⌘'). Remembered between launches.
+    /// Whether the canvas draws the pins (⌘'). Remembered between launches.
     var showsPins = UserDefaults.standard.object(forKey: "showTonePins") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showsPins, forKey: "showTonePins") }
     }
 
-    /// The pin the chart has selected: it is highlighted, and the next band
-    /// click moves it here.
+    /// The selected pin: its band lights up, and a band click aims it there.
     private(set) var selectedPin: Int?
     /// The developed preview's frame, uncropped, which the canvas lays out:
     /// the working frame, or less with the 12 MP limit.
@@ -453,8 +439,6 @@ import UniformTypeIdentifiers
         if border != state.border { border = state.border }
         if crop != state.crop {
             crop = state.crop
-            // A reference belongs to the crop it was drawn on.
-            selectedZone = nil
             selectedPin = nil
             updateHistogram()
         }
@@ -768,8 +752,6 @@ import UniformTypeIdentifiers
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
-        // References belong to the photograph that had them.
-        selectedZone = nil
         selectedPin = nil
         updateHistogram()
         interactionStart = nil; cropSession = nil
@@ -795,8 +777,9 @@ import UniformTypeIdentifiers
             state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
             // The pins and the placement describe the tones of the photograph
             // they were measured on, so they never carry to another file.
-            state.params["post.tone_anchors"] = .array([])
-            state.params["camera.placement_ev"] = .number(0)
+            for path in ["post.tone_anchors", "camera.placement_ev"] where state.params[path] != defaults[path] {
+                state.params[path] = defaults[path]
+            }
             state.crop = CropSettings()
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
@@ -1089,126 +1072,107 @@ import UniformTypeIdentifiers
         }
     }
     private func showHistogram(_ counted: Histogram, request: Int) {
-        guard request == histogramRequest else { return }
-        if counted != histogram { histogram = counted }
+        guard request == histogramRequest, counted != histogram else { return }
+        histogram = counted
     }
 
     // MARK: The zone system
 
-    /// Samples a circular area into a pin that holds its tone where it is,
-    /// and selects it. `radius` is a fraction of the photograph's shorter
-    /// side; zero is a single pixel (⌘-click).
-    func addPin(at centre: CGPoint, radius: Double) {
-        guard canPin, let image else { return }
-        let pick = TonePick.circle(centre: centre, radius: radius)
-        guard let sample = pick.sample(image) else { return }
-        let anchor = JSONValue.object([
-            "input": .number(sample.lstar),
-            "target": .number(sample.lstar),
-            "source": .object([
-                "x": .number(centre.x),
-                "y": .number(centre.y),
-                "radius": .number(radius)
-            ])
-        ])
+    /// Measures a circle of the photograph into a pin that holds its tone,
+    /// and selects it. `centre` is in fractions of the uncropped photograph
+    /// and `radius` a fraction of its shorter side; zero is one pixel. A zone
+    /// holds one pin, so a tone measured in an occupied zone replaces its pin.
+    func addPin(at centre: CGPoint, radius: Double) async {
+        guard let lstar = await measureTone(at: centre, radius: radius) else { return }
+        let anchor = Self.anchor(input: lstar, target: lstar, centre: centre, radius: radius)
         var anchors = state.params["post.tone_anchors"].array
-        // One pin per zone: a second tone measured in a zone re-aims that
-        // zone's pin rather than stacking another at the same output.
-        let zone = ZoneScale.zone(forTarget: sample.lstar)
-        let occupied = anchors.indices.first {
-            ZoneScale.zone(forTarget: state.params["post.tone_anchors.\($0).target"].double) == zone
-        }
-        if let occupied {
-            anchors[occupied] = anchor
-        } else {
-            anchors.append(anchor)
-        }
-        var next = state
-        next.params["post.tone_anchors"] = .array(anchors)
-        apply(next, action: occupied == nil ? "Pin Tone" : "Re-aim Tone Pin")
+        let zone = ZoneScale.zone(forTarget: lstar)
+        let occupied = pins.firstIndex { $0.zone == zone }
+        if let occupied { anchors[occupied] = anchor } else { anchors.append(anchor) }
+        setAnchors(anchors, action: occupied == nil ? "Pin Tone" : "Replace Tone Pin")
         selectedPin = occupied ?? anchors.indices.last
-        selectedZone = nil
-        updateHistogram()
     }
 
-    /// Re-measures a placed pin at a new point, keeping its radius and its
-    /// zone aim; a pin that was only holding its tone follows the new one.
-    func movePin(_ index: Int, to centre: CGPoint) {
-        guard pins.indices.contains(index), let image else { return }
+    /// Measures a pin again at a new point, keeping its radius and its aim;
+    /// a pin that was only holding its tone holds the new one.
+    func movePin(_ index: Int, to centre: CGPoint) async {
+        guard pins.indices.contains(index) else { return }
         let radius = pins[index].source?.radius ?? 0
-        guard let sample = TonePick.circle(centre: centre, radius: radius).sample(image) else { return }
+        guard let lstar = await measureTone(at: centre, radius: radius), pins.indices.contains(index) else { return }
+        let pin = pins[index]
+        let holding = abs(pin.target - pin.input) < 0.01
         var anchors = state.params["post.tone_anchors"].array
-        guard anchors.indices.contains(index), case .object(var anchor) = anchors[index] else { return }
-        let wasHolding = abs(pins[index].target - pins[index].input) < 0.01
-        anchor["input"] = .number(sample.lstar)
-        if wasHolding { anchor["target"] = .number(sample.lstar) }
-        anchor["source"] = .object([
-            "x": .number(centre.x), "y": .number(centre.y), "radius": .number(radius)
-        ])
-        anchors[index] = .object(anchor)
-        var next = state
-        next.params["post.tone_anchors"] = .array(anchors)
-        apply(next, action: "Move Tone Pin")
+        anchors[index] = Self.anchor(input: lstar, target: holding ? lstar : pin.target, centre: centre, radius: radius)
+        setAnchors(anchors, action: "Move Tone Pin")
         selectedPin = index
     }
 
-    /// Selects a pin (nil clears it); the next band click aims it.
-    func selectPin(_ index: Int?) {
-        selectedPin = index
-        selectedZone = nil
+    func selectPin(_ index: Int) { selectedPin = index }
+
+    /// Aims the selected pin at a zone's tone. A zone holds one pin, so when
+    /// another pin is already there, that one is selected instead.
+    func aimSelectedPin(atZone zone: Int) {
+        guard let index = selectedPin, pins.indices.contains(index), ZoneScale.zones.indices.contains(zone) else { return }
+        let target = ZoneScale.zones[zone].target
+        if let other = pins.indices.first(where: { $0 != index && abs(pins[$0].target - target) < 0.5 }) {
+            selectedPin = other
+            return
+        }
+        var anchors = state.params["post.tone_anchors"].array
+        guard case .object(var anchor) = anchors[index] else { return }
+        anchor["target"] = .number(target)
+        anchors[index] = .object(anchor)
+        setAnchors(anchors, action: "Aim Tone Pin")
     }
 
     var canRemovePin: Bool { selectedPin != nil }
 
-    /// ⌘': show or hide every pin at once. Hiding drops the selection, so no
-    /// highlight outlives the circles it belongs to.
+    func removeSelectedPin() {
+        guard let index = selectedPin, pins.indices.contains(index) else { return }
+        var anchors = state.params["post.tone_anchors"].array
+        anchors.remove(at: index)
+        setAnchors(anchors, action: "Remove Tone Pin")
+        selectedPin = nil
+    }
+
+    func clearToneSelection() { selectedPin = nil }
+
+    /// ⌘': show or hide every pin. Hiding drops the selection, so no highlight
+    /// outlives the circles it belongs to.
     func toggleTonePins() {
         showsPins.toggle()
         if !showsPins { selectedPin = nil }
     }
 
-    /// Moves a pin's target to another zone's tone; a pin already there is
-    /// selected instead, because a zone holds one pin.
-    private func movePin(_ index: Int, to zone: Int) {
-        guard pins.indices.contains(index), ZoneScale.zones.indices.contains(zone) else { return }
-        let target = ZoneScale.zones[zone].target
-        if let other = pins.indices.first(where: { $0 != index && abs(pins[$0].target - target) < 0.5 }) {
-            selectedPin = other
-            selectedZone = nil
-            return
+    /// The tone of a circle on the current render, as the pins read it: before
+    /// the curve they make. Nil if the render changed meanwhile.
+    private func measureTone(at centre: CGPoint, radius: Double) async -> Double? {
+        guard canPin, let engine else { return nil }
+        let measuring = revision
+        do {
+            let (_, result) = try await engine.request([
+                "command": .string("sample_tone"), "render_id": .number(Double(renderID)),
+                "x": .number(centre.x), "y": .number(centre.y), "radius": .number(radius)
+            ])
+            return measuring == revision ? result["lstar"].double : nil
+        } catch {
+            report(error)
+            return nil
         }
-        var anchors = state.params["post.tone_anchors"].array
-        guard anchors.indices.contains(index), case .object(var anchor) = anchors[index] else { return }
-        anchor["target"] = .number(target)
-        anchors[index] = .object(anchor)
+    }
+
+    private static func anchor(input: Double, target: Double, centre: CGPoint, radius: Double) -> JSONValue {
+        .object([
+            "input": .number(input), "target": .number(target),
+            "source": .object(["x": .number(centre.x), "y": .number(centre.y), "radius": .number(radius)])
+        ])
+    }
+
+    /// Replaces the pins as one undoable edit.
+    private func setAnchors(_ anchors: [JSONValue], action: String) {
         var next = state
         next.params["post.tone_anchors"] = .array(anchors)
-        apply(next, action: "Aim Tone Pin")
-        selectedZone = nil
-        selectedPin = index
-    }
-
-    /// ⌫: removes the selected pin.
-    func deleteToneSelection() {
-        removeSelectedPin()
-    }
-
-    /// Removes the selected pin — one undoable edit.
-    func removeSelectedPin() {
-        guard let index = selectedPin, pins.indices.contains(index) else { return }
-        var anchors = state.params["post.tone_anchors"].array
-        anchors.remove(at: index)
-        var next = state
-        next.params["post.tone_anchors"] = .array(anchors)
-        apply(next, action: "Remove Tone Pin")
-        selectedPin = nil
-        selectedZone = nil
-    }
-
-    /// Esc: drops the pin selection.
-    func clearToneSelection() {
-        selectedPin = nil
-        selectedZone = nil
+        apply(next, action: action)
     }
 
     /// Only mention an update once it has visibly taken a while.

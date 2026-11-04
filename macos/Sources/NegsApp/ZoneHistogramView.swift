@@ -55,6 +55,9 @@ struct ToneHistogram: Sendable {
     var blue: [Double]
     /// The photograph's own CIE L\*.
     var luminance: [Double]
+    /// The tallest bar, leaving out the clipped ends so their spikes don't
+    /// flatten the rest. Lightness never sets the scale.
+    let peak: Double
 
     static let empty = ToneHistogram(
         red: Array(repeating: 0, count: 256), green: Array(repeating: 0, count: 256),
@@ -63,6 +66,9 @@ struct ToneHistogram: Sendable {
 
     init(red: [Double], green: [Double], blue: [Double], luminance: [Double]) {
         self.red = red; self.green = green; self.blue = blue; self.luminance = luminance
+        let channels = [red, green, blue]
+        let inner = channels.map { $0.count > 250 ? $0[5...250].max() ?? 0 : 0 }.max() ?? 0
+        peak = inner > 0 ? inner : channels.map { $0.max() ?? 0 }.max() ?? 0
     }
 
     init(_ histogram: Histogram) {
@@ -122,30 +128,31 @@ private extension Color {
 }
 
 /// The tone histogram drawn over the print's zones. Each band is a button:
-/// with a tone selected on the photograph, clicking a band pins that tone to
-/// the zone's centre (the host clears the selection afterwards). The curves
-/// never take the pointer.
+/// with a pin selected it aims the pin there, and otherwise it holds that
+/// band's reading in the caption. The curves never take the pointer.
 struct ZoneHistogramView: View {
     let histogram: ToneHistogram
-    @Binding var selectedZone: Int?
-    /// A reference is selected, so a click pins its tone.
+    /// A tone can be measured on the photograph right now.
     var canPin = false
-    /// The print's pinned tones: a selected one lights its band and names
-    /// itself in the caption. The pins themselves are outlined on the
-    /// photograph, where they were measured.
     var pins: [TonePin] = []
     var selectedPin: Int?
+    /// A band was clicked with a pin selected.
+    var onAim: (Int) -> Void = { _ in }
     var chartHeight: CGFloat = 124
 
     @State private var hoveredZone: Int?
+    /// The band a click is holding in the caption.
+    @State private var readZone: Int?
 
     private var zones: [Zone] { ZoneScale.zones }
 
-    /// The band to highlight: the selected pin's, else the clicked one.
-    private var highlightedZone: Int? {
-        if let index = selectedPin, pins.indices.contains(index) { return pins[index].zone }
-        return selectedZone
+    private var pin: TonePin? {
+        guard let selectedPin, pins.indices.contains(selectedPin) else { return nil }
+        return pins[selectedPin]
     }
+
+    /// The lit band: the selected pin's, else the one held for reading.
+    private var highlightedZone: Int? { pin?.zone ?? readZone }
 
     /// Hover wins over the highlight for the caption.
     private var activeZone: Zone? {
@@ -153,9 +160,9 @@ struct ZoneHistogramView: View {
         return zones.first { $0.index == index }
     }
 
-    private var selectedPinValue: TonePin? {
-        guard let index = selectedPin, pins.indices.contains(index) else { return nil }
-        return pins[index]
+    /// What clicking a band will do, when it does more than hold the reading.
+    static func clickHint(pinSelected: Bool) -> String? {
+        pinSelected ? "Click to move here" : nil
     }
 
     var body: some View {
@@ -186,7 +193,11 @@ struct ZoneHistogramView: View {
                     isHovered: hoveredZone == zone.index,
                     isSelected: highlightedZone == zone.index
                 ) {
-                    selectedZone = selectedZone == zone.index ? nil : zone.index
+                    if pin != nil {
+                        onAim(zone.index)
+                    } else {
+                        readZone = readZone == zone.index ? nil : zone.index
+                    }
                 }
                 .frame(width: width * span / 100)
                 .onHover { inside in
@@ -204,36 +215,26 @@ struct ZoneHistogramView: View {
 
     @ViewBuilder private var caption: some View {
         HStack(spacing: 6) {
-            if let pin = selectedPinValue, hoveredZone == nil {
-                Text("Pin").fontWeight(.semibold).foregroundStyle(ZonePalette.textPrimary)
-                Text("L* \(pin.input.formatted(.number.precision(.fractionLength(1)))) → Zone \(zones.first { $0.index == pin.zone }?.numeral ?? "")")
+            if let pin, hoveredZone == nil {
+                Text("Pin \(pin.number)").fontWeight(.semibold).foregroundStyle(ZonePalette.textPrimary)
+                Text("L* \(pin.input.formatted(.number.precision(.fractionLength(1)))) → Zone \(ZoneLadder.names[pin.zone])")
                     .foregroundStyle(ZonePalette.textSecondary)
                 Spacer(minLength: 0)
-                Text("⌫ deletes")
-                    .foregroundStyle(ZonePalette.accentText)
+                Text("⌫ deletes").foregroundStyle(ZonePalette.textSecondary)
             } else if let zone = activeZone {
-                Text("Zone \(zone.numeral)")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(ZonePalette.textPrimary)
-                Text(zone.name)
-                    .foregroundStyle(ZonePalette.textSecondary)
+                Text("Zone \(zone.numeral)").fontWeight(.semibold).foregroundStyle(ZonePalette.textPrimary)
+                Text(zone.name).foregroundStyle(ZonePalette.textSecondary)
                 Spacer(minLength: 0)
-                Text(histogram.share(of: zone), format: .percent.precision(.fractionLength(1)))
-                    .monospacedDigit()
-                    .foregroundStyle(ZonePalette.textPrimary)
-                if selectedPin != nil {
-                    Text("·  Click to move here")
-                        .foregroundStyle(ZonePalette.accentText)
-                } else if canPin {
-                    Text("·  Click to pin")
-                        .foregroundStyle(ZonePalette.accentText)
+                // The hint replaces the share: both don't fit the narrowest inspector.
+                if let hint = Self.clickHint(pinSelected: pin != nil) {
+                    Text(hint).foregroundStyle(ZonePalette.accentText)
+                } else {
+                    Text(histogram.share(of: zone), format: .percent.precision(.fractionLength(1)))
+                        .monospacedDigit()
+                        .foregroundStyle(ZonePalette.textPrimary)
                 }
-            } else if canPin {
-                Text("⌘-click or ⌘-drag to pin a tone")
-                    .foregroundStyle(ZonePalette.accentText)
-                Spacer(minLength: 0)
             } else {
-                Text("Hover a zone to read it")
+                Text(canPin ? "⌘-click or ⌘-drag a tone to pin it" : "Hover a zone to read it")
                     .foregroundStyle(ZonePalette.textSecondary)
                 Spacer(minLength: 0)
             }
@@ -289,14 +290,12 @@ private struct ZoneBand: View {
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .animation(.easeOut(duration: 0.12), value: isSelected)
-        .help("Zone \(zone.numeral), \(zone.name): \(share.formatted(.percent.precision(.fractionLength(1)))) of the tones here.")
         .accessibilityLabel(
             "Zone \(zone.numeral), \(zone.name), \(share.formatted(.percent.precision(.fractionLength(1)))) of pixels"
         )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
-
 
 /// R, G and B as screened fills with thin strokes, the photograph's L\* as an
 /// open line over them.
@@ -305,10 +304,7 @@ private struct HistogramCurves: View {
 
     var body: some View {
         Canvas { context, size in
-            let peak = max(
-                histogram.red.max() ?? 0, histogram.green.max() ?? 0,
-                histogram.blue.max() ?? 0, .leastNonzeroMagnitude
-            )
+            let peak = max(histogram.peak, .leastNonzeroMagnitude)
             let channels: [([Double], Color, Double, Color, Double)] = [
                 (histogram.red, ZonePalette.red, 0.32, ZonePalette.red, 0.80),
                 (histogram.green, ZonePalette.green, 0.32, ZonePalette.green, 0.80),
@@ -352,4 +348,3 @@ private struct HistogramCurves: View {
         return path
     }
 }
-

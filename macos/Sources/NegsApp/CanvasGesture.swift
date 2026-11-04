@@ -3,8 +3,8 @@ import AppKit
 /// What a mouse-down on the photograph starts. Pure, so the map from clicks
 /// and modifiers to a gesture is testable without events.
 ///
-/// There are only four: a double-click zooms, ⌘ samples a tone into a pin,
-/// clicking a pin selects it, and everything else pans.
+/// A double-click zooms, ⌘ samples a tone into a pin, clicking a pin's chip
+/// selects it, and everything else pans.
 struct CanvasGesture {
     enum Start: Equatable {
         /// Toggle between fit and 1:1, about the click.
@@ -13,8 +13,8 @@ struct CanvasGesture {
         case pan
         /// A ⌘-click, or a ⌘-drag that grows a sample circle from the point.
         case pin
-        /// A click on a pin's chip or ring: select it (its band lights up and
-        /// the next band click aims it).
+        /// A click on a pin's chip selects it: its band lights up, and a band
+        /// click aims it there. A drag from the chip moves it.
         case selectPin(Int)
     }
 

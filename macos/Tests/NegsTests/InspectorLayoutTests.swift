@@ -108,12 +108,12 @@ import XCTest
 
         // A pin fills the zone caption and draws on the canvas; both reserve
         // their space already.
-        model.addPin(at: CGPoint(x: 0.5, y: 0.5), radius: 0)
+        await model.addPin(at: CGPoint(x: 0.5, y: 0.5), radius: 0)
         try await waitUntil { model.pins.count == 1 }
         try await Task.sleep(for: .milliseconds(200))
         try capture("pick")
-        XCTAssertEqual(document.frame.height, initialHeight, accuracy: 1, "A tone reference must not resize the inspector form")
-        XCTAssertEqual(sliderY(), interactiveY, accuracy: 1, "A tone reference must keep sliders under the pointer")
+        XCTAssertEqual(document.frame.height, initialHeight, accuracy: 1, "A pin must not resize the inspector form")
+        XCTAssertEqual(sliderY(), interactiveY, accuracy: 1, "A pin must keep sliders under the pointer")
     }
 
     private func waitUntil(_ predicate: () -> Bool) async throws {

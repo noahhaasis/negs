@@ -62,6 +62,19 @@ final class ZoneHistogramTests: XCTestCase {
         XCTAssertEqual(histogram.share(of: ZoneScale.zones[7]), 0, accuracy: 1e-12)
     }
 
+    /// A clipped spike can't flatten the chart: it runs off the top.
+    func testClippedEndsDoNotSetTheScale() {
+        var histogram = Histogram()
+        histogram.red[255] = 90_000; histogram.blue[0] = 70_000; histogram.green[128] = 40
+        XCTAssertEqual(ToneHistogram(histogram).peak, 40)
+    }
+
+    /// A click only promises what it does: without a selected pin it reads.
+    func testOnlyASelectedPinOffersAClick() {
+        XCTAssertEqual(ZoneHistogramView.clickHint(pinSelected: true), "Click to move here")
+        XCTAssertNil(ZoneHistogramView.clickHint(pinSelected: false))
+    }
+
     func testEmptyHistogramHasNoShare() {
         let empty = ToneHistogram.empty
         XCTAssertEqual(empty.share(of: ZoneScale.zones[5]), 0)

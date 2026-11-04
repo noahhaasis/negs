@@ -76,10 +76,10 @@ final class HistogramTests: XCTestCase {
     func testPeakIgnoresClippedEnds() {
         var histogram = Histogram()
         histogram.red[0] = 1000; histogram.green[128] = 40; histogram.blue[255] = 900
-        XCTAssertEqual(histogram.peak, 40)
-        XCTAssertEqual(Histogram().peak, 0)
+        XCTAssertEqual(ToneHistogram(histogram).peak, 40)
+        XCTAssertEqual(ToneHistogram(Histogram()).peak, 0)
         var clipped = Histogram(); clipped.red[255] = 7
-        XCTAssertEqual(clipped.peak, 7)
+        XCTAssertEqual(ToneHistogram(clipped).peak, 7)
     }
 
     /// Bins 0–4 and 251–255 don't set the scale either, so a spike at the
@@ -87,15 +87,15 @@ final class HistogramTests: XCTestCase {
     func testPeakIgnoresBinsZeroToFourAnd251Up() throws {
         var histogram = Histogram()
         histogram.red[3] = 5000; histogram.green[252] = 5000; histogram.blue[128] = 40
-        XCTAssertEqual(histogram.peak, 40)
+        XCTAssertEqual(ToneHistogram(histogram).peak, 40)
         // The neighbours of the excluded ends still count.
         histogram.blue[5] = 50
-        XCTAssertEqual(histogram.peak, 50)
+        XCTAssertEqual(ToneHistogram(histogram).peak, 50)
         histogram.red[250] = 60
-        XCTAssertEqual(histogram.peak, 60)
+        XCTAssertEqual(ToneHistogram(histogram).peak, 60)
         // A flat clipped frame still gets a scale, as before.
         var ends = Histogram(); ends.red[3] = 5000; ends.green[254] = 4000
-        XCTAssertEqual(ends.peak, 5000)
+        XCTAssertEqual(ToneHistogram(ends).peak, 5000)
     }
 
     // MARK: Lightness and channels
@@ -110,7 +110,7 @@ final class HistogramTests: XCTestCase {
         XCTAssertEqual(histogram.green[127], 64)
         XCTAssertEqual(histogram.blue[127], 64)
         // Lightness never sets the graph's vertical scale.
-        XCTAssertEqual(histogram.peak, 64)
+        XCTAssertEqual(ToneHistogram(histogram).peak, 64)
     }
 
     /// Each channel is read as a tone of its own: a saturated red's red

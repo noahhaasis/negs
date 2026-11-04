@@ -152,7 +152,8 @@ import SwiftUI
             item.state = model.showsPins ? .on : .off
             return photo
         case #selector(deleteTonePin):
-            return model.canRemovePin
+            // Delete still deletes text while a field is being edited.
+            return model.canRemovePin && !(NSApp.keyWindow?.firstResponder is NSText)
         case #selector(toggleAdjustments):
             item.state = model.inspectorVisible && model.inspectorPane == .adjustments ? .on : .off; return true
         case #selector(togglePresets):

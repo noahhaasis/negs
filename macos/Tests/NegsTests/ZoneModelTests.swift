@@ -2,8 +2,8 @@ import AppKit
 import XCTest
 @testable import NegsApp
 
-/// The system end to end, through the release helper: a pick, the measured
-/// curve, and the placement a zone click applies.
+/// The pins end to end, through the release helper: measuring a tone, holding
+/// it, and aiming it at a zone.
 @MainActor final class ZoneModelTests: XCTestCase {
     private var directory: URL!
     private var ramp: URL!
@@ -90,9 +90,7 @@ import XCTest
     }
     /// Pins the tone at `point` (a ⌘-click) and waits for the render.
     private func pin(_ point: CGPoint = CGPoint(x: 0.5, y: 0.5), radius: Double = 0, on model: EditorModel) async throws {
-        let before = model.pins.count
-        model.addPin(at: point, radius: radius)
-        try await waitUntil { model.pins.count != before || model.pins.last?.input != nil }
+        await model.addPin(at: point, radius: radius)
         try await waitUntil { model.previewCurrent }
     }
 
@@ -128,6 +126,32 @@ extension ZoneModelTests {
         XCTAssertEqual(try lstar(model), before, accuracy: 1.0)
     }
 
+    /// A pin reads the tone before the curve: pulling one tone down must not
+    /// change what a second pin elsewhere measures.
+    func testASecondPinReadsTheToneBeforeTheFirstPinsCurve() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let light = CGPoint(x: 0.75, y: 0.5)
+        let untouched = try lstar(model, at: light)
+        try await pin(on: model)
+        model.aimSelectedPin(atZone: 2)
+        try await waitUntil { model.previewCurrent }
+        XCTAssertLessThan(try lstar(model, at: light), untouched - 3, "The curve should have moved this tone")
+        try await pin(light, on: model)
+        XCTAssertEqual(try XCTUnwrap(model.pins.last).input, untouched, accuracy: 1)
+    }
+
+    /// Holding a tone leaves a photograph with Post edits as it was.
+    func testAPinKeepsThePostEdit() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        model.set("post.brightness", .number(40))
+        try await waitUntil { model.previewCurrent }
+        let probe = CGPoint(x: 0.25, y: 0.5), before = try lstar(model, at: probe)
+        try await pin(on: model)
+        XCTAssertEqual(try lstar(model, at: probe), before, accuracy: 1.5)
+    }
+
     /// Clicking a band aims the selected pin at that zone, and the tone
     /// prints there.
     func testAimingAPinLandsTheToneOnTheZone() async throws {
@@ -135,7 +159,7 @@ extension ZoneModelTests {
         defer { model.shutdown() }
         try await pin(on: model)
         let target = ZoneScale.zones[5].target
-        model.selectedZone = 5
+        model.aimSelectedPin(atZone: 5)
         XCTAssertEqual(anchors(model).last?.target, target)
         try await waitUntil { model.previewCurrent }
         XCTAssertEqual(try lstar(model), target, accuracy: 1.5)
@@ -149,7 +173,7 @@ extension ZoneModelTests {
             defer { model.shutdown() }
             try await pin(on: model)
             let target = ZoneScale.zones[4].target
-            model.selectedZone = 4
+            model.aimSelectedPin(atZone: 4)
             try await waitUntil { model.previewCurrent }
             XCTAssertEqual(try lstar(model), target, accuracy: 1.5, "compensation \(compensation)")
         }
@@ -161,12 +185,12 @@ extension ZoneModelTests {
         let model = try await makeModel()
         defer { model.shutdown() }
         try await pin(CGPoint(x: 0.05, y: 0.5), on: model)
-        model.selectedZone = 0
+        model.aimSelectedPin(atZone: 0)
         try await waitUntil { model.previewCurrent }
         XCTAssertLessThan(try lstar(model, at: CGPoint(x: 0.05, y: 0.5)), 1.0)
 
         try await pin(CGPoint(x: 0.95, y: 0.5), on: model)
-        model.selectedZone = 8
+        model.aimSelectedPin(atZone: 8)
         try await waitUntil { model.previewCurrent }
         XCTAssertGreaterThan(try lstar(model, at: CGPoint(x: 0.95, y: 0.5)), 99.0)
         // And a later interior pin leaves both ends alone.
@@ -182,7 +206,7 @@ extension ZoneModelTests {
         model.undoManager = undo
         try await pin(on: model)
         let held = anchors(model)[0].target
-        model.selectedZone = 5
+        model.aimSelectedPin(atZone: 5)
         try await waitUntil { model.previewCurrent }
         XCTAssertEqual(undo.undoActionName, "Aim Tone Pin")
         undo.undo()
@@ -196,7 +220,7 @@ extension ZoneModelTests {
         let undo = UndoManager()
         model.undoManager = undo
         try await pin(on: model)
-        model.deleteToneSelection()
+        model.removeSelectedPin()
         try await waitUntil { model.previewCurrent }
         XCTAssertTrue(model.pins.isEmpty)
         XCTAssertEqual(undo.undoActionName, "Remove Tone Pin")

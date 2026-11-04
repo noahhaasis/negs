@@ -16,11 +16,10 @@ struct PreviewCanvas: NSViewRepresentable {
     let zoomCommand: UUID
     let fit: Bool
     var scale: CanvasScale?
-    /// The pins shown over the photograph: a numbered chip each, with the
-    /// ring of the area it averaged.
+    /// The pins shown over the photograph.
     var pins: [TonePinMarker] = []
     /// Called when a pin's chip is clicked.
-    var onSelectPin: ((Int?) -> Void)? = nil
+    var onSelectPin: ((Int) -> Void)? = nil
     /// Called with the centre (unit coordinates, top left) and radius (a
     /// fraction of the shorter side) of a ⌘-click or ⌘-drag.
     var onPin: ((CGPoint, Double) -> Void)? = nil
@@ -176,7 +175,17 @@ final class ImageScrollView: NSScrollView {
         fitting = value
         onFitChanged?(value)
     }
-    override func magnify(with event: NSEvent) { setFitting(false); super.magnify(with: event) }
+    /// Pins keep their size on screen, so every change of zoom redraws them.
+    override var magnification: CGFloat { didSet { (documentView as? PhotographView)?.zoomChanged() } }
+    override func setMagnification(_ magnification: CGFloat, centeredAt point: NSPoint) {
+        super.setMagnification(magnification, centeredAt: point)
+        (documentView as? PhotographView)?.zoomChanged()
+    }
+    override func magnify(with event: NSEvent) {
+        setFitting(false)
+        super.magnify(with: event)
+        (documentView as? PhotographView)?.zoomChanged()
+    }
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.option) {
             setFitting(false)
@@ -209,7 +218,7 @@ final class PhotographView: NSView {
     /// One chip layer per pin, keyed by the pin's index.
     private var chips: [Int: CALayer] = [:]
     /// Called when a pin's chip is clicked.
-    var onSelectPin: ((Int?) -> Void)?
+    var onSelectPin: ((Int) -> Void)?
     /// Called with the centre (unit coordinates, top left) and radius (a
     /// fraction of the shorter side) of a completed ⌘-click or ⌘-drag.
     var onPin: ((CGPoint, Double) -> Void)?
@@ -222,11 +231,13 @@ final class PhotographView: NSView {
         case pan
         /// A ⌘-drag: the circle grows from `centre` to the pointer.
         case pin(centre: CGPoint, unitCentre: CGPoint)
-        /// A pin dragged to a new place: the chip follows, and the tone is
-        /// measured again on mouse-up.
-        case movePin(index: Int, centre: CGPoint, unitCentre: CGPoint, moved: Bool)
+        /// A pin dragged from its chip: it follows the pointer from where it
+        /// was grabbed, and the tone is measured again on mouse-up.
+        case movePin(index: Int, start: CGPoint, grab: CGVector, unit: CGPoint?)
     }
     private var drag: Drag?
+    /// Where a dragged pin is drawn until the model has measured it there.
+    private var movedPin: (index: Int, centre: CGPoint)?
     private var cursorPushed = false
     /// The photograph's size on the canvas, after cropping and rotation.
     var displaySize: CGSize {
@@ -284,6 +295,7 @@ final class PhotographView: NSView {
     func setPins(_ markers: [TonePinMarker]) {
         guard markers != pinMarkers else { return }
         pinMarkers = markers
+        movedPin = nil
         updatePins()
     }
 
@@ -309,50 +321,62 @@ final class PhotographView: NSView {
         clip.convert(CGPoint(x: unit.x * size.width, y: (1 - unit.y) * size.height), from: photo)
     }
 
-    /// A chip's diameter on screen, in clip pixels, so it stays the same size
-    /// as the view zooms.
-    private var chipSize: CGFloat {
-        guard clip.bounds.width > 0, bounds.width > 0 else { return 18 }
-        let zoom = max(enclosingScrollView?.magnification ?? 1, 0.01)
-        return 18 / zoom * clip.bounds.width / bounds.width
+    /// The canvas's zoom. Clip units are the document's, so this alone maps
+    /// them to screen points, whatever the rotation or border.
+    private var zoom: CGFloat { max(enclosingScrollView?.magnification ?? 1, 0.01) }
+
+    /// A chip's diameter in clip units: 18 points on screen.
+    private var chipSize: CGFloat { 18 / zoom }
+
+    func zoomChanged() {
+        guard !pinMarkers.isEmpty else { return }
+        updatePins()
     }
 
     private func updatePins() {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         let rings = CGMutablePath()
-        var anyRing = false
         let diameter = chipSize
+        let upright = CGAffineTransform(rotationAngle: .pi / 2 * CGFloat(rotation))
+        let scale = (window?.backingScaleFactor ?? 2) * zoom
         var live = Set<Int>()
         for marker in pinMarkers {
             live.insert(marker.index)
-            let centre = clipPoint(marker.source.centre)
+            let moved = movedPin.flatMap { $0.index == marker.index ? $0.centre : nil }
+            let centre = moved ?? clipPoint(marker.source.centre)
             let radius = marker.source.radius * min(size.width, size.height)
             if radius > 0.5 {
                 rings.addEllipse(in: CGRect(
                     x: centre.x - radius, y: centre.y - radius,
                     width: radius * 2, height: radius * 2
                 ))
-                anyRing = true
             }
             let chip = chips[marker.index] ?? makeChip(marker.index)
-            chip.frame = CGRect(
-                x: centre.x - diameter / 2, y: centre.y - diameter / 2,
-                width: diameter, height: diameter
-            )
+            chip.setAffineTransform(upright)
+            chip.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+            chip.position = centre
             chip.name = "pin \(marker.number)"
             chip.cornerRadius = diameter / 2
             chip.backgroundColor = Self.tone(marker.lstar).cgColor
-            chip.borderWidth = marker.selected ? 2 : 0
-            chip.borderColor = NSColor.controlAccentColor.cgColor
+            // A chip sits on the tone it's filled with, so it needs an edge
+            // of its own to be seen.
+            chip.borderWidth = (marker.selected ? 2 : 1) / zoom
+            chip.borderColor = (marker.selected ? NSColor.controlAccentColor : NSColor.white.withAlphaComponent(0.8)).cgColor
             if let label = chip.sublayers?.first as? CATextLayer {
-                label.frame = CGRect(x: 0, y: -1, width: diameter, height: diameter)
-                label.fontSize = diameter * 0.55
+                // CATextLayer draws from its top, so centring the line means
+                // dropping it by half the space its height leaves.
+                let fontSize = diameter * 0.58
+                let lineHeight = fontSize * 1.2
+                label.frame = CGRect(x: 0, y: -(diameter - lineHeight) / 2, width: diameter, height: diameter)
+                label.fontSize = fontSize
                 label.foregroundColor = (marker.lstar < 55 ? NSColor.white : NSColor.black).cgColor
                 label.string = "\(marker.number)"
-                label.contentsScale = window?.backingScaleFactor ?? 2
+                label.contentsScale = scale
             }
         }
-        ringLayer.path = anyRing ? rings : nil
+        ringLayer.path = rings.isEmpty ? nil : rings
+        ringLayer.lineWidth = 1 / zoom
+        dragRing.lineWidth = 1 / zoom
         for (index, chip) in chips where !live.contains(index) {
             chip.removeFromSuperlayer()
             chips.removeValue(forKey: index)
@@ -365,10 +389,12 @@ final class PhotographView: NSView {
         chip.masksToBounds = true
         chip.actions = [
             "contents": NSNull(), "bounds": NSNull(), "position": NSNull(),
-            "backgroundColor": NSNull(), "borderWidth": NSNull()
+            "backgroundColor": NSNull(), "borderWidth": NSNull(), "borderColor": NSNull(),
+            "transform": NSNull(), "cornerRadius": NSNull()
         ]
         let label = CATextLayer()
         label.alignmentMode = .center
+        label.font = NSFont.systemFont(ofSize: 0, weight: .semibold)
         label.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull()]
         chip.addSublayer(label)
         clip.addSublayer(chip)
@@ -384,16 +410,15 @@ final class PhotographView: NSView {
         return NSColor(srgbRed: v, green: v, blue: v, alpha: 1)
     }
 
-    /// The pin whose chip or ring contains `point`, if any.
-    private func pinIndex(at point: CGPoint) -> Int? {
+    /// The pin whose chip is under `point`, if any. Only the chip takes the
+    /// pointer, so a plain drag inside a large circle still pans.
+    func pinIndex(at point: CGPoint) -> Int? {
         guard let root = layer, size.width > 0, !pinMarkers.isEmpty else { return nil }
         let clipped = clip.convert(point, from: root)
         let half = chipSize / 2
         return pinMarkers.last { marker in
             let centre = clipPoint(marker.source.centre)
-            let radius = max(marker.source.radius * min(size.width, size.height), half)
-            let dx = clipped.x - centre.x, dy = clipped.y - centre.y
-            return dx * dx + dy * dy <= radius * radius
+            return hypot(clipped.x - centre.x, clipped.y - centre.y) <= half
         }?.index
     }
 
@@ -412,6 +437,7 @@ final class PhotographView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        movedPin = nil
         let start = CanvasGesture.start(
             clickCount: event.clickCount, modifiers: event.modifierFlags,
             pinUnderPointer: pinIndex(at: point)
@@ -421,9 +447,10 @@ final class PhotographView: NSView {
             (enclosingScrollView as? ImageScrollView)?.toggleZoom(about: point)
         case .selectPin(let index):
             onSelectPin?(index)
-            guard let unit = unitPoint(at: point) else { return }
-            drag = .movePin(index: index, centre: point, unitCentre: unit, moved: false)
-            pushCursor(.openHand)
+            guard let marker = pinMarkers.first(where: { $0.index == index }), let root = layer else { return }
+            let chip = root.convert(clipPoint(marker.source.centre), from: clip)
+            drag = .movePin(index: index, start: point, grab: CGVector(dx: point.x - chip.x, dy: point.y - chip.y), unit: nil)
+            pushCursor(.closedHand)
         case .pin:
             guard let unit = unitPoint(at: point) else { return }
             drag = .pin(centre: point, unitCentre: unit)
@@ -442,14 +469,13 @@ final class PhotographView: NSView {
         switch drag {
         case .pin(let centre, _):
             updateDragRing(centre: centre, radius: hypot(point.x - centre.x, point.y - centre.y))
-        case .movePin(let index, let start, _, _):
-            guard hypot(point.x - start.x, point.y - start.y) > 2, let unit = unitPoint(at: point) else { return }
-            drag = .movePin(index: index, centre: point, unitCentre: unit, moved: true)
-            if let chip = chips[index] {
-                CATransaction.begin(); CATransaction.setDisableActions(true)
-                chip.position = clip.convert(point, from: layer)
-                CATransaction.commit()
-            }
+        case .movePin(let index, let start, let grab, _):
+            guard hypot(point.x - start.x, point.y - start.y) > 2 else { return }
+            let centre = CGPoint(x: point.x - grab.dx, y: point.y - grab.dy)
+            guard let unit = unitPoint(at: centre) else { return }
+            drag = .movePin(index: index, start: start, grab: grab, unit: unit)
+            movedPin = (index, clip.convert(centre, from: layer))
+            updatePins()
         case .pan:
             guard let scroll = enclosingScrollView else { return }
             var origin = scroll.contentView.bounds.origin
@@ -464,15 +490,14 @@ final class PhotographView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if case .movePin(let index, _, let unit, let moved) = drag, moved {
+        if case .movePin(let index, _, _, let unit?) = drag {
             onMovePin?(index, unit)
         }
         if case .pin(let centre, let unit) = drag {
-            // The radius is a fraction of the shorter side, in photograph
-            // pixels, so a circle means the same area at any zoom.
-            let pixels = hypot(point.x - centre.x, point.y - centre.y) * (size.width > 0 ? clip.bounds.width / bounds.width : 1)
-            let radius = min(max(Double(pixels / max(min(size.width, size.height), 1)), 0), 1)
-            onPin?(unit, radius)
+            // A fraction of the shorter side, so a circle means the same area
+            // at any zoom.
+            let reach = hypot(point.x - centre.x, point.y - centre.y)
+            onPin?(unit, min(Double(reach / max(min(size.width, size.height), 1)), 1))
         }
         drag = nil
         dragRing.isHidden = true
@@ -513,8 +538,7 @@ final class PhotographView: NSView {
         chips.values.map { $0.convert(CGPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: self.layer) }
     }
 
-    /// The chips' on-screen diameter in view points, for tests.
-    var chipDiameter: CGFloat { chipSize }
+    var chipLayers: [CALayer] { Array(chips.values) }
 
     override func resetCursorRects() { addCursorRect(bounds, cursor: .arrow) }
 

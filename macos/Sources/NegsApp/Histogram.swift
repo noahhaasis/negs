@@ -73,13 +73,6 @@ struct Histogram: Equatable, Sendable {
         return histogram
     }
 
-    /// The tallest bar, leaving out the clipped ends so their spikes don't
-    /// flatten the rest. Lightness never sets the scale.
-    var peak: UInt32 {
-        let inner = [red, green, blue].map { $0[5...250].max() ?? 0 }.max() ?? 0
-        return inner > 0 ? inner : [red, green, blue].map { $0.max() ?? 0 }.max() ?? 0
-    }
-
     /// Each code's linear value, so a count doesn't call `pow` per pixel.
     private static let codeLinear: [Float] = (0...255).map { srgbDecode(Float($0) / 255) }
 
@@ -99,19 +92,19 @@ struct Histogram: Equatable, Sendable {
 }
 
 /// The proxy's luminance weights: sRGB's, or Rec. 2020's for a wide render.
-private func luminanceWeights(_ displaySpace: String) -> SIMD3<Float> {
+func luminanceWeights(_ displaySpace: String) -> SIMD3<Float> {
     displaySpace == "Rec. 2020 (sRGB transfer)"
         ? SIMD3(0.2627, 0.6780, 0.0593)
         : SIMD3(0.2126, 0.7152, 0.0722)
 }
 
 /// The sRGB transfer function, the proxy's encoding in either space.
-private func srgbDecode(_ v: Float) -> Float {
+func srgbDecode(_ v: Float) -> Float {
     v <= 0.040_45 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
 }
 
 /// CIE Lab lightness 0…100 of a linear luminance.
-private func lstar(_ y: Float) -> Double {
+func lstar(_ y: Float) -> Double {
     let y = Double(max(y, 0))
     return y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
 }
@@ -119,64 +112,6 @@ private func lstar(_ y: Float) -> Double {
 /// The same lightness, binned into 0…255.
 private func lstarBin(_ y: Float) -> UInt8 {
     UInt8(min(max(lstar(y) / 100, 0), 1) * 255)
-}
-
-
-/// A tone sample: a circle on the photograph, in fractions of its width and
-/// height, with the radius in fractions of the shorter side. A ⌘-click is a
-/// circle of no radius (one pixel); a ⌘-drag grows one from the cursor.
-enum TonePick: Equatable, Sendable {
-    case circle(centre: CGPoint, radius: Double)
-
-    /// The average L\* of the pixels inside, or nil when none of the
-    /// photograph falls inside the circle.
-    func sample(_ surface: IOSurface, maxSamples: Int = 1 << 16) -> ToneSample? {
-        let size = CGSize(width: surface.width, height: surface.height)
-        guard size.width >= 1, size.height >= 1, case .circle(let centre, let radius) = self else { return nil }
-        let shorter = min(size.width, size.height)
-        let radiusPixels = CGFloat(radius) * shorter
-        // A ⌘-click is one pixel: a circle of no radius still covers the
-        // pixel under the pointer.
-        let reach = max(radiusPixels, 0.5)
-        let area = CGRect(
-            x: centre.x * size.width - reach, y: centre.y * size.height - reach,
-            width: reach * 2, height: reach * 2
-        ).intersection(CGRect(origin: .zero, size: size))
-        let stride = max(1, Int((area.width * area.height / Double(maxSamples)).squareRoot().rounded(.up)))
-        let (cx, cy) = (centre.x * size.width, centre.y * size.height)
-        var pixels: [(x: Int, y: Int)] = []
-        for row in Swift.stride(from: 0, to: Int(area.height), by: stride) {
-            for column in Swift.stride(from: 0, to: Int(area.width), by: stride) {
-                let x = Int(area.minX) + column, y = Int(area.minY) + row
-                guard x < surface.width, y < surface.height else { continue }
-                let dx = Double(x) + 0.5 - cx, dy = Double(y) + 0.5 - cy
-                if radiusPixels > 0 && dx * dx + dy * dy > Double(radiusPixels * radiusPixels) { continue }
-                pixels.append((x, y))
-            }
-        }
-        guard !pixels.isEmpty else { return nil }
-        let weights = luminanceWeights(EditorModel.displaySpace(of: surface))
-        surface.lock(options: .readOnly, seed: nil)
-        defer { surface.unlock(options: .readOnly, seed: nil) }
-        let base = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
-        var lightness = 0.0
-        for (x, y) in pixels {
-            let pixel = base + y * surface.bytesPerRow + x * 4
-            let linear = SIMD3(
-                srgbDecode(Float(pixel[2]) / 255),
-                srgbDecode(Float(pixel[1]) / 255),
-                srgbDecode(Float(pixel[0]) / 255)
-            )
-            let y = weights.x * linear.x + weights.y * linear.y + weights.z * linear.z
-            lightness += lstar(y)
-        }
-        return ToneSample(lstar: lightness / Double(pixels.count))
-    }
-}
-
-/// A reference's tone: CIE L\* 0…100.
-struct ToneSample: Equatable, Sendable {
-    var lstar: Double
 }
 
 /// A pinned tone: a measured L\* held where it is, or aimed at a zone, and

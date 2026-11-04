@@ -601,13 +601,10 @@ struct AdjustmentInspector: View {
             VStack(spacing: 10) {
                 ZoneHistogramView(
                     histogram: model.histogram.map(ToneHistogram.init) ?? .empty,
-                    selectedZone: Binding(
-                        get: { model.selectedZone },
-                        set: { model.selectedZone = $0 }
-                    ),
                     canPin: model.canPin,
                     pins: model.pins,
-                    selectedPin: model.selectedPin
+                    selectedPin: model.selectedPin,
+                    onAim: { model.aimSelectedPin(atZone: $0) }
                 )
                 InspectorTabBar(model: model)
             }
@@ -665,10 +662,8 @@ struct AdjustmentInspector: View {
                 control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
             }
             control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
-            // Placement moves the print's tones; Exposure changes the
-            // negative, and the printer compensates for it.
             control(.slider("Placement (EV)", "camera.placement_ev", -8...8, 0.01))
-                .help("Moves the print's tones along the film-and-print curve; the histogram's gold zone numbers add to it. Exposure changes the negative, and the printer compensates.")
+                .help("Makes the whole print lighter or darker along the film-and-print curve. Exposure changes the negative, and the printer compensates.")
         }
         Section("Lens") {
             control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))
