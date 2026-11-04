@@ -101,6 +101,9 @@ import UniformTypeIdentifiers
     /// A preset New Preset just made: Escape while naming it removes it.
     @ObservationIgnored private var unnamedPreset: URL?
     var zoomCommand = UUID()
+    /// True fits the whole photograph in the viewer, but never past 1:1;
+    /// false shows it at 1:1 even when that crops it. The viewer starts fitted
+    /// and keeps whatever the user chooses.
     var fitImage = true
     var recentFiles: [URL] = []
     @ObservationIgnored weak var undoManager: UndoManager?
@@ -552,13 +555,12 @@ import UniformTypeIdentifiers
         case .original:
             guard imageSizeMode != .original else { return }
             var next = state; next.params[ImageSize.targetPath] = .null
+            // A size change keeps the current zoom: fitted stays whole-image,
+            // and a manual 1:1 stays 1:1.
             apply(next, action: "Change Image Size")
-            // Back to the source's own pixels: fit them in the view again.
-            zoom(fit: true)
         case .longestSide:
             guard imageSizeMode != .longestSide else { return }
-            // Look at the resized result at one image pixel per screen pixel.
-            if setLongestSide(ImageSize.remembered ?? nativeLongestSide) == nil { zoom(fit: false) }
+            _ = setLongestSide(ImageSize.remembered ?? nativeLongestSide)
         }
     }
 
@@ -689,9 +691,9 @@ import UniformTypeIdentifiers
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()
-        // A session brings its own zoom; otherwise keep the setting the
-        // previous photograph was viewed at (fit or 1:1).
-        zoom(fit: session?.fitImage ?? fitImage)
+        // Launch fits the restored photograph (never past 1:1). Changing
+        // photographs keeps the fit or 1:1 setting the previous one was at.
+        zoom(fit: session == nil ? fitImage : true)
         recentFiles.removeAll { $0 == url }; recentFiles.insert(url, at: 0)
         recentFiles = Array(recentFiles.prefix(10)); saveRecents()
         // A restore at launch may still be undone; `start` notes it.

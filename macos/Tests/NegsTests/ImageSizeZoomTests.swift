@@ -3,20 +3,20 @@ import XCTest
 @testable import NegsApp
 
 @MainActor final class ImageSizeZoomTests: XCTestCase {
-    /// Choosing Longest side resizes the input, so look at it at actual size.
-    func testChoosingLongestSideZoomsToOneToOne() async throws {
+    /// A size change keeps the current zoom; a fitted view stays whole-image.
+    func testChangingInputSizeKeepsTheZoomSetting() async throws {
         let directory = try temporaryDirectory()
         let model = try await makeModel(in: directory)
         defer { model.shutdown() }
         let saved = UserDefaults.standard.object(forKey: "imageSizeLongestSide")
         defer { UserDefaults.standard.set(saved, forKey: "imageSizeLongestSide") }
 
-        model.chooseImageSize(.original)
-        XCTAssertTrue(model.fitImage, "Changing to Original from Original leaves the zoom alone")
+        XCTAssertTrue(model.fitImage, "The viewer starts fitted")
         model.chooseImageSize(.longestSide)
-        XCTAssertFalse(model.fitImage, "Longest side shows the resized input at 1:1")
+        XCTAssertTrue(model.fitImage, "A fitted view stays fitted at the new size")
+        model.zoom(fit: false)
         model.chooseImageSize(.original)
-        XCTAssertTrue(model.fitImage, "Original fits the source again")
+        XCTAssertFalse(model.fitImage, "A manual 1:1 stays 1:1 when the input size changes")
     }
 
     /// Switching photographs keeps the fit or 1:1 setting the user chose.
@@ -37,11 +37,13 @@ import XCTest
         model.open(fixture)
         try await waitUntil { model.previewCurrent || model.error != nil }
         XCTAssertNil(model.error)
-        XCTAssertTrue(model.fitImage)
-        model.chooseImageSize(.longestSide)
-        XCTAssertFalse(model.fitImage)
+        XCTAssertTrue(model.fitImage, "A photograph opens fitted")
+        model.zoom(fit: false)
         model.open(fixture)
         XCTAssertFalse(model.fitImage, "A new photograph keeps the 1:1 setting")
+        model.zoom(fit: true)
+        model.open(fixture)
+        XCTAssertTrue(model.fitImage, "A new photograph keeps the fitted setting")
     }
 
     private func temporaryDirectory() throws -> URL {

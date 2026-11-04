@@ -101,7 +101,11 @@ final class ImageScrollView: NSScrollView {
     func applyZoom() {
         guard let documentView, documentView.frame.width > 0, contentSize.width > 0 else { return }
         let size = documentView.frame.size
-        let amount = fitting ? min(contentSize.width / size.width, contentSize.height / size.height) : 1 / (window?.backingScaleFactor ?? 2)
+        // 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
+        // photograph, but never enlarges it past 1:1.
+        let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
+        let fit = min(contentSize.width / size.width, contentSize.height / size.height)
+        let amount = fitting ? min(fit, oneToOne) : oneToOne
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
     }
     /// A higher-resolution render of the same photograph replaces the shown
