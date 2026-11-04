@@ -953,7 +953,8 @@ fn paint_trackbar(draw: &NMCUSTOMDRAW) {
         let focused = GetFocus() == hwnd && focus_cues(hwnd);
         let mut c = Canvas::new(draw.hdc, client);
         c.clear(parent_background(hwnd));
-        let cy = (thumb.top + thumb.bottom) as f32 / 2.0;
+        // Centred in the control, which is as tall as the focus ring.
+        let cy = (client.top + client.bottom) as f32 / 2.0;
         // The thumb's centre runs from half its width inside the channel's ends.
         let half = (thumb.right - thumb.left) as f32 / 2.0;
         let (left, right) = (channel.left as f32 + half, channel.right as f32 - half);

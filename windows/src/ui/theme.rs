@@ -376,7 +376,7 @@ pub fn apply_control(hwnd: HWND, created: bool) {
     let n = unsafe { GetClassNameW(hwnd, &mut name) } as usize;
     let class = String::from_utf16_lossy(&name[..n]);
     let theme: Option<PCWSTR> = match class.as_str() {
-        "SysListView32" | "tooltips_class32" | "NegsRows" | "NegsStockGrid" | "NegsStrip" | "ScrollBar" | "Edit" | "msctls_progress32" => {
+        "SysListView32" | "tooltips_class32" | "NegsRows" | "NegsCropRows" | "NegsStockGrid" | "NegsStrip" | "ScrollBar" | "Edit" | "msctls_progress32" => {
             Some(if dark { w!("DarkMode_Explorer") } else { w!("Explorer") })
         }
         _ => None,
@@ -409,7 +409,7 @@ pub fn apply_created(hwnd: HWND, class: PCWSTR) {
         return;
     }
     let name = unsafe { class.to_string() }.unwrap_or_default().to_ascii_lowercase();
-    if matches!(name.as_str(), "syslistview32" | "tooltips_class32" | "negsrows" | "negsstockgrid" | "negsstrip" | "msctls_progress32" | "scrollbar") {
+    if matches!(name.as_str(), "syslistview32" | "tooltips_class32" | "negsrows" | "negscroprows" | "negsstockgrid" | "negsstrip" | "msctls_progress32" | "scrollbar") {
         apply_control(hwnd, true);
     }
 }

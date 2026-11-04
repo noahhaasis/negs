@@ -1,6 +1,6 @@
-//! Text for the canvas (badges, the straighten dial), rasterised with GDI
-//! into a coverage mask the GPU colours. Greyscale antialiasing, so it can be
-//! drawn on any background.
+//! Text for the canvas (badges, the straighten dial, the tools), rasterised
+//! with GDI into a coverage mask the GPU colours. Greyscale antialiasing, so
+//! it can be drawn on any background.
 
 use windows::Win32::Graphics::Gdi::*;
 use windows::core::PCWSTR;
@@ -13,13 +13,15 @@ pub struct Mask {
     pub height: u32,
 }
 
-/// `text` in Segoe UI at `pixels` height (the font's em size in device pixels).
+/// `text` in Segoe UI at `pixels` height (the font's em size in device
+/// pixels); icon glyphs (the Private Use Area) in the system's icon font.
 pub fn render(text: &str, pixels: i32, weight: i32) -> Option<Mask> {
     unsafe {
         let screen = GetDC(None);
         let dc = CreateCompatibleDC(screen);
         ReleaseDC(None, screen);
-        let face = wide("Segoe UI");
+        let glyphs = !text.is_empty() && text.chars().all(|c| ('\u{E000}'..='\u{F8FF}').contains(&c));
+        let face = wide(if glyphs { crate::ui::icon_face() } else { "Segoe UI" });
         let mut lf = LOGFONTW { lfHeight: -pixels, lfWeight: weight, lfQuality: ANTIALIASED_QUALITY, ..Default::default() };
         lf.lfFaceName[..face.len()].copy_from_slice(&face);
         let font = CreateFontIndirectW(&lf);

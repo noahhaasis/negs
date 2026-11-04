@@ -234,12 +234,14 @@ thread_local! {
 pub fn register() {
     unsafe {
         // Their backgrounds are painted from the palette.
-        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 6] = [
+        let classes: [(PCWSTR, WNDPROC, WNDCLASS_STYLES); 7] = [
             (w!("NegsInspector"), Some(panel_proc), WNDCLASS_STYLES(0)),
             (w!("NegsRows"), Some(rows_proc), WNDCLASS_STYLES(0)),
             (w!("NegsScope"), Some(scope_proc), WNDCLASS_STYLES(0)),
             (w!("NegsScopeGrip"), Some(grip_proc), CS_DBLCLKS),
             (w!("NegsCropPanel"), Some(crop_proc), WNDCLASS_STYLES(0)),
+            // Its own class only so its scroll bar takes the dark theme.
+            (w!("NegsCropRows"), Some(crop_proc), WNDCLASS_STYLES(0)),
             (w!("NegsStockGrid"), Some(grid_proc), WNDCLASS_STYLES(0)),
         ];
         for (name, proc_, style) in classes {
@@ -314,11 +316,24 @@ impl Inspector {
 
     pub fn layout(&mut self, x: i32, y: i32, width: i32, height: i32, visible: bool) {
         self.rect = RECT { left: x, top: y, right: x + width, bottom: y + height };
+        let rows_panel = self.rows_panel;
+        let rows_height = move || {
+            let mut client = RECT::default();
+            unsafe {
+                let _ = GetClientRect(rows_panel, &mut client);
+            }
+            client.bottom
+        };
+        let before = rows_height();
         unsafe {
             let _ = MoveWindow(self.panel, x, y, width, height, true);
             let _ = ShowWindow(self.panel, if visible { SW_SHOWNA } else { SW_HIDE });
         }
         self.layout_frame();
+        // A resized window: the rows' scroll range and position follow.
+        if self.built && rows_height() != before {
+            post(|app: &mut App| layout_rows(&mut app.inspector, &app.model));
+        }
     }
 
     /// The scope, the pinned stocks, the tab switch, the rows and the reset
@@ -364,6 +379,7 @@ impl Inspector {
             positions.push((crop.panel, 0, 0, w, h));
         }
         place(&positions, 0);
+        layout_crop(self);
     }
 }
 
@@ -1242,7 +1258,8 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                 let reset = ins.px(24.0);
                 positions.push((c[0], x, y + ins.px(2.0), right - x - reset - edit, text));
                 positions.push((c[3], right - edit - reset, y, reset, ins.px(22.0)));
-                positions.push((c[1], x - ins.px(8.0), y + ins.px(22.0), right - x - edit, ins.px(24.0)));
+                // 26 DIPs: the thumb's focus ring, uncut.
+                positions.push((c[1], x - ins.px(8.0), y + ins.px(22.0), right - x - edit, ins.px(26.0)));
                 let r = ins.field(right - edit, y + ins.px(22.0), edit);
                 positions.push((c[2], r.left, r.top, r.right - r.left, r.bottom - r.top));
                 ins.px(48.0)
@@ -1454,6 +1471,65 @@ fn scroll_to(ins: &mut Inspector, target: i32) {
         }
         let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nPos: target, ..Default::default() };
         SetScrollInfo(ins.rows_panel, SB_VERT, &info, true);
+    }
+}
+
+/// Scrolls the rows, or the crop panel's, so the focused control's row is in
+/// view. Only after keys: a click may be starting a drag.
+pub fn reveal_focus(app: &mut App) {
+    let ins = &mut app.inspector;
+    let crop_rows = ins.crop.as_ref().map(|c| c.rows);
+    unsafe {
+        // The scrolling panel's child that holds the focus.
+        let mut child = GetFocus();
+        let panel = loop {
+            let Ok(parent) = GetParent(child) else { return };
+            if parent == ins.rows_panel || Some(parent) == crop_rows {
+                break parent;
+            }
+            child = parent;
+        };
+        // Measured where a running slide ends.
+        finish_slide(ins);
+        // Top and bottom in the panel's client area, as scrolled now.
+        let span = |hwnds: &[HWND]| {
+            hwnds.iter().filter(|&&h| IsWindowVisible(h).as_bool()).fold(None, |span: Option<(i32, i32)>, &h| {
+                let mut r = RECT::default();
+                let _ = GetWindowRect(h, &mut r);
+                let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
+                MapWindowPoints(None, panel, &mut corners);
+                let (top, bottom) = (corners[0].y, corners[1].y);
+                Some(span.map_or((top, bottom), |(t, b)| (t.min(top), b.max(bottom))))
+            })
+        };
+        let margin = ins.px(8.0);
+        let mut client = RECT::default();
+        let _ = GetClientRect(panel, &mut client);
+        // A row taller than the panel shows the focused control's top.
+        let target = |scroll: i32, (top, bottom): (i32, i32), own: i32| {
+            let (top, bottom) = (top - margin + scroll, bottom + margin + scroll);
+            if top < scroll {
+                Some(top)
+            } else if bottom > scroll + client.bottom {
+                Some((bottom - client.bottom).min(own - margin + scroll))
+            } else {
+                None
+            }
+        };
+        let Some(own) = span(&[child]) else { return };
+        if panel == ins.rows_panel {
+            let row = ins.rows.iter().find(|r| r.controls.contains(&child));
+            let whole = row.and_then(|r| span(&r.controls)).unwrap_or(own);
+            if let Some(to) = target(ins.scroll, whole, own.0) {
+                scroll_to(ins, to);
+            }
+        } else if let Some(crop) = ins.crop.as_mut() {
+            // The angle's label is above it.
+            let whole = if child == crop.get(C_ANGLE) { span(&[child, crop.get(C_LABELS + 5)]).unwrap_or(own) } else { own };
+            if let Some(to) = target(crop.scroll, whole, own.0) {
+                scroll_crop(crop, to);
+            }
+        }
     }
 }
 
@@ -3325,10 +3401,17 @@ pub fn report_geometry(app: &mut App) {
 
 // MARK: Crop panel
 
-/// Replaces the adjustments while cropping (`CropInspector`).
+/// Replaces the adjustments while cropping (`CropInspector`). Cancel and
+/// Done stay at the bottom, like Reset below the adjustments; the controls
+/// above them scroll when the column is short.
 struct CropPanel {
     panel: HWND,
+    rows: HWND,
     controls: Vec<(u16, HWND)>,
+    /// The custom ratio's fields show.
+    custom: bool,
+    scroll: i32,
+    content: i32,
 }
 
 const C_ASPECT: u16 = CROP_FIRST; // ..+8
@@ -3356,9 +3439,11 @@ fn build_crop(app: &mut App) {
     let fonts = &app.fonts;
     let parent = app.inspector.panel;
     let panel = create(w!("NegsCropPanel"), "Crop", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), parent, 0, HFONT::default());
+    let rows = create(w!("NegsCropRows"), "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), panel, 0, HFONT::default());
     let mut controls = vec![];
     let mut add = |id: u16, class: PCWSTR, text: &str, style: WINDOW_STYLE, font: HFONT| {
-        let c = create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), panel, id, font);
+        let parent = if matches!(id, C_CANCEL | C_DONE) { panel } else { rows };
+        let c = create(class, text, WS_CHILD | WS_VISIBLE | style, WINDOW_EX_STYLE(0), parent, id, font);
         controls.push((id, c));
         c
     };
@@ -3417,24 +3502,76 @@ fn build_crop(app: &mut App) {
     );
     add(C_CANCEL, w!("BUTTON"), "Cancel", WS_TABSTOP | WS_GROUP, fonts.ui);
     add(C_DONE, w!("BUTTON"), "Done", WS_TABSTOP | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32), fonts.ui);
-    app.inspector.crop = Some(CropPanel { panel, controls });
-    layout_crop(app);
+    let custom = app.model.crop_session.as_ref().is_some_and(|s| s.aspect == CropAspect::Custom);
+    let ins = &mut app.inspector;
+    unsafe {
+        let _ = MoveWindow(panel, 0, 0, ins.rect.right - ins.rect.left, ins.rect.bottom - ins.rect.top, false);
+    }
+    ins.crop = Some(CropPanel { panel, rows, controls, custom, scroll: 0, content: 0 });
+    layout_crop(ins);
 }
 
-fn layout_crop(app: &mut App) {
-    let ins = &app.inspector;
+/// Pins Cancel and Done, then places the controls above them.
+fn layout_crop(ins: &mut Inspector) {
     let Some(crop) = &ins.crop else { return };
     let (w, h) = (ins.rect.right - ins.rect.left, ins.rect.bottom - ins.rect.top);
     let pad = ins.px(16.0);
-    let right = w - pad;
+    let (button, tall) = (ins.px(88.0), ins.px(32.0));
+    let footer = h - pad - tall;
+    let rows = crop.rows;
+    place(
+        &[
+            (rows, 0, 0, w, (footer - ins.px(8.0)).max(0)),
+            (crop.get(C_CANCEL), w - pad - 2 * button - ins.px(8.0), footer, button, tall),
+            (crop.get(C_DONE), w - pad - button, footer, button, tall),
+        ],
+        0,
+    );
+    // Once more when the scroll bar comes or goes, which changes the width.
+    for _ in 0..2 {
+        let mut client = RECT::default();
+        unsafe {
+            let _ = GetClientRect(rows, &mut client);
+        }
+        let (positions, content) = crop_rows(ins, client.right);
+        let Some(crop) = ins.crop.as_mut() else { return };
+        crop.content = content;
+        crop.scroll = crop.scroll.clamp(0, (content - client.bottom).max(0));
+        place(&positions, crop.scroll);
+        let mut after = RECT::default();
+        unsafe {
+            let info = SCROLLINFO {
+                cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+                fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
+                nMin: 0,
+                nMax: content,
+                nPage: client.bottom.max(0) as u32,
+                nPos: crop.scroll,
+                ..Default::default()
+            };
+            SetScrollInfo(rows, SB_VERT, &info, true);
+            let _ = GetClientRect(rows, &mut after);
+        }
+        if after.right == client.right {
+            break;
+        }
+    }
+    // The panel draws the fields' frames, which reach past the fields.
+    unsafe {
+        let _ = InvalidateRect(rows, None, false);
+    }
+}
+
+/// Where the controls above Cancel and Done go in a `width` wide panel,
+/// unscrolled, and the height they take.
+fn crop_rows(ins: &Inspector, width: i32) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
+    let Some(crop) = &ins.crop else { return (vec![], 0) };
+    let pad = ins.px(16.0);
+    let right = width - pad;
     let row = ins.px(24.0);
     let mut y = ins.px(16.0);
-    let place = |id: u16, x: i32, y: i32, w: i32, h: i32| unsafe {
-        let _ = MoveWindow(crop.get(id), x, y, w.max(0), h.max(0), true);
-    };
-    unsafe {
-        let _ = MoveWindow(crop.panel, 0, 0, w, h, true);
-    }
+    let mut positions = vec![];
+    let mut place = |id: u16, x: i32, y: i32, w: i32, h: i32| positions.push((crop.get(id), x, y, w, h));
     place(C_LABELS, pad, y, right - pad, ins.px(24.0));
     y += ins.px(32.0);
     for i in 0..CropAspect::ALL.len() as u16 {
@@ -3442,13 +3579,12 @@ fn layout_crop(app: &mut App) {
         y += row + ins.px(4.0);
     }
     y += ins.px(4.0);
-    let custom = app.model.crop_session.as_ref().is_some_and(|s| s.aspect == CropAspect::Custom);
     for id in [C_LABELS + 1, C_WIDTH, C_LABELS + 2, C_HEIGHT] {
         unsafe {
-            let _ = ShowWindow(crop.get(id), if custom { SW_SHOWNA } else { SW_HIDE });
+            let _ = ShowWindow(crop.get(id), if crop.custom { SW_SHOWNA } else { SW_HIDE });
         }
     }
-    if custom {
+    if crop.custom {
         let field = ins.px(56.0);
         place(C_LABELS + 1, pad, y + ins.px(2.0), ins.px(88.0), ins.px(20.0));
         let r = ins.field(pad + ins.px(96.0), y, field);
@@ -3469,7 +3605,7 @@ fn layout_crop(app: &mut App) {
     place(C_ANGLE_RESET, right - ins.px(24.0) - ins.px(56.0), y, ins.px(24.0), ins.px(22.0));
     place(C_ANGLE_VALUE, right - ins.px(56.0), y + ins.px(2.0), ins.px(56.0), ins.px(20.0));
     y += ins.px(22.0);
-    place(C_ANGLE, pad - ins.px(8.0), y, right - pad + ins.px(16.0), ins.px(24.0));
+    place(C_ANGLE, pad - ins.px(8.0), y, right - pad + ins.px(16.0), ins.px(26.0));
     y += ins.px(40.0);
     place(C_LABELS + 6, pad, y, ins.px(88.0), ins.px(20.0));
     place(C_SIZE, pad + ins.px(88.0), y, right - pad - ins.px(88.0), ins.px(20.0));
@@ -3478,10 +3614,11 @@ fn layout_crop(app: &mut App) {
     y += ins.px(56.0);
     place(C_RESET, pad, y, right - pad, ins.px(32.0));
     y += ins.px(48.0);
-    place(C_LABELS + 7, pad, y, right - pad, ins.px(88.0));
-    let button = ins.px(88.0);
-    place(C_DONE, right - button, h - pad - ins.px(32.0), button, ins.px(32.0));
-    place(C_CANCEL, right - 2 * button - ins.px(8.0), h - pad - ins.px(32.0), button, ins.px(32.0));
+    // The hint wraps to as many lines as the width needs.
+    let hint = footer_height(ins, crop.get(C_LABELS + 7), right - pad);
+    place(C_LABELS + 7, pad, y, right - pad, hint);
+    y += hint + ins.px(8.0);
+    (positions, y)
 }
 
 fn sync_crop(app: &mut App) {
@@ -3544,9 +3681,31 @@ fn sync_crop(app: &mut App) {
     set_text(crop.get(C_SIZE), &format!("{} × {} px", size.0.round() as i64, size.1.round() as i64));
     set_text(crop.get(C_SIZE_NOTE), &note);
     enable(crop.get(C_RESET), session.modified());
-    let custom_visible = unsafe { IsWindowVisible(crop.get(C_WIDTH)).as_bool() };
-    if custom_visible != (session.aspect == CropAspect::Custom) {
-        layout_crop(app);
+    let custom = session.aspect == CropAspect::Custom;
+    if let Some(crop) = app.inspector.crop.as_mut()
+        && crop.custom != custom
+    {
+        crop.custom = custom;
+        layout_crop(&mut app.inspector);
+    }
+}
+
+/// Scrolls the controls above Cancel and Done to `target`.
+fn scroll_crop(crop: &mut CropPanel, target: i32) {
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(crop.rows, &mut client);
+    }
+    let target = target.clamp(0, (crop.content - client.bottom).max(0));
+    if target == crop.scroll {
+        return;
+    }
+    let delta = crop.scroll - target;
+    crop.scroll = target;
+    unsafe {
+        ScrollWindowEx(crop.rows, 0, delta, None, None, None, None, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+        let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nPos: target, ..Default::default() };
+        SetScrollInfo(crop.rows, SB_VERT, &info, true);
     }
 }
 
@@ -3598,6 +3757,40 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                         }
                     }
                     app.model.crop_changed();
+                });
+                LRESULT(0)
+            }
+            WM_VSCROLL => {
+                with_app(|app| {
+                    let line = app.inspector.px(40.0);
+                    let Some(crop) = app.inspector.crop.as_mut() else { return };
+                    if hwnd != crop.rows {
+                        return;
+                    }
+                    let mut info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, ..Default::default() };
+                    let _ = GetScrollInfo(hwnd, SB_VERT, &mut info);
+                    let target = match SCROLLBAR_COMMAND((wparam.0 & 0xffff) as i32) {
+                        SB_LINEUP => info.nPos - line,
+                        SB_LINEDOWN => info.nPos + line,
+                        SB_PAGEUP => info.nPos - info.nPage as i32,
+                        SB_PAGEDOWN => info.nPos + info.nPage as i32,
+                        SB_THUMBTRACK | SB_THUMBPOSITION => info.nTrackPos,
+                        SB_TOP => 0,
+                        SB_BOTTOM => i32::MAX / 2,
+                        _ => info.nPos,
+                    };
+                    scroll_crop(crop, target);
+                });
+                LRESULT(0)
+            }
+            // From the controls, the angle slider without focus, or Cancel and Done.
+            WM_MOUSEWHEEL => {
+                let delta = ((wparam.0 >> 16) & 0xffff) as i16 as i32;
+                with_app(|app| {
+                    let step = delta * app.inspector.px(60.0) / 120;
+                    if let Some(crop) = app.inspector.crop.as_mut() {
+                        scroll_crop(crop, crop.scroll - step);
+                    }
                 });
                 LRESULT(0)
             }

@@ -17,6 +17,7 @@ mod empty;
 mod folder_watch;
 pub mod inspector;
 mod motion;
+mod panes;
 mod presets;
 mod strip;
 mod theme;
@@ -99,6 +100,7 @@ pub mod id {
     pub const ZOOM_OUT: u16 = 305;
     pub const FULL_SCREEN: u16 = 306;
     pub const PRESETS: u16 = 307;
+    pub const PANEL: u16 = 308;
     pub const ROTATE: u16 = 400;
     pub const CROP: u16 = 401;
     pub const CROP_DONE: u16 = 402;
@@ -302,7 +304,7 @@ impl Fonts {
             let section = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 115 / 100, lfWeight: 600, ..display });
             let small = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 85 / 100, ..base });
             let title = CreateFontIndirectW(&LOGFONTW { lfHeight: base.lfHeight * 19 / 10, lfWeight: 600, ..display });
-            let glyph_face = if font_exists("Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" };
+            let glyph_face = icon_face();
             let mut glyph = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: CLEARTYPE_QUALITY, ..Default::default() };
             let face = wide(glyph_face);
             glyph.lfFaceName[..face.len()].copy_from_slice(&face);
@@ -330,6 +332,11 @@ fn set_face(font: &mut LOGFONTW, face: &str) {
     let w = wide(face);
     font.lfFaceName = [0; 32];
     font.lfFaceName[..w.len()].copy_from_slice(&w);
+}
+
+/// Segoe Fluent Icons on Windows 11, MDL2 Assets on Windows 10.
+pub fn icon_face() -> &'static str {
+    if font_exists("Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" }
 }
 
 /// Whether a font family is installed (asked once per face).
@@ -365,16 +372,20 @@ fn enumerate_font(face: &str) -> bool {
 pub struct App {
     pub model: Model,
     pub main: HWND,
-    toolbar: HWND,
+    /// Open, after the menus; Export and the panel's button, before the
+    /// caption buttons.
+    tools: HWND,
+    actions: HWND,
     /// The menu bar in the title bar.
     menubar: HWND,
     status: HWND,
     progress: HWND,
     cancel: HWND,
-    original_button: HWND,
     pub canvas: HWND,
     empty: HWND,
     strip: HWND,
+    /// Adjustments | Presets, at the top of the column.
+    panes: HWND,
     pub inspector: inspector::Inspector,
     /// Created the first time the Presets panel shows.
     presets_view: Option<presets::Panel>,
@@ -439,7 +450,8 @@ impl App {
         if flags & (dirty::PRESETS | dirty::CHROME | dirty::LAYOUT) != 0 {
             presets::sync(self);
         }
-        if flags & (dirty::CANVAS | dirty::ZOOM | dirty::CROP) != 0 {
+        // The canvas's tools follow the chrome (the film strip's button).
+        if flags & (dirty::CANVAS | dirty::ZOOM | dirty::CROP | dirty::CHROME) != 0 {
             canvas::update_scene(self);
             if self.model.image.is_some() && !self.model.first_render_shown {
                 self.model.first_render_shown = true;
@@ -477,7 +489,6 @@ impl App {
 
     fn update_chrome(&mut self) {
         let model = &self.model;
-        let photo = model.source.is_some();
         let title = match &model.source {
             Some(path) => format!("{} - Negs", crate::model::file_name(path)),
             None => "Negs".into(),
@@ -486,27 +497,15 @@ impl App {
         unsafe {
             let _ = SetWindowTextW(self.main, pcwstr(&title));
         }
-        let check = |id: u16, on: bool| unsafe {
-            SendMessageW(self.toolbar, TB_CHECKBUTTON, WPARAM(id as usize), LPARAM(on as isize));
-        };
-        let enable = |id: u16, on: bool| unsafe {
-            SendMessageW(self.toolbar, TB_ENABLEBUTTON, WPARAM(id as usize), LPARAM(on as isize));
-        };
-        enable(id::FIT, photo && !model.cropping());
-        enable(id::ACTUAL, photo && !model.cropping());
-        enable(id::ROTATE, photo);
-        enable(id::CROP, model.cropping() || model.image.is_some());
-        enable(id::EXPORT, model.can_export());
-        check(id::FILMSTRIP, model.prefs.filmstrip_visible);
-        check(id::ADJUSTMENTS, model.inspector_visible && !presets::shown(model));
-        check(id::PRESETS, presets::shown(model));
-        check(id::CROP, model.cropping());
+        unsafe {
+            SendMessageW(self.actions, TB_ENABLEBUTTON, WPARAM(id::EXPORT as usize), LPARAM(model.can_export() as isize));
+            SendMessageW(self.actions, TB_CHECKBUTTON, WPARAM(id::PANEL as usize), LPARAM(model.inspector_visible as isize));
+        }
+        panes::sync(self.panes, model.pane() == crate::model::Pane::Presets);
         let exporting = model.exporting;
         unsafe {
             let _ = ShowWindow(self.progress, if exporting { SW_SHOWNA } else { SW_HIDE });
             let _ = ShowWindow(self.cancel, if exporting { SW_SHOWNA } else { SW_HIDE });
-            let _ = EnableWindow(self.original_button, model.can_show_original());
-            let _ = ShowWindow(self.original_button, if photo { SW_SHOWNA } else { SW_HIDE });
         }
         self.update_taskbar();
     }
@@ -532,7 +531,6 @@ impl App {
         set(1, &stocks);
         let export = if model.exporting { format!("Exporting · {} s", model.export_started.elapsed().as_secs()) } else { String::new() };
         set(2, &export);
-        set(3, "");
         unsafe {
             if model.exporting {
                 SetTimer(self.main, TIMER_EXPORT, 1000, None);
@@ -579,7 +577,7 @@ impl App {
             self.fit_minimum();
             let mut client = RECT::default();
             let _ = GetClientRect(self.main, &mut client);
-            titlebar::layout(self.main, self.menubar, self.toolbar);
+            titlebar::layout(self.main, self.menubar, self.tools, self.actions);
             SendMessageW(self.status, WM_SIZE, WPARAM(0), LPARAM(0));
             let height = |hwnd: HWND| {
                 let mut r = RECT::default();
@@ -606,8 +604,14 @@ impl App {
             let _ = MoveWindow(self.strip, 0, canvas_bottom, column, strip_height, true);
             let _ = ShowWindow(self.strip, if show_strip { SW_SHOWNA } else { SW_HIDE });
             let shows_presets = presets::shown(&self.model);
-            self.inspector.layout(column + splitter, top, inspector_width, bottom - top, self.model.inspector_visible && !shows_presets);
-            let rect = RECT { left: column + splitter, top, right: column + splitter + inspector_width, bottom };
+            // The switch between the panels; cropping has the column to itself.
+            let shows_panes = self.model.inspector_visible && !self.model.cropping();
+            let panes_height = if shows_panes { self.px(panes::HEIGHT) } else { 0 };
+            let _ = MoveWindow(self.panes, column + splitter, top, inspector_width, panes_height, true);
+            let _ = ShowWindow(self.panes, if shows_panes { SW_SHOWNA } else { SW_HIDE });
+            let panel_top = top + panes_height;
+            self.inspector.layout(column + splitter, panel_top, inspector_width, bottom - panel_top, self.model.inspector_visible && !shows_presets);
+            let rect = RECT { left: column + splitter, top: panel_top, right: column + splitter + inspector_width, bottom };
             presets::layout(self, rect, shows_presets);
             canvas::resized(self.canvas);
             // Their own WM_SIZE arrives while the app is busy here.
@@ -653,16 +657,10 @@ impl App {
         unsafe {
             let mut client = RECT::default();
             let _ = GetClientRect(self.status, &mut client);
-            let original = self.px(36.0);
             let export = if self.model.exporting { self.px(250.0) } else { 0 };
             let stocks = self.px(280.0);
             let right = client.right - self.px(18.0);
-            let parts = [
-                (right - original - export - stocks).max(self.px(80.0)),
-                right - original - export,
-                right - original,
-                -1,
-            ];
+            let parts = [(right - export - stocks).max(self.px(80.0)), right - export, -1];
             SendMessageW(self.status, SB_SETPARTS, WPARAM(parts.len()), LPARAM(parts.as_ptr() as isize));
             let mut part = RECT::default();
             SendMessageW(self.status, SB_GETRECT, WPARAM(2), LPARAM(&mut part as *mut _ as isize));
@@ -671,8 +669,6 @@ impl App {
             let cancel = self.px(64.0);
             let _ = MoveWindow(self.progress, part.right - cancel - bar - inset * 2, part.top + inset * 2, bar, part.bottom - part.top - inset * 4, true);
             let _ = MoveWindow(self.cancel, part.right - cancel - inset, part.top + inset / 2, cancel, part.bottom - part.top - inset, true);
-            SendMessageW(self.status, SB_GETRECT, WPARAM(3), LPARAM(&mut part as *mut _ as isize));
-            let _ = MoveWindow(self.original_button, part.left + inset, part.top + inset / 2, part.right - part.left - inset * 2, part.bottom - part.top - inset, true);
         }
     }
 
@@ -708,6 +704,11 @@ impl App {
             }
             id::ADJUSTMENTS => model.toggle_pane(crate::model::Pane::Adjustments),
             id::PRESETS => model.toggle_pane(crate::model::Pane::Presets),
+            id::PANEL => model.toggle_inspector(),
+            id::ORIGINAL => {
+                let shown = model.holding_original;
+                model.hold_original(!shown);
+            }
             id::NEW_PRESET => model.new_preset(),
             id::IMPORT_PRESETS => {
                 if model.can_change_presets() {
@@ -800,6 +801,8 @@ impl App {
         enable(id::NEW_PRESET, model.can_change_presets());
         enable(id::IMPORT_PRESETS, model.can_change_presets());
         check(id::FULL_SCREEN, self.full_screen.is_some());
+        check(id::ORIGINAL, model.holding_original);
+        enable(id::ORIGINAL, model.can_show_original() && !model.cropping());
         for c in [id::FIT, id::ACTUAL, id::ZOOM_IN, id::ZOOM_OUT] {
             enable(c, photo && !model.cropping());
         }
@@ -1047,6 +1050,8 @@ fn build_menu() -> (HMENU, HMENU) {
         add(view, id::ZOOM_IN, "Zoom &In\tCtrl+=");
         add(view, id::ZOOM_OUT, "Zoom &Out\tCtrl+-");
         separator(view);
+        add(view, id::ORIGINAL, "Show &Original\tHold O");
+        separator(view);
         add(view, id::FULL_SCREEN, "F&ull Screen\tF11");
         let image = popup("&Image");
         add(image, id::ROTATE, "&Rotate Clockwise\tCtrl+R");
@@ -1103,7 +1108,7 @@ fn toolbar_images(dpi: u32) -> HIMAGELIST {
         let screen = GetDC(None);
         let dc = CreateCompatibleDC(screen);
         ReleaseDC(None, screen);
-        let face = if font_exists("Segoe Fluent Icons") { "Segoe Fluent Icons" } else { "Segoe MDL2 Assets" };
+        let face = icon_face();
         let mut lf = LOGFONTW { lfHeight: -(16 * dpi as i32 / 96), lfQuality: ANTIALIASED_QUALITY, ..Default::default() };
         let w = wide(face);
         lf.lfFaceName[..w.len()].copy_from_slice(&w);
@@ -1152,59 +1157,51 @@ fn toolbar_images(dpi: u32) -> HIMAGELIST {
     }
 }
 
-fn build_toolbar(main: HWND, dpi: u32) -> HWND {
+/// The title bar's tooltips, by command.
+fn tool_tip(command: u16) -> &'static str {
+    match command {
+        id::OPEN => "Open photograph (Ctrl+O)",
+        id::EXPORT => "Export photograph (Ctrl+Shift+E)",
+        _ => "Show or hide the panel (F7 adjustments, F8 presets)",
+    }
+}
+
+/// A toolbar in the title bar, of (glyph, command, check button). Buttons
+/// with a label (`chrome::TOOL_LABELS`) show it; the tools for the
+/// photograph are on the canvas (`canvas::Tool`).
+fn build_toolbar(main: HWND, dpi: u32, font: HFONT, buttons: &[(i32, u16, bool)]) -> HWND {
     unsafe {
         let toolbar = create(
             TOOLBARCLASSNAMEW,
             "",
-            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(TBSTYLE_FLAT | TBSTYLE_LIST | TBSTYLE_TOOLTIPS | CCS_NODIVIDER as u32 | CCS_NOPARENTALIGN as u32 | CCS_NORESIZE as u32),
+            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(TBSTYLE_FLAT | TBSTYLE_LIST | CCS_NODIVIDER as u32 | CCS_NOPARENTALIGN as u32 | CCS_NORESIZE as u32),
             WINDOW_EX_STYLE(0),
             main,
             0,
-            HFONT::default(),
+            font,
         );
         SendMessageW(toolbar, TB_BUTTONSTRUCTSIZE, WPARAM(std::mem::size_of::<TBBUTTON>()), LPARAM(0));
-        SendMessageW(toolbar, TB_SETEXTENDEDSTYLE, WPARAM(0), LPARAM((TBSTYLE_EX_MIXEDBUTTONS | 0x80 /* TBSTYLE_EX_DOUBLEBUFFER */) as isize));
+        SendMessageW(toolbar, TB_SETEXTENDEDSTYLE, WPARAM(0), LPARAM(0x80 /* TBSTYLE_EX_DOUBLEBUFFER */));
         SendMessageW(toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
-        theme::apply_control(HWND(SendMessageW(toolbar, TB_GETTOOLTIPS, WPARAM(0), LPARAM(0)).0 as *mut _), true);
-        let tips: Vec<Vec<u16>> = [
-            "Open photograph (Ctrl+O)",
-            "Show or hide film strip (F6)",
-            "Fit photograph (Ctrl+0)",
-            "Actual size (Ctrl+1)",
-            "Rotate clockwise (Ctrl+R)",
-            "Crop the photograph (C)",
-            "Export photograph (Ctrl+Shift+E)",
-            "Show or hide adjustments (F7)",
-            "Show or hide presets (F8)",
-        ]
-        .iter()
-        .map(wide)
-        .collect();
-        let button = |image: i32, cmd: u16, style: u32, tip: usize| TBBUTTON {
-            iBitmap: image,
-            idCommand: cmd as i32,
-            fsState: TBSTATE_ENABLED as u8,
-            fsStyle: style as u8,
-            iString: tips[tip].as_ptr() as isize,
-            ..Default::default()
-        };
-        let separator = TBBUTTON { iBitmap: 8, fsStyle: BTNS_SEP as u8, ..Default::default() };
-        let buttons = [
-            button(0, id::OPEN, BTNS_BUTTON, 0),
-            button(1, id::FILMSTRIP, BTNS_CHECK, 1),
-            separator,
-            button(2, id::FIT, BTNS_BUTTON, 2),
-            button(3, id::ACTUAL, BTNS_BUTTON, 3),
-            separator,
-            button(4, id::ROTATE, BTNS_BUTTON, 4),
-            button(5, id::CROP, BTNS_CHECK, 5),
-            separator,
-            button(6, id::EXPORT, BTNS_BUTTON, 6),
-            button(7, id::ADJUSTMENTS, BTNS_CHECK, 7),
-            button(8, id::PRESETS, BTNS_CHECK, 8),
-        ];
+        // A label shows and names the button (the toolbar keeps a pointer
+        // to it, so it lives as long as the toolbar).
+        let label = |image: i32| chrome::TOOL_LABELS.get(image as usize).copied().flatten();
+        let texts: &'static [Option<Vec<u16>>] =
+            Box::leak(buttons.iter().map(|&(image, _, _)| label(image).map(wide)).collect::<Vec<_>>().into_boxed_slice());
+        let buttons: Vec<TBBUTTON> = buttons
+            .iter()
+            .zip(texts)
+            .map(|(&(image, cmd, check), text)| TBBUTTON {
+                iBitmap: image,
+                idCommand: cmd as i32,
+                fsState: TBSTATE_ENABLED as u8,
+                fsStyle: ((if check { BTNS_CHECK } else { BTNS_BUTTON }) | if text.is_some() { BTNS_AUTOSIZE } else { 0 }) as u8,
+                iString: text.as_ref().map_or(-1, |t| t.as_ptr() as isize),
+                ..Default::default()
+            })
+            .collect();
         SendMessageW(toolbar, TB_ADDBUTTONSW, WPARAM(buttons.len()), LPARAM(buttons.as_ptr() as isize));
+        titlebar::add_tips(toolbar, buttons.iter().map(|b| (b.idCommand as u16, tool_tip(b.idCommand as u16))).collect());
         titlebar::tool_metrics(main, toolbar);
         toolbar
     }
@@ -1314,8 +1311,11 @@ pub fn run() {
         report.stamp("fonts");
         let menubar = titlebar::create_menubar(main, menu, fonts.ui);
         titlebar::set_fonts(fonts.ui, fonts.glyph_small);
-        let toolbar = build_toolbar(main, dpi);
-        chrome::subclass_toolbar(toolbar, fonts.glyph);
+        let tools = build_toolbar(main, dpi, fonts.ui, &[(0, id::OPEN, false)]);
+        let actions = build_toolbar(main, dpi, fonts.ui, &[(1, id::EXPORT, false), (2, id::PANEL, true)]);
+        for toolbar in [tools, actions] {
+            chrome::subclass_toolbar(toolbar, fonts.glyph);
+        }
         report.stamp("toolbar");
         let status = create(STATUSCLASSNAMEW, "", WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WINDOW_STYLE(SBARS_SIZEGRIP), WINDOW_EX_STYLE(0), main, 0, fonts.ui);
         empty::subclass_status(status);
@@ -1323,27 +1323,26 @@ pub fn run() {
         let progress = create(PROGRESS_CLASSW, "", WS_CHILD | WINDOW_STYLE(PBS_MARQUEE), WINDOW_EX_STYLE(0), status, 0, HFONT::default());
         SendMessageW(progress, PBM_SETMARQUEE, WPARAM(1), LPARAM(30));
         let cancel = create(w!("BUTTON"), "Cancel", WS_CHILD | WS_TABSTOP, WINDOW_EX_STYLE(0), status, id::CANCEL_EXPORT, fonts.ui);
-        let original_button = create(w!("BUTTON"), "\u{E8B9}", WS_CHILD | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32), WINDOW_EX_STYLE(0), status, id::ORIGINAL, fonts.glyph_small);
-        accessible_name(original_button, "Show Original (toggle with Space; hold O or backslash)");
-        empty::subclass_original_button(original_button);
         let canvas = create(w!("NegsCanvas"), "Photograph preview", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
         let empty = create(w!("NegsEmpty"), "", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), main, 0, HFONT::default());
         let strip = create(w!("NegsStrip"), "Film Strip", WS_CHILD | WS_TABSTOP | WS_HSCROLL, WINDOW_EX_STYLE(0), main, 0, HFONT::default());
+        let panes = panes::create(main, fonts.ui);
         let inspector = inspector::Inspector::create(main, &fonts, dpi);
         canvas::init(canvas, dpi);
 
         let mut app = App {
             model,
             main,
-            toolbar,
+            tools,
+            actions,
             menubar,
             status,
             progress,
             cancel,
-            original_button,
             canvas,
             empty,
             strip,
+            panes,
             inspector,
             presets_view: None,
             fonts,
@@ -1387,11 +1386,17 @@ pub fn run() {
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            if pre_translate(&msg) {
-                continue;
+            // Tab, arrows in a group or an access key moving the focus
+            // scroll the inspector to the newly focused control.
+            let keyed = matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_CHAR | WM_SYSCHAR);
+            let before = keyed.then(|| GetFocus());
+            if !pre_translate(&msg) {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
             }
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+            if before.is_some_and(|before| GetFocus() != before) {
+                with_app(inspector::reveal_focus);
+            }
         }
         APP.with(|cell| cell.borrow_mut().take());
     }
@@ -1744,15 +1749,18 @@ impl App {
         self.dpi = dpi;
         self.fonts = Fonts::new(dpi);
         unsafe {
-            SendMessageW(self.toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
-            chrome::subclass_toolbar(self.toolbar, self.fonts.glyph);
-            titlebar::tool_metrics(self.main, self.toolbar);
+            for toolbar in [self.tools, self.actions] {
+                SendMessageW(toolbar, TB_SETIMAGELIST, WPARAM(0), LPARAM(toolbar_images(dpi).0));
+                SendMessageW(toolbar, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
+                chrome::subclass_toolbar(toolbar, self.fonts.glyph);
+                titlebar::tool_metrics(self.main, toolbar);
+            }
+            panes::set_font(self.panes, self.fonts.ui);
             SendMessageW(self.menubar, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             titlebar::set_metrics(self.main, self.menubar);
             titlebar::set_fonts(self.fonts.ui, self.fonts.glyph_small);
             SendMessageW(self.status, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
             SendMessageW(self.cancel, WM_SETFONT, WPARAM(self.fonts.ui.0 as usize), LPARAM(1));
-            SendMessageW(self.original_button, WM_SETFONT, WPARAM(self.fonts.glyph_small.0 as usize), LPARAM(1));
         }
         canvas::set_dpi(dpi);
         inspector::dpi_changed(self);

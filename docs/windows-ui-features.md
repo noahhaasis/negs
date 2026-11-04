@@ -117,12 +117,19 @@ Rotate, Crop (accent-tinted while cropping). Right: Export, Adjustments.
 While cropping, Export is replaced by **Cancel** and **Done** (Done is the
 prominent/default button). Enabled states as in the menu table.
 
-On Windows:
+On Windows, each control sits with what it acts on:
 
-- A Win32 toolbar (`TOOLBARCLASSNAME`, flat, with tooltips) under the menu,
-  or a thin command bar. Toggle buttons (`BTNS_CHECK`) for Film Strip,
-  Adjustments and Crop show their state the Windows way, as pressed buttons,
-  instead of a tint.
+- The title bar holds the window's actions: Open (with its label) after the
+  menus, Export (labelled, in the accent) and a button that hides or shows
+  the panel column before the caption buttons. They are toolbar controls
+  (`TOOLBARCLASSNAME`), so screen readers name them.
+- The photograph's tools float in a pill under it on the canvas (`canvas::Tool`):
+  Fit, 1:1 · Rotate, Crop · Before | After · Film Strip, with tooltips that name
+  the shortcut. A fitted photograph leaves room for the pill; the pill hides while
+  cropping. It is drawn by the canvas, so the menus and shortcuts are its keyboard
+  and screen reader route.
+- Adjustments | Presets is a switch at the top of the column (`ui/panes.rs`),
+  hidden while cropping.
 - Crop's Done/Cancel: on Windows, put them at the bottom of the crop panel
   (§9), Done as the default push button, Cancel next to it; Enter and Esc
   work anywhere in crop mode. Keep them in the toolbar too only if it looks
@@ -262,8 +269,8 @@ On Windows:
 
 Behaviour:
 
-- Hold the button at the right of the status bar, or hold `\` (not in a text
-  field), to show the undeveloped photo in place of the developed one; crop,
+- Hold `\` or O (not in a text field), click Before in the canvas's tools, or
+  choose View ▸ Show Original, to show the undeveloped photo in place of the developed one; crop,
   rotation and border stay, so nothing moves. Releasing shows the developed
   photo again. Losing focus while held releases it.
 - Decoded at the preview's size when the pointer first reaches the button,
@@ -435,7 +442,10 @@ On Windows:
   value, unless that trackbar has keyboard focus. Win32 trackbars take the
   wheel by default, a classic annoyance in scrolling panels.
 - Keyboard: Tab order follows the visual order; arrow/PageUp/PageDown on a
-  focused trackbar change it; access keys on labels.
+  focused trackbar change it; access keys on labels. Moving the focus by
+  key (Tab, arrows in a group, an access key) scrolls the rows, or the crop
+  panel's, so the focused control's whole row is in view; a click doesn't,
+  as it may be starting a drag.
 - Trackbar drag: `TB_THUMBTRACK` → begin interaction (one undo step, fast
   frames); `TB_ENDTRACK`/`TB_THUMBPOSITION` → end interaction and the full
   render. Keyboard steps are single edits.
@@ -639,7 +649,7 @@ Behaviour:
   preview.
 
 On Windows: `STATUSCLASSNAME` with parts (status text · `Film → Paper` ·
-export progress · Show Original). Errors via `TaskDialogIndirect` (main
+export progress); Show Original is in the canvas's tools. Errors via `TaskDialogIndirect` (main
 instruction + content, expandable details for the exporter log). Text in
 the status bar is copyable via a context menu "Copy".
 

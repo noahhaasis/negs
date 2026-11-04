@@ -95,7 +95,7 @@ the rows they are dropped between. The panel is created the first time it
 shows, after the window's first frame. While cropping, the column shows the
 crop panel. The shown pane is the `inspectorPane` preference.
 
-Toolbar Presets button (checked state) beside Adjustments; View ▸ Presets
+The Adjustments | Presets switch at the top of the column; View ▸ Presets
 (F8), File ▸ New Preset (Ctrl+Shift+S) and Import Presets… (Ctrl+Shift+O). The
 uninstaller's full cleanup deletes the Presets folder, and its second button
 reads "Keep settings, presets and editing session".
@@ -347,8 +347,10 @@ its painting changed.
   glyphs and toolbars are GDI, which paints opaque. Making them alpha-correct is more
   work than it's worth without a Windows 11 machine to check it on.
 - **Title bar** (`ui/titlebar.rs`): `WM_NCCALCSIZE` gives the caption's place (and
-  the old menu bar's) to a 40 DIP band holding the icon, the menu bar, the tools, the
-  title and the caption buttons. The side and bottom frame stay the system's, and a
+  the old menu bar's) to a 40 DIP band holding the icon, the menu bar, Open, the
+  title, Export, the panel button and the caption buttons. The photograph's tools
+  (zoom, rotate, crop, Before | After, film strip) are a pill the canvas draws under
+  the photograph, with tooltips placed over it; a fitted photograph keeps clear of it. The side and bottom frame stay the system's, and a
   maximised window is kept on its monitor. `WM_NCHITTEST` returns `HTCAPTION`, top
   edge resize, and `HTMINBUTTON`/`HTMAXBUTTON`/`HTCLOSE` (for Windows 11 snap
   layouts); the caption buttons' clicks are handled in `WM_NCLBUTTONDOWN/UP` so the
