@@ -110,7 +110,7 @@ import XCTest
 
         // A pin fills the zone caption and draws on the canvas; both reserve
         // their space already.
-        await model.addPin(at: CGPoint(x: 0.5, y: 0.5), radius: 0)
+        await model.placeZone(5, at: CGPoint(x: 0.5, y: 0.5))
         try await waitUntil { model.pins.count == 1 }
         try await Task.sleep(for: .milliseconds(200))
         try capture("pick")

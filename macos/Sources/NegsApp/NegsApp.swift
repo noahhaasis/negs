@@ -232,10 +232,8 @@ struct CanvasArea: View {
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
         PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale,
-                      pins: model.pinMarkers,
+                      pins: model.pinsToShow,
                       onSelectPin: { model.selectPin($0) },
-                      allowsPinning: model.canPin,
-                      onPin: { centre, radius in Task { await model.addPin(at: centre, radius: radius) } },
                       onMovePin: { index, centre in Task { await model.movePin(index, to: centre) } },
                       onEscapeKey: { model.clearToneSelection() },
                       onDeleteKey: { model.removeSelectedPin() },

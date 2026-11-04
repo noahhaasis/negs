@@ -370,9 +370,9 @@ final class PhotographView: NSView {
             chip.setAffineTransform(upright)
             chip.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
             chip.position = centre
-            chip.name = "pin \(marker.number)"
+            chip.name = "zone \(ZoneLadder.names[marker.zone])"
             chip.cornerRadius = diameter / 2
-            chip.backgroundColor = ZoneScale.grey(lstar: marker.lstar).cgColor
+            chip.backgroundColor = ZoneScale.grey(marker.zone).cgColor
             // A chip sits on the tone it's filled with, so it needs an edge
             // of its own to be seen.
             chip.borderWidth = (marker.selected ? 2 : 1) / zoom
@@ -384,8 +384,8 @@ final class PhotographView: NSView {
                 let lineHeight = fontSize * 1.2
                 label.frame = CGRect(x: 0, y: -(diameter - lineHeight) / 2, width: diameter, height: diameter)
                 label.fontSize = fontSize
-                label.foregroundColor = (marker.lstar < 55 ? NSColor.white : NSColor.black).cgColor
-                label.string = "\(marker.number)"
+                label.foregroundColor = (ZoneScale.zones[marker.zone].target < 55 ? NSColor.white : NSColor.black).cgColor
+                label.string = ZoneLadder.names[marker.zone]
                 label.contentsScale = scale
             }
         }

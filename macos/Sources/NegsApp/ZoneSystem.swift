@@ -83,32 +83,36 @@ enum ZoneScale {
     }
 }
 
-/// A pinned tone: a measured L\* held where it is, or aimed at a zone, and
-/// the circle on the photograph it averaged.
+/// A pin: a measured tone that prints as its zone.
 struct TonePin: Equatable, Sendable {
+    /// The tone before the pins' curve.
     var input: Double
     var target: Double
     var zone: Int
-    /// 1-based, for the numbered circle on the photograph.
-    var number: Int
     /// Where the tone was measured; nil when the app recorded no position.
     var source: PinSource?
 }
 
-/// The circle a pin averaged, in fractions of the photograph.
+/// The circle a pin averages, in fractions of the uncropped photograph.
 struct PinSource: Equatable, Sendable {
     var centre: CGPoint
     /// As a fraction of the shorter side.
     var radius: Double
 }
 
-/// A pin the canvas outlines.
+/// A pin the canvas draws.
 struct TonePinMarker: Equatable, Sendable {
     let index: Int
-    /// The number in the circle.
-    let number: Int
-    /// The measured L\*, which colours the circle.
-    let lstar: Double
+    let zone: Int
     let source: PinSource
     let selected: Bool
+    /// The tone curve can't honour it, so it has no effect.
+    var ignored = false
+}
+
+/// A zone being dragged from the panel.
+struct ZoneDrag: Equatable, Sendable {
+    let zone: Int
+    /// The pointer in canvas points, from the top left.
+    let point: CGPoint
 }

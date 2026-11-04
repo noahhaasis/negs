@@ -38,7 +38,7 @@ import UniformTypeIdentifiers
     private(set) var original: IOSurface?
     /// The tones of `image` within the crop; nil until it develops.
     private(set) var histogram: Histogram?
-    /// The print's pinned tones, in parameter order.
+    /// The photograph's pins, in parameter order.
     var pins: [TonePin] {
         let anchors = state.params["post.tone_anchors"].array
         return anchors.indices.compactMap { index in
@@ -55,33 +55,47 @@ import UniformTypeIdentifiers
                 && state.params["\(path).source.x"] != .null
                 ? PinSource(centre: centre, radius: radius)
                 : nil
-            return TonePin(
-                input: input, target: target,
-                zone: ZoneScale.zone(forTarget: target), number: index + 1, source: source
+            return TonePin(input: input, target: target, zone: ZoneScale.zone(forTarget: target), source: source)
+        }
+    }
+
+    /// The pins the canvas draws, with a resize in progress already applied.
+    var pinsToShow: [TonePinMarker] {
+        guard zonePanelVisible, original == nil, !holdingOriginal else { return [] }
+        return pins.enumerated().compactMap { index, pin in
+            guard var source = pin.source else { return nil }
+            if let pendingResize, pendingResize.index == index { source.radius = pendingResize.radius }
+            return TonePinMarker(
+                index: index, zone: pin.zone, source: source,
+                selected: selectedPin == index, ignored: ignoredPins.contains(index)
             )
         }
     }
 
-    /// The pins the canvas outlines, when the pins are shown.
-    var pinMarkers: [TonePinMarker] {
-        guard showsPins else { return [] }
-        return pins.enumerated().compactMap { index, pin in
-            pin.source.map {
-                TonePinMarker(
-                    index: index, number: pin.number, lstar: pin.input,
-                    source: $0, selected: selectedPin == index
-                )
-            }
+    /// Whether the zone panel is on. Remembered between launches.
+    var zonePanelVisible = UserDefaults.standard.object(forKey: "showZonePanel") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(zonePanelVisible, forKey: "showZonePanel")
+            if !zonePanelVisible { selectedPin = nil }
         }
     }
 
-    /// Whether the canvas draws the pins (⌘'). Remembered between launches.
-    var showsPins = UserDefaults.standard.object(forKey: "showTonePins") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showsPins, forKey: "showTonePins") }
-    }
+    /// The panel shows with a photograph, except while cropping.
+    var showsZonePanel: Bool { zonePanelVisible && source != nil && !cropping }
 
-    /// The selected pin: its band lights up, and a band click aims it there.
+    /// A zone being dragged from the panel.
+    var zoneDrag: ZoneDrag?
+
+    /// The size the next pin's circle starts at: the last one used.
+    var sampleRadius = SampleSize.initial
+
+    /// The selected pin: its tile is outlined, and the scroll wheel sizes it.
     private(set) var selectedPin: Int?
+    /// The pins the tone curve can't honour, from the last render.
+    private(set) var ignoredPins: Set<Int> = []
+    /// A resize waiting for the wheel to stop, shown before it's an edit.
+    private var pendingResize: (index: Int, radius: Double)?
+    @ObservationIgnored private var resizeCommit: Task<Void, Never>?
     /// The developed preview's frame, uncropped, which the canvas lays out:
     /// the working frame, or less with the 12 MP limit.
     private(set) var imageSize = CGSize.zero
@@ -260,11 +274,9 @@ import UniformTypeIdentifiers
     var canSave: Bool { previewCurrent && image != nil && !rendering && !saving && !cropping }
     var cropping: Bool { cropSession != nil }
     var canShowOriginal: Bool { image != nil && !cropping }
-    /// Whether a tone can be sampled: this preview is current, and the
-    /// original or the crop isn't what's on screen.
-    var canPin: Bool {
-        image != nil && previewCurrent && !cropping && !holdingOriginal && original == nil
-    }
+    /// Whether a zone can be dropped: a drop during a render waits for it, but
+    /// the original or the crop must not be what's on screen.
+    var canPlaceZones: Bool { image != nil && !cropping && !holdingOriginal && original == nil }
     /// The shown photograph's size after cropping, before rotation; zero
     /// before one opens. Borders fit this size.
     var photoSize: CGSize { crop.size(of: image != nil ? imageSize : placeholderSize) }
@@ -623,8 +635,11 @@ import UniformTypeIdentifiers
     /// else re-renders.
     private func replaceState(_ next: EditState) {
         guard !closing else { return }
+        let previousAnchors = state.params["post.tone_anchors"]
         let render = next.rendered != state.rendered
         state = next
+        if next.params["post.tone_anchors"] != previousAnchors { cancelResize() }
+        if let selectedPin, !pins.indices.contains(selectedPin) { self.selectedPin = nil }
         // A crop doesn't re-render the preview, but it changes the thumbnails.
         if render { changed() } else { pumpPreviews() }
     }
@@ -1048,6 +1063,8 @@ import UniformTypeIdentifiers
             isRaw = result["raw"].bool
             if inputColour != result["input_colour"] { inputColour = result["input_colour"] }
             lensCorrectionSupported = result["lens_correction_supported"].bool
+            let ignored = Set(result["ignored_pins"].array.map { Int($0.double) })
+            if ignored != ignoredPins { ignoredPins = ignored }
             if revision == currentRevision, interactiveScale == nil {
                 renderID = id; previewCurrent = true; hideActivity()
                 showingCachedPreview = false
@@ -1094,52 +1111,68 @@ import UniformTypeIdentifiers
 
     // MARK: The zone system
 
-    /// Measures a circle of the photograph into a pin that holds its tone,
-    /// and selects it. `centre` is in fractions of the uncropped photograph
-    /// and `radius` a fraction of its shorter side; zero is one pixel. A zone
-    /// holds one pin, so a tone measured in an occupied zone replaces its pin.
-    func addPin(at centre: CGPoint, radius: Double) async {
+    /// Makes the tone of the circle at `centre` print as `zone`, and selects
+    /// its pin. A zone has one pin, so a placed zone's pin moves here. A drop
+    /// during a render waits for it. `centre` is in fractions of the uncropped
+    /// photograph.
+    func placeZone(_ zone: Int, at centre: CGPoint) async {
+        guard ZoneScale.zones.indices.contains(zone) else { return }
+        let radius = sampleRadius
         guard let lstar = await measureTone(at: centre, radius: radius) else { return }
-        let anchor = Self.anchor(input: lstar, target: lstar, centre: centre, radius: radius)
+        let anchor = Self.anchor(input: lstar, target: ZoneScale.zones[zone].target, centre: centre, radius: radius)
         var anchors = state.params["post.tone_anchors"].array
-        let zone = ZoneScale.zone(forTarget: lstar)
-        let occupied = pins.firstIndex { $0.zone == zone }
-        if let occupied { anchors[occupied] = anchor } else { anchors.append(anchor) }
-        setAnchors(anchors, action: occupied == nil ? "Pin Tone" : "Replace Tone Pin")
-        selectedPin = occupied ?? anchors.indices.last
+        let placed = pins.firstIndex { $0.zone == zone }
+        if let placed { anchors[placed] = anchor } else { anchors.append(anchor) }
+        setAnchors(anchors, action: placed == nil ? "Place Tone Pin" : "Move Tone Pin")
+        selectedPin = placed ?? anchors.indices.last
     }
 
-    /// Measures a pin again at a new point, keeping its radius and its aim;
-    /// a pin that was only holding its tone holds the new one.
+    /// Measures a pin again at a new spot, keeping its zone and size.
     func movePin(_ index: Int, to centre: CGPoint) async {
         guard pins.indices.contains(index) else { return }
-        let radius = pins[index].source?.radius ?? 0
+        let radius = pins[index].source?.radius ?? sampleRadius
         guard let lstar = await measureTone(at: centre, radius: radius), pins.indices.contains(index) else { return }
-        let pin = pins[index]
-        let holding = abs(pin.target - pin.input) < 0.01
         var anchors = state.params["post.tone_anchors"].array
-        anchors[index] = Self.anchor(input: lstar, target: holding ? lstar : pin.target, centre: centre, radius: radius)
+        anchors[index] = Self.anchor(input: lstar, target: pins[index].target, centre: centre, radius: radius)
         setAnchors(anchors, action: "Move Tone Pin")
         selectedPin = index
     }
 
-    func selectPin(_ index: Int) { selectedPin = index }
+    /// One step of the scroll wheel on the selected pin. The circle follows at
+    /// once; when the wheel stops the area is measured as one edit.
+    func resizeSelectedPin(scrollDelta: Double, precise: Bool) {
+        guard let index = selectedPin, pins.indices.contains(index), pins[index].source != nil else { return }
+        let current = pendingResize?.index == index ? pendingResize!.radius : pins[index].source!.radius
+        let radius = SampleSize.radius(from: current, scrollDelta: scrollDelta, precise: precise)
+        pendingResize = (index, radius)
+        sampleRadius = radius
+        resizeCommit?.cancel()
+        resizeCommit = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            await self?.commitResize(of: index, to: radius)
+        }
+    }
 
-    /// Aims the selected pin at a zone's tone. A zone holds one pin, so when
-    /// another pin is already there, that one is selected instead.
-    func aimSelectedPin(atZone zone: Int) {
-        guard let index = selectedPin, pins.indices.contains(index), ZoneScale.zones.indices.contains(zone) else { return }
-        let target = ZoneScale.zones[zone].target
-        if let other = pins.indices.first(where: { $0 != index && abs(pins[$0].target - target) < 0.5 }) {
-            selectedPin = other
+    private func commitResize(of index: Int, to radius: Double) async {
+        guard pins.indices.contains(index), let centre = pins[index].source?.centre,
+              let lstar = await measureTone(at: centre, radius: radius) else {
+            if !Task.isCancelled { pendingResize = nil }
             return
         }
+        guard !Task.isCancelled, pins.indices.contains(index) else { return }
         var anchors = state.params["post.tone_anchors"].array
-        guard case .object(var anchor) = anchors[index] else { return }
-        anchor["target"] = .number(target)
-        anchors[index] = .object(anchor)
-        setAnchors(anchors, action: "Aim Tone Pin")
+        anchors[index] = Self.anchor(input: lstar, target: pins[index].target, centre: centre, radius: radius)
+        setAnchors(anchors, action: "Resize Tone Pin")
     }
+
+    private func cancelResize() {
+        resizeCommit?.cancel()
+        resizeCommit = nil
+        pendingResize = nil
+    }
+
+    func selectPin(_ index: Int?) { selectedPin = index }
 
     var canRemovePin: Bool { selectedPin != nil }
 
@@ -1153,28 +1186,30 @@ import UniformTypeIdentifiers
 
     func clearToneSelection() { selectedPin = nil }
 
-    /// ⌘': show or hide every pin. Hiding drops the selection, so no highlight
-    /// outlives the circles it belongs to.
-    func toggleTonePins() {
-        showsPins.toggle()
-        if !showsPins { selectedPin = nil }
-    }
-
     /// The tone of a circle on the current render, as the pins read it: before
-    /// the curve they make. Nil if the render changed meanwhile.
+    /// the curve they make. Waits out any render. Nil if the photograph
+    /// changes first, cropping starts or the render fails.
     private func measureTone(at centre: CGPoint, radius: Double) async -> Double? {
-        guard canPin, let engine else { return nil }
-        let measuring = revision
-        do {
-            let (_, result) = try await engine.request([
-                "command": .string("sample_tone"), "render_id": .number(Double(renderID)),
-                "x": .number(centre.x), "y": .number(centre.y), "radius": .number(radius)
-            ])
-            return measuring == revision ? result["lstar"].double : nil
-        } catch {
-            report(error)
-            return nil
+        guard let engine else { return nil }
+        let generation = sourceGeneration
+        while generation == sourceGeneration, !closing, !cropping, !renderFailed, !Task.isCancelled {
+            guard previewCurrent, !rendering else {
+                try? await Task.sleep(for: .milliseconds(20))
+                continue
+            }
+            let measuring = revision
+            do {
+                let (_, result) = try await engine.request([
+                    "command": .string("sample_tone"), "render_id": .number(Double(renderID)),
+                    "x": .number(centre.x), "y": .number(centre.y), "radius": .number(radius)
+                ])
+                if measuring == revision, generation == sourceGeneration { return result["lstar"].double }
+            } catch {
+                report(error)
+                return nil
+            }
         }
+        return nil
     }
 
     private static func anchor(input: Double, target: Double, centre: CGPoint, radius: Double) -> JSONValue {

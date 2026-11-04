@@ -130,7 +130,7 @@ extension CanvasGestureTests {
         for unit in [CGPoint(x: 0.3, y: 0.3), CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0.8, y: 0.7)] {
             view.setPins([
                 TonePinMarker(
-                    index: 0, number: 1, lstar: 50,
+                    index: 0, zone: 5,
                     source: PinSource(centre: unit, radius: 0.1), selected: false
                 )
             ])
@@ -146,7 +146,7 @@ extension CanvasGestureTests {
         scroll.allowsMagnification = true; scroll.minMagnification = 0.01; scroll.maxMagnification = 16
         let view = PhotographView()
         scroll.documentView = view
-        let marker = TonePinMarker(index: 0, number: 1, lstar: 50, source: PinSource(centre: CGPoint(x: 0.5, y: 0.5), radius: 0), selected: false)
+        let marker = TonePinMarker(index: 0, zone: 5, source: PinSource(centre: CGPoint(x: 0.5, y: 0.5), radius: 0), selected: false)
         for (rotation, border) in [(0, false), (1, false), (0, true)] as [(Int, Bool)] {
             let frame = rotation == 1 ? CGSize(width: 200, height: 800) : CGSize(width: 800, height: 200)
             view.show(NSObject(), size: CGSize(width: 800, height: 200), rotation: rotation)
@@ -166,7 +166,7 @@ extension CanvasGestureTests {
         let view = makeView()
         view.show(NSObject(), size: CGSize(width: 800, height: 200), rotation: 1)
         view.setFrameSize(CGSize(width: 200, height: 800)); view.layout()
-        view.setPins([TonePinMarker(index: 0, number: 1, lstar: 50, source: PinSource(centre: CGPoint(x: 0.5, y: 0.5), radius: 0), selected: false)])
+        view.setPins([TonePinMarker(index: 0, zone: 5, source: PinSource(centre: CGPoint(x: 0.5, y: 0.5), radius: 0), selected: false)])
         let chip = try XCTUnwrap(view.chipLayers.first)
         let total = chip.affineTransform().concatenating(view.clipLayer.affineTransform())
         XCTAssertEqual(total.b, 0, accuracy: 1e-6)
@@ -178,7 +178,7 @@ extension CanvasGestureTests {
     func testARingDoesNotTakeThePointer() throws {
         let view = makeView()
         let centre = CGPoint(x: 0.5, y: 0.5)
-        view.setPins([TonePinMarker(index: 0, number: 1, lstar: 50, source: PinSource(centre: centre, radius: 0.4), selected: false)])
+        view.setPins([TonePinMarker(index: 0, zone: 5, source: PinSource(centre: centre, radius: 0.4), selected: false)])
         let point = viewPoint(centre, in: view)
         XCTAssertEqual(view.pinIndex(at: point), 0)
         XCTAssertNil(view.pinIndex(at: CGPoint(x: point.x + 30, y: point.y)))
