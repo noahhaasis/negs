@@ -327,6 +327,11 @@ struct State {
     scaled: Vec<(Scaled, Keyed)>,
     /// The last image key handed out.
     keys: u64,
+    /// Prep's output for the settled and the interactive frame
+    /// (`Pipeline::with_prepared_frame`), so edits after Prep skip it: each
+    /// slot only sees its kind's one resample of `source` per size, and is
+    /// emptied with the source.
+    prepared: [spektrafilm_core::prep::PreparedFrame; 2],
     /// The full source's auto-exposure metering frame, so every render size
     /// meters alike, as the desktop apps do; made on first use.
     metering: Option<ImageBuf>,
@@ -367,6 +372,7 @@ impl Engine {
             source: None,
             scaled: Vec::new(),
             keys: 0,
+            prepared: Default::default(),
             metering: None,
             autoexposure: None,
             input_colour: None,
@@ -559,6 +565,7 @@ impl Engine {
 
     fn keep(&self, image: ImageBuf, colour: spektrafilm_io::InputColour) {
         let mut state = self.state.borrow_mut();
+        state.prepared.iter().for_each(|frame| frame.clear());
         state.source = Some(state.keyed(image));
         state.input_colour = Some(colour);
     }
@@ -582,6 +589,7 @@ impl Engine {
         }
         state.source = None;
         state.scaled.clear();
+        state.prepared.iter().for_each(|frame| frame.clear());
         state.metering = None;
         state.autoexposure = None;
         state.shown = None;
@@ -915,7 +923,8 @@ async fn render(
             let full = &state.source.as_ref().unwrap().0;
             state.metering = Some(spektrafilm_core::stages::filming::metering_preview(full));
         }
-        let mut pipeline = state.pipeline.as_ref().unwrap().1.clone().with_params(params.clone());
+        let mut pipeline = state.pipeline.as_ref().unwrap().1.clone().with_params(params.clone())
+            .with_prepared_frame(state.prepared[interactive as usize].clone());
         if let Some(metering) = state.metering.clone().filter(|_| params.camera.auto_exposure) {
             pipeline = pipeline.with_metering_preview(metering);
             let io = &params.io;
