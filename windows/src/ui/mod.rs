@@ -493,9 +493,14 @@ impl App {
             Some(path) => format!("{} - Negs", crate::model::file_name(path)),
             None => "Negs".into(),
         };
-        let title = wide(title);
-        unsafe {
-            let _ = SetWindowTextW(self.main, pcwstr(&title));
+        // Only a new title: setting it hides the window for a moment (see
+        // WM_SETTEXT), and the photograph's Vulkan surface then dropped out
+        // for a frame, after every render, showing what GDI last drew there.
+        if draw::window_text(self.main) != title {
+            let title = wide(title);
+            unsafe {
+                let _ = SetWindowTextW(self.main, pcwstr(&title));
+            }
         }
         unsafe {
             SendMessageW(self.actions, TB_ENABLEBUTTON, WPARAM(id::EXPORT as usize), LPARAM(model.can_export() as isize));
@@ -1505,7 +1510,9 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 DefWindowProcW(hwnd, msg, wparam, LPARAM(-1))
             }
             WM_SETTEXT | WM_SETICON => {
-                // The system would draw its caption over the band.
+                // The system would draw its caption over the band. Hiding
+                // the window also takes the canvas's Vulkan surface off the
+                // screen for a frame: send these only when something changed.
                 let style = GetWindowLongW(hwnd, GWL_STYLE);
                 SetWindowLongW(hwnd, GWL_STYLE, style & !(WS_VISIBLE.0 as i32));
                 let result = DefWindowProcW(hwnd, msg, wparam, lparam);
