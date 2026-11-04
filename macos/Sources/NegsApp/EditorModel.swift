@@ -1474,9 +1474,10 @@ import UniformTypeIdentifiers
     }
 
     /// Saves the current preview with the crop, rotation, border, size, and encoding.
-    private func saveCommand(to url: URL, size: ExportSize, save: SaveSettings) -> [String: JSONValue] {
+    func saveCommand(to url: URL, size: ExportSize, save: SaveSettings) -> [String: JSONValue] {
         var command: [String: JSONValue] = ["command": .string("save"), "render_id": .number(Double(renderID)), "output": .string(url.path),
-                                            "rotate_cw": .number(Double(imageRotation)), "save_options": save.json]
+                                            "rotate_cw": .number(Double(imageRotation)), "save_options": save.json,
+                                            "crop_after_post": .bool(true)]
         if let crop = Self.cropJSON(state.crop) { command["crop"] = crop }
         if let border = state.border.exported(for: photoSize) {
             command["border"] = .string(border.style.rawValue)

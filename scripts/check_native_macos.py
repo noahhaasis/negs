@@ -179,7 +179,7 @@ def main():
                 pinned_id, pinned_result = request("render", **(render_args | {"params": pinned}))
                 assert pinned_result["export_resolution"], pinned_result
                 pinned_preview, pinned_fast = work / "pinned-preview.tiff", work / "pinned-fast.tiff"
-                request("save", render_id=pinned_id, output=str(pinned_preview), crop=crop, rotate_cw=1)
+                request("save", render_id=pinned_id, output=str(pinned_preview), crop=crop, crop_after_post=True, rotate_cw=1)
                 (work / "pinned.json").write_text(json.dumps(pinned))
                 subprocess.run([args.fast_exporter.resolve(), "process", str(source), "-o", str(pinned_fast),
                                 "--film", "kodak_gold_200", "--paper", "kodak_portra_endura", "--crop", "0,0,0.5,1,-2",

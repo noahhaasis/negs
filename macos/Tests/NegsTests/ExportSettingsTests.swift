@@ -55,4 +55,13 @@ import XCTest
         defer { model.shutdown() }
         try body(model)
     }
+
+    /// A save adjusts before it straightens, as the preview and a Fast export
+    /// do, so a pin or Post edit on a straightened crop saves what was shown.
+    @MainActor func testSavesApplyPostBeforeTheCrop() {
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let command = model.saveCommand(to: URL(fileURLWithPath: "/tmp/out.png"), size: .full, save: SaveSettings())
+        XCTAssertEqual(command["crop_after_post"], .bool(true))
+    }
 }
