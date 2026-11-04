@@ -5,6 +5,43 @@ import XCTest
 @testable import NegsApp
 
 final class ExposurePlacementTests: XCTestCase {
+    /// The preview is read in the colour space the RAW declares (the engine's
+    /// `preview_colour_space`), as on the web and Windows: Adobe RGB is
+    /// converted, nothing said is sRGB, anything else is refused. A JPEG
+    /// with an embedded thumbnail stands in for a RAW's preview.
+    func testPreviewIsReadInTheDeclaredColourSpace() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("embedded-thumbnail.jpg")
+        let context = try XCTUnwrap(CGContext(data: nil, width: 640, height: 480, bitsPerComponent: 8, bytesPerRow: 2560,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(red: 0.2, green: 0.7, blue: 0.3, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 640, height: 480))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), [kCGImageDestinationEmbedThumbnail: true] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let size = CGSize(width: 640, height: 480)
+        func centre(_ declared: PreviewColourSpace?) throws -> [UInt8] {
+            let data = try CameraBrightnessReference.png(from: url, expectedSize: size, declared: declared)
+            let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil)), 0, nil))
+            XCTAssertEqual(image.colorSpace?.name, CGColorSpace.sRGB)
+            var pixel = [UInt8](repeating: 0, count: 4)
+            let read = try XCTUnwrap(CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            read.draw(image, in: CGRect(x: -image.width / 2, y: -image.height / 2, width: image.width, height: image.height))
+            return Array(pixel.prefix(3))
+        }
+        let (untagged, srgb, adobe) = (try centre(nil), try centre(.srgb), try centre(.adobeRGB))
+        XCTAssertEqual(untagged, srgb)
+        // Adobe RGB's green is more saturated than the same numbers in sRGB.
+        XCTAssertLessThan(Int(adobe[0]), Int(srgb[0]) - 10, "\(adobe) vs \(srgb)")
+        XCTAssertThrowsError(try CameraBrightnessReference.png(from: url, expectedSize: size, declared: .other)) {
+            XCTAssertEqual(CameraBrightnessReference.failure($0).message, "The camera preview’s colour space isn’t supported.")
+            XCTAssertTrue(CameraBrightnessReference.failure($0).forPhoto)
+        }
+    }
+
     func testReferenceDoesNotGenerateThumbnailWhenNoneIsEmbedded() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

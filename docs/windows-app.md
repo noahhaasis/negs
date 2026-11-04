@@ -254,9 +254,12 @@ a solve failure holds until the next edit.
 The reference (`brightness.rs`) is the RAW's embedded preview through rawler, oriented,
 letterbox bars trimmed when its shape differs, at most 512 px. For JPEG, PNG and TIFF it is
 the file itself through WIC with its profile; transparent and floating-point files are
-refused. ImageIO supplies the preview's colour space on the Mac. Here it comes from the EXIF
-ColorSpace, the Nikon, Canon or Pentax maker note, or an embedded JPEG's EXIF. Adobe RGB is
-converted to sRGB. Anything else reads "The camera preview has no color profile."
+refused. Its colour space comes from a DNG preview's PreviewColorSpace, the EXIF ColorSpace, the Nikon, Canon or Pentax maker note, or an
+embedded JPEG's EXIF. Adobe RGB is converted to sRGB. A preview that says nothing is read as
+sRGB on every platform (2026-11-04); one in another declared colour space (a DNG's ProPhoto or
+gray gamma 2.2) reads "The camera preview’s colour space isn’t supported." The Mac reads
+the same preview through ImageIO but asks the helper for this declaration
+(`preview_colour_space`), so the rule is the same everywhere.
 
 **Validation** (2026-11-03, this machine, helper from `6ec07ac`; the crates are unchanged on
 this branch): 130 Windows tests pass, 29 of them new. They cover the Mac's lifecycle and

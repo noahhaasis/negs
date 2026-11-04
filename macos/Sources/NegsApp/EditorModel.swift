@@ -1369,8 +1369,14 @@ import UniformTypeIdentifiers
                 }
             }
             do {
+                // What the RAW says its preview is in, read by the engine as
+                // on the web and Windows.
+                let declared = raw ? PreviewColourSpace(rawValue: try await engine.request([
+                    "command": .string("preview_colour_space"), "input": .string(source.path)
+                ]).1["colour_space"].string) : nil
+                try Task.checkCancellation()
                 let data = try await Task.detached(priority: .userInitiated) {
-                    raw ? try CameraBrightnessReference.png(from: source, expectedSize: size)
+                    raw ? try CameraBrightnessReference.png(from: source, expectedSize: size, declared: declared)
                         : try CameraBrightnessReference.filePNG(from: source, expectedSize: size)
                 }.value
                 try Task.checkCancellation()

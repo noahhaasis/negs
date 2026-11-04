@@ -105,7 +105,10 @@ The phone sheet's tabs are Stock · Prep · Camera · Film · Print · Scan · O
 
 **Match camera brightness.** `spektrafilm-io::brightness` is the shared reference (Windows
 uses it too): rawler's embedded preview, its declared colour space, Adobe RGB → sRGB,
-trimmed bars, ≤ 512 px. The placement's trials are async (`place_exposure_with`, a
+trimmed bars, ≤ 512 px. A DNG's preview declares its own (PreviewColorSpace, in the IFD rawler
+takes it from) ahead of the camera's EXIF or maker note: Lightroom DNGs often carry no other
+declaration, and refused to match until 2026-11-04. Since then an untagged preview is read as
+sRGB on every platform; before, the web and Windows refused it (the Mac's check never did). The placement's trials are async (`place_exposure_with`, a
 `Renderer`), so the browser renders them on WebGPU: the CPU solve took 4.4 s in wasm.
 
 | | Mac Chrome | iPhone |

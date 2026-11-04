@@ -78,6 +78,12 @@ enum Command {
         limit_preview: bool,
         preview_path: PathBuf,
     },
+    /// The colour space a RAW's camera preview says it's in, for the Mac's
+    /// Match camera brightness reference (`spektrafilm_io::brightness::
+    /// preview_colour_space`): "srgb", "adobe_rgb", "other" or null.
+    PreviewColourSpace {
+        input: PathBuf,
+    },
     /// Fit the graded exposure to an embedded camera-preview reference without
     /// replacing the current render or changing the decoded source.
     PlaceExposure {
@@ -571,6 +577,16 @@ impl Session {
                 self.thumbnail_pipelines = Vec::new();
                 self.thumbnail_wb_sources = Vec::new();
                 Ok(json!({}))
+            }
+            Command::PreviewColourSpace { input } => {
+                use spektrafilm_io::brightness::{Declared, preview_colour_space};
+                let file = std::fs::read(&input).with_context(|| format!("Couldn't read {}", input.display()))?;
+                let space = preview_colour_space(&file).map(|declared| match declared {
+                    Declared::Srgb => "srgb",
+                    Declared::AdobeRgb => "adobe_rgb",
+                    Declared::Other => "other",
+                });
+                Ok(json!({ "colour_space": space }))
             }
             Command::PlaceExposure { input, source_generation, film, paper, mut params, reference_path } => {
                 let started = Instant::now();

@@ -33,21 +33,19 @@ pub fn same_shape(aspect: f64, expected: f64) -> bool {
 
 /// A RAW's embedded preview in `file`, oriented, trimmed of letterbox bars
 /// and reduced to [`LONG_SIDE`], as the reference for a photograph of
-/// `expected` size (its decoded source). The camera must say it is sRGB or
-/// Adobe RGB: the preview is only a brightness reference, and its
-/// colorimetry has to be known.
+/// `expected` size (its decoded source). An Adobe RGB preview is converted;
+/// one that says nothing is read as sRGB, as on every platform (cameras and
+/// Lightroom make sRGB previews unless set otherwise); one in another declared
+/// colour space (a DNG's ProPhoto or gray gamma 2.2) is refused.
 pub fn camera_preview(file: &[u8], expected: (u32, u32)) -> Result<image::RgbImage> {
     let source = rawler::rawsource::RawSource::new_from_slice(file);
     let Ok(decoder) = rawler::get_decoder(&source) else {
         return unusable("This RAW has no camera preview to match.");
     };
     let params = rawler::decoders::RawDecodeParams::default();
-    let Some(image) = decoder
-        .preview_image(&source, &params)
-        .ok()
-        .flatten()
-        .or_else(|| decoder.thumbnail_image(&source, &params).ok().flatten())
-    else {
+    let preview = decoder.preview_image(&source, &params).ok().flatten();
+    let from_thumbnail = preview.is_none();
+    let Some(image) = preview.or_else(|| decoder.thumbnail_image(&source, &params).ok().flatten()) else {
         return unusable("This RAW has no camera preview to match.");
     };
     let metadata = decoder.raw_metadata(&source, &params).ok();
@@ -66,18 +64,13 @@ pub fn camera_preview(file: &[u8], expected: (u32, u32)) -> Result<image::RgbIma
     if width < 64 || height < 64 || expected.0 == 0 || expected.1 == 0 {
         return unusable("The camera preview is too small to match.");
     }
-    // The colorimetry has to be known: ImageIO reads it on the Mac; here the
-    // camera's own declaration does, and Adobe RGB is converted.
-    let declared = match metadata.as_ref().and_then(|m| m.exif.color_space) {
-        Some(1) => Some(Declared::Srgb),
-        _ => declared_colour_space(file),
-    };
+    let declared = declared_for(file, from_thumbnail, metadata.as_ref().and_then(|m| m.exif.color_space));
     let mut rgba = image.to_rgba8();
     drop(image);
     match declared {
-        Some(Declared::Srgb) => {}
+        Some(Declared::Srgb) | None => {}
         Some(Declared::AdobeRgb) => adobe_to_srgb(&mut rgba),
-        None => return unusable("The camera preview has no color profile."),
+        Some(Declared::Other) => return unusable("The camera preview’s colour space isn’t supported."),
     }
     let wanted = expected.0 as f64 / expected.1 as f64;
     if !same_shape(width as f64 / height as f64, wanted) {
@@ -109,11 +102,37 @@ pub fn linear(rgb: image::RgbImage) -> Result<ImageBuf> {
     Ok(image)
 }
 
+/// The colour space the preview [`camera_preview`] takes from `file` says
+/// it's in, for the Mac, whose ImageIO reads the same preview's pixels: the
+/// same rule on every platform. None when nothing says (read as sRGB) or
+/// when `file` has no camera preview.
+pub fn preview_colour_space(file: &[u8]) -> Option<Declared> {
+    let source = rawler::rawsource::RawSource::new_from_slice(file);
+    let decoder = rawler::get_decoder(&source).ok()?;
+    let params = rawler::decoders::RawDecodeParams::default();
+    let from_thumbnail = decoder.preview_image(&source, &params).ok().flatten().is_none();
+    let exif = decoder.raw_metadata(&source, &params).ok().and_then(|m| m.exif.color_space);
+    declared_for(file, from_thumbnail, exif)
+}
+
+/// The camera's own declaration for its preview, if any (`exif`: the
+/// decoder's EXIF ColorSpace). A DNG's preview says first: Lightroom and DNG
+/// Converter render it themselves, whatever the camera was set to.
+fn declared_for(file: &[u8], from_thumbnail: bool, exif: Option<u16>) -> Option<Declared> {
+    dng_preview_colour_space(file, from_thumbnail).or_else(|| match exif {
+        Some(1) => Some(Declared::Srgb),
+        _ => declared_colour_space(file),
+    })
+}
+
 /// The colour space a camera says its JPEGs and previews are in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Declared {
     Srgb,
     AdobeRgb,
+    /// Another colour space, such as a DNG preview's ProPhoto: not to be
+    /// read as sRGB.
+    Other,
 }
 
 /// The camera's declared colour space, from the RAW's EXIF (ColorSpace), the
@@ -150,6 +169,33 @@ pub fn declared_colour_space(file: &[u8]) -> Option<Declared> {
         at = start;
     }
     None
+}
+
+/// The colour space a DNG says its camera preview is in: PreviewColorSpace
+/// (0xC71A) in the preview's own IFD, as Lightroom and Adobe DNG Converter
+/// write it. The IFD is the one rawler's DNG decoder takes: the first SubIFD
+/// marked as a reduced-resolution image (`preview_image`), or else IFD0 when
+/// it is one (`thumbnail_image`, `from_thumbnail`). Gray gamma 2.2, ProPhoto
+/// and later values are [`Declared::Other`]; None for other files and for
+/// Unknown (0).
+pub fn dng_preview_colour_space(file: &[u8], from_thumbnail: bool) -> Option<Declared> {
+    let tiff = Tiff::new(file, 0)?;
+    let ifd0 = tiff.first()?;
+    tiff.entry(ifd0, 0xC612)?; // DNGVersion: rawler's DNG decoder read it
+    let reduced = |ifd: usize| tiff.entry(ifd, 0x00FE).and_then(|e| tiff.number(e)) == Some(1);
+    let ifd = if from_thumbnail {
+        Some(ifd0).filter(|&ifd| reduced(ifd))
+    } else {
+        let (offset, length) = tiff.value_offset(tiff.entry(ifd0, 0x014A)?)?;
+        let at = offset - tiff.base;
+        (0..length / 4).filter_map(|i| tiff.u32(at + 4 * i)).map(|o| o as usize).find(|&ifd| reduced(ifd))
+    }?;
+    match tiff.entry(ifd, 0xC71A).and_then(|e| tiff.number(e))? {
+        0 => None,
+        2 => Some(Declared::Srgb),
+        3 => Some(Declared::AdobeRgb),
+        _ => Some(Declared::Other),
+    }
 }
 
 fn maker_note(tiff: &Tiff, ifd0: usize, note: usize) -> Option<Declared> {
@@ -231,6 +277,10 @@ impl<'a> Tiff<'a> {
             4 | 13 => self.u32(entry + 8),
             _ => None,
         }
+    }
+    /// A short or long entry's value, as the TIFF spec lets either hold it.
+    fn number(&self, entry: usize) -> Option<u32> {
+        self.long(entry).or_else(|| self.short(entry).map(u32::from))
     }
     /// An entry's bytes: their absolute offset in `data` and their length.
     fn value_offset(&self, entry: usize) -> Option<(usize, usize)> {
@@ -443,6 +493,77 @@ mod tests {
         assert_eq!(declared_colour_space(b"not a tiff at all"), None);
     }
 
+    /// A little-endian DNG (or, without `dng_version`, a plain TIFF): IFD0
+    /// with NewSubFileType `main`, PreviewColorSpace `main_space` and SubIFDs,
+    /// each a NewSubFileType and an optional PreviewColorSpace (type, value).
+    fn dng(dng_version: bool, main: u32, main_space: Option<u32>, subs: &[(u32, Option<(u16, u32)>)]) -> Vec<u8> {
+        let entry = |d: &mut Vec<u8>, tag: u16, typ: u16, count: u32, value: u32| {
+            d.extend(tag.to_le_bytes());
+            d.extend(typ.to_le_bytes());
+            d.extend(count.to_le_bytes());
+            d.extend(value.to_le_bytes());
+        };
+        let (list_at, sub_at) = (100u32, |i: usize| 200 + 40 * i as u32);
+        let mut d = b"II*\0\x08\0\0\0".to_vec();
+        let count = 2 + dng_version as u16 + main_space.is_some() as u16;
+        d.extend(count.to_le_bytes());
+        entry(&mut d, 0x00FE, 4, 1, main);
+        let subs_value = if subs.len() == 1 { sub_at(0) } else { list_at };
+        entry(&mut d, 0x014A, 4, subs.len() as u32, subs_value);
+        if dng_version {
+            entry(&mut d, 0xC612, 1, 4, u32::from_le_bytes([1, 4, 0, 0]));
+        }
+        if let Some(space) = main_space {
+            entry(&mut d, 0xC71A, 4, 1, space);
+        }
+        d.extend(0u32.to_le_bytes());
+        d.resize(list_at as usize, 0);
+        for i in 0..subs.len() {
+            d.extend(sub_at(i).to_le_bytes());
+        }
+        for (i, &(kind, space)) in subs.iter().enumerate() {
+            d.resize(sub_at(i) as usize, 0);
+            d.extend((1 + space.is_some() as u16).to_le_bytes());
+            entry(&mut d, 0x00FE, 4, 1, kind);
+            if let Some((typ, value)) = space {
+                entry(&mut d, 0xC71A, typ, 1, value);
+            }
+            d.extend(0u32.to_le_bytes());
+        }
+        d
+    }
+
+    /// A DNG's PreviewColorSpace, from the IFD rawler takes the preview from.
+    #[test]
+    fn dng_preview_colour_spaces_are_found() {
+        // Lightroom: IFD0 a thumbnail, SubIFD 1 the raw, SubIFD 2 the preview.
+        let lightroom = dng(true, 1, Some(2), &[(0, None), (1, Some((4, 2))), (1, Some((4, 2)))]);
+        assert_eq!(dng_preview_colour_space(&lightroom, false), Some(Declared::Srgb));
+        assert_eq!(dng_preview_colour_space(&lightroom, true), Some(Declared::Srgb));
+        // Each image says for itself.
+        let mixed = dng(true, 1, Some(2), &[(0, None), (1, Some((4, 3)))]);
+        assert_eq!(dng_preview_colour_space(&mixed, false), Some(Declared::AdobeRgb));
+        assert_eq!(dng_preview_colour_space(&mixed, true), Some(Declared::Srgb));
+        assert_eq!(dng_preview_colour_space(&dng(true, 1, None, &[(1, Some((3, 3)))]), false), Some(Declared::AdobeRgb), "a short, one SubIFD");
+        // Only the first reduced SubIFD counts, as rawler's preview_image.
+        assert_eq!(dng_preview_colour_space(&dng(true, 0, None, &[(0, None), (1, None), (1, Some((4, 2)))]), false), None);
+        // An IFD0 that is the raw is no thumbnail.
+        assert_eq!(dng_preview_colour_space(&dng(true, 0, Some(2), &[(1, Some((4, 2)))]), true), None);
+        // Gray gamma 2.2, ProPhoto and later values are another colour space;
+        // Unknown says nothing, nor does a TIFF that isn't a DNG.
+        for value in [1, 4, 5] {
+            assert_eq!(dng_preview_colour_space(&dng(true, 1, Some(value), &[(1, Some((4, value)))]), false), Some(Declared::Other), "{value}");
+        }
+        assert_eq!(dng_preview_colour_space(&dng(true, 1, Some(0), &[(1, Some((4, 0)))]), false), None);
+        assert_eq!(dng_preview_colour_space(&dng(false, 1, Some(2), &[(1, Some((4, 2)))]), false), None);
+        // Truncated or foreign data never panics.
+        for n in 0..lightroom.len() {
+            let _ = dng_preview_colour_space(&lightroom[..n], false);
+            let _ = dng_preview_colour_space(&lightroom[..n], true);
+        }
+        assert_eq!(dng_preview_colour_space(b"not a tiff at all", false), None);
+    }
+
     /// Adobe RGB greys stay grey; its saturated green clips to sRGB's.
     #[test]
     fn adobe_rgb_previews_become_srgb() {
@@ -459,6 +580,7 @@ mod tests {
     fn non_raw_bytes_have_no_camera_preview() {
         let error = camera_preview(b"not a raw at all", (900, 600)).unwrap_err();
         assert_eq!(failure(&error), ("This RAW has no camera preview to match.".into(), true));
+        assert_eq!(preview_colour_space(b"not a raw at all"), None);
     }
 
     /// The reference PNG's pixels, as the helper reads them: linear sRGB.
@@ -472,13 +594,18 @@ mod tests {
         assert!((v(2) - 1.0).abs() < 1e-6 && v(0) == 0.0);
     }
 
-    /// Optional: a real 3:2 RAW (`NEGS_TEST_RAW`) gives an sRGB preview of its shape.
+    /// Optional: a real RAW (`NEGS_TEST_RAW`) gives an sRGB preview of its
+    /// shape, 3:2 unless `NEGS_TEST_RAW_SHAPE` says otherwise (\"2x3\").
     #[test]
     fn a_real_raw_gives_its_camera_preview() {
         let Some(path) = std::env::var_os("NEGS_TEST_RAW") else { return };
         let file = std::fs::read(path).unwrap();
-        eprintln!("declared {:?}", declared_colour_space(&file));
-        let preview = camera_preview(&file, (3, 2)).unwrap();
+        eprintln!("declared {:?}, DNG preview {:?}, preview {:?}", declared_colour_space(&file), dng_preview_colour_space(&file, false), preview_colour_space(&file));
+        let shape = std::env::var("NEGS_TEST_RAW_SHAPE").ok().and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some((w.parse().ok()?, h.parse().ok()?))
+        });
+        let preview = camera_preview(&file, shape.unwrap_or((3, 2))).unwrap();
         eprintln!("preview {}x{}", preview.width(), preview.height());
         assert_eq!(preview.width().max(preview.height()), LONG_SIDE);
     }
