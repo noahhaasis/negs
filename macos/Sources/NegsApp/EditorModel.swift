@@ -554,7 +554,8 @@ import UniformTypeIdentifiers
             apply(next, action: "Change Image Size")
         case .longestSide:
             guard imageSizeMode != .longestSide else { return }
-            _ = setLongestSide(ImageSize.remembered ?? nativeLongestSide)
+            // Look at the resized result at one image pixel per screen pixel.
+            if setLongestSide(ImageSize.remembered ?? nativeLongestSide) == nil { zoom(fit: false) }
         }
     }
 
