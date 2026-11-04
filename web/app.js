@@ -829,7 +829,10 @@ async function pump() {
 // pixels the view covers, so all of them from 100% on, within what the GPU
 // takes and the device's cap (MAX_PIXELS). The CPU engine renders the
 // fitted size and more only up to a few megapixels, as each takes seconds.
-const MAX_PIXELS = matchMedia("(pointer: coarse)").matches ? 12e6 : 40e6;
+// Touch screens stop at 4.4 MP (2560×1707): on the iPhone 13 Pro, 3072 px
+// frames and a 12 MP export after edits got the tab killed from 1.4 GB
+// (docs/web-prep-port-plan.md).
+const MAX_PIXELS = matchMedia("(pointer: coarse)").matches ? 4.4e6 : 40e6;
 const CPU_PIXELS = 4e6;
 let limits = null;       // the WebGPU engine's: { side, pixels }
 
