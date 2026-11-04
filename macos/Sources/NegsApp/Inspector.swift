@@ -24,9 +24,31 @@ enum InspectorSection: String, CaseIterable {
     case camera = "Camera", film = "Film", print = "Print", scan = "Scan & Color"
 }
 
-/// The inspector's two tabs: developing the film, then finishing the scan.
-enum InspectorTab: String, CaseIterable {
-    case lab = "Lab", post = "Post"
+/// The inspector's workflow steps, in the order the light takes them: how the
+/// camera saw the photograph, the film and print that carry it, the scanner
+/// that reads it, the finishing edits, and the export.
+enum InspectorTab: String, CaseIterable, Identifiable {
+    case camera, film, print, scan, finish, export
+
+    var id: String { rawValue }
+
+    var title: String { rawValue.capitalized }
+
+    /// A symbol for the tab bar, one that reads at 15 points.
+    var symbol: String {
+        switch self {
+        case .camera: "camera"
+        case .film: "film"
+        case .print: "photo"
+        case .scan: "scanner"
+        case .finish: "slider.horizontal.3"
+        case .export: "square.and.arrow.up"
+        }
+    }
+
+    /// Printing is skipped while the film is scanned directly, since there is
+    /// no print to make. Such a tab stays visible, dimmed and struck through.
+    func isSkipped(scanning: Bool) -> Bool { self == .print && scanning }
 }
 
 struct AdjustmentGroup: Identifiable {
@@ -400,9 +422,9 @@ final class FocusingTextField: NSTextField {
     }
 }
 
-/// Image Size, in the Lab between the film and the camera: the photograph's
-/// resolution before the film develops it. Reads only its own parameters,
-/// the crop and the source's size, so other edits don't redraw it.
+/// Image Size, at the top of Camera: the photograph's resolution before the
+/// film develops it. Reads only its own parameters, the crop and the source's
+/// size, so other edits don't redraw it.
 struct ImageSizeSection: View {
     let model: EditorModel
     @State private var fieldError: String?
@@ -448,8 +470,8 @@ struct ImageSizeSection: View {
                 Text("The preview shows \(EditorModel.percent(model.previewScale)) of these pixels. Exports develop all of them; inspect grain in an exported file.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-        } header: { Text("Image Size") } footer: {
-            Text("Resizes before film simulation, including halation and grain.")
+        } header: { Text("Input") } footer: {
+            Text("Resized first, before film simulation, halation and grain.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -516,118 +538,293 @@ private extension View {
     }
 }
 
+/// Six equal workflow tabs, a symbol over a short label, as a segmented
+/// control. Print dims and strikes through while the film is scanned directly.
+struct InspectorTabBar: View {
+    let model: EditorModel
+
+    var body: some View {
+        let scanning = model.value("io.scan_film").bool
+        HStack(spacing: 2) {
+            ForEach(InspectorTab.allCases) { tab in
+                let selected = model.inspectorTab == tab
+                let skipped = tab.isSkipped(scanning: scanning)
+                let tint = selected ? Color.primary : Color.secondary
+                Button {
+                    model.inspectorTab = tab
+                } label: {
+                    VStack(spacing: 3) {
+                        // A fixed icon box keeps every label on one baseline,
+                        // whatever the symbol's own height.
+                        Image(systemName: tab.symbol)
+                            .font(.system(size: 15))
+                            .frame(width: 22, height: 18)
+                            .foregroundStyle(tint)
+                        Text(tab.title)
+                            .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                            .foregroundStyle(tint)
+                            .strikethrough(skipped)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // Equal shares of the bar, so the columns and their bold
+                // selected labels never shift.
+                .frame(maxWidth: .infinity)
+                .background {
+                    if selected { RoundedRectangle(cornerRadius: 6).fill(.quaternary) }
+                }
+                .opacity(skipped ? 0.45 : 1)
+                .help(skipped ? "Print is skipped while Scan film directly is on." : tab.title)
+                .accessibilityLabel(tab.title)
+                .accessibilityValue(skipped ? "Skipped" : selected ? "Selected" : "")
+            }
+        }
+        .padding(3)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
+    }
+}
+
 struct AdjustmentInspector: View {
     let model: EditorModel
     @AppStorage("expandedAdjustments") private var expanded = "Enlarger"
-    @AppStorage("inspectorTab") private var tab = InspectorTab.lab
+
+    /// The selected tab lives on the model, so changing photos or switching
+    /// to Presets keeps it for this session without carrying it into the next.
+    private var tab: InspectorTab { model.inspectorTab }
 
     var body: some View {
-        // The histogram and tab switch stay put above the tab's scrolling sections.
+        // The histogram and workflow tabs stay put above the tab's scrolling sections.
         VStack(spacing: 0) {
             VStack(spacing: 10) {
                 HistogramView(histogram: model.histogram).frame(height: 88)
-                Picker("Tab", selection: $tab) {
-                    ForEach(InspectorTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden()
-                .frame(maxWidth: .infinity)
+                InspectorTabBar(model: model)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
             Divider()
             Form {
                 switch tab {
-                case .lab: lab
-                case .post: post
+                case .camera: cameraTab
+                case .film: filmTab
+                case .print: printTab
+                case .scan: scanTab
+                case .finish: finishTab
+                case .export: exportTab
                 }
             }
             .formStyle(.grouped)
-            // Pinned below the sections, like the Reset Adjustments button in Photos.
-            Button(action: model.reset) {
-                Text("Reset Adjustments").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.extraLarge)
-            .help("Restore defaults on both tabs while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.")
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            // A fresh Form per tab starts at the top rather than inheriting
+            // the last tab's scroll offset.
+            .id(tab)
+            footer
         }
         .disabled(!model.hasCatalog)
     }
 
-    @ViewBuilder private var lab: some View {
-        let scanning = model.value("io.scan_film").bool
-        Section("Film & Paper") {
-            // Preview grids, or the plain menus when Settings turns them off.
-            if model.previews.enabled {
-                StockFoldout(model: model, paper: false)
-            } else {
-                Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
-                    ForEach(model.filmGroups) { group in
-                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
-                    }
-                }
-            }
-            developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
-            Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
-                .help("Skip printing and scan the developed film, as for slides.")
-            if !scanning {
-                if model.previews.enabled {
-                    StockFoldout(model: model, paper: true)
-                } else {
-                    Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
-                        ForEach(model.paperGroups) { group in
-                            Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
-                        }
-                    }
-                }
-                developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")
-            }
+    /// Pinned below the sections, like the Reset Adjustments button in Photos.
+    private var footer: some View {
+        Button(action: model.reset) {
+            Text("Reset Adjustments").frame(maxWidth: .infinity)
         }
+        .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.extraLarge)
+        .help("Restore defaults on every tab while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.")
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: Camera
+
+    @ViewBuilder private var cameraTab: some View {
         ImageSizeSection(model: model)
-        Section("Camera") {
+        if model.isRaw {
+            Section("White Balance") {
+                control(.choice("RAW white balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
+                if model.value("io.raw_white_balance.mode").string == "custom" {
+                    control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
+                    control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
+                }
+            }
+        } else {
+            Section { inputColour }
+        }
+        Section("Exposure") {
             Toggle("Auto exposure", isOn: model.toggle("camera.auto_exposure"))
             if model.value("camera.auto_exposure").bool {
                 control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
             }
             control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
+        }
+        Section("Lens") {
             control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))
             control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1))
-            if !model.isRaw { inputColour }
-            if model.isRaw {
-                disclosure("RAW White Balance", symbol: "thermometer.sun") {
-                    control(.choice("White balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
-                    if model.value("io.raw_white_balance.mode").string == "custom" {
-                        control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
-                        control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
-                    }
-                }
-                if model.lensCorrectionSupported {
-                    control(.toggle("Lens corrections", EditorModel.lensCorrectionPath))
-                        .help("Corrects distortion and vignetting with the data the camera recorded for its lens.")
+            if model.isRaw, model.lensCorrectionSupported {
+                control(.toggle("Lens corrections", EditorModel.lensCorrectionPath))
+                    .help("Corrects distortion and vignetting with the data the camera recorded for its lens.")
+            }
+            group("Lens Diffusion")
+        }
+    }
+
+    // MARK: Film
+
+    @ViewBuilder private var filmTab: some View {
+        Section("Film Stock") {
+            filmPicker
+            developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
+            Toggle(isOn: model.toggle("io.scan_film")) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Scan film directly")
+                    Text("Skips the Print step").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            groups(.camera)
+            .help("The developed negative goes straight to the scanner, as for slides.")
         }
-        Section("Film") { groups(.film) }
+        // In the order the light meets them.
+        Section("Emulsion") {
+            group("Halation")
+            group("Film Curves")
+            group("DIR Couplers")
+            group("Grain")
+            group("Film Base")
+        }
+    }
+
+    @ViewBuilder private var filmPicker: some View {
+        // Preview grids, or the plain menus when Settings turns them off.
+        if model.previews.enabled {
+            StockFoldout(model: model, paper: false)
+        } else {
+            Picker("Film", selection: Binding(get: { model.film }, set: model.chooseFilm)) {
+                ForEach(model.filmGroups) { group in
+                    Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                }
+            }
+        }
+    }
+
+    // MARK: Print
+
+    @ViewBuilder private var printTab: some View {
+        let scanning = model.value("io.scan_film").bool
+        if scanning {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Print step is skipped", systemImage: "info.circle").font(.headline)
+                    Text("“Scan film directly” is on in Film, so the negative goes straight to the scanner.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Use print instead") { model.set("io.scan_film", .bool(false)) }
+                        .buttonStyle(.bordered)
+                        .help("Turns off Scan film directly in Film.")
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        Group {
+            Section("Paper") {
+                paperPicker
+                developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development")
+            }
+            Section("Enlarger") {
+                let enlarger = adjustmentGroups.first { $0.title == "Enlarger" }
+                ForEach(enlarger?.controls ?? []) { control($0) }
+                // Print Diffusion is an enlarger filter, so it stays with it.
+                group("Print Diffusion")
+            }
+            Section("Darkroom") {
+                group("Print Curves")
+                group("Print Base")
+                group("Glare")
+            }
+        }
+        .opacity(scanning ? 0.45 : 1)
+        .disabled(scanning)
+    }
+
+    @ViewBuilder private var paperPicker: some View {
+        if model.previews.enabled {
+            StockFoldout(model: model, paper: true)
+        } else {
+            Picker("Paper", selection: Binding(get: { model.paper }, set: model.choosePaper)) {
+                ForEach(model.paperGroups) { group in
+                    Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                }
+            }
+        }
+    }
+
+    // MARK: Scan
+
+    @ViewBuilder private var scanTab: some View {
+        Section("Scanner") {
+            let scanner = adjustmentGroups.first { $0.title == "Scanner" }
+            ForEach(scanner?.controls ?? []) { control($0) }
+        }
+        Section("Color") { group("Color Management") }
+    }
+
+    // MARK: Finish
+
+    /// Finishing edits on the scan, after the film. They shape the tones the
+    /// film produced; detail the paper clipped comes back only in Camera.
+    @ViewBuilder private var finishTab: some View {
         Section {
-            groups(.print).disabled(scanning)
-        } header: { Text("Print") } footer: {
-            if scanning { Text("Printing is skipped while scanning film directly.").font(.caption).foregroundStyle(.secondary) }
+            control(.slider("Brightness", "post.brightness", -100...100, 1))
+            control(.slider("Contrast", "post.contrast", -100...100, 1))
+            control(.slider("Whites", "post.whites", -100...100, 1))
+            control(.slider("Blacks", "post.blacks", -100...100, 1))
+            control(.slider("Saturation", "post.saturation", -100...100, 1))
+        } header: { Text("Tone") } footer: {
+            Text("Adjusts the finished scan. To recover a clipped highlight, use Exposure in Camera.")
+                .font(.caption).foregroundStyle(.secondary)
         }
-        Section("Scan & Color") {
-            groups(.scan)
-            disclosure("Output", symbol: "square.and.arrow.down.on.square") {
-                Toggle("Limit preview to 12 MP", isOn: Binding(get: { model.limitsPreview }, set: model.limitPreview))
-                    .help("Develops the preview faster on large photographs. Export keeps the full Image Size.")
-                Picker("Colour space", selection: Binding(get: { model.previewSpace }, set: model.choosePreviewSpace)) {
-                    ForEach(SaveSettings.colorSpaces, id: \.self) { Text($0).tag($0) }
+        Section("Border") {
+            Toggle("Add border", isOn: model.border(\.enabled))
+            Group {
+                let photo = model.photoSize == .zero ? nil : model.photoSize
+                BorderStylePicker(selection: model.border(\.style), photo: photo, colors: (model.border.color, model.border.lineColor))
+                if let photo, !BorderStyle.film35.fits(photo) {
+                    Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)); crop it to 3:2 or 4:3 to use it.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                .help("The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.")
-                Toggle("Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"))
-                    .help("Off writes linear values, for further processing.")
-                Toggle("Use less memory for export", isOn: model.toggle("settings.serial_grain"))
-                    .help("Processes grain channels one at a time. Same result, less memory, longer export.")
+                borderControls
+                Toggle("Extend to 3:4 for Instagram", isOn: model.border(\.instagram))
+                    .help("Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post.")
             }
+            .disabled(!model.border.enabled)
+        }
+    }
+
+    // MARK: Export
+
+    @ViewBuilder private var exportTab: some View {
+        Section("Output") {
+            Picker("Colour space", selection: Binding(get: { model.previewSpace }, set: model.choosePreviewSpace)) {
+                ForEach(SaveSettings.colorSpaces, id: \.self) { Text($0).tag($0) }
+            }
+            .help("The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.")
+            Toggle("Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"))
+                .help("Off writes linear values, for further processing.")
+            Toggle("Include border", isOn: model.border(\.export))
+                .help("Adds the border to exported photographs and saved previews.")
+                .disabled(!model.border.enabled)
+        }
+        Section("Performance") {
+            Toggle("Limit preview to 12 MP", isOn: Binding(get: { model.limitsPreview }, set: model.limitPreview))
+                .help("Develops the preview faster on large photographs. Export keeps the full Image Size.")
+            Toggle("Use less memory for export", isOn: model.toggle("settings.serial_grain"))
+                .help("Processes grain channels one at a time. Same result, less memory, longer export.")
+        }
+        Section {
+            Button { model.savePanel(export: true) } label: {
+                Text("Export Image…").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(model.source == nil || !model.ready || model.exporting || model.saving)
+            .help("Export the photograph (⇧⌘E).")
         }
     }
 
@@ -661,40 +858,6 @@ struct AdjustmentInspector: View {
                 }
                 .font(.caption).foregroundStyle(.secondary)
             }
-        }
-    }
-
-    /// Finishing edits on the scan, after the film. They shape the tones the
-    /// film produced; detail the paper clipped comes back only in the Lab.
-    @ViewBuilder private var post: some View {
-        Section {
-            control(.slider("Brightness", "post.brightness", -100...100, 1))
-            control(.slider("Contrast", "post.contrast", -100...100, 1))
-            control(.slider("Whites", "post.whites", -100...100, 1))
-            control(.slider("Blacks", "post.blacks", -100...100, 1))
-        } header: { Text("Tone") } footer: {
-            Text("Adjusts the finished scan/print. To recover a clipped highlight, use exposure in the Lab.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        Section("Color") {
-            control(.slider("Saturation", "post.saturation", -100...100, 1))
-        }
-        Section("Border") {
-            Toggle("Add border", isOn: model.border(\.enabled))
-            Group {
-                let photo = model.photoSize == .zero ? nil : model.photoSize
-                BorderStylePicker(selection: model.border(\.style), photo: photo, colors: (model.border.color, model.border.lineColor))
-                if let photo, !BorderStyle.film35.fits(photo) {
-                    Text("35mm needs a 3:2 or 3:4 photograph. This one is \(Self.ratio(photo)); crop it to 3:2 or 4:3 to use it.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                borderControls
-                Toggle("Extend to 3:4 for Instagram", isOn: model.border(\.instagram))
-                    .help("Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post.")
-                Toggle("Include in export", isOn: model.border(\.export))
-                    .help("Adds the border to exported photographs and saved previews.")
-            }
-            .disabled(!model.border.enabled)
         }
     }
 
@@ -734,8 +897,9 @@ struct AdjustmentInspector: View {
         return String(format: "%.2f:1", Double(ratio))
     }
 
-    @ViewBuilder private func groups(_ section: InspectorSection) -> some View {
-        ForEach(adjustmentGroups.filter { $0.section == section }) { group in
+    /// One effect group's disclosure, by title, so each tab can order them.
+    @ViewBuilder private func group(_ title: String) -> some View {
+        if let group = adjustmentGroups.first(where: { $0.title == title }) {
             disclosure(group.title, symbol: group.symbol, enable: group.enable) {
                 ForEach(group.controls) { control($0) }
                     .disabled(group.enable.map { !model.value($0).bool } ?? false)
@@ -761,6 +925,7 @@ struct AdjustmentInspector: View {
                     Toggle(title, isOn: model.toggle(enable)).labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             // As in Photos, clicking the title toggles the group, not only the chevron.
             .contentShape(Rectangle())
             .onTapGesture { withAnimation { isExpanded.wrappedValue.toggle() } }

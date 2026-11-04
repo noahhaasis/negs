@@ -78,6 +78,9 @@ import UniformTypeIdentifiers
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
     }
     var inspectorVisible = true
+    /// The inspector tab chosen in this session. Like the pane, it survives
+    /// changing photos; unlike it, it isn't carried into the next launch.
+    var inspectorTab = InspectorTab.camera
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
         didSet { UserDefaults.standard.set(inspectorPane.rawValue, forKey: "inspectorPane") }

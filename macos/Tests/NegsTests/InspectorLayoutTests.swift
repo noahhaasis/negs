@@ -22,9 +22,8 @@ import XCTest
                                 data: root.appendingPathComponent("data"))
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build the release helper first") }
         let defaults = UserDefaults.standard
-        let saved = ["expandedAdjustments", "inspectorTab", "imageSizeLongestSide"].map { ($0, defaults.object(forKey: $0)) }
+        let saved = ["expandedAdjustments", "imageSizeLongestSide"].map { ($0, defaults.object(forKey: $0)) }
         defaults.set("Enlarger", forKey: "expandedAdjustments")
-        defaults.set("Lab", forKey: "inspectorTab")
         defer { for (key, value) in saved { defaults.set(value, forKey: key) } }
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("negs-layout-\(UUID().uuidString)")
@@ -34,6 +33,8 @@ import XCTest
         defer { model.shutdown() }
         await model.start(paths: paths)
         XCTAssertTrue(model.ready, model.error ?? "No engine")
+        // The Enlarger controls live on Print now; keep them on screen.
+        model.inspectorTab = .print
         model.set("film_render.grain.active", .bool(false))
         model.set("film_render.halation.active", .bool(false))
         model.limitPreview(limited)
