@@ -341,7 +341,7 @@ impl Inspector {
         let reset = self.px(32.0);
         let mut y = self.px(8.0);
         unsafe {
-            let _ = MoveWindow(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0), true);
+            place_combo(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0));
             let _ = MoveWindow(self.scope_label, w - pad - self.px(40.0), y + self.px(4.0), self.px(40.0), self.px(16.0), true);
             y += mode + self.px(8.0);
             let _ = MoveWindow(self.scope, pad, y, inner, scope, true);
@@ -1291,7 +1291,9 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                     None => reveal.push(hwnd),
                 }
             }
-            if let Some(d) = defer {
+            if let Some(d) = defer
+                && !combo_in_place(hwnd, x, at, w.max(0))
+            {
                 defer = DeferWindowPos(d, hwnd, None, x, at, w.max(0), h.max(0), SWP_NOZORDER | SWP_NOACTIVATE).ok();
             }
             if interrupted.contains(&hwnd) {
@@ -1330,7 +1332,9 @@ fn place(positions: &[(HWND, i32, i32, i32, i32)], scroll: i32) {
     unsafe {
         let mut defer = BeginDeferWindowPos(positions.len() as i32).ok();
         for &(hwnd, x, y, w, h) in positions {
-            if let Some(d) = defer {
+            if let Some(d) = defer
+                && !combo_in_place(hwnd, x, y - scroll, w.max(0))
+            {
                 defer = DeferWindowPos(d, hwnd, None, x, y - scroll, w.max(0), h.max(0), SWP_NOZORDER | SWP_NOACTIVATE).ok();
             }
         }
@@ -2328,7 +2332,45 @@ extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             RESET_TRACKBAR.set(0);
             return LRESULT(0);
         }
-        DefSubclassProc(hwnd, msg, wparam, lparam)
+        // The control repaints only its own narrow thumb when it moves,
+        // leaving pieces of the round thumb and the accent fill behind:
+        // the whole slider repaints when its position, press or focus changes.
+        if !matches!(msg, WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_CAPTURECHANGED | WM_KEYDOWN | WM_TIMER | WM_MOUSEWHEEL | WM_SETFOCUS | WM_KILLFOCUS | TBM_SETPOS) {
+            return DefSubclassProc(hwnd, msg, wparam, lparam);
+        }
+        let state = || (DefSubclassProc(hwnd, TBM_GETPOS, WPARAM(0), LPARAM(0)).0, GetCapture() == hwnd);
+        let before = state();
+        let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+        if matches!(msg, WM_SETFOCUS | WM_KILLFOCUS) || state() != before {
+            let _ = InvalidateRect(hwnd, None, false);
+        }
+        result
+    }
+}
+
+/// Moves a drop-down list unless it is already there. A move asks for the
+/// list's height; the box sizes itself back to its field at once, and what
+/// it covered meanwhile is erased and repainted, a flash of the controls
+/// below it on every layout.
+fn place_combo(combo: HWND, x: i32, y: i32, width: i32, list: i32) {
+    if !combo_in_place(combo, x, y, width) {
+        unsafe {
+            let _ = MoveWindow(combo, x, y, width, list, true);
+        }
+    }
+}
+
+/// Whether `hwnd` is a drop-down list already at this place and width.
+fn combo_in_place(hwnd: HWND, x: i32, y: i32, width: i32) -> bool {
+    if draw::class_of(hwnd) != "ComboBox" {
+        return false;
+    }
+    unsafe {
+        let mut r = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut r);
+        let mut points = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
+        MapWindowPoints(None, GetParent(hwnd).unwrap_or_default(), &mut points);
+        (points[0].x, points[0].y, points[1].x - points[0].x) == (x, y, width)
     }
 }
 

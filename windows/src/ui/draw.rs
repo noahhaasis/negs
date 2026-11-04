@@ -431,7 +431,7 @@ pub fn font_of(hwnd: HWND) -> HFONT {
     unsafe { HFONT(SendMessageW(hwnd, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _) }
 }
 
-fn class_of(hwnd: HWND) -> String {
+pub fn class_of(hwnd: HWND) -> String {
     let mut name = [0u16; 64];
     let n = unsafe { GetClassNameW(hwnd, &mut name) } as usize;
     String::from_utf16_lossy(&name[..n])
