@@ -1,12 +1,12 @@
 /* A lesson inside the inspector, never a coachmark over the photograph. */
 .tutorial-invitation h1 { font-size: 22px; line-height: 1.2; }
 .tutorial-invitation .btn, #confirm-tutorial { min-height: 44px; }
-#tutorial { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 44px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
-#tutorial::before { content: ""; position: absolute; inset: 0 -10px; }
-#tutorial svg { display: block; width: 18px; height: 18px; }
+.help-button { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 44px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.help-button::before { content: ""; position: absolute; inset: 0 -10px; }
+.help-button svg { display: block; width: 18px; height: 18px; }
 .top #open { margin-left: auto; }
-#tutorial:hover { color: var(--fg); background: var(--field); }
-#tutorial:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.help-button:hover { color: var(--fg); background: var(--field); }
+.help-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .side.cropping .top { flex-wrap: wrap; }
 .tour-guide { padding: 14px; }
 .app.tutorial-mode { height: var(--tutorial-height, 100dvh); }
@@ -52,7 +52,7 @@
 .tutorial-mode .scroll { scroll-behavior: auto; }
 @media (min-width: 1000px) { .app.tutorial-mode { grid-template-columns: minmax(0, 1fr) 360px; } }
 @media (pointer: coarse) {
-  #tutorial { min-height: 44px; }
+  .help-button { min-height: 44px; }
   .tour-heading { font-size: 13px; }
   .tour-guide p { font-size: 15px; }
   .tour-guide .hint { font-size: 13px; }

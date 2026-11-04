@@ -248,6 +248,10 @@
   .dialog .preset-name { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
   .dialog .problem { color: var(--danger); }
   .dialog [hidden] { display: none; }
+  .dialog.settings form { gap: 14px; }
+  .setting { display: grid; gap: 4px; }
+  .setting .row { gap: 12px; color: var(--fg); font-size: 13px; }
+  .setting select { width: auto; }
 
   /* Fingers: bigger thumbs, switches and targets, and no hover-only cues.
      Fields stay at 16px, below which iOS zooms the page on focus. */
@@ -309,6 +313,8 @@
     .wordmark { left: auto; right: calc(10px + env(safe-area-inset-right)); transform: none; }
     .app { transition: grid-template-rows .2s ease; }
     .app.dragging-sheet { transition: none; }
+    .dialog.settings { width: 100%; max-width: none; margin: auto 0 0; border-radius: 12px 12px 0 0; border-width: 1px 0 0;
+      padding-bottom: env(safe-area-inset-bottom); }
   }
 </style>
 </head>
@@ -362,6 +368,9 @@
       <button type="button" class="help-button" id="tutorial" aria-label="Start tutorial" title="Start tutorial">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .25c0 1.75-2.5 2-2.5 3.75"/><path d="M12 16.5h.01"/></svg>
       </button>
+      <button type="button" class="help-button" id="settings" aria-label="Settings" aria-haspopup="dialog" title="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
       <button class="btn" id="open">Open…</button>
       <button class="btn" id="export" disabled>Export</button>
       <div class="menu-anchor" id="preset-menu-anchor">
@@ -370,7 +379,6 @@
           <button type="button" role="menuitem" id="import-preset" tabindex="-1">Import preset…</button>
           <button type="button" role="menuitem" id="export-preset" tabindex="-1">Export preset…</button>
           <button type="button" role="menuitem" id="export-lut" tabindex="-1" title="A 33 × 33 × 33 CUBE file, sRGB in and out, with the current film and paper color settings. Excludes auto exposure, print filter shifts, preflash, grain, halation, glare, diffusion, blur, sharpening, RAW development and Post edits.">Export LUT…</button>
-          <button type="button" role="menuitemcheckbox" id="previews" tabindex="-1" aria-checked="true" title="Show each film and paper on your photograph. Turn off to use simple menus on slower devices.">Film and paper previews</button>
         </div>
       </div>
       <button class="btn" id="crop-cancel" hidden>Cancel</button>
@@ -423,8 +431,7 @@
     </nav>
     <div class="tour-status" id="tour-status" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="bottom" id="bottom" data-tab="stock">
-      <div class="row"><label>Engine <select id="engine"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></label>
-        <a class="hint" href="credits.html" target="_blank" rel="noopener">Credits &amp; source</a></div>
+      <div class="row"><a class="hint" href="credits.html" target="_blank" rel="noopener">Credits &amp; source</a></div>
       <div id="engine-info" hidden>Starting…</div>
       <div class="hint" id="update" role="status" hidden><span id="update-text">A new version of Negs is ready.</span>
         <button class="link" id="update-reload" title="Reloads Negs; the photograph you have open closes">Reload</button></div>
@@ -451,6 +458,23 @@
   </form>
 </dialog>
 <input type="file" id="preset-file" hidden accept=".json,application/json">
+<dialog class="dialog settings" id="settings-dialog" aria-labelledby="settings-title">
+  <form method="dialog">
+    <header><h2 id="settings-title">Settings</h2><button class="dismiss" value="close" aria-label="Close">×</button></header>
+    <div class="setting">
+      <label class="row" for="previews">Film and paper previews <input type="checkbox" class="switch" id="previews" aria-describedby="previews-hint"></label>
+      <p class="hint" id="previews-hint">Show each film and paper on your photograph. They use about 100 MB, and turn off if Negs runs out of memory.</p>
+    </div>
+    <div class="setting">
+      <label class="row" for="match-new-raws">Match new RAWs to camera brightness <input type="checkbox" class="switch" id="match-new-raws" aria-describedby="match-new-raws-hint"></label>
+      <p class="hint" id="match-new-raws-hint">Start each RAW you open as bright as the camera showed it (Prep › Match camera brightness).</p>
+    </div>
+    <div class="setting">
+      <label class="row" for="engine">Engine <select id="engine" aria-describedby="engine-hint"><option value="gpu">WebGPU</option><option value="cpu">CPU</option></select></label>
+      <p class="hint" id="engine-hint">WebGPU uses the graphics chip and is much faster. CPU works without it.</p>
+    </div>
+  </form>
+</dialog>
 <dialog class="dialog" id="export-dialog" aria-labelledby="export-title">
   <form method="dialog">
     <header><h2 id="export-title">Export preset</h2><button class="dismiss" value="close" aria-label="Close">×</button></header>

@@ -76,8 +76,7 @@ export function createPresets(app) {
   function sync() {
     $("preset-menu-anchor").hidden = app.cropping();
     more.disabled = !app.ready();
-    // The previews' switch (app.js) works whenever the menu opens.
-    for (const b of items()) if (b.getAttribute("role") === "menuitem") b.disabled = !ready();
+    for (const b of items()) b.disabled = !ready();
     $("export-lut").disabled ||= lutting;
   }
 

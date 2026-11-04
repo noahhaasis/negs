@@ -6,7 +6,16 @@
 measured), [stock previews](stock-previews.md#web-branch-web-prep-port) (the feature),
 [Apple device testing](apple-device-testing.md) (device rules).
 
-## The question
+## Result (2026-11-04)
+
+Measured; see [Where the memory goes](web-prep-port-plan.md#built-2026-11-04). The
++150–180 MiB was the spike while the grids fill. Filled grids hold +88–114 MiB settled, 23
+of it a first calibration any stock change pays. Neither an export (≤ 903 MiB) nor opening
+another photograph with the grids open (1241 MiB) comes near the kill. Noah chose on
+by default, off after a memory crash (Settings sheet; see the plan). ~40–50 MiB is still
+unattributed. The rest of this note is the
+brief as it was.
+
 
 The film and paper previews (Stock › Film and Paper foldouts, `web/stocks.js`, `pumpPreviews`
 in `web/app.js`, `Engine.thumbnail` in `crates/spektrafilm-wasm`) pass the speed gates on the

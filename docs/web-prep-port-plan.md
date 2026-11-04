@@ -138,17 +138,76 @@ pipeline, uploads or prepared frames. Tiles and renders take turns: the GPU's sh
 | After an edit, all 33 | 33 × 9–15 ms | 2.1 s (median 19 ms) |
 | A slider frame while tiles fill | | waited 18 ms beyond its own render |
 | wasm memory | unchanged (657 MiB) | +46–69 MiB (124 → 170–193) |
-| Footprint with both grids open | | **+150–180 MiB** (≈650–685 vs ≈490–530 MiB off) |
+| Footprint while the grids fill | | +160–250 MiB, gone within ~8 s |
+| Footprint with both grids filled, settled | | **+88 / +107 / +114 MiB** (off: +0 / +1) |
 
-Speed passes the gates; memory doesn't (gate +100 MiB). Keeping 4 pipelines instead of 40
-didn't lower the footprint, so the rest is GPU sets, the tile canvases or transfer garbage;
-the sampler lost the phone before that was pinned down. So, per decision 5, previews are
-**off by default on touch screens** (on with ⋯ › Film and paper previews) and on elsewhere.
+Speed passes the gates; memory straddles its gate (+100 MiB settled), but 23 MiB of that is
+paid by any stock change, and neither an export nor another photograph comes near the kill
+(below). Decision 5, Noah: **on by default everywhere, off after a memory crash.**
+
+- **Settings sheet**: a gear beside the tutorial's ? in the top bar opens it (a bottom sheet
+  on phones). It holds *Film and paper previews* (out of ⋯), *Match new RAWs to camera
+  brightness* (the Prep switch sets it too) and *Engine* (out of the Stock tab's bottom).
+- **After a memory crash**, previews on: they go off, and a note says so with a Settings
+  button. iOS kills the tab without a `pagehide`, and Safari loads it again at once as a
+  `navigate`, not a `reload`. So the page keeps a marker in localStorage with a 5 s
+  heartbeat while shown, and clears it when hidden or left. A marker under 60 s old at load
+  means a crash (`crashCheck` in `app.js`).
+- Without a photograph the Film and Paper menus show instead of blank tiles.
+- Checked on the iPhone in an ordinary tab (automation can't do it: it lifts the tab's
+  memory limit, past 4 GiB of JS and 20 GiB of GPU buffers, and a killed tab ends its
+  session). Open a photo, SIGKILL the tab's WebContent process over the developer tunnel
+  (pymobiledevice3 `ProcessControl.kill`), and read the reload with Web Inspector (not
+  automation). The note showed and previews were off; a manual reload shows none.
+  `web/checks/settings-phone.mjs` covers the default and the sheet.
+- An "Out of memory" opening the sample came from a long-lived ordinary tab (188 MiB idle
+  before the open; a fresh tab opened it). It matches Safari keeping a replaced engine's
+  memory in the tab (`worker.js`), not the previews.
+
+**Where the memory goes** (iPhone, 2026-11-04 afternoon; `web/checks/stocks-memory-phone.mjs`
+and `footprint.py`, 500 ms samples; each run a fresh tab: open the Fuji RAF, fill both
+grids three times as `stocks-phone.mjs` does, then 30–60 s idle plateaus). Settled medians
+of the tab's WebContent footprint, MiB:
+
+| Run | Before the grids | Filled, idle 60 s | Peak while filling | Export peak | Open peak |
+|---|---|---|---|---|---|
+| off | 409 / 436 / 404 | 410 / 437 / 409 | 431 / 462 / 431 | 820 / 761 | 1131 / 1047 / 1059 |
+| on | 414 / 454 / 409 | 502 / 568 / 495 | 593 / 702 / 625 | 830 / 903 | 1067 / 1208 / 1101 |
+| on, tiles not painted (`?previewPaint=0`) | 411 | 518 | 591 | 878 | 1195 |
+
+- What filled grids hold, ~100 MiB:
+  - **23 MiB is the first calibration's wasm growth**, which any stock change pays. Previews
+    off, the first film change grows wasm 124 → 147 MiB and the footprint +23 MiB; later
+    film and paper changes grow neither (`web/checks/stock-change-memory.mjs`).
+  - **23 MiB more is the previews' own wasm growth** (147 → 170, at the first paper tile).
+    That is room for 40 cached pipelines next to a calibration's transients. wasm memory
+    never shrinks, so turning the previews off doesn't return it.
+  - **Not the tile canvases.** Unpainted tiles left the same +107 MiB, and blanking the
+    canvases dropped the footprint by no more than an off run's drift.
+  - **Not the GPU's small sets.** Releasing the render buffers freed the same amount with
+    previews on and off (344–346 MiB, almost all an export's).
+  - **~40–50 MiB is unattributed.** It stayed through blanking the canvases, releasing the
+    thumbnails and releasing the render buffers. It is likely allocator or Metal memory
+    kept after the fill's transients (the +160–250 MiB spike: tile bytes crossing to the
+    page, calibrations, uploads). Pinning it down needs Web Inspector's memory timeline.
+- **Export with both grids open** (`exportJpeg`'s render, finish and JPEG encode at
+  2569×1713, without the download): 830–903 MiB peak against 761–820 off. It is far from
+  the ~1.4 GiB kill, and lower than opening a photograph. (The 1.33 GiB above came after
+  2560 px frames.)
+- **Opening the photograph again with both grids open** is the highest point: 1241 MiB
+  against 1180 off (one run each, `?reopen=1`). The first opens ranged 1047–1208 MiB across
+  all runs, so the previews add about +60 MiB to the riskiest moment, about 160 MiB under
+  the kill.
+- Not previews: after an export, the GPU pool keeps its full-size buffers (~340 MiB, the
+  512 MiB pool budget) until the next photograph or `releaseRenderBuffers`.
 
 ## Left to do
 
-1. **The previews' memory on the iPhone**, then an export with both grids open and the
-   default on phones: [handoff](handoff-web-previews-memory.md).
+1. **The previews' measurement hooks.** Remove the `TEMP(previews memory)` hooks in
+   `app.js` and `engine.js` (`?previewPaint=0`, `negs.engineCall`, `memoryMiB`) and
+   `web/checks/stock-change-memory.mjs` when no longer needed; `stocks-memory-phone.mjs`
+   uses `negs.engineCall`. Open: the ~40–50 MiB the filled grids keep that no release
+   returns, and the ~340 MiB the GPU pool keeps after an export.
 2. **JPEG/PNG "Match original brightness".** The match switch shows for RAWs only. Plan
    step 3: use the source the engine already decoded, reduced to 512 px and converted to
    linear sRGB, as the reference (no second decode), and check it against the Mac's EVs
@@ -166,9 +225,7 @@ the sampler lost the phone before that was pinned down. So, per decision 5, prev
    - Run `web/checks/tutorial-layouts.mjs`, `tutorial.mjs` and `tutorial-discovery.mjs`;
      they weren't run after the tab change.
 5. **The menus.**
-   - ⋯ is still labelled "Presets and LUT" but now holds the *Film and paper previews*
-     switch, whose label wraps to two lines. A small settings group there could also hold
-     *Match new RAWs to camera brightness*, which today is only remembered from the switch.
+   - ⋯ holds presets and the LUT only again; settings moved to the gear's sheet (above).
    - The tab layout itself: Noah wants to refine it later ("the mac simplified a lot of
      things"); the phone's tab strip is Stock · Prep · Camera · Film · Print · Scan · Output.
 6. **Smaller:** `golden.py` still keeps 12 MP (the touch cap is 4.4 MP); the shared

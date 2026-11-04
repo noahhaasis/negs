@@ -1631,9 +1631,12 @@ const PREVIEW_SIDE = 320;
 // The calibrated stocks the engine keeps for them: every film with its
 // paper, and every paper with the current film.
 const PREVIEW_PIPELINES = 40;
-// Off by default on touch screens: on the iPhone 13 Pro they added
-// 150–180 MiB to the tab (docs/web-prep-port-plan.md).
-let previewsOn = remembered("stockPreviews", !matchMedia("(pointer: coarse)").matches);
+const PREVIEW_PAINT = new URLSearchParams(location.search).get("previewPaint") !== "0";
+// On by default: on the iPhone 13 Pro filled grids hold ~100 MiB of the tab,
+// and neither an export nor opening another photograph with them came near
+// the tab's limit (docs/web-prep-port-plan.md). A memory crash turns them
+// off (`crashCheck`).
+let previewsOn = remembered("stockPreviews", true);
 let previewing = false, previewTimer = 0, previewRefresh = 0;
 const previewStats = [];
 let folds = null;
@@ -1648,16 +1651,18 @@ function buildPreviews() {
   folds = { film: fold("film", "Film", filmGroups(), chooseFilm), paper: fold("paper", "Paper", paperGroups(), choosePaper) };
   $("film").closest("label").after(folds.film.root);
   $("paper-row").after(folds.paper.root);
-  $("previews").addEventListener("click", () => setPreviews(!previewsOn));
+  $("previews").addEventListener("change", () => setPreviews($("previews").checked));
   syncs.push(() => {
-    // Scanned film isn't printed: no paper.
-    $("film").closest("label").hidden = previewsOn;
-    $("paper-row").hidden = previewsOn || get("io.scan_film");
-    folds.film.root.hidden = !previewsOn;
-    folds.paper.root.hidden = !previewsOn || get("io.scan_film");
+    // Scanned film isn't printed: no paper. Until a photograph is open the
+    // tiles would be blank, so the menus show.
+    const tiles = previewsOn && !!photo;
+    $("film").closest("label").hidden = tiles;
+    $("paper-row").hidden = tiles || get("io.scan_film");
+    folds.film.root.hidden = !tiles;
+    folds.paper.root.hidden = !tiles || get("io.scan_film");
     folds.film.select(state.film);
     folds.paper.select(state.paper);
-    $("previews").setAttribute("aria-checked", previewsOn);
+    $("previews").checked = previewsOn;
     refreshPreviews();
   });
 }
@@ -1665,12 +1670,56 @@ function buildPreviews() {
 function setPreviews(on) {
   previewsOn = on;
   remember("stockPreviews", on);
+  markAlive();
   if (!on) {
     for (const t of [...folds.film.tiles.values(), ...folds.paper.tiles.values()]) Stocks.markStale(t, null, null);
     host?.call("releaseThumbnails").catch(() => {});
   }
   sync();
 }
+
+// ---- Memory crashes ------------------------------------------------------------
+
+// A tab iOS kills for memory gets no pagehide, and Safari loads it again
+// at once (as a "navigate", not a "reload": iPhone, iOS 26). So while the
+// page is shown it keeps a marker with a heartbeat, which leaving or hiding
+// it (another app, another tab, a reload) clears; a marker still there and
+// fresh at load means the last page was killed moments ago. A tab
+// discarded in the background was hidden first, and a browser quit is
+// rarely opened again within the minute.
+const ALIVE = "alive";
+const lastLife = remembered(ALIVE, null);
+function markAlive() {
+  if (document.visibilityState === "visible") remember(ALIVE, { previews: previewsOn, at: Date.now() });
+}
+setInterval(markAlive, 5000);
+const markGone = () => { try { localStorage.removeItem(`negs.${ALIVE}`); } catch {} };
+addEventListener("visibilitychange", () => (document.visibilityState === "visible" ? markAlive() : markGone()));
+addEventListener("pagehide", markGone);
+addEventListener("pageshow", markAlive);
+markAlive();
+
+// After a crash with the previews on, they go off (the tiles' memory is the
+// part of the tab that can go), and a note says so.
+function crashCheck() {
+  const fresh = Date.now() - (lastLife?.at ?? 0) < 60_000;
+  if (!lastLife?.previews || !fresh || !previewsOn) return;
+  setPreviews(false);
+  showMessage("Negs ran out of memory and reloaded. Film and paper previews are now off to save memory.", false, 20_000,
+    { label: "Settings", run: () => openSettings() });
+}
+
+// ---- Settings ------------------------------------------------------------------
+
+// The gear's sheet: the previews (above), new RAWs' brightness match (the
+// Prep switch also sets it) and the engine (its change handler is below).
+function openSettings() {
+  $("previews").checked = previewsOn;
+  $("match-new-raws").checked = matchNewRaws();
+  $("settings-dialog").showModal();
+}
+$("settings").addEventListener("click", openSettings);
+$("match-new-raws").addEventListener("change", () => remember("matchNewRaws", $("match-new-raws").checked));
 
 // What tile `id` of `which` renders: the edit with that stock chosen.
 function tileRequest(which, id) {
@@ -1721,7 +1770,9 @@ async function pumpPreviews() {
     const side = Stocks.frameSide(photo.width, photo.height, crop, PREVIEW_SIDE);
     const r = await engine.call("thumbnail", request.film, request.paper, request.params, side, PREVIEW_PIPELINES, structuredClone(crop), rotation());
     previewStats.push({ id: tile.id, elapsedMs: r.elapsedMs, stages: r.stages, memoryMiB: r.memoryMiB, at: performance.now() });
-    if (photo === target && previewsOn) Stocks.paint(tile, target, request.key, r);
+    // TEMP(previews memory): ?previewPaint=0 marks the tile current without
+    // painting it (docs/handoff-web-previews-memory.md).
+    if (photo === target && previewsOn) PREVIEW_PAINT ? Stocks.paint(tile, target, request.key, r) : Object.assign(tile, { photo: target, key: request.key });
   } catch (e) {
     if (!e.restarted) console.warn(`no preview of ${tile.id}: ${e.message}`);
     tile.failed = request.key;
@@ -2437,6 +2488,7 @@ buildSheet();
 touchSlider($("crop-angle-track"), $("crop-angle"));
 catalog = await (await fetch("catalog.json")).json();
 fillStocks();
+crashCheck();
 // Leaving loses the edit: only an exported JPEG keeps it. While a photograph
 // is open with an edit other than the last exported (at first, the
 // defaults), the Negs link asks first, and the browser asks before a reload,
@@ -2532,6 +2584,8 @@ globalThis.negs = {
       failed: tiles.filter(({ tile, request }) => tile.failed === request.key).length, previewing, stats: previewStats.slice() };
   },
   setPreviews: (on) => setPreviews(!!on),
+  // TEMP(previews memory): an engine method by name (releaseRenderBuffers, memoryMiB).
+  engineCall: (method, ...args) => host.call(method, ...args),
   // One preview of the whole frame within `side`, for measurements.
   thumbnail: (side, film = state.film, paper = state.paper) => host.call("thumbnail", film, paper, params(), side, PREVIEW_PIPELINES, Crop.defaults(), 0),
   // Opens or folds the Film and Paper foldouts.

@@ -48,8 +48,10 @@ Film and paper previews, no preset previews yet. `web/stocks.js` builds the fold
 the menus (both are built; the switch shows one), `app.js` `pumpPreviews` schedules the
 tiles on screen (an IntersectionObserver), and the wasm engine's `thumbnail` renders them
 on WebGPU with its own reduced source, 40 cached pipelines and per-film auto-exposure EVs.
-The setting is ⋯ › *Film and paper previews*: on by default, **off on touch screens**, where
-the tiles added 150–180 MiB to the iPhone's tab. Measurements and open items:
+The setting is Settings (the gear) › *Film and paper previews*: on by default, and turned
+off after a memory crash with a note. Filled grids hold ~100 MiB of the iPhone's tab
+(+160–250 MiB while they fill, briefly). Without a photograph the menus show. Measurements
+and open items:
 [web Prep port](web-prep-port-plan.md#built-2026-11-04). Check: `web/checks/stocks.test.mjs`.
 
 ## Helper protocol (`crates/spektrafilm-native`)
