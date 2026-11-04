@@ -121,7 +121,7 @@ pub fn measure(pipeline: &Pipeline, post: &PostParams, auto_ev: f64) -> ToneRamp
         });
         let y = (0..3).map(|c| f64::from(weights[c]) * linear[c]).sum::<f64>();
         lstar_samples.push(lstar(y) as f32);
-        green.push(rgb[1].clamp(0.0, 1.0));
+        green.push(rgb[1].clamp(0.0, 1.0) as f32);
     }
     ToneRamp { lstar: lstar_samples, green }
 }
