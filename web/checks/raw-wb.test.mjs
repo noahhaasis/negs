@@ -10,7 +10,7 @@ import { deflateSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSourceQueue, isRawColour, sameWb, wbKey } from "../raw-wb.js";
-import { RAW_WB_MODES, SECTIONS, optionTitle } from "../controls.js";
+import { PREP_SECTIONS, RAW_WB_MODES, SECTIONS, optionTitle } from "../controls.js";
 
 const web = join(dirname(fileURLToPath(import.meta.url)), "..");
 const wasm = await import("../pkg/spektrafilm_wasm.js");
@@ -58,11 +58,10 @@ test("helpers: effective WB keys, RAW classification, serial source queue", asyn
   assert.ok(!queue.busy, "a failure doesn't wedge the queue");
 });
 
-test("controls: RAW White Balance in Camera before Lens Diffusion, desktop ranges", () => {
-  const camera = SECTIONS.find((s) => s.title === "Camera");
-  const titles = camera.groups.map((g) => g.title);
-  assert.equal(titles.indexOf("RAW White Balance") + 1, titles.indexOf("Lens Diffusion"));
-  const group = camera.groups.find((g) => g.title === "RAW White Balance");
+test("controls: RAW White Balance first in Prep, desktop ranges", () => {
+  assert.equal(PREP_SECTIONS[0].title, "RAW White Balance");
+  assert.ok(!SECTIONS.some((s) => s.groups?.some((g) => g.title === "RAW White Balance")), "no longer in Camera");
+  const group = PREP_SECTIONS[0];
   assert.equal(group.raw, true);
   const [mode, temperature, tint] = group.controls;
   assert.deepEqual(mode.options, ["as_shot", "daylight", "tungsten", "custom"]);

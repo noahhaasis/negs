@@ -121,7 +121,9 @@
   .panes { display: flex; flex: none; margin: 10px 14px; padding: 2px; border-radius: 7px; background: var(--field); }
   .panes button { flex: 1; padding: 3px 0; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; font-weight: 500; }
   .panes button[aria-selected=true] { background: var(--line); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / .3); }
-  .side:not(.sheet)[data-pane=lab] .scroll [data-pane=post], .side:not(.sheet)[data-pane=post] .scroll [data-pane=lab] { display: none; }
+  .side:not(.sheet)[data-pane=prep] .scroll [data-pane]:not([data-pane=prep]),
+  .side:not(.sheet)[data-pane=lab] .scroll [data-pane]:not([data-pane=lab]),
+  .side:not(.sheet)[data-pane=output] .scroll [data-pane]:not([data-pane=output]) { display: none; }
   .grabber, .tabs { display: none; }
   .stock { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
   .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
@@ -194,6 +196,7 @@
   .btn:disabled { opacity: .5; cursor: default; }
   .hint { color: var(--faint); font-size: 11px; }
   .hint[hidden] { display: none; }
+  .ctl > .hint:only-child { margin: 0; }
   /* The footer's quiet commands: installing, offline use, updates. */
   .link { padding: 0; border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; }
   .link:hover { text-decoration: underline; }
@@ -375,7 +378,7 @@
       <p class="hint">Drag corners or edges to resize, or drag inside to move. Drag the dial below the photograph to level it. Return applies; Escape cancels. Borders are added after cropping.</p>
     </div>
     <div class="panes" id="panes" role="tablist" aria-label="Inspector">
-      <button type="button" role="tab" data-pane="lab">Lab</button><button type="button" role="tab" data-pane="post">Post</button>
+      <button type="button" role="tab" data-pane="prep">Prep</button><button type="button" role="tab" data-pane="lab">Lab</button><button type="button" role="tab" data-pane="output">Output</button>
     </div>
     <nav class="tabs" id="tabs" role="tablist" aria-label="Inspector"></nav>
     <div class="tour-heading" id="tutorial-heading" hidden><span id="tour-progress"></span><button type="button" class="link" id="tour-end">End tour</button></div>
@@ -386,15 +389,16 @@
         <p class="hint" id="tour-hint" hidden></p>
         <button type="button" class="btn" id="tour-retry" hidden>Retry</button>
       </section>
-      <div class="stock" data-tab="stock" data-pane="lab">
+      <div class="stock" data-tab="stock">
         <label>Film <select id="film"></select></label>
         <label id="film-time-row" hidden>Development <select id="film-time"></select></label>
         <label class="row" title="Skip printing and scan the developed film, as for slides.">Scan film directly <input type="checkbox" class="switch" id="scan-film"></label>
         <label id="paper-row">Paper <select id="paper"></select></label>
         <label id="paper-time-row" hidden>Print development <select id="paper-time"></select></label>
       </div>
+      <div id="prep-sections"></div>
       <div id="sections"></div>
-      <div id="post-sections"></div>
+      <div id="output-sections"></div>
       <div class="actions" data-tab="stock"><button class="btn" id="reset" title="Restore the defaults while keeping the film, paper and rotation.">Reset Adjustments</button></div>
     </div>
     <nav class="tour-nav" id="tutorial-nav" aria-label="Tutorial navigation" hidden>
@@ -440,7 +444,7 @@
     <label for="preset-link">Preset link</label>
     <input type="text" id="preset-link" readonly aria-describedby="preset-link-status">
     <div class="dialog-row"><span class="hint" id="preset-link-status" role="status"></span><button type="button" class="btn" id="copy-link" disabled>Copy link</button></div>
-    <p class="hint">Includes Lab settings only. Your photo, Post adjustments, crop and border are not included.</p>
+    <p class="hint">Includes Lab settings only. Your photo, Prep adjustments, crop and border are not included.</p>
     <footer><button class="btn" value="close">Close</button><button type="button" class="btn primary" id="download-preset">Download preset</button></footer>
   </form>
 </dialog>

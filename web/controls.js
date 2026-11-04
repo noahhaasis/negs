@@ -1,6 +1,7 @@
-// The Lab inspector's controls: RuntimeParams paths with desktop's titles,
-// ranges and steps (macOS Inspector.swift `adjustmentGroups` and the Camera
-// section; Linux fixtures.rs agrees). Defaults come from the engine's
+// The inspector's controls, on its Prep, Lab and Output panes: RuntimeParams
+// paths with desktop's titles, ranges and steps (macOS Inspector.swift
+// `adjustmentGroups`, the Camera section and the Prep tab; Linux fixtures.rs
+// agrees). Defaults come from the engine's
 // catalog, never from here. Print Diffusion follows docs/print-diffusion-plan.md
 // on main, which the desktop apps haven't shipped yet.
 
@@ -35,22 +36,50 @@ const curves = (at) => [
 // groups, if any; a `raw` group shows for camera RAWs only. A group's `enable` is the
 // switch in its header; `print` sections are skipped while scanning film.
 // `tab` names a section's tab on phones when its title is too long.
+// The Prep pane (macOS Inspector `prep`): the photograph before the film.
+// A section's `raw` shows it for camera RAWs only. Brightness holds Match
+// camera brightness (app.js `match`), Exposure as an offset on the match
+// (`kind: "offset"`), the match's note, and Auto exposure, shown while the
+// match is off or it's changed (`kind: "metering"` rows).
+export const PREP_SECTIONS = [
+  // A camera RAW's input white balance, which develops it again from its
+  // bytes (app.js). Custom's fields only while it's chosen.
+  { title: "RAW White Balance", tab: "Prep", raw: true, controls: [
+    choice("White balance", "io.raw_white_balance.mode", RAW_WB_MODES),
+    { ...slider("Temperature (K)", "io.raw_white_balance.temperature", 1667, 25000, 1), when: ["io.raw_white_balance.mode", "custom"] },
+    { ...slider("Tint", "io.raw_white_balance.tint", 0.01, 4, 0.01), when: ["io.raw_white_balance.mode", "custom"] },
+  ] },
+  { title: "Brightness", tab: "Prep", controls: [
+    { kind: "match", label: "Match camera brightness",
+      help: "Develops the RAW about as bright as the camera’s own preview, and keeps it there when you change film, paper or a preset. Exposure adds to it." },
+    { kind: "offset", label: "Exposure (EV)", path: "prep.exposure_ev", min: -3, max: 3, step: 0.05 },
+    { kind: "note", label: "Camera brightness" },
+    { ...toggle("Auto exposure", "camera.auto_exposure"), metering: true,
+      help: "Meters the photograph and exposes the film so the metered area lands on mid-grey, as a camera's meter does. Exposure adds to it." },
+    { ...choice("Metering", "camera.auto_exposure_method", METERING), when: "camera.auto_exposure", metering: true },
+  ] },
+  { title: "Tone", tab: "Prep", controls: [
+    slider("Highlights", "prep.highlights", -180, 100, 1),
+    slider("Shadows", "prep.shadows", -100, 100, 1),
+    slider("Contrast", "prep.contrast", -100, 100, 1),
+    slider("Lift", "prep.lift", -100, 100, 1),
+    slider("Gain", "prep.gain", -100, 100, 1),
+  ] },
+  { title: "Color", tab: "Prep", controls: [
+    slider("Color Boost", "prep.color_boost", -100, 100, 1),
+    slider("Saturation", "prep.saturation", -100, 100, 1),
+  ] },
+  { title: "Detail", tab: "Prep", controls: [
+    slider("Midtone Detail", "prep.midtone_detail", -100, 100, 1),
+  ] },
+];
+
 export const SECTIONS = [
   { title: "Camera", controls: [
-    toggle("Auto exposure", "camera.auto_exposure"),
-    { ...choice("Metering", "camera.auto_exposure_method", METERING), when: "camera.auto_exposure" },
-    slider("Exposure (EV)", "camera.exposure_compensation_ev", -5, 5, 0.1),
+    slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5, 5, 0.1),
     slider("Film format (mm)", "camera.film_format_mm", 4, 120, 0.1),
     slider("Lens blur (µm)", "camera.lens_blur_um", 0, 100, 0.1),
   ], groups: [
-    // macOS Inspector's RAW White Balance disclosure: a camera RAW's input
-    // white balance, which develops it again from its bytes (app.js). Shown
-    // for RAWs only (`raw`); Custom's fields only while it's chosen.
-    { title: "RAW White Balance", raw: true, controls: [
-      choice("White balance", "io.raw_white_balance.mode", RAW_WB_MODES),
-      { ...slider("Temperature (K)", "io.raw_white_balance.temperature", 1667, 25000, 1), when: ["io.raw_white_balance.mode", "custom"] },
-      { ...slider("Tint", "io.raw_white_balance.tint", 0.01, 4, 0.01), when: ["io.raw_white_balance.mode", "custom"] },
-    ] },
     { title: "Lens Diffusion", enable: "camera.diffusion_filter.active", controls: [
       choice("Filter", "camera.diffusion_filter.filter_family", DIFFUSION_FILTERS),
       slider("Strength", "camera.diffusion_filter.strength", 0, 2, 0.01),
@@ -160,23 +189,14 @@ export const SECTIONS = [
   ] },
 ];
 
-// The Post tab (macOS Inspector `post`): finishing edits on the scan, after
-// the film. Each section shows on desktop's Post pane and the phone's Post tab.
-export const POST_SECTIONS = [
-  { title: "Tone", tab: "Post", controls: [
-    slider("Brightness", "post.brightness", -100, 100, 1),
-    slider("Contrast", "post.contrast", -100, 100, 1),
-    slider("Whites", "post.whites", -100, 100, 1),
-    slider("Blacks", "post.blacks", -100, 100, 1),
-  ], footer: "Adjusts the finished scan/print. To recover a clipped highlight, use exposure in the Lab." },
-  { title: "Color", tab: "Post", controls: [
-    slider("Saturation", "post.saturation", -100, 100, 1),
-  ] },
+// The Output pane (macOS Inspector `output`): what's added after the film.
+// Post's tone and colour went with the Mac's round 2, for Prep's.
+export const OUTPUT_SECTIONS = [
   // macOS Inspector `Section("Border")`: the border's settings
   // (web/border.js), outside the edit's params, so Reset Adjustments keeps
   // them. Everything after "Add border" is off while it is; `styles` shows a
   // control for those styles only.
-  { title: "Border", tab: "Post", controls: [
+  { title: "Border", tab: "Output", controls: [
     { kind: "toggle", label: "Add border", border: "enabled" },
     { kind: "styles", label: "Style", border: "style" },
     borderSlider("Width", "width", 0, 15, 0.1, ["solid", "keyline"]),

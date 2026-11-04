@@ -48,6 +48,11 @@ export function client(wasm, kind) {
       engine.loadDecoded(pixels, width, height, colour);
       return { width: fullWidth, height: fullHeight, kept: width, keptHeight: height, colour };
     },
+    // Prep › Match camera brightness (app.js): the engine's placement of
+    // the loaded photograph against `reference` (linear sRGB, from
+    // web/decoder.js), as JSON; and the note for a reason it failed with.
+    placeExposure: (film, paper, params, reference, width, height) => engine.placeExposure(film, paper, params, reference, width, height),
+    brightnessFailure: (reason) => [...wasm.brightnessFailure(reason)],
     async render(film, paper, params, maxDim, interactive, present = false) {
       return dataResult(wasm, () => engine.render(film, paper, params, maxDim, interactive, present), (r) =>
         ({ width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, backend: r.backend, elapsedMs: r.elapsedMs, stages: r.stages,

@@ -25,7 +25,9 @@ async function start(threads) {
 }
 
 // `whiteBalance`: io.raw_white_balance as JSON, which a RAW develops at.
-onmessage = async ({ data: { dispose, threads, bytes, maxDim, maxPixels, rawDevelop, whiteBalance } }) => {
+// With `reference` ({ width, height }: the photograph as decoded), it makes
+// Prep › Match camera brightness's reference from the RAW's preview instead.
+onmessage = async ({ data: { dispose, threads, bytes, maxDim, maxPixels, rawDevelop, whiteBalance, reference } }) => {
   if (dispose) {
     pool.end(await wasm?.catch(() => null));
     return close();
@@ -35,14 +37,21 @@ onmessage = async ({ data: { dispose, threads, bytes, maxDim, maxPixels, rawDeve
   try {
     const module = await wasm;
     const t = performance.now();
-    // Explicit benchmark switch only; the shipping/default route is unchanged.
-    const decoded = rawDevelop === "bounded" || rawDevelop === "force"
-      ? module.decodeBounded(bytes, maxDim, maxPixels, rawDevelop === "force", whiteBalance)
-      : module.decode(bytes, maxDim, maxPixels, whiteBalance);
-    const pixels = decoded.takePixels();
-    message = [{ result: { pixels, width: decoded.width, height: decoded.height, fullWidth: decoded.fullWidth, fullHeight: decoded.fullHeight,
-      colour: decoded.colour, bounded: decoded.bounded, decodeMs: performance.now() - t, readyMs, memoryMiB: Math.round(module.memoryBytes() / 2 ** 20) } }, [pixels.buffer]];
-    decoded.free();
+    if (reference) {
+      const made = module.cameraReference(bytes, reference.width, reference.height);
+      const pixels = made.takePixels();
+      message = [{ result: { pixels, width: made.width, height: made.height, ms: performance.now() - t } }, [pixels.buffer]];
+      made.free();
+    } else {
+      // Explicit benchmark switch only; the shipping/default route is unchanged.
+      const decoded = rawDevelop === "bounded" || rawDevelop === "force"
+        ? module.decodeBounded(bytes, maxDim, maxPixels, rawDevelop === "force", whiteBalance)
+        : module.decode(bytes, maxDim, maxPixels, whiteBalance);
+      const pixels = decoded.takePixels();
+      message = [{ result: { pixels, width: decoded.width, height: decoded.height, fullWidth: decoded.fullWidth, fullHeight: decoded.fullHeight,
+        colour: decoded.colour, bounded: decoded.bounded, decodeMs: performance.now() - t, readyMs, memoryMiB: Math.round(module.memoryBytes() / 2 ** 20) } }, [pixels.buffer]];
+      decoded.free();
+    }
   } catch (e) {
     message = [{ error: String(e?.message ?? e) }];
   }
