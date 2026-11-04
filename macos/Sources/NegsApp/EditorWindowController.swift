@@ -83,7 +83,7 @@ import SwiftUI
         let toolbar = NSToolbar(identifier: "editor")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
-        toolbar.centeredItemIdentifiers = [.zoom, .edit]
+        // The view/edit controls lead from the left; the actions group trails.
         window.toolbar = toolbar
         model.undoManager = window.undoManager
         // Dragging the inspector closed hides the adjustments, like the toolbar button.
@@ -168,19 +168,18 @@ import SwiftUI
             item.image = model.filmstripVisible
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
         }
-        setEnabled(.zoom, photo && !model.cropping)
-        if let edit = items[.edit] as? NSToolbarItemGroup {
-            edit.isEnabled = photo
-            edit.subitems[0].isEnabled = photo
-            edit.subitems[1].isEnabled = model.image != nil
-            let crop = edit.subitems[1]
+        setEnabled(.fit, photo && !model.cropping)
+        setEnabled(.actualSize, photo && !model.cropping)
+        setEnabled(.rotate, photo)
+        setEnabled(.crop, model.image != nil)
+        if let crop = items[.crop] {
             crop.toolTip = model.cropping ? "Apply the crop (⌘K)" : "Crop the photograph (⌘K)"
             // The accent color marks crop mode as on.
             crop.image = model.cropping
                 ? symbol("crop", "Crop").withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor]))
                 : symbol("crop", "Crop")
         }
-        setEnabled(.export, photo && model.ready && !model.exporting && !model.saving)
+        setEnabled(.export, photo && model.ready && !model.exporting && !model.saving && !model.cropping)
         // The accent color marks the panel the inspector column shows.
         for (id, pane, name, label) in [(NSToolbarItem.Identifier.adjustments, InspectorPane.adjustments, "slider.horizontal.3", "Adjustments"),
                                         (.presets, .presets, "square.stack", "Presets")] {
@@ -202,25 +201,24 @@ import SwiftUI
         (item as? NSToolbarItemGroup)?.subitems.forEach { $0.isEnabled = enabled }
     }
 
-    /// While cropping, Cancel and Done take the place of Export.
+    /// While cropping, Cancel and Done sit beside the actions group and Export
+    /// is disabled there; the group itself keeps its rounded capsule.
     private func showCropActions(_ cropping: Bool) {
         guard let toolbar = window?.toolbar else { return }
         let ids = toolbar.items.map(\.itemIdentifier)
-        if cropping, let i = ids.firstIndex(of: .export) {
-            toolbar.removeItem(at: i)
-            toolbar.insertItem(withItemIdentifier: .doneCrop, at: i)
-            toolbar.insertItem(withItemIdentifier: .cancelCrop, at: i)
+        if cropping, !ids.contains(.doneCrop), let i = ids.firstIndex(of: .actions) {
+            toolbar.insertItem(withItemIdentifier: .doneCrop, at: i + 1)
+            toolbar.insertItem(withItemIdentifier: .cancelCrop, at: i + 1)
         } else if !cropping, let i = ids.firstIndex(of: .cancelCrop) {
             toolbar.removeItem(at: i + 1)
             toolbar.removeItem(at: i)
-            toolbar.insertItem(withItemIdentifier: .export, at: i)
         }
     }
 
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.open, .filmstrip, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .export, .presets, .adjustments]
+        [.controls, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .actions]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -230,30 +228,29 @@ import SwiftUI
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         let item: NSToolbarItem
         switch id {
-        case .open:
-            item = button(id, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph))
-            item.isNavigational = true
-        case .filmstrip:
-            item = button(id, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip))
-        case .zoom:
+        case .controls:
+            // Native rounded toolbar group: open, film strip and the view/edit
+            // controls share one capsule, as in Photos.
             let group = NSToolbarItemGroup(itemIdentifier: id)
-            group.subitems = [button(.init("fit"), "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
-                              button(.init("actualSize"), "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize))]
-            group.label = "Zoom"
+            group.subitems = [button(.open, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph)),
+                              button(.filmstrip, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip)),
+                              button(.fit, "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
+                              button(.actualSize, "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize)),
+                              button(.rotate, "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),
+                              button(.crop, "Crop", "crop", "Crop the photograph (⌘K)", #selector(toggleCrop))]
+            group.label = "View"
+            group.controlRepresentation = .expanded
+            group.selectionMode = .momentary
             item = group
-        case .edit:
-            // Grouped items share one capsule, without the dividers of a segmented group.
+        case .actions:
             let group = NSToolbarItemGroup(itemIdentifier: id)
-            group.subitems = [button(.init("rotate"), "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),
-                              button(.init("crop"), "Crop", "crop", "Crop the photograph (⌘K)", #selector(toggleCrop))]
-            group.label = "Edit"
+            group.subitems = [button(.export, "Export", "square.and.arrow.down", "Export photograph (⇧⌘E)", #selector(export)),
+                              button(.presets, "Presets", "square.stack", "Show or hide presets (⌥⌘P)", #selector(togglePresets)),
+                              button(.adjustments, "Adjustments", "slider.horizontal.3", "Show or hide adjustments (⌥⌘I)", #selector(toggleAdjustments))]
+            group.label = "Actions"
+            group.controlRepresentation = .expanded
+            group.selectionMode = .momentary
             item = group
-        case .export:
-            item = button(id, "Export", "square.and.arrow.down", "Export photograph (⇧⌘E)", #selector(export))
-        case .presets:
-            item = button(id, "Presets", "square.stack", "Show or hide presets (⌥⌘P)", #selector(togglePresets))
-        case .adjustments:
-            item = button(id, "Adjustments", "slider.horizontal.3", "Show or hide adjustments (⌥⌘I)", #selector(toggleAdjustments))
         case .cancelCrop:
             item = NSToolbarItem(itemIdentifier: id)
             item.view = cancelButton; item.label = "Cancel"; item.toolTip = "Discard the crop (Esc)"
@@ -285,6 +282,9 @@ import SwiftUI
         item.isBordered = true
         item.target = self
         item.action = action
+        // A group's subitems are not returned to `toolbar(_:itemForItemIdentifier:)`
+        // by identifier, so keep them for enabled-state and icon updates.
+        items[id] = item
         return item
     }
 
@@ -308,7 +308,8 @@ import SwiftUI
 }
 
 private extension NSToolbarItem.Identifier {
-    static let filmstrip = Self("filmstrip")
-    static let open = Self("open"), zoom = Self("zoom"), edit = Self("edit")
+    static let controls = Self("controls"), actions = Self("actions")
+    static let filmstrip = Self("filmstrip"), open = Self("open")
+    static let fit = Self("fit"), actualSize = Self("actualSize"), rotate = Self("rotate"), crop = Self("crop")
     static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
 }

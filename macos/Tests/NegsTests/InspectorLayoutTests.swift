@@ -22,8 +22,10 @@ import XCTest
                                 data: root.appendingPathComponent("data"))
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build the release helper first") }
         let defaults = UserDefaults.standard
-        let saved = ["expandedAdjustments", "imageSizeLongestSide"].map { ($0, defaults.object(forKey: $0)) }
+        let saved = ["expandedAdjustments", "imageSizeLongestSide", "inspectorPane"].map { ($0, defaults.object(forKey: $0)) }
         defaults.set("Enlarger", forKey: "expandedAdjustments")
+        // A previous Presets pane leaves the inspector without its form.
+        defaults.set("adjustments", forKey: "inspectorPane")
         defer { for (key, value) in saved { defaults.set(value, forKey: key) } }
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("negs-layout-\(UUID().uuidString)")

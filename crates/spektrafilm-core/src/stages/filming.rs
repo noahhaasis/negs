@@ -419,6 +419,10 @@ pub fn expose(
         let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev));
         rgb.data.par_iter_mut().for_each(|v| *v *= exp_comp);
 
+        // Scene preparation: tone, colour and midtone detail before the film.
+        crate::prep::apply_linear(&mut rgb, &params.prep, &params.io.input_color_space)
+            .expect("Invalid Prep settings or pixels");
+
         // RGB → film raw exposure; the simplified fallback treats RGB values
         // as proportional to raw exposure.
         rgb_to_film_raw(&rgb, params, backend, tc_lut, front_illuminant)

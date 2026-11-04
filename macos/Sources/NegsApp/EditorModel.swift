@@ -115,6 +115,10 @@ import UniformTypeIdentifiers
     /// The inspector tab chosen in this session. Like the pane, it survives
     /// changing photos; unlike it, it isn't carried into the next launch.
     var inspectorTab = InspectorTab.camera
+    /// Film format › Custom picked while the value is still a format's, so the
+    /// slider stays. Reset Adjustments and a fresh photograph clear it, as they
+    /// do the edits.
+    var customFilmFormat = false
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
         didSet { UserDefaults.standard.set(inspectorPane.rawValue, forKey: "inspectorPane") }
@@ -544,6 +548,7 @@ import UniformTypeIdentifiers
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
         next.params[ImageSize.targetPath] = state.params[ImageSize.targetPath]
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        customFilmFormat = false
         apply(next, action: "Reset Adjustments")
     }
     private func apply(_ next: EditState, action: String) {
@@ -722,6 +727,7 @@ import UniformTypeIdentifiers
             if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
             state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
             state.crop = CropSettings()
+            customFilmFormat = false
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()

@@ -1048,6 +1048,11 @@ impl Pipeline {
         autoexposure_ev: f64,
         run: impl FnOnce(&spektrafilm_gpu::FilmChainParams<'_>) -> Option<T>,
     ) -> Result<Option<T>, String> {
+        // Prep is a CPU pass the resident chain has no slot for; fall back to
+        // the CPU path whenever it would change the scene.
+        if !self.params.prep.is_identity() {
+            return Ok(None);
+        }
         // The front pass expects linear RGB. Decoded pixels aren't the
         // caller's, so they have no key.
         let decoded;
