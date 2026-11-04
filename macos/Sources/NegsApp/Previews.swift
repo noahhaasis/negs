@@ -55,12 +55,14 @@ enum PreviewRules {
 
     /// The helper request for a preset's tile, without its scratch file: the
     /// helper applies the preset over `state` as `preset_import` does.
-    static func presetCommand(text: String, state: EditState, source: URL, generation: Int) -> [String: JSONValue] {
+    static func presetCommand(text: String, state: EditState, source: URL, generation: Int,
+                              includeFinish: Bool = false) -> [String: JSONValue] {
         var command: [String: JSONValue] = [
             "command": .string("thumbnail"), "input": .string(source.path),
             "source_generation": .number(Double(generation)),
             "film": .string(state.film), "paper": .string(state.paper), "params": state.params,
-            "long_side": .number(Double(longSide)), "preset": .string(text)
+            "long_side": .number(Double(longSide)), "preset": .string(text),
+            "include_finish": .bool(includeFinish)
         ]
         if let crop = EditorModel.cropJSON(state.crop) { command["crop"] = crop }
         return command
@@ -71,7 +73,10 @@ enum PreviewRules {
     /// the preset replaces the rest. A Lab edit then leaves the tiles alone.
     /// Without the list (an older helper), every setting counts.
     static func presetKey(_ command: [String: JSONValue], kept: [String]?, generation: Int) -> PreviewTile.Key {
-        guard let kept else { return PreviewTile.Key(generation: generation, request: command) }
+        guard var kept else { return PreviewTile.Key(generation: generation, request: command) }
+        // With Finish in the preset, the preset's post values matter, not the
+        // photograph's kept ones.
+        if command["include_finish"]?.bool == true { kept.removeAll { $0 == "post" } }
         var request = command
         let params = command["params"] ?? .null
         var subset = JSONValue.object([:])

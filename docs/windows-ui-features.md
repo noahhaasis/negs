@@ -335,7 +335,7 @@ parameters reject fractions). Ranges and steps (`Inspector.swift` and
 - Film format (mm) 4…120, 0.1 → `camera.film_format_mm`
 - Lens blur (µm) 0…100, 0.1 → `camera.lens_blur_um`
 - *RAW White Balance* (group, RAW files only): White balance (As Shot,
-  Daylight, Tungsten, Custom) → `io.raw_white_balance.mode`; when Custom,
+  Daylight 5500 K, Tungsten, Custom) → `io.raw_white_balance.mode`; when Custom,
   Temperature (K) 1667…25000, 1 and Tint 0.01…4, 0.01. Changing it
   re-develops the RAW.
 - *Lens Diffusion* (group with on/off → `camera.diffusion_filter.active`):

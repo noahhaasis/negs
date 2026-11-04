@@ -188,6 +188,9 @@ pub struct Pipeline {
     /// The auto-exposure EV already metered for this frame by a caller that
     /// renders it repeatedly; see [`Self::with_autoexposure_ev`].
     autoexposure_ev: Option<f64>,
+    /// The caller's slot for this frame's Prep output; see
+    /// [`Self::with_prepared_frame`].
+    prepared_frame: Option<crate::prep::PreparedFrame>,
 }
 
 impl Pipeline {
@@ -298,6 +301,16 @@ impl Pipeline {
     /// colour space and settings.
     pub fn with_autoexposure_ev(mut self, ev: f64) -> Self {
         self.autoexposure_ev = Some(ev);
+        self
+    }
+
+    /// Keep the GPU path's Prep output in `frame` and reuse it while nothing
+    /// Prep reads changes (its settings, the exposure before it, the input
+    /// decoding and the frame size), so other edits skip Prep. The caller
+    /// promises that every image it renders with `frame` at one size has the
+    /// same pixels, and uses a new slot when they change.
+    pub fn with_prepared_frame(mut self, frame: crate::prep::PreparedFrame) -> Self {
+        self.prepared_frame = Some(frame);
         self
     }
 
@@ -441,6 +454,7 @@ impl Pipeline {
             output_gamut,
             metering_preview: None,
             autoexposure_ev: None,
+            prepared_frame: None,
         };
         pipeline.apply_film_curves_morph();
         pipeline
@@ -633,6 +647,7 @@ impl Pipeline {
             output_gamut,
             metering_preview: None,
             autoexposure_ev: None,
+            prepared_frame: None,
         };
         // The enlarger illuminant with its dichroic filters, and the preflash.
         pipeline.filter_enlarger();
@@ -1051,8 +1066,27 @@ impl Pipeline {
         // The front pass expects linear RGB. Decoded pixels aren't the
         // caller's, so they have no key.
         let decoded;
-        let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding);
-        let image = if self.params.io.input_cctf_decoding {
+        let prepared;
+        let prep_active = !self.params.prep.is_identity();
+        // Prep changes the upload, including through its whole-frame spatial
+        // base. A source-image cache key cannot identify these pixels.
+        let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active);
+        let image = if prep_active {
+            let key = crate::prep::PreparedKey::new(image, &self.params, autoexposure_ev);
+            let cached = self.prepared_frame.as_ref().and_then(|frame| frame.take(&key));
+            prepared = match cached {
+                Some(image) => image,
+                None => std::sync::Arc::new(stages::filming::prepare_input_from(
+                    image,
+                    &self.params,
+                    autoexposure_ev,
+                )?),
+            };
+            if let Some(frame) = &self.prepared_frame {
+                frame.put(key, prepared.clone());
+            }
+            &*prepared
+        } else if self.params.io.input_cctf_decoding {
             let mut d = image.clone();
             stages::filming::decode_input_cctf(&mut d, &self.params);
             decoded = d;
@@ -1060,6 +1094,9 @@ impl Pipeline {
         } else {
             image
         };
+        if !prep_active && let Some(frame) = &self.prepared_frame {
+            frame.clear(); // neutral Prep needs no copy of the frame
+        }
         // Bake the exposure scale (auto-exposure × manual EV compensation)
         // into the front-pass matrix. The upsampler is homogeneous in the
         // input RGB, so scaling the matrix is
@@ -1067,11 +1104,13 @@ impl Pipeline {
         // pass at the head of the chain. The auto exposure is metered on the
         // CPU, on the ≤256 px metering frame, by the caller.
         let mut exposure_scale_f64 = 1.0f64;
-        if autoexposure_ev != 0.0 {
-            exposure_scale_f64 *= autoexposure_ev.exp2();
-        }
-        if self.params.camera.exposure_compensation_ev != 0.0 {
-            exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
+        if !prep_active {
+            if autoexposure_ev != 0.0 {
+                exposure_scale_f64 *= autoexposure_ev.exp2();
+            }
+            if self.params.camera.exposure_compensation_ev != 0.0 {
+                exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
+            }
         }
         if self.params.camera.placement_ev != 0.0 {
             exposure_scale_f64 *= 2.0f64.powf(self.params.camera.placement_ev as f64);

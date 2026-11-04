@@ -370,6 +370,33 @@ pub fn decode_input_cctf(rgb: &mut ImageBuf, params: &RuntimeParams) {
     }
 }
 
+/// Decode, apply both exposures and Prep in one pass into a new buffer. The
+/// borrowed-frame path used by the GPU chain; see `Pipeline::with_prepared_frame`.
+pub(crate) fn prepare_input_from(
+    image: &ImageBuf,
+    params: &RuntimeParams,
+    autoexposure_ev: f64,
+) -> Result<ImageBuf, String> {
+    let cctf = RgbColourspace::input(&params.io.input_color_space).cctf;
+    let decode = params.io.input_cctf_decoding && cctf != colorspace::Cctf::Linear;
+    let scale = (autoexposure_ev != 0.0).then(|| from_f64(autoexposure_ev.exp2()));
+    let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev));
+    let data = image
+        .data
+        .par_iter()
+        .map(|&value| {
+            let mut value = if decode { from_f64(cctf.decode(to_f64(value))) } else { value };
+            if let Some(scale) = scale {
+                value *= scale;
+            }
+            value * exp_comp
+        })
+        .collect();
+    let mut rgb = ImageBuf::from_data(image.width, image.height, data);
+    crate::prep::apply_linear(&mut rgb, &params.prep, &params.io.input_color_space)?;
+    Ok(rgb)
+}
+
 /// [`rgb_to_film_raw`] for an image that still carries the input CCTF
 /// (the auto-exposure metering frame).
 pub fn encoded_rgb_to_film_raw(
@@ -418,6 +445,10 @@ pub fn expose(
         // Exposure compensation and placement
         let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev + params.camera.placement_ev));
         rgb.data.par_iter_mut().for_each(|v| *v *= exp_comp);
+
+        // Scene preparation: tone, colour and midtone detail before the film.
+        crate::prep::apply_linear(&mut rgb, &params.prep, &params.io.input_color_space)
+            .expect("Invalid Prep settings or pixels");
 
         // RGB → film raw exposure; the simplified fallback treats RGB values
         // as proportional to raw exposure.

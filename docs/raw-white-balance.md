@@ -10,7 +10,7 @@ changing the colour processing. See [decoder architecture](apple-raw-decoder.md)
 Apple As Shot uses the stored camera white balance. Other modes develop at D65
 (`neutralChromaticity = (0.3127, 0.3290)`) before applying the existing shared
 CAT02/ACES temperature/tint operation. Apple's own numerical tint control is
-not used, so Tint keeps its established Spektrafilm meaning. Custom 6504 K /
+not used, so Tint keeps its established Spektrafilm meaning. Custom 5500 K /
 tint 1 is exactly Daylight. Both preview and f64 export call the same loader.
 
 Apple uses its own demosaicing, active-area crop and camera calibration.
@@ -26,8 +26,8 @@ Open a camera RAW, then use **RAW white balance** above Profiles:
 | Mode | Behavior |
 | --- | --- |
 | **As shot** (default) | Uses the RAW's stored camera WB through the selected decoder. |
-| **Daylight** | Develops at D65 through Apple, or matrix-derived daylight coefficients through rawler. |
-| **Tungsten (2850 K)** | Starts from Daylight and adapts a 2850 K scene white to the daylight reference. |
+| **Daylight (5500 K)** | Develops at D65, then adapts a 5500 K daylight white to the 6504 K reference. |
+| **Tungsten (2850 K)** | Starts from the D65 development and adapts a 2850 K scene white to the 6504 K reference. |
 | **Custom** | Same adaptation using Temperature, then a green-channel multiplier in linear ACES2065-1 using Tint. |
 
 Custom defaults to **5500 K, tint 1.0**. Temperature is **1667–25000 K**;
@@ -166,7 +166,8 @@ reintroducing the original temperature-to-camera coefficient calculation.
 - **Color processing:** non-As-shot temperature/tint follows upstream's
   ACES/XYZ operations, expressed as a matrix acting on rawler's linear sRGB
   output (CAT02 D65↔D60 conversion around the ACES operation). The identity
-  Custom setting, 6504 K / tint 1, is exactly Daylight. Rawler's demosaic,
+  Custom setting, 6504 K / tint 1, is exactly the D65 development; Daylight
+  is the 5500 K adaptation from that reference. Rawler's demosaic,
   camera matrices, negative/highlight handling, and floating output differ
   from LibRaw's 16-bit ACES development. Exact upstream pixel parity is
   therefore not claimed, particularly in highlights or saturated colors.

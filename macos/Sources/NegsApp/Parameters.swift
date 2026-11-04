@@ -152,7 +152,7 @@ func optionTitle(_ option: String) -> String {
     let titles = [
         "average": "Average", "median": "Median", "center_weighted": "Center-Weighted", "partial": "Partial",
         "matrix": "Matrix", "multi_zone": "Multi-Zone", "highlight_weighted": "Highlight-Weighted",
-        "as_shot": "As Shot", "daylight": "Daylight", "tungsten": "Tungsten", "custom": "Custom",
+        "as_shot": "As Shot", "daylight": "Daylight (5500 K)", "tungsten": "Tungsten", "custom": "Custom",
         "black_pro_mist": "Black Pro-Mist", "glimmerglass": "Glimmerglass", "pro_mist": "Pro-Mist", "cinebloom": "CineBloom",
         "off": "Off", "oklch": "OKLCh", "oklrab": "OKLrab", "cam16ucs": "CAM16-UCS", "aces_rgc": "ACES RGC", "xy": "xy Chromaticity",
         "hanatos2025": "Hanatos 2025", "arctic2026beta04": "Arctic 2026 (Beta 04)", "mallett2019": "Mallett 2019"

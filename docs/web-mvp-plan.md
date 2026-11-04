@@ -354,7 +354,7 @@ Owner review of the whole MVP before stage 2.
 
 ### 12. RAW white balance
 
-As Shot, Daylight, Tungsten 2850 K, Custom (1667–25000 K, tint 0.01–4), as
+As Shot, Daylight 5500 K, Tungsten 2850 K, Custom (1667–25000 K, tint 0.01–4), as
 desktop (`docs/raw-white-balance.md`, `spektrafilm-io/src/white_balance.rs`).
 First find out whether Daylight-decoded data plus a linear adjustment
 equals each mode (then it folds into the front-pass matrix and moves at

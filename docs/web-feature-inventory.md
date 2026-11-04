@@ -40,7 +40,7 @@ Do now:
 | Interactive frames | Present (adaptive) | Resident | – |
 
 second stage:
-| RAW white balance (As Shot/Daylight/Tungsten/Custom) | Missing | CPU re-decode ~0.8 s at 24 MP (maybe foldable into front matrix, unverified) | M |
+| RAW white balance (As Shot/Daylight 5500 K/Tungsten/Custom) | Missing | CPU re-decode ~0.8 s at 24 MP (maybe foldable into front matrix, unverified) | M |
 | Show Original (hold) | Present (MVP piece 8; `[wasm]` docs/web-wasm.md item 16) | Resident: the chain's input through the display pass | – |
 | Data download/caching (service worker, lazy LUTs and textures) | none | S–M |
 | About / licence attribution | none (needed: profile, film.png MIT, 35mm CC BY-SA) | S |

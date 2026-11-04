@@ -99,7 +99,7 @@ SPEKTRAFILM_RAW_TEST_FILE=/path/photo.NEF MACOSX_DEPLOYMENT_TARGET=14.0 \
 ```
 
 The real-file test verifies upright/unoriented consistency, exact Daylight /
-Custom 6504 K identity, changed custom WB and finite output. Missing input fails
+Custom 5500 K identity, changed custom WB and finite output. Missing input fails
 that requested test. Normal CI intentionally marks it ignored rather than
 pretending that proprietary camera fixtures were tested.
 

@@ -51,6 +51,12 @@ enum InspectorTab: String, CaseIterable, Identifiable {
     func isSkipped(scanning: Bool) -> Bool { self == .print && scanning }
 }
 
+/// Detail lives in Scan, though the engine applies it to the scene before the
+/// film; the newest controls call it Midtone Detail.
+let scanDetailControls: [Adjustment] = [
+    .slider("Midtone Detail", "prep.midtone_detail", -100...100, 1)
+]
+
 struct AdjustmentGroup: Identifiable {
     let title: String
     let symbol: String
@@ -212,6 +218,44 @@ struct SliderRow: View {
                       defaultValue: model.defaultValue(path).double, modified: model.isModified(path),
                       reset: { model.resetValue(path) },
                       editing: { $0 ? model.beginInteraction() : model.endInteraction() })
+    }
+}
+
+/// The film frame as a stills format, which writes the frame's long edge in
+/// mm; Custom shows the slider. A value no format has reads as Custom, so
+/// presets and older edits need no setting of their own.
+struct FilmFormatPicker: View {
+    let model: EditorModel
+    static let path = "camera.film_format_mm"
+    static let range: ClosedRange<Double> = 4...120
+    /// Long edges of the image area. 135 stays at the engine's 35 (not the
+    /// gate's 36) so existing edits render as before; 6×4.5 and 6×6 share 56.
+    static let formats: [(name: String, mm: Double)] = [
+        ("110", 17), ("Half frame", 24), ("35 mm (135)", 35),
+        ("6×4.5 / 6×6", 56), ("6×7", 70), ("6×9", 84), ("4×5", 120),
+    ]
+    static func format(mm: Double) -> String? { formats.first { abs($0.mm - mm) < 0.05 }?.name }
+    private static let custom = "Custom"
+
+    var body: some View {
+        let mm = model.value(Self.path).double
+        let custom = model.customFilmFormat || Self.format(mm: mm) == nil
+        Picker("Film format", selection: Binding(get: { custom ? Self.custom : Self.format(mm: mm) ?? Self.custom }, set: { name in
+            if let format = Self.formats.first(where: { $0.name == name }) {
+                model.customFilmFormat = false
+                model.set(Self.path, .number(format.mm))
+            } else {
+                model.customFilmFormat = true
+            }
+        })) {
+            ForEach(Self.formats, id: \.name) { Text($0.name).tag($0.name) }
+            Divider()
+            Text("Custom…").tag(Self.custom)
+        }
+        .help("The film frame's long edge. 35 mm is 135 stills film; Custom shows the slider.")
+        if custom {
+            SliderRow(model: model, title: "Long edge (mm)", path: Self.path, range: Self.range, step: 0.1)
+        }
     }
 }
 
@@ -644,7 +688,6 @@ struct AdjustmentInspector: View {
     // MARK: Camera
 
     @ViewBuilder private var cameraTab: some View {
-        ImageSizeSection(model: model)
         if model.isRaw {
             Section("White Balance") {
                 control(.choice("RAW white balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
@@ -666,7 +709,7 @@ struct AdjustmentInspector: View {
                 .help("Makes the whole print lighter or darker along the film-and-print curve. Exposure changes the negative, and the printer compensates.")
         }
         Section("Lens") {
-            control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))
+            FilmFormatPicker(model: model)
             control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1))
             if model.isRaw, model.lensCorrectionSupported {
                 control(.toggle("Lens corrections", EditorModel.lensCorrectionPath))
@@ -770,6 +813,9 @@ struct AdjustmentInspector: View {
             let scanner = adjustmentGroups.first { $0.title == "Scanner" }
             ForEach(scanner?.controls ?? []) { control($0) }
         }
+        Section("Detail") {
+            ForEach(scanDetailControls) { control($0) }
+        }
         Section("Color") { group("Color Management") }
     }
 
@@ -808,6 +854,7 @@ struct AdjustmentInspector: View {
     // MARK: Export
 
     @ViewBuilder private var exportTab: some View {
+        ImageSizeSection(model: model)
         Section("File") {
             Picker("Format", selection: Binding(get: { model.exportFormat }, set: { model.exportFormat = $0 })) {
                 ForEach(OutputFormat.allCases, id: \.rawValue) { format in

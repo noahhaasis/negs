@@ -27,27 +27,25 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(catalog["protocol"], .number(1))
         let defaults = catalog["defaults"]
         let stocks = catalog["profiles"].array.map(Stock.init)
-        for group in adjustmentGroups {
-            for control in group.controls {
-                if case .balancePrint = control { continue }
-                if case .stockSlider(_, let path, let index, let range, _, _) = control {
-                    // Null until edited; every film's preset fills the lane.
-                    XCTAssertEqual(defaults[path], .null, path)
-                    let field = String(path.split(separator: ".").last!)
-                    for stock in stocks where !stock.paper {
-                        let preset = stock.grain[field].array.map(\.double)
-                        XCTAssertEqual(preset.count, 3, "\(stock.id) \(field)")
-                        XCTAssertTrue(preset.indices.contains(index) && range.contains(preset[index]), "\(stock.id) \(control.id)")
-                    }
-                    continue
+        for control in adjustmentGroups.flatMap(\.controls) + scanDetailControls {
+            if case .balancePrint = control { continue }
+            if case .stockSlider(_, let path, let index, let range, _, _) = control {
+                // Null until edited; every film's preset fills the lane.
+                XCTAssertEqual(defaults[path], .null, path)
+                let field = String(path.split(separator: ".").last!)
+                for stock in stocks where !stock.paper {
+                    let preset = stock.grain[field].array.map(\.double)
+                    XCTAssertEqual(preset.count, 3, "\(stock.id) \(field)")
+                    XCTAssertTrue(preset.indices.contains(index) && range.contains(preset[index]), "\(stock.id) \(control.id)")
                 }
-                XCTAssertNotEqual(defaults[control.id], .null, "Missing Rust parameter: \(control.id)")
-                switch control {
-                case .slider(_, _, let range, _): XCTAssertTrue(range.contains(defaults[control.id].double), control.id)
-                case .toggle: if case .bool = defaults[control.id] {} else { XCTFail(control.id) }
-                case .choice(_, _, let options): XCTAssertTrue(options.contains(defaults[control.id].string), control.id)
-                case .stockSlider, .balancePrint: break
-                }
+                continue
+            }
+            XCTAssertNotEqual(defaults[control.id], .null, "Missing Rust parameter: \(control.id)")
+            switch control {
+            case .slider(_, _, let range, _): XCTAssertTrue(range.contains(defaults[control.id].double), control.id)
+            case .toggle: if case .bool = defaults[control.id] {} else { XCTFail(control.id) }
+            case .choice(_, _, let options): XCTAssertTrue(options.contains(defaults[control.id].string), control.id)
+            case .stockSlider, .balancePrint: break
             }
         }
         XCTAssertEqual(stocks.first { $0.id == "kodak_gold_200" }?.target, "kodak_portra_endura")
@@ -61,6 +59,47 @@ final class EngineTests: XCTestCase {
         let (id, next) = try await client.request(["command": .string("catalog")])
         XCTAssertEqual(id, 3)
         XCTAssertEqual(next["profiles"], catalog["profiles"])
+    }
+
+    func testPresetFinishRoundTripsWhenAsked() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let helper = root.appendingPathComponent("target/release/spektrafilm-native")
+        guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+            throw XCTSkip("Build spektrafilm-native in release mode before the integration test")
+        }
+        let client = try EngineClient(paths: EnginePaths(helper: helper, exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: root.appendingPathComponent("data")))
+        defer { client.stop() }
+        let (_, catalog) = try await client.request(["command": .string("catalog")])
+        var current = catalog["defaults"]
+        current["post.contrast"] = .number(0.75)
+        var saved = current
+        saved["post.contrast"] = .number(0.25)
+        saved["post.brightness"] = .number(12)
+
+        let (_, plain) = try await client.request([
+            "command": .string("preset_export"), "film": .string("kodak_portra_400"),
+            "paper": .string("kodak_supra_endura"), "params": saved, "include_finish": .bool(false)
+        ])
+        XCTAssertFalse(plain["text"].string.contains("negs_finish"))
+        let (_, exported) = try await client.request([
+            "command": .string("preset_export"), "film": .string("kodak_portra_400"),
+            "paper": .string("kodak_supra_endura"), "params": saved, "include_finish": .bool(true)
+        ])
+        let text = exported["text"].string
+        XCTAssertTrue(text.contains("negs_finish"))
+
+        let (_, applied) = try await client.request([
+            "command": .string("preset_import"), "text": .string(text), "params": current,
+            "include_finish": .bool(true)
+        ])
+        XCTAssertEqual(applied["params"]["post"]["brightness"], .number(12))
+        XCTAssertEqual(applied["params"]["post"]["contrast"], .number(0.25))
+        let (_, kept) = try await client.request([
+            "command": .string("preset_import"), "text": .string(text), "params": current,
+            "include_finish": .bool(false)
+        ])
+        XCTAssertEqual(kept["params"]["post"]["brightness"], .number(0))
+        XCTAssertEqual(kept["params"]["post"]["contrast"], .number(0.75))
     }
 
     /// Balance Print solves the enlarger's M/Y shifts on the helper; a tuned
