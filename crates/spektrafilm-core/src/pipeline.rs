@@ -1073,6 +1073,9 @@ impl Pipeline {
         if self.params.camera.exposure_compensation_ev != 0.0 {
             exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
         }
+        if self.params.camera.placement_ev != 0.0 {
+            exposure_scale_f64 *= 2.0f64.powf(self.params.camera.placement_ev as f64);
+        }
         // B&W/slide filming exposure correction is a linear scale on the raw
         // film exposure (CPU: `raw *= factor` before log10). Since the
         // upsampler is homogeneous in the input RGB, folding it into the

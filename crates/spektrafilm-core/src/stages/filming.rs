@@ -415,8 +415,8 @@ pub fn expose(
             rgb.data.par_iter_mut().for_each(|v| *v *= scale);
         }
 
-        // Exposure compensation
-        let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev));
+        // Exposure compensation and placement
+        let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev + params.camera.placement_ev));
         rgb.data.par_iter_mut().for_each(|v| *v *= exp_comp);
 
         // RGB → film raw exposure; the simplified fallback treats RGB values
