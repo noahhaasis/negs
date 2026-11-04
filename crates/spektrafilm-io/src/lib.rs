@@ -14,6 +14,7 @@
 //! over the source file's camera metadata read by [`read_metadata`].
 
 pub mod border;
+pub mod brightness;
 pub mod bounded;
 pub mod colour;
 pub mod crop;
