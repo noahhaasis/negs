@@ -169,12 +169,21 @@ fn luminance_of(value: f64) -> f64 {
 /// they were made in; the others bend the curve between them. Tones outside
 /// the ends clamp, which is what setting a black or white point means. With
 /// no pins it is the identity.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct AnchorCurve {
     black: f64,
     white: f64,
     /// Interior pins, strictly between the ends and rising.
     points: Vec<(f64, f64)>,
+    /// The anchors the curve can't honour, as indices into those it was given.
+    ignored: Vec<usize>,
+}
+
+/// Two curves are equal if they map tones alike, whichever pins they dropped.
+impl PartialEq for AnchorCurve {
+    fn eq(&self, other: &Self) -> bool {
+        (self.black, self.white) == (other.black, other.white) && self.points == other.points
+    }
 }
 
 impl AnchorCurve {
@@ -184,44 +193,56 @@ impl AnchorCurve {
         // every pin aimed at white must print white, so the white point is
         // the darkest of them. Tones outside clamp.
         let (mut black, mut white) = (0.0f64, 100.0f64);
+        let mut white_index = None;
         let mut interior = Vec::new();
-        for anchor in anchors {
-            if !anchor.input.is_finite() || !anchor.target.is_finite() {
+        let mut ignored = Vec::new();
+        for (index, anchor) in anchors.iter().enumerate() {
+            let input = f64::from(anchor.input);
+            if !input.is_finite() || !anchor.target.is_finite() || !(0.0..100.0).contains(&input) {
+                ignored.push(index);
                 continue;
             }
-            let (input, target) = (anchor.input as f64, anchor.target.clamp(0.0, 100.0) as f64);
-            if !(0.0..100.0).contains(&input) {
-                continue;
-            }
+            let target = f64::from(anchor.target.clamp(0.0, 100.0));
             if target <= 0.0 {
                 black = black.max(input);
             } else if target >= 100.0 {
-                white = white.min(input);
+                if input < white {
+                    white = input;
+                    white_index = Some(index);
+                }
             } else {
-                interior.push((input, target));
+                interior.push((input, target, index));
             }
         }
+        // A white point at or below the black point leaves no room for a curve.
+        if white <= black + 0.5 {
+            ignored.extend(white_index);
+            white = 100.0;
+        }
         // Sorted by input, then by target, so ties resolve the same way
-        // whatever order the pins were made in.
+        // whatever order the pins were made in. The curve must rise, so a pin
+        // that would turn it back is dropped; the lowest input is kept.
         interior.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
-        // One pin per zone: two pins aimed at the same target would demand the
-        // same output from two inputs, flattening the curve between them. The
-        // lowest input wins, deterministically.
-        interior.dedup_by(|next, kept| (next.1 - kept.1).abs() < 0.5);
-        // A black point at or past the white point leaves no room; keep the
-        // curve a curve.
-        let white = white.max(black + 0.5);
-        let mut points = Vec::with_capacity(interior.len());
-        for (input, target) in interior {
+        let mut points: Vec<(f64, f64)> = Vec::with_capacity(interior.len());
+        for (input, target, index) in interior {
             let inside = input > black + 0.5 && input < white - 0.5;
             let rising = points
                 .last()
                 .is_none_or(|&(i, t)| input - i >= 0.5 && target - t >= 0.5);
             if inside && rising {
                 points.push((input, target));
+            } else {
+                ignored.push(index);
             }
         }
-        Self { black, white, points }
+        ignored.sort_unstable();
+        Self { black, white, points, ignored }
+    }
+
+    /// The anchors the curve can't honour: they have no effect until another
+    /// pin moves out of their way.
+    pub fn ignored(&self) -> &[usize] {
+        &self.ignored
     }
 
     pub fn is_identity(&self) -> bool {
@@ -604,6 +625,40 @@ mod tests {
 
     fn pin(input: f32, target: f32) -> ToneAnchor {
         ToneAnchor { input, target, source: None }
+    }
+
+    #[test]
+    fn a_crossed_pair_reports_the_one_it_drops() {
+        let curve = AnchorCurve::new(&[pin(25.0, 60.0), pin(50.0, 20.0)]);
+        assert_eq!(curve.ignored(), &[1]);
+        assert!((curve.map(25.0) - 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn order_does_not_change_which_tone_is_kept() {
+        let a = AnchorCurve::new(&[pin(25.0, 60.0), pin(50.0, 20.0)]);
+        let b = AnchorCurve::new(&[pin(50.0, 20.0), pin(25.0, 60.0)]);
+        assert_eq!(a, b);
+        assert_eq!((a.ignored(), b.ignored()), (&[1usize][..], &[0usize][..]));
+    }
+
+    #[test]
+    fn crossed_end_points_report_the_white_point() {
+        let curve = AnchorCurve::new(&[pin(70.0, 0.0), pin(40.0, 100.0)]);
+        assert_eq!(curve.ignored(), &[1]);
+        assert_eq!(curve.map(60.0), 0.0);
+        assert!((curve.map(100.0) - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_pin_outside_the_ends_is_ignored() {
+        assert_eq!(AnchorCurve::new(&[pin(30.0, 0.0), pin(20.0, 50.0)]).ignored(), &[1]);
+        assert_eq!(AnchorCurve::new(&[pin(80.0, 100.0), pin(90.0, 50.0)]).ignored(), &[1]);
+    }
+
+    #[test]
+    fn non_finite_pins_are_ignored() {
+        assert_eq!(AnchorCurve::new(&[pin(f32::NAN, 50.0), pin(50.0, 40.0)]).ignored(), &[0]);
     }
 
     #[test]

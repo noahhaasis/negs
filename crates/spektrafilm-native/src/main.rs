@@ -7,7 +7,7 @@ use spektrafilm_core::{
     image_size,
     params::RuntimeParams,
     pipeline::Pipeline,
-    post::{PostParams, PostProcess},
+    post::{AnchorCurve, PostParams, PostProcess},
     presets,
     preview::*,
     profile,
@@ -703,6 +703,7 @@ impl Session {
                 if let Some(last) = reused {
                     write_display(&last.image, last.encoding, &post, &preview_path)?;
                     let mut response = last.response.clone();
+                    response["ignored_pins"] = ignored_pins(&post);
                     // Edge rounding moves the crop's pixels with its position.
                     response["photo_crop_width"] = json!(size.photo.0);
                     response["photo_crop_height"] = json!(size.photo.1);
@@ -783,6 +784,7 @@ impl Session {
                     "output_color_space": encoding.space.name,
                     "display_color_space": DisplaySpace::of(encoding).name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
+                    "ignored_pins": ignored_pins(&post),
                 });
                 self.output = Some(Rendered {
                     id: request.id,
@@ -813,6 +815,11 @@ fn parse_request(line: &str) -> Result<Request> {
 /// Writes the preview for the app as raw RGBA, avoiding PNG compression on
 /// every slider edit. Save keeps the float output, independent of this proxy.
 /// The bytes are in `DisplaySpace::of(encoding)`.
+/// The pins the tone curve can't honour, for the app to mark.
+fn ignored_pins(post: &PostParams) -> Value {
+    json!(AnchorCurve::new(&post.tone_anchors).ignored())
+}
+
 fn write_display(
     image: &ImageBuf,
     encoding: Encoding,
@@ -1108,6 +1115,30 @@ mod tests {
             paper: "kodak_portra_endura".into(), params: Box::new(params), limit_preview: false,
             preview_path: preview.into(), interactive_scale, crop,
         }
+    }
+
+    #[test]
+    fn render_reports_ignored_pins_when_reusing_the_scan() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-ignored-pins-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pixels = (0..32 * 24 * 3).map(|i| ((i * 37) % 255) as spektrafilm_math::Scalar / 255.0).collect();
+        spektrafilm_io::save_image(&ImageBuf::from_data(32, 24, pixels), &dir.join("input.png"), None).unwrap();
+        let mut session = Session::default();
+        let mut send = |id, command| session.handle(Request { id, command }, &data).unwrap();
+        let anchor = |input, target| spektrafilm_core::post::ToneAnchor { input, target, source: None };
+        let with = |anchors| {
+            let mut params = RuntimeParams::default();
+            params.post.tone_anchors = anchors;
+            let Command::Render { input, source_generation, film, paper, limit_preview, preview_path, interactive_scale, crop, .. } =
+                render(&dir.join("input.png"), &dir.join("preview.rgba"), None, None, None) else { unreachable!() };
+            Command::Render { input, source_generation, film, paper, params: Box::new(params), limit_preview, preview_path, interactive_scale, crop }
+        };
+        assert_eq!(send(1, with(vec![])).get("ignored_pins"), Some(&json!([])));
+        // Only Post changes, so this render reuses the scan.
+        let crossed = send(2, with(vec![anchor(25.0, 60.0), anchor(50.0, 20.0)]));
+        assert_eq!(crossed["ignored_pins"], json!([1]));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
