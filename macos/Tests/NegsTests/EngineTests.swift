@@ -61,6 +61,47 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(next["profiles"], catalog["profiles"])
     }
 
+    func testPresetFinishRoundTripsWhenAsked() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let helper = root.appendingPathComponent("target/release/spektrafilm-native")
+        guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+            throw XCTSkip("Build spektrafilm-native in release mode before the integration test")
+        }
+        let client = try EngineClient(paths: EnginePaths(helper: helper, exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: root.appendingPathComponent("data")))
+        defer { client.stop() }
+        let (_, catalog) = try await client.request(["command": .string("catalog")])
+        var current = catalog["defaults"]
+        current["post.contrast"] = .number(0.75)
+        var saved = current
+        saved["post.contrast"] = .number(0.25)
+        saved["post.brightness"] = .number(12)
+
+        let (_, plain) = try await client.request([
+            "command": .string("preset_export"), "film": .string("kodak_portra_400"),
+            "paper": .string("kodak_supra_endura"), "params": saved, "include_finish": .bool(false)
+        ])
+        XCTAssertFalse(plain["text"].string.contains("negs_finish"))
+        let (_, exported) = try await client.request([
+            "command": .string("preset_export"), "film": .string("kodak_portra_400"),
+            "paper": .string("kodak_supra_endura"), "params": saved, "include_finish": .bool(true)
+        ])
+        let text = exported["text"].string
+        XCTAssertTrue(text.contains("negs_finish"))
+
+        let (_, applied) = try await client.request([
+            "command": .string("preset_import"), "text": .string(text), "params": current,
+            "include_finish": .bool(true)
+        ])
+        XCTAssertEqual(applied["params"]["post"]["brightness"], .number(12))
+        XCTAssertEqual(applied["params"]["post"]["contrast"], .number(0.25))
+        let (_, kept) = try await client.request([
+            "command": .string("preset_import"), "text": .string(text), "params": current,
+            "include_finish": .bool(false)
+        ])
+        XCTAssertEqual(kept["params"]["post"]["brightness"], .number(0))
+        XCTAssertEqual(kept["params"]["post"]["contrast"], .number(0.75))
+    }
+
     /// Balance Print solves the enlarger's M/Y shifts on the helper; a tuned
     /// film base moves them.
     func testBalancePrintSolvesFilterShifts() async throws {

@@ -154,6 +154,12 @@ struct UpdateSettings: View {
                 Text("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            Section("Presets") {
+                Toggle("Save Finish parameters in presets", isOn: Binding(
+                    get: { model.saveFinishInPresets }, set: { model.saveFinishInPresets = $0 }))
+                Text("Writes the Finish tab's tone settings into new presets and applies them when a preset is chosen. Off, presets leave the photograph's Finish settings alone.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Section("Viewer") {
                 HStack(spacing: 12) {
                     Toggle("Custom background", isOn: $customBackground)

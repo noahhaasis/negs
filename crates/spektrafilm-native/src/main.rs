@@ -65,12 +65,18 @@ enum Command {
         text: String,
         #[serde(default)]
         params: Option<Box<RuntimeParams>>,
+        /// Apply the preset's optional Finish section too.
+        #[serde(default)]
+        include_finish: bool,
     },
     /// The settings as a preset file's text.
     PresetExport {
         film: String,
         paper: String,
         params: Box<RuntimeParams>,
+        /// Write the optional Finish section.
+        #[serde(default)]
+        include_finish: bool,
     },
     Original {
         input: PathBuf,
@@ -118,6 +124,9 @@ enum Command {
         /// applies it; its film and paper replace `film` and `paper`.
         #[serde(default)]
         preset: Option<String>,
+        /// Apply the preset's optional Finish section too.
+        #[serde(default)]
+        include_finish: bool,
     },
     /// Frees the thumbnails' caches (the previews were turned off).
     ReleaseThumbnails,
@@ -327,6 +336,7 @@ impl Session {
         preview_path: PathBuf,
         crop: Option<Crop>,
         preset: Option<String>,
+        include_finish: bool,
         data: &Path,
     ) -> Result<Value> {
         let started = Instant::now();
@@ -334,7 +344,7 @@ impl Session {
         let preset_applied = preset.is_some();
         if let Some(text) = preset {
             let preset = presets::import(&text, data).map_err(anyhow::Error::msg)?;
-            params = Box::new(presets::apply(&preset.params, &params));
+            params = Box::new(presets::apply_with_finish(&preset, &params, include_finish));
             (film, paper) = (preset.film, preset.paper);
         }
         if let Some(crop) = &crop {
@@ -473,13 +483,14 @@ impl Session {
                 std::fs::write(&output, cube)?;
                 Ok(json!({"size": size, "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0}))
             }
-            Command::PresetImport { text, params } => {
+            Command::PresetImport { text, params, include_finish } => {
                 let preset = presets::import(&text, data).map_err(anyhow::Error::msg)?;
-                let params = presets::apply(&preset.params, &params.unwrap_or_default());
+                let params = presets::apply_with_finish(&preset, &params.unwrap_or_default(), include_finish);
                 Ok(json!({"film": preset.film, "paper": preset.paper, "params": params}))
             }
-            Command::PresetExport { film, paper, params } => {
-                let text = presets::export(&film, &paper, &params, data).map_err(anyhow::Error::msg)?;
+            Command::PresetExport { film, paper, params, include_finish } => {
+                let text = presets::export_with_finish(&film, &paper, &params, data, include_finish)
+                    .map_err(anyhow::Error::msg)?;
                 Ok(json!({"text": text}))
             }
             Command::Original { input, params, limit_preview, preview_path } => {
@@ -506,8 +517,8 @@ impl Session {
                 Ok(json!({"width": width, "height": height, "input_colour": loaded.colour,
                           "display_color_space": DisplaySpace::of(encoding).name()}))
             }
-            Command::Thumbnail { input, source_generation, film, paper, params, long_side, preview_path, crop, preset } => {
-                self.thumbnail(input, source_generation, film, paper, params, long_side, preview_path, crop, preset, data)
+            Command::Thumbnail { input, source_generation, film, paper, params, long_side, preview_path, crop, preset, include_finish } => {
+                self.thumbnail(input, source_generation, film, paper, params, long_side, preview_path, crop, preset, include_finish, data)
             }
             Command::ReleaseThumbnails => {
                 self.thumbnail_source = None;
@@ -874,7 +885,7 @@ mod tests {
         let text = r#"{"simulation": {"film_stock": "kodak_portra_400", "route": "input > film > scan"},
                        "couplers": {"langmuir_donor_k_rgb": [Infinity, 1.0, 1.0]}}"#;
         let imported = session.handle(Request { id: 1, command: Command::PresetImport {
-            text: text.into(), params: Some(Box::new(current)),
+            text: text.into(), params: Some(Box::new(current)), include_finish: false,
         } }, &data).unwrap();
         assert_eq!(imported["film"], "kodak_portra_400");
         assert_eq!(imported["params"]["io"]["photo_long_side_px"], 2400);
@@ -884,11 +895,13 @@ mod tests {
         let params: RuntimeParams = serde_json::from_value(imported["params"].clone()).unwrap();
         let exported = session.handle(Request { id: 2, command: Command::PresetExport {
             film: "kodak_portra_400".into(), paper: "kodak_supra_endura".into(), params: Box::new(params),
+            include_finish: false,
         } }, &data).unwrap();
         let text = exported["text"].as_str().unwrap();
         assert!(text.contains("Infinity"), "{text}");
         let refused = session.handle(Request { id: 3, command: Command::PresetImport {
             text: r#"{"simulation": {"film_stock": "kodak_unknown"}}"#.into(), params: None,
+            include_finish: false,
         } }, &data).unwrap_err();
         assert!(refused.to_string().contains("kodak_unknown"), "{refused}");
     }
@@ -914,7 +927,7 @@ mod tests {
             let response = session.handle(Request { id: 1, command: Command::Thumbnail {
                 input: input.clone(), source_generation: 1, film: film.into(), paper: paper.into(),
                 params: Box::new(params), long_side: 24, preview_path: preview.clone(), crop: None,
-                preset: preset.map(str::to_string),
+                preset: preset.map(str::to_string), include_finish: false,
             } }, &data).unwrap();
             (response, std::fs::read(preview).unwrap())
         };
@@ -924,7 +937,7 @@ mod tests {
         // The photograph's colour space stays; the preset's look comes in.
         assert_eq!(response["display_color_space"], DisplaySpace::Rec2020SrgbTransfer.name());
         let imported = session.handle(Request { id: 2, command: Command::PresetImport {
-            text: text.into(), params: Some(Box::new(current.clone())),
+            text: text.into(), params: Some(Box::new(current.clone())), include_finish: false,
         } }, &data).unwrap();
         assert_eq!(imported["params"]["camera"]["exposure_compensation_ev"], 1.5);
         let params: RuntimeParams = serde_json::from_value(imported["params"].clone()).unwrap();

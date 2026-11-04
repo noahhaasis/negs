@@ -116,11 +116,23 @@ pub struct Preset {
     pub film: String,
     pub paper: String,
     pub params: RuntimeParams,
+    /// Finish (post-scan) settings written by Negs when the user asks to
+    /// include them. Python's GUI state has no such section.
+    pub finish: Option<crate::post::PostParams>,
 }
 
 /// Read a preset file. Errors name the reason, for the user.
 pub fn import(text: &str, data_dir: &Path) -> Result<Preset, String> {
-    let state = gui_state(&parse(text)?)?;
+    let file = parse(text)?;
+    // Negs's own optional section; Python's state merge ignores unknown keys.
+    let finish = file
+        .get("negs_finish")
+        .map(|value| {
+            serde_json::from_value(value.clone())
+                .map_err(|error| format!("Invalid Finish settings: {error}"))
+        })
+        .transpose()?;
+    let state = gui_state(&file)?;
     let (film, paper) = (stock(&state, "simulation.film_stock")?, stock(&state, "simulation.print_paper")?);
     let film_stock = load_stock(data_dir, &film, false)?;
     let paper_stock = load_stock(data_dir, &paper, true)?;
@@ -128,7 +140,7 @@ pub fn import(text: &str, data_dir: &Path) -> Result<Preset, String> {
     check(&state, &params)?;
     params.film_render.development_time = listed_time(&film_stock, params.film_render.development_time);
     params.print_render.development_time = listed_time(&paper_stock, params.print_render.development_time);
-    Ok(Preset { film, paper, params })
+    Ok(Preset { film, paper, params, finish })
 }
 
 /// A development time as the stock's family lists it: the entry the engine
@@ -153,10 +165,39 @@ pub fn apply(preset: &RuntimeParams, current: &RuntimeParams) -> RuntimeParams {
     serde_json::from_value(params).expect("kept values come from RuntimeParams")
 }
 
+/// [`apply`] with Negs's optional Finish section. A preset without one still
+/// keeps the photograph's Finish settings; only a present section replaces
+/// them, and only when the setting asks for it.
+pub fn apply_with_finish(preset: &Preset, current: &RuntimeParams, include_finish: bool) -> RuntimeParams {
+    let finish = include_finish.then_some(preset.finish).flatten();
+    let mut params = serde_json::to_value(&preset.params).expect("RuntimeParams serializes");
+    let current = serde_json::to_value(current).expect("RuntimeParams serializes");
+    for path in KEPT {
+        if path == "post" && finish.is_some() {
+            continue;
+        }
+        let value = get(&current, path).expect("kept paths exist").clone();
+        set(&mut params, path, value).expect("kept paths exist");
+    }
+    let mut applied: RuntimeParams =
+        serde_json::from_value(params).expect("kept values come from RuntimeParams");
+    if let Some(finish) = finish {
+        applied.post = finish;
+    }
+    applied
+}
+
 /// Write the settings as a preset file Python spektrafilm loads. A file can't
 /// leave a value to the stock, so the stock presets the engine would use
 /// (grain, DIR gammas, halation baseline, development time) are written out.
 pub fn export(film_id: &str, paper_id: &str, params: &RuntimeParams, data_dir: &Path) -> Result<String, String> {
+    export_with_finish(film_id, paper_id, params, data_dir, false)
+}
+
+/// [`export`] with Negs's own optional Finish section. Python ignores the
+/// extra top-level key; Negs applies it only when the setting asks.
+pub fn export_with_finish(film_id: &str, paper_id: &str, params: &RuntimeParams, data_dir: &Path,
+                          include_finish: bool) -> Result<String, String> {
     let film = load_stock(data_dir, film_id, false)?;
     let paper = load_stock(data_dir, paper_id, true)?;
     let params = resolved(&film, &paper, params);
@@ -193,6 +234,12 @@ pub fn export(film_id: &str, paper_id: &str, params: &RuntimeParams, data_dir: &
         ("camera.diffusion_filter", get(&state, "camera_diffusion").cloned().unwrap_or_default()),
     ] {
         set(&mut state, path, value)?;
+    }
+    if include_finish {
+        state
+            .as_object_mut()
+            .expect("the preset state is an object")
+            .insert("negs_finish".into(), serde_json::to_value(&params.post).expect("PostParams serializes"));
     }
     let text = serde_json::to_string_pretty(&state).expect("JSON values serialize");
     let marker = serde_json::to_string(INFINITY).expect("strings serialize");
@@ -706,6 +753,28 @@ mod tests {
         assert_eq!(preset.params.enlarger.print_exposure, 1.5);
         assert!(preset.params.io.scan_film);
         assert_eq!(preset.params.io.raw_white_balance.mode, spektrafilm_io::RawWhiteBalanceMode::AsShot);
+    }
+
+    #[test]
+    fn finish_is_written_only_when_asked_and_applied_only_when_asked() {
+        let data = data_dir();
+        let mut current = RuntimeParams::default();
+        current.post.contrast = 0.3;
+        let mut saved = RuntimeParams::default();
+        saved.post.brightness = 12.0;
+
+        let without = export("kodak_portra_400", "kodak_supra_endura", &saved, &data).unwrap();
+        assert!(!without.contains("negs_finish"));
+        let text = export_with_finish("kodak_portra_400", "kodak_supra_endura", &saved, &data, true).unwrap();
+        assert!(text.contains("negs_finish"));
+        let preset = import(&text, &data).unwrap();
+        assert_eq!(preset.finish.map(|finish| finish.brightness), Some(12.0));
+
+        let applied = apply_with_finish(&preset, &current, true);
+        assert_eq!(applied.post.brightness, 12.0);
+        assert_eq!(applied.post.contrast, 0.0, "the preset's Finish replaces the photograph's");
+        let kept = apply_with_finish(&preset, &current, false);
+        assert_eq!(kept.post.contrast, 0.3, "Finish stays with the photograph unless asked");
     }
 
     #[test]

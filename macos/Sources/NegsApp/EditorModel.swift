@@ -119,6 +119,16 @@ import UniformTypeIdentifiers
     /// slider stays. Reset Adjustments and a fresh photograph clear it, as they
     /// do the edits.
     var customFilmFormat = false
+    /// Settings › Presets › Save Finish parameters in presets. Stored so the
+    /// helper's preset files can carry the post-scan tone controls.
+    static let saveFinishInPresetsKey = "saveFinishInPresets"
+    var saveFinishInPresets = UserDefaults.standard.bool(forKey: "saveFinishInPresets") {
+        didSet {
+            guard saveFinishInPresets != oldValue else { return }
+            UserDefaults.standard.set(saveFinishInPresets, forKey: Self.saveFinishInPresetsKey)
+            pumpPreviews()
+        }
+    }
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
         didSet { UserDefaults.standard.set(inspectorPane.rawValue, forKey: "inspectorPane") }
@@ -1076,7 +1086,8 @@ import UniformTypeIdentifiers
                                                         photo: rendered.params["io.raw_white_balance"])
             for preset in ordered {
                 guard case .valid = presetStatus[preset], let text = presetTexts[preset], let tile = previews.tile(preset: preset.url) else { continue }
-                let command = PreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation)
+                let command = PreviewRules.presetCommand(text: text, state: rendered, source: source, generation: generation,
+                                                         includeFinish: saveFinishInPresets)
                 wanted.append((tile, PreviewRules.presetKey(command, kept: kept.isEmpty ? nil : kept, generation: generation), command, preset.name))
             }
         }
@@ -1444,7 +1455,8 @@ import UniformTypeIdentifiers
                 for _ in 0..<3 {
                     let snapshot = state
                     let (_, result) = try await engine.request(["command": .string("preset_import"), "text": .string(text),
-                                                                "params": snapshot.params])
+                                                                "params": snapshot.params,
+                                                                "include_finish": .bool(saveFinishInPresets)])
                     guard state == snapshot else { continue }
                     let (film, paper) = (result["film"].string, result["paper"].string)
                     guard films.contains(where: { $0.id == film }), papers.contains(where: { $0.id == paper }) else {
@@ -1472,7 +1484,8 @@ import UniformTypeIdentifiers
         Task {
             do {
                 let (_, result) = try await engine.request(["command": .string("preset_export"), "film": .string(snapshot.film),
-                                                            "paper": .string(snapshot.paper), "params": snapshot.params])
+                                                            "paper": .string(snapshot.paper), "params": snapshot.params,
+                                                            "include_finish": .bool(saveFinishInPresets)])
                 let file = try await presetLibrary.add(Data(result["text"].string.utf8), name: name)
                 await refreshPresets()
                 unnamedPreset = file.url

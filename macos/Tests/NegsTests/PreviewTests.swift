@@ -81,8 +81,8 @@ final class PreviewTests: XCTestCase {
     func testAPresetTileFollowsOnlyWhatThePresetKeeps() {
         let photo = URL(fileURLWithPath: "/photos/a.jpg"), text = #"{"simulation": {"film_stock": "kodak_portra_400"}}"#
         let kept = ["io.output_color_space", "io.crop", "post"]
-        func command(_ state: EditState, text: String = text, generation: Int = 1) -> [String: JSONValue] {
-            PreviewRules.presetCommand(text: text, state: state, source: photo, generation: generation)
+        func command(_ state: EditState, text: String = text, generation: Int = 1, includeFinish: Bool = false) -> [String: JSONValue] {
+            PreviewRules.presetCommand(text: text, state: state, source: photo, generation: generation, includeFinish: includeFinish)
         }
         func key(_ state: EditState, text: String = text, generation: Int = 1) -> PreviewTile.Key {
             PreviewRules.presetKey(command(state, text: text, generation: generation), kept: kept, generation: generation)
@@ -106,6 +106,11 @@ final class PreviewTests: XCTestCase {
         XCTAssertNotEqual(key(space), base)
         var post = state; post.params["post.saturation"] = .number(0.5)
         XCTAssertNotEqual(key(post), base)
+        // Finish in a preset comes from the preset, not the photograph's post.
+        let finishKey = PreviewRules.presetKey(command(state, includeFinish: true), kept: kept, generation: 1)
+        var changedPost = state; changedPost.params["post.saturation"] = .number(0.8)
+        XCTAssertEqual(PreviewRules.presetKey(command(changedPost, includeFinish: true), kept: kept, generation: 1), finishKey)
+        XCTAssertNotEqual(finishKey, base)
         var cropped = state; cropped.crop.angle = 3
         XCTAssertNotEqual(key(cropped), base)
         XCTAssertNotEqual(key(state, generation: 2), base)

@@ -28,6 +28,21 @@ final class PresetNameTests: XCTestCase {
     }
 }
 
+@MainActor final class PresetFinishSettingTests: XCTestCase {
+    func testSettingPersistsForTheNextModel() {
+        let key = EditorModel.saveFinishInPresetsKey
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+
+        let model = EditorModel()
+        model.saveFinishInPresets = true
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: key))
+        XCTAssertTrue(EditorModel().saveFinishInPresets)
+        model.saveFinishInPresets = false
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: key))
+    }
+}
+
 final class PresetLibraryTests: XCTestCase {
     private var folder: URL!
 
