@@ -105,6 +105,16 @@ import XCTest
         XCTAssertEqual(document.frame.height, initialHeight, accuracy: 1)
         XCTAssertEqual(scroll.contentView.bounds.origin.y, initialOrigin, accuracy: 1, "Releasing a slider must keep the inspector's scroll position")
         XCTAssertEqual(sliderY(), interactiveY, accuracy: 1, "Releasing a slider must keep the slider in place")
+
+        // A picked tone fills the zone strip and its caption, both of which
+        // reserve their space, so the form doesn't move when they appear.
+        model.pickTone(.small(CGPoint(x: 0.5, y: 0.5)))
+        try await waitUntil { model.toneSample != nil }
+        try await waitUntil { model.zoneReadout != nil }
+        try await Task.sleep(for: .milliseconds(200))
+        try capture("pick")
+        XCTAssertEqual(document.frame.height, initialHeight, accuracy: 1, "A zone readout must not resize the inspector form")
+        XCTAssertEqual(sliderY(), interactiveY, accuracy: 1, "A zone readout must keep sliders under the pointer")
     }
 
     private func waitUntil(_ predicate: () -> Bool) async throws {

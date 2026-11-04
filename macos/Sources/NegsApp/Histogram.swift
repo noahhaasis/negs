@@ -97,6 +97,23 @@ struct OutputMapping: Equatable, Sendable {
     }
 }
 
+/// Which channels the histogram draws: the output space's red, green and
+/// blue, and CIE Lab lightness. All on until the user hides one.
+struct HistogramChannels: OptionSet, Sendable {
+    let rawValue: Int
+
+    static let red = HistogramChannels(rawValue: 1 << 0)
+    static let green = HistogramChannels(rawValue: 1 << 1)
+    static let blue = HistogramChannels(rawValue: 1 << 2)
+    static let lightness = HistogramChannels(rawValue: 1 << 3)
+    static let all: HistogramChannels = [.red, .green, .blue, .lightness]
+
+    var redOn: Bool { contains(.red) }
+    var greenOn: Bool { contains(.green) }
+    var blueOn: Bool { contains(.blue) }
+    var lightnessOn: Bool { contains(.lightness) }
+}
+
 /// The developed photograph's tones: 256 bins per channel of the cropped
 /// photograph, and 256 bins of CIE Lab lightness. The border is drawn on the
 /// canvas, never in the preview, so it never counts.
@@ -294,19 +311,108 @@ struct ToneSample: Equatable, Sendable {
 }
 
 
-/// Red, green, and blue added on a dark well, as in photo editors: where
-/// channels overlap they mix to cyan, magenta, yellow, and white.
+
+
+/// The tones of the developed photograph, under the scales that read them:
+/// zone bands, an L\* stripe, the R/G/B fills and L\* curve, and the EV scale.
+/// The graph itself takes no clicks; only the channel tick marks do.
 struct HistogramView: View {
     let histogram: Histogram?
+    var curve: ToneCurve? = nil
+    var sample: ToneSample? = nil
+    var channels: HistogramChannels = .all
+    var onToggleChannel: ((HistogramChannels) -> Void)? = nil
 
     var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 1) {
+                lStripeValues(width: geometry.size.width)
+                lStripe
+                chart
+                channelTicks
+                evScale
+            }
+        }
+        .padding(.horizontal, 3)
+        .accessibilityElement()
+        .accessibilityLabel("Histogram")
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        guard histogram != nil else { return "No developed photograph" }
+        var parts = ["Tones of the developed photograph", "Zone bands"]
+        if channels.lightnessOn { parts.append("lightness curve") }
+        if sample != nil { parts.append("with a picked tone and its picker lines") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// The channel fills drawn, in stacking order.
+    static func drawnChannels(_ channels: HistogramChannels) -> [HistogramChannels] {
+        [.red, .green, .blue].filter { channels.contains($0) }
+    }
+
+    /// The picker lines drawn: each channel's at the picked code, and the
+    /// grey lightness line.
+    static func drawnPickers(_ channels: HistogramChannels) -> [HistogramChannels] {
+        [.red, .green, .blue, .lightness].filter { channels.contains($0) }
+    }
+
+    // MARK: The L* stripe
+
+    private func lStripeValues(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(ZoneGeometry.lStripe(width: width), id: \.value) { step in
+                Text("\(step.value)")
+                    .font(.system(size: 7))
+                    .foregroundStyle(.secondary)
+                    .position(x: min(max(step.x, 6), max(width - 6, 6)), y: 4)
+            }
+        }
+        .frame(height: 9)
+    }
+
+    /// Alternating steps of 10 L\*, the scale the bands and curve use.
+    private var lStripe: some View {
         Canvas { context, size in
+            for step in 0..<10 {
+                let x0 = ZoneGeometry.x(lstar: Double(step * 10), width: size.width)
+                let x1 = ZoneGeometry.x(lstar: Double((step + 1) * 10), width: size.width)
+                let shade = step % 2 == 0 ? 0.68 : 0.42
+                context.fill(
+                    Path(CGRect(x: x0, y: 0, width: max(x1 - x0, 0.5), height: size.height)),
+                    with: .color(Color(white: shade))
+                )
+            }
+        }
+        .frame(height: 5)
+    }
+
+    // MARK: The graph
+
+    private var chart: some View {
+        Canvas { context, size in
+            drawBands(context, size)
             guard let histogram, histogram.peak > 0 else { return }
             let peak = Double(histogram.peak)
-            context.blendMode = .plusLighter
-            for (bins, color) in [(histogram.red, Color(red: 1, green: 0.2, blue: 0.2)),
-                                  (histogram.green, Color(red: 0.2, green: 1, blue: 0.2)),
-                                  (histogram.blue, Color(red: 0.25, green: 0.35, blue: 1))] {
+            // Back to front: the L* curve, the channel fills, the pickers.
+            if channels.lightnessOn {
+                var path = Path()
+                for (index, count) in histogram.lightness.enumerated() {
+                    let x = size.width * CGFloat(index) / 255
+                    let y = size.height * (1 - min(Double(count) / peak, 1))
+                    if index == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
+                }
+                context.stroke(path, with: .color(Color(white: 0.78)), lineWidth: 1)
+            }
+            var additive = context
+            additive.blendMode = .plusLighter
+            let fills: [(HistogramChannels, [UInt32], Color)] = [
+                (.red, histogram.red, Color(red: 1, green: 0.2, blue: 0.2)),
+                (.green, histogram.green, Color(red: 0.2, green: 1, blue: 0.2)),
+                (.blue, histogram.blue, Color(red: 0.25, green: 0.35, blue: 1))
+            ]
+            for (flag, bins, color) in fills where Self.drawnChannels(channels).contains(flag) {
                 var path = Path()
                 path.move(to: CGPoint(x: 0, y: size.height))
                 for (index, count) in bins.enumerated() {
@@ -315,14 +421,101 @@ struct HistogramView: View {
                 }
                 path.addLine(to: CGPoint(x: size.width, y: size.height))
                 path.closeSubpath()
-                context.fill(path, with: .color(color.opacity(0.75)))
+                additive.fill(path, with: .color(color.opacity(0.75)))
+            }
+            if let sample {
+                // One thin line per channel, at the picked tone's code.
+                let lines: [(HistogramChannels, Double, Color)] = [
+                    (.red, sample.red, Color(red: 1, green: 0.3, blue: 0.3)),
+                    (.green, sample.green, Color(red: 0.3, green: 1, blue: 0.3)),
+                    (.blue, sample.blue, Color(red: 0.4, green: 0.5, blue: 1)),
+                    (.lightness, sample.lstar * 2.55, Color(white: 0.8))
+                ]
+                for (flag, code, color) in lines where Self.drawnPickers(channels).contains(flag) {
+                    let x = size.width * CGFloat(min(max(code, 0), 255)) / 255
+                    var path = Path()
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                    context.stroke(path, with: .color(color.opacity(0.85)), lineWidth: flag == .lightness ? 1 : 0.75)
+                }
             }
         }
-        .padding(.horizontal, 4).padding(.top, 6)
-        .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 6))
-        .accessibilityElement()
-        .accessibilityLabel("Histogram")
-        .accessibilityValue(histogram == nil ? "No developed photograph" : "Red, green, and blue tones of the developed photograph")
+        .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 4))
+        .frame(maxHeight: .infinity)
+    }
+
+    /// The zone bands and their Roman numerals, behind the tones. Zone V is
+    /// larger: it is the meter's mid-grey.
+    private func drawBands(_ context: GraphicsContext, _ size: CGSize) {
+        for zone in 0..<ZoneLadder.names.count {
+            let x0 = ZoneGeometry.x(lstar: ZoneLadder.lstar[zone], width: size.width)
+            let x1 = ZoneGeometry.x(lstar: ZoneLadder.lstar[zone + 1], width: size.width)
+            let lit = ZoneGeometry.bandLit(zone)
+            context.fill(
+                Path(CGRect(x: x0, y: 0, width: max(x1 - x0, 0), height: size.height)),
+                with: .color(lit ? Color.white.opacity(0.075) : Color.black.opacity(0.18))
+            )
+            let numeral = Text(ZoneLadder.names[zone])
+                .font(.system(size: zone == 5 ? 10 : 7, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(lit ? 0.55 : 0.32))
+            context.draw(
+                numeral,
+                at: CGPoint(x: (x0 + x1) / 2, y: zone == 5 ? size.height / 2 : 8),
+                anchor: .center
+            )
+        }
+    }
+
+    // MARK: The ticks below the graph
+
+    /// R, G, B and L\* tick marks: each toggles its channel.
+    private var channelTicks: some View {
+        HStack(spacing: 0) {
+            tick("R", flag: .red, color: Color(red: 1, green: 0.35, blue: 0.35), label: "Red channel")
+            tick("G", flag: .green, color: Color(red: 0.35, green: 1, blue: 0.35), label: "Green channel")
+            tick("B", flag: .blue, color: Color(red: 0.45, green: 0.55, blue: 1), label: "Blue channel")
+            tick("L*", flag: .lightness, color: Color(white: 0.72), label: "Lightness channel")
+        }
+        .frame(height: 12)
+    }
+
+    private func tick(_ title: String, flag: HistogramChannels, color: Color, label: String) -> some View {
+        let on = channels.contains(flag)
+        return Button {
+            onToggleChannel?(flag)
+        } label: {
+            VStack(spacing: 0) {
+                Rectangle().fill(on ? color : Color.secondary.opacity(0.35)).frame(width: 1, height: 3)
+                Text(title)
+                    .font(.system(size: 7, weight: .medium))
+                    .foregroundStyle(Color.secondary.opacity(on ? 1 : 0.5))
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .help("Show or hide the \(label.lowercased())")
+        .accessibilityLabel(label)
+        .accessibilityValue(on ? "On" : "Off")
+    }
+
+    /// The scene's stops, at 1/3-EV steps, placed by the measured curve's
+    /// green channel: long at whole stops, taller and thicker at 12.5 %.
+    private var evScale: some View {
+        Canvas { context, size in
+            for tick in ZoneGeometry.evTicks(curve: curve, width: size.width) {
+                let height: CGFloat = tick.midtone ? 11 : tick.long ? 7 : 4
+                var path = Path()
+                path.move(to: CGPoint(x: tick.x, y: 0))
+                path.addLine(to: CGPoint(x: tick.x, y: height))
+                context.stroke(
+                    path,
+                    with: .color(Color(white: tick.long || tick.midtone ? 0.75 : 0.5)),
+                    lineWidth: tick.midtone ? 2 : 1
+                )
+            }
+        }
+        .frame(height: 12)
+        .accessibilityHidden(true)
     }
 }
 

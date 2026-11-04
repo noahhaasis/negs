@@ -599,7 +599,28 @@ struct AdjustmentInspector: View {
         // The histogram and workflow tabs stay put above the tab's scrolling sections.
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                HistogramView(histogram: model.histogram).frame(height: 88)
+                VStack(spacing: 2) {
+                    // The zone strip lies over the graph's top edge, just
+                    // below the L* values; the histogram itself takes no clicks.
+                    ZStack(alignment: .topLeading) {
+                        HistogramView(
+                            histogram: model.histogram,
+                            curve: model.toneCurve,
+                            sample: model.toneSample,
+                            channels: model.histogramChannels,
+                            onToggleChannel: { model.histogramChannels.formSymmetricDifference($0) }
+                        )
+                        .frame(height: 116)
+                        ZoneStrip(model: model).padding(.top, 15)
+                    }
+                    .frame(height: 116)
+                    Text(ZoneLabels.headline(model.zoneReadout, sample: model.toneSample))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help("The picked tone, and what each zone's gold number would add to Placement.")
+                }
                 InspectorTabBar(model: model)
             }
             .padding(.horizontal, 20)
@@ -656,6 +677,10 @@ struct AdjustmentInspector: View {
                 control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
             }
             control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
+            // Placement moves the print's tones; Exposure changes the
+            // negative, and the printer compensates for it.
+            control(.slider("Placement (EV)", "camera.placement_ev", -8...8, 0.01))
+                .help("Moves the print's tones along the film-and-print curve; the histogram's gold zone numbers add to it. Exposure changes the negative, and the printer compensates.")
         }
         Section("Lens") {
             control(.slider("Film format (mm)", "camera.film_format_mm", 4...120, 0.1))

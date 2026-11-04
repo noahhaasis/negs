@@ -118,6 +118,13 @@ final class ImageScrollView: NSScrollView {
         let amount = fitting ? min(fit, oneToOne) : oneToOne
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
     }
+    /// Whether the photograph is larger than the viewport, so panning has
+    /// somewhere to go.
+    var canScroll: Bool {
+        guard let documentView else { return false }
+        return documentView.frame.width > contentSize.width + 0.5
+            || documentView.frame.height > contentSize.height + 0.5
+    }
     /// Double-click: fit the whole photograph, or show it at 1:1 about the
     /// clicked point, which then stays under the pointer.
     func toggleZoom(about point: CGPoint) {
@@ -396,6 +403,7 @@ final class PhotographView: NSView {
             drag = .pick(pick: start == .pickSmall ? .small(unit) : .large(unit), start: point, moved: false)
             pushCursor(.crosshair)
         case .pan:
+            guard let scroll = enclosingScrollView as? ImageScrollView, scroll.canScroll else { return }
             drag = .pan
             pushCursor(.closedHand)
         }
