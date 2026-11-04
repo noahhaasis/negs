@@ -131,6 +131,43 @@ fn calibration_thresholds(white: [f64; 3]) -> Result<WhiteThresholds, String> {
         channels: white.map(|v| (0.985 * v).min(0.985)),
     })
 }
+/// A pending trial render; boxed so the solve's steps can await it.
+pub type Rendering<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + 'a>>;
+
+/// How [`place_exposure_with`] renders its trials: `pipeline` on `image`,
+/// as [`Pipeline::process`] does. A browser awaits the GPU's readback.
+pub trait Renderer {
+    fn render<'a>(&'a mut self, pipeline: &'a Pipeline, image: ImageBuf) -> Rendering<'a, ImageBuf>;
+}
+
+/// Renders on `backend` at once, as [`place_exposure`] does.
+struct Now<'b>(&'b dyn ComputeBackend);
+impl Renderer for Now<'_> {
+    fn render<'a>(&'a mut self, pipeline: &'a Pipeline, image: ImageBuf) -> Rendering<'a, ImageBuf> {
+        Box::pin(std::future::ready(Ok(pipeline.process(image, self.0))))
+    }
+}
+
+/// The value of `future`, which must be ready on its first poll: a solve
+/// whose renders all are.
+fn now<T>(future: impl std::future::Future<Output = T>) -> T {
+    let mut future = std::pin::pin!(future);
+    match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        std::task::Poll::Ready(value) => value,
+        std::task::Poll::Pending => unreachable!("a synchronous placement render was pending"),
+    }
+}
+
+/// The solve's trials: the distribution of the output at an exposure.
+trait Trials {
+    fn render(&mut self, ev: f64) -> Rendering<'_, Distribution>;
+}
+impl<F: FnMut(f64) -> Result<Distribution, String>> Trials for F {
+    fn render(&mut self, ev: f64) -> Rendering<'_, Distribution> {
+        Box::pin(std::future::ready(self(ev)))
+    }
+}
+
 #[derive(Debug)]
 struct Solution {
     ev: f64,
@@ -143,10 +180,14 @@ struct Solution {
     budget: f64,
     used_quantiles: usize,
 }
+#[cfg(test)]
 fn solve(
     target: &Distribution,
     mut render: impl FnMut(f64) -> Result<Distribution, String>,
 ) -> Result<Solution, String> {
+    now(solve_with(target, &mut render))
+}
+async fn solve_with(target: &Distribution, trials: &mut dyn Trials) -> Result<Solution, String> {
     // Target-defined eligibility never changes as exposure is tested. Camera
     // night scenes are not driven to a universal middle-grey histogram.
     let selected: Vec<_> = target
@@ -170,14 +211,14 @@ fn solve(
             .collect();
         median(&mut v)
     };
-    let baseline = render(0.)?;
+    let baseline = trials.render(0.).await?;
     let before = residual(&baseline);
     let budget =
         (baseline.near_white_fraction.max(target.near_white_fraction) + EXTRA_WHITE_AREA).min(1.);
     let mut points = Vec::new();
     for i in 0..=12 {
         let ev = -MAX_EV + i as f64 * 0.5;
-        let d = render(ev)?;
+        let d = trials.render(ev).await?;
         points.push((ev, residual(&d)));
     }
     // A robust residual must actually be bracketed and monotone here. Never
@@ -198,7 +239,7 @@ fn solve(
     }
     for _ in 0..8 {
         let mid = (lo + hi) * 0.5;
-        if residual(&render(mid)?) < 0. {
+        if residual(&trials.render(mid).await?) < 0. {
             lo = mid;
         } else {
             hi = mid;
@@ -206,20 +247,20 @@ fn solve(
     }
     let requested = (((lo + hi) * 0.5) * 100.).round() / 100.;
     let mut ev = requested;
-    let mut after = render(ev)?;
+    let mut after = trials.render(ev).await?;
     let limited = ev > 0. && after.near_white_fraction > budget;
     if limited {
         let (mut lo, mut hi) = (0., ev);
         for _ in 0..10 {
             let mid = (lo + hi) * 0.5;
-            if render(mid)?.near_white_fraction <= budget {
+            if trials.render(mid).await?.near_white_fraction <= budget {
                 lo = mid;
             } else {
                 hi = mid;
             }
         }
         ev = (lo * 100.).floor() / 100.;
-        after = render(ev)?;
+        after = trials.render(ev).await?;
     }
     Ok(Solution {
         ev,
@@ -314,6 +355,17 @@ pub fn place_exposure(
     reference: &ImageBuf,
     backend: &dyn ComputeBackend,
 ) -> Result<PlacementAnalysis, String> {
+    now(place_exposure_with(pipeline, source, reference, &mut Now(backend)))
+}
+
+/// [`place_exposure`] with its trials rendered by `renderer`, which may
+/// await them: a browser's GPU reads back between tasks.
+pub async fn place_exposure_with(
+    pipeline: &Pipeline,
+    source: &ImageBuf,
+    reference: &ImageBuf,
+    renderer: &mut dyn Renderer,
+) -> Result<PlacementAnalysis, String> {
     pipeline.params.prep.validate()?;
     if !valid_dimensions(source) || !valid_dimensions(reference) {
         return Err("Invalid exposure placement image dimensions".into());
@@ -350,7 +402,7 @@ pub fn place_exposure(
     // An overexposed uniform patch measures this film/paper/finishing white,
     // including sub-digital whites that a fixed clipping threshold would miss.
     let white_source = ImageBuf::from_data(16, 16, vec![from_f64(65536.); 16 * 16 * 3]);
-    let white = display_srgb(meter.process(white_source, backend), &meter);
+    let white = display_srgb(renderer.render(&meter, white_source).await?, &meter);
     let white = std::array::from_fn(|c| white.pixels().map(|p| to_f64(p[c])).fold(0., f64::max));
     let thresholds = calibration_thresholds(white)?;
     let target = distribution(
@@ -359,20 +411,9 @@ pub fn place_exposure(
         reference.height,
         thresholds,
     )?;
-    let mut cache = std::collections::HashMap::<u64, Distribution>::new();
-    let solution = solve(&target, |ev| {
-        // Prep's stored value is f32; use that same value in every trial/cache.
-        let ev = ev as f32;
-        let key = (ev as f64).to_bits();
-        if let Some(d) = cache.get(&key) {
-            return Ok(d.clone());
-        }
-        meter.params.prep.exposure_ev = ev;
-        let output = display_srgb(meter.process(source.clone(), backend), &meter);
-        let d = distribution(&rgba(&output), output.width, output.height, thresholds)?;
-        cache.insert(key, d.clone());
-        Ok(d)
-    })?;
+    let mut trials = Placement { meter, source, thresholds, cache: Default::default(), renderer };
+    let solution = solve_with(&target, &mut trials).await?;
+    let source = trials.source;
     Ok(PlacementAnalysis {
         policy: POLICY,
         exposure_ev: solution.ev,
@@ -390,6 +431,34 @@ pub fn place_exposure(
         preview_dimensions: [source.width, source.height],
     })
 }
+/// The solve's trials through the selected film: the proxy at each
+/// exposure, displayed and measured, each exposure once.
+struct Placement<'r> {
+    meter: Pipeline,
+    source: ImageBuf,
+    thresholds: WhiteThresholds,
+    cache: std::collections::HashMap<u64, Distribution>,
+    renderer: &'r mut dyn Renderer,
+}
+impl Trials for Placement<'_> {
+    fn render(&mut self, ev: f64) -> Rendering<'_, Distribution> {
+        Box::pin(async move {
+            // Prep's stored value is f32; use that same value in every trial/cache.
+            let ev = ev as f32;
+            let key = (ev as f64).to_bits();
+            if let Some(d) = self.cache.get(&key) {
+                return Ok(d.clone());
+            }
+            self.meter.params.prep.exposure_ev = ev;
+            let output = self.renderer.render(&self.meter, self.source.clone()).await?;
+            let output = display_srgb(output, &self.meter);
+            let d = distribution(&rgba(&output), output.width, output.height, self.thresholds)?;
+            self.cache.insert(key, d.clone());
+            Ok(d)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

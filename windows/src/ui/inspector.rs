@@ -86,7 +86,7 @@ enum When {
     MeterAuto,
     /// Film format › Custom…: the long-edge slider.
     CustomFormat,
-    /// Not among the Lab's basics: with Show all controls, or once changed.
+    /// Not among the Lab's basics: with Advanced controls, or once changed.
     Shows(&'static str),
     ScanToggle,
     ScanSection,
@@ -114,7 +114,7 @@ enum Kind {
     ExposureOffset,
     /// Lab › Camera › Film format: stills formats, or Custom….
     FilmFormat,
-    /// Lab › Show all controls (a preference).
+    /// Lab › Advanced controls (a preference).
     AllControls,
     /// The paper row while scanning film directly.
     PaperSkipped,
@@ -147,7 +147,7 @@ enum Note {
     Size,
     /// What the brightness match did, or why it can't.
     Brightness,
-    /// What Show all controls shows.
+    /// What Advanced controls shows.
     AllControls,
 }
 
@@ -924,7 +924,7 @@ fn create_row(ins: &mut Inspector, fonts: &super::Fonts, index: usize) {
         }
         Kind::MatchBrightness => controls.push(check("Match camera brightness")),
         Kind::AllControls => {
-            let c = check("Show all controls");
+            let c = check("Advanced controls");
             super::dialogs::tooltip(c, "Shows every Lab setting. Off, the Lab shows the few most photographs need, and any that you or a preset changed.");
             controls.push(c);
         }
@@ -3603,7 +3603,7 @@ mod tests {
     }
 
     /// `Inspector.swift`'s Lab: each group's basics, anything changed from
-    /// its default, and everything with Show all controls.
+    /// its default, and everything with Advanced controls.
     #[test]
     fn the_lab_shows_basics_and_changes() {
         let mut model = model();

@@ -42,6 +42,17 @@ make = " ".join(exiv2("Exif.Image.Make"))
 model = " ".join(exiv2("Exif.Image.Model"))
 orientation = int(exiv2("Exif.Image.Orientation")[0])
 artist = " ".join(exiv2("Exif.Image.Artist"))
+# The camera preview's colour space, as EXIF ColorSpace (1: sRGB, 2: Adobe RGB),
+# so Match camera brightness can use the preview (spektrafilm-io brightness.rs,
+# macOS CameraBrightnessReference): the camera's own setting, or for a DNG its
+# PreviewColorSpace (2: sRGB, 3: Adobe RGB).
+tags = [line.split()[:2] for line in subprocess.run(["exiv2", "-Pkv", nef], capture_output=True, text=True).stdout.splitlines()]
+declared = {key: value for key, value, *_ in (t + [""] for t in tags if t)
+            if key in ("Exif.Photo.ColorSpace", "Exif.Nikon3.ColorSpace", "Exif.Canon.ColorSpace") or key.endswith(".PreviewColorSpace")}
+spaces = {({"2": 1, "3": 2} if key.endswith(".PreviewColorSpace") else {"1": 1, "2": 2}).get(value) for key, value in declared.items()}
+spaces.discard(None)
+assert len(spaces) == 1, f"The camera preview's colour space isn't known: {declared}"
+preview_space = spaces.pop()
 assert model in ("NIKON Z f", "NIKON D800", "Canon EOS 6D", "Canon EOS 2000D"), f"Unsupported camera: {model}"
 
 if model != "NIKON Z f":
@@ -234,6 +245,10 @@ main_entries = {
 }
 if artist:
     main_entries[315] = (ASCII, artist)
+# The preview's EXIF: only its ColorSpace.
+exif_at = len(body)
+body += directory({40961: (SHORT, [preview_space])}, exif_at)
+main_entries[34665] = (LONG, [exif_at])
 main_at = len(body)
 body += directory(main_entries, main_at)
 struct.pack_into("<I", body, 4, main_at)

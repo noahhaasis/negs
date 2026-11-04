@@ -48,6 +48,20 @@ export function client(wasm, kind) {
       engine.loadDecoded(pixels, width, height, colour);
       return { width: fullWidth, height: fullHeight, kept: width, keptHeight: height, colour };
     },
+    // Prep › Match camera brightness (app.js): the engine's placement of
+    // the loaded photograph against `reference` (linear sRGB, from
+    // web/decoder.js), as JSON; and the note for a reason it failed with.
+    placeExposure: (film, paper, params, reference, width, height) => engine.placeExposure(film, paper, params, reference, width, height),
+    brightnessFailure: (reason) => [...wasm.brightnessFailure(reason)],
+    // A film or paper preview (app.js): the loaded photograph through these
+    // stocks, its frame within `longSide`, then cropped and turned as an
+    // export is. The engine keeps up to `pipelines` stocks calibrated.
+    async thumbnail(film, paper, params, longSide, pipelines, crop, rotation) {
+      const r = await dataResult(wasm, () => engine.thumbnail(film, paper, params, longSide, pipelines), (r) =>
+        ({ width: r.width, height: r.height, rgba: r.rgba, backend: r.backend, elapsedMs: r.elapsedMs, stages: r.stages }));
+      return { ...r, ...applyRgba(r.rgba, r.width, r.height, crop, rotation), memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) };
+    },
+    releaseThumbnails: () => engine.releaseThumbnails(),
     async render(film, paper, params, maxDim, interactive, present = false) {
       return dataResult(wasm, () => engine.render(film, paper, params, maxDim, interactive, present), (r) =>
         ({ width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, backend: r.backend, elapsedMs: r.elapsedMs, stages: r.stages,

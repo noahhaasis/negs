@@ -75,6 +75,13 @@ impl PrepParams {
         *self == Self::default()
     }
 
+    /// Only the exposure differs from neutral: a uniform gain, which the GPU
+    /// path folds into its front pass with the camera's exposure instead of
+    /// preparing the frame on the CPU.
+    pub fn is_exposure_only(&self) -> bool {
+        self.exposure_ev != 0.0 && (PrepParams { exposure_ev: 0.0, ..*self }).is_identity()
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if !self.exposure_ev.is_finite() || !(-3.0..=3.0).contains(&self.exposure_ev) {
             return Err("Invalid Prep exposure_ev; expected a finite value from -3 to 3".into());
@@ -134,17 +141,26 @@ impl PreparedKey {
 /// ([`crate::pipeline::Pipeline::with_prepared_frame`]).
 #[derive(Clone, Default)]
 pub struct PreparedFrame(std::sync::Arc<std::sync::Mutex<Option<Prepared>>>);
-type Prepared = (PreparedKey, std::sync::Arc<ImageBuf>);
+/// The output, and the image key that names its pixels to the GPU.
+type Prepared = (PreparedKey, std::sync::Arc<ImageBuf>, u64);
+
+/// Image keys for prepared frames, from the top half of `u64` so they never
+/// meet a caller's source keys (which count up from 0).
+static UPLOAD_KEYS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 63);
 
 impl PreparedFrame {
-    /// The kept output if it was made with `key`; any other is dropped first,
-    /// so it never lives beside the frame that replaces it.
-    pub(crate) fn take(&self, key: &PreparedKey) -> Option<std::sync::Arc<ImageBuf>> {
+    /// The kept output and its image key, if it was made with `key`; any
+    /// other is dropped first, so it never lives beside the frame that
+    /// replaces it.
+    pub(crate) fn take(&self, key: &PreparedKey) -> Option<(std::sync::Arc<ImageBuf>, u64)> {
         let mut slot = self.0.lock().unwrap();
-        slot.take().filter(|(kept, _)| kept == key).map(|(_, image)| image)
+        slot.take().filter(|(kept, ..)| kept == key).map(|(_, image, upload)| (image, upload))
     }
-    pub(crate) fn put(&self, key: PreparedKey, image: std::sync::Arc<ImageBuf>) {
-        *self.0.lock().unwrap() = Some((key, image));
+    /// Keep `image`, under the image key `take` gave for it or a new one.
+    pub(crate) fn put(&self, key: PreparedKey, image: std::sync::Arc<ImageBuf>, upload: Option<u64>) -> u64 {
+        let upload = upload.unwrap_or_else(|| UPLOAD_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        *self.0.lock().unwrap() = Some((key, image, upload));
+        upload
     }
     pub fn clear(&self) {
         *self.0.lock().unwrap() = None;

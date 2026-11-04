@@ -308,7 +308,9 @@ impl Pipeline {
     /// Prep reads changes (its settings, the exposure before it, the input
     /// decoding and the frame size), so other edits skip Prep. The caller
     /// promises that every image it renders with `frame` at one size has the
-    /// same pixels, and uses a new slot when they change.
+    /// same pixels, and uses a new slot when they change. The kept frame
+    /// stays uploaded on a GPU that keeps keyed inputs, under a key of its
+    /// own (`1 << 63` and up: the caller's image keys stay below).
     pub fn with_prepared_frame(mut self, frame: crate::prep::PreparedFrame) -> Self {
         self.prepared_frame = Some(frame);
         self
@@ -1154,19 +1156,25 @@ impl Pipeline {
         // caller's, so they have no key.
         let decoded;
         let prepared;
-        let prep_active = !self.params.prep.is_identity();
-        // Prep changes the upload, including through its whole-frame spatial base.
-        // A source-image cache key cannot identify these newly prepared pixels.
-        let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active);
+        // Exposure-only Prep is a uniform gain: it joins the exposure scale
+        // below (float rounding from the CPU's per-pixel multiply, approved
+        // for the GPU path), so the upload keeps its source key.
+        let fold_prep_exposure = self.params.prep.is_exposure_only();
+        let prep_active = !self.params.prep.is_identity() && !fold_prep_exposure;
+        // Other Prep changes the upload, including through its whole-frame spatial base.
+        // A source-image cache key cannot identify these newly prepared pixels;
+        // a kept prepared frame has its own, so a Lab edit doesn't upload it again.
+        let mut image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active);
         let image = if prep_active {
             let key = crate::prep::PreparedKey::new(image, &self.params, autoexposure_ev);
             let cached = self.prepared_frame.as_ref().and_then(|frame| frame.take(&key));
+            let upload = cached.as_ref().map(|(_, upload)| *upload);
             prepared = match cached {
-                Some(image) => image,
+                Some((image, _)) => image,
                 None => std::sync::Arc::new(stages::filming::prepare_input_from(image, &self.params, autoexposure_ev)?),
             };
             if let Some(frame) = &self.prepared_frame {
-                frame.put(key, prepared.clone());
+                image_key = Some(frame.put(key, prepared.clone(), upload));
             }
             &*prepared
         } else if self.params.io.input_cctf_decoding {
@@ -1180,7 +1188,8 @@ impl Pipeline {
         if !prep_active && let Some(frame) = &self.prepared_frame {
             frame.clear(); // neutral Prep needs no copy of the frame
         }
-        // Bake the exposure scale (auto-exposure × manual EV compensation)
+        // Bake the exposure scale (auto-exposure × manual EV compensation ×
+        // an exposure-only Prep)
         // into the front-pass matrix. The upsampler is homogeneous in the
         // input RGB, so scaling the matrix is
         // equivalent to scaling the input — saves a separate "scale" compute
@@ -1193,6 +1202,9 @@ impl Pipeline {
             }
             if self.params.camera.exposure_compensation_ev != 0.0 {
                 exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
+            }
+            if fold_prep_exposure {
+                exposure_scale_f64 *= (self.params.prep.exposure_ev as f64).exp2();
             }
         }
         // B&W/slide filming exposure correction is a linear scale on the raw

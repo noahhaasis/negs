@@ -11,7 +11,7 @@ const rowOf = (label, group) => {
   return [...scope.querySelectorAll(".ctl")].find((r) => (r.querySelector(".label, label > span")?.textContent) === label);
 };
 // Drag Exposure: input events render interactive frames, change settles.
-let row = rowOf("Exposure (EV)");
+let row = rowOf("Negative exposure (EV)");
 let range = row.querySelector("input[type=range]");
 let n = negs.renders.length;
 for (const v of [0.3, 0.6, 0.9, 1.2]) { range.value = v; range.dispatchEvent(new Event("input")); await wait(40); }
@@ -66,7 +66,7 @@ const print = [...document.querySelectorAll("fieldset.section")].find((f) => f.q
 out.scanning = { printDisabled: print.disabled, footer: !print.querySelector(".footer").hidden, paperHidden: document.getElementById("paper-row").hidden };
 // Reset Adjustments keeps the film and paper, restores scan for the film.
 pick("film", "kodak_vision3_250d");
-rowOf("Exposure (EV)").querySelector(".value").click();
+rowOf("Negative exposure (EV)").querySelector(".value").click();
 field = document.querySelector(".value-field"); field.value = "2"; field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
 document.getElementById("reset").click();
 await wait(300);

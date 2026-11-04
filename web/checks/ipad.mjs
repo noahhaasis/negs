@@ -24,7 +24,7 @@ export default async function (test) {
     await wait(400);
     if (env.IPAD_NATIVE === "1") await step("native exposure slider drag", async () => {
       const box = await execute(`
-        const track = document.querySelector('input[aria-label="Exposure (EV)"]').parentElement;
+        const track = document.querySelector('input[aria-label="Negative exposure (EV)"]').parentElement;
         track.scrollIntoView({ block: 'center' });
         const r = track.getBoundingClientRect();
         if (r.width < 20 || r.height < 5 || r.y < 0 || r.bottom > innerHeight) throw new Error('Exposure track is not visible: ' + JSON.stringify(r.toJSON()));
@@ -38,13 +38,13 @@ export default async function (test) {
       ];
       await call("POST", "/actions", { actions: [{ type: "pointer", id: "finger", parameters: { pointerType: "mouse" }, actions }] });
     });
-    for (const value of [-5, 5, 0]) await step(`exposure slider ${value}`, () => input("Exposure (EV)", value));
+    for (const value of [-5, 5, 0]) await step(`exposure slider ${value}`, () => input("Negative exposure (EV)", value));
     await step("rapid exposure inputs", async () => {
       for (const value of [-4, 4, -3, 3, -2, 2, -1, 1, 0]) {
-        await input("Exposure (EV)", value, "input");
+        await input("Negative exposure (EV)", value, "input");
         await wait(50);
       }
-      await input("Exposure (EV)", .7);
+      await input("Negative exposure (EV)", .7);
     });
     const finalEV = await execute("return negs.state().params.camera.exposure_compensation_ev;");
     if (finalEV !== .7) throw new Error(`Rapid edits ended at ${finalEV}, expected 0.7`);
@@ -108,7 +108,7 @@ export default async function (test) {
     await step("reset for lifecycle checks", () => start());
     await execute("document.querySelector('#tabs [data-tab=\"camera\"]').click();");
     await step("typed exposure clamps below its minimum", () => execute(`
-      const range = document.querySelector('input[aria-label="Exposure (EV)"]');
+      const range = document.querySelector('input[aria-label="Negative exposure (EV)"]');
       range.closest('.slider').querySelector('.value').click();
       const field = document.querySelector('input.value-field');
       field.value = '-999999';
@@ -116,7 +116,7 @@ export default async function (test) {
     `));
     if (await execute("return negs.state().params.camera.exposure_compensation_ev;") !== -5) throw new Error('Typed exposure was not clamped');
     await step("invalid typed exposure leaves the edit intact", () => execute(`
-      const range = document.querySelector('input[aria-label="Exposure (EV)"]');
+      const range = document.querySelector('input[aria-label="Negative exposure (EV)"]');
       range.closest('.slider').querySelector('.value').click();
       const field = document.querySelector('input.value-field');
       field.value = 'Infinity';
@@ -155,7 +155,7 @@ export default async function (test) {
     await step("reset after lifecycle checks", () => start());
   } else if (phase === "zoom") {
     await step("zoom Fuji to 100%", () => execute("negs.view.actualSize();"));
-    await step("edit at 100% zoom", () => input("Exposure (EV)", 1));
+    await step("edit at 100% zoom", () => input("Negative exposure (EV)", 1));
     await step("zoom Fuji back to fit", () => execute("negs.view.fit();"));
     await step("reset after zoom", () => start());
   } else if (phase === "heavy") {
@@ -187,7 +187,7 @@ export default async function (test) {
       "scanner.unsharp_mask.0": 3,
     }));
   } else if (phase === "after-export") {
-    await step("edit after full-resolution export", () => input("Exposure (EV)", 1));
+    await step("edit after full-resolution export", () => input("Negative exposure (EV)", 1));
     await step("reset after full-resolution export", () => execute("document.getElementById('reset').click();"));
   } else if (phase === "limited-export") {
     const before = await probe();
@@ -197,7 +197,7 @@ export default async function (test) {
     if (!after.message.includes('needs too much memory') || after.exports.length !== before.exports.length) throw new Error('Expected the browser memory limit message');
     if (after.engineInstances !== before.engineInstances) throw new Error('Memory rejection restarted the engine');
     log("limited-export-pass", { state: after });
-    await step("edit after limited export", () => input("Exposure (EV)", .3));
+    await step("edit after limited export", () => input("Negative exposure (EV)", .3));
   } else if (phase === "export") {
     const before = await probe();
     log("export-start", { state: before });

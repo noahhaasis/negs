@@ -187,7 +187,7 @@ pub struct Preferences {
     /// Settings › Use less memory for export: grain channels one at a time.
     /// Only exports read it; previews always develop the channels together.
     pub low_memory_export: bool,
-    /// Lab › Show all controls. Off, the Lab shows each group's basics and
+    /// Lab › Advanced controls. Off, the Lab shows each group's basics and
     /// anything changed from its default.
     pub lab_all_controls: bool,
     /// The scope above the tabs: "Histogram" or "Waveform".

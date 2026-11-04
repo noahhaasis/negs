@@ -5,11 +5,13 @@
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 
-import { SECTIONS, POST_SECTIONS, optionTitle, snap, formatValue } from "./controls.js";
+import { PREP_SECTIONS, SECTIONS, OUTPUT_SECTIONS, optionTitle, snap, formatValue } from "./controls.js";
 import { createView } from "./view.js";
 import { placeholder } from "./placeholder.js";
 import * as Border from "./border.js";
 import * as Crop from "./crop.js";
+import * as Stocks from "./stocks.js";
+import * as Help from "./help.js";
 import { createCropEditor } from "./crop-editor.js";
 import { fetchFailed } from "./engine.js";
 import { DEFAULT_SAMPLE, createSamplePicker } from "./samples.js";
@@ -23,7 +25,9 @@ let tutorial = null, tutorialPresentation = false, tutorialRestoring = false;
 // complete RuntimeParams, starting from the engine's defaults. Values a
 // film's presets fill stay null until edited.
 let catalog = { profiles: [], defaults: {}, nullable_paths: [] };
-const state = { film: "", paper: "", params: {} };
+// `match`: Prep › Match camera brightness while it's on (see `matchInputs`):
+// { ev, inputs, limited }, ev null until solved.
+const state = { film: "", paper: "", params: {}, match: null };
 // Every value a film's presets fill (macOS Stock.presetPaths): a film change resets them.
 const GRAIN_FIELDS = ["rms_granularity", "density_min", "uniformity", "particle_scale_sublayers"];
 const PRESET_PATHS = [
@@ -212,26 +216,30 @@ function isModified(path) {
 const params = () => JSON.stringify({ ...state.params, io: { ...state.params.io, rotate_cw: 0 } });
 
 // A new film brings its own grain, DIR and halation presets, as upstream
-// applies them (macOS EditorModel.chooseFilm).
-function chooseFilm(id) {
-  state.film = id;
-  set("film_render.development_time", null);
-  for (const path of PRESET_PATHS) set(path, null);
-  pairFilm();
+// applies them (macOS EditorModel.chooseFilm). `into`: the edit, or a copy
+// (a preview tile's).
+function chooseFilm(id, into = state) {
+  into.film = id;
+  set("film_render.development_time", null, into.params);
+  for (const path of PRESET_PATHS) set(path, null, into.params);
+  pairFilm(into);
 }
-function choosePaper(id) {
-  state.paper = id;
-  set("print_render.development_time", null);
+function choosePaper(id, into = state) {
+  into.paper = id;
+  set("print_render.development_time", null, into.params);
 }
 // A slide scans directly; a film with a target paper prints on it. Others
 // keep the paper, as on desktop.
-function pairFilm() {
-  const f = stock(state.film);
+function pairFilm(into = state) {
+  const f = stock(into.film);
   if (!f) return;
-  set("io.scan_film", f.positive);
-  if (papers().some((p) => p.id === f.target_print) && state.paper !== f.target_print) {
-    state.paper = f.target_print;
-    set("print_render.development_time", null);
+  set("io.scan_film", f.positive, into.params);
+  // The film set Scan film directly, not you: its row shows while on and
+  // hides again with a negative film.
+  if (into === state) revealed.delete("io.scan_film");
+  if (papers().some((p) => p.id === f.target_print) && into.paper !== f.target_print) {
+    into.paper = f.target_print;
+    set("print_render.development_time", null, into.params);
   }
 }
 
@@ -240,6 +248,7 @@ function pairFilm() {
 function resetAdjustments() {
   const kept = ["io.rotate_cw", "io.photo_long_side_px"].map((path) => [path, get(path)]);
   state.params = structuredClone(catalog.defaults);
+  state.match = newMatch();
   for (const [path, value] of kept) set(path, value);
   set("io.scan_film", stock(state.film)?.positive ?? false);
 }
@@ -272,6 +281,20 @@ function binding(c) {
       set: (v) => setStock(c.path, c.index, v),
       initial: () => stockDefaults(c.path)[c.index] ?? 0,
       modified: () => { const v = stockValues(c.path)[c.index]; return v !== undefined && !near(v, stockDefaults(c.path)[c.index] ?? 0); },
+    };
+  }
+  if (c.kind === "offset") {
+    // Prep's Exposure: the user's exposure above the match (macOS
+    // EditorModel.exposureOffset), within the engine's ±3 EV in all.
+    return {
+      get: () => get(c.path) - matchedEv(),
+      set: (v) => {
+        const m = matchedEv();
+        const offset = Math.min(Math.max(Math.round(v / c.step) * c.step, -3 - m), 3 - m);
+        set(c.path, Math.min(3, Math.max(-3, Math.abs(offset) < 1e-9 ? m : m + offset)));
+      },
+      initial: () => 0,
+      modified: () => Math.abs(get(c.path) - matchedEv()) > 1e-6,
     };
   }
   if (c.border) {
@@ -309,10 +332,88 @@ const actions = {
   balancePrint: { run: balancePrint, busy: () => balancing, busyLabel: "Balancing…", enabled: () => !balancing && !!host && !get("io.scan_film") },
 };
 
+// The (i) beside a control: its tooltip in a bubble, on click or tap, since
+// phones have no hover. Clicking elsewhere, Escape or scrolling closes it.
+const tip = el("div", { className: "tip", id: "tip", role: "tooltip" });
+tip.setAttribute("popover", "auto");
+document.body.append(tip);
+let tipFor = null, tipWasOpen = false;
+tip.addEventListener("toggle", (ev) => {
+  if (ev.newState !== "closed") return;
+  tipFor?.setAttribute("aria-expanded", "false");
+  tipFor = null;
+});
+// Forgets the (i) at once: the toggle event comes a task later.
+function closeTip() {
+  if (!tipFor) return;
+  tipFor.setAttribute("aria-expanded", "false");
+  tipFor = null;
+  tip.hidePopover();
+}
+// `text`: a string, or a function for one that depends on the edit.
+function info(label, text) {
+  const button = el("button", { type: "button", className: "info" });
+  button.setAttribute("aria-label", `About ${label}`);
+  button.setAttribute("aria-expanded", "false");
+  // Light dismiss closes it on the press, before the click: a click on the
+  // (i) that was open only closes it.
+  button.addEventListener("pointerdown", () => { tipWasOpen = tipFor === button; });
+  button.addEventListener("click", (ev) => {
+    // Not the group's foldout or the label's control.
+    ev.preventDefault();
+    ev.stopPropagation();
+    const open = tipWasOpen || tipFor === button;
+    tipWasOpen = false;
+    closeTip();
+    if (open) return;
+    tip.textContent = typeof text === "function" ? text() : text;
+    tipFor = button;
+    button.setAttribute("aria-expanded", "true");
+    tip.showPopover();
+    // Under the (i), or over it where the screen ends; inside the window.
+    const r = button.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8))}px`;
+    const top = r.bottom + 4 + h > innerHeight - 8 ? r.top - 4 - h : r.bottom + 4;
+    tip.style.top = `${Math.max(8, Math.min(top, innerHeight - h - 8))}px`;
+  });
+  return button;
+}
+// A static label's leading text gets its (i) (the stock area's rows).
+function labelInfo(label, text) {
+  const node = [...label.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+  const title = node.textContent.trim();
+  node.replaceWith(el("span", { className: "label-line" }, el("span", { textContent: title }), info(title, text)));
+  label.removeAttribute("title");
+}
+
+// A control's tooltip (help.js): its own, else its path's. Prep's Exposure
+// reads differently while it's an offset on the match (macOS Inspector).
+function helpFor(c) {
+  if (c.kind === "offset") {
+    return () => state.match
+      ? "Brighter or darker than the match, in stops. It stays when the match changes with the film, paper or a preset."
+      : "Brightens or darkens the scene before the film, in stops. Unlike Negative exposure, the print doesn’t make up for it.";
+  }
+  return c.help ?? Help.PATHS[c.path] ?? null;
+}
+
 function buildControl(c) {
   const row = buildRow(c);
-  if (c.path) row.dataset.tutorialPath = c.path;
-  if (c.help) row.title = c.help;
+  if (c.path ?? c.tutorial) row.dataset.tutorialPath = c.path ?? c.tutorial;
+  const help = helpFor(c);
+  if (help) {
+    const button = info(c.label, help);
+    if (c.kind === "action") row.append(button);
+    else if (c.kind === "styles") row.prepend(el("div", { className: "head" }, el("span", { className: "label", textContent: c.label }), button));
+    else row.querySelector(".head > .label, :scope > label > span")?.after(button);
+  }
+  // While matched the meter only sets where the highlight limit starts, so
+  // Auto exposure shows when matching is off, or when it's changed.
+  if (c.metering) {
+    syncs.push(() => {
+      row.hidden = !shownWhen(c.when) || (matchActive() && !isModified("camera.auto_exposure") && !isModified("camera.auto_exposure_method"));
+    });
+  }
   // A border setting: shown for its styles, off while the border is.
   if (c.border && c.border !== "enabled") {
     syncs.push(() => {
@@ -328,13 +429,28 @@ function buildRow(c) {
   if (c.kind === "styles") return buildStyles(c);
   if (c.kind === "action") {
     const a = actions[c.action];
-    const button = el("button", { type: "button", className: "btn", textContent: c.label, title: c.help });
+    const button = el("button", { type: "button", className: "btn", textContent: c.label });
     button.addEventListener("click", () => a.run());
     syncs.push(() => {
       button.disabled = !a.enabled();
       button.textContent = a.busy() ? a.busyLabel : c.label;
     });
     return el("div", { className: "ctl action" }, button);
+  }
+  if (c.kind === "match") {
+    const sw = el("input", { type: "checkbox", className: "switch" });
+    sw.addEventListener("change", () => setMatch(sw.checked));
+    const row = el("div", { className: "ctl row" }, el("label", {}, el("span", { textContent: c.label }), sw));
+    // Camera RAWs only, for now: a JPEG's own pixels as the reference isn't
+    // in the browser yet.
+    syncs.push(() => { sw.checked = !!state.match; row.hidden = !photo?.raw; });
+    return row;
+  }
+  if (c.kind === "note") {
+    const note = el("p", { className: "hint" });
+    const row = el("div", { className: "ctl" }, note);
+    syncs.push(() => { const text = matchNote(); row.hidden = !text; note.textContent = text ?? ""; });
+    return row;
   }
   const b = binding(c);
   // A border change is a display pass; anything else renders.
@@ -486,7 +602,7 @@ function remembered(key, fallback) {
   try { return JSON.parse(localStorage.getItem(`negs.${key}`)) ?? fallback; } catch { return fallback; }
 }
 function remember(key, value) {
-  if ((tutorialPresentation || tutorialRestoring) && ["groups", "pane", "tab", "sheet"].includes(key)) return;
+  if ((tutorialPresentation || tutorialRestoring) && ["groups", "pane", "tab", "sheet", "stockFolds", "matchNewRaws"].includes(key)) return;
   try { localStorage.setItem(`negs.${key}`, JSON.stringify(value)); } catch {}
 }
 
@@ -538,9 +654,49 @@ function touchSlider(track, range) {
   track.addEventListener("pointercancel", end);
 }
 
+// Advanced controls (Settings; macOS calls it the same): off, the Lab shows
+// the controls most photographs need (controls.js `basic`, `advanced`) and
+// any that's off its default, so a preset never changes what you can't see.
+// A row shown for its change stays until you switch pane or tab, reset or
+// open a photograph, so setting it back doesn't pull it from under you.
+let advanced = remembered("advanced", false);
+const revealed = new Set();
+function changedShows(key, changed) {
+  if (changed) revealed.add(key);
+  return revealed.has(key);
+}
+// Tucks `node` away while Advanced controls is off and `shows()` is false.
+// Returns whether it showed at the last sync.
+function tuck(node, shows) {
+  let on = true;
+  syncs.push(() => {
+    on = advanced || shows();
+    node.classList.toggle("tucked", !on);
+  });
+  return () => on;
+}
+function forgetRevealed() {
+  revealed.clear();
+  sync();
+}
+
+// The Lab's note that Advanced controls hides some: at the end of every
+// Lab tab on the sheet, once at the Lab's end in the sidebar.
+function advancedHint(tab) {
+  const open = el("button", { type: "button", className: "link", textContent: "Settings › Advanced controls" });
+  open.addEventListener("click", () => openSettings());
+  const hint = el("p", { className: `hint advanced-hint ${tab ? "per-tab" : "lab-end"}` }, "Some settings are hidden. ", open, " shows them all.");
+  if (tab) hint.dataset.tab = tab;
+  hint.dataset.pane = "lab";
+  syncs.push(() => { hint.hidden = advanced; });
+  return hint;
+}
+
 function buildControls() {
+  $("scroll").addEventListener("scroll", closeTip, { passive: true });
+  addEventListener("resize", closeTip);
   const opened = remembered("groups", {});
-  const sections = [...SECTIONS.map((s) => [s, "lab"]), ...POST_SECTIONS.map((s) => [s, "post"])];
+  const sections = [...PREP_SECTIONS.map((s) => [s, "prep"]), ...SECTIONS.map((s) => [s, "lab"]), ...OUTPUT_SECTIONS.map((s) => [s, "output"])];
   for (const [section, pane] of sections) {
     // A fieldset, so a section or group that is off disables its controls.
     const body = el("fieldset", { className: "section" }, el("h2", { textContent: section.title }));
@@ -548,14 +704,34 @@ function buildControls() {
     body.dataset.pane = pane;
     // A phone tab with several sections keeps their titles.
     body.classList.toggle("titled", sections.filter(([s]) => sectionId(s) === body.dataset.tab).length > 1);
-    for (const c of section.controls ?? []) body.append(buildControl(c));
+    const lab = pane === "lab";
+    // Whether each of the section's loose controls and groups shows.
+    const parts = [];
+    for (const c of section.controls ?? []) {
+      const row = buildControl(c);
+      body.append(row);
+      if (!lab) continue;
+      if (!c.advanced) parts.push(() => true);
+      else { const b = binding(c); parts.push(tuck(row, () => changedShows(c.path, b.modified()))); }
+    }
+    if (section.raw) syncs.push(() => { body.hidden = !photo?.raw; });
     for (const group of section.groups ?? []) {
       const key = `${section.title}/${group.title}`;
       const details = el("details", { open: opened[key] ?? group.open ?? false });
       details.dataset.tutorialGroup = key;
       details.addEventListener("toggle", () => remember("groups", { ...remembered("groups", {}), [key]: details.open }));
       const summary = el("summary", {}, el("span", { textContent: group.title }));
-      const controls = el("fieldset", { className: "controls" }, ...group.controls.map(buildControl));
+      if (Help.GROUPS[group.title]) summary.append(info(group.title, Help.GROUPS[group.title]));
+      const controls = el("fieldset", { className: "controls" });
+      // Past the basics, each control shows with Advanced controls or once changed.
+      const changed = [];
+      group.controls.forEach((c, i) => {
+        const row = buildControl(c);
+        controls.append(row);
+        if (!lab || i < (group.basic ?? 0) || c.kind === "action") return;
+        const b = binding(c), id = c.index == null ? c.path : `${c.path}.${c.index}`;
+        changed.push(tuck(row, () => changedShows(id, b.modified())));
+      });
       if (group.enable) {
         const sw = el("input", { type: "checkbox", className: "switch", title: `${group.title} on or off` });
         sw.setAttribute("aria-label", group.title);
@@ -572,6 +748,12 @@ function buildControls() {
       // on desktop; the edit keeps them for the next RAW.
       if (group.raw) syncs.push(() => { details.hidden = !photo?.raw; });
       body.append(details);
+      // A group with no basics shows with Advanced controls, or once
+      // something in it changed. After its controls: their syncs run first.
+      if (lab) {
+        parts.push(group.basic ? () => true
+          : tuck(details, () => changedShows(key, !!group.enable && isModified(group.enable)) || changed.some((shown) => shown())));
+      }
     }
     if (section.print) {
       const footer = el("p", { className: "hint footer", textContent: section.footer });
@@ -583,14 +765,24 @@ function buildControls() {
     } else if (section.footer) {
       body.append(el("p", { className: "hint footer", textContent: section.footer }));
     }
-    $(pane === "post" ? "post-sections" : "sections").append(body);
+    $(pane === "lab" ? "sections" : `${pane}-sections`).append(body);
+    if (lab) {
+      tuck(body, () => parts.some((shown) => shown()));
+      $("sections").append(advancedHint(sectionId(section)));
+    }
   }
+  $("sections").append(advancedHint(null));
+  // Scan film directly, beside the stocks: few photographs want it.
+  tuck($("scan-film").closest("label"), () => changedShows("io.scan_film", get("io.scan_film")));
 }
 
-// Desktop's Lab | Post switch (macOS AdjustmentInspector): which pane the
-// sidebar shows. On the phone's sheet each section has its tab instead.
+// Desktop's Prep | Lab | Output switch (macOS AdjustmentInspector): which
+// pane the sidebar shows. On the phone's sheet each section has its tab
+// instead. Remembered "post" was Output's.
+const PANES = ["prep", "lab", "output"];
 function showPane(pane) {
-  if (pane !== "post") pane = "lab";
+  if (pane === "post") pane = "output";
+  if (!PANES.includes(pane)) pane = "prep";
   $("side").dataset.pane = pane;
   for (const button of $("panes").children) button.setAttribute("aria-selected", button.dataset.pane === pane);
   remember("pane", pane);
@@ -599,10 +791,11 @@ function buildPanes() {
   for (const button of $("panes").children) {
     button.addEventListener("click", () => {
       showPane(button.dataset.pane);
+      forgetRevealed();
       $("scroll").scrollTop = 0;
     });
   }
-  showPane(remembered("pane", "lab"));
+  showPane(remembered("pane", "prep"));
 }
 
 // The pickers' sections, in desktop's order (macOS StockGroup).
@@ -630,6 +823,12 @@ function fillStocks() {
   };
   fill($("film"), filmGroups());
   fill($("paper"), paperGroups());
+  labelInfo($("film").closest("label"), Help.FILM);
+  labelInfo($("paper-row"), Help.PAPER);
+  labelInfo($("film-time-row"), Help.PATHS["film_render.development_time"]);
+  labelInfo($("paper-time-row"), Help.PATHS["print_render.development_time"]);
+  labelInfo($("scan-film").closest("label"), Help.PATHS["io.scan_film"]);
+  buildPreviews();
   developmentTime("film", "film_render.development_time", () => state.film);
   developmentTime("paper", "print_render.development_time", () => state.paper);
   state.params = structuredClone(catalog.defaults);
@@ -639,9 +838,7 @@ function fillStocks() {
   syncs.push(() => {
     $("film").value = state.film;
     $("paper").value = state.paper;
-    // Scanned film isn't printed: no paper.
     $("scan-film").checked = get("io.scan_film");
-    $("paper-row").hidden = get("io.scan_film");
   });
   sync();
 }
@@ -678,7 +875,9 @@ function developmentTime(which, path, id) {
 // Where a sidebar doesn't fit beside the photograph, the inspector is a
 // bottom sheet with a tab per section (index.html has the same query).
 const SHEET = matchMedia("(max-width: 899px) and (orientation: portrait), (max-width: 639px)");
-const TABS = [{ id: "stock", title: "Stock" }, ...[...SECTIONS, ...POST_SECTIONS].map((s) => ({ id: sectionId(s), title: s.tab ?? s.title }))]
+// Prep comes before Stock, as it does before the film, but Stock opens first.
+const TABS = [...PREP_SECTIONS.map((s) => ({ id: sectionId(s), title: s.tab ?? s.title })), { id: "stock", title: "Stock" },
+  ...[...SECTIONS, ...OUTPUT_SECTIONS].map((s) => ({ id: sectionId(s), title: s.tab ?? s.title }))]
   .filter((t, i, all) => all.findIndex((u) => u.id === t.id) === i);
 
 function showTab(id) {
@@ -721,10 +920,19 @@ function buildSheet() {
     button.dataset.tab = t.id;
     button.addEventListener("click", () => {
       showTab(t.id);
+      forgetRevealed();
       if (sheet === "low") setSheet("mid");
       $("scroll").scrollTop = 0;
     });
     $("tabs").append(button);
+    // A tab whose sections Advanced controls hides goes too (Scan).
+    const sections = $("scroll").querySelectorAll(`.section[data-tab="${t.id}"]`);
+    if (sections.length) {
+      syncs.push(() => {
+        button.hidden = [...sections].every((s) => s.classList.contains("tucked"));
+        if (button.hidden && $("side").dataset.tab === t.id) showTab("stock");
+      });
+    }
   }
   showTab(remembered("tab", "stock"));
   setSheet(sheet);
@@ -732,9 +940,14 @@ function buildSheet() {
   // On the sheet, and on screens too short to spare the room, the engine's
   // footer scrolls with the Stock tab; otherwise it stays at the sidebar's foot.
   const short = matchMedia("(max-height: 599px)");
+  const stocks = $("side").querySelector(".stock");
   const place = () => {
-    // The Lab | Post panes are the sidebar's; the sheet shows a tab at a time.
+    // The Prep | Lab | Output panes are the sidebar's; the sheet shows a tab at a time.
     $("side").classList.toggle("sheet", SHEET.matches);
+    // Film and paper: pinned above the panes in the sidebar, as on the Mac,
+    // since they shape everything the panes adjust; the sheet's Stock tab.
+    SHEET.matches ? $("prep-sections").before(stocks) : $("panes").before(stocks);
+    if (folds) { folds.film.center(); folds.paper.center(); }
     SHEET.matches || short.matches ? $("scroll").append($("bottom")) : $("scroll").after($("bottom"));
     setSheet(sheet);
   };
@@ -777,7 +990,7 @@ function buildSheet() {
 // 8 ms whatever its size, so it goes no smaller than a quarter.
 const BUDGET_MS = 90;
 let interactiveScale = 0.5, minScale = 0.15;
-let wanted = null, running = false, settleTimer = 0, exporting = false;
+let wanted = null, running = false, settleTimer = 0, exporting = false, lastSlide = -Infinity;
 const renders = [];
 let renderFailures = 0;
 
@@ -788,13 +1001,18 @@ function schedule(mode) {
   if (!photo) return;
   clearTimeout(settleTimer);
   // A slider that stops without a change event (keyboard, wheel) settles anyway.
-  if (mode === "interactive") settleTimer = setTimeout(() => schedule("settled"), 250);
+  if (mode === "interactive") {
+    settleTimer = setTimeout(() => schedule("settled"), 250);
+    lastSlide = performance.now();
+  }
   wanted = mode;
   pump();
 }
 
 async function pump() {
-  if (running || exporting) return;
+  // Not while the engine's GPU solves the brightness match either: its
+  // trials share the chain's buffers.
+  if (running || exporting || matching?.engine || previewing) return;
   running = true;
   $("busy").classList.add("on");
   // Not while the engine's photograph is being replaced: the next frame is
@@ -823,13 +1041,18 @@ async function pump() {
   }
   running = false;
   $("busy").classList.remove("on");
+  reconcileMatch();
+  pumpPreviews();
 }
 
 // The longest side to render, in photograph pixels: as many as the device
 // pixels the view covers, so all of them from 100% on, within what the GPU
 // takes and the device's cap (MAX_PIXELS). The CPU engine renders the
 // fitted size and more only up to a few megapixels, as each takes seconds.
-const MAX_PIXELS = matchMedia("(pointer: coarse)").matches ? 12e6 : 40e6;
+// Touch screens stop at 4.4 MP (2560×1707): on the iPhone 13 Pro, 3072 px
+// frames and a 12 MP export after edits got the tab killed from 1.4 GB
+// (docs/web-prep-port-plan.md).
+const MAX_PIXELS = matchMedia("(pointer: coarse)").matches ? 4.4e6 : 40e6;
 const CPU_PIXELS = 4e6;
 let limits = null;       // the WebGPU engine's: { side, pixels }
 
@@ -838,7 +1061,8 @@ let limits = null;       // the WebGPU engine's: { side, pixels }
 // and exports that copy: a full-size export there doesn't fit, so the desktop
 // exports every pixel. The same budget as renderSide's, so its largest frame
 // is this copy at 1:1.
-const keptPixels = () => (matchMedia("(pointer: coarse)").matches ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
+const keptPixels = () => query.has("kept") ? Number(query.get("kept")) // measurement only: the working copy's size
+  : (matchMedia("(pointer: coarse)").matches ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
 // The engine's photograph from `bytes`, a RAW developed at `wb` (the edit's
 // io.raw_white_balance). Only through `source` (below). A decode made in
 // web/decoder.js is dropped instead of kept when `stale()` says by then it
@@ -1423,6 +1647,323 @@ function settingsChanged(mode = "settled") {
   schedule(mode);
 }
 
+// ---- Prep › Match camera brightness ----------------------------------------
+
+// The macOS model (EditorModel §Camera brightness), for camera RAWs: the
+// reference is the RAW's embedded camera preview (spektrafilm-io
+// brightness.rs, in a short-lived module), the solve the engine's
+// `placeExposure`. New RAWs start with the switch as it was last set.
+const matchNewRaws = () => remembered("matchNewRaws", true);
+const newMatch = () => (!photo || photo.raw) && matchNewRaws() ? { ev: null, inputs: null, limited: false } : null;
+// A failed match, for `photo`: for the photograph (`inputs` null, the
+// reference is the problem) or until these inputs change.
+let matchFailure = null;
+let matching = null;   // the solve running: { inputs }
+let lastSolve = null;  // how long the last took: { solveMs, totalMs, ev }
+// What the match depends on: everything that changes how bright the
+// developed photograph is, except the brightness edits that are the user's
+// own (Prep, and the enlarger's print exposure) and settings that can't
+// change it. A change re-solves the match; Prep edits never do.
+const MATCH_IGNORES = ["prep", "enlarger.print_exposure", "post", "film_render.grain", "io.rotate_cw", "io.crop",
+  "io.crop_center", "io.crop_size", "io.output_color_space", "io.output_cctf_encoding", "settings.serial_grain"];
+function matchInputs() {
+  const p = structuredClone(state.params);
+  for (const path of MATCH_IGNORES) set(path, null, p);
+  return JSON.stringify({ film: state.film, paper: state.paper, params: p });
+}
+const matchUnavailable = () => matchFailure?.photo === photo && matchFailure.inputs === null ? matchFailure.message : null;
+const matchFailedHere = () => matchFailure?.photo === photo && matchFailure.inputs !== null && matchFailure.inputs === matchInputs();
+// On, possible, and not failed for the current settings.
+const matchActive = () => !!state.match && !!photo?.raw && !matchUnavailable() && !matchFailedHere();
+// On and not yet solved for the current settings. Export waits.
+const matchPending = () => matchActive() && (state.match.ev === null || state.match.inputs !== matchInputs());
+const matchedEv = () => (matchActive() ? state.match.ev ?? 0 : 0);
+// The note under the Exposure slider.
+function matchNote() {
+  if (!state.match || !photo?.raw) return null;
+  if (matchUnavailable()) return matchUnavailable();
+  if (matchFailedHere()) return matchFailure.message;
+  if (matchPending() || matching) return "Matching…";
+  const ev = state.match.ev;
+  if (ev === null) return null;
+  const value = `${ev >= 0 ? "+" : "−"}${Math.abs(ev).toFixed(2)}`;
+  return state.match.limited ? `Starts at ${value} EV to match the camera, held back to protect highlights.` : `Starts at ${value} EV to match the camera.`;
+}
+
+// Turns matching on (from the match, Exposure back to 0) or off (the
+// brightness stays; Exposure then shows all of it).
+function setMatch(on) {
+  remember("matchNewRaws", on);
+  if (on === !!state.match) return;
+  if (on) {
+    state.match = { ev: null, inputs: null, limited: false };
+    set("prep.exposure_ev", 0);
+  } else {
+    state.match = null;
+  }
+  settingsChanged();
+}
+
+// The reference for `target`, made once per photograph by a module that
+// then ends, so the RAW's bytes and preview decode leave its memory.
+function cameraReference(target) {
+  target.reference ??= new Promise((resolve, reject) => {
+    const worker = startDecoder();
+    worker.onmessage = ({ data: { result, error } }) => error ? reject(new Error(error)) : resolve(result);
+    worker.onerror = (ev) => reject(new Error(ev.message || "the camera preview couldn't be read"));
+    // It ends after its one answer (web/decoder.js).
+    worker.postMessage({ bytes: target.bytes, reference: { width: target.width, height: target.height } });
+  });
+  return target.reference;
+}
+
+// Solves the match when it's on and stale, once the frame of the current
+// settings has shown (`force`: for an export, whatever shows). One solve at
+// a time; its end looks again, so edits made meanwhile coalesce. A result
+// applies only if the inputs it was solved for are still current.
+async function reconcileMatch({ force = false } = {}) {
+  if (matching || previewing || !matchPending() || !sourceCurrent() || !host || cropSession) return;
+  if (!force && (running || wanted || exporting || !developed || renders.at(-1)?.interactive !== false)) return;
+  const inputs = matchInputs(), target = photo, opening = opens, engine = host;
+  const stale = () => photo !== target || opening !== opens || host !== engine;
+  const p = structuredClone(state.params);
+  set("prep", structuredClone(defaultValue("prep")), p);
+  set("enlarger.print_exposure", defaultValue("enlarger.print_exposure"), p);
+  const request = JSON.stringify({ ...p, io: { ...p.io, rotate_cw: 0 } });
+  matching = { inputs };
+  sync();
+  const t = performance.now();
+  try {
+    let reference;
+    try {
+      reference = await cameraReference(target);
+    } catch (e) {
+      const unusable = /^UNUSABLE: /.test(e.message);
+      throw Object.assign(new Error(unusable ? e.message.slice(10) : "The camera preview couldn’t be read."), { photograph: true, cause: e });
+    }
+    if (stale() || running) return;
+    matching.engine = true;
+    const result = JSON.parse(await engine.call("placeExposure", state.film, state.paper, request, reference.pixels, reference.width, reference.height));
+    lastSolve = { solveMs: Math.round(result.elapsed_ms), totalMs: Math.round(performance.now() - t), ev: result.exposure_ev };
+    console.log(`matched camera brightness: ${result.exposure_ev.toFixed(3)} EV${result.highlight_limited ? " (highlight-limited)" : ""} in ${result.elapsed_ms.toFixed(0)} ms (${(performance.now() - t).toFixed(0)} ms with the reference)`);
+    if (stale() || !state.match || matchInputs() !== inputs) return;
+    if (!Number.isFinite(result.exposure_ev) || Math.abs(result.exposure_ev) > 3) throw new Error("No reliable brightness match with these settings.");
+    applyMatch(result.exposure_ev, !!result.highlight_limited, inputs);
+  } catch (e) {
+    if (stale() || e.restarted || matchInputs() !== inputs) return;
+    console.warn(`no camera brightness match: ${e.cause?.message ?? e.message}`);
+    let message = e.message, photograph = !!e.photograph;
+    if (!photograph) [message, photograph] = await engine.call("brightnessFailure", e.message).then(([m, scope]) => [m, scope === "photograph"]).catch(() => ["No reliable brightness match with these settings.", false]);
+    matchFailure = { photo: target, inputs: photograph ? null : inputs, message, reason: e.cause?.message ?? e.message };
+    sync();
+    schedule("settled");
+  } finally {
+    matching = null;
+    sync();
+    if (wanted) pump();
+    queueMicrotask(() => { reconcileMatch(); pumpPreviews(); });
+  }
+}
+
+// Moves the total with the match, keeping the user's exposure above it. A
+// change under 0.05 EV keeps the values and only marks them current.
+function applyMatch(ev, limited, inputs) {
+  const match = state.match;
+  if (!match || matchInputs() !== inputs) return;
+  const offset = get("prep.exposure_ev") - (match.ev ?? 0);
+  if (match.ev === null || Math.abs(ev - match.ev) >= 0.05) {
+    match.ev = ev;
+    set("prep.exposure_ev", Math.min(3, Math.max(-3, Math.abs(offset) < 1e-9 ? ev : ev + offset)));
+  }
+  match.inputs = inputs;
+  match.limited = limited;
+  settingsChanged();
+}
+
+// Until a pending match is solved, for an export: it renders what Match
+// camera brightness would show.
+async function matchSettled() {
+  for (let i = 0; i < 1200 && (matchPending() || matching); i++) {
+    reconcileMatch({ force: true });
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+// ---- Film and paper previews ----------------------------------------------
+
+// The foldouts of web/stocks.js beside the menus, one tile request at a
+// time and only while the photograph has nothing else to render: no frame
+// running or wanted, no slider moving, no brightness match or export
+// (docs/stock-previews.md). Off: the menus, and the engine lets go of what
+// the previews kept.
+const PREVIEW_SIDE = 320;
+// The calibrated stocks the engine keeps for them: every film with its
+// paper, and every paper with the current film.
+const PREVIEW_PIPELINES = 40;
+// On by default: on the iPhone 13 Pro filled grids hold ~100 MiB of the tab,
+// and neither an export nor opening another photograph with them came near
+// the tab's limit (docs/web-prep-port-plan.md). A memory crash turns them
+// off (`crashCheck`).
+let previewsOn = remembered("stockPreviews", true);
+let previewing = false, previewTimer = 0, previewRefresh = 0;
+const previewStats = [];
+let folds = null;
+
+function buildPreviews() {
+  const opened = remembered("stockFolds", {});
+  const fold = (which, title, groups, choose) => {
+    const f = Stocks.foldout(title, groups, (id) => { choose(id); sync(); schedule("settled"); }, refreshPreviews, !!opened[which]);
+    f.root.addEventListener("toggle", () => remember("stockFolds", { ...remembered("stockFolds", {}), [which]: f.root.open }));
+    return f;
+  };
+  // One grid open at a time: opening one folds the other (and a remembered
+  // pair opens on the film's).
+  if (opened.film && opened.paper) opened.paper = false;
+  folds = { film: fold("film", "Film", filmGroups(), chooseFilm), paper: fold("paper", "Paper", paperGroups(), choosePaper) };
+  for (const [one, other] of [[folds.film, folds.paper], [folds.paper, folds.film]]) {
+    one.root.addEventListener("toggle", () => { if (one.root.open) other.root.open = false; });
+  }
+  folds.film.root.querySelector(".stock-title").after(info("Film", Help.FILM));
+  folds.paper.root.querySelector(".stock-title").after(info("Paper", Help.PAPER));
+  $("film").closest("label").after(folds.film.root);
+  $("paper-row").after(folds.paper.root);
+  $("previews").addEventListener("change", () => setPreviews($("previews").checked));
+  syncs.push(() => {
+    // Scanned film isn't printed: no paper. Until a photograph is open the
+    // tiles would be blank, so the menus show.
+    const tiles = previewsOn && !!photo;
+    $("film").closest("label").hidden = tiles;
+    $("paper-row").hidden = tiles || get("io.scan_film");
+    folds.film.root.hidden = !tiles;
+    folds.paper.root.hidden = !tiles || get("io.scan_film");
+    folds.film.select(state.film);
+    folds.paper.select(state.paper);
+    $("previews").checked = previewsOn;
+    refreshPreviews();
+  });
+}
+
+function setPreviews(on) {
+  previewsOn = on;
+  remember("stockPreviews", on);
+  markAlive();
+  if (!on) {
+    for (const t of [...folds.film.tiles.values(), ...folds.paper.tiles.values()]) Stocks.markStale(t, null, null);
+    host?.call("releaseThumbnails").catch(() => {});
+  }
+  sync();
+}
+
+// ---- Memory crashes ------------------------------------------------------------
+
+// A tab iOS kills for memory gets no pagehide, and Safari loads it again
+// at once (as a "navigate", not a "reload": iPhone, iOS 26). So while the
+// page is shown it keeps a marker with a heartbeat, which leaving or hiding
+// it (another app, another tab, a reload) clears; a marker still there and
+// fresh at load means the last page was killed moments ago. A tab
+// discarded in the background was hidden first, and a browser quit is
+// rarely opened again within the minute.
+const ALIVE = "alive";
+const lastLife = remembered(ALIVE, null);
+function markAlive() {
+  if (document.visibilityState === "visible") remember(ALIVE, { previews: previewsOn, at: Date.now() });
+}
+setInterval(markAlive, 5000);
+const markGone = () => { try { localStorage.removeItem(`negs.${ALIVE}`); } catch {} };
+addEventListener("visibilitychange", () => (document.visibilityState === "visible" ? markAlive() : markGone()));
+addEventListener("pagehide", markGone);
+addEventListener("pageshow", markAlive);
+markAlive();
+
+// After a crash with the previews on, they go off (the tiles' memory is the
+// part of the tab that can go), and a note says so.
+function crashCheck() {
+  const fresh = Date.now() - (lastLife?.at ?? 0) < 60_000;
+  if (!lastLife?.previews || !fresh || !previewsOn) return;
+  setPreviews(false);
+  showMessage("Negs ran out of memory and reloaded. Film and paper previews are now off to save memory.", false, 20_000,
+    { label: "Settings", run: () => openSettings() });
+}
+
+// ---- Settings ------------------------------------------------------------------
+
+// The gear's sheet: the previews (above), new RAWs' brightness match (the
+// Prep switch also sets it) and the engine (its change handler is below).
+function openSettings() {
+  $("previews").checked = previewsOn;
+  $("match-new-raws").checked = matchNewRaws();
+  $("advanced").checked = advanced;
+  $("settings-dialog").showModal();
+}
+$("advanced").addEventListener("change", () => {
+  advanced = $("advanced").checked;
+  remember("advanced", advanced);
+  forgetRevealed();
+});
+$("settings").addEventListener("click", openSettings);
+$("match-new-raws").addEventListener("change", () => remember("matchNewRaws", $("match-new-raws").checked));
+
+// What tile `id` of `which` renders: the edit with that stock chosen.
+function tileRequest(which, id) {
+  const into = { film: state.film, paper: state.paper, params: structuredClone(state.params) };
+  (which === "film" ? chooseFilm : choosePaper)(id, into);
+  const request = { film: into.film, paper: into.paper, params: JSON.stringify({ ...into.params, io: { ...into.params.io, rotate_cw: 0 } }) };
+  return { ...request, key: JSON.stringify([request, crop, rotation()]) };
+}
+
+// The tiles on screen, each with its request and whether its picture is
+// current; stale ones dimmed. Once per frame, however many changes.
+function previewTiles() {
+  if (!previewsOn || !folds || !photo) return [];
+  const out = [];
+  for (const which of ["film", "paper"]) {
+    for (const tile of folds[which].onScreen()) {
+      const request = tileRequest(which, tile.id);
+      Stocks.markStale(tile, photo, request.key);
+      out.push({ tile, request });
+    }
+  }
+  return out;
+}
+function refreshPreviews() {
+  if (previewRefresh) return;
+  previewRefresh = requestAnimationFrame(() => {
+    previewRefresh = 0;
+    pumpPreviews();
+  });
+}
+
+// Renders the next tile on screen whose picture isn't current, then looks
+// again.
+async function pumpPreviews() {
+  clearTimeout(previewTimer);
+  const tiles = previewTiles();
+  if (previewing || !photo || !host || !developed || loading || running || wanted || exporting || matching || cropSession || !sourceCurrent()) return;
+  const quiet = performance.now() - lastSlide;
+  if (quiet < 400) {
+    previewTimer = setTimeout(pumpPreviews, 400 - quiet);
+    return;
+  }
+  const next = tiles.find(({ tile, request }) => tile.key !== request.key && tile.failed !== request.key);
+  if (!next) return;
+  const { tile, request } = next, target = photo, engine = host;
+  previewing = true;
+  try {
+    const side = Stocks.frameSide(photo.width, photo.height, crop, PREVIEW_SIDE);
+    const r = await engine.call("thumbnail", request.film, request.paper, request.params, side, PREVIEW_PIPELINES, structuredClone(crop), rotation());
+    previewStats.push({ id: tile.id, elapsedMs: r.elapsedMs, stages: r.stages, memoryMiB: r.memoryMiB, at: performance.now() });
+    if (photo === target && previewsOn) Stocks.paint(tile, target, request.key, r);
+  } catch (e) {
+    if (!e.restarted) console.warn(`no preview of ${tile.id}: ${e.message}`);
+    tile.failed = request.key;
+  } finally {
+    previewing = false;
+  }
+  if (wanted) pump();
+  reconcileMatch();
+  refreshPreviews();
+}
+
 // ---- Tutorial adapter ------------------------------------------------------
 
 // Polling is only used at session boundaries, not on slider interaction.
@@ -1437,13 +1978,15 @@ async function tourWait(test, signal, failures = renderFailures) {
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
 }
-const tourIdle = () => !loading && !running && !wanted && !source.busy && !developing;
+const tourIdle = () => !loading && !running && !wanted && !source.busy && !developing && !matching;
 const layoutSettled = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
 function tutorialAdapter() {
   let sampleShown = false;
   function baseline() {
     state.params = structuredClone(catalog.defaults);
+    // The steps show what each control does, so nothing re-solves under them.
+    state.match = null;
     state.paper = "kodak_portra_endura";
     chooseFilm("kodak_portra_400");
     crop = Crop.defaults();
@@ -1451,16 +1994,20 @@ function tutorialAdapter() {
     holdOriginal(false);
   }
   function reveal(step) {
+    for (const fold of Object.values(folds)) fold.root.open = false;
     for (const node of document.querySelectorAll(".tour-control, .tour-group, .tour-section, .tour-stock")) {
       node.classList.remove("tour-control", "tour-group", "tour-section", "tour-stock");
     }
     $("app").dataset.tourStep = step.id;
-    showPane("lab");
+    showPane(PANES.includes(step.tab) ? step.tab : "lab");
     showTab(step.tab);
     $("preset-menu").hidden = true;
     $("more").setAttribute("aria-expanded", "false");
+    // The film and paper steps: the menu, or with previews its grid, opened.
     if (step.target === "film" || step.target === "paper") {
-      $(step.target).closest("label").classList.add("tour-control");
+      const fold = folds[step.target].root;
+      if (fold.hidden) $(step.target).closest("label").classList.add("tour-control");
+      else { fold.classList.add("tour-control"); fold.open = true; }
       $(step.target).closest(".stock").classList.add("tour-stock");
     }
     for (const path of step.paths ?? []) {
@@ -1490,7 +2037,8 @@ function tutorialAdapter() {
     capture() {
       return { edit: structuredClone(state), photo, crop: structuredClone(crop), border: { ...border }, view: view.snapshot(),
         pane: $("side").dataset.pane, tab: $("side").dataset.tab, sheet, scroll: $("scroll").scrollTop,
-        groups: [...document.querySelectorAll("[data-tutorial-group]")].map((node) => [node, node.open]) };
+        groups: [...document.querySelectorAll("[data-tutorial-group]")].map((node) => [node, node.open]),
+        folds: Object.values(folds).map((fold) => [fold.root, fold.root.open]) };
     },
     async enter(signal) {
       tutorialPresentation = true;
@@ -1515,6 +2063,9 @@ function tutorialAdapter() {
     async step(step, signal) {
       await tourWait(tourIdle, signal);
       baseline();
+      // A step can start with an effect on, to show it.
+      for (const [path, value] of Object.entries(step.set ?? {})) set(path, value);
+      sync(); // reveal() reads what the baseline shows (the stock grids).
       reveal(step);
       sync();
       view.fit();
@@ -1542,7 +2093,7 @@ function tutorialAdapter() {
       $("tutorial-nav").hidden = true;
       $("preset-menu").hidden = true;
       $("more").setAttribute("aria-expanded", "false");
-      for (const [node, opened] of saved.groups) node.open = opened;
+      for (const [node, opened] of [...saved.groups, ...saved.folds]) node.open = opened;
       showPane(saved.pane);
       showTab(saved.tab);
       setSheet(saved.sheet);
@@ -1593,7 +2144,7 @@ function tutorialAdapter() {
       samplePicker.sync();
       presets.sync();
     },
-    completed: () => showMessage("You’re ready. Film and paper shape the look; Print exposure sets the final brightness. Reopen Tutorial whenever you like.", false, 8000),
+    completed: () => showMessage("You’re ready. Film and paper shape the look; Prep’s Exposure sets the brightness. Reopen Tutorial whenever you like.", false, 8000),
   };
 }
 
@@ -1611,6 +2162,7 @@ async function open(name, data, sampleId = null) {
   endCrop(false);
   const opening = ++opens, previous = photo;
   let loaded = false;
+  revealed.clear();
   $("edit-tools").hidden = true;
   loading = true;
   forgetOriginal();
@@ -1651,7 +2203,12 @@ async function open(name, data, sampleId = null) {
     // A newer photograph is opening; the engine loads it next.
     if (opening !== opens) return;
     // Its size as decoded, whatever the engine keeps.
+    // The exposure set above the last photograph's match carries over; the
+    // match is solved anew (macOS EditorModel.open).
+    const offset = (get("prep.exposure_ev") ?? 0) - (state.match?.ev ?? 0);
     photo = { ...opened(name, bytes, size), sampleId, ...developedAs(size, wb) };
+    state.match = newMatch();
+    set("prep.exposure_ev", Math.min(3, Math.max(-3, offset)));
     crop = Crop.defaults();
     set("io.rotate_cw", 0);
     console.log(`decoded ${name} ${size.width}×${size.height} in ${(performance.now() - t).toFixed(0)} ms`);
@@ -1839,7 +2396,8 @@ async function exportJpeg() {
   showMessage(`Rendering ${photo.exportWidth}×${photo.exportHeight} for export…`);
   $("busy").classList.add("on");
   try {
-    while (running) await new Promise((r) => setTimeout(r, 20));
+    while (running || previewing) await new Promise((r) => setTimeout(r, 20));
+    await matchSettled();
     const r = await exportRender();
     const canvas = new OffscreenCanvas(r.width, r.height);
     let blob;
@@ -2119,6 +2677,7 @@ buildSheet();
 touchSlider($("crop-angle-track"), $("crop-angle"));
 catalog = await (await fetch("catalog.json")).json();
 fillStocks();
+crashCheck();
 // Leaving loses the edit: only an exported JPEG keeps it. While a photograph
 // is open with an edit other than the last exported (at first, the
 // defaults), the Negs link asks first, and the browser asks before a reload,
@@ -2171,7 +2730,7 @@ globalThis.negs = {
   // Applies preset text as Import preset does; resolves to whether it did.
   applyPreset: (text, name = "Preset", options) => presets.apply(text, name, options),
   presetBusy: () => presets.busy(),
-  // Desktop's Lab | Post switch.
+  // Desktop's Prep | Lab | Output switch.
   pane: (pane) => showPane(pane),
   // A fresh edit: Reset Adjustments, the film (and paper, if given) chosen
   // as the pickers choose them, then `edits` ({ path: value }).
@@ -2190,6 +2749,38 @@ globalThis.negs = {
   balance: (film, paper, params) => host.call("balancePrint", film, paper, params),
   // The edit rendered at `maxDim`, read back as bytes; the page shows nothing.
   read: (maxDim) => host.call("render", state.film, state.paper, params(), maxDim, false, false),
+  // Measurement only: one frame at `maxDim`, presented as the editor's are,
+  // with `patch` merged over the edit's params; the whole frame's time too.
+  async frame(maxDim, interactive = false, patch = {}, film = state.film, paper = state.paper) {
+    const merged = structuredClone(state.params);
+    const merge = (into, from) => { for (const [k, v] of Object.entries(from)) v && typeof v === "object" && !Array.isArray(v) && into[k] && typeof into[k] === "object" ? merge(into[k], v) : (into[k] = v); };
+    merge(merged, patch);
+    const t = performance.now();
+    const r = await host.call("render", film, paper, JSON.stringify({ ...merged, io: { ...merged.io, rotate_cw: 0 } }), maxDim, interactive, presenting);
+    await draw(r);
+    return { wallMs: performance.now() - t, elapsedMs: r.elapsedMs, width: r.width, height: r.height, stages: r.stages, presented: r.presented, backend: r.backend, memoryMiB: r.memoryMiB };
+  },
+  keptPixels: () => keptPixels(),
+  // Prep › Match camera brightness: its state and note, and the switch.
+  // The stock previews: whether they're on, the tiles on screen and how
+  // many are current, and each tile render's time.
+  previews: () => {
+    const tiles = previewTiles();
+    const every = folds ? ["film", "paper"].flatMap((which) => [...folds[which].tiles.values()].map((tile) => ({ which, tile, key: tileRequest(which, tile.id).key }))) : [];
+    return { on: previewsOn, onScreen: tiles.length, current: tiles.filter(({ tile, request }) => tile.key === request.key).length,
+      // Every tile, on screen or not, and the ones whose picture is out of date.
+      all: every.length, outdated: every.filter(({ tile, key }) => tile.key !== key).map(({ which, tile }) => `${which}:${tile.id}${tile.key ? " (stale)" : ""}`),
+      failed: tiles.filter(({ tile, request }) => tile.failed === request.key).length, previewing, stats: previewStats.slice() };
+  },
+  setPreviews: (on) => setPreviews(!!on),
+  // One preview of the whole frame within `side`, for measurements.
+  thumbnail: (side, film = state.film, paper = state.paper) => host.call("thumbnail", film, paper, params(), side, PREVIEW_PIPELINES, Crop.defaults(), 0),
+  // Opens or folds the Film and Paper foldouts.
+  openStocks: (film = true, paper = true) => { folds.film.root.open = film; folds.paper.root.open = paper; },
+  match: () => ({ match: structuredClone(state.match), note: matchNote(), pending: matchPending(), active: matchActive(), solving: !!matching,
+    exposure: get("prep.exposure_ev"), failure: matchFailure?.photo === photo ? matchFailure.message : null,
+    reason: matchFailure?.photo === photo ? matchFailure.reason : null, lastSolve }),
+  setMatch: (on) => setMatch(on),
   // Opens a photograph from a URL as the Open button would.
   // (An array buffer: Chrome fails blob() of a large response in a test profile.)
   open: async (url) => openFile(new File([await (await fetch(url)).arrayBuffer()], url.split("/").at(-1))),
@@ -2239,7 +2830,7 @@ globalThis.negs = {
 syncs.push(fetchBorderTexture);
 $("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });
 $("paper").addEventListener("change", () => { choosePaper($("paper").value); sync(); schedule("settled"); });
-$("reset").addEventListener("click", () => { resetAdjustments(); sync(); schedule("settled"); });
+$("reset").addEventListener("click", () => { resetAdjustments(); forgetRevealed(); schedule("settled"); });
 $("scan-film").addEventListener("change", () => { set("io.scan_film", $("scan-film").checked); sync(); schedule("settled"); });
 $("engine").addEventListener("change", async () => {
   if ($("engine").value === kind) return;

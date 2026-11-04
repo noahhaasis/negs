@@ -16,10 +16,15 @@ camera brightness, on by default. Restored sessions retain their saved edits. If
 missing, unusable, or the photo/settings change while analysis runs, the app
 keeps the existing exposure. Manual Prep controls remain available.
 
+A preview that doesn't say its colour space is read as sRGB, on every
+platform: cameras and Lightroom make sRGB previews unless set otherwise.
+Adobe RGB is converted; a DNG preview declared ProPhoto or gray gamma 2.2
+is refused, as reading it as sRGB would be about half a stop off.
+
 A failed match turns the button off and says why in a line below it, as
 long as trying again couldn't change the answer: for the photograph when the
-preview is the problem (none, too small, framed differently, no colour
-profile, too few midtones), until the next edit when no reliable match was
+preview is the problem (none, too small, framed differently, in a colour
+space other than sRGB or Adobe RGB, too few midtones), until the next edit when no reliable match was
 found or it would take more than ±3 EV. The engine's own reasons are mapped to
 these short notes, never shown as they are. An automatic match fails the same
 quiet way.

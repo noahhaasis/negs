@@ -261,7 +261,7 @@ fn resident_and_submitted_gpu_apply_prep_and_invalidate_source_uploads() {
     };
     let source = image();
     for encoded in [true, false] {
-        for variation in 0..4 {
+        for variation in 0..5 {
             let mut p = params();
             p.io.input_cctf_decoding = encoded;
             if variation == 0 || variation == 3 {
@@ -269,6 +269,10 @@ fn resident_and_submitted_gpu_apply_prep_and_invalidate_source_uploads() {
             }
             if variation == 2 {
                 p.prep.shadows = -45.;
+            }
+            if variation == 4 {
+                // Exposure alone: folded into the front pass, not prepared.
+                p.prep = PrepParams { exposure_ev: -0.85, ..Default::default() };
             }
             let (ready, neutral) = prepared(&source, &p);
             let pipe = pipeline(p).with_autoexposure_ev(0.4);

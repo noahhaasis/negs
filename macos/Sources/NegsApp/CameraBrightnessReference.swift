@@ -11,10 +11,24 @@ struct CameraPreviewUnusable: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// The colour space a RAW says its camera preview is in: the engine's
+/// `preview_colour_space`, the rule the web and Windows apply themselves
+/// (spektrafilm-io brightness.rs). nil when nothing says.
+enum PreviewColourSpace: String {
+    case srgb
+    case adobeRGB = "adobe_rgb"
+    case other
+}
+
 /// A camera's embedded preview, never a new RAW development. The small,
 /// explicitly tagged sRGB image is only a brightness reference, not a look.
 enum CameraBrightnessReference {
-    static func png(from url: URL, expectedSize: CGSize) throws -> Data {
+    /// `declared`: what the RAW says the preview is in. ImageIO's own guess
+    /// isn't used, so every platform reads the same preview the same way:
+    /// Adobe RGB is converted, a preview that says nothing is sRGB (cameras
+    /// and Lightroom make sRGB previews unless set otherwise), and any other
+    /// colour space is refused.
+    static func png(from url: URL, expectedSize: CGSize, declared: PreviewColourSpace? = nil) throws -> Data {
         guard let source = CGImageSourceCreateWithURL(url as CFURL,
             [kCGImageSourceShouldCache: false] as CFDictionary),
               let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -39,18 +53,19 @@ enum CameraBrightnessReference {
             }
             preview = inside
         }
-        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        let exif = properties?[kCGImagePropertyExifDictionary] as? [CFString: Any]
-        let sRGBDeclared = (exif?[kCGImagePropertyExifColorSpace] as? NSNumber)?.intValue == 1
-        let profile = (properties?[kCGImagePropertyProfileName] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let namedProfile = !profile.isEmpty && !["device rgb", "generic rgb"].contains(profile.lowercased())
-        // An ImageIO-assigned default color space is not evidence that an
-        // untagged preview has known colorimetry. Require camera metadata too.
         guard let sourceSpace = thumbnail.colorSpace,
-              sRGBDeclared || namedProfile,
-              sourceSpace.model == .rgb || sourceSpace.model == .monochrome,
-              sourceSpace.copyICCData() != nil else {
-            throw CameraPreviewUnusable(message: "The camera preview has no color profile.")
+              sourceSpace.model == .rgb || sourceSpace.model == .monochrome else {
+            throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
+        }
+        if declared == .other {
+            throw CameraPreviewUnusable(message: "The camera preview’s colour space isn’t supported.")
+        }
+        if sourceSpace.model == .rgb {
+            guard let space = CGColorSpace(name: declared == .adobeRGB ? CGColorSpace.adobeRGB1998 : CGColorSpace.sRGB),
+                  let tagged = preview.copy(colorSpace: space) else {
+                throw CameraPreviewUnusable(message: "The camera preview couldn’t be read.")
+            }
+            preview = tagged
         }
         return try encoded(preview, unusable: "The camera preview couldn’t be read.")
     }
