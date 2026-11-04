@@ -74,6 +74,40 @@ import UniformTypeIdentifiers
     private(set) var exportStarted = Date()
     var error: String?
     var status = "Starting…"
+    // MARK: Export settings
+    //
+    // The Export tab's choices, remembered between launches. The save panel
+    // is now only a file chooser; these used to live in its accessory view.
+    var exportFormat = OutputFormat.last {
+        didSet {
+            OutputFormat.last = exportFormat
+            // Each lossless format keeps its own depth; JPEG is always 8-bit.
+            exportBitDepth = SaveSettings.bitDepth(for: exportFormat)
+        }
+    }
+    var exportBitDepth = SaveSettings.bitDepth(for: OutputFormat.last) {
+        didSet { SaveSettings.setBitDepth(exportBitDepth, for: exportFormat) }
+    }
+    var exportEngine = ExportEngine.selected {
+        didSet { ExportEngine.selected = exportEngine }
+    }
+    var exportSize = ExportSize.last {
+        didSet { ExportSize.last = exportSize }
+    }
+    var exportQuality = SaveSettings.lastQuality {
+        didSet {
+            let clamped = min(max(exportQuality, SaveSettings.qualityRange.lowerBound), SaveSettings.qualityRange.upperBound)
+            if clamped != exportQuality { exportQuality = clamped } else { SaveSettings.lastQuality = clamped }
+        }
+    }
+    /// The file settings a save or export uses now. ProPhoto RGB at 8 bits
+    /// falls back to Adobe RGB, as its picker says.
+    var exportSaveSettings: SaveSettings {
+        let depth = exportFormat == .jpeg ? 8 : exportBitDepth
+        let chosen = SaveSettings.colorSpaces.firstIndex(of: previewSpace) ?? SaveSettings.chosenSpace
+        return SaveSettings(bitDepth: depth, colorSpace: SaveSettings.effectiveSpace(chosen, bitDepth: depth),
+                            jpegQuality: exportQuality)
+    }
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
     }
@@ -1220,9 +1254,15 @@ import UniformTypeIdentifiers
 
     func savePanel(export: Bool) {
         guard let source, !cropping, export ? !exporting && !saving : canSave else { return }
+        let format = exportFormat
+        let engine = exportEngine
+        // Save Preview keeps the whole preview; Export uses the tab's size.
+        let size = export ? exportSize : .full
+        let save = exportSaveSettings
         let panel = NSSavePanel()
         panel.title = export ? "Export Photograph" : "Save Preview"
         panel.canCreateDirectories = true
+        panel.allowedContentTypes = [format.type]
         // Without a directory the panel shows the last folder of any panel,
         // usually the Open panel's, so start where the last save went.
         if let folder = Self.lastSaveFolder { panel.directoryURL = folder }
@@ -1233,31 +1273,22 @@ import UniformTypeIdentifiers
         if let border = state.border.exported(for: photoSize) {
             extras += " Adds the \(border.style.title.lowercased()) border\(border.instagram ? ", extended to 3:4 for Instagram" : "")."
         }
-        let previewSpace = previewSpace
-        let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: export ? ExportEngine.selected : nil, size: ExportSize.last) { engine, size, save in
-            let extras = extras + (size.summary.map { " \($0)." } ?? "") + (save.summary(export: export, previewSpace: previewSpace).map { " \($0)." } ?? "")
-            return switch engine {
-            case .reference?: "The most precise result. Can take about half a minute for large photos.\(extras)"
-            case .fast?: "Looks the same as Reference, in a fraction of the time.\(extras)"
-            case nil: "Saves the preview as shown.\(extras)"
-            }
-        }
-        panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).\(picker.format.type.preferredFilenameExtension ?? "png")"
+        if let fit = size.summary { extras += " \(fit)." }
+        if let space = save.summary(export: export, previewSpace: previewSpace) { extras += " \(space)." }
+        let engineNote = export
+            ? (engine == .reference ? "The most precise result. Can take about half a minute for large photos." : "Looks the same as Reference, in a fraction of the time.")
+            : "Saves the preview as shown."
+        panel.message = engineNote + extras
+        panel.nameFieldStringValue = "\(source.deletingPathExtension().lastPathComponent)_\(state.film).\(format.type.preferredFilenameExtension ?? "png")"
         panel.begin { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
             guard !Self.sameFile(url, source) else {
                 self.error = "Choose a different filename to preserve the original photograph."; return
             }
-            OutputFormat.last = picker.format
-            ExportSize.last = picker.size
-            picker.remember()
             Self.lastSaveFolder = url.deletingLastPathComponent()
-            let engine = picker.engine ?? .reference
-            let size = picker.size
-            let save = picker.settings
-            if export { ExportEngine.selected = engine }
             Task {
-                if export { await self.export(to: url, engine: engine, size: size, save: save) } else { await self.savePreview(to: url, size: size, save: save) }
+                if export { await self.export(to: url, engine: engine, size: size, save: save) }
+                else { await self.savePreview(to: url, size: size, save: save) }
                 // Then the preview follows the space just saved in.
                 self.choosePreviewSpace(save.spaceName)
             }
@@ -1744,150 +1775,3 @@ struct ExportSize: Equatable {
     }
 }
 
-/// The save panel's Format, Bit Depth, Colour Space, JPEG Quality and Size
-/// controls, and for exports the Engine pop-up. Changing the format
-/// restricts the panel to that type, which also rewrites the extension in
-/// the name field, and shows its bit depth (JPEG's fixed) and, for JPEG
-/// only, the quality. ProPhoto RGB needs 16 bits: at 8 it is disabled and
-/// Adobe RGB stands in until 16 bits bring it back. Changing anything
-/// updates the message.
-@MainActor private final class FormatPicker: NSObject, NSTextFieldDelegate {
-    private let popup = NSPopUpButton()
-    private let enginePopup: NSPopUpButton?
-    private let depthPopup = NSPopUpButton()
-    private let spacePopup = NSPopUpButton()
-    private let qualitySlider = NSSlider(value: 95, minValue: Double(SaveSettings.qualityRange.lowerBound),
-                                         maxValue: Double(SaveSettings.qualityRange.upperBound), target: nil, action: nil)
-    private let qualityLabel = NSTextField(labelWithString: "")
-    private var qualityRow: NSStackView!
-    private let stack = NSStackView()
-    private let edgePopup = NSPopUpButton()
-    private let pixelsField = NSTextField()
-    private let message: (ExportEngine?, ExportSize, SaveSettings) -> String
-    private weak var panel: NSSavePanel?
-    /// The colour space picked, and each lossless format's bit depth.
-    private var chosenSpace = SaveSettings.chosenSpace
-    private var depths: [OutputFormat: Int] = [.png: SaveSettings.bitDepth(for: .png), .tiff: SaveSettings.bitDepth(for: .tiff)]
-    var format: OutputFormat { OutputFormat.allCases[max(popup.indexOfSelectedItem, 0)] }
-    /// nil for Save Preview.
-    var engine: ExportEngine? { enginePopup.map { ExportEngine.allCases[max($0.indexOfSelectedItem, 0)] } }
-    var size: ExportSize {
-        ExportSize(edge: ExportSize.Edge.allCases[max(edgePopup.indexOfSelectedItem, 0)],
-                   pixels: ExportSize.pixels(from: pixelsField.stringValue))
-    }
-    var settings: SaveSettings {
-        let depth = depths[format] ?? 8
-        return SaveSettings(bitDepth: depth, colorSpace: SaveSettings.effectiveSpace(chosenSpace, bitDepth: depth),
-                            jpegQuality: Int(qualitySlider.doubleValue.rounded()))
-    }
-
-    init(panel: NSSavePanel, selected: OutputFormat, engine: ExportEngine?, size: ExportSize, message: @escaping (ExportEngine?, ExportSize, SaveSettings) -> String) {
-        self.panel = panel
-        self.message = message
-        enginePopup = engine.map { _ in NSPopUpButton() }
-        super.init()
-        popup.addItems(withTitles: OutputFormat.allCases.map(\.title))
-        popup.selectItem(at: OutputFormat.allCases.firstIndex(of: selected) ?? 0)
-        popup.target = self; popup.action = #selector(changed)
-        var rows = [NSStackView(views: [NSTextField(labelWithString: "Format:"), popup])]
-        depthPopup.addItems(withTitles: ["8-bit", "16-bit"])
-        depthPopup.target = self; depthPopup.action = #selector(depthChanged)
-        rows.append(NSStackView(views: [NSTextField(labelWithString: "Bit Depth:"), depthPopup]))
-        spacePopup.addItems(withTitles: SaveSettings.colorSpaces)
-        spacePopup.autoenablesItems = false
-        spacePopup.item(at: SaveSettings.prophoto)?.toolTip = "ProPhoto RGB needs 16 bits; 8 bits would band."
-        spacePopup.target = self; spacePopup.action = #selector(spaceChanged)
-        spacePopup.toolTip = "The colour space the file is saved in, with its ICC profile."
-        rows.append(NSStackView(views: [NSTextField(labelWithString: "Colour Space:"), spacePopup]))
-        qualitySlider.doubleValue = Double(SaveSettings.lastQuality)
-        qualitySlider.isContinuous = true
-        qualitySlider.target = self; qualitySlider.action = #selector(qualityChanged)
-        qualitySlider.widthAnchor.constraint(equalToConstant: 160).isActive = true
-        qualityLabel.alignment = .right
-        qualityLabel.widthAnchor.constraint(equalToConstant: 28).isActive = true
-        qualityRow = NSStackView(views: [NSTextField(labelWithString: "JPEG Quality:"), qualitySlider, qualityLabel])
-        rows.append(qualityRow)
-        if let enginePopup, let engine {
-            enginePopup.addItems(withTitles: ExportEngine.allCases.map(\.title))
-            enginePopup.selectItem(at: ExportEngine.allCases.firstIndex(of: engine) ?? 0)
-            enginePopup.target = self; enginePopup.action = #selector(engineChanged)
-            enginePopup.toolTip = "Reference develops the photo again with extra precision. Fast uses the preview's result and looks the same."
-            rows.append(NSStackView(views: [NSTextField(labelWithString: "Engine:"), enginePopup]))
-        }
-        edgePopup.addItems(withTitles: ExportSize.Edge.allCases.map(\.title))
-        edgePopup.selectItem(at: ExportSize.Edge.allCases.firstIndex(of: size.edge) ?? 0)
-        edgePopup.target = self; edgePopup.action = #selector(sizeChanged)
-        edgePopup.toolTip = "Fits the finished file, border included, to this many pixels. Never enlarges."
-        // No minimum or maximum here: `size` reads `stringValue` on every
-        // keystroke, and a range-checking formatter would reject a partial
-        // number ("2", "20", …) and clear the field. `size` clamps instead.
-        let formatter = NumberFormatter()
-        formatter.allowsFloats = false
-        pixelsField.formatter = formatter
-        pixelsField.integerValue = size.pixels
-        pixelsField.alignment = .right
-        pixelsField.delegate = self
-        pixelsField.setAccessibilityLabel("Size in pixels")
-        pixelsField.widthAnchor.constraint(equalToConstant: 64).isActive = true
-        pixelsField.isEnabled = size.edge != .full
-        rows.append(NSStackView(views: [NSTextField(labelWithString: "Size:"), edgePopup, pixelsField, NSTextField(labelWithString: "px")]))
-        rows.forEach(stack.addArrangedSubview)
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
-        panel.accessoryView = stack
-        panel.allowedContentTypes = [selected.type]
-        sync()
-    }
-
-    /// Stores the choices for the next save.
-    func remember() {
-        SaveSettings.chosenSpace = chosenSpace
-        for (format, depth) in depths { SaveSettings.setBitDepth(depth, for: format) }
-        SaveSettings.lastQuality = settings.jpegQuality
-    }
-
-    /// Brings the bit depth, colour space and quality controls in line with
-    /// the format, then the message.
-    private func sync() {
-        let current = settings
-        depthPopup.selectItem(at: current.bitDepth == 16 ? 1 : 0)
-        depthPopup.isEnabled = format != .jpeg
-        depthPopup.toolTip = format == .jpeg ? "JPEG is 8-bit only." : nil
-        spacePopup.item(at: SaveSettings.prophoto)?.isEnabled = current.bitDepth == 16
-        spacePopup.selectItem(at: current.colorSpace)
-        qualityLabel.stringValue = "\(current.jpegQuality)"
-        qualityRow.isHidden = format != .jpeg
-        stack.setFrameSize(stack.fittingSize)
-        panel?.message = message(engine, size, current)
-    }
-
-    @objc private func changed() {
-        panel?.allowedContentTypes = [format.type]
-        sync()
-    }
-    @objc private func depthChanged() {
-        if format != .jpeg { depths[format] = depthPopup.indexOfSelectedItem == 1 ? 16 : 8 }
-        sync()
-    }
-    @objc private func spaceChanged() { chosenSpace = max(spacePopup.indexOfSelectedItem, 0); sync() }
-    @objc private func qualityChanged() { qualityLabel.stringValue = "\(settings.jpegQuality)" }
-    @objc private func engineChanged() { panel?.message = message(engine, size, settings) }
-    @objc private func sizeChanged() {
-        pixelsField.isEnabled = size.edge != .full
-        if pixelsField.isEnabled {
-            // Show the value that will be used when the field was left blank
-            // or out of range, then focus it for typing.
-            pixelsField.integerValue = size.pixels
-            panel?.makeFirstResponder(pixelsField)
-        }
-        panel?.message = message(engine, size, settings)
-    }
-    func controlTextDidChange(_ notification: Notification) { panel?.message = message(engine, size, settings) }
-    /// Leaving the field writes back the clamped value, so an empty or
-    /// out-of-range entry never sits beside a different export size.
-    func controlTextDidEndEditing(_ notification: Notification) {
-        let pixels = size.pixels
-        if pixelsField.integerValue != pixels { pixelsField.integerValue = pixels }
-        panel?.message = message(engine, size, settings)
-    }
-}

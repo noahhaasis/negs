@@ -800,16 +800,76 @@ struct AdjustmentInspector: View {
     // MARK: Export
 
     @ViewBuilder private var exportTab: some View {
+        Section("File") {
+            Picker("Format", selection: Binding(get: { model.exportFormat }, set: { model.exportFormat = $0 })) {
+                ForEach(OutputFormat.allCases, id: \.rawValue) { format in
+                    Text(format.title).tag(format)
+                }
+            }
+            .help("The file type, and the extension the save panel offers.")
+            Picker("Bit depth", selection: Binding(get: { model.exportBitDepth }, set: { model.exportBitDepth = $0 })) {
+                Text("8-bit").tag(8)
+                Text("16-bit").tag(16)
+            }
+            .disabled(model.exportFormat == .jpeg)
+            .help(model.exportFormat == .jpeg ? "JPEG is 8-bit only." : "Bits per channel, for PNG and TIFF.")
+            if model.exportFormat == .jpeg {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        Slider(value: Binding(get: { Double(model.exportQuality) },
+                                              set: { model.exportQuality = Int($0.rounded()) }),
+                               in: Double(SaveSettings.qualityRange.lowerBound)...Double(SaveSettings.qualityRange.upperBound),
+                               step: 1)
+                        .frame(width: 140)
+                        Text("\(model.exportQuality)").monospacedDigit().frame(width: 28, alignment: .trailing)
+                    }
+                } label: { Text("JPEG quality") }
+            }
+            if model.exportBitDepth == 8, model.previewSpace == SaveSettings.colorSpaces[SaveSettings.prophoto] {
+                Text("ProPhoto RGB needs 16 bits; exports use Adobe RGB (1998) at 8 bits.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
         Section("Output") {
             Picker("Colour space", selection: Binding(get: { model.previewSpace }, set: model.choosePreviewSpace)) {
                 ForEach(SaveSettings.colorSpaces, id: \.self) { Text($0).tag($0) }
             }
-            .help("The preview develops in this colour space, so it shows the colours an export in it can hold. Save and Export use it next, and switch it when you pick another.")
+            .help("The preview develops in this colour space, and exports are written in it. ProPhoto RGB needs 16 bits.")
             Toggle("Encode with the colour space’s curve", isOn: model.toggle("io.output_cctf_encoding"))
                 .help("Off writes linear values, for further processing.")
             Toggle("Include border", isOn: model.border(\.export))
                 .help("Adds the border to exported photographs and saved previews.")
                 .disabled(!model.border.enabled)
+        }
+        Section("Export") {
+            Picker("Engine", selection: Binding(get: { model.exportEngine }, set: { model.exportEngine = $0 })) {
+                ForEach(ExportEngine.allCases, id: \.rawValue) { engine in
+                    Text(engine.title).tag(engine)
+                }
+            }
+            .help("Reference develops the photo again with extra precision. Fast uses the preview's result and looks the same.")
+            Picker("Size", selection: Binding(get: { model.exportSize.edge }, set: { model.exportSize.edge = $0 })) {
+                ForEach(ExportSize.Edge.allCases, id: \.rawValue) { edge in
+                    Text(edge.title).tag(edge)
+                }
+            }
+            .help("Fits the finished file, border included, to this many pixels. Never enlarges.")
+            if model.exportSize.edge != .full {
+                LabeledContent {
+                    HStack(spacing: 4) {
+                        TextField("", value: Binding(
+                            get: { model.exportSize.pixels },
+                            set: { model.exportSize.pixels = min(max($0, ExportSize.pixelRange.lowerBound), ExportSize.pixelRange.upperBound) }
+                        ), format: .number)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 72)
+                        .accessibilityLabel(model.exportSize.edge == .long ? "Long edge in pixels" : "Short edge in pixels")
+                        Text("px").foregroundStyle(.secondary)
+                    }
+                } label: {
+                    Text(model.exportSize.edge == .long ? "Long edge" : "Short edge")
+                }
+            }
         }
         Section("Performance") {
             Toggle("Limit preview to 12 MP", isOn: Binding(get: { model.limitsPreview }, set: model.limitPreview))
