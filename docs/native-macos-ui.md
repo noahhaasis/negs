@@ -244,10 +244,11 @@ lightness line is the pixel's luminance, which is what the zones mean.
 A **pin** is a tone measured on the photograph and held on the curve. On the
 canvas:
 
-- ⌘-click pins the tone under the pointer (one pixel).
-- ⌘-drag grows a circle from the cursor outward and pins the average inside
-  it; the circle's radius is a fraction of the photograph's shorter side, so
-  it covers the same area at any zoom.
+- holding ⌘ shows the circle a pin would average, at the pointer. ⌘-scroll
+  sizes it, down to the one pixel under the pointer, and the size carries to the
+  next pin. Its radius is a fraction of the photograph's shorter side, so it
+  covers the same area at any zoom.
+- ⌘-click pins the average inside the circle.
 - a pin is a numbered chip over the spot it averaged, 18 points across at any
   zoom and upright on a turned photograph, filled with its tone's own grey,
   with a thin ring around the area it averaged.

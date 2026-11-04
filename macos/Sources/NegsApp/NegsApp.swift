@@ -234,6 +234,7 @@ struct CanvasArea: View {
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale,
                       pins: model.pinMarkers,
                       onSelectPin: { model.selectPin($0) },
+                      allowsPinning: model.canPin,
                       onPin: { centre, radius in Task { await model.addPin(at: centre, radius: radius) } },
                       onMovePin: { index, centre in Task { await model.movePin(index, to: centre) } },
                       onEscapeKey: { model.clearToneSelection() },

@@ -184,6 +184,77 @@ extension CanvasGestureTests {
         XCTAssertNil(view.pinIndex(at: CGPoint(x: point.x + 30, y: point.y)))
     }
 
+    // MARK: Sizing the sample with the scroll wheel
+
+    private func scrollEvent(_ delta: Int32) throws -> NSEvent {
+        let event = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0))
+        event.flags = .maskCommand
+        return try XCTUnwrap(NSEvent(cgEvent: event))
+    }
+
+    private func mouse(_ type: NSEvent.EventType, at point: CGPoint, modifiers: NSEvent.ModifierFlags = .command) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+
+    /// Each step scales the circle, down to one pixel and back, and never past
+    /// half the photograph.
+    func testScrollingScalesTheSampleWithinItsLimits() {
+        XCTAssertGreaterThan(SampleSize.radius(from: 0.1, scrollDelta: -10, precise: true), 0.1)
+        XCTAssertLessThan(SampleSize.radius(from: 0.1, scrollDelta: 10, precise: true), 0.1)
+        // A wheel's notch counts for more than a trackpad's pixel.
+        XCTAssertGreaterThan(SampleSize.radius(from: 0.1, scrollDelta: -1, precise: false), SampleSize.radius(from: 0.1, scrollDelta: -1, precise: true))
+        XCTAssertEqual(SampleSize.radius(from: 0.5, scrollDelta: -100, precise: true), 0.5)
+        XCTAssertEqual(SampleSize.radius(from: SampleSize.smallest, scrollDelta: 100, precise: true), 0)
+        XCTAssertEqual(SampleSize.radius(from: 0, scrollDelta: 100, precise: true), 0)
+        XCTAssertEqual(SampleSize.radius(from: 0, scrollDelta: -1, precise: true), SampleSize.smallest)
+    }
+
+    /// ⌘-scroll sizes the circle and doesn't pan; a plain scroll pans as before.
+    func testCommandScrollSizesTheSampleInsteadOfPanning() throws {
+        let scroll = ImageScrollView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        scroll.allowsMagnification = true
+        let view = makeView()
+        scroll.documentView = view
+        let (before, origin) = (view.sampleRadius, scroll.contentView.bounds.origin)
+        scroll.scrollWheel(with: try scrollEvent(-30))
+        XCTAssertGreaterThan(view.sampleRadius, before)
+        XCTAssertEqual(scroll.contentView.bounds.origin, origin)
+    }
+
+    /// ⌘-click pins at the size already set; a drag no longer changes it.
+    func testCommandClickPinsAtTheScrolledSize() throws {
+        let view = makeView()
+        view.allowsPinning = true
+        view.sampleRadius = 0.2
+        var pinned: [(CGPoint, Double)] = []
+        view.onPin = { pinned.append(($0, $1)) }
+        let point = viewPoint(CGPoint(x: 0.5, y: 0.5), in: view)
+        view.mouseDown(with: try mouse(.leftMouseDown, at: point))
+        view.mouseDragged(with: try mouse(.leftMouseDragged, at: CGPoint(x: point.x + 30, y: point.y)))
+        view.mouseUp(with: try mouse(.leftMouseUp, at: CGPoint(x: point.x + 30, y: point.y)))
+        XCTAssertEqual(pinned.count, 1)
+        XCTAssertEqual(pinned[0].0.x, 0.5, accuracy: 0.01)
+        XCTAssertEqual(pinned[0].1, 0.2)
+        XCTAssertEqual(view.sampleRadius, 0.2)
+    }
+
+    /// The circle shows only while ⌘ is held over the photograph, and only
+    /// when a tone can be pinned.
+    func testTheSampleCircleShowsWhileCommandIsHeld() {
+        let view = makeView()
+        view.allowsPinning = true
+        let point = viewPoint(CGPoint(x: 0.5, y: 0.5), in: view)
+        view.updateSampleCircle(at: point, commandHeld: true)
+        XCTAssertTrue(view.sampleCircleVisible)
+        view.updateSampleCircle(at: point, commandHeld: false)
+        XCTAssertFalse(view.sampleCircleVisible)
+        view.updateSampleCircle(at: CGPoint(x: -50, y: -50), commandHeld: true)
+        XCTAssertFalse(view.sampleCircleVisible, "Outside the photograph")
+        view.allowsPinning = false
+        view.updateSampleCircle(at: point, commandHeld: true)
+        XCTAssertFalse(view.sampleCircleVisible, "Nothing to pin")
+    }
+
     /// The unit point reads the photograph as shown: near the top of a
     /// top-black gradient is a dark tone, near the bottom a light one.
     func testUnitPointIsNotMirrored() throws {

@@ -234,7 +234,7 @@ struct ZoneHistogramView: View {
                         .foregroundStyle(ZonePalette.textPrimary)
                 }
             } else {
-                Text(canPin ? "⌘-click or ⌘-drag a tone to pin it" : "Hover a zone to read it")
+                Text(canPin ? "⌘-click a tone to pin it, ⌘-scroll to size" : "Hover a zone to read it")
                     .foregroundStyle(ZonePalette.textSecondary)
                 Spacer(minLength: 0)
             }

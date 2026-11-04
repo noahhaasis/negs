@@ -20,8 +20,10 @@ struct PreviewCanvas: NSViewRepresentable {
     var pins: [TonePinMarker] = []
     /// Called when a pin's chip is clicked.
     var onSelectPin: ((Int) -> Void)? = nil
+    /// A tone can be pinned right now, so ⌘ shows the sample circle.
+    var allowsPinning = false
     /// Called with the centre (unit coordinates, top left) and radius (a
-    /// fraction of the shorter side) of a ⌘-click or ⌘-drag.
+    /// fraction of the shorter side) of a ⌘-click.
     var onPin: ((CGPoint, Double) -> Void)? = nil
     /// Called when a placed pin is dragged to a new point.
     var onMovePin: ((Int, CGPoint) -> Void)? = nil
@@ -40,7 +42,7 @@ struct PreviewCanvas: NSViewRepresentable {
         scroll.allowsMagnification = true; scroll.minMagnification = 0.005; scroll.maxMagnification = 16
         scroll.documentView = PhotographView()
         scroll.setAccessibilityLabel("Photograph preview")
-        scroll.setAccessibilityHelp("Pinch to zoom, drag to pan, ⌘-click to pin a tone, ⌘-drag to pin the average of a circle, double-click to fit or show actual size.")
+        scroll.setAccessibilityHelp("Pinch to zoom, drag to pan, ⌘-click to pin the tone inside the circle, ⌘-scroll to size the circle, double-click to fit or show actual size.")
         scroll.onFitChanged = onFitChanged
         return scroll
     }
@@ -54,6 +56,7 @@ struct PreviewCanvas: NSViewRepresentable {
         photo.onSelectPin = onSelectPin
         photo.onPin = onPin
         photo.onMovePin = onMovePin
+        photo.allowsPinning = allowsPinning
         photo.setPins(pins)
         let cropped = crop.size(of: size)
         let displaySize = rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
@@ -187,7 +190,9 @@ final class ImageScrollView: NSScrollView {
         (documentView as? PhotographView)?.zoomChanged()
     }
     override func scrollWheel(with event: NSEvent) {
-        if event.modifierFlags.contains(.option) {
+        if event.modifierFlags.contains(.command), let photo = documentView as? PhotographView {
+            photo.sizeSample(with: event)
+        } else if event.modifierFlags.contains(.option) {
             setFitting(false)
             let center = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
             setMagnification(min(max(magnification * exp(-event.scrollingDeltaY * 0.01), minMagnification), maxMagnification), centeredAt: center)
@@ -202,8 +207,11 @@ final class PhotographView: NSView {
     private let photo = CALayer()
     /// The circles the pins average, over the photograph.
     private let ringLayer = CAShapeLayer()
-    /// The circle a ⌘-drag is growing, until the mouse comes up.
-    private let dragRing = CAShapeLayer()
+    /// The circle a ⌘-click would average, while ⌘ is held.
+    private let sampleRing = CAShapeLayer()
+    /// Where the sample circle is drawn; nil while it's hidden.
+    private var samplePoint: CGPoint?
+    private var flagsMonitor: Any?
     private var borderLayers: BorderLayers!
     private var image: AnyObject?
     private var size = CGSize.zero
@@ -220,17 +228,22 @@ final class PhotographView: NSView {
     /// Called when a pin's chip is clicked.
     var onSelectPin: ((Int) -> Void)?
     /// Called with the centre (unit coordinates, top left) and radius (a
-    /// fraction of the shorter side) of a completed ⌘-click or ⌘-drag.
+    /// fraction of the shorter side) of a ⌘-click.
     var onPin: ((CGPoint, Double) -> Void)?
     /// Called when a placed pin is dragged to a new point.
     var onMovePin: ((Int, CGPoint) -> Void)?
     var onEscapeKey: (() -> Void)?
     var onDeleteKey: (() -> Void)?
+    /// A tone can be pinned right now.
+    var allowsPinning = false {
+        didSet { if allowsPinning != oldValue { refreshSampleCircle(NSEvent.modifierFlags) } }
+    }
+    /// The circle a ⌘-click averages, which ⌘-scroll sizes.
+    var sampleRadius = SampleSize.initial
+    var sampleCircleVisible: Bool { !sampleRing.isHidden }
     /// The drag in progress.
     private enum Drag {
         case pan
-        /// A ⌘-drag: the circle grows from `centre` to the pointer.
-        case pin(centre: CGPoint, unitCentre: CGPoint)
         /// A pin dragged from its chip: it follows the pointer from where it
         /// was grabbed, and the tone is measured again on mouse-up.
         case movePin(index: Int, start: CGPoint, grab: CGVector, unit: CGPoint?)
@@ -261,23 +274,24 @@ final class PhotographView: NSView {
             "backgroundColor": NSNull(), "borderWidth": NSNull()
         ]
         photo.actions = none; clip.actions = none
-        ringLayer.actions = none; dragRing.actions = none
+        ringLayer.actions = none; sampleRing.actions = none
         clip.masksToBounds = true
-        // The pins and the drag ring, drawn in the photographed frame so they
+        // The pins and the sample circle, drawn in the photographed frame so they
         // follow the crop and the straightening, never exported. The photo is
         // added first: a layer added earlier would be painted under it.
         ringLayer.fillColor = nil
         ringLayer.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.75).cgColor
         ringLayer.lineWidth = 1
-        dragRing.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
-        dragRing.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.95).cgColor
-        dragRing.lineWidth = 1
-        dragRing.isHidden = true
+        sampleRing.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+        sampleRing.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.95).cgColor
+        sampleRing.lineWidth = 1
+        sampleRing.isHidden = true
         clip.addSublayer(photo)
         clip.addSublayer(ringLayer)
-        clip.addSublayer(dragRing)
+        clip.addSublayer(sampleRing)
         layer?.addSublayer(clip)
         borderLayers = BorderLayers(in: layer!, around: clip)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
@@ -329,6 +343,7 @@ final class PhotographView: NSView {
     private var chipSize: CGFloat { 18 / zoom }
 
     func zoomChanged() {
+        drawSampleCircle()
         guard !pinMarkers.isEmpty else { return }
         updatePins()
     }
@@ -376,7 +391,6 @@ final class PhotographView: NSView {
         }
         ringLayer.path = rings.isEmpty ? nil : rings
         ringLayer.lineWidth = 1 / zoom
-        dragRing.lineWidth = 1 / zoom
         for (index, chip) in chips where !live.contains(index) {
             chip.removeFromSuperlayer()
             chips.removeValue(forKey: index)
@@ -453,10 +467,7 @@ final class PhotographView: NSView {
             pushCursor(.closedHand)
         case .pin:
             guard let unit = unitPoint(at: point) else { return }
-            drag = .pin(centre: point, unitCentre: unit)
-            dragRing.isHidden = false
-            updateDragRing(centre: point, radius: 0)
-            pushCursor(.crosshair)
+            if allowsPinning { onPin?(unit, sampleRadius) }
         case .pan:
             guard let scroll = enclosingScrollView as? ImageScrollView, scroll.canScroll else { return }
             drag = .pan
@@ -467,8 +478,6 @@ final class PhotographView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         switch drag {
-        case .pin(let centre, _):
-            updateDragRing(centre: centre, radius: hypot(point.x - centre.x, point.y - centre.y))
         case .movePin(let index, let start, let grab, _):
             guard hypot(point.x - start.x, point.y - start.y) > 2 else { return }
             let centre = CGPoint(x: point.x - grab.dx, y: point.y - grab.dy)
@@ -489,27 +498,71 @@ final class PhotographView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
         if case .movePin(let index, _, _, let unit?) = drag {
             onMovePin?(index, unit)
         }
-        if case .pin(let centre, let unit) = drag {
-            // A fraction of the shorter side, so a circle means the same area
-            // at any zoom.
-            let reach = hypot(point.x - centre.x, point.y - centre.y)
-            onPin?(unit, min(Double(reach / max(min(size.width, size.height), 1)), 1))
-        }
         drag = nil
-        dragRing.isHidden = true
         popCursor()
     }
 
-    private func updateDragRing(centre: CGPoint, radius: CGFloat) {
-        let local = clip.convert(centre, from: layer)
-        dragRing.path = CGPath(
-            ellipseIn: CGRect(x: local.x - radius, y: local.y - radius, width: radius * 2, height: radius * 2),
+    // MARK: The sample circle
+
+    override func mouseMoved(with event: NSEvent) {
+        updateSampleCircle(at: convert(event.locationInWindow, from: nil), commandHeld: event.modifierFlags.contains(.command))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        updateSampleCircle(at: .zero, commandHeld: false)
+    }
+
+    /// ⌘ can go down without the mouse moving, and with a field holding the
+    /// keyboard, so the window's modifier changes are watched here.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
+        flagsMonitor = nil
+        guard window != nil else { return }
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.refreshSampleCircle(event.modifierFlags)
+            return event
+        }
+    }
+
+    private func refreshSampleCircle(_ modifiers: NSEvent.ModifierFlags) {
+        let point = window.map { convert($0.mouseLocationOutsideOfEventStream, from: nil) } ?? .zero
+        updateSampleCircle(at: point, commandHeld: modifiers.contains(.command) && (window == nil || visibleRect.contains(point)))
+    }
+
+    /// Shows the sample circle at `point` while ⌘ is held over the photograph.
+    func updateSampleCircle(at point: CGPoint, commandHeld: Bool) {
+        let shown = commandHeld && allowsPinning && unitPoint(at: point) != nil
+        let wasShown = samplePoint != nil
+        samplePoint = shown ? point : nil
+        sampleRing.isHidden = !shown
+        drawSampleCircle()
+        if shown { NSCursor.crosshair.set() } else if wasShown { NSCursor.arrow.set() }
+    }
+
+    /// One step of ⌘-scroll.
+    func sizeSample(with event: NSEvent) {
+        sampleRadius = SampleSize.radius(
+            from: sampleRadius, scrollDelta: Double(event.scrollingDeltaY), precise: event.hasPreciseScrollingDeltas
+        )
+        drawSampleCircle()
+    }
+
+    private func drawSampleCircle() {
+        guard let samplePoint else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        let centre = clip.convert(samplePoint, from: layer)
+        // One pixel still shows, as a small circle.
+        let radius = max(CGFloat(sampleRadius) * min(size.width, size.height), 3 / zoom)
+        sampleRing.path = CGPath(
+            ellipseIn: CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2),
             transform: nil
         )
+        sampleRing.lineWidth = 1 / zoom
+        CATransaction.commit()
     }
 
     override func layout() {
