@@ -32,7 +32,7 @@ impl RawWhiteBalanceMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::AsShot => "As shot",
-            Self::Daylight => "Daylight",
+            Self::Daylight => "Daylight (5500 K)",
             Self::Tungsten => "Tungsten (2850 K)",
             Self::Custom => "Custom",
         }
@@ -86,7 +86,8 @@ impl RawWhiteBalance {
 
     fn adjustment(self) -> Option<(f64, f64)> {
         match self.mode {
-            RawWhiteBalanceMode::AsShot | RawWhiteBalanceMode::Daylight => None,
+            RawWhiteBalanceMode::AsShot => None,
+            RawWhiteBalanceMode::Daylight => Some((5500.0, 1.0)),
             RawWhiteBalanceMode::Tungsten => Some((2850.0, 1.0)),
             RawWhiteBalanceMode::Custom => Some((self.temperature, self.tint)),
         }
@@ -331,7 +332,7 @@ mod tests {
         assert_eq!(wb.mode, RawWhiteBalanceMode::AsShot);
         assert_eq!(wb.adjustment(), None);
         wb.mode = RawWhiteBalanceMode::Daylight;
-        assert_eq!(wb.adjustment(), None);
+        assert_eq!(wb.adjustment(), Some((5500.0, 1.0)));
         wb.mode = RawWhiteBalanceMode::Tungsten;
         wb.temperature = f64::NAN; // inactive controls are ignored
         wb.tint = -1.0;

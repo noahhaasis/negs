@@ -285,7 +285,7 @@ mod tests {
             RawDecodeOptions {
                 white_balance: RawWhiteBalance {
                     mode: RawWhiteBalanceMode::Custom,
-                    temperature: 6504.0,
+                    temperature: 5500.0,
                     tint: 1.0,
                 },
                 ..options

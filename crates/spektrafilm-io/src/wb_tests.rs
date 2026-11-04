@@ -130,7 +130,7 @@ fn selection_reloads_raw_and_export_json_reproduces_preview_pixels() {
         &file.0,
         RawWhiteBalance {
             mode: RawWhiteBalanceMode::Custom,
-            temperature: 6504.0,
+            temperature: 5500.0,
             tint: 1.0,
         },
     )
@@ -165,7 +165,7 @@ fn byte_loaders_apply_the_same_wb_as_path_loaders() {
     assert_ne!(daylight, as_shot);
     assert_ne!(tungsten, daylight);
     assert_ne!(custom, daylight);
-    let custom_daylight = RawWhiteBalance { mode: RawWhiteBalanceMode::Custom, temperature: 6504.0, tint: 1.0 };
+    let custom_daylight = RawWhiteBalance { mode: RawWhiteBalanceMode::Custom, temperature: 5500.0, tint: 1.0 };
     assert_eq!(load_raw_bytes(&bytes, custom_daylight).unwrap().data, daylight);
     assert_eq!(load_raw_bytes(&bytes, RawWhiteBalance::default()).unwrap().data, as_shot);
     let invalid = RawWhiteBalance { mode: RawWhiteBalanceMode::Custom, temperature: 1000.0, tint: 1.0 };

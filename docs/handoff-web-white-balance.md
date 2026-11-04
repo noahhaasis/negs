@@ -127,7 +127,7 @@ Add focused automated coverage for:
 - All four modes and custom serialization/validation using shared semantics;
   invalid active custom values fail clearly, default As Shot stays unchanged.
 - RAW pixels actually change for Daylight/Tungsten/Custom where expected; switching
-  back to As Shot returns to baseline. Custom 6504 K / tint 1 equals Daylight.
+  back to As Shot returns to baseline. Custom 5500 K / tint 1 equals Daylight.
   Compare to shared rawler reference results, not Apple's macOS decoder pixels.
 - Both main-engine and throwaway-worker paths; opt-in bounded decoding continues
   to accept the selected WB. CPU and WebGPU consume the same developed source.

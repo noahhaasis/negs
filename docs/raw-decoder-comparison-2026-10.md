@@ -84,7 +84,7 @@ application bundle.
 - IO tests: 46 passed, with real-file tests explicitly marked ignored in normal
   CI. The rawler-only configuration also passed 46 tests.
 - The real Apple orientation/WB test was explicitly run on each HE★ file. It
-  verifies upright/unoriented consistency, exact Daylight/Custom 6504 K identity,
+  verifies upright/unoriented consistency, exact Daylight/Custom 5500 K identity,
   changed custom WB and finite output.
 - The f64 IO suite and existing CLI/native-helper tests passed.
 - The release native helper imported both HE★ files, rendered them through the
