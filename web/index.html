@@ -165,6 +165,20 @@
   .ctl[hidden] { display: none; }
   .ctl .head, .ctl > label { display: flex; flex: 1; align-items: center; gap: 6px; color: var(--muted); }
   .ctl .head .label, .ctl > label > span { margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A control's (i) (app.js info) sits right after its title. */
+  .ctl .head .label:has(+ .info), .ctl > label > span:has(+ .info) { margin-right: 0; }
+  .ctl .info { margin-right: auto; }
+  .info { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; margin: 0 -2px; padding: 0; border: 0; background: none;
+    color: var(--faint); cursor: pointer; vertical-align: middle; }
+  .info::before { content: "i"; display: grid; place-items: center; width: 12px; height: 12px; border: 1px solid currentColor; border-radius: 50%;
+    font: italic 600 9px/1 Georgia, "Times New Roman", serif; }
+  .info:hover, .info[aria-expanded=true] { color: var(--fg); }
+  summary .info { font-weight: 400; }
+  .label-line { display: flex; align-items: center; gap: 4px; }
+  .stock-fold summary .stock-title + .info { margin-left: -4px; }
+  .ctl.styles .head { margin-bottom: 6px; }
+  .tip { position: fixed; inset: auto; margin: 0; max-width: min(280px, calc(100vw - 16px)); padding: 8px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: #2b2b2b; color: var(--fg); font-size: 12px; line-height: 1.45; box-shadow: 0 6px 24px rgb(0 0 0 / .45); }
   .ctl.changed .head .label, .ctl.changed > label > span { color: var(--fg); }
   .ctl.choice select { width: auto; max-width: 60%; padding: 3px 6px; }
   .ctl.action { display: flex; justify-content: flex-end; }
@@ -279,6 +293,9 @@
     .value { font-size: 14px; min-width: 56px; min-height: 32px; padding: 4px 8px; background: var(--field); border-radius: 6px; }
     .value-field { width: 84px; min-height: 32px; padding: 4px 8px; }
     .reset { min-width: 40px; min-height: 36px; font-size: 18px; }
+    .info { width: 30px; height: 36px; margin: 0 -8px; }
+    .info::before { width: 15px; height: 15px; font-size: 11px; }
+    .tip { font-size: 14px; }
     input[type=range] { --thumb: 26px; --track: 6px; height: 34px; pointer-events: none; }
     .ctl.slider .track { margin-top: -2px; padding: 2px 0; cursor: pointer; }
     .switch { width: 44px; height: 26px; border-radius: 13px; }

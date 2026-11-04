@@ -11,6 +11,7 @@ import { placeholder } from "./placeholder.js";
 import * as Border from "./border.js";
 import * as Crop from "./crop.js";
 import * as Stocks from "./stocks.js";
+import * as Help from "./help.js";
 import { createCropEditor } from "./crop-editor.js";
 import { fetchFailed } from "./engine.js";
 import { DEFAULT_SAMPLE, createSamplePicker } from "./samples.js";
@@ -328,10 +329,81 @@ const actions = {
   balancePrint: { run: balancePrint, busy: () => balancing, busyLabel: "Balancing…", enabled: () => !balancing && !!host && !get("io.scan_film") },
 };
 
+// The (i) beside a control: its tooltip in a bubble, on click or tap, since
+// phones have no hover. Clicking elsewhere, Escape or scrolling closes it.
+const tip = el("div", { className: "tip", id: "tip", role: "tooltip" });
+tip.setAttribute("popover", "auto");
+document.body.append(tip);
+let tipFor = null, tipWasOpen = false;
+tip.addEventListener("toggle", (ev) => {
+  if (ev.newState !== "closed") return;
+  tipFor?.setAttribute("aria-expanded", "false");
+  tipFor = null;
+});
+// Forgets the (i) at once: the toggle event comes a task later.
+function closeTip() {
+  if (!tipFor) return;
+  tipFor.setAttribute("aria-expanded", "false");
+  tipFor = null;
+  tip.hidePopover();
+}
+// `text`: a string, or a function for one that depends on the edit.
+function info(label, text) {
+  const button = el("button", { type: "button", className: "info" });
+  button.setAttribute("aria-label", `About ${label}`);
+  button.setAttribute("aria-expanded", "false");
+  // Light dismiss closes it on the press, before the click: a click on the
+  // (i) that was open only closes it.
+  button.addEventListener("pointerdown", () => { tipWasOpen = tipFor === button; });
+  button.addEventListener("click", (ev) => {
+    // Not the group's foldout or the label's control.
+    ev.preventDefault();
+    ev.stopPropagation();
+    const open = tipWasOpen || tipFor === button;
+    tipWasOpen = false;
+    closeTip();
+    if (open) return;
+    tip.textContent = typeof text === "function" ? text() : text;
+    tipFor = button;
+    button.setAttribute("aria-expanded", "true");
+    tip.showPopover();
+    // Under the (i), or over it where the screen ends; inside the window.
+    const r = button.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8))}px`;
+    const top = r.bottom + 4 + h > innerHeight - 8 ? r.top - 4 - h : r.bottom + 4;
+    tip.style.top = `${Math.max(8, Math.min(top, innerHeight - h - 8))}px`;
+  });
+  return button;
+}
+// A static label's leading text gets its (i) (the stock area's rows).
+function labelInfo(label, text) {
+  const node = [...label.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+  const title = node.textContent.trim();
+  node.replaceWith(el("span", { className: "label-line" }, el("span", { textContent: title }), info(title, text)));
+  label.removeAttribute("title");
+}
+
+// A control's tooltip (help.js): its own, else its path's. Prep's Exposure
+// reads differently while it's an offset on the match (macOS Inspector).
+function helpFor(c) {
+  if (c.kind === "offset") {
+    return () => state.match
+      ? "Brighter or darker than the match, in stops. It stays when the match changes with the film, paper or a preset."
+      : "Brightens or darkens the scene before the film, in stops. Unlike Negative exposure, the print doesn’t make up for it.";
+  }
+  return c.help ?? Help.PATHS[c.path] ?? null;
+}
+
 function buildControl(c) {
   const row = buildRow(c);
   if (c.path) row.dataset.tutorialPath = c.path;
-  if (c.help) row.title = c.help;
+  const help = helpFor(c);
+  if (help) {
+    const button = info(c.label, help);
+    if (c.kind === "action") row.append(button);
+    else if (c.kind === "styles") row.prepend(el("div", { className: "head" }, el("span", { className: "label", textContent: c.label }), button));
+    else row.querySelector(".head > .label, :scope > label > span")?.after(button);
+  }
   // While matched the meter only sets where the highlight limit starts, so
   // Auto exposure shows when matching is off, or when it's changed.
   if (c.metering) {
@@ -354,7 +426,7 @@ function buildRow(c) {
   if (c.kind === "styles") return buildStyles(c);
   if (c.kind === "action") {
     const a = actions[c.action];
-    const button = el("button", { type: "button", className: "btn", textContent: c.label, title: c.help });
+    const button = el("button", { type: "button", className: "btn", textContent: c.label });
     button.addEventListener("click", () => a.run());
     syncs.push(() => {
       button.disabled = !a.enabled();
@@ -618,6 +690,8 @@ function advancedHint(tab) {
 }
 
 function buildControls() {
+  $("scroll").addEventListener("scroll", closeTip, { passive: true });
+  addEventListener("resize", closeTip);
   const opened = remembered("groups", {});
   const sections = [...PREP_SECTIONS.map((s) => [s, "prep"]), ...SECTIONS.map((s) => [s, "lab"]), ...OUTPUT_SECTIONS.map((s) => [s, "output"])];
   for (const [section, pane] of sections) {
@@ -644,6 +718,7 @@ function buildControls() {
       details.dataset.tutorialGroup = key;
       details.addEventListener("toggle", () => remember("groups", { ...remembered("groups", {}), [key]: details.open }));
       const summary = el("summary", {}, el("span", { textContent: group.title }));
+      if (Help.GROUPS[group.title]) summary.append(info(group.title, Help.GROUPS[group.title]));
       const controls = el("fieldset", { className: "controls" });
       // Past the basics, each control shows with Advanced controls or once changed.
       const changed = [];
@@ -745,6 +820,11 @@ function fillStocks() {
   };
   fill($("film"), filmGroups());
   fill($("paper"), paperGroups());
+  labelInfo($("film").closest("label"), Help.FILM);
+  labelInfo($("paper-row"), Help.PAPER);
+  labelInfo($("film-time-row"), Help.PATHS["film_render.development_time"]);
+  labelInfo($("paper-time-row"), Help.PATHS["print_render.development_time"]);
+  labelInfo($("scan-film").closest("label"), Help.PATHS["io.scan_film"]);
   buildPreviews();
   developmentTime("film", "film_render.development_time", () => state.film);
   developmentTime("paper", "print_render.development_time", () => state.paper);
@@ -1730,6 +1810,8 @@ function buildPreviews() {
     return f;
   };
   folds = { film: fold("film", "Film", filmGroups(), chooseFilm), paper: fold("paper", "Paper", paperGroups(), choosePaper) };
+  folds.film.root.querySelector(".stock-title").after(info("Film", Help.FILM));
+  folds.paper.root.querySelector(".stock-title").after(info("Paper", Help.PAPER));
   $("film").closest("label").after(folds.film.root);
   $("paper-row").after(folds.paper.root);
   $("previews").addEventListener("change", () => setPreviews($("previews").checked));

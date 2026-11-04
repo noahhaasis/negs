@@ -201,13 +201,15 @@ export const OUTPUT_SECTIONS = [
   // them. Everything after "Add border" is off while it is; `styles` shows a
   // control for those styles only.
   { title: "Border", tab: "Output", controls: [
-    { kind: "toggle", label: "Add border", border: "enabled" },
-    { kind: "styles", label: "Style", border: "style" },
-    borderSlider("Width", "width", 0, 15, 0.1, ["solid", "keyline"]),
-    borderSlider("Line width", "line", 0.05, 2, 0.05, ["keyline"]),
-    { kind: "color", label: "Color", border: "color", styles: ["solid", "keyline"] },
-    { kind: "color", label: "Line color", border: "lineColor", styles: ["keyline"] },
-    borderSlider("Width", "filmWidth", 0, 15, 0.1, ["film"], "Adds black around the film frame."),
+    { kind: "toggle", label: "Add border", border: "enabled",
+      help: "Frames the photograph in a mat or a film frame. The preview always shows it; Include in export decides whether files get it." },
+    { kind: "styles", label: "Style", border: "style",
+      help: "Solid is a plain mat; Keyline adds a thin line around the photograph; Film is a scanned 120 film frame; 35mm a negative strip with the film’s edge print." },
+    borderSlider("Width", "width", 0, 15, 0.1, ["solid", "keyline"], "The mat’s width, in percent of the photograph’s long edge."),
+    borderSlider("Line width", "line", 0.05, 2, 0.05, ["keyline"], "The line’s width, in percent of the photograph’s long edge."),
+    { kind: "color", label: "Color", border: "color", styles: ["solid", "keyline"], help: "The mat’s colour." },
+    { kind: "color", label: "Line color", border: "lineColor", styles: ["keyline"], help: "The line’s colour." },
+    borderSlider("Width", "filmWidth", 0, 15, 0.1, ["film"], "Adds black around the film frame, in percent of the photograph’s long edge."),
     { kind: "toggle", label: "Extend to 3:4 for Instagram", border: "instagram",
       help: "Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post." },
     { kind: "toggle", label: "Include in export", border: "export", help: "Adds the border to exported photographs and saved previews." },
