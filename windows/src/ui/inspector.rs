@@ -197,10 +197,9 @@ pub struct Inspector {
     decimal: char,
     /// The UI font's line height, for value boxes inside their fields.
     line: i32,
-    /// Motion: the next layout slides rows to their places; the next sync
-    /// fades the rows in (Lab | Post); the slide running.
+    /// Motion: the next layout slides rows to their places; the slide
+    /// running.
     slide: bool,
-    fade: bool,
     sliding: Option<Slide>,
     /// Where the last layout put each control (its top), to slide from.
     placed: std::collections::HashMap<isize, i32>,
@@ -294,7 +293,6 @@ impl Inspector {
             decimal: '.',
             line: fonts.line,
             slide: false,
-            fade: false,
             sliding: None,
             placed: Default::default(),
             crop_shown: false,
@@ -340,30 +338,32 @@ impl Inspector {
         let tabs = self.px(32.0);
         let reset = self.px(32.0);
         let mut y = self.px(8.0);
-        unsafe {
-            place_combo(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0));
-            let _ = MoveWindow(self.scope_label, w - pad - self.px(40.0), y + self.px(4.0), self.px(40.0), self.px(16.0), true);
-            y += mode + self.px(8.0);
-            let _ = MoveWindow(self.scope, pad, y, inner, scope, true);
-            y += scope;
-            let _ = MoveWindow(self.grip, pad, y, inner, grip, true);
-            y += grip;
-            let _ = MoveWindow(self.pinned, 0, y, w, self.pinned_height, true);
-            y += self.pinned_height + self.px(8.0);
-            let each = inner / 3;
-            for (i, &tab) in self.tabs.iter().enumerate() {
-                let x = pad + each * i as i32;
-                let width = if i == 2 { inner - 2 * each } else { each };
-                let _ = MoveWindow(tab, x, y, width, tabs, true);
-            }
-            y += tabs + self.px(8.0);
-            let rows_bottom = h - reset - pad - self.px(8.0);
-            let _ = MoveWindow(self.rows_panel, 0, y, w, (rows_bottom - y).max(0), true);
-            let _ = MoveWindow(self.reset, pad, h - reset - pad, inner, reset, true);
-            if let Some(crop) = &self.crop {
-                let _ = MoveWindow(crop.panel, 0, 0, w, h, true);
-            }
+        // Moved together (`DeferWindowPos`): one at a time, each move
+        // repainted what it uncovered before the next filled it, which
+        // flickered on every step of dragging the scope's grabber.
+        let mut positions = vec![(self.scope_mode, pad, y, self.px(112.0).min(inner), self.px(200.0))];
+        positions.push((self.scope_label, w - pad - self.px(40.0), y + self.px(4.0), self.px(40.0), self.px(16.0)));
+        y += mode + self.px(8.0);
+        positions.push((self.scope, pad, y, inner, scope));
+        y += scope;
+        positions.push((self.grip, pad, y, inner, grip));
+        y += grip;
+        positions.push((self.pinned, 0, y, w, self.pinned_height));
+        y += self.pinned_height + self.px(8.0);
+        let each = inner / 3;
+        for (i, &tab) in self.tabs.iter().enumerate() {
+            let x = pad + each * i as i32;
+            let width = if i == 2 { inner - 2 * each } else { each };
+            positions.push((tab, x, y, width, tabs));
         }
+        y += tabs + self.px(8.0);
+        let rows_bottom = h - reset - pad - self.px(8.0);
+        positions.push((self.rows_panel, 0, y, w, (rows_bottom - y).max(0)));
+        positions.push((self.reset, pad, h - reset - pad, inner, reset));
+        if let Some(crop) = &self.crop {
+            positions.push((crop.panel, 0, 0, w, h));
+        }
+        place(&positions, 0);
     }
 }
 
@@ -753,6 +753,21 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
         let shown = on_tab && visible(row, model, &|g| want[g] && expanded[g]);
         want[i] = shown;
     }
+    // Rows and grids appearing and going (a tab, a group, a foldout) change
+    // while the column doesn't draw, then it paints once: shown one by one,
+    // rows drew at their old places, over a part-cleared panel, before the
+    // layout moved them. The tabs used to fade the rows in instead, a
+    // layered window that blanked them first and flashed again when it ended.
+    let foldout_changed = |paper: bool| {
+        let open = model.previews.open(paper) && ins.rows.iter().zip(&want).any(|(r, w)| r.kind == Kind::Foldout(paper) && *w);
+        open != ins.grids[paper as usize].as_ref().is_some_and(|g| g.was_open)
+    };
+    let lock = want.iter().zip(&ins.rows).any(|(w, r)| *w != r.shown) || foldout_changed(false) || foldout_changed(true);
+    if lock {
+        unsafe {
+            SendMessageW(ins.panel, WM_SETREDRAW, WPARAM(0), LPARAM(0));
+        }
+    }
     let t0 = crate::platform::qpc();
     let mut created = false;
     for i in 0..ins.rows.len() {
@@ -780,15 +795,27 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     for paper in [false, true] {
         let key = grid_key(model, paper);
         let open = model.previews.open(paper) && ins.rows.iter().any(|r| r.kind == Kind::Foldout(paper) && r.shown);
+        // A grid rebuilt while open keeps its scroll and the tile under the
+        // pointer, rather than jumping back to the current stock.
+        let mut kept = None;
         if ins.grids[paper as usize].as_ref().is_some_and(|g| g.key != key) {
             if let Some(grid) = ins.grids[paper as usize].take() {
+                kept = grid.was_open.then(|| (grid.scroll, pointed_tile(&grid)));
+                // The hovered tile's position now names another tile.
+                if HOVER_TILE.get().is_some_and(|(p, _)| p == paper) {
+                    HOVER_TILE.set(None);
+                }
                 unsafe {
                     let _ = DestroyWindow(grid.window);
                 }
             }
         }
         if open && ins.grids[paper as usize].is_none() && model.has_catalog() {
-            ins.grids[paper as usize] = Some(build_grid(ins.pinned, &app.fonts, model, paper, key));
+            let mut grid = build_grid(ins.pinned, &app.fonts, model, paper, key);
+            if let Some((scroll, anchor)) = kept {
+                (grid.scroll, grid.was_open, grid.anchor) = (scroll, true, anchor);
+            }
+            ins.grids[paper as usize] = Some(grid);
             created = true;
             fix_z_order(ins);
         }
@@ -810,8 +837,11 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     }
     let t2 = crate::platform::qpc();
     update_values(ins, model, &expanded);
-    if std::mem::take(&mut ins.fade) {
-        motion::fade_in(ins.rows_panel);
+    if lock {
+        unsafe {
+            SendMessageW(ins.panel, WM_SETREDRAW, WPARAM(1), LPARAM(0));
+            let _ = RedrawWindow(ins.panel, None, None, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        }
     }
     let t3 = crate::platform::qpc();
     // Curves are computed only while the graph is on screen.
@@ -1796,7 +1826,6 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
             app.model.prefs.choose_tab(next);
             app.model.prefs.save();
             app.inspector.scroll = 0;
-            app.inspector.fade = true;
             app.model.dirty |= dirty::STRUCTURE;
         }
         return;
@@ -2006,6 +2035,7 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 SetTextColor(dc, COLORREF(p.secondary));
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -2087,6 +2117,7 @@ extern "system" fn rows_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 draw_item(&*(lparam.0 as *const DRAWITEMSTRUCT));
                 LRESULT(1)
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
@@ -2314,6 +2345,12 @@ unsafe fn second_click(hwnd: HWND, lparam: LPARAM) -> bool {
 /// subclass's data. A double-click's first click still moves the thumb.
 extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, reset: usize) -> LRESULT {
     unsafe {
+        // `paint_trackbar` covers the whole control. Its class erases in
+        // the system's light button face, which showed as white bars when
+        // the rows moved (dragging the scope's grabber, opening a foldout).
+        if msg == WM_ERASEBKGND {
+            return LRESULT(1);
+        }
         if msg == WM_MOUSEWHEEL && GetFocus() != hwnd {
             return SendMessageW(GetParent(hwnd).unwrap_or_default(), msg, wparam, lparam);
         }
@@ -2348,19 +2385,10 @@ extern "system" fn trackbar_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
     }
 }
 
-/// Moves a drop-down list unless it is already there. A move asks for the
-/// list's height; the box sizes itself back to its field at once, and what
-/// it covered meanwhile is erased and repainted, a flash of the controls
-/// below it on every layout.
-fn place_combo(combo: HWND, x: i32, y: i32, width: i32, list: i32) {
-    if !combo_in_place(combo, x, y, width) {
-        unsafe {
-            let _ = MoveWindow(combo, x, y, width, list, true);
-        }
-    }
-}
-
 /// Whether `hwnd` is a drop-down list already at this place and width.
+/// Layouts leave those alone: a move asks for the list's height; the box
+/// sizes itself back to its field at once, and what it covered meanwhile
+/// is erased and repainted, a flash of the controls below it.
 fn combo_in_place(hwnd: HWND, x: i32, y: i32, width: i32) -> bool {
     if draw::class_of(hwnd) != "ComboBox" {
         return false;
@@ -2492,6 +2520,8 @@ struct StockGrid {
     /// It was on screen at the last layout; opening it again scrolls to the
     /// current stock.
     was_open: bool,
+    /// The tile to keep in place at the next layout (`pointed_tile`).
+    anchor: Option<(String, bool, i32)>,
 }
 
 /// A tile as drawn.
@@ -2548,7 +2578,7 @@ fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, ke
         })
         .collect();
     TILES.with(|t| t.borrow_mut()[paper as usize] = looks);
-    let grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false };
+    let grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false, anchor: None };
     select_tile(&grid, if paper { &model.state.paper } else { &model.state.film });
     grid
 }
@@ -2591,7 +2621,12 @@ fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
     }
     grid.content = content;
     grid.view = content.min(limit);
-    if !grid.was_open {
+    if let Some((id, favorite, top)) = grid.anchor.take() {
+        let index = (0..grid.tiles.len()).find(|&i| grid.tiles[i].0 == id && among_favorites(grid, i) == favorite);
+        if let Some(&(_, _, y, _, _)) = index.and_then(|i| positions.iter().find(|p| p.0 == grid.tiles[i].1)) {
+            grid.scroll = y - top;
+        }
+    } else if !grid.was_open {
         let selected = TILES.with(|t| {
             let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
             t.borrow()[paper as usize].iter().position(|look| look.selected)
@@ -2615,6 +2650,33 @@ fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
         let _ = InvalidateRect(grid.window, None, true);
     }
     grid.view
+}
+
+/// Whether the tile at `index` is among the favourites, the untitled section.
+fn among_favorites(grid: &StockGrid, index: usize) -> bool {
+    match grid.headings.first() {
+        Some(&(None, _)) => index < grid.headings.get(1).map_or(grid.tiles.len(), |h| h.1),
+        _ => false,
+    }
+}
+
+/// The tile under the pointer: its stock, whether it is the copy among the
+/// favourites, and its top in the grid's view. Starring adds a tile above
+/// it; the rebuilt grid scrolls so this one stays under the pointer.
+fn pointed_tile(grid: &StockGrid) -> Option<(String, bool, i32)> {
+    unsafe {
+        let mut p = POINT::default();
+        GetCursorPos(&mut p).ok()?;
+        let _ = ScreenToClient(grid.window, &mut p);
+        grid.tiles.iter().enumerate().find_map(|(i, (id, tile))| {
+            let mut r = RECT::default();
+            let _ = GetWindowRect(*tile, &mut r);
+            let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
+            MapWindowPoints(None, grid.window, &mut corners);
+            let inside = p.x >= corners[0].x && p.x < corners[1].x && p.y >= corners[0].y && p.y < corners[1].y;
+            inside.then(|| (id.clone(), among_favorites(grid, i), corners[0].y))
+        })
+    }
 }
 
 /// Scrolls an open grid to `target`.
@@ -2869,6 +2931,9 @@ extern "system" fn tile_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
             return LRESULT(0);
         }
         match msg {
+            // `draw_tile` covers the whole tile; erasing first blanked the
+            // thumbnails for a frame whenever the grid moved.
+            WM_ERASEBKGND => return LRESULT(1),
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if on_star(hwnd, lparam) => {
                 toggle_tile_favorite(hwnd);
                 return LRESULT(0);
@@ -2949,6 +3014,7 @@ extern "system" fn grid_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 SetTextColor(dc, COLORREF(p.secondary));
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_ERASEBKGND => draw::erase(hwnd, wparam, theme::palette().panel),
             WM_VSCROLL | WM_MOUSEWHEEL => {
                 with_app(|app| {
@@ -3532,6 +3598,7 @@ extern "system" fn crop_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
                 SetTextColor(dc, COLORREF(color));
                 LRESULT(theme::brush(p.panel).0 as isize)
             }
+            WM_CTLCOLORBTN => draw::button_brush(),
             WM_NOTIFY => draw::custom_draw(lparam).unwrap_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam)),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {

@@ -52,7 +52,9 @@ fn fade_step(raw: isize, start: Instant) {
         if t >= 1.0 {
             let ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
             SetWindowLongW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_LAYERED.0 as i32));
-            let _ = RedrawWindow(hwnd, None, None, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+            // Drawn at once: no longer layered, the window shows nothing of
+            // its own until it paints, a flash at the fade's end.
+            let _ = RedrawWindow(hwnd, None, None, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW);
             return;
         }
         let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), (ease(t) * 255.0) as u8, LWA_ALPHA);

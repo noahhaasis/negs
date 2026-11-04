@@ -55,6 +55,12 @@ pub fn tooltip(hwnd: HWND, text: &str) {
                 )
                 .unwrap_or_default();
                 SendMessageW(tip, TTM_SETMAXTIPWIDTH, WPARAM(0), LPARAM(420));
+                // At the system's half second (a tenth from tip to tip), a
+                // pointer resting on a slider before pressing it showed the
+                // tip, and the press hid it at once: a box flashed by.
+                for delay in [TTDT_INITIAL, TTDT_RESHOW] {
+                    SendMessageW(tip, TTM_SETDELAYTIME, WPARAM(delay as usize), LPARAM(1000));
+                }
                 super::theme::apply_control(tip, true);
                 t.set(tip.0 as isize);
             }

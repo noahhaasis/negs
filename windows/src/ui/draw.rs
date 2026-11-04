@@ -1006,9 +1006,13 @@ extern "system" fn combo_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
-            WM_SETFOCUS | WM_KILLFOCUS | WM_ENABLE => {
+            // The control draws its choice itself, outside `WM_PAINT`, when
+            // focus or the choice changes (keys, the wheel, its list's
+            // `LBN_SELCHANGE`, `CB_SETCURSEL`), in the system's highlight
+            // text: white on the box. Paint over it at once.
+            WM_SETFOCUS | WM_KILLFOCUS | WM_ENABLE | WM_COMMAND | WM_KEYDOWN | WM_CHAR | WM_MOUSEWHEEL | WM_UPDATEUISTATE | CB_SETCURSEL | CB_SELECTSTRING => {
                 let result = DefSubclassProc(hwnd, msg, wparam, lparam);
-                let _ = InvalidateRect(hwnd, None, false);
+                let _ = RedrawWindow(hwnd, None, None, RDW_INVALIDATE | RDW_UPDATENOW);
                 result
             }
             _ => DefSubclassProc(hwnd, msg, wparam, lparam),
@@ -1072,6 +1076,14 @@ pub fn chevron(c: &mut Canvas, cx: f32, cy: f32, open: bool, scale: f32, color: 
 }
 
 /// `WM_ERASEBKGND` with `color`.
+/// `WM_CTLCOLORBTN`: an owner-drawn button erases itself with this brush
+/// before its `WM_DRAWITEM`, often well before when it is shown or moved.
+/// Unanswered, that is the system's light button face, which flashed white
+/// in dark mode over tiles and headers.
+pub fn button_brush() -> LRESULT {
+    LRESULT(theme::brush(theme::palette().panel).0 as isize)
+}
+
 pub fn erase(hwnd: HWND, wparam: WPARAM, color: Color) -> LRESULT {
     unsafe {
         let mut r = RECT::default();
