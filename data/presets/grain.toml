@@ -135,3 +135,89 @@ rms_granularity = [8.0]
 
 [fujifilm_acros_100_ii]
 rms_granularity = [7.0]
+
+# --- Negs only, not upstream: the colour films ported from Fotufilm (CC BY-SA
+# 4.0, MUAStudio Inc.), scaled to this table from the stocks both share (see
+# docs/handoff-fotufilm-grain.md). Where Fotufilm's grainStrength is the
+# datasheet figure (Fujifilm still negatives, every slide film, Aerocolor
+# 2460), it matches this table 1:1 (C-200, X-TRA 400, Pro 400H, Provia 100F,
+# Ektachrome 100, Kodachrome 64) and is used x 1000. Fotufilm's other figures
+# read 1.9x this table on Gold 200, UltraMax 400, Ektar 100 and Portra 400, so
+# they are scaled by 0.525 (least squares). The Fujifilm cine films take the
+# Vision3 250D/500T fit (x 1.54 on Fotufilm's per-layer figure, its layer
+# weights included). CineStill 800T is Vision3 500T and takes its section.
+# Rounded to 0.5. Uniformity, density_min and sublayers come from the colour
+# defaults unless set.
+[fujifilm_superia_200]
+rms_granularity = [4.0, 4.0, 4.0]
+
+[fujifilm_reala_100]
+rms_granularity = [4.0, 4.0, 4.0]
+
+[fujifilm_pro_160ns]
+rms_granularity = [3.0, 3.0, 3.0]
+
+[kodak_aerocolor_2460]
+rms_granularity = [8.5, 8.5, 8.5]
+
+[kodak_kodacolor_100]
+rms_granularity = [5.0, 5.0, 5.0]
+
+[lomography_color_100]
+rms_granularity = [3.5, 3.5, 3.5]
+
+[cinestill_400d]
+rms_granularity = [4.0, 4.0, 4.0]
+
+[lomography_lomochrome_metropolis]
+rms_granularity = [6.0, 6.0, 6.0]
+
+[lomography_lomochrome_turquoise]
+rms_granularity = [6.5, 6.5, 6.5]
+
+[harman_phoenix_200]
+rms_granularity = [9.5, 9.5, 9.5]
+
+[cinestill_800t]
+rms_granularity = [9.0, 13.0, 30.0]
+uniformity = [0.93, 0.97, 0.99]
+particle_scale_sublayers = [1.0, 0.3, 0.25]
+
+[fujifilm_eterna_500]
+rms_granularity = [3.5, 5.5, 7.0]
+
+[fujifilm_eterna_vivid_500]
+rms_granularity = [3.5, 5.5, 7.0]
+
+[fujifilm_f64d]
+rms_granularity = [2.5, 4.0, 5.0]
+
+[fujifilm_reala_500d]
+rms_granularity = [4.0, 6.0, 8.0]
+
+[fujifilm_astia_100f]
+rms_granularity = [7.0, 7.0, 7.0]
+
+[fujifilm_velvia_50]
+rms_granularity = [9.0, 9.0, 9.0]
+
+[agfa_agfachrome_50]
+rms_granularity = [10.0, 10.0, 10.0]
+
+[agfa_agfachrome_100]
+rms_granularity = [10.0, 10.0, 10.0]
+
+[agfa_agfachrome_200]
+rms_granularity = [12.0, 12.0, 12.0]
+
+[kodak_kodachrome_25]
+rms_granularity = [9.0, 9.0, 9.0]
+
+[kodak_kodachrome_200]
+rms_granularity = [16.0, 16.0, 16.0]
+
+[kodak_aerochrome_1443]
+rms_granularity = [23.0, 23.0, 23.0]
+
+[fotufilm_infrared_color]
+rms_granularity = [8.5, 8.5, 8.5]

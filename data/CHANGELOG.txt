@@ -86,6 +86,14 @@ see FOTUFILM_LICENSE.txt):
   rms_granularity to the datasheet's RMS granularity (Fotufilm's
   grainStrength x 1000; T-MAX 100 and Acros 100 II checked against the Kodak
   and Fujifilm datasheets) and takes the rest from upstream's B&W defaults.
+- presets/grain.toml: grain sections for the 24 colour films, in a second
+  Negs-only block. Fotufilm's datasheet figures (Fujifilm still negatives,
+  slide films, Aerocolor 2460) are used x 1000, as they match upstream 1:1
+  on the films both have; Fotufilm's other figures are scaled by 0.525,
+  fitted on Gold 200, UltraMax 400, Ektar 100 and Portra 400; the Fujifilm
+  cine films take a fit on Vision3 250D/500T with Fotufilm's layer weights;
+  CineStill 800T takes Vision3 500T's section. The rest from upstream's
+  colour defaults. Before, every one got the schema defaults.
 - borders/35mm/: edge-print strips for the 24 ported colour films (product
   codes or names) and the 5 B&W films (Fotufilm's edge texts),
   crates/spektrafilm-io/src/film35.rs.

@@ -21,8 +21,32 @@ first for the port itself and how the owner works.
   itself not checked). Before, on the schema default, it read like T-MAX 100 (flat-roof noise 1.61
   vs 1.58); at 17 it reads 2.77, beside HP5's 2.80. The owner likes the grain. Page:
   https://claude.ai/artifact/YSu9xhNJTEndT6LE7LNeR9.
-- Not started: step 3 (colour), step 4. SpektraLab (`research/spektralab/NOTES.md`) has no colour
-  granularity data.
+- Step 3 (colour), 5 November 2026, not committed yet: a second Negs-only block in `grain.toml` for
+  the 24 colour ports. The "per class" plan didn't hold. The overlap splits by where Fotufilm's
+  figure comes from, not by class:
+  - Fotufilm's datasheet figures match upstream 1:1: C-200, X-TRA 400 and Pro 400H all 4; Provia
+    8, Ektachrome 8, Kodachrome 64 10. So Fujifilm still negatives (Superia 200, Reala 100,
+    Pro 160NS), all slides and Aerocolor 2460 (Kodak AS-2652: 8.5 at C-41 3:15) are used × 1000,
+    uniform over the channels as upstream's still films are.
+  - Fotufilm's Kodak consumer figures read 1.9× upstream (Gold 10.5/5, UltraMax 11/6, Ektar 6/4,
+    Portra 400 9/4.5). Kodak publishes only Print Grain Index for these now, so Fotufilm's numbers
+    are not datasheet RMS. Kodacolor 100 and the approximate films (Lomography Color 100,
+    CineStill 400D, LomoChrome, Phoenix) are scaled by 0.525 (least squares on those four).
+  - Kodak cine: upstream reads 1.54× Fotufilm's per-layer figure (grainStrength × layer weight;
+    least squares over 250D and 500T). The Fujifilm cine films (Eterna, Eterna Vivid, F-64D,
+    Reala 500D) have no overlap and use that fit with their own layer weights. That is a
+    judgement call: on Fujifilm's own still scale (× 1), Eterna 500 would read finer than Ektar.
+  - CineStill 800T copies Vision3 500T's rms, uniformity and sublayers (same emulsion; Fotufilm
+    gives both identical grain).
+  - Measured on a flat 18 % grey frame at the half-size pitch (L* noise, sigma-25 high-pass;
+    scratch `cgrain/flat.py`): Pro 160NS 0.48 ≈ Ektar 0.52 < Portra 400 0.59 < Gold 0.69 <
+    Eterna 500 0.76 ≈ Portra 800 0.78 < Aerocolor 1.14 < Phoenix 1.31 < CineStill 800T 1.66 ≈
+    Vision3. Before, every ported negative read 1.0–1.2, grainier than Portra 800. Slides read
+    0.27–0.62 (Aerochrome 1.13). On the photo patches, scene texture and sensor noise swamp colour
+    grain at these levels (grain-off renders read *more* fine noise), so measure on the flat frame.
+  - Page: https://claude.ai/artifact/C1vn3SMYFN3RhnLYhJkoek.
+- Not started: step 4. SpektraLab (`research/spektralab/NOTES.md`) has no colour granularity
+  data.
 
 ## The problem, as the owner sees it
 
