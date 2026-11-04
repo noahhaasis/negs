@@ -218,6 +218,75 @@ management, enlarger, and output options. Default film/paper pairing and direct
 scanning follow the profile metadata. Controls and reset participate in Undo.
 JPEG inputs now use the same shared loader for CLI export as for preview.
 
+## The zone system
+
+The histogram is a working scale as well as a picture of the tones. Over the
+graph it shows the eight print zones (0 and I to VII) as alternating bands
+with Roman numerals, an L\* stripe in steps of 10 with its values above it,
+the R, G and B fills, the CIE Lab lightness curve in grey, and along the very
+bottom an EV scale: 49 ticks at 1/3-EV steps, long at whole stops and taller
+and thicker at 12.5 %, the meter's calibration point. Bins 0–4 and 251–255
+never set the graph's vertical scale, so clipped ends run off the top. The
+R, G, B and L\* tick marks below the graph each switch their channel on or
+off; the choice is remembered between launches.
+
+R, G and B are code values of the output space: the helper sends the matrix
+and encode table that turn its display proxy back into that space
+(`display_to_output` and `output_encode` in the `render` answer), so the bars
+mean the same as the exported file's numbers. L\* is CIE Lab lightness of the
+proxy's own luminance, so it describes the photograph rather than one output
+space. When the proxy is sRGB, the bars are its bytes exactly.
+
+Selecting a region counts only that region, live during the drag; with no
+region the histogram covers the whole crop. On the canvas:
+
+- drag to select a region; drag inside the selection to move it; a click
+  without a drag clears it (the whole photograph)
+- ⇧-drag pans, but only when the view can scroll; two-finger scroll and pinch
+  are unchanged
+- ⌃-click samples a 3×3 patch, ⌃⌥-click 7×7, and ⌃-drag selects a region and
+  samples it
+- double-click toggles fit and 1:1 about the clicked point, and clears the
+  region
+- crop mode has its own gestures and is unaffected
+
+A ⌃ pick samples the rendered preview (averaging the patch or region),
+reads the picked tone's code values and L\*, and puts a thin line at each
+channel's value. Gold numbers then appear at each zone's starting boundary,
+one zone per button in two rows; a tooltip gives the distance in EV to that
+zone's start, and the caption beneath the graph reads, for example,
+`L* 49.2 · 128 120 110`. Clicking a number moves the print's tones so the
+picked tone lands on that zone; ⇧-clicking aims for the zone's centre, the
+midpoint of the distances to this zone and the next. Zone VII's centre is the
+midpoint to L\* `min(99, the print's white)`. A zone the print cannot reach
+(such as Zone 0 on paper) shows `—` and is disabled. The whole click is one
+undo step. The graph itself takes no clicks; only the numbers and channel
+ticks do.
+
+The correction goes to a separate parameter, `camera.placement_ev` (Placement
+in the Camera tab's Exposure section, −8…+8 EV in 0.01 steps). It shifts the
+scene along the film-and-print curve rigidly, and the print does not
+compensate for it. Exposure compensation is not the same control: with print
+compensation on (the default) the printer cancels it, so mid-grey stays put
+and a zone click could not work. Placement at 0 leaves every existing render,
+golden and preset unchanged; a preset also keeps the photograph's placement.
+
+The helper measures the curve with `tone_curve` (`film`, `paper`, `params`):
+it develops a neutral ramp of 385 samples, 1/16 EV apart from −16 to +8 EV,
+through the same pipeline with grain, lens diffusion, glare, halation's
+scatter and the scanner's sharpening off (halation's per-pixel boost, the
+print filter shifts, preflash and auto exposure stay), applies the finishing
+edits, and returns the output L\* and the output-encoded green channel at each
+sample. Swift inverts the L\* curve (binary search on a running-maximum
+envelope) to get the stops between the pick and each boundary. The app asks
+for the curve after each settled render and discards any answer that is no
+longer the current edit, so the gold numbers are disabled while a render is
+in flight. A print that runs backwards, as a direct scan of the negative
+does, cannot be inverted: the strip explains that the zones aren't available
+rather than showing numbers. A pick at or beyond either end of what the print
+can reach reads "Clipped" instead of a wrong distance. Placing past ±8 EV
+stops at the slider's end and the status line says how far it fell short.
+
 ## Build and run
 
 From the repository root, with Rust and Xcode installed:
@@ -256,7 +325,11 @@ profile metadata, protocol recovery, IOSurface preview conversion, rapid edits
 while a render is in flight, undo/redo including one step per slider drag,
 slider snapping, canvas rotation, cancellation preserving an existing output,
 cleanup of files and exporters left by a crashed launch, and the export engine
-choice (tool lookup, binary and backend, CPU-fallback detection).
+choice (tool lookup, binary and backend, CPU-fallback detection). The zone
+tests pin the ladder, the curve inversion, the EV scale and channel gating,
+the canvas's selection and pick geometry, and, through the release helper,
+that a zone click lands the picked tone on the zone with print compensation,
+auto exposure, and one undo step.
 `testRealExportsFromJobList` runs real exports through `ExportJob` when
 `SPEKTRAFILM_EXPORT_JOBS` names a JSON job list (source, destination, params,
 film, paper, engine), for end-to-end engine comparisons.

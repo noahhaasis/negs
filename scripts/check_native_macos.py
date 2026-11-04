@@ -8,6 +8,7 @@ Also runs on Windows; pass the .exe paths with the three executable options.
 import argparse
 import copy
 import json
+import math
 import os
 import queue
 from pathlib import Path
@@ -157,6 +158,26 @@ def main():
                                env=dict(os.environ, SPEKTRAFILM_BACKEND=os.environ.get("SPEKTRAFILM_BACKEND", "wgpu")), check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
                 assert preview_export.read_bytes() == fast_export.read_bytes(), "A saved preview at export size must equal the Fast export"
+                # Placement shifts the film-and-print curve rigidly; saving the
+                # preview must still be the Fast export of the same params.
+                placed = copy.deepcopy(grain_params)
+                placed["camera"]["placement_ev"] = 1.0
+                placed_id, placed_result = request("render", **(render_args | {"params": placed}))
+                assert placed_result["export_resolution"], placed_result
+                placed_preview, placed_fast = work / "placed-preview.tiff", work / "placed-fast.tiff"
+                request("save", render_id=placed_id, output=str(placed_preview), crop=crop, rotate_cw=1)
+                (work / "placed.json").write_text(json.dumps(placed))
+                subprocess.run([args.fast_exporter.resolve(), "process", str(source), "-o", str(placed_fast),
+                                "--film", "kodak_gold_200", "--paper", "kodak_portra_endura", "--crop", "0,0,0.5,1,-2",
+                                "--params", str(work / "placed.json"), "--data-dir", str(args.data_dir.resolve())],
+                               env=dict(os.environ, SPEKTRAFILM_BACKEND=os.environ.get("SPEKTRAFILM_BACKEND", "wgpu")), check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                assert placed_preview.read_bytes() == placed_fast.read_bytes(), "Placement must keep export parity"
+                # The zone readout inverts this curve: 385 finite samples.
+                _, curve = request("tone_curve", film="kodak_gold_200", paper="kodak_portra_endura", params=placed)
+                assert (curve["ev_min"], curve["ev_step"]) == (-16.0, 0.0625), curve
+                assert len(curve["lstar"]) == 385 and len(curve["green"]) == 385, curve
+                assert all(math.isfinite(v) for v in curve["lstar"] + curve["green"]), "tone curve must be finite"
                 export_params = work / "params.json"
                 export_params.write_text(json.dumps(params))
                 exported = work / "reference.png"
