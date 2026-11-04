@@ -1725,6 +1725,15 @@ struct ExportSize: Equatable {
             UserDefaults.standard.set(newValue.pixels, forKey: "exportEdgePixels")
         }
     }
+
+    /// What a Size field's text means: its digits, or the default when there
+    /// are none, clamped to the range. The field's formatter doesn't enforce
+    /// the range while typing, so partial entries such as "2" stay in the
+    /// field and this settles the value.
+    static func pixels(from text: String) -> Int {
+        let value = Int(text.filter(\.isNumber)) ?? full.pixels
+        return min(max(value, pixelRange.lowerBound), pixelRange.upperBound)
+    }
 }
 
 /// The save panel's Format, Bit Depth, Colour Space, JPEG Quality and Size
@@ -1755,9 +1764,8 @@ struct ExportSize: Equatable {
     /// nil for Save Preview.
     var engine: ExportEngine? { enginePopup.map { ExportEngine.allCases[max($0.indexOfSelectedItem, 0)] } }
     var size: ExportSize {
-        let pixels = Int(pixelsField.stringValue.filter(\.isNumber)) ?? ExportSize.full.pixels
-        return ExportSize(edge: ExportSize.Edge.allCases[max(edgePopup.indexOfSelectedItem, 0)],
-                          pixels: min(max(pixels, ExportSize.pixelRange.lowerBound), ExportSize.pixelRange.upperBound))
+        ExportSize(edge: ExportSize.Edge.allCases[max(edgePopup.indexOfSelectedItem, 0)],
+                   pixels: ExportSize.pixels(from: pixelsField.stringValue))
     }
     var settings: SaveSettings {
         let depth = depths[format] ?? 8
@@ -1802,14 +1810,16 @@ struct ExportSize: Equatable {
         edgePopup.selectItem(at: ExportSize.Edge.allCases.firstIndex(of: size.edge) ?? 0)
         edgePopup.target = self; edgePopup.action = #selector(sizeChanged)
         edgePopup.toolTip = "Fits the finished file, border included, to this many pixels. Never enlarges."
+        // No minimum or maximum here: `size` reads `stringValue` on every
+        // keystroke, and a range-checking formatter would reject a partial
+        // number ("2", "20", …) and clear the field. `size` clamps instead.
         let formatter = NumberFormatter()
         formatter.allowsFloats = false
-        formatter.minimum = ExportSize.pixelRange.lowerBound as NSNumber
-        formatter.maximum = ExportSize.pixelRange.upperBound as NSNumber
         pixelsField.formatter = formatter
         pixelsField.integerValue = size.pixels
         pixelsField.alignment = .right
         pixelsField.delegate = self
+        pixelsField.setAccessibilityLabel("Size in pixels")
         pixelsField.widthAnchor.constraint(equalToConstant: 64).isActive = true
         pixelsField.isEnabled = size.edge != .full
         rows.append(NSStackView(views: [NSTextField(labelWithString: "Size:"), edgePopup, pixelsField, NSTextField(labelWithString: "px")]))
@@ -1856,8 +1866,20 @@ struct ExportSize: Equatable {
     @objc private func engineChanged() { panel?.message = message(engine, size, settings) }
     @objc private func sizeChanged() {
         pixelsField.isEnabled = size.edge != .full
-        if pixelsField.isEnabled { panel?.makeFirstResponder(pixelsField) }
+        if pixelsField.isEnabled {
+            // Show the value that will be used when the field was left blank
+            // or out of range, then focus it for typing.
+            pixelsField.integerValue = size.pixels
+            panel?.makeFirstResponder(pixelsField)
+        }
         panel?.message = message(engine, size, settings)
     }
     func controlTextDidChange(_ notification: Notification) { panel?.message = message(engine, size, settings) }
+    /// Leaving the field writes back the clamped value, so an empty or
+    /// out-of-range entry never sits beside a different export size.
+    func controlTextDidEndEditing(_ notification: Notification) {
+        let pixels = size.pixels
+        if pixelsField.integerValue != pixels { pixelsField.integerValue = pixels }
+        panel?.message = message(engine, size, settings)
+    }
 }
