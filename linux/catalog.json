@@ -18,13 +18,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          4.0,
+          4.0,
+          4.0
         ],
         "uniformity": [
           0.97,
@@ -50,18 +50,18 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.3,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          9.0,
+          13.0,
+          30.0
         ],
         "uniformity": [
+          0.93,
           0.97,
-          0.97,
-          0.97
+          0.99
         ]
       }
     },
@@ -114,13 +114,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          3.0,
+          3.0,
+          3.0
         ],
         "uniformity": [
           0.97,
@@ -178,13 +178,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          4.0,
+          4.0,
+          4.0
         ],
         "uniformity": [
           0.97,
@@ -210,13 +210,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          4.0,
+          4.0,
+          4.0
         ],
         "uniformity": [
           0.97,
@@ -274,13 +274,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          9.5,
+          9.5,
+          9.5
         ],
         "uniformity": [
           0.97,
@@ -306,13 +306,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          8.5,
+          8.5,
+          8.5
         ],
         "uniformity": [
           0.97,
@@ -402,13 +402,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          5.0,
+          5.0,
+          5.0
         ],
         "uniformity": [
           0.97,
@@ -626,13 +626,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
           6.0,
-          8.0,
-          10.0
+          6.0,
+          6.0
         ],
         "uniformity": [
           0.97,
@@ -658,13 +658,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          6.5,
+          6.5,
+          6.5
         ],
         "uniformity": [
           0.97,
@@ -690,13 +690,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          3.5,
+          3.5,
+          3.5
         ],
         "uniformity": [
           0.97,
@@ -722,12 +722,12 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
+          10.0,
+          10.0,
           10.0
         ],
         "uniformity": [
@@ -754,13 +754,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          12.0,
+          12.0,
+          12.0
         ],
         "uniformity": [
           0.97,
@@ -786,12 +786,12 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
+          10.0,
+          10.0,
           10.0
         ],
         "uniformity": [
@@ -818,13 +818,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          7.0,
+          7.0,
+          7.0
         ],
         "uniformity": [
           0.97,
@@ -914,13 +914,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          9.0,
+          9.0,
+          9.0
         ],
         "uniformity": [
           0.97,
@@ -946,13 +946,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          8.5,
+          8.5,
+          8.5
         ],
         "uniformity": [
           0.97,
@@ -978,13 +978,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          23.0,
+          23.0,
+          23.0
         ],
         "uniformity": [
           0.97,
@@ -1042,13 +1042,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          16.0,
+          16.0,
+          16.0
         ],
         "uniformity": [
           0.97,
@@ -1074,13 +1074,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          9.0,
+          9.0,
+          9.0
         ],
         "uniformity": [
           0.97,
@@ -1138,13 +1138,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          3.5,
+          5.5,
+          7.0
         ],
         "uniformity": [
           0.97,
@@ -1170,13 +1170,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          3.5,
+          5.5,
+          7.0
         ],
         "uniformity": [
           0.97,
@@ -1202,13 +1202,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          8.0,
-          10.0
+          2.5,
+          4.0,
+          5.0
         ],
         "uniformity": [
           0.97,
@@ -1234,13 +1234,13 @@
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
+          4.0,
           6.0,
-          8.0,
-          10.0
+          8.0
         ],
         "uniformity": [
           0.97,
@@ -1424,24 +1424,24 @@
       ],
       "grain": {
         "density_min": [
-          0.03,
-          0.03,
-          0.03
+          0.01,
+          0.01,
+          0.01
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          6.0,
-          6.0
+          7.0,
+          7.0,
+          7.0
         ],
         "uniformity": [
-          0.97,
-          0.97,
-          0.97
+          0.6,
+          0.6,
+          0.6
         ]
       }
     },
@@ -1461,24 +1461,24 @@
       ],
       "grain": {
         "density_min": [
-          0.03,
-          0.03,
-          0.03
+          0.01,
+          0.01,
+          0.01
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          6.0,
-          6.0
+          19.0,
+          19.0,
+          19.0
         ],
         "uniformity": [
-          0.97,
-          0.97,
-          0.97
+          0.6,
+          0.6,
+          0.6
         ]
       }
     },
@@ -1497,24 +1497,24 @@
       ],
       "grain": {
         "density_min": [
-          0.03,
-          0.03,
-          0.03
+          0.01,
+          0.01,
+          0.01
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          6.0,
-          6.0
+          10.0,
+          10.0,
+          10.0
         ],
         "uniformity": [
-          0.97,
-          0.97,
-          0.97
+          0.6,
+          0.6,
+          0.6
         ]
       }
     },
@@ -1533,24 +1533,24 @@
       ],
       "grain": {
         "density_min": [
-          0.03,
-          0.03,
-          0.03
+          0.01,
+          0.01,
+          0.01
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          6.0,
-          6.0
+          16.0,
+          16.0,
+          16.0
         ],
         "uniformity": [
-          0.97,
-          0.97,
-          0.97
+          0.6,
+          0.6,
+          0.6
         ]
       }
     },
@@ -1606,24 +1606,24 @@
       ],
       "grain": {
         "density_min": [
-          0.03,
-          0.03,
-          0.03
+          0.01,
+          0.01,
+          0.01
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          6.0,
-          6.0
+          8.0,
+          8.0,
+          8.0
         ],
         "uniformity": [
-          0.97,
-          0.97,
-          0.97
+          0.6,
+          0.6,
+          0.6
         ]
       }
     },
@@ -1640,24 +1640,24 @@
       ],
       "grain": {
         "density_min": [
-          0.03,
-          0.03,
-          0.03
+          0.01,
+          0.01,
+          0.01
         ],
         "particle_scale_sublayers": [
           1.0,
-          0.5,
+          0.4,
           0.25
         ],
         "rms_granularity": [
-          6.0,
-          6.0,
-          6.0
+          17.0,
+          17.0,
+          17.0
         ],
         "uniformity": [
-          0.97,
-          0.97,
-          0.97
+          0.6,
+          0.6,
+          0.6
         ]
       }
     },

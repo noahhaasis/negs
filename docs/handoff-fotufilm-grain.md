@@ -17,8 +17,8 @@ first for the port itself and how the owner works.
   6.5 min. The ratio is similar across films, so their order holds. The presets keep upstream's
   convention (datasheet figure = preset), not a per-film correction.
 - Tri-X 400: the owner chose accuracy over today's look ("it should be accurate to the real
-  film"), so `kodak_trix400_d76_8min` now has rms 17 (Fotufilm's figure, also SpektraLab's; F-4017
-  itself not checked). Before, on the schema default, it read like T-MAX 100 (flat-roof noise 1.61
+  film"), so `kodak_trix400_d76_8min` now has rms 17 (Fotufilm's and SpektraLab's figure; Kodak F-4017,
+  rev. 10-21, p7 lists 17, measured in HC-110 (B) at 48 µm, net D 1.0; Kodak gives no D-76 figure). Before, on the schema default, it read like T-MAX 100 (flat-roof noise 1.61
   vs 1.58); at 17 it reads 2.77, beside HP5's 2.80. The owner likes the grain. Page:
   https://claude.ai/artifact/YSu9xhNJTEndT6LE7LNeR9.
 - Step 3 (colour), 5 November 2026, not committed yet: a second Negs-only block in `grain.toml` for
@@ -86,7 +86,7 @@ Negs' `rms_granularity` (`crates/spektrafilm-model/src/grain.rs` line 40, `param
 | Film | Fotufilm `grainStrength` | Negs today | Note |
 |---|---|---|---|
 | Delta 3200 | 0.019 | 6 (schema) | |
-| Tri-X 400 | 0.017 | 6 (schema) | F-4017 figure not checked |
+| Tri-X 400 | 0.017 | 6 (schema) | Kodak F-4017 lists 17 (HC-110 B) |
 | HP5 Plus | 0.016 | 6 (schema) | |
 | Double-X 5222 | 0.014 | **14** (grain.toml) | B&W cross-check: the two agree 1:1 |
 | FP4 Plus | 0.010 | 6 (schema) | |

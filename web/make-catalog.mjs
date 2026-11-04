@@ -16,6 +16,6 @@ const stocks = readdirSync(profiles).filter((f) => f.endsWith(".json")).map((f) 
 for (const stock of stocks) registerData(`profiles/${stock}.json`, readFileSync(join(profiles, `${stock}.json`)));
 const out = JSON.parse(catalog(stocks));
 if (!out.profiles.length) throw new Error(`No profiles found in ${profiles}`);
-out.attribution = "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, CC BY-SA 4.0. See data/profiles and SPEKTRAFILM_LICENSE.txt.";
+out.attribution = "Profile metadata derived from Spektrafilm profiles by Andrea Volpato and contributors, and from Fotufilm film profiles by MUAStudio Inc. (https://fotufilm.com), both CC BY-SA 4.0. See data/profiles, SPEKTRAFILM_LICENSE.txt and FOTUFILM_LICENSE.txt.";
 writeFileSync(join(here, "catalog.json"), JSON.stringify(out) + "\n");
 console.error(`web/catalog.json: ${out.profiles.length} stocks`);

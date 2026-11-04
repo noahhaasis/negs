@@ -29,8 +29,8 @@ Negs-only data, not from spektrafilm:
   Ilford datasheets, in spektrafilm's profile format. Sources and method:
   profile-sources/bw-expansion/README.md.
 - presets/grain.toml: a kodak_trix400_d76_8min section (rms_granularity 17,
-  as Fotufilm's Tri-X 400; the rest from upstream's B&W defaults), in the
-  Negs-only block at the end of the file. Before it, Tri-X 400 got the schema
+  Kodak F-4017's figure, as Fotufilm's; the rest from upstream's B&W
+  defaults), in the Negs-only block at the end of the file. Before it, Tri-X 400 got the schema
   defaults and was about as fine-grained as T-MAX 100.
 - filters/neutral_print_filters.json: entries for kodak_trix400_d76_8min on
   every colour paper under TH-KG3, derived with upstream's own solver

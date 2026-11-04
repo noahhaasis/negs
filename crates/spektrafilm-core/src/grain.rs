@@ -204,11 +204,13 @@ mod tests {
         assert_eq!(s.particle_scale_sublayers, [1.0, 0.5, 0.25]);
         // Negs-only sections (the Fotufilm B&W ports) take the B&W defaults.
         let s = grain_settings(&film("ilford_delta_3200"), &g);
-        assert_eq!((s.rms_granularity, s.density_min, s.uniformity), ([19.0; 3], [0.01; 3], [0.6; 3]));
+        let lanes = (s.rms_granularity, s.density_min, s.uniformity);
+        assert_eq!(lanes, ([19.0; 3], [0.01; 3], [0.6; 3]));
         assert_eq!(s.particle_scale_sublayers, [1.0, 0.4, 0.25]);
         // The colour ports take the colour defaults; CineStill 800T is Vision3 500T.
         let s = grain_settings(&film("kodak_kodachrome_25"), &g);
-        assert_eq!((s.rms_granularity, s.density_min, s.uniformity), ([9.0; 3], [0.03; 3], [0.97; 3]));
+        let lanes = (s.rms_granularity, s.density_min, s.uniformity);
+        assert_eq!(lanes, ([9.0; 3], [0.03; 3], [0.97; 3]));
         let s = grain_settings(&film("cinestill_800t"), &g);
         let t = grain_settings(&film("kodak_vision3_500t"), &g);
         assert_eq!((s.rms_granularity, s.uniformity), (t.rms_granularity, t.uniformity));

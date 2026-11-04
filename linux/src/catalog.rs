@@ -174,7 +174,8 @@ mod tests {
     fn complete_catalog_and_pairing_metadata() {
         let films = super::stocks(false);
         let papers = super::stocks(true);
-        assert_eq!(films.len(), 23);
+        // 23, plus the 24 colour and 5 B&W films ported from Fotufilm.
+        assert_eq!(films.len(), 52);
         assert_eq!(papers.len(), 10);
         assert!(
             films

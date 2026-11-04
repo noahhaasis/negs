@@ -37,7 +37,8 @@ def verify_prefix(prefix, native=True, check_script=ROOT / 'scripts/check_native
             raise ValueError(links.stdout)
         if require_bundled_openblas and name != 'negs' and str(library) not in links.stdout:
             raise ValueError(f'{name} does not resolve the bundled OpenBLAS:\n{links.stdout}')
-    required = ['share/negs/data/SPEKTRAFILM_LICENSE.txt', 'share/negs/payload.json',
+    required = ['share/negs/data/SPEKTRAFILM_LICENSE.txt', 'share/negs/data/FOTUFILM_LICENSE.txt',
+                'share/negs/payload.json',
                 'share/licenses/negs/LICENSE', 'share/licenses/negs/THIRD-PARTY-RUST.txt',
                 'share/licenses/negs/OFL-BarlowCondensed.txt',
                 f'share/metainfo/{APP_ID}.metainfo.xml',

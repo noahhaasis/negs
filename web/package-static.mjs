@@ -36,8 +36,11 @@ for (const dir of ["profiles", "filters", "borders"]) copy(`data/${dir}`);
 const luts = "data/luts/spectral_upsampling";
 mkdirSync(join(output, luts), { recursive: true });
 for (const file of readdirSync(join(root, luts)).filter((f) => /\.(npy|toml)$/.test(f))) copy(`${luts}/${file}`);
-for (const file of ["LICENSE", "data/SPEKTRAFILM_LICENSE.txt", "data/CHANGELOG.txt"]) copy(file);
+for (const file of ["LICENSE", "data/SPEKTRAFILM_LICENSE.txt", "data/FOTUFILM_LICENSE.txt", "data/CHANGELOG.txt"]) {
+  copy(file);
+}
 copy("data/SPEKTRAFILM_LICENSE.txt", "SPEKTRAFILM_LICENSE.txt");
+copy("data/FOTUFILM_LICENSE.txt", "FOTUFILM_LICENSE.txt");
 // The 35mm edge print's font is compiled into the engine.
 copy("crates/spektrafilm-io/fonts/OFL-BarlowCondensed.txt", "OFL-BarlowCondensed.txt");
 for (const file of readdirSync(join(web, "static"))) {

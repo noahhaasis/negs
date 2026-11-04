@@ -115,8 +115,9 @@ density_min = [0.003]
 # --- Negs only, not upstream: Negs' datasheet Tri-X 400 and the B&W films
 # ported from Fotufilm (CC BY-SA 4.0, MUAStudio Inc.). rms_granularity is
 # the datasheet's diffuse RMS granularity (48 um aperture, net D 1.0), which
-# is Fotufilm's grainStrength x 1000; T-MAX 100 (Kodak F-4016) and Acros 100 II (Fujifilm AF3-0259E)
-# checked against the datasheet. Uniformity, density_min and sublayers come
+# is Fotufilm's grainStrength x 1000; Tri-X 400 (Kodak F-4017, 10-21, p7: 17, HC-110 B),
+# T-MAX 100 (Kodak F-4016) and Acros 100 II (Fujifilm AF3-0259E) checked
+# against the datasheet. Uniformity, density_min and sublayers come
 # from [defaults.bw.negative].
 [ilford_delta_3200]
 rms_granularity = [19.0]

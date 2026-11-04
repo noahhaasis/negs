@@ -101,7 +101,7 @@ Method, versions and reproduction: [benchmarks](docs/benchmarks.md).
 | **Black & white** | Tri-X 400 *(experimental)*, Double-X 5222 *(experimental)*, HP5 Plus, FP4 Plus, Delta 3200, T-MAX 100, Acros 100 II |
 | **Papers & print film** | Portra Endura, Endura Premier, Supra Endura, Ultra Endura, Ektacolor Edge, Crystal Archive II, Ilford Multigrade RC, Vision 2383, Vision 2393 |
 
-Kodak, Fujifilm and Ilford stock names are trademarks of their owners. Negs is not affiliated with them.
+Kodak, Fujifilm, Ilford, Agfa, Harman, Lomography and CineStill stock names are trademarks of their owners. Negs is not affiliated with them.
 
 ## Install
 
@@ -223,7 +223,7 @@ The film model at the heart of Negs comes from two open-source projects. Negs bu
 - **[spektrafilm](https://github.com/andreavolpato/spektrafilm)** by Andrea Volpato: the spectral simulation of film and print. The physics and the stock data come from here.
 - **[spektrafilm-rs](https://github.com/turbasvin/spektrafilm-rs)** by turbasvin: the Rust port of spektrafilm that Negs started from.
 
-The default spectral-upsampling table is by [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt). The optional Arctic 2026 table is by Andrea Volpato, from spektrafilm, and the Mallett 2019 table is spektrafilm's tabulation of the spectral primary decomposition by Ian Mallett and Cem Yuksel (2019). The profiles and tables from spektrafilm are under CC BY-SA 4.0 ([license](data/SPEKTRAFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). 24 additional film profiles are adapted from [Fotufilm](https://fotufilm.com) by MUAStudio Inc., also under CC BY-SA 4.0 ([license](data/FOTUFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). Parts of the maths are ported from numpy, scipy, scikit-image and colour-science. RAW files Apple can't read are decoded with [rawler](https://github.com/dnglab/dnglab); the Sony, Fujifilm, OM/Olympus and Panasonic lens corrections on Windows and Linux are ported from [darktable](https://www.darktable.org)'s embedded-metadata lens correction; and updates are delivered with [Sparkle](https://sparkle-project.org).
+The default spectral-upsampling table is by [Johannes Hanatos](https://github.com/hanatos), author of [vkdt](https://github.com/hanatos/vkdt). The optional Arctic 2026 table is by Andrea Volpato, from spektrafilm, and the Mallett 2019 table is spektrafilm's tabulation of the spectral primary decomposition by Ian Mallett and Cem Yuksel (2019). The profiles and tables from spektrafilm are under CC BY-SA 4.0 ([license](data/SPEKTRAFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). 29 additional film profiles (24 colour, 5 black-and-white) are adapted from [Fotufilm](https://fotufilm.com) by MUAStudio Inc., also under CC BY-SA 4.0 ([license](data/FOTUFILM_LICENSE.txt), [changes](data/CHANGELOG.txt)). Parts of the maths are ported from numpy, scipy, scikit-image and colour-science. RAW files Apple can't read are decoded with [rawler](https://github.com/dnglab/dnglab); the Sony, Fujifilm, OM/Olympus and Panasonic lens corrections on Windows and Linux are ported from [darktable](https://www.darktable.org)'s embedded-metadata lens correction; and updates are delivered with [Sparkle](https://sparkle-project.org).
 
 The Prep tab, camera brightness matching, the RGB waveform and the Apple RAW 9 → 8 fallback come from [yosoyelchris](https://github.com/yosoyelchris)'s fork of Negs ([details](docs/prep.md)).
 
