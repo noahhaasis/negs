@@ -15,7 +15,10 @@ const el = (tag, props = {}, ...children) => {
 export function foldout(title, groups, choose, shown, open = false) {
   const current = el("span", { className: "stock-current" });
   const summary = el("summary", {}, el("span", { className: "stock-title", textContent: title }), current);
-  const details = el("details", { className: "stock-fold", open }, summary);
+  // In the sidebar a fixed window onto the grid keeps the tabs below in
+  // reach (macOS StockFoldout.gridHeight); on the sheet the panel scrolls.
+  const body = el("div", { className: "stock-scroll" });
+  const details = el("details", { className: "stock-fold", open }, summary, body);
   const tiles = new Map();
   const visible = new Set();
   const observer = new IntersectionObserver((entries) => {
@@ -34,9 +37,17 @@ export function foldout(title, groups, choose, shown, open = false) {
       tiles.set(s.id, { id: s.id, name: s.name, button, canvas, key: null, photo: null, failed: null });
       observer.observe(button);
     }
-    details.append(el("h3", { textContent: g.title }), grid);
+    body.append(el("h3", { textContent: g.title }), grid);
   }
-  details.addEventListener("toggle", shown);
+  // The window opens on the current stock, and follows it when it changes
+  // from elsewhere (a film's paper).
+  let selected = null;
+  const center = () => {
+    const tile = tiles.get(selected);
+    if (!details.open || !tile || body.scrollHeight <= body.clientHeight) return;
+    body.scrollTop = tile.button.offsetTop - (body.clientHeight - tile.button.offsetHeight) / 2;
+  };
+  details.addEventListener("toggle", () => { center(); shown(); });
   return {
     root: details,
     tiles,
@@ -47,7 +58,9 @@ export function foldout(title, groups, choose, shown, open = false) {
       const name = [...tiles.values()].find((t) => t.id === id)?.name ?? "";
       current.textContent = name;
       for (const t of tiles.values()) t.button.classList.toggle("selected", t.id === id);
+      if (id !== selected) { selected = id; center(); }
     },
+    center,
   };
 }
 

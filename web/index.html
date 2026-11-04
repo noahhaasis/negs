@@ -97,7 +97,7 @@
   #crop-dial-value { font-variant-numeric: tabular-nums; }
   .view.cropping { padding-top: calc(44px + env(safe-area-inset-top)); padding-bottom: 80px; }
   .view.cropping .zoom, .view.cropping .hud { display: none; }
-  .side.cropping > .scroll, .side.cropping > .panes, .side.cropping > .tabs, .side.cropping > .bottom { display: none; }
+  .side.cropping > .scroll, .side.cropping > .panes, .side.cropping > .tabs, .side.cropping > .bottom, .side.cropping > .stock { display: none; }
   .crop-inspector { overflow-y: auto; flex: 1; padding: 14px; display: grid; align-content: start; gap: 14px; }
   .crop-inspector label { display: grid; gap: 6px; color: var(--muted); }
   .crop-inspector input[type=number] { width: 72px; padding: 4px 6px; background: var(--field); border: 1px solid var(--line); border-radius: 5px; }
@@ -138,6 +138,9 @@
   .stock-fold summary { padding: 0; font-weight: 400; color: var(--muted); font-size: 12px; }
   .stock-current { margin-left: auto; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .stock-fold h3 { margin: 12px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .stock-scroll { position: relative; }
+  .side:not(.sheet) > .stock { flex: none; }
+  .side:not(.sheet) .stock-scroll { max-height: min(290px, 30vh); overflow-y: auto; overscroll-behavior: contain; margin-right: -8px; padding-right: 8px; }
   .stock-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .stock-tile { display: grid; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
   .stock-tile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

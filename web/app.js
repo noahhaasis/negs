@@ -937,9 +937,14 @@ function buildSheet() {
   // On the sheet, and on screens too short to spare the room, the engine's
   // footer scrolls with the Stock tab; otherwise it stays at the sidebar's foot.
   const short = matchMedia("(max-height: 599px)");
+  const stocks = $("side").querySelector(".stock");
   const place = () => {
     // The Prep | Lab | Output panes are the sidebar's; the sheet shows a tab at a time.
     $("side").classList.toggle("sheet", SHEET.matches);
+    // Film and paper: pinned above the panes in the sidebar, as on the Mac,
+    // since they shape everything the panes adjust; the sheet's Stock tab.
+    SHEET.matches ? $("prep-sections").before(stocks) : $("panes").before(stocks);
+    if (folds) { folds.film.center(); folds.paper.center(); }
     SHEET.matches || short.matches ? $("scroll").append($("bottom")) : $("scroll").after($("bottom"));
     setSheet(sheet);
   };
