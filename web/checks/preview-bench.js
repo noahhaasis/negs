@@ -34,14 +34,12 @@ export default async function bench({ image, tag = "bench", sizes = [1200, 2048,
     const cases = [["plain", {}]];
     if (prep) {
       cases.push(["prepExposure", { prep: { exposure_ev: 0.7 } }]);
-      cases.push(["prepExposureFolded", { prep: { exposure_ev: 0.7 } }, true]);
       cases.push(["prepFull", { prep: { exposure_ev: 0.7, highlights: -50, shadows: 30, midtone_detail: 40 } }]);
     }
     const base = negs.state().params.enlarger.print_exposure;
     for (const side of [...new Set(sizes.map((s) => Math.min(s, long)))]) {
       await negs.frame(side); // the source resampled for this size, once
-      for (const [name, patch, fold = false] of cases) {
-        await negs.foldPrepExposure(fold);
+      for (const [name, patch] of cases) {
         for (const interactive of [false, true]) {
           const frames = [];
           for (let i = 0; i < runs; i++) {

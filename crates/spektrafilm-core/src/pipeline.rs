@@ -1154,9 +1154,12 @@ impl Pipeline {
         // caller's, so they have no key.
         let decoded;
         let prepared;
-        let fold_prep_exposure = crate::prep::fold_exposure() && self.params.prep.is_exposure_only();
+        // Exposure-only Prep is a uniform gain: it joins the exposure scale
+        // below (float rounding from the CPU's per-pixel multiply, approved
+        // for the GPU path), so the upload keeps its source key.
+        let fold_prep_exposure = self.params.prep.is_exposure_only();
         let prep_active = !self.params.prep.is_identity() && !fold_prep_exposure;
-        // Prep changes the upload, including through its whole-frame spatial base.
+        // Other Prep changes the upload, including through its whole-frame spatial base.
         // A source-image cache key cannot identify these newly prepared pixels.
         let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active);
         let image = if prep_active {
@@ -1181,7 +1184,8 @@ impl Pipeline {
         if !prep_active && let Some(frame) = &self.prepared_frame {
             frame.clear(); // neutral Prep needs no copy of the frame
         }
-        // Bake the exposure scale (auto-exposure × manual EV compensation)
+        // Bake the exposure scale (auto-exposure × manual EV compensation ×
+        // an exposure-only Prep)
         // into the front-pass matrix. The upsampler is homogeneous in the
         // input RGB, so scaling the matrix is
         // equivalent to scaling the input — saves a separate "scale" compute

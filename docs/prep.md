@@ -45,9 +45,14 @@ and negative values are retained. Neutral settings bypass every conversion.
 This is a port of those controls, not a claim of complete Resolve RAW-decoder
 or rendering parity.
 
-Preview, Fast export, and Reference export share the same Prep stage. Active
-Prep invalidates source-only GPU upload keys; successive edits cannot reuse
-stale prepared pixels. Reference builds retain the recovered f32 control math
+Preview, Fast export, and Reference export share the same Prep stage. On the
+GPU path, Prep with only Exposure set (what Match camera brightness gives) is a
+uniform gain folded into the front pass's exposure scale with the camera
+exposure: no CPU pass, and the source upload is kept. Its pixels differ from the
+CPU multiply by float rounding (grain off: ≤ 1 code on 0.003 % of values; grain
+on: a few isolated grain specks; approved 2026-11-04, see
+[web Prep port](web-prep-port-plan.md)). Other active Prep invalidates
+source-only GPU upload keys; successive edits cannot reuse stale prepared pixels. Reference builds retain the recovered f32 control math
 inside the otherwise f64 pipeline. Whole-frame spatial processing runs on CPU
 (in parallel) before the GPU film stage. Interactive previews apply it at
 preview resolution. The macOS helper keeps the prepared photograph-size and

@@ -2203,7 +2203,6 @@ globalThis.negs = {
     return { wallMs: performance.now() - t, elapsedMs: r.elapsedMs, width: r.width, height: r.height, stages: r.stages, presented: r.presented, backend: r.backend, memoryMiB: r.memoryMiB };
   },
   keptPixels: () => keptPixels(),
-  foldPrepExposure: (on) => host.call("setFoldPrepExposure", on),
   // Opens a photograph from a URL as the Open button would.
   // (An array buffer: Chrome fails blob() of a large response in a test profile.)
   open: async (url) => openFile(new File([await (await fetch(url)).arrayBuffer()], url.split("/").at(-1))),
