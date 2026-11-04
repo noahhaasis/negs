@@ -176,7 +176,7 @@ def main():
                 # A pinned print tone (the zone bands) is part of the look, so
                 # the preview export must still equal the Fast export.
                 pinned = copy.deepcopy(grain_params)
-                pinned["print_render"]["tone_anchors"] = [{"input": 49.0, "target": 36.35}]
+                pinned["post"]["tone_anchors"] = [{"input": 49.0, "target": 36.35}]
                 pinned_id, pinned_result = request("render", **(render_args | {"params": pinned}))
                 assert pinned_result["export_resolution"], pinned_result
                 pinned_preview, pinned_fast = work / "pinned-preview.tiff", work / "pinned-fast.tiff"

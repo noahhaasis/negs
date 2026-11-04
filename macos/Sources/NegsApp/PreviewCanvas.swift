@@ -334,11 +334,12 @@ final class PhotographView: NSView {
                 ))
                 anyRing = true
             }
-            let chip = chips[marker.index] ?? makeChip()
+            let chip = chips[marker.index] ?? makeChip(marker.index)
             chip.frame = CGRect(
                 x: centre.x - diameter / 2, y: centre.y - diameter / 2,
                 width: diameter, height: diameter
             )
+            chip.name = "pin \(marker.number)"
             chip.cornerRadius = diameter / 2
             chip.backgroundColor = Self.tone(marker.lstar).cgColor
             chip.borderWidth = marker.selected ? 2 : 0
@@ -359,7 +360,7 @@ final class PhotographView: NSView {
         CATransaction.commit()
     }
 
-    private func makeChip() -> CALayer {
+    private func makeChip(_ index: Int) -> CALayer {
         let chip = CALayer()
         chip.masksToBounds = true
         chip.actions = [
@@ -371,7 +372,7 @@ final class PhotographView: NSView {
         label.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull()]
         chip.addSublayer(label)
         clip.addSublayer(chip)
-        chips[chips.count] = chip
+        chips[index] = chip
         return chip
     }
 
