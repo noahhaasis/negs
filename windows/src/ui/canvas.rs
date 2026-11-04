@@ -6,7 +6,7 @@
 //! The view state lives here, apart from the app, so the canvas can paint
 //! while the app is busy (a modal dialog, a re-entrant call).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -25,10 +25,37 @@ use crate::picture::Picture;
 
 mod software;
 
-/// The grey around the photograph, from the theme.
-fn background() -> [u8; 3] {
-    super::theme::palette().canvas
+thread_local! {
+    /// Settings › Custom viewer background, when on.
+    static CUSTOM_BACKGROUND: Cell<Option<[u8; 3]>> = const { Cell::new(None) };
 }
+
+/// The colour around the photograph: Settings' custom colour, or the
+/// theme's grey. High contrast keeps the system's colours.
+fn background() -> [u8; 3] {
+    let theme = super::theme::current();
+    match CUSTOM_BACKGROUND.with(Cell::get) {
+        Some(custom) if !theme.high_contrast => custom,
+        _ => theme.palette.canvas,
+    }
+}
+
+/// Sets the custom viewer background (None: the theme's) and repaints.
+pub fn set_custom_background(hwnd: HWND, color: Option<[u8; 3]>) {
+    if CUSTOM_BACKGROUND.with(|c| c.replace(color)) != color {
+        invalidate(hwnd);
+    }
+}
+/// 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
+/// photograph, but never enlarges a small one past 1:1 (the Mac's
+/// `ImageScrollView.magnification`).
+fn zoom_amount(fitting: bool, document: (f64, f64), viewport: (f64, f64)) -> f64 {
+    if !fitting {
+        return 1.0;
+    }
+    (viewport.0 / document.0).min(viewport.1 / document.1).min(1.0)
+}
+
 const MIN_ZOOM: f64 = 0.005;
 const MAX_ZOOM: f64 = 16.0;
 const CROP_MARGIN: f64 = 36.0;
@@ -414,8 +441,7 @@ impl View {
         if dw <= 0.0 || self.width == 0 {
             return;
         }
-        let amount = if self.fitting { (self.width as f64 / dw).min(self.height as f64 / dh) } else { 1.0 };
-        self.zoom = amount.clamp(MIN_ZOOM, MAX_ZOOM);
+        self.zoom = zoom_amount(self.fitting, (dw, dh), (self.width as f64, self.height as f64)).clamp(MIN_ZOOM, MAX_ZOOM);
         self.center = (dw / 2.0, dh / 2.0);
     }
 
@@ -1134,6 +1160,15 @@ extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fit shrinks a large photograph to the view but leaves a small one at 1:1.
+    #[test]
+    fn fit_never_enlarges_past_one_to_one() {
+        assert_eq!(zoom_amount(true, (4000.0, 3000.0), (1000.0, 1000.0)), 0.25);
+        assert_eq!(zoom_amount(true, (400.0, 300.0), (1000.0, 1000.0)), 1.0);
+        assert_eq!(zoom_amount(true, (1000.0, 500.0), (1000.0, 1000.0)), 1.0);
+        assert_eq!(zoom_amount(false, (4000.0, 3000.0), (1000.0, 1000.0)), 1.0);
+    }
 
     /// The canvas cuts the exporter's pixels, then turns them.
     #[test]

@@ -1906,7 +1906,7 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
 }
 
 /// The common colour dialog; one undo step per OK.
-fn choose_color(owner: HWND, current: BorderColor) -> Option<BorderColor> {
+pub(super) fn choose_color(owner: HWND, current: BorderColor) -> Option<BorderColor> {
     thread_local! {
         static CUSTOM: RefCell<[COLORREF; 16]> = RefCell::new([COLORREF(0xffffff); 16]);
     }

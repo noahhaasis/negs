@@ -23,7 +23,7 @@ mod theme;
 mod titlebar;
 mod tone_graph;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -121,8 +121,31 @@ static QUEUE: Mutex<VecDeque<Task>> = Mutex::new(VecDeque::new());
 static TIMED: Mutex<Vec<(Instant, usize)>> = Mutex::new(Vec::new());
 static MAIN: AtomicIsize = AtomicIsize::new(0);
 
+/// The narrowest canvas column and adjustments column, in DIPs (the Mac's
+/// split-view minimums). The window keeps room for both, or for the canvas
+/// alone while the adjustments are hidden.
+const CANVAS_MINIMUM: f64 = 680.0;
+const INSPECTOR_MINIMUM: f64 = 300.0;
+const INSPECTOR_MAXIMUM: f64 = 440.0;
+const SPLITTER: f64 = 5.0;
+const MINIMUM_HEIGHT: f64 = 520.0;
+
+/// The window's narrowest client width in DIPs.
+fn minimum_width(inspector_visible: bool) -> f64 {
+    if inspector_visible { CANVAS_MINIMUM + SPLITTER + INSPECTOR_MINIMUM } else { CANVAS_MINIMUM }
+}
+
+/// The adjustments column's width in DIPs: the chosen width, narrowed to
+/// leave the canvas its minimum, but never below its own.
+fn inspector_width(chosen: f64, client: f64) -> f64 {
+    chosen.clamp(INSPECTOR_MINIMUM, INSPECTOR_MAXIMUM).min(client - CANVAS_MINIMUM - SPLITTER).max(INSPECTOR_MINIMUM)
+}
+
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
+    /// Whether the last layout showed the adjustments, for WM_GETMINMAXINFO,
+    /// which can arrive while the app is borrowed.
+    static INSPECTOR_SHOWN: Cell<bool> = const { Cell::new(true) };
     static TIMED_TASKS: RefCell<Vec<(Instant, Box<dyn FnOnce(&mut App)>)>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -550,6 +573,10 @@ impl App {
     /// Lays out the toolbar, the canvas column, the adjustments and the status bar.
     pub fn layout(&mut self) {
         unsafe {
+            INSPECTOR_SHOWN.with(|s| s.set(self.model.inspector_visible));
+            // Make room before the adjustments appear, so neither column is
+            // squeezed below its minimum.
+            self.fit_minimum();
             let mut client = RECT::default();
             let _ = GetClientRect(self.main, &mut client);
             titlebar::layout(self.main, self.menubar, self.toolbar);
@@ -561,8 +588,12 @@ impl App {
             };
             let top = titlebar::height(self.main);
             let bottom = client.bottom - height(self.status);
-            let inspector_width = if self.model.inspector_visible { self.px(self.model.prefs.inspector_width.clamp(300.0, 440.0)) } else { 0 };
-            let splitter = if self.model.inspector_visible { self.px(5.0) } else { 0 };
+            let inspector_width = if self.model.inspector_visible {
+                self.px(inspector_width(self.model.prefs.inspector_width, client.right as f64 / self.scale()))
+            } else {
+                0
+            };
+            let splitter = if self.model.inspector_visible { self.px(SPLITTER) } else { 0 };
             let column = (client.right - inspector_width - splitter).max(0);
             let show_strip = self.model.prefs.filmstrip_visible && self.model.source.is_some();
             let strip_height = if show_strip { self.px(112.0) } else { 0 };
@@ -583,6 +614,38 @@ impl App {
             empty::layout(self);
             strip::resized(self);
             self.layout_status();
+        }
+    }
+
+    /// Grows a window narrower or shorter than the minimum (a saved frame
+    /// from before it, or one the adjustments are appearing in), keeping its
+    /// top-left corner and its monitor's work area. Maximized and full screen
+    /// windows already fill the screen.
+    fn fit_minimum(&self) {
+        unsafe {
+            if self.full_screen.is_some() || IsZoomed(self.main).as_bool() || IsIconic(self.main).as_bool() {
+                return;
+            }
+            let (mut client, mut frame) = (RECT::default(), RECT::default());
+            let _ = GetClientRect(self.main, &mut client);
+            let _ = GetWindowRect(self.main, &mut frame);
+            let wanted = (self.px(minimum_width(self.model.inspector_visible)), self.px(MINIMUM_HEIGHT));
+            let grow = ((wanted.0 - client.right).max(0), (wanted.1 - client.bottom).max(0));
+            if grow == (0, 0) {
+                return;
+            }
+            let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            let _ = GetMonitorInfoW(MonitorFromWindow(self.main, MONITOR_DEFAULTTONEAREST), &mut info);
+            let work = info.rcWork;
+            let width = (frame.right - frame.left + grow.0).min(work.right - work.left);
+            let height = (frame.bottom - frame.top + grow.1).min(work.bottom - work.top);
+            if (width, height) == (frame.right - frame.left, frame.bottom - frame.top) {
+                return;
+            }
+            // Slide left or up rather than off the work area's edge.
+            let x = frame.left.min(work.right - width).max(work.left);
+            let y = frame.top.min(work.bottom - height).max(work.top);
+            let _ = SetWindowPos(self.main, None, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
 
@@ -1301,6 +1364,7 @@ pub fn run() {
         };
         let _ = recent;
         empty::build(&mut app);
+        canvas::set_custom_background(app.canvas, app.model.prefs.custom_viewer_background());
         app.layout();
         app.update_chrome();
         app.update_status();
@@ -1492,8 +1556,21 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             WM_GETMINMAXINFO => {
                 let info = &mut *(lparam.0 as *mut MINMAXINFO);
-                let dpi = GetDpiForWindow(hwnd).max(96) as i32;
-                info.ptMinTrackSize = POINT { x: 760 * dpi / 96, y: 520 * dpi / 96 };
+                let s = GetDpiForWindow(hwnd).max(96) as f64 / 96.0;
+                // The minimum is for the client area; the frame adds to it.
+                let client = ((minimum_width(INSPECTOR_SHOWN.with(Cell::get)) * s).round() as i32, (MINIMUM_HEIGHT * s).round() as i32);
+                let mut frame = RECT { left: 0, top: 0, right: client.0, bottom: client.1 };
+                let mut window = RECT::default();
+                let mut inside = RECT::default();
+                if GetWindowRect(hwnd, &mut window).is_ok() && GetClientRect(hwnd, &mut inside).is_ok() && inside.right > 0 {
+                    frame.right += (window.right - window.left) - inside.right;
+                    frame.bottom += (window.bottom - window.top) - inside.bottom;
+                }
+                // Never more than the monitor's work area, on a small screen.
+                let mut monitor = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+                let _ = GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor);
+                let work = monitor.rcWork;
+                info.ptMinTrackSize = POINT { x: frame.right.min(work.right - work.left), y: frame.bottom.min(work.bottom - work.top) };
                 LRESULT(0)
             }
             WM_DPICHANGED => {
@@ -1654,7 +1731,12 @@ impl App {
         if !self.model.inspector_visible {
             self.model.inspector_visible = true;
         }
-        self.model.prefs.inspector_width = target.clamp(300.0, 440.0);
+        // No wider than the canvas's minimum leaves, so the splitter follows the pointer.
+        let mut client = RECT::default();
+        unsafe {
+            let _ = GetClientRect(self.main, &mut client);
+        }
+        self.model.prefs.inspector_width = inspector_width(target, client.right as f64 / self.scale());
         self.model.dirty |= dirty::LAYOUT;
     }
 
@@ -1724,3 +1806,25 @@ pub fn session_store() -> SessionStore {
 }
 
 pub fn _unused(_: EditorSession) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The window keeps room for both columns, or the canvas alone.
+    #[test]
+    fn minimum_width_follows_the_adjustments() {
+        assert_eq!(minimum_width(true), 985.0);
+        assert_eq!(minimum_width(false), 680.0);
+    }
+
+    /// A narrow window narrows the adjustments before the canvas, down to
+    /// their own minimum.
+    #[test]
+    fn adjustments_give_way_to_the_canvas() {
+        assert_eq!(inspector_width(340.0, 1400.0), 340.0);
+        assert_eq!(inspector_width(440.0, 1000.0), 315.0);
+        assert_eq!(inspector_width(440.0, 900.0), 300.0);
+        assert_eq!(inspector_width(500.0, 2000.0), 440.0);
+    }
+}

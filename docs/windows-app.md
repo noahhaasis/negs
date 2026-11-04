@@ -583,6 +583,43 @@ Windows 11, as above; the tile star's hover and its click (only the favourite's 
 was seen, as in the Prep port's own check); dragging the grabber with the pointer; the
 scope menu's list opening dark (it uses the same handler as the column's lists).
 
+## The Mac's fit, window minimum and viewer background (2026-11-04)
+
+The Mac's `c92b539` made four fixes. Three are ported; the fourth isn't needed:
+
+- **Fit stops at 1:1** (`ui/canvas.rs`, `zoom_amount`): fitting shows the whole photograph
+  but never enlarges a small one past one photograph pixel per screen pixel.
+- **Window minimum** (`ui/mod.rs`): the client keeps room for the canvas (680 DIP), the
+  splitter (5) and the adjustments' minimum (300), so 985 × 520 DIP; with the adjustments
+  hidden, 680 × 520. Height stays at Windows' 520 (the Mac's is 560). A smaller saved frame,
+  or a window the adjustments are reappearing in, grows to it first (`fit_minimum`), keeping
+  its top-left corner and its monitor's work area; maximized and full screen windows are
+  left alone. On a screen smaller than the minimum, the work area is the minimum. Unlike
+  the Mac's split view, the column's chosen width (300–440) narrows to leave the canvas its
+  680 before the window can shrink further, and the splitter can't be dragged past it.
+- **Custom viewer background** (Settings › Preview & Export, before Limit preview, as in
+  the Mac's order): a checkbox, Choose Colour… (the common colour dialog) and a swatch,
+  saved under the Mac's keys `viewerBackgroundCustom` and `viewerBackgroundColor`
+  (`#242424` by default). Off, the canvas follows the theme as before. High contrast keeps
+  the system's colours either way.
+- **Not ported: typed export sizes.** The Mac's Size field cleared partial numbers while
+  typing because of its formatter's range. The Windows save dialog's edit box has no
+  formatter and clamps only when read, so a typed 1600 exports at 1600 already.
+
+**Results** (2026-11-04, this machine, release build): `cargo test --release` passes all
+128 Windows tests, 3 of them new (fit, minimum width, the adjustments giving way). The
+brightness tests that moved to `spektrafilm_io::brightness` in the merge left this suite.
+In the release app with a fresh profile (`NEGS_PROFILE_DIR`) and a D750 NEF at 100 %: a
+saved 700 × 450 frame opened at a 985 × 520 client with the column at 300 DIP; resizing to
+400 × 300 stopped at 985 × 520, and at 680 × 520 with the adjustments hidden; showing them
+again grew the window back to 985. The custom colour filled the canvas; unticking it
+disabled the button, faded the swatch, and after OK saved `false` and showed the theme's
+grey again.
+
+**Not verified here:** fit on a photograph smaller than the canvas (covered by the unit
+test only), a monitor smaller than the minimum, other scaling than 100 %, light theme and
+high contrast with a custom background.
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,
