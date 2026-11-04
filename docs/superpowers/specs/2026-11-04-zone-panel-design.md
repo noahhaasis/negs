@@ -18,18 +18,16 @@ Success is that someone can drag zone 0 onto a shadow and watch the black point 
 
 ### Placing a pin
 
-1. Press on a tile and drag onto the photograph. A line follows the pointer from the tile, ending in the pin and its averaging circle.
-2. The scroll wheel sizes the circle during the drag.
-3. Letting go over the photograph places the pin and selects it. Letting go anywhere else cancels.
+1. Press on a tile and drag onto the photograph. A line follows the pointer from the tile, ending in the pin and its averaging circle, at the size last used.
+2. Letting go over the photograph places the pin and selects it. Letting go anywhere else cancels.
+3. Scroll to size the placed pin's circle. The tone is measured again as it changes.
 4. The pin's averaged tone becomes that zone in the tone curve, and the photograph updates. Dragging zone 0 onto something that is really zone III raises the black point. Each further pin recalculates the curve.
-
-The pin selected on drop can still be sized by scrolling. That matters on a trackpad, where scrolling with the button held is awkward.
 
 ### Working with a placed pin
 
 - Click a pin to select it. Click empty photograph to deselect.
 - Drag a selected pin to measure a different spot. Its line and circle follow from where it was grabbed.
-- Scroll to resize the selected pin's circle. With nothing selected and no drag in progress, scrolling pans as it does today.
+- Scroll to resize the selected pin's circle. With nothing selected, scrolling pans as it does today. Scrolling does nothing during a drag.
 - Delete removes the selected pin, and Esc deselects.
 - Dragging a tile that is already placed moves that zone's pin: a zone has one pin.
 - Each drop, move, resize gesture and delete is one undo step. A resize is one step however many scroll events it takes.
@@ -98,7 +96,6 @@ These would make it a failure even if it technically worked:
 
 - How the line overlay is built, as long as it follows pan and zoom during live gestures.
 - How the app learns which pins the curve ignored: asking the helper or sharing the rule. There must be one source of truth, and `AnchorCurve` currently drops those pins silently.
-- How scroll events reach the canvas during a tile drag. The builder must prove this works with a real mouse early on, because it is the riskiest assumption here. If it can't work, stop and raise it.
 - Debouncing re-measurement while scrolling.
 
 ## Calls Claude made
@@ -108,5 +105,6 @@ These were not specified by the user:
 - The panel is shown by default on first launch, then remembered.
 - The canvas's 680-point minimum width includes the panel.
 - The panel and pin gestures are unavailable while cropping or showing the Original.
+- A new pin starts at the size last used, or a radius of 2% of the shorter side the first time.
 - Pins are 24 points, up from 18, because 18 was reported as hard to read.
 - Pins saved by earlier test builds with a "holding" target take the zone that target falls in.
