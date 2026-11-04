@@ -16,13 +16,19 @@ struct PreviewCanvas: NSViewRepresentable {
     let zoomCommand: UUID
     let fit: Bool
     var scale: CanvasScale?
-    /// The region the histogram covers; nil is the whole photograph.
-    var selection: CropSettings?
-    /// Called while a region is dragged or moved, with `picking` true when
-    /// ⌃ makes it a tone pick too.
-    var onSelection: ((CropSettings?, _ picking: Bool) -> Void)? = nil
-    /// Called on a ⌃-click that did not drag.
-    var onPick: ((TonePick) -> Void)? = nil
+    /// The pins shown over the photograph: a numbered chip each, with the
+    /// ring of the area it averaged.
+    var pins: [TonePinMarker] = []
+    /// Called when a pin's chip is clicked.
+    var onSelectPin: ((Int?) -> Void)? = nil
+    /// Called with the centre (unit coordinates, top left) and radius (a
+    /// fraction of the shorter side) of a ⌘-click or ⌘-drag.
+    var onPin: ((CGPoint, Double) -> Void)? = nil
+    /// Called when a placed pin is dragged to a new point.
+    var onMovePin: ((Int, CGPoint) -> Void)? = nil
+    /// Esc and Delete on the photograph: drop the tone selection / remove it.
+    var onEscapeKey: (() -> Void)? = nil
+    var onDeleteKey: (() -> Void)? = nil
     /// Called when the user changes between fit and a zoomed view.
     var onFitChanged: ((Bool) -> Void)? = nil
 
@@ -35,7 +41,7 @@ struct PreviewCanvas: NSViewRepresentable {
         scroll.allowsMagnification = true; scroll.minMagnification = 0.005; scroll.maxMagnification = 16
         scroll.documentView = PhotographView()
         scroll.setAccessibilityLabel("Photograph preview")
-        scroll.setAccessibilityHelp("Pinch to zoom, scroll or ⇧-drag to pan, drag to select a region for the histogram, Control-click to read a tone, double-click to fit or show actual size.")
+        scroll.setAccessibilityHelp("Pinch to zoom, drag to pan, ⌘-click to pin a tone, ⌘-drag to pin the average of a circle, double-click to fit or show actual size.")
         scroll.onFitChanged = onFitChanged
         return scroll
     }
@@ -44,9 +50,12 @@ struct PreviewCanvas: NSViewRepresentable {
         scale?.view = scroll
         scroll.onFitChanged = onFitChanged
         let photo = scroll.documentView as! PhotographView
-        photo.onSelection = onSelection
-        photo.onPick = onPick
-        photo.setSelection(selection)
+        photo.onEscapeKey = onEscapeKey
+        photo.onDeleteKey = onDeleteKey
+        photo.onSelectPin = onSelectPin
+        photo.onPin = onPin
+        photo.onMovePin = onMovePin
+        photo.setPins(pins)
         let cropped = crop.size(of: size)
         let displaySize = rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
         let documentSize = border.map { border in
@@ -182,8 +191,10 @@ final class PhotographView: NSView {
     private let clip = CALayer()
     /// The whole photograph, straightened inside the crop.
     private let photo = CALayer()
-    /// The selected region, outlined over the photograph.
-    private let marquee = CAShapeLayer()
+    /// The circles the pins average, over the photograph.
+    private let ringLayer = CAShapeLayer()
+    /// The circle a ⌘-drag is growing, until the mouse comes up.
+    private let dragRing = CAShapeLayer()
     private var borderLayers: BorderLayers!
     private var image: AnyObject?
     private var size = CGSize.zero
@@ -192,18 +203,28 @@ final class PhotographView: NSView {
     private var border: BorderSettings?
     private var filmTexture: CGImage?
     private var filmStrip: FilmStrip?
-    /// The region the histogram covers, in the crop's turned frame.
-    private var selection: CropSettings?
-    /// Called as a region is dragged or moved.
-    var onSelection: ((CropSettings?, _ picking: Bool) -> Void)?
-    /// Called on a ⌃-click that did not drag.
-    var onPick: ((TonePick) -> Void)?
+    /// The pins to show: a numbered, luminance-coloured chip each, with the
+    /// ring of the area it averaged.
+    private var pinMarkers: [TonePinMarker] = []
+    /// One chip layer per pin, keyed by the pin's index.
+    private var chips: [Int: CALayer] = [:]
+    /// Called when a pin's chip is clicked.
+    var onSelectPin: ((Int?) -> Void)?
+    /// Called with the centre (unit coordinates, top left) and radius (a
+    /// fraction of the shorter side) of a completed ⌘-click or ⌘-drag.
+    var onPin: ((CGPoint, Double) -> Void)?
+    /// Called when a placed pin is dragged to a new point.
+    var onMovePin: ((Int, CGPoint) -> Void)?
+    var onEscapeKey: (() -> Void)?
+    var onDeleteKey: (() -> Void)?
     /// The drag in progress.
     private enum Drag {
-        case select(anchor: CGPoint)
-        case move(start: CGPoint, original: CropSettings, picking: Bool, moved: Bool)
-        case pick(pick: TonePick, start: CGPoint, moved: Bool)
         case pan
+        /// A ⌘-drag: the circle grows from `centre` to the pointer.
+        case pin(centre: CGPoint, unitCentre: CGPoint)
+        /// A pin dragged to a new place: the chip follows, and the tone is
+        /// measured again on mouse-up.
+        case movePin(index: Int, centre: CGPoint, unitCentre: CGPoint, moved: Bool)
     }
     private var drag: Drag?
     private var cursorPushed = false
@@ -223,18 +244,27 @@ final class PhotographView: NSView {
         photo.minificationFilter = .trilinear
         photo.magnificationFilter = .linear
         photo.isOpaque = true
-        let none = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "transform": NSNull()]
+        let none = [
+            "contents": NSNull(), "bounds": NSNull(), "position": NSNull(),
+            "transform": NSNull(), "path": NSNull(), "lineDashPhase": NSNull(),
+            "backgroundColor": NSNull(), "borderWidth": NSNull()
+        ]
         photo.actions = none; clip.actions = none
+        ringLayer.actions = none; dragRing.actions = none
         clip.masksToBounds = true
-        // The region the histogram covers, drawn in the photographed frame
-        // so it follows the crop and the straightening, and never exported.
-        marquee.fillColor = nil
-        marquee.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
-        marquee.lineWidth = 1
-        marquee.lineJoin = .round
-        marquee.actions = none
-        clip.addSublayer(marquee)
+        // The pins and the drag ring, drawn in the photographed frame so they
+        // follow the crop and the straightening, never exported. The photo is
+        // added first: a layer added earlier would be painted under it.
+        ringLayer.fillColor = nil
+        ringLayer.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.75).cgColor
+        ringLayer.lineWidth = 1
+        dragRing.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+        dragRing.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.95).cgColor
+        dragRing.lineWidth = 1
+        dragRing.isHidden = true
         clip.addSublayer(photo)
+        clip.addSublayer(ringLayer)
+        clip.addSublayer(dragRing)
         layer?.addSublayer(clip)
         borderLayers = BorderLayers(in: layer!, around: clip)
     }
@@ -249,11 +279,12 @@ final class PhotographView: NSView {
         needsLayout = true
     }
 
-    /// Outlines `selection`, or clears the marquee for nil.
-    func setSelection(_ selection: CropSettings?) {
-        guard selection != self.selection else { return }
-        self.selection = selection
-        updateMarquee()
+    /// Shows the pins: a numbered chip filled with the pin's tone, and a thin
+    /// ring around the area the pin averaged.
+    func setPins(_ markers: [TonePinMarker]) {
+        guard markers != pinMarkers else { return }
+        pinMarkers = markers
+        updatePins()
     }
 
     /// The photograph point under `viewPoint`, as unit coordinates of the
@@ -273,135 +304,130 @@ final class PhotographView: NSView {
         return CGPoint(x: x, y: y)
     }
 
-    /// The region between two view points, clamped to the crop. Nil when the
-    /// drag is empty (a click), which means the whole photograph.
-    func selection(from a: CGPoint, to b: CGPoint) -> CropSettings? {
-        guard let root = layer, size.width >= 1, size.height >= 1 else { return nil }
-        let (pa, pb) = (clip.convert(a, from: root), clip.convert(b, from: root))
-        let bounds = clip.bounds
-        let x0 = min(max(min(pa.x, pb.x), bounds.minX), bounds.maxX)
-        let x1 = min(max(max(pa.x, pb.x), bounds.minX), bounds.maxX)
-        let y0 = min(max(min(pa.y, pb.y), bounds.minY), bounds.maxY)
-        let y1 = min(max(max(pa.y, pb.y), bounds.minY), bounds.maxY)
-        guard x1 - x0 >= 0.5, y1 - y0 >= 0.5 else { return nil }
-        return selection(fromClip: CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
+    /// A unit point in the clip's coordinates (photograph pixels, y up).
+    private func clipPoint(_ unit: CGPoint) -> CGPoint {
+        clip.convert(CGPoint(x: unit.x * size.width, y: (1 - unit.y) * size.height), from: photo)
     }
 
-    /// A clip-space rectangle as the crop's turned-frame fractions. Clip
-    /// coordinates are y-up with their origin at the crop's bottom left, so
-    /// this removes the quarter turn and puts y back at the top left.
-    private func selection(fromClip rect: CGRect) -> CropSettings {
-        let pixels = crop.pixels(in: size)
-        var result = crop
-        result.rect = CGRect(
-            x: (rect.minX + pixels.minX) / size.width,
-            y: (pixels.maxY - rect.maxY) / size.height,
-            width: rect.width / size.width,
-            height: rect.height / size.height
-        )
-        return result
+    /// A chip's diameter on screen, in clip pixels, so it stays the same size
+    /// as the view zooms.
+    private var chipSize: CGFloat {
+        guard clip.bounds.width > 0, bounds.width > 0 else { return 18 }
+        let zoom = max(enclosingScrollView?.magnification ?? 1, 0.01)
+        return 18 / zoom * clip.bounds.width / bounds.width
     }
 
-    /// The selected pixels in the clip's coordinates.
-    private func clipRect(of selection: CropSettings) -> CGRect {
-        let pixels = crop.pixels(in: size)
-        let chosen = selection.pixels(in: size)
-        return CGRect(
-            x: chosen.minX - pixels.minX, y: pixels.maxY - chosen.maxY,
-            width: chosen.width, height: chosen.height
-        )
-    }
-
-    private func updateMarquee() {
+    private func updatePins() {
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        if let selection, size.width > 0, size.height > 0 {
-            marquee.path = CGPath(rect: clipRect(of: selection), transform: nil)
-        } else {
-            marquee.path = nil
+        let rings = CGMutablePath()
+        var anyRing = false
+        let diameter = chipSize
+        var live = Set<Int>()
+        for marker in pinMarkers {
+            live.insert(marker.index)
+            let centre = clipPoint(marker.source.centre)
+            let radius = marker.source.radius * min(size.width, size.height)
+            if radius > 0.5 {
+                rings.addEllipse(in: CGRect(
+                    x: centre.x - radius, y: centre.y - radius,
+                    width: radius * 2, height: radius * 2
+                ))
+                anyRing = true
+            }
+            let chip = chips[marker.index] ?? makeChip()
+            chip.frame = CGRect(
+                x: centre.x - diameter / 2, y: centre.y - diameter / 2,
+                width: diameter, height: diameter
+            )
+            chip.cornerRadius = diameter / 2
+            chip.backgroundColor = Self.tone(marker.lstar).cgColor
+            chip.borderWidth = marker.selected ? 2 : 0
+            chip.borderColor = NSColor.controlAccentColor.cgColor
+            if let label = chip.sublayers?.first as? CATextLayer {
+                label.frame = CGRect(x: 0, y: -1, width: diameter, height: diameter)
+                label.fontSize = diameter * 0.55
+                label.foregroundColor = (marker.lstar < 55 ? NSColor.white : NSColor.black).cgColor
+                label.string = "\(marker.number)"
+                label.contentsScale = window?.backingScaleFactor ?? 2
+            }
+        }
+        ringLayer.path = anyRing ? rings : nil
+        for (index, chip) in chips where !live.contains(index) {
+            chip.removeFromSuperlayer()
+            chips.removeValue(forKey: index)
         }
         CATransaction.commit()
     }
 
-    override func layout() {
-        super.layout()
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        // The crop's pixels, as the exporter cuts them. Layers are y-up, so
-        // the rectangle's top-left origin flips, and clockwise is negative.
-        let pixels = crop.pixels(in: size)
-        clip.bounds = CGRect(origin: .zero, size: pixels.size)
-        clip.position = CGPoint(x: bounds.midX, y: bounds.midY)
-        clip.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
-        photo.bounds = CGRect(origin: .zero, size: size)
-        photo.position = CGPoint(x: size.width / 2 - pixels.minX, y: pixels.height - (size.height / 2 - pixels.minY))
-        photo.setAffineTransform(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180))
-        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
-        updateMarquee()
-        CATransaction.commit()
+    private func makeChip() -> CALayer {
+        let chip = CALayer()
+        chip.masksToBounds = true
+        chip.actions = [
+            "contents": NSNull(), "bounds": NSNull(), "position": NSNull(),
+            "backgroundColor": NSNull(), "borderWidth": NSNull()
+        ]
+        let label = CATextLayer()
+        label.alignmentMode = .center
+        label.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        chip.addSublayer(label)
+        clip.addSublayer(chip)
+        chips[chips.count] = chip
+        return chip
     }
 
-    /// `original` shifted by a clip-space delta (photograph pixels, y up),
-    /// clamped to the crop. The size never changes.
-    func moving(_ original: CropSettings, by delta: CGPoint) -> CropSettings {
-        let base = clipRect(of: original), bounds = clip.bounds
-        let x = min(max(base.minX + delta.x, bounds.minX), max(bounds.maxX - base.width, bounds.minX))
-        let y = min(max(base.minY + delta.y, bounds.minY), max(bounds.maxY - base.height, bounds.minY))
-        return selection(fromClip: CGRect(x: x, y: y, width: base.width, height: base.height))
+    /// The grey a pin's tone looks like, as sRGB.
+    static func tone(_ lstar: Double) -> NSColor {
+        let y = lstar > 8 ? pow((lstar + 16) / 116, 3) : lstar * 27.0 / 24389
+        let encoded = y <= 0.003_130_8 ? 12.92 * y : 1.055 * pow(y, 1 / 2.4) - 0.055
+        let v = min(max(encoded, 0), 1)
+        return NSColor(srgbRed: v, green: v, blue: v, alpha: 1)
     }
 
-    /// The layers the canvas builds, so tests can drive its coordinate map.
-    var photographLayer: CALayer { photo }
-    var clipLayer: CALayer { clip }
-
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .arrow) }
-
-    private func pushCursor(_ cursor: NSCursor) {
-        guard !cursorPushed else { return }
-        cursorPushed = true
-        cursor.push()
+    /// The pin whose chip or ring contains `point`, if any.
+    private func pinIndex(at point: CGPoint) -> Int? {
+        guard let root = layer, size.width > 0, !pinMarkers.isEmpty else { return nil }
+        let clipped = clip.convert(point, from: root)
+        let half = chipSize / 2
+        return pinMarkers.last { marker in
+            let centre = clipPoint(marker.source.centre)
+            let radius = max(marker.source.radius * min(size.width, size.height), half)
+            let dx = clipped.x - centre.x, dy = clipped.y - centre.y
+            return dx * dx + dy * dy <= radius * radius
+        }?.index
     }
 
-    private func popCursor() {
-        guard cursorPushed else { return }
-        cursorPushed = false
-        NSCursor.pop()
-    }
-
-    private func clearSelection() {
-        selection = nil
-        updateMarquee()
-        onSelection?(nil, false)
-    }
-
-    private func isInsideSelection(_ point: CGPoint) -> Bool {
-        guard let selection, let root = layer, size.width > 0 else { return false }
-        return clipRect(of: selection).contains(clip.convert(point, from: root))
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 53:
+            onEscapeKey?()
+            return
+        case 51, 117:
+            onDeleteKey?()
+            return
+        default:
+            super.keyDown(with: event)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let start = CanvasGesture.start(
             clickCount: event.clickCount, modifiers: event.modifierFlags,
-            insideSelection: isInsideSelection(point)
+            pinUnderPointer: pinIndex(at: point)
         )
         switch start {
         case .zoomToggle:
-            clearSelection()
             (enclosingScrollView as? ImageScrollView)?.toggleZoom(about: point)
-        case .select:
-            drag = .select(anchor: point)
-            pushCursor(.crosshair)
-        case .move:
-            drag = .move(
-                start: point, original: selection ?? crop,
-                picking: event.modifierFlags.contains(.control), moved: false
-            )
-            pushCursor(.closedHand)
-        case .pickSmall, .pickLarge:
+        case .selectPin(let index):
+            onSelectPin?(index)
             guard let unit = unitPoint(at: point) else { return }
-            // A pick's mouse-down also clears the region, so the pick alone
-            // describes the tone and 3×3/7×7 mean what they say.
-            clearSelection()
-            drag = .pick(pick: start == .pickSmall ? .small(unit) : .large(unit), start: point, moved: false)
+            drag = .movePin(index: index, centre: point, unitCentre: unit, moved: false)
+            pushCursor(.openHand)
+        case .pin:
+            guard let unit = unitPoint(at: point) else { return }
+            drag = .pin(centre: point, unitCentre: unit)
+            dragRing.isHidden = false
+            updateDragRing(centre: point, radius: 0)
             pushCursor(.crosshair)
         case .pan:
             guard let scroll = enclosingScrollView as? ImageScrollView, scroll.canScroll else { return }
@@ -413,33 +439,15 @@ final class PhotographView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         switch drag {
-        case .select(let anchor):
-            if let rect = selection(from: anchor, to: point) {
-                selection = rect
-                updateMarquee()
-                onSelection?(rect, false)
-            } else {
-                clearSelection()
-            }
-        case .move(let start, let original, let picking, let moved):
-            guard let root = layer else { return }
-            let from = clip.convert(start, from: root), to = clip.convert(point, from: root)
-            let rect = moving(original, by: CGPoint(x: to.x - from.x, y: to.y - from.y))
-            selection = rect
-            updateMarquee()
-            let dragged = moved || hypot(point.x - start.x, point.y - start.y) > 2
-            if dragged {
-                drag = .move(start: start, original: original, picking: picking, moved: true)
-            }
-            if picking || dragged { onSelection?(rect, picking) }
-        case .pick(let pick, let start, let moved):
-            let dragged = moved || hypot(point.x - start.x, point.y - start.y) > 2
-            guard dragged else { return }
-            drag = .pick(pick: pick, start: start, moved: true)
-            if let rect = selection(from: start, to: point) {
-                selection = rect
-                updateMarquee()
-                onSelection?(rect, true)
+        case .pin(let centre, _):
+            updateDragRing(centre: centre, radius: hypot(point.x - centre.x, point.y - centre.y))
+        case .movePin(let index, let start, _, _):
+            guard hypot(point.x - start.x, point.y - start.y) > 2, let unit = unitPoint(at: point) else { return }
+            drag = .movePin(index: index, centre: point, unitCentre: unit, moved: true)
+            if let chip = chips[index] {
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                chip.position = clip.convert(point, from: layer)
+                CATransaction.commit()
             }
         case .pan:
             guard let scroll = enclosingScrollView else { return }
@@ -455,19 +463,69 @@ final class PhotographView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        switch drag {
-        case .select:
-            // A click without a drag is an empty region: the whole photograph.
-            if selection == nil { onSelection?(nil, false) }
-        case .move(_, _, let picking, let moved):
-            // A ⌃-click that did not move the region is a pick.
-            if picking, !moved, let unit = unitPoint(at: point) { onPick?(.small(unit)) }
-        case .pick(let pick, _, let moved):
-            if !moved { onPick?(pick) }
-        case .pan, nil:
-            break
+        if case .movePin(let index, _, let unit, let moved) = drag, moved {
+            onMovePin?(index, unit)
+        }
+        if case .pin(let centre, let unit) = drag {
+            // The radius is a fraction of the shorter side, in photograph
+            // pixels, so a circle means the same area at any zoom.
+            let pixels = hypot(point.x - centre.x, point.y - centre.y) * (size.width > 0 ? clip.bounds.width / bounds.width : 1)
+            let radius = min(max(Double(pixels / max(min(size.width, size.height), 1)), 0), 1)
+            onPin?(unit, radius)
         }
         drag = nil
+        dragRing.isHidden = true
         popCursor()
+    }
+
+    private func updateDragRing(centre: CGPoint, radius: CGFloat) {
+        let local = clip.convert(centre, from: layer)
+        dragRing.path = CGPath(
+            ellipseIn: CGRect(x: local.x - radius, y: local.y - radius, width: radius * 2, height: radius * 2),
+            transform: nil
+        )
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        // The crop's pixels, as the exporter cuts them. Layers are y-up, so
+        // the rectangle's top-left origin flips, and clockwise is negative.
+        let pixels = crop.pixels(in: size)
+        clip.bounds = CGRect(origin: .zero, size: pixels.size)
+        clip.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        clip.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
+        photo.bounds = CGRect(origin: .zero, size: size)
+        photo.position = CGPoint(x: size.width / 2 - pixels.minX, y: pixels.height - (size.height / 2 - pixels.minY))
+        photo.setAffineTransform(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180))
+        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
+        updatePins()
+        CATransaction.commit()
+    }
+
+    /// The layers the canvas builds, so tests can drive its coordinate map.
+    var photographLayer: CALayer { photo }
+    var clipLayer: CALayer { clip }
+
+    /// Each pin chip's centre in the view's coordinates, for tests.
+    var chipCentres: [CGPoint] {
+        chips.values.map { $0.convert(CGPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: self.layer) }
+    }
+
+    /// The chips' on-screen diameter in view points, for tests.
+    var chipDiameter: CGFloat { chipSize }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .arrow) }
+
+    private func pushCursor(_ cursor: NSCursor) {
+        guard !cursorPushed else { return }
+        cursorPushed = true
+        cursor.push()
+    }
+
+    private func popCursor() {
+        guard cursorPushed else { return }
+        cursorPushed = false
+        NSCursor.pop()
     }
 }

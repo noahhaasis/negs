@@ -43,11 +43,16 @@ final class HistogramTests: XCTestCase {
         let image = try surface()
         let whole = Histogram.of(image, crop: CropSettings())
         XCTAssertEqual(whole.red.reduce(0, +), 6000)
-        XCTAssertEqual(whole.red[0], 50 * 60); XCTAssertEqual(whole.red[200], 60); XCTAssertEqual(whole.red[255], 49 * 60)
-        XCTAssertEqual(whole.green[0], 51 * 60); XCTAssertEqual(whole.blue[255], 49 * 60)
+        // Bins are L*: black is 0, the red column's 200 code is L* 80.6, white is 255.
+        XCTAssertEqual(whole.red[0], 50 * 60)
+        XCTAssertEqual(whole.red[205], 60)
+        XCTAssertEqual(whole.red[255], 49 * 60)
+        XCTAssertEqual(whole.green[0], 51 * 60)
+        XCTAssertEqual(whole.blue[255], 49 * 60)
         // The left 40%: only black.
         let left = Histogram.of(image, crop: CropSettings(rect: CGRect(x: 0, y: 0, width: 0.4, height: 1)))
-        XCTAssertEqual(left.red[0], 40 * 60); XCTAssertEqual(left.red.reduce(0, +), 40 * 60)
+        XCTAssertEqual(left.red[0], 40 * 60)
+        XCTAssertEqual(left.red.reduce(0, +), 40 * 60)
     }
 
     func testSamplesLargeCropsEvenly() throws {
@@ -93,19 +98,34 @@ final class HistogramTests: XCTestCase {
         XCTAssertEqual(ends.peak, 5000)
     }
 
-    // MARK: Lightness
+    // MARK: Lightness and channels
 
     func testLightnessBinsAFlatGrey() throws {
-        // sRGB 119 is L* 50.04, and L* × 2.55 = 127.6, binned by truncation.
+        // sRGB 119 is L* 50.0, and L* × 2.55 = 127.6, binned by truncation.
         let histogram = Histogram.of(try surface(width: 8, height: 8) { _, _ in (119, 119, 119) }, crop: CropSettings())
         XCTAssertEqual(histogram.lightness[127], 64)
         XCTAssertEqual(histogram.lightness.reduce(0, +), 64)
-        XCTAssertEqual(histogram.red[119], 64)
+        // A channel value of 119 is the same tone, so it bins the same.
+        XCTAssertEqual(histogram.red[127], 64)
+        XCTAssertEqual(histogram.green[127], 64)
+        XCTAssertEqual(histogram.blue[127], 64)
         // Lightness never sets the graph's vertical scale.
         XCTAssertEqual(histogram.peak, 64)
     }
 
-    /// The same bytes mean different luminance under different tags, and L\*
+    /// Each channel is read as a tone of its own: a saturated red's red
+    /// channel bins near white, its green and blue channels at black.
+    func testChannelBinsAreTheChannelsOwnLightness() throws {
+        let image = try surface(width: 6, height: 6) { _, _ in (255, 0, 0) }
+        let histogram = Histogram.of(image, crop: CropSettings())
+        XCTAssertEqual(histogram.red[255], 36)
+        XCTAssertEqual(histogram.green[0], 36)
+        XCTAssertEqual(histogram.blue[0], 36)
+        // Its luminance is sRGB red's: L* 53.2, binned at 135.
+        XCTAssertEqual(histogram.lightness[135], 36)
+    }
+
+    /// The same bytes mean different luminance under different tags, and L*\*
     /// follows the proxy's space.
     func testLightnessUsesTheProxysLuminance() throws {
         let green = { (_: Int, _: Int) in (r: UInt8(0), g: UInt8(255), b: UInt8(0)) }
@@ -120,133 +140,66 @@ final class HistogramTests: XCTestCase {
         XCTAssertEqual(srgbBin, 223, accuracy: 1)
         XCTAssertEqual(wideBin, 219, accuracy: 1)
         XCTAssertGreaterThan(srgbBin, wideBin)
-        // The bars themselves are the proxy's codes in both.
+        // The channel bars are the channel's own tone in both.
         XCTAssertEqual(srgb.green[255], 16)
         XCTAssertEqual(wide.green[255], 16)
     }
 
-    // MARK: Picks
+    // MARK: Sampling a circle
 
-    func testSampleAveragesTheWindow() throws {
-        // One bright pixel in a flat field: the wider window averages it down.
+    /// L\* of an sRGB code, as the sampler measures it.
+    private func lstar(_ code: UInt8) -> Double {
+        let v = Double(code) / 255
+        let y = v <= 0.040_45 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        return y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
+    }
+
+    func testATinyCircleSamplesThePixelUnderIt() throws {
         let image = try surface(width: 11, height: 11) { x, y in
             x == 5 && y == 5 ? (200, 200, 200) : (100, 100, 100)
         }
-        let point = CGPoint(x: 5.5 / 11, y: 5.5 / 11)
-        let small = try XCTUnwrap(TonePick.small(point).sample(image, output: .identity))
-        let large = try XCTUnwrap(TonePick.large(point).sample(image, output: .identity))
-        XCTAssertEqual(small.red, (8 * 100 + 200) / 9, accuracy: 1e-9)
-        XCTAssertEqual(large.red, (48 * 100 + 200) / 49, accuracy: 1e-9)
-        XCTAssertEqual(small.green, small.red)
-        XCTAssertEqual(small.blue, small.red)
-        // L* follows the same average of the picked pixels.
-        XCTAssertGreaterThan(small.lstar, large.lstar)
+        let pixel = try XCTUnwrap(
+            TonePick.circle(centre: CGPoint(x: 5.5 / 11, y: 5.5 / 11), radius: 0).sample(image)
+        )
+        XCTAssertEqual(pixel.lstar, lstar(200), accuracy: 1e-3)
+        let flat = try XCTUnwrap(
+            TonePick.circle(centre: CGPoint(x: 0.1, y: 0.1), radius: 0).sample(image)
+        )
+        XCTAssertEqual(flat.lstar, lstar(100), accuracy: 1e-3)
     }
 
-    func testPickSurvivesASmallerInteractiveSurface() throws {
+    /// The drag's radius averages everything inside it: a circle over the
+    /// black and white halves lands between them.
+    func testACircleAveragesItsArea() throws {
+        let image = try surface()
+        let left = try XCTUnwrap(
+            TonePick.circle(centre: CGPoint(x: 0.25, y: 0.5), radius: 0).sample(image)
+        )
+        XCTAssertEqual(left.lstar, 0, accuracy: 1e-9, "the black half")
+        let both = try XCTUnwrap(
+            TonePick.circle(centre: CGPoint(x: 0.5, y: 0.5), radius: 0.3).sample(image)
+        )
+        XCTAssertGreaterThan(both.lstar, 5)
+        XCTAssertLessThan(both.lstar, 95)
+    }
+
+    func testACircleCentredOutsideTheImageIsNil() throws {
+        let image = try surface(width: 10, height: 10) { _, _ in (128, 128, 128) }
+        XCTAssertNil(TonePick.circle(centre: CGPoint(x: 1.5, y: 0.5), radius: 0).sample(image))
+        XCTAssertNil(TonePick.circle(centre: CGPoint(x: 0.5, y: -0.2), radius: 0).sample(image))
+    }
+
+    func testASmallerPreviewSamplesTheSameTone() throws {
         let flat = { (_: Int, _: Int) in (r: UInt8(128), g: UInt8(128), b: UInt8(128)) }
         let full = try XCTUnwrap(
-            TonePick.small(CGPoint(x: 0.5, y: 0.5)).sample(try surface(width: 20, height: 20) { flat($0, $1) }, output: .identity)
+            TonePick.circle(centre: CGPoint(x: 0.5, y: 0.5), radius: 0.2)
+                .sample(try surface(width: 20, height: 20) { flat($0, $1) })
         )
         let half = try XCTUnwrap(
-            TonePick.small(CGPoint(x: 0.5, y: 0.5)).sample(try surface(width: 10, height: 10) { flat($0, $1) }, output: .identity)
+            TonePick.circle(centre: CGPoint(x: 0.5, y: 0.5), radius: 0.2)
+                .sample(try surface(width: 10, height: 10) { flat($0, $1) })
         )
-        XCTAssertEqual(full, half)
-        XCTAssertEqual(full.red, 128, accuracy: 1e-9)
-    }
-
-    func testSampleClipsTheWindowAtTheEdge() throws {
-        let image = try surface(width: 11, height: 11) { x, y in
-            x == 0 && y == 0 ? (200, 200, 200) : (100, 100, 100)
-        }
-        let corner = try XCTUnwrap(TonePick.small(CGPoint(x: 0, y: 0)).sample(image, output: .identity))
-        // Only the four in-image pixels of the 3×3 window.
-        XCTAssertEqual(corner.red, 125, accuracy: 1e-9)
-    }
-
-    func testSampleOutsideTheImageIsNil() throws {
-        let image = try surface(width: 10, height: 10) { _, _ in (128, 128, 128) }
-        XCTAssertNil(TonePick.small(CGPoint(x: 1.5, y: 0.5)).sample(image, output: .identity))
-        XCTAssertNil(TonePick.small(CGPoint(x: 0.5, y: -0.2)).sample(image, output: .identity))
-        XCTAssertNil(TonePick.large(CGPoint(x: 2, y: 2)).sample(image, output: .identity))
-    }
-
-
-    func testRegionSampleAveragesTheRectangle() throws {
-        let image = try surface()
-        let left = CropSettings(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
-        let sample = try XCTUnwrap(TonePick.region(left).sample(image, output: .identity))
-        XCTAssertEqual(sample.red, 0, accuracy: 1e-9)
-        let all = try XCTUnwrap(TonePick.region(CropSettings()).sample(image, output: .identity))
-        // 50 black columns, the red one, then 49 white: the red average.
-        let expected = (50.0 * 0 + 200 + 49.0 * 255) / 100
-        XCTAssertEqual(all.red, expected, accuracy: 1.5)
-    }
-
-    func testRegionCountsOnlyTheSelection() throws {
-        let image = try surface()
-        let left = CropSettings(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
-        let counted = Histogram.of(image, crop: left)
-        XCTAssertEqual(counted.red[0], counted.red.reduce(0, +))
-        XCTAssertEqual(counted.red[0], 50 * 60)
-        // No selection means the whole crop, as the model passes it.
-        XCTAssertEqual(Histogram.of(image, crop: CropSettings()).red.reduce(0, +), 6000)
-    }
-
-    func testRegionOnAStraightenedPhotoReadsWhatIsShown() throws {
-        let image = try surface()
-        let left = CGRect(x: 0, y: 0.25, width: 0.4, height: 0.5)
-        let sample = try XCTUnwrap(
-            TonePick.region(CropSettings(rect: left, angle: 180)).sample(image, output: .identity)
-        )
-        XCTAssertEqual(sample.red, 255, accuracy: 1e-9, "a half turn shows the white half")
-    }
-
-    // MARK: The output space
-
-    private func mapping(_ rows: [[Double]], encode: (Double) -> Double) -> OutputMapping {
-        let table = (0..<1024).map { encode(pow(Double($0) / 1023, 2)) }
-        return OutputMapping(
-            matrix: .array(rows.map { .array($0.map(JSONValue.number)) }),
-            encode: .array(table.map(JSONValue.number))
-        )!
-    }
-
-    /// A Rec. 2020 proxy is not the output space: its bars pass through the
-    /// render's matrix before they are binned.
-    func testBarsAreInTheOutputSpaceOnAWideProxy() throws {
-        // Linear Rec. 2020 (0.5, 0.2, 0.1), which the sRGB transfer encodes.
-        let bytes = [0.5, 0.2, 0.1].map { UInt8((OutputMapping.srgbEncode($0) * 255).rounded()) }
-        let image = try surface(width: 6, height: 6, displaySpace: "Rec. 2020 (sRGB transfer)") { _, _ in
-            (bytes[0], bytes[1], bytes[2])
-        }
-        // An output space that swaps red and blue, with linear encoding.
-        let swapped = mapping([[0, 0, 1], [0, 1, 0], [1, 0, 0]], encode: { $0 })
-        let mapped = Histogram.of(image, crop: CropSettings(), output: swapped)
-        XCTAssertEqual(mapped.red.reduce(0, +), 36)
-        XCTAssertEqual(mapped.red[25...27].reduce(0, +), 36, "blue's code becomes red's")
-        XCTAssertEqual(mapped.blue[127...129].reduce(0, +), 36, "red's code becomes blue's")
-        XCTAssertEqual(mapped.green[50...52].reduce(0, +), 36, "green keeps its code")
-        // Without the mapping the proxy's own codes are counted.
-        let plain = Histogram.of(image, crop: CropSettings())
-        XCTAssertEqual(plain.red[Int(bytes[0])], 36)
-        XCTAssertEqual(plain.blue[Int(bytes[2])], 36)
-        // And the pick reads the same output-space codes.
-        let sample = try XCTUnwrap(TonePick.small(CGPoint(x: 0.5, y: 0.5)).sample(image, output: swapped))
-        XCTAssertEqual(sample.red, 25.5, accuracy: 1)
-        XCTAssertEqual(sample.blue, 127.5, accuracy: 1)
-    }
-
-    func testIdentityMappingRoundTripsTheProxyBytes() throws {
-        let image = try surface(width: 4, height: 4) { x, _ in (UInt8(x * 60), UInt8(x * 40), 20) }
-        let histogram = Histogram.of(image, crop: CropSettings(), output: .identity)
-        XCTAssertEqual(histogram.red[0], 4)
-        XCTAssertEqual(histogram.red[60], 4)
-        XCTAssertEqual(histogram.red[180], 4)
-        let sample = try XCTUnwrap(TonePick.small(CGPoint(x: 2.5 / 4, y: 0.5)).sample(image, output: .identity))
-        XCTAssertEqual(sample.red, 120, accuracy: 1e-9)
-        XCTAssertEqual(sample.green, 80, accuracy: 1e-9)
-        XCTAssertEqual(sample.blue, 20, accuracy: 1e-9)
+        XCTAssertEqual(full.lstar, half.lstar, accuracy: 1e-6)
+        XCTAssertEqual(full.lstar, lstar(128), accuracy: 1e-3)
     }
 }
-

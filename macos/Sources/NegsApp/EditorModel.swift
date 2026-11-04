@@ -38,23 +38,64 @@ import UniformTypeIdentifiers
     private(set) var original: IOSurface?
     /// The tones of `image` within the crop; nil until it develops.
     private(set) var histogram: Histogram?
-    /// Which of the histogram's channels are drawn.
-    var histogramChannels = HistogramChannels(rawValue: UserDefaults.standard.object(forKey: "histogramChannels") as? Int ?? HistogramChannels.all.rawValue) {
-        didSet { UserDefaults.standard.set(histogramChannels.rawValue, forKey: "histogramChannels") }
+    /// The zone band being clicked: with a pin selected, the click aims it
+    /// there. Reading a zone is hover.
+    var selectedZone: Int? {
+        didSet {
+            guard let zone = selectedZone else { return }
+            guard let index = selectedPin, pins.indices.contains(index) else {
+                selectedZone = nil
+                return
+            }
+            movePin(index, to: zone)
+        }
     }
-    /// The region the histogram counts; nil is the whole crop.
-    private(set) var selection: CropSettings?
-    /// The tone a ⌃-click picked, and its sample in the last preview.
-    private(set) var tonePick: TonePick?
-    private(set) var toneSample: ToneSample?
-    /// How a proxy's bytes read as the output space's codes, from the last
-    /// render; identity until one arrives.
-    private(set) var outputMapping = OutputMapping.identity
-    /// The film-and-print curve of the last settled edit; nil while a render
-    /// runs, which disables the zones.
-    private(set) var toneCurve: ToneCurve?
-    /// What each zone would take for the pick, from the current curve.
-    private(set) var zoneReadout: ZoneReadout?
+
+    /// The print's pinned tones, in parameter order.
+    var pins: [TonePin] {
+        let anchors = state.params["post.tone_anchors"].array
+        return anchors.indices.compactMap { index in
+            let path = "post.tone_anchors.\(index)"
+            let input = state.params["\(path).input"].double
+            let target = state.params["\(path).target"].double
+            guard input.isFinite, target.isFinite else { return nil }
+            let radius = state.params["\(path).source.radius"].double
+            let centre = CGPoint(
+                x: state.params["\(path).source.x"].double,
+                y: state.params["\(path).source.y"].double
+            )
+            let source = radius.isFinite && radius >= 0 && centre.x.isFinite && centre.y.isFinite
+                && state.params["\(path).source.x"] != .null
+                ? PinSource(centre: centre, radius: radius)
+                : nil
+            return TonePin(
+                input: input, target: target,
+                zone: ZoneScale.zone(forTarget: target), number: index + 1, source: source
+            )
+        }
+    }
+
+    /// The pins the canvas outlines, when the pins are shown.
+    var pinMarkers: [TonePinMarker] {
+        guard showsPins else { return [] }
+        return pins.enumerated().compactMap { index, pin in
+            pin.source.map {
+                TonePinMarker(
+                    index: index, number: pin.number, lstar: pin.input,
+                    source: $0, selected: selectedPin == index
+                )
+            }
+        }
+    }
+
+    /// Whether the chart draws the pins (⌘'). Remembered between launches.
+    var showsPins = UserDefaults.standard.object(forKey: "showTonePins") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showsPins, forKey: "showTonePins") }
+    }
+
+    /// The pin the chart has selected: it is highlighted, and the next band
+    /// click moves it here.
+    private(set) var selectedPin: Int?
     /// The developed preview's frame, uncropped, which the canvas lays out:
     /// the working frame, or less with the 12 MP limit.
     private(set) var imageSize = CGSize.zero
@@ -199,9 +240,6 @@ import UniformTypeIdentifiers
     @ObservationIgnored private(set) var launchFrame: (frame: LaunchFrame, generation: Int, rendered: EditState)?
     @ObservationIgnored private var parameters: [String: ObservedParameter] = [:]
     @ObservationIgnored private var stripRequest: (film: String, format: FilmFormat)?
-    /// A zone click that ran past the Placement slider's range; the status
-    /// line reports it once the render it caused finishes.
-    @ObservationIgnored private var placementNote: String?
     @ObservationIgnored private var histogramRequest = 0
     /// The source's original, decoded on first use and kept until another
     /// photograph opens. Volatile while hidden.
@@ -222,12 +260,10 @@ import UniformTypeIdentifiers
     var canSave: Bool { previewCurrent && image != nil && !rendering && !saving && !cropping }
     var cropping: Bool { cropSession != nil }
     var canShowOriginal: Bool { image != nil && !cropping }
-    /// Whether the gold numbers can move the tone: the curve describes this
-    /// edit (not an older one still on screen), and the pick is within what
-    /// the print can reach.
-    var canPlaceZone: Bool {
-        toneCurve != nil && previewCurrent && !cropping && !holdingOriginal && original == nil
-            && zoneReadout?.state == .ready
+    /// Whether a tone can be sampled: this preview is current, and the
+    /// original or the crop isn't what's on screen.
+    var canPin: Bool {
+        image != nil && previewCurrent && !cropping && !holdingOriginal && original == nil
     }
     /// The shown photograph's size after cropping, before rotation; zero
     /// before one opens. Borders fit this size.
@@ -417,8 +453,9 @@ import UniformTypeIdentifiers
         if border != state.border { border = state.border }
         if crop != state.crop {
             crop = state.crop
-            // A region belongs to the crop it was drawn on.
-            selection = nil
+            // A reference belongs to the crop it was drawn on.
+            selectedZone = nil
+            selectedPin = nil
             updateHistogram()
         }
         let rotation = Int(state.params["io.rotate_cw"].double)
@@ -731,10 +768,9 @@ import UniformTypeIdentifiers
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
-        // A pick and its region belong to the photograph that had them.
-        selection = nil
-        tonePick = nil; toneSample = nil; toneCurve = nil; zoneReadout = nil
-        outputMapping = .identity
+        // References belong to the photograph that had them.
+        selectedZone = nil
+        selectedPin = nil
         updateHistogram()
         interactionStart = nil; cropSession = nil
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
@@ -757,6 +793,10 @@ import UniformTypeIdentifiers
             let interpretation = defaults["io.input_interpretation"]
             if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
             state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
+            // The pins and the placement describe the tones of the photograph
+            // they were measured on, so they never carry to another file.
+            state.params["post.tone_anchors"] = .array([])
+            state.params["camera.placement_ev"] = .number(0)
             state.crop = CropSettings()
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
@@ -942,10 +982,6 @@ import UniformTypeIdentifiers
     private func changed(invalidateCache: Bool = true) {
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
-        // The curve describes the previous edit, so the zones wait for this
-        // one to settle rather than moving a tone by a stale amount.
-        toneCurve = nil
-        placementNote = nil
         if renderFailed { renderFailed = false }
         // Dims the thumbnails now, or blanks them for a new photograph.
         pumpPreviews()
@@ -1018,12 +1054,7 @@ import UniformTypeIdentifiers
                 showingCachedPreview = false
                 renderAtExportSize = result["export_resolution"].bool
                 renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
-                // The proxy's mapping describes this render's output space.
-                if let mapping = OutputMapping(matrix: result["display_to_output"], encode: result["output_encode"]) {
-                    outputMapping = mapping
-                }
                 if let cacheKey { previewCache.save(developed, photoSize: imageSize, sourceSize: sourceSize, workingSize: workingSize, raw: isRaw, key: cacheKey) }
-                requestToneCurve(snapshot, revision: currentRevision, generation: generation)
             }
             let seconds = result["elapsed_ms"].double / 1000
             let time = "developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
@@ -1033,10 +1064,6 @@ import UniformTypeIdentifiers
             status = interactiveScale != nil
                 ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
                 : "\(Int(photograph.width)) × \(Int(photograph.height))\(previewScale < 1 ? " · shown at \(Self.percent(previewScale))" : "") · \(time)"
-            if let note = placementNote, interactiveScale == nil {
-                status += " · " + note
-                placementNote = nil
-            }
         } catch {
             if currentRevision == revision, generation == sourceGeneration, !closing {
                 renderFailed = true; hideActivity(); report(error)
@@ -1050,102 +1077,138 @@ import UniformTypeIdentifiers
         !closing && generation == sourceGeneration && (revision == renderedRevision || interacting)
     }
 
-    /// Counts the preview's tones off the main thread, over the selection when
-    /// there is one, and samples the picked tone. A newer preview or crop
-    /// supersedes a count still running.
+    /// Counts the preview's tones off the main thread. A newer preview or
+    /// crop supersedes a count still running.
     private func updateHistogram() {
         histogramRequest += 1
         guard let image else { histogram = nil; return }
-        let request = histogramRequest, crop = selection ?? crop
-        let output = outputMapping, pick = tonePick
+        let request = histogramRequest, crop = crop
         Task.detached(priority: .userInitiated) { [weak self] in
-            let counted = Histogram.of(image, crop: crop, output: output)
-            let sample = pick?.sample(image, output: output)
-            await self?.showHistogram(counted, sample: sample, request: request)
+            let counted = Histogram.of(image, crop: crop)
+            await self?.showHistogram(counted, request: request)
         }
     }
-    private func showHistogram(_ counted: Histogram, sample: ToneSample?, request: Int) {
+    private func showHistogram(_ counted: Histogram, request: Int) {
         guard request == histogramRequest else { return }
         if counted != histogram { histogram = counted }
-        if sample != toneSample {
-            toneSample = sample
-            updateZoneReadout()
-        }
-    }
-
-    /// Asks the helper for the film-and-print curve of this edit. Only the
-    /// current, settled render's answer is kept: a later edit or photograph
-    /// discards it, so the zones never describe an older state.
-    private func requestToneCurve(_ snapshot: EditState, revision: Int, generation: Int) {
-        guard let engine, !closing else { return }
-        let command: [String: JSONValue] = [
-            "command": .string("tone_curve"),
-            "film": .string(snapshot.film), "paper": .string(snapshot.paper),
-            "params": snapshot.params
-        ]
-        Task { [weak self] in
-            do {
-                let (_, result) = try await engine.request(command)
-                guard let self, !self.closing,
-                      self.revision == revision, self.sourceGeneration == generation
-                else { return }
-                self.toneCurve = ToneCurve(
-                    evMin: result["ev_min"].double, evStep: result["ev_step"].double,
-                    lstar: result["lstar"].array.map(\.double),
-                    green: result["green"].array.map(\.double)
-                )
-                self.updateZoneReadout()
-            } catch {
-                // The zones stay unavailable; the photograph is unaffected.
-            }
-        }
-    }
-
-    private func updateZoneReadout() {
-        guard let toneCurve, let toneSample else {
-            zoneReadout = nil
-            return
-        }
-        zoneReadout = ZoneReadout(curve: toneCurve, pickLStar: toneSample.lstar)
     }
 
     // MARK: The zone system
 
-    /// The region the histogram counts, or nil for the whole crop. A ⌃
-    /// selection (`picking`) also moves the tone pick to the region.
-    func setSelection(_ selection: CropSettings?, picking: Bool) {
-        guard !cropping, !holdingOriginal, original == nil else { return }
-        let changed = selection != self.selection
-        self.selection = selection
-        guard changed || picking else { return }
-        if picking, let selection { tonePick = .region(selection) }
-        updateHistogram()
-    }
-
-    /// Reads the tone under a ⌃-click. Ignored while Original shows, as the
-    /// unprocessed photograph has no print to place.
-    func pickTone(_ pick: TonePick) {
-        guard !cropping, !holdingOriginal, original == nil, image != nil else { return }
-        tonePick = pick
-        updateHistogram()
-    }
-
-    /// Moves `camera.placement_ev` so the picked tone lands on `zone`, or at
-    /// its centre, as one undoable edit.
-    func placeInZone(_ zone: Int, centre: Bool) {
-        guard canPlaceZone, let readout = zoneReadout,
-              let delta = readout.delta(zone: zone, centre: centre)
-        else { return }
-        let range = -8.0...8.0
-        let current = value("camera.placement_ev").double
-        let target = current + delta
-        let placed = Self.snap(target, to: range, step: 0.01)
-        var next = state
-        next.params["camera.placement_ev"] = .number(placed)
-        apply(next, action: "Place in Zone")
-        if target < range.lowerBound || target > range.upperBound {
-            placementNote = String(format: "That zone needs %+.2f EV of placement; Placement stops at ±8 EV.", delta)
+    /// Samples a circular area into a pin that holds its tone where it is,
+    /// and selects it. `radius` is a fraction of the photograph's shorter
+    /// side; zero is a single pixel (⌘-click).
+    func addPin(at centre: CGPoint, radius: Double) {
+        guard canPin, let image else { return }
+        let pick = TonePick.circle(centre: centre, radius: radius)
+        guard let sample = pick.sample(image) else { return }
+        let anchor = JSONValue.object([
+            "input": .number(sample.lstar),
+            "target": .number(sample.lstar),
+            "source": .object([
+                "x": .number(centre.x),
+                "y": .number(centre.y),
+                "radius": .number(radius)
+            ])
+        ])
+        var anchors = state.params["post.tone_anchors"].array
+        // One pin per zone: a second tone measured in a zone re-aims that
+        // zone's pin rather than stacking another at the same output.
+        let zone = ZoneScale.zone(forTarget: sample.lstar)
+        let occupied = anchors.indices.first {
+            ZoneScale.zone(forTarget: state.params["post.tone_anchors.\($0).target"].double) == zone
         }
+        if let occupied {
+            anchors[occupied] = anchor
+        } else {
+            anchors.append(anchor)
+        }
+        var next = state
+        next.params["post.tone_anchors"] = .array(anchors)
+        apply(next, action: occupied == nil ? "Pin Tone" : "Re-aim Tone Pin")
+        selectedPin = occupied ?? anchors.indices.last
+        selectedZone = nil
+        updateHistogram()
+    }
+
+    /// Re-measures a placed pin at a new point, keeping its radius and its
+    /// zone aim; a pin that was only holding its tone follows the new one.
+    func movePin(_ index: Int, to centre: CGPoint) {
+        guard pins.indices.contains(index), let image else { return }
+        let radius = pins[index].source?.radius ?? 0
+        guard let sample = TonePick.circle(centre: centre, radius: radius).sample(image) else { return }
+        var anchors = state.params["post.tone_anchors"].array
+        guard anchors.indices.contains(index), case .object(var anchor) = anchors[index] else { return }
+        let wasHolding = abs(pins[index].target - pins[index].input) < 0.01
+        anchor["input"] = .number(sample.lstar)
+        if wasHolding { anchor["target"] = .number(sample.lstar) }
+        anchor["source"] = .object([
+            "x": .number(centre.x), "y": .number(centre.y), "radius": .number(radius)
+        ])
+        anchors[index] = .object(anchor)
+        var next = state
+        next.params["post.tone_anchors"] = .array(anchors)
+        apply(next, action: "Move Tone Pin")
+        selectedPin = index
+    }
+
+    /// Selects a pin (nil clears it); the next band click aims it.
+    func selectPin(_ index: Int?) {
+        selectedPin = index
+        selectedZone = nil
+    }
+
+    var canRemovePin: Bool { selectedPin != nil }
+
+    /// ⌘': show or hide every pin at once. Hiding drops the selection, so no
+    /// highlight outlives the circles it belongs to.
+    func toggleTonePins() {
+        showsPins.toggle()
+        if !showsPins { selectedPin = nil }
+    }
+
+    /// Moves a pin's target to another zone's tone; a pin already there is
+    /// selected instead, because a zone holds one pin.
+    private func movePin(_ index: Int, to zone: Int) {
+        guard pins.indices.contains(index), ZoneScale.zones.indices.contains(zone) else { return }
+        let target = ZoneScale.zones[zone].target
+        if let other = pins.indices.first(where: { $0 != index && abs(pins[$0].target - target) < 0.5 }) {
+            selectedPin = other
+            selectedZone = nil
+            return
+        }
+        var anchors = state.params["post.tone_anchors"].array
+        guard anchors.indices.contains(index), case .object(var anchor) = anchors[index] else { return }
+        anchor["target"] = .number(target)
+        anchors[index] = .object(anchor)
+        var next = state
+        next.params["post.tone_anchors"] = .array(anchors)
+        apply(next, action: "Aim Tone Pin")
+        selectedZone = nil
+        selectedPin = index
+    }
+
+    /// ⌫: removes the selected pin.
+    func deleteToneSelection() {
+        removeSelectedPin()
+    }
+
+    /// Removes the selected pin — one undoable edit.
+    func removeSelectedPin() {
+        guard let index = selectedPin, pins.indices.contains(index) else { return }
+        var anchors = state.params["post.tone_anchors"].array
+        anchors.remove(at: index)
+        var next = state
+        next.params["post.tone_anchors"] = .array(anchors)
+        apply(next, action: "Remove Tone Pin")
+        selectedPin = nil
+        selectedZone = nil
+    }
+
+    /// Esc: drops the pin selection.
+    func clearToneSelection() {
+        selectedPin = nil
+        selectedZone = nil
     }
 
     /// Only mention an update once it has visibly taken a while.

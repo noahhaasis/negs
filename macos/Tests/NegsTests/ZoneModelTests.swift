@@ -88,234 +88,188 @@ import XCTest
         while !predicate(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(predicate(), "Timed out waiting for the engine")
     }
+    /// Pins the tone at `point` (a ⌘-click) and waits for the render.
+    private func pin(_ point: CGPoint = CGPoint(x: 0.5, y: 0.5), radius: Double = 0, on model: EditorModel) async throws {
+        let before = model.pins.count
+        model.addPin(at: point, radius: radius)
+        try await waitUntil { model.pins.count != before || model.pins.last?.input != nil }
+        try await waitUntil { model.previewCurrent }
+    }
 
-    private func pick(_ point: CGPoint = CGPoint(x: 0.5, y: 0.5), on model: EditorModel) async throws {
-        model.pickTone(.small(point))
-        try await waitUntil { model.zoneReadout != nil && model.toneCurve != nil }
+    /// The pins, in parameter order.
+    private func anchors(_ model: EditorModel) -> [(input: Double, target: Double)] {
+        let anchors = model.state.params["post.tone_anchors"].array
+        return anchors.indices.map { index in
+            (model.state.params["post.tone_anchors.\(index).input"].double,
+             model.state.params["post.tone_anchors.\(index).target"].double)
+        }
+    }
+
+    /// The tone under a point of the preview, as the canvas measures it.
+    private func lstar(_ model: EditorModel, at point: CGPoint = CGPoint(x: 0.5, y: 0.5)) throws -> Double {
+        try XCTUnwrap(
+            TonePick.circle(centre: point, radius: 0).sample(try XCTUnwrap(model.image))?.lstar
+        )
     }
 }
 
 extension ZoneModelTests {
-    func testPlacingLandsThePickOnTheZone() async throws {
+    /// A ⌘-click pins the tone where it is: the curve passes through it, so
+    /// the photograph doesn't change.
+    func testAPinHoldsItsTone() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
-        try await pick(on: model)
-        XCTAssertEqual(model.zoneReadout?.state, .ready)
-        model.placeInZone(5, centre: false)
-        try await waitUntil {
-            model.previewCurrent && model.toneCurve != nil
-                && (model.zoneReadout?.distances[5].map { abs($0) < 0.1 } ?? false)
-        }
-        XCTAssertEqual(model.zoneReadout!.distances[5]!, 0, accuracy: 0.1)
+        let before = try lstar(model)
+        try await pin(on: model)
+        XCTAssertEqual(model.pins.count, 1)
+        XCTAssertEqual(model.pins[0].input, before, accuracy: 0.1)
+        XCTAssertEqual(model.pins[0].target, before, accuracy: 0.1)
+        XCTAssertEqual(model.selectedPin, 0)
+        XCTAssertEqual(try lstar(model), before, accuracy: 1.0)
     }
 
-    func testPlacingWorksWithPrintCompensationOnAndOff() async throws {
+    /// Clicking a band aims the selected pin at that zone, and the tone
+    /// prints there.
+    func testAimingAPinLandsTheToneOnTheZone() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await pin(on: model)
+        let target = ZoneScale.zones[5].target
+        model.selectedZone = 5
+        XCTAssertEqual(anchors(model).last?.target, target)
+        try await waitUntil { model.previewCurrent }
+        XCTAssertEqual(try lstar(model), target, accuracy: 1.5)
+    }
+
+    /// The curve is applied to the scan after the print, so the print's own
+    /// exposure compensation can't cancel a pin.
+    func testAimingWorksWithPrintCompensationOnAndOff() async throws {
         for compensation in [true, false] {
             let model = try await makeModel(compensation: compensation)
             defer { model.shutdown() }
-            try await pick(on: model)
-            XCTAssertEqual(model.zoneReadout?.state, .ready, "compensation \(compensation)")
-            model.placeInZone(4, centre: false)
-            try await waitUntil {
-                model.previewCurrent && model.toneCurve != nil
-                    && (model.zoneReadout?.distances[4].map { abs($0) < 0.1 } ?? false)
-            }
-            XCTAssertEqual(model.zoneReadout!.distances[4]!, 0, accuracy: 0.1)
+            try await pin(on: model)
+            let target = ZoneScale.zones[4].target
+            model.selectedZone = 4
+            try await waitUntil { model.previewCurrent }
+            XCTAssertEqual(try lstar(model), target, accuracy: 1.5, "compensation \(compensation)")
         }
     }
 
-    func testPlacingWorksWithAutoExposureOn() async throws {
-        let model = try await makeModel(autoExposure: true)
+    /// Zone 0 is the black point and VIII paper white, whichever order the
+    /// pins were made in.
+    func testTheEndsAreTheBlackAndWhitePoints() async throws {
+        let model = try await makeModel()
         defer { model.shutdown() }
-        try await pick(on: model)
-        XCTAssertEqual(model.zoneReadout?.state, .ready)
-        model.placeInZone(5, centre: true)
-        try await waitUntil {
-            model.previewCurrent && model.toneCurve != nil
-                && (model.zoneReadout?.distances[5].map { $0 < -0.1 } ?? false)
-        }
-        // The centre is half a zone above the start, so the pick lands at
-        // minus half the zone's own height.
-        let distances = model.zoneReadout!.distances
-        let height = distances[6]! - distances[5]!
-        XCTAssertEqual(distances[5]!, -height / 2, accuracy: 0.15)
+        try await pin(CGPoint(x: 0.05, y: 0.5), on: model)
+        model.selectedZone = 0
+        try await waitUntil { model.previewCurrent }
+        XCTAssertLessThan(try lstar(model, at: CGPoint(x: 0.05, y: 0.5)), 1.0)
+
+        try await pin(CGPoint(x: 0.95, y: 0.5), on: model)
+        model.selectedZone = 8
+        try await waitUntil { model.previewCurrent }
+        XCTAssertGreaterThan(try lstar(model, at: CGPoint(x: 0.95, y: 0.5)), 99.0)
+        // And a later interior pin leaves both ends alone.
+        let ends = anchors(model)
+        XCTAssertEqual(ends.first { $0.target < 0.5 }?.target, 0)
+        XCTAssertEqual(ends.first { $0.target > 99.5 }?.target, 100)
     }
 
-    func testPlacementIsOneUndoStep() async throws {
+    func testAimingIsOneUndoStep() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
         let undo = UndoManager()
         model.undoManager = undo
-        try await pick(on: model)
-        model.placeInZone(5, centre: false)
-        try await waitUntil { model.previewCurrent && model.canPlaceZone && abs(model.value("camera.placement_ev").double) > 0.05 }
-        let placed = model.value("camera.placement_ev").double
-        XCTAssertEqual(undo.undoActionName, "Place in Zone")
+        try await pin(on: model)
+        let held = anchors(model)[0].target
+        model.selectedZone = 5
+        try await waitUntil { model.previewCurrent }
+        XCTAssertEqual(undo.undoActionName, "Aim Tone Pin")
         undo.undo()
-        try await waitUntil { model.previewCurrent && model.toneCurve != nil }
-        XCTAssertEqual(model.value("camera.placement_ev").double, 0, accuracy: 1e-9)
-        XCTAssertNotEqual(placed, 0)
-        // The readout describes the restored tone again.
-        try await waitUntil { (model.zoneReadout?.distances[5].map { abs($0) > 0.05 }) ?? false }
+        try await waitUntil { model.previewCurrent }
+        XCTAssertEqual(anchors(model)[0].target, held)
     }
 
-    func testZonesAreDisabledWhileRendering() async throws {
+    func testRemovingAPinIsOneUndoStep() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
-        try await pick(on: model)
-        XCTAssertTrue(model.canPlaceZone)
-        model.set("camera.exposure_compensation_ev", .number(0.3))
-        // The curve on screen describes the edit before this one.
-        XCTAssertFalse(model.canPlaceZone)
-        try await waitUntil { model.canPlaceZone }
+        let undo = UndoManager()
+        model.undoManager = undo
+        try await pin(on: model)
+        model.deleteToneSelection()
+        try await waitUntil { model.previewCurrent }
+        XCTAssertTrue(model.pins.isEmpty)
+        XCTAssertEqual(undo.undoActionName, "Remove Tone Pin")
+        undo.undo()
+        try await waitUntil { model.previewCurrent }
+        XCTAssertEqual(model.pins.count, 1)
     }
 
-    func testStaleCurveIsDiscarded() async throws {
+    /// A zone holds one pin: a second tone measured there re-aims the first.
+    func testOnePinPerZone() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
-        let middle = 49.0
-        let base = try XCTUnwrap(model.toneCurve?.ev(forLStar: middle))
+        try await pin(CGPoint(x: 0.44, y: 0.5), on: model)
+        let zone = ZoneScale.zone(forTarget: model.pins[0].target)
+        try await pin(CGPoint(x: 0.48, y: 0.5), on: model)
+        XCTAssertEqual(model.pins.count, 1, "the second tone replaced the first")
+        XCTAssertEqual(ZoneScale.zone(forTarget: model.pins[0].target), zone)
+    }
+
+    /// ⌘' hides every pin at once, and hiding drops the selection.
+    func testToggleTonePinsHidesThemAll() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await pin(CGPoint(x: 0.3, y: 0.5), on: model)
+        try await pin(CGPoint(x: 0.7, y: 0.5), on: model)
+        XCTAssertEqual(model.pins.count, 2)
+        XCTAssertEqual(model.pinMarkers.count, 2)
+        model.toggleTonePins()
+        XCTAssertFalse(model.showsPins)
+        XCTAssertTrue(model.pinMarkers.isEmpty, "all of them hide together")
+        XCTAssertEqual(model.pins.count, 2, "hiding is not deleting")
+        XCTAssertNil(model.selectedPin)
+        model.toggleTonePins()
+        XCTAssertEqual(model.pinMarkers.count, 2)
+    }
+
+    /// A pin remembers the circle it averaged, so the canvas can draw its
+    /// chip and ring.
+    func testPinsCarryTheirCircle() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await pin(CGPoint(x: 0.3, y: 0.6), radius: 0.1, on: model)
+        let source = try XCTUnwrap(model.pins[0].source)
+        XCTAssertEqual(source.centre.x, 0.3, accuracy: 0.001)
+        XCTAssertEqual(source.centre.y, 0.6, accuracy: 0.001)
+        XCTAssertEqual(source.radius, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(model.pinMarkers.first?.number, 1)
+        XCTAssertEqual(model.pinMarkers.first?.source.radius ?? 0, 0.1, accuracy: 1e-9)
+    }
+
+    /// A new photograph starts with no pins: they describe the tones of the
+    /// file they were measured on.
+    func testANewPhotographKeepsNoPins() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await pin(on: model)
         model.set("camera.placement_ev", .number(1))
-        try await waitUntil { model.previewCurrent && model.toneCurve != nil }
-        model.set("camera.placement_ev", .number(2))
-        model.set("camera.placement_ev", .number(3))
-        // Placement moves the scene up the curve, so the same output tone is
-        // reached three stops earlier.
-        try await waitUntil {
-            model.previewCurrent && model.toneCurve != nil
-                && abs((model.toneCurve?.ev(forLStar: middle) ?? .nan) - (base - 3)) < 0.3
-        }
-        XCTAssertEqual(model.toneCurve!.ev(forLStar: middle)!, base - 3, accuracy: 0.3)
+        model.open(other)
+        try await waitUntil { model.previewCurrent }
+        XCTAssertTrue(model.pins.isEmpty)
+        XCTAssertEqual(model.value("camera.placement_ev").double, 0)
+        XCTAssertNil(model.selectedPin)
     }
 
-    func testNegativeScanIsUnavailable() async throws {
-        let model = try await makeModel(scanFilm: true)
-        defer { model.shutdown() }
-        model.pickTone(.small(CGPoint(x: 0.5, y: 0.5)))
-        try await waitUntil { model.zoneReadout != nil }
-        XCTAssertEqual(model.zoneReadout?.state, .unavailable)
-        XCTAssertFalse(model.canPlaceZone)
+    /// A saved session keeps its pins: an empty default array takes the saved
+    /// entries, so `post.tone_anchors` comes back whole.
+    func testSavedPinsSurviveRestoration() {
+        let pin = JSONValue.object([
+            "input": .number(49.2), "target": .number(36.35),
+            "source": .object(["x": .number(0.4), "y": .number(0.5), "radius": .number(0.02)])
+        ])
+        let defaults = JSONValue.object(["post": .object(["tone_anchors": .array([])])])
+        let saved = JSONValue.object(["post": .object(["tone_anchors": .array([pin])])])
+        XCTAssertEqual(defaults.restoring(saved), saved)
     }
 }
-
-
-extension ZoneModelTests {
-    func testNoPickFromOriginal() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        try await pick(on: model)
-        let picked = model.tonePick
-        model.holdOriginal(true)
-        try await waitUntil { model.original != nil }
-        model.pickTone(.large(CGPoint(x: 0.9, y: 0.1)))
-        XCTAssertEqual(model.tonePick, picked, "the unprocessed photograph has no print to place")
-        model.holdOriginal(false)
-    }
-
-    func testNewPhotographClearsThePick() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        try await pick(on: model)
-        model.setSelection(CropSettings(rect: CGRect(x: 0.2, y: 0.2, width: 0.4, height: 0.4)), picking: true)
-        model.open(other)
-        XCTAssertNil(model.tonePick)
-        XCTAssertNil(model.toneSample)
-        XCTAssertNil(model.zoneReadout)
-        XCTAssertNil(model.selection)
-    }
-
-    func testEditsKeepThePick() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        let point = CGPoint(x: 0.4, y: 0.6)
-        try await pick(point, on: model)
-        XCTAssertEqual(model.tonePick, .small(point))
-        model.set("camera.exposure_compensation_ev", .number(0.2))
-        try await waitUntil { model.previewCurrent && model.zoneReadout != nil }
-        XCTAssertEqual(model.tonePick, .small(point))
-        XCTAssertNotNil(model.toneSample)
-    }
-
-    func testPlacementClampsAtTheSliderRange() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        model.set("camera.placement_ev", .number(7.9))
-        try await waitUntil { model.previewCurrent && model.toneCurve != nil }
-        // A dark tone, so it is still mid-print with the placement pushed up.
-        try await pick(CGPoint(x: 0.03, y: 0.5), on: model)
-        XCTAssertEqual(model.zoneReadout?.state, .ready)
-        model.placeInZone(7, centre: false)
-        try await waitUntil { model.previewCurrent && model.value("camera.placement_ev").double == 8 }
-        XCTAssertEqual(model.value("camera.placement_ev").double, 8, accuracy: 1e-9)
-        XCTAssertTrue(model.status.contains("±8"), model.status)
-    }
-
-    func testSelectionLimitsTheHistogram() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        try await waitUntil { model.histogram != nil }
-        let whole = try XCTUnwrap(model.histogram).red.lastIndex { $0 > 0 }!
-        XCTAssertGreaterThan(whole, 200, "the ramp reaches paper white")
-        model.setSelection(CropSettings(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1)), picking: false)
-        // The left half of the ramp is all darker than the right half.
-        try await waitUntil { (model.histogram?.red.lastIndex { $0 > 0 } ?? whole) < whole - 20 }
-        // And no selection counts the whole crop again.
-        model.setSelection(nil, picking: false)
-        try await waitUntil { (model.histogram?.red.lastIndex { $0 > 0 } ?? 0) >= whole - 1 }
-    }
-
-    func testSelectionSurvivesAnEdit() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        let region = CropSettings(rect: CGRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5))
-        model.setSelection(region, picking: false)
-        model.set("camera.exposure_compensation_ev", .number(0.2))
-        try await waitUntil { model.previewCurrent && model.histogram != nil }
-        XCTAssertEqual(model.selection, region)
-    }
-
-    func testNewPhotographOrCropClearsTheSelection() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        let region = CropSettings(rect: CGRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5))
-        model.setSelection(region, picking: false)
-        XCTAssertEqual(model.selection, region)
-        model.beginCrop()
-        model.cropSession?.rect = CGRect(x: 0.2, y: 0.2, width: 0.6, height: 0.6)
-        model.endCrop(apply: true)
-        XCTAssertNil(model.selection)
-        model.setSelection(region, picking: false)
-        model.open(other)
-        XCTAssertNil(model.selection)
-    }
-
-    func testPlainSelectionLeavesThePickAlone() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        let point = CGPoint(x: 0.5, y: 0.5)
-        try await pick(point, on: model)
-        model.setSelection(CropSettings(rect: CGRect(x: 0.2, y: 0.2, width: 0.3, height: 0.3)), picking: false)
-        XCTAssertEqual(model.tonePick, .small(point), "the gold numbers keep describing the last ⌃ pick")
-    }
-
-    func testControlSelectionMovesThePick() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        let region = CropSettings(rect: CGRect(x: 0.2, y: 0.2, width: 0.3, height: 0.3))
-        model.setSelection(region, picking: true)
-        XCTAssertEqual(model.tonePick, .region(region))
-        try await waitUntil { model.toneSample != nil }
-        XCTAssertNotNil(model.toneSample)
-    }
-
-    func testNoSelectionFromOriginal() async throws {
-        let model = try await makeModel()
-        defer { model.shutdown() }
-        model.holdOriginal(true)
-        try await waitUntil { model.original != nil }
-        model.setSelection(CropSettings(rect: CGRect(x: 0, y: 0, width: 0.5, height: 1)), picking: true)
-        XCTAssertNil(model.selection)
-        model.holdOriginal(false)
-    }
-}
-

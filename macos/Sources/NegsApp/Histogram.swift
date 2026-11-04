@@ -3,139 +3,26 @@ import Foundation
 import IOSurface
 import SwiftUI
 
-/// How a proxy's bytes become the output space's code values: the matrix
-/// from the proxy's linear RGB to the output space's linear RGB, and a
-/// 1024-entry table on √linear giving the output-encoded value.
+/// The developed photograph as a tone histogram: 256 bins across CIE L\*
+/// 0…100 for red, green, blue and the photograph's lightness.
 ///
-/// The helper sends both with every render; `.identity` describes an sRGB
-/// proxy whose output is sRGB, as in tests and before a first render.
-struct OutputMapping: Equatable, Sendable {
-    /// One row per output channel.
-    private let matrix: [SIMD3<Float>]
-    /// `encode[i]` is the output-encoded value for `linear = (i / 1023)^2`.
-    private let encode: [Float]
-    /// The proxy is already the output: the bytes are the codes.
-    private let isIdentity: Bool
-
-    static let identity = OutputMapping(
-        matrix: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)],
-        encode: OutputMapping.srgbTable,
-        isIdentity: true
-    )
-
-    init?(matrix: JSONValue, encode: JSONValue) {
-        let rows = matrix.array
-        let table = encode.array.map(\.double)
-        guard rows.count == 3, rows.allSatisfy({ $0.array.count == 3 }),
-              table.count > 1, table.allSatisfy(\.isFinite)
-        else { return nil }
-        let rows3 = rows.map {
-            SIMD3(Float($0.array[0].double), Float($0.array[1].double), Float($0.array[2].double))
-        }
-        guard rows3.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }) else { return nil }
-        self.init(
-            matrix: rows3, encode: table.map(Float.init),
-            isIdentity: Self.isIdentity(rows3, table)
-        )
-    }
-
-    private init(matrix: [SIMD3<Float>], encode: [Float], isIdentity: Bool) {
-        self.matrix = matrix
-        self.encode = encode
-        self.isIdentity = isIdentity
-    }
-
-    /// The output-encoded code values (0…1) of one proxy pixel's linear RGB.
-    /// With an identity mapping the proxy's own transfer is exact; otherwise
-    /// the table's square-root spacing puts its resolution near black.
-    /// Colours a wide proxy clipped stay clipped.
-    func encoded(linear: SIMD3<Float>) -> SIMD3<Float> {
-        if isIdentity {
-            return SIMD3(
-                Self.srgbEncode(linear.x), Self.srgbEncode(linear.y), Self.srgbEncode(linear.z)
-            )
-        }
-        var out = SIMD3<Float>(0, 0, 0)
-        for channel in 0..<3 {
-            let row = matrix[channel]
-            let value = row.x * linear.x + row.y * linear.y + row.z * linear.z
-            out[channel] = Self.lookup(encode, sqrt(max(value, 0)))
-        }
-        return out
-    }
-
-    private static func lookup(_ table: [Float], _ x: Float) -> Float {
-        let t = min(max(x, 0), 1) * Float(table.count - 1)
-        let index = min(Int(t), table.count - 2)
-        let fraction = t - Float(index)
-        return table[index] + (table[index + 1] - table[index]) * fraction
-    }
-
-    private static func isIdentity(_ matrix: [SIMD3<Float>], _ table: [Double]) -> Bool {
-        guard matrix == [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)],
-              table.count == 1024
-        else { return false }
-        return table.indices.allSatisfy { index in
-            let linear = pow(Double(index) / 1023, 2)
-            return abs(table[index] - srgbEncode(linear)) < 1e-5
-        }
-    }
-
-    /// The sRGB transfer function, the proxy's own encoding.
-    static func srgbEncode(_ x: Double) -> Double {
-        x <= 0.003_130_8 ? 12.92 * x : 1.055 * pow(x, 1 / 2.4) - 0.055
-    }
-    static func srgbEncode(_ x: Float) -> Float {
-        x <= 0.003_130_8 ? 12.92 * x : 1.055 * pow(x, 1 / 2.4) - 0.055
-    }
-    static func srgbDecode(_ v: Float) -> Float {
-        v <= 0.040_45 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
-    }
-
-    private static let srgbTable: [Float] = (0..<1024).map { index in
-        Float(srgbEncode(pow(Double(index) / 1023, 2)))
-    }
-}
-
-/// Which channels the histogram draws: the output space's red, green and
-/// blue, and CIE Lab lightness. All on until the user hides one.
-struct HistogramChannels: OptionSet, Sendable {
-    let rawValue: Int
-
-    static let red = HistogramChannels(rawValue: 1 << 0)
-    static let green = HistogramChannels(rawValue: 1 << 1)
-    static let blue = HistogramChannels(rawValue: 1 << 2)
-    static let lightness = HistogramChannels(rawValue: 1 << 3)
-    static let all: HistogramChannels = [.red, .green, .blue, .lightness]
-
-    var redOn: Bool { contains(.red) }
-    var greenOn: Bool { contains(.green) }
-    var blueOn: Bool { contains(.blue) }
-    var lightnessOn: Bool { contains(.lightness) }
-}
-
-/// The developed photograph's tones: 256 bins per channel of the cropped
-/// photograph, and 256 bins of CIE Lab lightness. The border is drawn on the
-/// canvas, never in the preview, so it never counts.
+/// Every bin is an L\* bin, so the bars line up with the zone bands: bin `i`
+/// sits at L\* `i / 255 × 100`. The channels are their own values read as
+/// tones — a saturated red's red channel is bright, its blue channel dark —
+/// and the lightness is the pixel's luminance, which is what the zones mean.
 struct Histogram: Equatable, Sendable {
     var red = [UInt32](repeating: 0, count: 256)
     var green = [UInt32](repeating: 0, count: 256)
     var blue = [UInt32](repeating: 0, count: 256)
-    /// L\* × 2.55, so the lightness shares the graph's 0…255 axis.
+    /// The pixel's CIE L\*: CIE Lab lightness of its luminance.
     var lightness = [UInt32](repeating: 0, count: 256)
 
     /// Counts the crop of a BGRA preview. A large crop is sampled on an even
     /// grid of at most `maxSamples` pixels, which keeps the shape and takes a
     /// few milliseconds at any preview size.
-    ///
-    /// R, G and B are code values of `output`'s space: an sRGB proxy is read
-    /// directly, and a wide one maps back through the render's matrix. L\* is
-    /// CIE Lab lightness of the proxy's own luminance, so it is the tone of
-    /// the photograph rather than of one output space.
     static func of(
         _ surface: IOSurface,
         crop: CropSettings,
-        output: OutputMapping = .identity,
         maxSamples: Int = 1 << 20
     ) -> Histogram {
         var histogram = Histogram()
@@ -143,9 +30,9 @@ struct Histogram: Equatable, Sendable {
         let area = crop.pixels(in: size)
         guard area.width >= 1, area.height >= 1 else { return histogram }
         let stride = max(1, Int((area.width * area.height / Double(maxSamples)).squareRoot().rounded(.up)))
-        let space = EditorModel.displaySpace(of: surface)
-        let weights = luminanceWeights(space)
-        let maps = space != "sRGB"
+        // The proxy carries the sRGB curve in either display space, so one
+        // code → L\* table serves the channels.
+        let weights = luminanceWeights(EditorModel.displaySpace(of: surface))
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
         let base = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
@@ -154,25 +41,23 @@ struct Histogram: Equatable, Sendable {
         // to the photograph, as `CropGeometry.turn(_:by: -angle, about:)`.
         let (sin, cos) = (Foundation.sin(-crop.angle * .pi / 180), Foundation.cos(-crop.angle * .pi / 180))
         let (cx, cy) = (size.width / 2, size.height / 2)
+        let codeBins = Histogram.codeBins
         histogram.red.withUnsafeMutableBufferPointer { red in
             histogram.green.withUnsafeMutableBufferPointer { green in
                 histogram.blue.withUnsafeMutableBufferPointer { blue in
                     histogram.lightness.withUnsafeMutableBufferPointer { lightness in
                         func count(_ x: Int, _ y: Int) {
                             let pixel = base + y * rowBytes + x * 4
+                            red[Int(codeBins[Int(pixel[2])])] += 1
+                            green[Int(codeBins[Int(pixel[1])])] += 1
+                            blue[Int(codeBins[Int(pixel[0])])] += 1
                             let linear = SIMD3(
-                                OutputMapping.srgbDecode(Float(pixel[2]) / 255),
-                                OutputMapping.srgbDecode(Float(pixel[1]) / 255),
-                                OutputMapping.srgbDecode(Float(pixel[0]) / 255)
+                                Histogram.codeLinear[Int(pixel[2])],
+                                Histogram.codeLinear[Int(pixel[1])],
+                                Histogram.codeLinear[Int(pixel[0])]
                             )
-                            let codes = maps
-                                ? output.encoded(linear: linear) * 255
-                                : SIMD3(Float(pixel[2]), Float(pixel[1]), Float(pixel[0]))
-                            red[Int(codes.x.rounded())] += 1
-                            green[Int(codes.y.rounded())] += 1
-                            blue[Int(codes.z.rounded())] += 1
-                            let y = weights.x * linear.x + weights.y * linear.y + weights.z * linear.z
-                            lightness[Int(min(max(y.lstar * 2.55, 0), 255))] += 1
+                            let luminance = weights.x * linear.x + weights.y * linear.y + weights.z * linear.z
+                            lightness[Int(Histogram.bin(forLuminance: luminance))] += 1
                         }
                         for row in Swift.stride(from: 0, to: Int(area.height), by: stride) {
                             for column in Swift.stride(from: 0, to: Int(area.width), by: stride) {
@@ -188,12 +73,28 @@ struct Histogram: Equatable, Sendable {
         return histogram
     }
 
-    /// The tallest bin, leaving out the clipped ends so they don't flatten
-    /// the rest; their spikes run off the top instead. Lightness never sets
-    /// the scale.
+    /// The tallest bar, leaving out the clipped ends so their spikes don't
+    /// flatten the rest. Lightness never sets the scale.
     var peak: UInt32 {
         let inner = [red, green, blue].map { $0[5...250].max() ?? 0 }.max() ?? 0
         return inner > 0 ? inner : [red, green, blue].map { $0.max() ?? 0 }.max() ?? 0
+    }
+
+    /// Each code's linear value, so a count doesn't call `pow` per pixel.
+    private static let codeLinear: [Float] = (0...255).map { srgbDecode(Float($0) / 255) }
+
+    /// Every L\* code's bin, for a channel value read as a tone.
+    private static let codeBins: [UInt8] = codeLinear.map(lstarBin)
+
+    /// Bins for a linear luminance, at 2048 √Y steps so the shadows get the
+    /// resolution the eye does.
+    private static let luminanceBins: [UInt8] = (0..<2048).map { index in
+        let y = Float(index) / 2047
+        return lstarBin(y * y)
+    }
+
+    private static func bin(forLuminance y: Float) -> UInt8 {
+        luminanceBins[Int(min(max(y, 0).squareRoot() * 2047, 2047))]
     }
 }
 
@@ -204,318 +105,107 @@ private func luminanceWeights(_ displaySpace: String) -> SIMD3<Float> {
         : SIMD3(0.2126, 0.7152, 0.0722)
 }
 
-private extension Float {
-    /// CIE Lab lightness of a linear Y, on the 216/24389 breakpoint.
-    var lstar: Float { Float(lstarValue(Double(self))) }
+/// The sRGB transfer function, the proxy's encoding in either space.
+private func srgbDecode(_ v: Float) -> Float {
+    v <= 0.040_45 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
 }
 
-private func lstarValue(_ y: Double) -> Double {
-    y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
+/// CIE Lab lightness 0…100 of a linear luminance.
+private func lstar(_ y: Float) -> Double {
+    let y = Double(max(y, 0))
+    return y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
+}
+
+/// The same lightness, binned into 0…255.
+private func lstarBin(_ y: Float) -> UInt8 {
+    UInt8(min(max(lstar(y) / 100, 0), 1) * 255)
 }
 
 
-/// A control-click on the canvas: a 3×3 or 7×7 sample about a point (unit
-/// coordinates of the uncropped photograph, top left), or the whole dragged
-/// region (as the histogram's crop).
+/// A tone sample: a circle on the photograph, in fractions of its width and
+/// height, with the radius in fractions of the shorter side. A ⌘-click is a
+/// circle of no radius (one pixel); a ⌘-drag grows one from the cursor.
 enum TonePick: Equatable, Sendable {
-    case small(CGPoint)
-    case large(CGPoint)
-    case region(CropSettings)
+    case circle(centre: CGPoint, radius: Double)
 
-    /// The average of the picked pixels, in output-space code values and CIE
-    /// L\*. Nil when no pixel of the photograph falls inside the pick.
-    func sample(_ surface: IOSurface, output: OutputMapping, maxSamples: Int = 1 << 16) -> ToneSample? {
+    /// The average L\* of the pixels inside, or nil when none of the
+    /// photograph falls inside the circle.
+    func sample(_ surface: IOSurface, maxSamples: Int = 1 << 16) -> ToneSample? {
         let size = CGSize(width: surface.width, height: surface.height)
-        guard size.width >= 1, size.height >= 1 else { return nil }
-        let pixels: [(x: Int, y: Int)]
-        switch self {
-        case .small(let point):
-            pixels = Self.window(around: point, radius: 1, size: size)
-        case .large(let point):
-            pixels = Self.window(around: point, radius: 3, size: size)
-        case .region(let crop):
-            pixels = Self.region(crop, size: size, maxSamples: maxSamples)
+        guard size.width >= 1, size.height >= 1, case .circle(let centre, let radius) = self else { return nil }
+        let shorter = min(size.width, size.height)
+        let radiusPixels = CGFloat(radius) * shorter
+        // A ⌘-click is one pixel: a circle of no radius still covers the
+        // pixel under the pointer.
+        let reach = max(radiusPixels, 0.5)
+        let area = CGRect(
+            x: centre.x * size.width - reach, y: centre.y * size.height - reach,
+            width: reach * 2, height: reach * 2
+        ).intersection(CGRect(origin: .zero, size: size))
+        let stride = max(1, Int((area.width * area.height / Double(maxSamples)).squareRoot().rounded(.up)))
+        let (cx, cy) = (centre.x * size.width, centre.y * size.height)
+        var pixels: [(x: Int, y: Int)] = []
+        for row in Swift.stride(from: 0, to: Int(area.height), by: stride) {
+            for column in Swift.stride(from: 0, to: Int(area.width), by: stride) {
+                let x = Int(area.minX) + column, y = Int(area.minY) + row
+                guard x < surface.width, y < surface.height else { continue }
+                let dx = Double(x) + 0.5 - cx, dy = Double(y) + 0.5 - cy
+                if radiusPixels > 0 && dx * dx + dy * dy > Double(radiusPixels * radiusPixels) { continue }
+                pixels.append((x, y))
+            }
         }
         guard !pixels.isEmpty else { return nil }
-        let space = EditorModel.displaySpace(of: surface)
-        let weights = luminanceWeights(space)
-        let maps = space != "sRGB"
+        let weights = luminanceWeights(EditorModel.displaySpace(of: surface))
         surface.lock(options: .readOnly, seed: nil)
         defer { surface.unlock(options: .readOnly, seed: nil) }
         let base = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
-        var codes = SIMD3<Double>(0, 0, 0)
         var lightness = 0.0
         for (x, y) in pixels {
             let pixel = base + y * surface.bytesPerRow + x * 4
             let linear = SIMD3(
-                OutputMapping.srgbDecode(Float(pixel[2]) / 255),
-                OutputMapping.srgbDecode(Float(pixel[1]) / 255),
-                OutputMapping.srgbDecode(Float(pixel[0]) / 255)
+                srgbDecode(Float(pixel[2]) / 255),
+                srgbDecode(Float(pixel[1]) / 255),
+                srgbDecode(Float(pixel[0]) / 255)
             )
-            let outputCodes = maps
-                ? output.encoded(linear: linear) * 255
-                : SIMD3(Float(pixel[2]), Float(pixel[1]), Float(pixel[0]))
-            codes += SIMD3(Double(outputCodes.x), Double(outputCodes.y), Double(outputCodes.z))
             let y = weights.x * linear.x + weights.y * linear.y + weights.z * linear.z
-            lightness += lstarValue(Double(y))
+            lightness += lstar(y)
         }
-        let count = Double(pixels.count)
-        return ToneSample(
-            red: codes.x / count, green: codes.y / count, blue: codes.z / count,
-            lstar: lightness / count
-        )
-    }
-
-    /// The in-image pixels of a square window about `point`.
-    private static func window(around point: CGPoint, radius: Int, size: CGSize) -> [(x: Int, y: Int)] {
-        let (width, height) = (Int(size.width), Int(size.height))
-        let (cx, cy) = (Int((point.x * size.width).rounded(.down)), Int((point.y * size.height).rounded(.down)))
-        guard (0..<width).contains(cx), (0..<height).contains(cy) else { return [] }
-        var pixels: [(Int, Int)] = []
-        for y in (cy - radius)...(cy + radius) where (0..<height).contains(y) {
-            for x in (cx - radius)...(cx + radius) where (0..<width).contains(x) {
-                pixels.append((x, y))
-            }
-        }
-        return pixels
-    }
-
-    /// The pixels a region covers, sampled evenly like the histogram's count
-    /// so a full frame stays cheap. The region is in the turned frame, as
-    /// `CropSettings` and the histogram read it.
-    private static func region(_ crop: CropSettings, size: CGSize, maxSamples: Int) -> [(x: Int, y: Int)] {
-        let area = crop.pixels(in: size)
-        guard area.width >= 1, area.height >= 1 else { return [] }
-        let stride = max(1, Int((area.width * area.height / Double(maxSamples)).squareRoot().rounded(.up)))
-        let (sin, cos) = (Foundation.sin(-crop.angle * .pi / 180), Foundation.cos(-crop.angle * .pi / 180))
-        let (cx, cy) = (size.width / 2, size.height / 2)
-        let (width, height) = (Int(size.width), Int(size.height))
-        var pixels: [(Int, Int)] = []
-        for row in Swift.stride(from: 0, to: Int(area.height), by: stride) {
-            for column in Swift.stride(from: 0, to: Int(area.width), by: stride) {
-                let (dx, dy) = (area.minX + CGFloat(column) + 0.5 - cx, area.minY + CGFloat(row) + 0.5 - cy)
-                let (x, y) = (Int((cx + dx * cos - dy * sin).rounded(.down)), Int((cy + dx * sin + dy * cos).rounded(.down)))
-                if x >= 0, x < width, y >= 0, y < height { pixels.append((x, y)) }
-            }
-        }
-        return pixels
+        return ToneSample(lstar: lightness / Double(pixels.count))
     }
 }
 
-/// A picked tone: output-space code values 0–255, and CIE L\* 0–100.
+/// A reference's tone: CIE L\* 0…100.
 struct ToneSample: Equatable, Sendable {
-    var red: Double
-    var green: Double
-    var blue: Double
     var lstar: Double
 }
 
+/// A pinned tone: a measured L\* held where it is, or aimed at a zone, and
+/// the circle on the photograph it averaged.
+struct TonePin: Equatable, Sendable {
+    var input: Double
+    var target: Double
+    var zone: Int
+    /// 1-based, for the numbered circle on the photograph.
+    var number: Int
+    /// Where the tone was measured; nil when the app recorded no position.
+    var source: PinSource?
+}
 
+/// The circle a pin averaged, in fractions of the photograph.
+struct PinSource: Equatable, Sendable {
+    var centre: CGPoint
+    /// As a fraction of the shorter side.
+    var radius: Double
+}
 
-
-/// The tones of the developed photograph, under the scales that read them:
-/// zone bands, an L\* stripe, the R/G/B fills and L\* curve, and the EV scale.
-/// The graph itself takes no clicks; only the channel tick marks do.
-struct HistogramView: View {
-    let histogram: Histogram?
-    var curve: ToneCurve? = nil
-    var sample: ToneSample? = nil
-    var channels: HistogramChannels = .all
-    var onToggleChannel: ((HistogramChannels) -> Void)? = nil
-
-    var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 1) {
-                lStripeValues(width: geometry.size.width)
-                lStripe
-                chart
-                channelTicks
-                evScale
-            }
-        }
-        .padding(.horizontal, 3)
-        .accessibilityElement()
-        .accessibilityLabel("Histogram")
-        .accessibilityValue(accessibilityValue)
-    }
-
-    private var accessibilityValue: String {
-        guard histogram != nil else { return "No developed photograph" }
-        var parts = ["Tones of the developed photograph", "Zone bands"]
-        if channels.lightnessOn { parts.append("lightness curve") }
-        if sample != nil { parts.append("with a picked tone and its picker lines") }
-        return parts.joined(separator: ", ")
-    }
-
-    /// The channel fills drawn, in stacking order.
-    static func drawnChannels(_ channels: HistogramChannels) -> [HistogramChannels] {
-        [.red, .green, .blue].filter { channels.contains($0) }
-    }
-
-    /// The picker lines drawn: each channel's at the picked code, and the
-    /// grey lightness line.
-    static func drawnPickers(_ channels: HistogramChannels) -> [HistogramChannels] {
-        [.red, .green, .blue, .lightness].filter { channels.contains($0) }
-    }
-
-    // MARK: The L* stripe
-
-    private func lStripeValues(width: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(ZoneGeometry.lStripe(width: width), id: \.value) { step in
-                Text("\(step.value)")
-                    .font(.system(size: 7))
-                    .foregroundStyle(.secondary)
-                    .position(x: min(max(step.x, 6), max(width - 6, 6)), y: 4)
-            }
-        }
-        .frame(height: 9)
-    }
-
-    /// Alternating steps of 10 L\*, the scale the bands and curve use.
-    private var lStripe: some View {
-        Canvas { context, size in
-            for step in 0..<10 {
-                let x0 = ZoneGeometry.x(lstar: Double(step * 10), width: size.width)
-                let x1 = ZoneGeometry.x(lstar: Double((step + 1) * 10), width: size.width)
-                let shade = step % 2 == 0 ? 0.68 : 0.42
-                context.fill(
-                    Path(CGRect(x: x0, y: 0, width: max(x1 - x0, 0.5), height: size.height)),
-                    with: .color(Color(white: shade))
-                )
-            }
-        }
-        .frame(height: 5)
-    }
-
-    // MARK: The graph
-
-    private var chart: some View {
-        Canvas { context, size in
-            drawBands(context, size)
-            guard let histogram, histogram.peak > 0 else { return }
-            let peak = Double(histogram.peak)
-            // Back to front: the L* curve, the channel fills, the pickers.
-            if channels.lightnessOn {
-                var path = Path()
-                for (index, count) in histogram.lightness.enumerated() {
-                    let x = size.width * CGFloat(index) / 255
-                    let y = size.height * (1 - min(Double(count) / peak, 1))
-                    if index == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
-                }
-                context.stroke(path, with: .color(Color(white: 0.78)), lineWidth: 1)
-            }
-            var additive = context
-            additive.blendMode = .plusLighter
-            let fills: [(HistogramChannels, [UInt32], Color)] = [
-                (.red, histogram.red, Color(red: 1, green: 0.2, blue: 0.2)),
-                (.green, histogram.green, Color(red: 0.2, green: 1, blue: 0.2)),
-                (.blue, histogram.blue, Color(red: 0.25, green: 0.35, blue: 1))
-            ]
-            for (flag, bins, color) in fills where Self.drawnChannels(channels).contains(flag) {
-                var path = Path()
-                path.move(to: CGPoint(x: 0, y: size.height))
-                for (index, count) in bins.enumerated() {
-                    let x = size.width * CGFloat(index) / CGFloat(bins.count - 1)
-                    path.addLine(to: CGPoint(x: x, y: size.height * (1 - min(Double(count) / peak, 1))))
-                }
-                path.addLine(to: CGPoint(x: size.width, y: size.height))
-                path.closeSubpath()
-                additive.fill(path, with: .color(color.opacity(0.75)))
-            }
-            if let sample {
-                // One thin line per channel, at the picked tone's code.
-                let lines: [(HistogramChannels, Double, Color)] = [
-                    (.red, sample.red, Color(red: 1, green: 0.3, blue: 0.3)),
-                    (.green, sample.green, Color(red: 0.3, green: 1, blue: 0.3)),
-                    (.blue, sample.blue, Color(red: 0.4, green: 0.5, blue: 1)),
-                    (.lightness, sample.lstar * 2.55, Color(white: 0.8))
-                ]
-                for (flag, code, color) in lines where Self.drawnPickers(channels).contains(flag) {
-                    let x = size.width * CGFloat(min(max(code, 0), 255)) / 255
-                    var path = Path()
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
-                    context.stroke(path, with: .color(color.opacity(0.85)), lineWidth: flag == .lightness ? 1 : 0.75)
-                }
-            }
-        }
-        .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 4))
-        .frame(maxHeight: .infinity)
-    }
-
-    /// The zone bands and their Roman numerals, behind the tones. Zone V is
-    /// larger: it is the meter's mid-grey.
-    private func drawBands(_ context: GraphicsContext, _ size: CGSize) {
-        for zone in 0..<ZoneLadder.names.count {
-            let x0 = ZoneGeometry.x(lstar: ZoneLadder.lstar[zone], width: size.width)
-            let x1 = ZoneGeometry.x(lstar: ZoneLadder.lstar[zone + 1], width: size.width)
-            let lit = ZoneGeometry.bandLit(zone)
-            context.fill(
-                Path(CGRect(x: x0, y: 0, width: max(x1 - x0, 0), height: size.height)),
-                with: .color(lit ? Color.white.opacity(0.075) : Color.black.opacity(0.18))
-            )
-            let numeral = Text(ZoneLadder.names[zone])
-                .font(.system(size: zone == 5 ? 10 : 7, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(lit ? 0.55 : 0.32))
-            context.draw(
-                numeral,
-                at: CGPoint(x: (x0 + x1) / 2, y: zone == 5 ? size.height / 2 : 8),
-                anchor: .center
-            )
-        }
-    }
-
-    // MARK: The ticks below the graph
-
-    /// R, G, B and L\* tick marks: each toggles its channel.
-    private var channelTicks: some View {
-        HStack(spacing: 0) {
-            tick("R", flag: .red, color: Color(red: 1, green: 0.35, blue: 0.35), label: "Red channel")
-            tick("G", flag: .green, color: Color(red: 0.35, green: 1, blue: 0.35), label: "Green channel")
-            tick("B", flag: .blue, color: Color(red: 0.45, green: 0.55, blue: 1), label: "Blue channel")
-            tick("L*", flag: .lightness, color: Color(white: 0.72), label: "Lightness channel")
-        }
-        .frame(height: 12)
-    }
-
-    private func tick(_ title: String, flag: HistogramChannels, color: Color, label: String) -> some View {
-        let on = channels.contains(flag)
-        return Button {
-            onToggleChannel?(flag)
-        } label: {
-            VStack(spacing: 0) {
-                Rectangle().fill(on ? color : Color.secondary.opacity(0.35)).frame(width: 1, height: 3)
-                Text(title)
-                    .font(.system(size: 7, weight: .medium))
-                    .foregroundStyle(Color.secondary.opacity(on ? 1 : 0.5))
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.plain)
-        .help("Show or hide the \(label.lowercased())")
-        .accessibilityLabel(label)
-        .accessibilityValue(on ? "On" : "Off")
-    }
-
-    /// The scene's stops, at 1/3-EV steps, placed by the measured curve's
-    /// green channel: long at whole stops, taller and thicker at 12.5 %.
-    private var evScale: some View {
-        Canvas { context, size in
-            for tick in ZoneGeometry.evTicks(curve: curve, width: size.width) {
-                let height: CGFloat = tick.midtone ? 11 : tick.long ? 7 : 4
-                var path = Path()
-                path.move(to: CGPoint(x: tick.x, y: 0))
-                path.addLine(to: CGPoint(x: tick.x, y: height))
-                context.stroke(
-                    path,
-                    with: .color(Color(white: tick.long || tick.midtone ? 0.75 : 0.5)),
-                    lineWidth: tick.midtone ? 2 : 1
-                )
-            }
-        }
-        .frame(height: 12)
-        .accessibilityHidden(true)
-    }
+/// A pin the canvas outlines.
+struct TonePinMarker: Equatable, Sendable {
+    let index: Int
+    /// The number in the circle.
+    let number: Int
+    /// The measured L\*, which colours the circle.
+    let lstar: Double
+    let source: PinSource
+    let selected: Bool
 }
 

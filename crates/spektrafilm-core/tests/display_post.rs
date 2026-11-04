@@ -36,7 +36,7 @@ fn image() -> ImageBuf {
 }
 
 fn post(brightness: f32, contrast: f32, whites: f32, blacks: f32, saturation: f32) -> PostParams {
-    PostParams { brightness, contrast, whites, blacks, saturation }
+    PostParams { brightness, contrast, whites, blacks, saturation, tone_anchors: Vec::new() }
 }
 
 #[test]
@@ -58,12 +58,12 @@ fn display_post_matches_the_cpu() {
         post(100.0, 100.0, 100.0, 0.0, 60.0),
     ];
     for encoded in [true, false] {
-        for case in cases {
+        for case in &cases {
             let mut params = RuntimeParams::default();
             params.camera.auto_exposure = false;
             params.film_render.grain.active = false;
             params.io.output_cctf_encoding = encoded;
-            params.post = case;
+            params.post = case.clone();
             let pipe = pipeline(params);
             assert!(pipe.display_on_gpu(&gpu), "{case:?}");
             let run = |output: ChainOutput| {
@@ -73,7 +73,7 @@ fn display_post_matches_the_cpu() {
             let ChainResult::Scan(scan) = run(ChainOutput::Scan) else { panic!("scan") };
             let (_, _, want) = preview::display_rgba(&scan, usize::MAX, encoded);
             let post = pipe.display_post().map(Arc::new);
-            assert_eq!(post.is_none(), case == PostParams::default());
+            assert_eq!(post.is_none(), *case == PostParams::default());
             let ChainResult::Rgba8 { rgba, .. } = run(ChainOutput::Rgba8 { encoded, post }) else { panic!("rgba8") };
             assert_eq!(rgba.len(), want.len());
             let off: Vec<_> = rgba.iter().zip(&want).map(|(a, b)| a.abs_diff(*b)).collect();

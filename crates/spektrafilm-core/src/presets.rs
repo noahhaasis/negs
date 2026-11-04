@@ -81,8 +81,9 @@ const SKIPPED: [&str; 3] = ["grain.micro_sublayers", "camera.diffusion_filter", 
 /// crop and rotation, the speed and memory settings, CAT16 and the colour
 /// management settings (Negs-only switches) and the Post tab. Every other params value comes from the preset or, where
 /// Python's GUI has no such setting, Negs's default.
-pub const KEPT: [&str; 25] = [
+pub const KEPT: [&str; 26] = [
     "camera.placement_ev",
+    "post.tone_anchors",
     "io.lens_correction",
     "io.input_interpretation",
     "io.input_color_space",

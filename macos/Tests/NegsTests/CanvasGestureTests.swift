@@ -24,39 +24,34 @@ import XCTest
     // MARK: The gesture map
 
     func testDoubleClickWinsOverEveryModifier() {
-        for modifiers: NSEvent.ModifierFlags in [[], [.shift], [.control], [.control, .option], [.command]] {
-            for inside in [true, false] {
-                XCTAssertEqual(
-                    CanvasGesture.start(clickCount: 2, modifiers: modifiers, insideSelection: inside),
-                    .zoomToggle, "\(modifiers) inside \(inside)"
-                )
-            }
+        for modifiers: NSEvent.ModifierFlags in [[], [.shift], [.control], [.command]] {
+            XCTAssertEqual(
+                CanvasGesture.start(clickCount: 2, modifiers: modifiers, pinUnderPointer: nil),
+                .zoomToggle, "\(modifiers)"
+            )
         }
     }
 
-    func testShiftPans() {
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: .shift, insideSelection: false), .pan)
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: .shift, insideSelection: true), .pan)
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: [.shift, .control], insideSelection: true), .pan)
+    func testCommandPins() {
+        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: .command, pinUnderPointer: nil), .pin)
+        // ⌘ over an existing pin still samples a new one.
+        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: .command, pinUnderPointer: 2), .pin)
     }
 
-    func testPlainDownStartsASelection() {
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: [], insideSelection: false), .select)
+    func testAPlainDragPans() {
+        for modifiers: NSEvent.ModifierFlags in [[], [.shift], [.control], [.control, .shift]] {
+            XCTAssertEqual(
+                CanvasGesture.start(clickCount: 1, modifiers: modifiers, pinUnderPointer: nil),
+                .pan, "\(modifiers)"
+            )
+        }
     }
 
-    func testPlainDownInsideTheSelectionMovesIt() {
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: [], insideSelection: true), .move)
-    }
-
-    func testControlPicksSmallAndControlOptionPicksLarge() {
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: .control, insideSelection: false), .pickSmall)
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: [.control, .option], insideSelection: false), .pickLarge)
-    }
-
-    func testCommandAloneIsAPlainSelection() {
-        // ⌘ white-balance picks are out of scope, so ⌘ alone selects.
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: .command, insideSelection: false), .select)
-        XCTAssertEqual(CanvasGesture.start(clickCount: 1, modifiers: .command, insideSelection: true), .move)
+    func testClickingAPinSelectsIt() {
+        XCTAssertEqual(
+            CanvasGesture.start(clickCount: 1, modifiers: [], pinUnderPointer: 3),
+            .selectPin(3)
+        )
     }
 
     // MARK: The coordinate map
@@ -89,85 +84,6 @@ import XCTest
 }
 
 extension CanvasGestureTests {
-    func testSelectionIsAnchoredAtMouseDownInBothDirections() throws {
-        let view = makeView()
-        let (a, b) = (CGPoint(x: 50, y: 50), CGPoint(x: 200, y: 150))
-        let forward = try XCTUnwrap(view.selection(from: a, to: b))
-        let backward = try XCTUnwrap(view.selection(from: b, to: a))
-        XCTAssertEqual(forward.rect, backward.rect)
-        XCTAssertEqual(forward.rect.minX, 0.125, accuracy: 1e-9)
-        XCTAssertEqual(forward.rect.minY, 0.5, accuracy: 1e-9)
-        XCTAssertEqual(forward.rect.width, 0.375, accuracy: 1e-9)
-        XCTAssertEqual(forward.rect.height, 1.0 / 3, accuracy: 1e-9)
-    }
-
-    func testSelectionClampsToTheCrop() throws {
-        let view = makeView()
-        let selection = try XCTUnwrap(view.selection(from: CGPoint(x: -100, y: -80), to: CGPoint(x: 500, y: 400)))
-        XCTAssertEqual(selection.rect.minX, 0, accuracy: 1e-9)
-        XCTAssertEqual(selection.rect.minY, 0, accuracy: 1e-9)
-        XCTAssertEqual(selection.rect.width, 1, accuracy: 1e-9)
-        XCTAssertEqual(selection.rect.height, 1, accuracy: 1e-9)
-    }
-
-    func testAClickWithoutADragClearsTheSelection() {
-        let view = makeView()
-        XCTAssertNil(view.selection(from: CGPoint(x: 100, y: 100), to: CGPoint(x: 100, y: 100)))
-        XCTAssertNil(view.selection(from: CGPoint(x: 100, y: 100), to: CGPoint(x: 100.2, y: 100.2)))
-    }
-
-    func testMovingKeepsTheSelectionsSize() {
-        let view = makeView()
-        let original = CropSettings(rect: CGRect(x: 0.2, y: 0.2, width: 0.3, height: 0.3))
-        let moved = view.moving(original, by: CGPoint(x: 40, y: 30))
-        XCTAssertEqual(moved.rect.width, original.rect.width, accuracy: 1e-9)
-        XCTAssertEqual(moved.rect.height, original.rect.height, accuracy: 1e-9)
-        XCTAssertEqual(moved.rect.minX, 0.3, accuracy: 1e-9)
-        // y is top-down, so moving up by 30 px of 300 takes 0.1 off it.
-        XCTAssertEqual(moved.rect.minY, 0.1, accuracy: 1e-9)
-        // The edge stops at the crop rather than leaving it.
-        let clamped = view.moving(original, by: CGPoint(x: 10_000, y: -10_000))
-        XCTAssertEqual(clamped.rect.maxX, 1, accuracy: 1e-9)
-        XCTAssertEqual(clamped.rect.maxY, 1, accuracy: 1e-9)
-        XCTAssertEqual(clamped.rect.width, original.rect.width, accuracy: 1e-9)
-    }
-}
-
-extension CanvasGestureTests {
-    func testSelectionOnARotatedPhotoCoversWhatWasDragged() throws {
-        // Four quadrants in the photograph: red, green / blue, white.
-        let image = try surface(width: 40, height: 40) { x, y in
-            if y < 20 { return x < 20 ? (255, 0, 0) : (0, 255, 0) }
-            return x < 20 ? (0, 0, 255) : (255, 255, 255)
-        }
-        // The shown top-left quarter, in the photograph's own coordinates.
-        let shown = CGRect(x: 0, y: 0, width: 0.5, height: 0.5)
-        for rotation in 0..<4 {
-            let view = makeView(rotation: rotation)
-            // y is up in the view, so the shown top-left starts at half height.
-            let display = view.bounds.size
-            let selection = try XCTUnwrap(
-                view.selection(
-                    from: CGPoint(x: 0, y: display.height / 2),
-                    to: CGPoint(x: display.width / 2, y: display.height)
-                )
-            )
-            let expected = CropSettings.unrotated(shown, rotation: rotation)
-            XCTAssertEqual(selection.rect.minX, expected.minX, accuracy: 1e-9, "rotation \(rotation)")
-            XCTAssertEqual(selection.rect.minY, expected.minY, accuracy: 1e-9, "rotation \(rotation)")
-            XCTAssertEqual(selection.rect.width, expected.width, accuracy: 1e-9, "rotation \(rotation)")
-            XCTAssertEqual(selection.rect.height, expected.height, accuracy: 1e-9, "rotation \(rotation)")
-            let sample = try XCTUnwrap(TonePick.region(selection).sample(image, output: .identity))
-            // Red, blue, white, green as the photograph turns clockwise.
-            switch rotation {
-            case 0: XCTAssertEqual(sample.red, 255, accuracy: 1)
-            case 1: XCTAssertEqual(sample.blue, 255, accuracy: 1)
-            case 2: XCTAssertEqual(sample.red, 255, accuracy: 1)
-            default: XCTAssertEqual(sample.green, 255, accuracy: 1)
-            }
-        }
-    }
-
     func testDoubleClickZoomsAboutTheClickedPoint() {
         _ = NSApplication.shared
         let scroll = ImageScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
@@ -207,5 +123,49 @@ extension CanvasGestureTests {
         }
         surface.unlock(options: [], seed: nil)
         return surface
+    }
+    /// A pin's chip sits exactly where its tone was measured.
+    func testAPinsChipSitsWhereItsToneWasMeasured() throws {
+        let view = makeView()
+        for unit in [CGPoint(x: 0.3, y: 0.3), CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0.8, y: 0.7)] {
+            view.setPins([
+                TonePinMarker(
+                    index: 0, number: 1, lstar: 50,
+                    source: PinSource(centre: unit, radius: 0.1), selected: false
+                )
+            ])
+            let expected = viewPoint(unit, in: view)
+            let actual = try XCTUnwrap(view.chipCentres.first)
+            XCTAssertEqual(actual.x, expected.x, accuracy: 0.5, "x at \(unit)")
+            XCTAssertEqual(actual.y, expected.y, accuracy: 0.5, "y at \(unit)")
+        }
+    }
+    /// The unit point reads the photograph as shown: near the top of a
+    /// top-black gradient is a dark tone, near the bottom a light one.
+    func testUnitPointIsNotMirrored() throws {
+        _ = NSApplication.shared
+        let (w, h) = (Int(size.width), Int(size.height))
+        let surface = try XCTUnwrap(IOSurface(properties: [
+            .width: w, .height: h, .bytesPerElement: 4,
+            .bytesPerRow: IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, w * 4),
+            .pixelFormat: kCVPixelFormatType_32BGRA
+        ]))
+        surface.lock(options: [], seed: nil)
+        let base = surface.baseAddress.assumingMemoryBound(to: UInt8.self)
+        for y in 0..<h {
+            let value = UInt8(y * 255 / (h - 1))
+            for x in 0..<w {
+                let p = base + y * surface.bytesPerRow + x * 4
+                p[0] = value; p[1] = value; p[2] = value; p[3] = 255
+            }
+        }
+        surface.unlock(options: [], seed: nil)
+
+        let view = PhotographView(frame: CGRect(origin: .zero, size: size))
+        view.show(surface, size: size, rotation: 0)
+        view.layout()
+        let top = try XCTUnwrap(view.unitPoint(at: viewPoint(CGPoint(x: 0.5, y: 0.1), in: view)))
+        let sample = try XCTUnwrap(TonePick.circle(centre: top, radius: 0).sample(surface))
+        XCTAssertLessThan(sample.lstar, 35, "the top of the file is dark: \(top)")
     }
 }

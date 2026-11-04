@@ -68,6 +68,9 @@ import SwiftUI
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
         view.addItem(.separator())
+        command(view, "Show Tone Pins", #selector(toggleTonePins), "'")
+        command(view, "Delete Tone Pin", #selector(deleteTonePin), "\u{8}", [])
+        view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
         command(view, "Actual Size", #selector(actualSize), "1")
         command(view, "Rotate Clockwise", #selector(rotate), "r")
@@ -120,6 +123,8 @@ import SwiftUI
     @objc private func exportPhotograph() { model.savePanel(export: true) }
     @objc private func exportLUT() { model.exportLUTPanel() }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
+    @objc private func toggleTonePins() { model.toggleTonePins() }
+    @objc private func deleteTonePin() { model.removeSelectedPin() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
     @objc private func togglePresets() { model.togglePane(.presets) }
     @objc private func newPreset() { model.newPreset() }
@@ -142,6 +147,12 @@ import SwiftUI
         case #selector(toggleFilmstrip):
             item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
             return true
+        case #selector(toggleTonePins):
+            item.title = model.showsPins ? "Hide Tone Pins" : "Show Tone Pins"
+            item.state = model.showsPins ? .on : .off
+            return photo
+        case #selector(deleteTonePin):
+            return model.canRemovePin
         case #selector(toggleAdjustments):
             item.state = model.inspectorVisible && model.inspectorPane == .adjustments ? .on : .off; return true
         case #selector(togglePresets):

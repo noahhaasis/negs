@@ -75,6 +75,10 @@ enum JSONValue: Codable, Equatable, Sendable {
                 result[key] = fallback.restoring(value, nullable: nullable, at: path.isEmpty ? key : "\(path).\(key)")
             }
             return .object(result)
+        case (.array(let defaults), .array(let values)) where defaults.isEmpty:
+            // An empty default means a list of any length — the print's pins,
+            // for one — so the saved entries are the value.
+            return .array(values)
         case (.array(let defaults), .array(let values)) where defaults.count == values.count:
             return .array(zip(defaults, values).map { $0.restoring($1, nullable: nullable, at: "\(path)[*]") })
         case (.number, .number), (.bool, .bool), (.string, .string), (.null, _): return saved

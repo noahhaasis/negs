@@ -173,6 +173,21 @@ def main():
                                env=dict(os.environ, SPEKTRAFILM_BACKEND=os.environ.get("SPEKTRAFILM_BACKEND", "wgpu")), check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
                 assert placed_preview.read_bytes() == placed_fast.read_bytes(), "Placement must keep export parity"
+                # A pinned print tone (the zone bands) is part of the look, so
+                # the preview export must still equal the Fast export.
+                pinned = copy.deepcopy(grain_params)
+                pinned["print_render"]["tone_anchors"] = [{"input": 49.0, "target": 36.35}]
+                pinned_id, pinned_result = request("render", **(render_args | {"params": pinned}))
+                assert pinned_result["export_resolution"], pinned_result
+                pinned_preview, pinned_fast = work / "pinned-preview.tiff", work / "pinned-fast.tiff"
+                request("save", render_id=pinned_id, output=str(pinned_preview), crop=crop, rotate_cw=1)
+                (work / "pinned.json").write_text(json.dumps(pinned))
+                subprocess.run([args.fast_exporter.resolve(), "process", str(source), "-o", str(pinned_fast),
+                                "--film", "kodak_gold_200", "--paper", "kodak_portra_endura", "--crop", "0,0,0.5,1,-2",
+                                "--params", str(work / "pinned.json"), "--data-dir", str(args.data_dir.resolve())],
+                               env=dict(os.environ, SPEKTRAFILM_BACKEND=os.environ.get("SPEKTRAFILM_BACKEND", "wgpu")), check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                assert pinned_preview.read_bytes() == pinned_fast.read_bytes(), "Pinned print tones must keep export parity"
                 # The zone readout inverts this curve: 385 finite samples.
                 _, curve = request("tone_curve", film="kodak_gold_200", paper="kodak_portra_endura", params=placed)
                 assert (curve["ev_min"], curve["ev_step"]) == (-16.0, 0.0625), curve
@@ -195,7 +210,7 @@ def main():
                 assert struct.unpack(">II", exported.read_bytes()[16:24]) == (12, 8), "Exported crop must match the UI"
                 child.stdin.close()
                 assert child.wait(timeout=10) == 0, "EOF should cleanly release the engine"
-                print(json.dumps({"passed": True, "requests": sequence, "backend": result["backend"], "profiles": len(catalog["profiles"]), "f64_export": True, "fast_export_from_preview": True}))
+                print(json.dumps({"passed": True, "requests": sequence, "backend": result["backend"], "profiles": len(catalog["profiles"]), "f64_export": True, "fast_export_from_preview": True, "print_tone": True}))
             finally:
                 if child.poll() is None:
                     child.kill()

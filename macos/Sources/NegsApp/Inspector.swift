@@ -599,28 +599,16 @@ struct AdjustmentInspector: View {
         // The histogram and workflow tabs stay put above the tab's scrolling sections.
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                VStack(spacing: 2) {
-                    // The zone strip lies over the graph's top edge, just
-                    // below the L* values; the histogram itself takes no clicks.
-                    ZStack(alignment: .topLeading) {
-                        HistogramView(
-                            histogram: model.histogram,
-                            curve: model.toneCurve,
-                            sample: model.toneSample,
-                            channels: model.histogramChannels,
-                            onToggleChannel: { model.histogramChannels.formSymmetricDifference($0) }
-                        )
-                        .frame(height: 116)
-                        ZoneStrip(model: model).padding(.top, 15)
-                    }
-                    .frame(height: 116)
-                    Text(ZoneLabels.headline(model.zoneReadout, sample: model.toneSample))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .help("The picked tone, and what each zone's gold number would add to Placement.")
-                }
+                ZoneHistogramView(
+                    histogram: model.histogram.map(ToneHistogram.init) ?? .empty,
+                    selectedZone: Binding(
+                        get: { model.selectedZone },
+                        set: { model.selectedZone = $0 }
+                    ),
+                    canPin: model.canPin,
+                    pins: model.pins,
+                    selectedPin: model.selectedPin
+                )
                 InspectorTabBar(model: model)
             }
             .padding(.horizontal, 20)

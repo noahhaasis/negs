@@ -20,7 +20,7 @@ use spektrafilm_math::image::ImageBuf;
 use spektrafilm_math::precision::{from_f32, to_f32};
 
 /// Each control runs from -100 to 100; 0 leaves the photograph unchanged.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PostParams {
     /// Lifts or darkens the midtones, keeping black and white.
     #[serde(default)]
@@ -37,6 +37,41 @@ pub struct PostParams {
     /// Scales colourfulness at constant luminance; -100 is monochrome.
     #[serde(default)]
     pub saturation: f32,
+    /// Tones this print pins, as measured L\* → printed L\*. They replace the
+    /// four knobs above when present: the first pin to target 0 sets the
+    /// black point, the first to target 100 the white point, and both stay
+    /// put while the pins between them bend the curve (see [`AnchorCurve`]).
+    #[serde(default)]
+    pub tone_anchors: Vec<ToneAnchor>,
+}
+
+/// One pin of the tone curve, in CIE Lab lightness.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ToneAnchor {
+    /// The tone as the preview measured it, L\* 0…100.
+    pub input: f32,
+    /// Where it should print, L\* 0…100.
+    pub target: f32,
+    /// Where the tone was measured, for the app to outline; the pipeline
+    /// never reads it. Fractions of the photograph in the crop's turned
+    /// frame, as `CropSettings` stores them.
+    #[serde(default)]
+    pub source: Option<AnchorSource>,
+}
+
+/// Where a pin's tone was measured — app metadata, never read by the
+/// pipeline: a circle on the photograph, in fractions of its width and
+/// height, that the pin averaged.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AnchorSource {
+    /// The circle's centre.
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub y: f32,
+    /// Its radius, as a fraction of the photograph's shorter side.
+    #[serde(default)]
+    pub radius: f32,
 }
 
 impl PostParams {
@@ -116,6 +151,117 @@ fn lookup(table: &[f32], x: f32) -> f32 {
     table[i] + (table[i + 1] - table[i]) * f
 }
 
+/// CIE Lab lightness of a linear luminance, and its inverse.
+fn lstar_of(y: f64) -> f64 {
+    if y > 216.0 / 24389.0 {
+        116.0 * y.cbrt() - 16.0
+    } else {
+        y * 24389.0 / 27.0
+    }
+}
+
+fn luminance_of(value: f64) -> f64 {
+    if value > 8.0 {
+        ((value + 16.0) / 116.0).powi(3)
+    } else {
+        value * 27.0 / 24389.0
+    }
+}
+
+/// The pins as a rising curve in L\*, with **sticky end points**: the first
+/// pin to target 0 fixes the black point, the first to target 100 the white
+/// point, and later pins only bend the curve between them. Tones outside the
+/// ends clamp, which is what setting a black or white point means. With no
+/// pins it is the identity.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AnchorCurve {
+    black: f64,
+    white: f64,
+    /// Interior pins, strictly between the ends and rising.
+    points: Vec<(f64, f64)>,
+}
+
+impl AnchorCurve {
+    pub fn new(anchors: &[ToneAnchor]) -> Self {
+        // Only the target matters, never the order: every pin aimed at black
+        // must print black, so the black point is the brightest of them;
+        // every pin aimed at white must print white, so the white point is
+        // the darkest of them. Tones outside clamp.
+        let (mut black, mut white) = (0.0f64, 100.0f64);
+        let mut interior = Vec::new();
+        for anchor in anchors {
+            if !anchor.input.is_finite() || !anchor.target.is_finite() {
+                continue;
+            }
+            let (input, target) = (anchor.input as f64, anchor.target.clamp(0.0, 100.0) as f64);
+            if !(0.0..100.0).contains(&input) {
+                continue;
+            }
+            if target <= 0.0 {
+                black = black.max(input);
+            } else if target >= 100.0 {
+                white = white.min(input);
+            } else {
+                interior.push((input, target));
+            }
+        }
+        // Sorted by input, then by target, so ties resolve the same way
+        // whatever order the pins were made in.
+        interior.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        // One pin per zone: two pins aimed at the same target would demand the
+        // same output from two inputs, flattening the curve between them. The
+        // lowest input wins, deterministically.
+        interior.dedup_by(|next, kept| (next.1 - kept.1).abs() < 0.5);
+        // A black point at or past the white point leaves no room; keep the
+        // curve a curve.
+        let white = white.max(black + 0.5);
+        let mut points = Vec::with_capacity(interior.len());
+        for (input, target) in interior {
+            let inside = input > black + 0.5 && input < white - 0.5;
+            let rising = points
+                .last()
+                .is_none_or(|&(i, t)| input - i >= 0.5 && target - t >= 0.5);
+            if inside && rising {
+                points.push((input, target));
+            }
+        }
+        Self { black, white, points }
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.black <= 0.0 && self.white >= 100.0 && self.points.is_empty()
+    }
+
+    /// The printed L\* of a measured one.
+    pub fn map(&self, value: f64) -> f64 {
+        if self.is_identity() {
+            return value;
+        }
+        if !value.is_finite() || value <= self.black {
+            return 0.0;
+        }
+        if value >= self.white {
+            return 100.0;
+        }
+        let mut previous = (self.black, 0.0);
+        for &(input, target) in &self.points {
+            if value <= input {
+                return previous.1 + (target - previous.1) * (value - previous.0) / (input - previous.0);
+            }
+            previous = (input, target);
+        }
+        previous.1 + (100.0 - previous.1) * (value - previous.0) / (self.white - previous.0)
+    }
+
+    /// The same curve on a linear luminance.
+    pub fn map_luminance(&self, y: f64) -> f64 {
+        if self.is_identity() {
+            return y;
+        }
+        luminance_of(self.map(lstar_of(y)).clamp(0.0, 100.0))
+    }
+}
+
 /// Post adjustments prepared for per-pixel use. Every curve is tabulated, so
 /// applying them costs a few lookups per pixel.
 pub struct PostProcess {
@@ -149,7 +295,14 @@ impl PostProcess {
             encoded,
             decode: samples(&|v| space.decode(v)),
             encode: samples(&|s| space.encode(s * s)),
-            tone: samples(&|s| srgb_decode(tone(params, srgb_encode(s * s)))),
+            tone: if params.tone_anchors.is_empty() {
+                samples(&|s| srgb_decode(tone(params, srgb_encode(s * s))))
+            } else {
+                // Pins replace the knobs: they can set the black and white
+                // points themselves.
+                let curve = AnchorCurve::new(&params.tone_anchors);
+                samples(&|s| curve.map_luminance(s * s))
+            },
         }
     }
 
@@ -350,6 +503,83 @@ mod tests {
         for (x, y) in a.data.iter().zip(&b.data) {
             // f32 tables and arithmetic, and two conversions.
             assert!((to_f32(*x) - to_f32(*y)).abs() < 2e-3, "{:?} vs {:?}", a.data, b.data);
+        }
+    }
+    // MARK: The pinned tone curve
+
+    fn pin(input: f32, target: f32) -> ToneAnchor {
+        ToneAnchor { input, target, source: None }
+    }
+
+    #[test]
+    fn no_pins_leave_the_tones_alone() {
+        let curve = AnchorCurve::new(&[]);
+        assert!(curve.is_identity());
+        for value in [0.0, 5.0, 50.0, 99.0, 100.0] {
+            assert_eq!(curve.map(value), value);
+        }
+    }
+
+    #[test]
+    fn a_pin_lands_on_its_target_without_moving_the_ends() {
+        let curve = AnchorCurve::new(&[pin(50.0, 30.0)]);
+        assert!((curve.map(50.0) - 30.0).abs() < 1e-9);
+        assert_eq!(curve.map(0.0), 0.0);
+        assert!((curve.map(100.0) - 100.0).abs() < 1e-9);
+    }
+
+    /// A pin aimed at black sets the black point, and a later pin elsewhere
+    /// leaves it exactly where it was.
+    #[test]
+    fn a_black_point_pin_stays_put() {
+        let curve = AnchorCurve::new(&[pin(30.0, 0.0), pin(60.0, 50.0)]);
+        assert_eq!(curve.map(10.0), 0.0);
+        assert_eq!(curve.map(30.0), 0.0);
+        assert!((curve.map(60.0) - 50.0).abs() < 1e-9);
+        assert!((curve.map(100.0) - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_white_point_pin_stays_put() {
+        let curve = AnchorCurve::new(&[pin(80.0, 100.0), pin(40.0, 30.0)]);
+        assert!((curve.map(80.0) - 100.0).abs() < 1e-9);
+        assert!((curve.map(95.0) - 100.0).abs() < 1e-9);
+        assert!((curve.map(40.0) - 30.0).abs() < 1e-9);
+    }
+
+    /// Only the zones matter, never the order: two pins aimed at black hold
+    /// the brightest of them, whichever came first.
+    #[test]
+    fn pin_order_never_changes_the_curve() {
+        let a = AnchorCurve::new(&[pin(30.0, 0.0), pin(10.0, 0.0), pin(60.0, 50.0)]);
+        let b = AnchorCurve::new(&[pin(60.0, 50.0), pin(10.0, 0.0), pin(30.0, 0.0)]);
+        assert_eq!(a, b);
+        assert_eq!(a.map(20.0), 0.0, "everything under the brightest black pin is black");
+    }
+
+    /// One pin per zone: two aimed at the same target collapse to one, so the
+    /// curve keeps rising instead of flattening.
+    #[test]
+    fn one_pin_per_zone() {
+        let curve = AnchorCurve::new(&[pin(40.0, 50.0), pin(70.0, 50.0)]);
+        assert!(curve.points.len() == 1);
+        let mut previous = -1.0;
+        for step in 0..=100 {
+            let value = curve.map(step as f64);
+            assert!(value >= previous, "L* {step}");
+            previous = value;
+        }
+    }
+
+    #[test]
+    fn pins_keep_the_curve_rising_and_inside() {
+        let curve = AnchorCurve::new(&[pin(25.0, 60.0), pin(50.0, 20.0), pin(75.0, 80.0)]);
+        let mut previous = -1.0;
+        for step in 0..=100 {
+            let value = curve.map(step as f64);
+            assert!((0.0..=100.0).contains(&value));
+            assert!(value >= previous, "L* {step}: {value} < {previous}");
+            previous = value;
         }
     }
 }

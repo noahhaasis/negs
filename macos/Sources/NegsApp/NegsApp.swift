@@ -232,9 +232,12 @@ struct CanvasArea: View {
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
         PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale,
-                      selection: model.selection,
-                      onSelection: { model.setSelection($0, picking: $1) },
-                      onPick: { model.pickTone($0) },
+                      pins: model.pinMarkers,
+                      onSelectPin: { model.selectPin($0) },
+                      onPin: { model.addPin(at: $0, radius: $1) },
+                      onMovePin: { model.movePin($0, to: $1) },
+                      onEscapeKey: { model.clearToneSelection() },
+                      onDeleteKey: { model.deleteToneSelection() },
                       onFitChanged: { model.fitImage = $0 })
     }
 }
