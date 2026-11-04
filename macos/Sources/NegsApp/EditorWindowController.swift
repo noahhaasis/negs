@@ -64,6 +64,15 @@ import SwiftUI
         window.isRestorable = false
         // Place the window before adding its content, so the first layout is at the final size.
         if !window.setFrameUsingName("editor") { window.center() }
+        // The split view cannot keep both columns at their minimums in a
+        // narrower window, so the window itself enforces their sum.
+        let minimum = NSSize(width: 680 + 300 + split.splitView.dividerThickness, height: 560)
+        window.contentMinSize = minimum
+        let restored = window.contentRect(forFrameRect: window.frame).size
+        if restored.width < minimum.width || restored.height < minimum.height {
+            window.setContentSize(NSSize(width: max(restored.width, minimum.width),
+                                         height: max(restored.height, minimum.height)))
+        }
         split.view.frame = NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size)
         window.contentViewController = split
         window.setFrameAutosaveName("editor")
