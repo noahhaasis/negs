@@ -705,8 +705,6 @@ struct AdjustmentInspector: View {
                 control(.choice("Metering", "camera.auto_exposure_method", ["average", "median", "center_weighted", "partial", "matrix", "multi_zone", "highlight_weighted"]))
             }
             control(.slider("Exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
-            control(.slider("Placement (EV)", "camera.placement_ev", -8...8, 0.01))
-                .help("Makes the whole print lighter or darker along the film-and-print curve. Exposure changes the negative, and the printer compensates.")
         }
         Section("Lens") {
             FilmFormatPicker(model: model)

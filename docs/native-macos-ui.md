@@ -286,12 +286,6 @@ produced but cannot recover a highlight that clipped; the exposure controls do
 that. A preset keeps the photograph's pins, a session restores them, and
 opening another file starts with none.
 
-`camera.placement_ev` (Placement in the Camera tab's Exposure section,
-−8…+8 EV in 0.01 steps) moves the whole print along the film-and-print curve.
-Exposure compensation is not the same control: with print compensation on (the
-default) the printer cancels it. Placement at 0 leaves every existing render
-unchanged.
-
 ## Build and run
 
 From the repository root, with Rust and Xcode installed:

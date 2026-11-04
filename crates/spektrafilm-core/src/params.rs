@@ -71,11 +71,6 @@ impl Default for DiffusionFilterParams {
 pub struct CameraParams {
     #[serde(default)]
     pub exposure_compensation_ev: f32,
-    /// Stops added to the scene that the print exposure doesn't compensate,
-    /// so it moves a tone along the film-and-print curve. Exposure
-    /// compensation changes the negative and the printer corrects for it.
-    #[serde(default)]
-    pub placement_ev: f32,
     #[serde(default = "default_true")]
     pub auto_exposure: bool,
     #[serde(default = "default_center_weighted")]
@@ -98,7 +93,6 @@ impl Default for CameraParams {
     fn default() -> Self {
         Self {
             exposure_compensation_ev: 0.0,
-            placement_ev: 0.0,
             auto_exposure: true,
             auto_exposure_method: "center_weighted".into(),
             lens_blur_um: 0.0,

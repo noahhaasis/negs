@@ -442,8 +442,8 @@ pub fn expose(
             rgb.data.par_iter_mut().for_each(|v| *v *= scale);
         }
 
-        // Exposure compensation and placement
-        let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev + params.camera.placement_ev));
+        // Exposure compensation
+        let exp_comp = from_f32(exp2_f32(params.camera.exposure_compensation_ev));
         rgb.data.par_iter_mut().for_each(|v| *v *= exp_comp);
 
         // Scene preparation: tone, colour and midtone detail before the film.

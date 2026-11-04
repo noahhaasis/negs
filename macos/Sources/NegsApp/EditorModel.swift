@@ -790,10 +790,10 @@ import UniformTypeIdentifiers
             let interpretation = defaults["io.input_interpretation"]
             if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
             state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
-            // The pins and the placement describe the tones of the photograph
-            // they were measured on, so they never carry to another file.
-            for path in ["post.tone_anchors", "camera.placement_ev"] where state.params[path] != defaults[path] {
-                state.params[path] = defaults[path]
+            // Pins describe the tones of the photograph they were measured on,
+            // so they never carry to another file.
+            if state.params["post.tone_anchors"] != defaults["post.tone_anchors"] {
+                state.params["post.tone_anchors"] = defaults["post.tone_anchors"]
             }
             state.crop = CropSettings()
             customFilmFormat = false

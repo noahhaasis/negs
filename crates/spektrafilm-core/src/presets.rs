@@ -81,8 +81,7 @@ const SKIPPED: [&str; 3] = ["grain.micro_sublayers", "camera.diffusion_filter", 
 /// crop and rotation, the speed and memory settings, CAT16 and the colour
 /// management settings (Negs-only switches) and the Post tab. Every other params value comes from the preset or, where
 /// Python's GUI has no such setting, Negs's default.
-pub const KEPT: [&str; 27] = [
-    "camera.placement_ev",
+pub const KEPT: [&str; 26] = [
     "post.tone_anchors",
     "prep",
     "io.lens_correction",
@@ -822,17 +821,6 @@ mod tests {
         let applied = apply_with_finish(&preset, &current, true);
         assert_eq!(applied.post.contrast, 25.0);
         assert_eq!(applied.post.tone_anchors, current.post.tone_anchors);
-    }
-
-    #[test]
-    fn placement_survives_a_preset_and_is_not_exported() {
-        let data = data_dir();
-        let preset = import(DEFAULT_GUI_STATE, &data).unwrap();
-        let mut current = RuntimeParams::default();
-        current.camera.placement_ev = 1.25;
-        assert_eq!(apply(&preset.params, &current).camera.placement_ev, 1.25);
-        let text = export("kodak_portra_400", "kodak_portra_endura", &current, &data).unwrap();
-        assert!(!text.contains("placement"), "{text}");
     }
 
     #[test]

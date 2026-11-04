@@ -74,7 +74,6 @@ import XCTest
         model.choosePaper("kodak_portra_endura")
         model.set("film_render.grain.active", .bool(false))
         model.set("camera.auto_exposure", .bool(autoExposure))
-        model.set("camera.placement_ev", .number(0))
         model.set("enlarger.print_exposure_compensation", .bool(compensation))
         if scanFilm { model.set("io.scan_film", .bool(true)) }
         model.open(ramp)
@@ -277,11 +276,9 @@ extension ZoneModelTests {
         let model = try await makeModel()
         defer { model.shutdown() }
         try await pin(on: model)
-        model.set("camera.placement_ev", .number(1))
         model.open(other)
         try await waitUntil { model.previewCurrent }
         XCTAssertTrue(model.pins.isEmpty)
-        XCTAssertEqual(model.value("camera.placement_ev").double, 0)
         XCTAssertNil(model.selectedPin)
     }
 
