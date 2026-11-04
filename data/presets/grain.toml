@@ -1,7 +1,8 @@
 # Grain presets per film stock, from spektrafilm by Andrea Volpato
 # (https://github.com/andreavolpato/spektrafilm), experimental branch at
 # 28bf883, src/spektrafilm/data/presets/grain.toml. CC BY-SA 4.0, like the
-# profiles in data/profiles. Unmodified apart from this header.
+# profiles in data/profiles. Unmodified apart from this header and the
+# Negs-only block at the end (see data/CHANGELOG.txt).
 # Read by crates/spektrafilm-core/src/grain.rs (upstream
 # runtime/params_builder.py `_apply_grain_preset`).
 
@@ -109,3 +110,28 @@ rms_granularity = [14.0]
 [kodak_trix]
 rms_granularity = [44.0]
 density_min = [0.003]
+
+
+# --- Negs only, not upstream: Negs' datasheet Tri-X 400 and the B&W films
+# ported from Fotufilm (CC BY-SA 4.0, MUAStudio Inc.). rms_granularity is
+# the datasheet's diffuse RMS granularity (48 um aperture, net D 1.0), which
+# is Fotufilm's grainStrength x 1000; T-MAX 100 (Kodak F-4016) and Acros 100 II (Fujifilm AF3-0259E)
+# checked against the datasheet. Uniformity, density_min and sublayers come
+# from [defaults.bw.negative].
+[ilford_delta_3200]
+rms_granularity = [19.0]
+
+[kodak_trix400_d76_8min]
+rms_granularity = [17.0]
+
+[ilford_hp5_plus]
+rms_granularity = [16.0]
+
+[ilford_fp4_plus]
+rms_granularity = [10.0]
+
+[kodak_tmax_100]
+rms_granularity = [8.0]
+
+[fujifilm_acros_100_ii]
+rms_granularity = [7.0]

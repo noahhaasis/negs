@@ -28,6 +28,10 @@ Negs-only data, not from spektrafilm:
   profiles/ilford_mgrc_deluxe_grade2.json are new preparations from Kodak and
   Ilford datasheets, in spektrafilm's profile format. Sources and method:
   profile-sources/bw-expansion/README.md.
+- presets/grain.toml: a kodak_trix400_d76_8min section (rms_granularity 17,
+  as Fotufilm's Tri-X 400; the rest from upstream's B&W defaults), in the
+  Negs-only block at the end of the file. Before it, Tri-X 400 got the schema
+  defaults and was about as fine-grained as T-MAX 100.
 - filters/neutral_print_filters.json: entries for kodak_trix400_d76_8min on
   every colour paper under TH-KG3, derived with upstream's own solver
   (runtime/print_balance.solve_neutral_filter_shifts at 28bf883) by
@@ -77,6 +81,11 @@ see FOTUFILM_LICENSE.txt):
 - presets/couplers.toml: 11 ported stocks with steep curves get the class
   default DIR-coupler gammas scaled down (factor in each entry's comment), so
   the coupler pre-correction stays well defined (tools/fotufilm_port/fold_check.py).
+- presets/grain.toml: grain sections for the 5 B&W films, in a marked
+  Negs-only block at the end; upstream's sections unchanged. Each sets
+  rms_granularity to the datasheet's RMS granularity (Fotufilm's
+  grainStrength x 1000; T-MAX 100 and Acros 100 II checked against the Kodak
+  and Fujifilm datasheets) and takes the rest from upstream's B&W defaults.
 - borders/35mm/: edge-print strips for the 24 ported colour films (product
   codes or names) and the 5 B&W films (Fotufilm's edge texts),
   crates/spektrafilm-io/src/film35.rs.
