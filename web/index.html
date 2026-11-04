@@ -242,11 +242,13 @@
   /* The ⋯ menu after Export (presets), and the presets' dialogs. */
   .menu-anchor { position: relative; }
   .btn.more { padding-inline: 9px; letter-spacing: .05em; }
+  /* Raised above the sidebar it opens over (both would be --panel), with a
+     lighter edge and a hover that reads at a glance. */
   .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: grid; min-width: 170px; padding: 4px;
-    border-radius: 8px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px rgb(0 0 0 / .45); }
+    border-radius: 8px; background: #2c2c2c; border: 1px solid #454545; box-shadow: 0 8px 28px rgb(0 0 0 / .6), 0 0 0 1px rgb(0 0 0 / .5); }
   .menu[hidden] { display: none; }
-  .menu button { padding: 7px 10px; border: 0; border-radius: 5px; background: none; color: var(--fg); text-align: left; font: inherit; cursor: pointer; }
-  .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--field); outline: none; }
+  .menu button { padding: 7px 10px; border: 0; border-radius: 5px; background: none; color: #f4f2ef; text-align: left; font: inherit; cursor: pointer; }
+  .menu button:hover:not(:disabled), .menu button:focus-visible { background: #424242; outline: none; }
   .menu button:disabled { color: var(--faint); cursor: default; }
   .menu [role=menuitemcheckbox]::before { content: "✓"; display: inline-block; width: 1.2em; visibility: hidden; }
   .menu [role=menuitemcheckbox][aria-checked=true]::before { visibility: visible; }
