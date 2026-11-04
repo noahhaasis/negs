@@ -780,7 +780,7 @@ struct AdjustmentInspector: View {
             }
         }
         Section {
-            Toggle("Show all controls", isOn: $allControls)
+            Toggle("Advanced controls", isOn: $allControls)
                 .help("Shows every Lab setting. Off, the Lab shows the few most photographs need, and any that you or a preset changed.")
         } footer: {
             Text(allControls

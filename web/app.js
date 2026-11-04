@@ -579,6 +579,44 @@ function touchSlider(track, range) {
   track.addEventListener("pointercancel", end);
 }
 
+// Advanced controls (Settings; macOS calls it the same): off, the Lab shows
+// the controls most photographs need (controls.js `basic`, `advanced`) and
+// any that's off its default, so a preset never changes what you can't see.
+// A row shown for its change stays until you switch pane or tab, reset or
+// open a photograph, so setting it back doesn't pull it from under you.
+let advanced = remembered("advanced", false);
+const revealed = new Set();
+function changedShows(key, changed) {
+  if (changed) revealed.add(key);
+  return revealed.has(key);
+}
+// Tucks `node` away while Advanced controls is off and `shows()` is false.
+// Returns whether it showed at the last sync.
+function tuck(node, shows) {
+  let on = true;
+  syncs.push(() => {
+    on = advanced || shows();
+    node.classList.toggle("tucked", !on);
+  });
+  return () => on;
+}
+function forgetRevealed() {
+  revealed.clear();
+  sync();
+}
+
+// The Lab's note that Advanced controls hides some: at the end of every
+// Lab tab on the sheet, once at the Lab's end in the sidebar.
+function advancedHint(tab) {
+  const open = el("button", { type: "button", className: "link", textContent: "Settings › Advanced controls" });
+  open.addEventListener("click", () => openSettings());
+  const hint = el("p", { className: `hint advanced-hint ${tab ? "per-tab" : "lab-end"}` }, "Some settings are hidden. ", open, " shows them all.");
+  if (tab) hint.dataset.tab = tab;
+  hint.dataset.pane = "lab";
+  syncs.push(() => { hint.hidden = advanced; });
+  return hint;
+}
+
 function buildControls() {
   const opened = remembered("groups", {});
   const sections = [...PREP_SECTIONS.map((s) => [s, "prep"]), ...SECTIONS.map((s) => [s, "lab"]), ...OUTPUT_SECTIONS.map((s) => [s, "output"])];
@@ -589,7 +627,16 @@ function buildControls() {
     body.dataset.pane = pane;
     // A phone tab with several sections keeps their titles.
     body.classList.toggle("titled", sections.filter(([s]) => sectionId(s) === body.dataset.tab).length > 1);
-    for (const c of section.controls ?? []) body.append(buildControl(c));
+    const lab = pane === "lab";
+    // Whether each of the section's loose controls and groups shows.
+    const parts = [];
+    for (const c of section.controls ?? []) {
+      const row = buildControl(c);
+      body.append(row);
+      if (!lab) continue;
+      if (!c.advanced) parts.push(() => true);
+      else { const b = binding(c); parts.push(tuck(row, () => changedShows(c.path, b.modified()))); }
+    }
     if (section.raw) syncs.push(() => { body.hidden = !photo?.raw; });
     for (const group of section.groups ?? []) {
       const key = `${section.title}/${group.title}`;
@@ -597,7 +644,16 @@ function buildControls() {
       details.dataset.tutorialGroup = key;
       details.addEventListener("toggle", () => remember("groups", { ...remembered("groups", {}), [key]: details.open }));
       const summary = el("summary", {}, el("span", { textContent: group.title }));
-      const controls = el("fieldset", { className: "controls" }, ...group.controls.map(buildControl));
+      const controls = el("fieldset", { className: "controls" });
+      // Past the basics, each control shows with Advanced controls or once changed.
+      const changed = [];
+      group.controls.forEach((c, i) => {
+        const row = buildControl(c);
+        controls.append(row);
+        if (!lab || i < (group.basic ?? 0) || c.kind === "action") return;
+        const b = binding(c), id = c.index == null ? c.path : `${c.path}.${c.index}`;
+        changed.push(tuck(row, () => changedShows(id, b.modified())));
+      });
       if (group.enable) {
         const sw = el("input", { type: "checkbox", className: "switch", title: `${group.title} on or off` });
         sw.setAttribute("aria-label", group.title);
@@ -614,6 +670,12 @@ function buildControls() {
       // on desktop; the edit keeps them for the next RAW.
       if (group.raw) syncs.push(() => { details.hidden = !photo?.raw; });
       body.append(details);
+      // A group with no basics shows with Advanced controls, or once
+      // something in it changed. After its controls: their syncs run first.
+      if (lab) {
+        parts.push(group.basic ? () => true
+          : tuck(details, () => changedShows(key, !!group.enable && isModified(group.enable)) || changed.some((shown) => shown())));
+      }
     }
     if (section.print) {
       const footer = el("p", { className: "hint footer", textContent: section.footer });
@@ -626,7 +688,14 @@ function buildControls() {
       body.append(el("p", { className: "hint footer", textContent: section.footer }));
     }
     $(pane === "lab" ? "sections" : `${pane}-sections`).append(body);
+    if (lab) {
+      tuck(body, () => parts.some((shown) => shown()));
+      $("sections").append(advancedHint(sectionId(section)));
+    }
   }
+  $("sections").append(advancedHint(null));
+  // Scan film directly, beside the stocks: few photographs want it.
+  tuck($("scan-film").closest("label"), () => changedShows("io.scan_film", get("io.scan_film")));
 }
 
 // Desktop's Prep | Lab | Output switch (macOS AdjustmentInspector): which
@@ -644,6 +713,7 @@ function buildPanes() {
   for (const button of $("panes").children) {
     button.addEventListener("click", () => {
       showPane(button.dataset.pane);
+      forgetRevealed();
       $("scroll").scrollTop = 0;
     });
   }
@@ -722,7 +792,9 @@ function developmentTime(which, path, id) {
 // Where a sidebar doesn't fit beside the photograph, the inspector is a
 // bottom sheet with a tab per section (index.html has the same query).
 const SHEET = matchMedia("(max-width: 899px) and (orientation: portrait), (max-width: 639px)");
-const TABS = [{ id: "stock", title: "Stock" }, ...[...PREP_SECTIONS, ...SECTIONS, ...OUTPUT_SECTIONS].map((s) => ({ id: sectionId(s), title: s.tab ?? s.title }))]
+// Prep comes before Stock, as it does before the film, but Stock opens first.
+const TABS = [...PREP_SECTIONS.map((s) => ({ id: sectionId(s), title: s.tab ?? s.title })), { id: "stock", title: "Stock" },
+  ...[...SECTIONS, ...OUTPUT_SECTIONS].map((s) => ({ id: sectionId(s), title: s.tab ?? s.title }))]
   .filter((t, i, all) => all.findIndex((u) => u.id === t.id) === i);
 
 function showTab(id) {
@@ -765,10 +837,19 @@ function buildSheet() {
     button.dataset.tab = t.id;
     button.addEventListener("click", () => {
       showTab(t.id);
+      forgetRevealed();
       if (sheet === "low") setSheet("mid");
       $("scroll").scrollTop = 0;
     });
     $("tabs").append(button);
+    // A tab whose sections Advanced controls hides goes too (Scan).
+    const sections = $("scroll").querySelectorAll(`.section[data-tab="${t.id}"]`);
+    if (sections.length) {
+      syncs.push(() => {
+        button.hidden = [...sections].every((s) => s.classList.contains("tucked"));
+        if (button.hidden && $("side").dataset.tab === t.id) showTab("stock");
+      });
+    }
   }
   showTab(remembered("tab", "stock"));
   setSheet(sheet);
@@ -1716,8 +1797,14 @@ function crashCheck() {
 function openSettings() {
   $("previews").checked = previewsOn;
   $("match-new-raws").checked = matchNewRaws();
+  $("advanced").checked = advanced;
   $("settings-dialog").showModal();
 }
+$("advanced").addEventListener("change", () => {
+  advanced = $("advanced").checked;
+  remember("advanced", advanced);
+  forgetRevealed();
+});
 $("settings").addEventListener("click", openSettings);
 $("match-new-raws").addEventListener("change", () => remember("matchNewRaws", $("match-new-raws").checked));
 
@@ -1974,6 +2061,7 @@ async function open(name, data, sampleId = null) {
   endCrop(false);
   const opening = ++opens, previous = photo;
   let loaded = false;
+  revealed.clear();
   $("edit-tools").hidden = true;
   loading = true;
   forgetOriginal();
@@ -2643,7 +2731,7 @@ globalThis.negs = {
 syncs.push(fetchBorderTexture);
 $("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });
 $("paper").addEventListener("change", () => { choosePaper($("paper").value); sync(); schedule("settled"); });
-$("reset").addEventListener("click", () => { resetAdjustments(); sync(); schedule("settled"); });
+$("reset").addEventListener("click", () => { resetAdjustments(); forgetRevealed(); schedule("settled"); });
 $("scan-film").addEventListener("change", () => { set("io.scan_film", $("scan-film").checked); sync(); schedule("settled"); });
 $("engine").addEventListener("change", async () => {
   if ($("engine").value === kind) return;

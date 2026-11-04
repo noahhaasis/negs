@@ -125,6 +125,10 @@
   .side:not(.sheet)[data-pane=lab] .scroll [data-pane]:not([data-pane=lab]),
   .side:not(.sheet)[data-pane=output] .scroll [data-pane]:not([data-pane=output]) { display: none; }
   .grabber, .tabs { display: none; }
+  /* Advanced controls off (app.js tuck); the tutorial still shows what it points at. */
+  .tucked:not(.tour-control, .tour-group, .tour-section) { display: none !important; }
+  .advanced-hint { margin: 12px 14px 16px; }
+  .side:not(.sheet) .advanced-hint.per-tab, .side.sheet .advanced-hint.lab-end { display: none; }
   .stock { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
   .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
   .stock label.row { display: flex; }
@@ -284,6 +288,7 @@
     .style { min-height: 64px; font-size: 13px; }
     .ctl.color input { width: 56px; height: 34px; }
     .link, .dismiss { min-height: 32px; }
+    .advanced-hint .link { min-height: 0; }
     .dismiss { min-width: 32px; }
   }
 
@@ -461,6 +466,10 @@
 <dialog class="dialog settings" id="settings-dialog" aria-labelledby="settings-title">
   <form method="dialog">
     <header><h2 id="settings-title">Settings</h2><button class="dismiss" value="close" aria-label="Close">×</button></header>
+    <div class="setting">
+      <label class="row" for="advanced">Advanced controls <input type="checkbox" class="switch" id="advanced" aria-describedby="advanced-hint"></label>
+      <p class="hint" id="advanced-hint">Show every camera, film, print and scan setting. Off, the Lab shows the ones most photos need, plus any that you or a preset changed.</p>
+    </div>
     <div class="setting">
       <label class="row" for="previews">Film and paper previews <input type="checkbox" class="switch" id="previews" aria-describedby="previews-hint"></label>
       <p class="hint" id="previews-hint">Show each film and paper on your photograph. They use about 100 MB, and turn off if Negs runs out of memory.</p>

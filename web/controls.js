@@ -35,6 +35,10 @@ const curves = (at) => [
 // path is true, or `[path, value]` has that value) and then their effect
 // groups, if any; a `raw` group shows for camera RAWs only. A group's `enable` is the
 // switch in its header; `print` sections are skipped while scanning film.
+// Without Advanced controls (Settings) the Lab shows a group's first `basic`
+// controls and the loose ones not marked `advanced`, plus any that's off its
+// default (macOS AdjustmentGroup.basic); a group with no basics only shows
+// once something in it changed.
 // `tab` names a section's tab on phones when its title is too long.
 // The Prep pane (macOS Inspector `prep`): the photograph before the film.
 // A section's `raw` shows it for camera RAWs only. Brightness holds Match
@@ -78,9 +82,9 @@ export const SECTIONS = [
   { title: "Camera", controls: [
     slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5, 5, 0.1),
     slider("Film format (mm)", "camera.film_format_mm", 4, 120, 0.1),
-    slider("Lens blur (µm)", "camera.lens_blur_um", 0, 100, 0.1),
+    { ...slider("Lens blur (µm)", "camera.lens_blur_um", 0, 100, 0.1), advanced: true },
   ], groups: [
-    { title: "Lens Diffusion", enable: "camera.diffusion_filter.active", controls: [
+    { title: "Lens Diffusion", basic: 2, enable: "camera.diffusion_filter.active", controls: [
       choice("Filter", "camera.diffusion_filter.filter_family", DIFFUSION_FILTERS),
       slider("Strength", "camera.diffusion_filter.strength", 0, 2, 0.01),
       slider("Spatial scale", "camera.diffusion_filter.spatial_scale", 0.1, 3, 0.01),
@@ -93,8 +97,8 @@ export const SECTIONS = [
     ] },
   ] },
   { title: "Film", groups: [
-    { title: "Film Curves", enable: "film_render.density_curves_morph.active", controls: curves("film_render.density_curves_morph") },
-    { title: "Grain", enable: "film_render.grain.active", controls: [
+    { title: "Film Curves", basic: 1, enable: "film_render.density_curves_morph.active", controls: curves("film_render.density_curves_morph") },
+    { title: "Grain", basic: 3, enable: "film_render.grain.active", controls: [
       stock("Red granularity", "film_render.grain.rms_granularity", 0, 0, 80, 0.1, "Granularity"),
       stock("Green granularity", "film_render.grain.rms_granularity", 1, 0, 80, 0.1, null),
       stock("Blue granularity", "film_render.grain.rms_granularity", 2, 0, 80, 0.1, null),
@@ -111,7 +115,7 @@ export const SECTIONS = [
       slider("Clump blur (µm)", "film_render.grain.micro_structure.0", 0, 1, 0.01),
       slider("Clump size (nm)", "film_render.grain.micro_structure.1", 0, 100, 1),
     ] },
-    { title: "Halation", enable: "film_render.halation.active", controls: [
+    { title: "Halation", basic: 1, enable: "film_render.halation.active", controls: [
       slider("Amount", "film_render.halation.halation_amount", 0, 3, 0.01),
       slider("Spatial scale", "film_render.halation.halation_spatial_scale", 0.1, 5, 0.01),
       slider("Scatter amount", "film_render.halation.scatter_amount", 0, 3, 0.01),
@@ -119,13 +123,13 @@ export const SECTIONS = [
       slider("Bounces", "film_render.halation.halation_n_bounces", 1, 5, 1),
       slider("Bounce decay", "film_render.halation.halation_bounce_decay", 0, 1, 0.01),
     ] },
-    { title: "DIR Couplers", enable: "film_render.dir_couplers.active", controls: [
+    { title: "DIR Couplers", basic: 1, enable: "film_render.dir_couplers.active", controls: [
       slider("Amount", "film_render.dir_couplers.amount", 0, 2, 0.01),
       slider("Diffusion (µm)", "film_render.dir_couplers.diffusion_size_um", 0, 100, 0.1),
       slider("Tail (µm)", "film_render.dir_couplers.diffusion_tail_um", 0, 400, 1),
       slider("Tail weight", "film_render.dir_couplers.diffusion_tail_weight", 0, 1, 0.01),
     ] },
-    { title: "Film Base", enable: "film_render.base.active", controls: [
+    { title: "Film Base", basic: 1, enable: "film_render.base.active", controls: [
       slider("Density", "film_render.base.scale", 0, 2, 0.01),
       slider("Tilt", "film_render.base.tilt", -1, 1, 0.01),
       slider("Cyan", "film_render.base.cyan", 0, 2, 0.01),
@@ -134,17 +138,17 @@ export const SECTIONS = [
     ] },
   ] },
   { title: "Print", print: true, footer: "Printing is skipped while scanning film directly.", groups: [
-    { title: "Enlarger", open: true, controls: [
+    { title: "Enlarger", open: true, basic: 4, controls: [
       slider("Print exposure", "enlarger.print_exposure", 0.1, 5, 0.01),
-      toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
       slider("Magenta shift", "enlarger.m_filter_shift", -50, 50, 0.1),
       slider("Yellow shift", "enlarger.y_filter_shift", -50, 50, 0.1),
+      action("Balance Print", "balancePrint", "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base."),
+      toggle("Exposure compensation", "enlarger.print_exposure_compensation"),
       slider("Preflash exposure", "enlarger.preflash_exposure", 0, 0.5, 0.01),
       slider("Preflash magenta", "enlarger.preflash_m_filter_shift", -50, 50, 0.1),
       slider("Preflash yellow", "enlarger.preflash_y_filter_shift", -50, 50, 0.1),
-      action("Balance Print", "balancePrint", "Sets the magenta and yellow shifts so a mid-grey prints neutral with the current film, bases, paper and enlarger. Use it after changing the film base."),
     ] },
-    { title: "Print Diffusion", enable: "enlarger.diffusion_filter.active", controls: [
+    { title: "Print Diffusion", basic: 2, enable: "enlarger.diffusion_filter.active", controls: [
       choice("Filter", "enlarger.diffusion_filter.filter_family", DIFFUSION_FILTERS),
       slider("Strength", "enlarger.diffusion_filter.strength", 0, 2, 0.01),
       slider("Spatial scale", "enlarger.diffusion_filter.spatial_scale", 0.1, 3, 0.01),
@@ -156,14 +160,14 @@ export const SECTIONS = [
       slider("Bloom intensity", "enlarger.diffusion_filter.bloom_intensity", 0, 4, 0.05),
       slider("Bloom size", "enlarger.diffusion_filter.bloom_size", 0.1, 4, 0.05),
     ] },
-    { title: "Print Curves", enable: "print_render.density_curves_morph.active", controls: curves("print_render.density_curves_morph") },
-    { title: "Print Base", enable: "print_render.base.active", controls: [
+    { title: "Print Curves", basic: 1, enable: "print_render.density_curves_morph.active", controls: curves("print_render.density_curves_morph") },
+    { title: "Print Base", basic: 1, enable: "print_render.base.active", controls: [
       slider("Density", "print_render.base.scale", 0, 2, 0.01),
       slider("Cyan", "print_render.base.cyan", 0, 2, 0.01),
       slider("Magenta", "print_render.base.magenta", 0, 2, 0.01),
       slider("Yellow", "print_render.base.yellow", 0, 2, 0.01),
     ] },
-    { title: "Glare", enable: "print_render.glare.active", controls: [
+    { title: "Glare", basic: 1, enable: "print_render.glare.active", controls: [
       slider("Amount", "print_render.glare.percent", 0, 0.2, 0.001),
       slider("Roughness", "print_render.glare.roughness", 0, 2, 0.01),
       slider("Blur (px)", "print_render.glare.blur", 0, 5, 0.01),
