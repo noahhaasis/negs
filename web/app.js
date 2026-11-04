@@ -1800,7 +1800,6 @@ const PREVIEW_SIDE = 320;
 // The calibrated stocks the engine keeps for them: every film with its
 // paper, and every paper with the current film.
 const PREVIEW_PIPELINES = 40;
-const PREVIEW_PAINT = new URLSearchParams(location.search).get("previewPaint") !== "0";
 // On by default: on the iPhone 13 Pro filled grids hold ~100 MiB of the tab,
 // and neither an export nor opening another photograph with them came near
 // the tab's limit (docs/web-prep-port-plan.md). A memory crash turns them
@@ -1953,9 +1952,7 @@ async function pumpPreviews() {
     const side = Stocks.frameSide(photo.width, photo.height, crop, PREVIEW_SIDE);
     const r = await engine.call("thumbnail", request.film, request.paper, request.params, side, PREVIEW_PIPELINES, structuredClone(crop), rotation());
     previewStats.push({ id: tile.id, elapsedMs: r.elapsedMs, stages: r.stages, memoryMiB: r.memoryMiB, at: performance.now() });
-    // TEMP(previews memory): ?previewPaint=0 marks the tile current without
-    // painting it (docs/handoff-web-previews-memory.md).
-    if (photo === target && previewsOn) PREVIEW_PAINT ? Stocks.paint(tile, target, request.key, r) : Object.assign(tile, { photo: target, key: request.key });
+    if (photo === target && previewsOn) Stocks.paint(tile, target, request.key, r);
   } catch (e) {
     if (!e.restarted) console.warn(`no preview of ${tile.id}: ${e.message}`);
     tile.failed = request.key;
@@ -2776,8 +2773,6 @@ globalThis.negs = {
       failed: tiles.filter(({ tile, request }) => tile.failed === request.key).length, previewing, stats: previewStats.slice() };
   },
   setPreviews: (on) => setPreviews(!!on),
-  // TEMP(previews memory): an engine method by name (releaseRenderBuffers, memoryMiB).
-  engineCall: (method, ...args) => host.call(method, ...args),
   // One preview of the whole frame within `side`, for measurements.
   thumbnail: (side, film = state.film, paper = state.paper) => host.call("thumbnail", film, paper, params(), side, PREVIEW_PIPELINES, Crop.defaults(), 0),
   // Opens or folds the Film and Paper foldouts.

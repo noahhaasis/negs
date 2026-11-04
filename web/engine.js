@@ -62,7 +62,6 @@ export function client(wasm, kind) {
       return { ...r, ...applyRgba(r.rgba, r.width, r.height, crop, rotation), memoryMiB: Math.round(wasm.memoryBytes() / 2 ** 20) };
     },
     releaseThumbnails: () => engine.releaseThumbnails(),
-    memoryMiB: () => Math.round(wasm.memoryBytes() / 2 ** 20),
     async render(film, paper, params, maxDim, interactive, present = false) {
       return dataResult(wasm, () => engine.render(film, paper, params, maxDim, interactive, present), (r) =>
         ({ width: r.width, height: r.height, rgba: r.rgba, presented: r.presented, backend: r.backend, elapsedMs: r.elapsedMs, stages: r.stages,

@@ -1,8 +1,8 @@
 # Plan: camera brightness, the Prep tab and stock previews on the web
 
-**Status (2026-11-04):** built on branch `web-prep-port` (worktree `web-preview-size`): Prep |
-Lab | Output, Match camera brightness and the film and paper previews. Results in
-[Built](#built-2026-11-04); what's left in [Left to do](#left-to-do). Main at `c92b539`. Template:
+**Status (2026-11-04):** built and merged to main: Prep | Lab | Output, Match camera
+brightness and the film and paper previews, and on the site's `/try`. Results in
+[Built](#built-2026-11-04); what's left in [Left to do](#left-to-do). Template:
 [the Windows port plan](windows-prep-port-plan.md), which shipped the same Mac features on
 Windows.
 
@@ -168,7 +168,8 @@ paid by any stock change, and neither an export nor another photograph comes nea
   memory in the tab (`worker.js`), not the previews.
 
 **Where the memory goes** (iPhone, 2026-11-04 afternoon; `web/checks/stocks-memory-phone.mjs`
-and `footprint.py`, 500 ms samples; each run a fresh tab: open the Fuji RAF, fill both
+and `footprint.py`; that check and the hooks it used were temporary and are removed, see git
+history before the merge; 500 ms samples; each run a fresh tab: open the Fuji RAF, fill both
 grids three times as `stocks-phone.mjs` does, then 30–60 s idle plateaus). Settled medians
 of the tab's WebContent footprint, MiB:
 
@@ -206,18 +207,18 @@ of the tab's WebContent footprint, MiB:
 
 ## Left to do
 
-1. **The previews' measurement hooks.** Remove the `TEMP(previews memory)` hooks in
-   `app.js` and `engine.js` (`?previewPaint=0`, `negs.engineCall`, `memoryMiB`) and
-   `web/checks/stock-change-memory.mjs` when no longer needed; `stocks-memory-phone.mjs`
-   uses `negs.engineCall`. Open: the ~40–50 MiB the filled grids keep that no release
-   returns, and the ~340 MiB the GPU pool keeps after an export.
+1. ~~**The previews' measurement hooks.**~~ (removed 2026-11-04 with
+   `stock-change-memory.mjs` and `stocks-memory-phone.mjs`). Still open: the ~40–50 MiB the
+   filled grids keep that no release returns, and the ~340 MiB the GPU pool keeps after an
+   export.
 2. **JPEG/PNG "Match original brightness".** The match switch shows for RAWs only. Plan
    step 3: use the source the engine already decoded, reduced to 512 px and converted to
    linear sRGB, as the reference (no second decode), and check it against the Mac's EVs
    (`CameraBrightnessReference.swift`, Windows `file_reference`). `spektrafilm-io::brightness`
    has `reduced` and `linear` for it; the page side is `cameraReference` in `app.js`.
-3. **`web/checks/post.mjs`** still drives the removed Post Tone/Saturation controls. Delete
-   it or turn it into a Prep check (Prep sliders, the match note, Exposure as an offset).
+3. ~~**`web/checks/post.mjs`**~~ (deleted 2026-11-04: it drove the removed Post
+   Tone/Saturation controls). A Prep check (Prep sliders, the match note, Exposure as an
+   offset) would replace it; Phase 4's `prep` phase covers the same ground.
 4. ~~**The walkthrough**~~ (done 2026-11-04): eleven steps. Print exposure's step went.
    *Start from the right brightness* shows Match camera brightness with Auto exposure and
    Metering (the tour starts with Match off; turning it on hides the meter, as outside the
