@@ -1814,7 +1814,13 @@ function buildPreviews() {
     f.root.addEventListener("toggle", () => remember("stockFolds", { ...remembered("stockFolds", {}), [which]: f.root.open }));
     return f;
   };
+  // One grid open at a time: opening one folds the other (and a remembered
+  // pair opens on the film's).
+  if (opened.film && opened.paper) opened.paper = false;
   folds = { film: fold("film", "Film", filmGroups(), chooseFilm), paper: fold("paper", "Paper", paperGroups(), choosePaper) };
+  for (const [one, other] of [[folds.film, folds.paper], [folds.paper, folds.film]]) {
+    one.root.addEventListener("toggle", () => { if (one.root.open) other.root.open = false; });
+  }
   folds.film.root.querySelector(".stock-title").after(info("Film", Help.FILM));
   folds.paper.root.querySelector(".stock-title").after(info("Paper", Help.PAPER));
   $("film").closest("label").after(folds.film.root);
