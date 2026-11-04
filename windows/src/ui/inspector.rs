@@ -720,6 +720,34 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     if !app.inspector.built {
         return;
     }
+    // Entering or leaving crop swaps the whole column while it doesn't
+    // draw, then it paints once, like a tab's rows below. The incoming side
+    // used to fade in, a layered window: entering showed the old controls
+    // through it and repainted the crop panel piece by piece when the fade
+    // ended; leaving blanked the column for a few frames.
+    let swap = app.inspector.crop_shown != app.model.cropping();
+    let panel = app.inspector.panel;
+    if swap {
+        hold_redraw(panel, true);
+    }
+    sync_column(app, structure, swap);
+    if swap {
+        hold_redraw(panel, false);
+    }
+}
+
+/// Stops the column drawing, or starts it again and paints it once.
+fn hold_redraw(panel: HWND, hold: bool) {
+    unsafe {
+        SendMessageW(panel, WM_SETREDRAW, WPARAM(!hold as usize), LPARAM(0));
+        if !hold {
+            let _ = RedrawWindow(panel, None, None, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        }
+    }
+}
+
+/// `sync` past the scope; `held` when the column already doesn't draw.
+fn sync_column(app: &mut App, structure: bool, held: bool) {
     sync_crop(app);
     let cropping = app.model.cropping();
     let ins = &mut app.inspector;
@@ -762,11 +790,9 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
         let open = model.previews.open(paper) && ins.rows.iter().zip(&want).any(|(r, w)| r.kind == Kind::Foldout(paper) && *w);
         open != ins.grids[paper as usize].as_ref().is_some_and(|g| g.was_open)
     };
-    let lock = want.iter().zip(&ins.rows).any(|(w, r)| *w != r.shown) || foldout_changed(false) || foldout_changed(true);
+    let lock = !held && (want.iter().zip(&ins.rows).any(|(w, r)| *w != r.shown) || foldout_changed(false) || foldout_changed(true));
     if lock {
-        unsafe {
-            SendMessageW(ins.panel, WM_SETREDRAW, WPARAM(0), LPARAM(0));
-        }
+        hold_redraw(ins.panel, true);
     }
     let t0 = crate::platform::qpc();
     let mut created = false;
@@ -838,10 +864,7 @@ pub fn sync(app: &mut App, structure: bool, histogram: bool) {
     let t2 = crate::platform::qpc();
     update_values(ins, model, &expanded);
     if lock {
-        unsafe {
-            SendMessageW(ins.panel, WM_SETREDRAW, WPARAM(1), LPARAM(0));
-            let _ = RedrawWindow(ins.panel, None, None, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
-        }
+        hold_redraw(ins.panel, false);
     }
     let t3 = crate::platform::qpc();
     // Curves are computed only while the graph is on screen.
@@ -3470,12 +3493,7 @@ fn sync_crop(app: &mut App) {
     unsafe {
         let _ = ShowWindow(crop.panel, if cropping { SW_SHOWNA } else { SW_HIDE });
     }
-    let panel = crop.panel;
-    if app.inspector.crop_shown != cropping {
-        app.inspector.crop_shown = cropping;
-        motion::fade_in(if cropping { panel } else { app.inspector.rows_panel });
-    }
-    let Some(crop) = &app.inspector.crop else { return };
+    app.inspector.crop_shown = cropping;
     let Some(session) = &app.model.crop_session else { return };
     let decimal = app.inspector.decimal;
     for (i, aspect) in CropAspect::ALL.iter().enumerate() {
