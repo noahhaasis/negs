@@ -674,7 +674,145 @@ impl Engine {
                 .map_err(JsValue::from)
         })
     }
+    /// Prep › Match camera brightness: the `prep.exposure_ev` that makes the
+    /// loaded photograph on `film` and `paper` with `params_json` as bright
+    /// as `reference` (`width` × `height` linear sRGB, from
+    /// [`camera_reference`]), as the helper's `place_exposure` solves it, on
+    /// a ≤ 256 px proxy: its trials on the GPU, awaiting each readback, or
+    /// the CPU engine's. Resolves to JSON: the engine's `PlacementAnalysis`
+    /// and `elapsed_ms`. Fails with the engine's reason
+    /// ([`brightness_failure`] words it).
+    #[wasm_bindgen(js_name = placeExposure)]
+    pub fn place_exposure(&self, film: String, paper: String, params_json: String, reference: Vec<f32>, width: u32, height: u32) -> js_sys::Promise {
+        let state = self.state.clone();
+        wasm_bindgen_futures::future_to_promise(async move {
+            place_exposure(&state, &film, &paper, &params_json, reference, width, height)
+                .await
+                .map(JsValue::from)
+                .map_err(JsValue::from)
+        })
+    }
 }
+
+/// [`Engine::place_exposure`].
+async fn place_exposure(state: &RefCell<State>, film: &str, paper: &str, params_json: &str, reference: Vec<f32>, width: u32, height: u32) -> Result<String, JsError> {
+    let started = web_time::Instant::now();
+    let mut params = parse_params(params_json).map_err(js_error)?;
+    params.prep.validate().map_err(|e| JsError::new(&e))?;
+    if width < 2 || height < 2 || reference.len() != width as usize * height as usize * 3 {
+        return Err(JsError::new("The camera-preview reference doesn't match its size"));
+    }
+    let reference = ImageBuf::from_data(width, height, reference);
+    let (pipeline, source, backend) = {
+        let mut state = state.borrow_mut();
+        let source = state.source.clone().ok_or_else(|| JsError::new("no image loaded"))?.0;
+        if let Some(colour) = &state.input_colour {
+            params.io.apply_input_colour(colour);
+        }
+        spektrafilm_core::image_size::clear(&mut params);
+        let key = preview::preview_pipeline_cache_key(film, paper, &params);
+        // The render's calibrated pipeline when it's this one, else one
+        // of its own, as the helper does; the render's stays.
+        let pipeline = match &state.pipeline {
+            Some((cached, pipeline)) if *cached == key => pipeline.clone().with_params(params.clone()),
+            _ => {
+                data_fs::take_missing();
+                let data = Path::new(DATA_DIR);
+                let built = (|| -> Result<Pipeline, String> {
+                    let film_profile = profile::load_profile_by_name(data, film).map_err(|e| e.to_string())?;
+                    let print = if params.io.scan_film { film } else { paper };
+                    let print_profile = profile::load_profile_by_name(data, print).map_err(|e| e.to_string())?;
+                    Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data)
+                })();
+                if !missing().is_empty() {
+                    return Err(JsError::new("Render the photograph with these stocks before matching"));
+                }
+                built.map_err(|e| JsError::new(&e))?
+            }
+        };
+        let metering = state
+            .metering
+            .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(&source))
+            .clone();
+        (pipeline.with_metering_preview(metering), source, state.backend.clone())
+    };
+    let mut renderer = Trials(backend);
+    let placement = spektrafilm_core::exposure_placement::place_exposure_with(&pipeline, &source, &reference, &mut renderer)
+        .await
+        .map_err(|e| JsError::new(&e))?;
+    let mut result = serde_json::to_value(placement).map_err(|e| js_error(e.into()))?;
+    result["elapsed_ms"] = serde_json::json!(started.elapsed().as_secs_f64() * 1000.0);
+    Ok(result.to_string())
+}
+
+/// The placement's trial renders: on the GPU's resident chain, as the
+/// helper's GPU backend renders them, awaiting each readback; on the CPU
+/// for the CPU engine or what the chain doesn't cover.
+struct Trials(Rc<dyn ComputeBackend>);
+impl spektrafilm_core::exposure_placement::Renderer for Trials {
+    fn render<'a>(&'a mut self, pipeline: &'a Pipeline, image: ImageBuf) -> spektrafilm_core::exposure_placement::Rendering<'a, ImageBuf> {
+        Box::pin(async move {
+            let backend = self.0.as_ref();
+            if backend.is_gpu() {
+                let (mapped_tx, mapped_rx) = futures_channel::oneshot::channel();
+                let on_mapped = Box::new(move || {
+                    let _ = mapped_tx.send(());
+                });
+                if let Some(pending) = pipeline.submit_resident(&image, None, backend, ChainOutput::Scan, on_mapped) {
+                    mapped_rx.await.map_err(|_| "GPU readback was cancelled".to_string())?;
+                    if let ChainResult::Scan(output) = pipeline.finish_submitted(pending, backend) {
+                        return Ok(output);
+                    }
+                    return Err("The GPU gave no scan".into());
+                }
+            }
+            Ok(pipeline.process(image, &CpuBackend))
+        })
+    }
+}
+
+/// A camera-brightness reference: linear sRGB pixels, at most 512 px.
+#[wasm_bindgen]
+pub struct Reference {
+    pixels: Vec<f32>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[wasm_bindgen]
+impl Reference {
+    /// The pixels, once (they move out).
+    #[wasm_bindgen(js_name = takePixels)]
+    pub fn take_pixels(&mut self) -> Vec<f32> {
+        std::mem::take(&mut self.pixels)
+    }
+}
+
+/// The reference for Match camera brightness from a RAW's `bytes`: its
+/// embedded camera preview (`spektrafilm_io::brightness`), for a
+/// photograph of `width` × `height` as decoded and oriented. Fails with the
+/// note to show; one starting `UNUSABLE: ` holds for the photograph.
+#[wasm_bindgen(js_name = cameraReference)]
+pub fn camera_reference(bytes: &[u8], width: u32, height: u32) -> Result<Reference, JsError> {
+    use spektrafilm_io::brightness;
+    match brightness::camera_preview(bytes, (width, height)).and_then(brightness::linear) {
+        Ok(image) => Ok(Reference { pixels: image.data, width: image.width, height: image.height }),
+        Err(e) => {
+            let (note, photograph) = brightness::failure(&e);
+            Err(JsError::new(&if photograph { format!("UNUSABLE: {note}") } else { note }))
+        }
+    }
+}
+
+/// The note for a failed [`Engine::place_exposure`] reason, and whether it
+/// holds for the photograph (`"photograph"`) or until the next edit
+/// (`"edit"`).
+#[wasm_bindgen(js_name = brightnessFailure)]
+pub fn brightness_failure(reason: &str) -> Vec<String> {
+    let (note, photograph) = spektrafilm_io::brightness::failure_reason(reason);
+    vec![note, if photograph { "photograph" } else { "edit" }.into()]
+}
+
 
 /// The size an image of `width` × `height` is kept at, within `max_dim` on
 /// its longer side and `max_pixels` in all (0: no limit): the longer side the
