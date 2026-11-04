@@ -83,6 +83,12 @@ pub fn register_data(path: &str, bytes: Vec<u8>) {
 /// The stock catalog of these profiles, as the native helper's `catalog`
 /// gives it (without its protocol fields), as JSON. Their profiles must be
 /// registered; `web/make-catalog.mjs` runs it at build time.
+/// Measurement only: fold an exposure-only Prep into the GPU front pass.
+#[wasm_bindgen(js_name = setFoldPrepExposure)]
+pub fn set_fold_prep_exposure(on: bool) {
+    spektrafilm_core::prep::set_fold_exposure(on);
+}
+
 #[wasm_bindgen]
 pub fn catalog(stocks: Vec<String>) -> Result<String, JsError> {
     let catalog = spektrafilm_core::catalog::catalog(Path::new(DATA_DIR), stocks).map_err(|e| JsError::new(&e.to_string()))?;

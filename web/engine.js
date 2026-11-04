@@ -11,6 +11,8 @@ export function client(wasm, kind) {
     backend: () => engine.backend(),
     setDiffusionGridBudget: (bytes) => engine.setDiffusionGridBudget(bytes),
     releaseRenderBuffers: () => engine.releaseRenderBuffers(),
+    // Measurement only (web/checks/preview-bench.js).
+    setFoldPrepExposure: (on) => wasm.setFoldPrepExposure(on),
     // An OffscreenCanvas the WebGPU engine presents renders on.
     setCanvas: (canvas) => engine.setCanvas(canvas),
     // Where that canvas shows the photograph, drawn again at once without

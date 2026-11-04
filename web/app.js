@@ -838,7 +838,8 @@ let limits = null;       // the WebGPU engine's: { side, pixels }
 // and exports that copy: a full-size export there doesn't fit, so the desktop
 // exports every pixel. The same budget as renderSide's, so its largest frame
 // is this copy at 1:1.
-const keptPixels = () => (matchMedia("(pointer: coarse)").matches ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
+const keptPixels = () => query.has("kept") ? Number(query.get("kept")) // measurement only: the working copy's size
+  : (matchMedia("(pointer: coarse)").matches ? Math.min(MAX_PIXELS, limits?.pixels ?? MAX_PIXELS) : 0);
 // The engine's photograph from `bytes`, a RAW developed at `wb` (the edit's
 // io.raw_white_balance). Only through `source` (below). A decode made in
 // web/decoder.js is dropped instead of kept when `stale()` says by then it
@@ -2190,6 +2191,19 @@ globalThis.negs = {
   balance: (film, paper, params) => host.call("balancePrint", film, paper, params),
   // The edit rendered at `maxDim`, read back as bytes; the page shows nothing.
   read: (maxDim) => host.call("render", state.film, state.paper, params(), maxDim, false, false),
+  // Measurement only: one frame at `maxDim`, presented as the editor's are,
+  // with `patch` merged over the edit's params; the whole frame's time too.
+  async frame(maxDim, interactive = false, patch = {}, film = state.film, paper = state.paper) {
+    const merged = structuredClone(state.params);
+    const merge = (into, from) => { for (const [k, v] of Object.entries(from)) v && typeof v === "object" && !Array.isArray(v) && into[k] && typeof into[k] === "object" ? merge(into[k], v) : (into[k] = v); };
+    merge(merged, patch);
+    const t = performance.now();
+    const r = await host.call("render", film, paper, JSON.stringify({ ...merged, io: { ...merged.io, rotate_cw: 0 } }), maxDim, interactive, presenting);
+    await draw(r);
+    return { wallMs: performance.now() - t, elapsedMs: r.elapsedMs, width: r.width, height: r.height, stages: r.stages, presented: r.presented, backend: r.backend, memoryMiB: r.memoryMiB };
+  },
+  keptPixels: () => keptPixels(),
+  foldPrepExposure: (on) => host.call("setFoldPrepExposure", on),
   // Opens a photograph from a URL as the Open button would.
   // (An array buffer: Chrome fails blob() of a large response in a test profile.)
   open: async (url) => openFile(new File([await (await fetch(url)).arrayBuffer()], url.split("/").at(-1))),

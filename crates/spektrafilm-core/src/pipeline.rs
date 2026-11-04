@@ -1154,7 +1154,8 @@ impl Pipeline {
         // caller's, so they have no key.
         let decoded;
         let prepared;
-        let prep_active = !self.params.prep.is_identity();
+        let fold_prep_exposure = crate::prep::fold_exposure() && self.params.prep.is_exposure_only();
+        let prep_active = !self.params.prep.is_identity() && !fold_prep_exposure;
         // Prep changes the upload, including through its whole-frame spatial base.
         // A source-image cache key cannot identify these newly prepared pixels.
         let image_key = image_key.filter(|_| !self.params.io.input_cctf_decoding && !prep_active);
@@ -1193,6 +1194,9 @@ impl Pipeline {
             }
             if self.params.camera.exposure_compensation_ev != 0.0 {
                 exposure_scale_f64 *= 2.0f64.powf(self.params.camera.exposure_compensation_ev as f64);
+            }
+            if fold_prep_exposure {
+                exposure_scale_f64 *= (self.params.prep.exposure_ev as f64).exp2();
             }
         }
         // B&W/slide filming exposure correction is a linear scale on the raw

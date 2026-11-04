@@ -70,9 +70,26 @@ impl TryFrom<UncheckedPrepParams> for PrepParams {
     }
 }
 
+/// Measurement only (ticket: web Prep port, point 6): when on, a GPU render
+/// whose Prep is exposure alone folds that gain into the front pass's
+/// exposure scale instead of preparing the frame on the CPU. Off by default:
+/// it moves those renders by float rounding.
+static FOLD_EXPOSURE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_fold_exposure(on: bool) {
+    FOLD_EXPOSURE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+pub fn fold_exposure() -> bool {
+    FOLD_EXPOSURE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 impl PrepParams {
     pub fn is_identity(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// Only the exposure differs from neutral.
+    pub fn is_exposure_only(&self) -> bool {
+        self.exposure_ev != 0.0 && (PrepParams { exposure_ev: 0.0, ..*self }).is_identity()
     }
 
     pub fn validate(&self) -> Result<(), String> {
