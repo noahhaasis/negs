@@ -398,7 +398,8 @@ final class PhotographView: NSView {
             pushCursor(.closedHand)
         case .pickSmall, .pickLarge:
             guard let unit = unitPoint(at: point) else { return }
-            // As in RPP, a pick's mouse-down also clears the region.
+            // A pick's mouse-down also clears the region, so the pick alone
+            // describes the tone and 3×3/7×7 mean what they say.
             clearSelection()
             drag = .pick(pick: start == .pickSmall ? .small(unit) : .large(unit), start: point, moved: false)
             pushCursor(.crosshair)
