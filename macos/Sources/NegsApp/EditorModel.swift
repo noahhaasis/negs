@@ -550,8 +550,11 @@ import UniformTypeIdentifiers
     func chooseImageSize(_ mode: ImageSize.Mode) {
         switch mode {
         case .original:
+            guard imageSizeMode != .original else { return }
             var next = state; next.params[ImageSize.targetPath] = .null
             apply(next, action: "Change Image Size")
+            // Back to the source's own pixels: fit them in the view again.
+            zoom(fit: true)
         case .longestSide:
             guard imageSizeMode != .longestSide else { return }
             // Look at the resized result at one image pixel per screen pixel.
@@ -686,7 +689,9 @@ import UniformTypeIdentifiers
         }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()
-        zoom(fit: session?.fitImage ?? true)
+        // A session brings its own zoom; otherwise keep the setting the
+        // previous photograph was viewed at (fit or 1:1).
+        zoom(fit: session?.fitImage ?? fitImage)
         recentFiles.removeAll { $0 == url }; recentFiles.insert(url, at: 0)
         recentFiles = Array(recentFiles.prefix(10)); saveRecents()
         // A restore at launch may still be undone; `start` notes it.

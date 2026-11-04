@@ -16,6 +16,8 @@ struct PreviewCanvas: NSViewRepresentable {
     let zoomCommand: UUID
     let fit: Bool
     var scale: CanvasScale?
+    /// Called when the user changes between fit and a zoomed view.
+    var onFitChanged: ((Bool) -> Void)? = nil
 
     func makeNSView(context: Context) -> ImageScrollView {
         let scroll = ImageScrollView()
@@ -26,12 +28,14 @@ struct PreviewCanvas: NSViewRepresentable {
         scroll.allowsMagnification = true; scroll.minMagnification = 0.005; scroll.maxMagnification = 16
         scroll.documentView = PhotographView()
         scroll.setAccessibilityLabel("Photograph preview")
-        scroll.setAccessibilityHelp("Pinch to zoom, scroll or drag to pan, double-click to fit.")
+        scroll.setAccessibilityHelp("Pinch to zoom, scroll or drag to pan, double-click to fit or show actual size.")
+        scroll.onFitChanged = onFitChanged
         return scroll
     }
 
     func updateNSView(_ scroll: ImageScrollView, context: Context) {
         scale?.view = scroll
+        scroll.onFitChanged = onFitChanged
         let photo = scroll.documentView as! PhotographView
         let cropped = crop.size(of: size)
         let displaySize = rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
@@ -85,6 +89,7 @@ final class CenteringClipView: NSClipView {
 final class ImageScrollView: NSScrollView {
     var lastCommand: UUID?
     var fitting = true
+    var onFitChanged: ((Bool) -> Void)?
     private var lastViewport = CGSize.zero
     override func layout() {
         super.layout()
@@ -119,10 +124,17 @@ final class ImageScrollView: NSScrollView {
         contentView.scroll(to: CGPoint(x: origin.x + (new.width - old.width) / 2, y: origin.y + (new.height - old.height) / 2))
         reflectScrolledClipView(contentView)
     }
-    override func magnify(with event: NSEvent) { fitting = false; super.magnify(with: event) }
+    /// Records a zoom the user made by hand, so changing photographs keeps
+    /// the same fit or 1:1 setting.
+    func setFitting(_ value: Bool) {
+        guard fitting != value else { return }
+        fitting = value
+        onFitChanged?(value)
+    }
+    override func magnify(with event: NSEvent) { setFitting(false); super.magnify(with: event) }
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.option) {
-            fitting = false
+            setFitting(false)
             let center = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
             setMagnification(min(max(magnification * exp(-event.scrollingDeltaY * 0.01), minMagnification), maxMagnification), centeredAt: center)
         } else { super.scrollWheel(with: event) }
@@ -196,7 +208,9 @@ final class PhotographView: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2, let scroll = enclosingScrollView as? ImageScrollView {
-            scroll.fitting = true; scroll.applyZoom()
+            // Double-click toggles: fit the whole photograph, or show it at 1:1.
+            scroll.setFitting(!scroll.fitting)
+            scroll.applyZoom()
         } else if !grabbing { grabbing = true; NSCursor.closedHand.push() }
     }
     override func mouseDragged(with event: NSEvent) {
