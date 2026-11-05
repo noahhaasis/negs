@@ -238,8 +238,9 @@ On the canvas:
 - a placed pin is selected. With a pin selected, the scroll wheel sizes its
   circle, and the tone is measured again when the wheel stops. A new pin starts
   at the size last used.
-- click a pin's chip to select it, click empty photograph to deselect, and drag
-  a chip to measure another spot. ⌫ deletes the selected pin and Esc deselects.
+- a pin is a small dot on the exact spot, with its zone's number beside it, so
+  its circle can shrink well below the label. Click the dot or number to select
+  it, click empty photograph to deselect, and drag it to measure another spot. ⌫ deletes the selected pin and Esc deselects.
 - with nothing selected, plain drag and scroll pan, including inside a pin's
   circle. Double-click fits or shows 1:1. Crop mode has its own gestures.
 
@@ -247,7 +248,7 @@ Placing, moving, resizing and deleting are each one undo step.
 
 Pins and their lines are drawn by `PinOverlayView`, a subview of the canvas's
 scroll view above the document. The photograph's zoom, rotation and crop don't
-touch it, so a chip is the same size and upright everywhere. It redraws on every
+touch it, so a marker is the same size and upright everywhere. It redraws on every
 change of the clip view's bounds. A pin whose spot is outside the crop is hidden.
 
 `post.tone_anchors` lives in Post, the finishing stage, which already tabulates

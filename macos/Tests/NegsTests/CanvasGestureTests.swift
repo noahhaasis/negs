@@ -155,7 +155,7 @@ extension CanvasGestureTests {
         XCTAssertEqual(try XCTUnwrap(scroll.overlay.links[0]).to.x, before.x - 40, accuracy: 0.5, "It follows the app's own clip view")
     }
 
-    func testAChipIs24PointsAtAnyZoomRotationAndBorder() throws {
+    func testAMarkerKeepsItsSizeAtAnyZoomRotationAndBorder() throws {
         for (rotation, frame) in [(0, nil), (1, nil), (0, CGSize(width: 800, height: 600))] as [(Int, CGSize?)] {
             let (scroll, view) = makeCanvas(rotation: rotation, frame: frame)
             scroll.showPins([marker()], dragged: nil)
@@ -163,10 +163,44 @@ extension CanvasGestureTests {
                 scroll.magnification = zoom
                 view.layout()
                 let chip = try XCTUnwrap(scroll.overlay.chipLayer(0))
-                XCTAssertEqual(chip.bounds.width, ZoneGeometry.chipDiameter + 3)
+                XCTAssertEqual(chip.bounds.width, ZoneGeometry.markerDiameter + 3)
                 XCTAssertEqual(chip.affineTransform(), .identity, "Upright, untouched by the photograph")
             }
         }
+    }
+
+    /// The marker is smaller than the old chip, so a small circle still shows.
+    func testACircleSmallerThanTheOldChipStillShows() {
+        let (scroll, _) = makeCanvas()
+        scroll.showPins([marker(radius: 0.03)], dragged: nil) // 9 points at 1:1
+        XCTAssertEqual(scroll.overlay.drawnCircles, 1)
+        scroll.showPins([marker(radius: 0)], dragged: nil)
+        XCTAssertEqual(scroll.overlay.drawnCircles, 0)
+    }
+
+    /// The numeral sits beside the marker, off the spot it measures, and can be
+    /// clicked like the marker.
+    func testTheLabelSitsBesideTheMarker() throws {
+        let (scroll, view) = makeCanvas()
+        let unit = CGPoint(x: 0.5, y: 0.5)
+        scroll.showPins([marker(at: unit)], dragged: nil)
+        let centre = overlayPoint(unit, scroll, view)
+        let label = try XCTUnwrap(scroll.overlay.labelFrame(0))
+        XCTAssertGreaterThan(label.minX, centre.x + ZoneGeometry.markerDiameter / 2)
+        XCTAssertEqual(label.midY, centre.y, accuracy: 0.5)
+        XCTAssertEqual(scroll.overlay.pin(at: CGPoint(x: label.midX, y: label.midY)), 0)
+        XCTAssertEqual(scroll.overlay.pin(at: centre), 0)
+    }
+
+    /// Near the canvas's right edge the label moves to the marker's left.
+    func testTheLabelStaysOnTheCanvas() throws {
+        let (scroll, view) = makeCanvas(viewport: 410)
+        let unit = CGPoint(x: 0.99, y: 0.5)
+        scroll.showPins([marker(at: unit)], dragged: nil)
+        let centre = overlayPoint(unit, scroll, view)
+        XCTAssertLessThan(centre.x, scroll.overlay.bounds.width)
+        let label = try XCTUnwrap(scroll.overlay.labelFrame(0))
+        XCTAssertLessThan(label.maxX, centre.x)
     }
 
     func testAChipSitsWhereItsToneWasMeasured() throws {
@@ -227,7 +261,7 @@ extension CanvasGestureTests {
         scroll.showPins([marker(at: unit, radius: 0.4)], dragged: nil)
         let point = overlayPoint(unit, scroll, view)
         XCTAssertEqual(scroll.overlay.pin(at: point), 0)
-        XCTAssertNil(scroll.overlay.pin(at: CGPoint(x: point.x + 30, y: point.y)))
+        XCTAssertNil(scroll.overlay.pin(at: CGPoint(x: point.x, y: point.y + 30)))
     }
 
     func testIgnoredLinksAreRed() {

@@ -34,7 +34,7 @@ Success is that someone can drag zone 0 onto a shadow and watch the black point 
 
 ### Reading the pins
 
-Pins must stay readable on any part of any photograph. Each pin is a chip about 24 points across on screen at any zoom, upright at any rotation, filled with its zone's grey and labelled with its zone's numeral, with a light edge and a dark outer outline. Lines and circles have the same light-on-dark casing. The selected pin's edge, line and circle use the accent colour.
+Pins must stay readable on any part of any photograph. Each pin is a small dot on the exact spot, with its zone's number in a pill beside it, so the circle can shrink below the label. Both are the same size on screen at any zoom, upright at any rotation, and filled with the zone's grey with a light edge and a dark outer outline. Lines and circles have the same light-on-dark casing. The selected pin's edge, line and circle use the accent colour.
 
 Lines run from the tile to the pin, follow pan and zoom, and clip at the canvas edge when the pin is out of view.
 
@@ -106,5 +106,4 @@ These were not specified by the user:
 - The canvas's 680-point minimum width includes the panel.
 - The panel and pin gestures are unavailable while cropping or showing the Original.
 - A new pin starts at the size last used, or a radius of 2% of the shorter side the first time.
-- Pins are 24 points, up from 18, because 18 was reported as hard to read.
 - Pins saved by earlier test builds with a "holding" target take the zone that target falls in.
