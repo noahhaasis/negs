@@ -151,6 +151,19 @@ final class WindowFitTests: XCTestCase {
         XCTAssertEqual(ExportPixels.size(photograph: photo, rotated: false, withBorder: nil, fit: ExportSize(edge: .long, pixels: 9000)), photo)
     }
 
+    func testTheBorderCantBeEditedWhileLocked() {
+        let model = EditorModel()
+        let saved = UserDefaults.standard.object(forKey: "lockWindowToPhotograph")
+        defer {
+            model.shutdown()
+            UserDefaults.standard.set(saved, forKey: "lockWindowToPhotograph")
+        }
+        model.windowLockedToPhotograph = false
+        XCTAssertTrue(model.canEditBorder)
+        model.windowLockedToPhotograph = true
+        XCTAssertFalse(model.canEditBorder)
+    }
+
     func testPTogglesTheLockOutsideTextFields() {
         let p: UInt16 = 35
         XCTAssertTrue(EditorWindowController.togglesWindowLock(keyCode: p, modifiers: [], firstResponder: nil))

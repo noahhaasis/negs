@@ -672,6 +672,8 @@ import UniformTypeIdentifiers
         didSet { UserDefaults.standard.set(windowLockedToPhotograph, forKey: "lockWindowToPhotograph") }
     }
     var canZoom: Bool { source != nil && !cropping && !windowLockedToPhotograph }
+    /// The border's controls: locked to the export size, its frame is settled.
+    var canEditBorder: Bool { !windowLockedToPhotograph }
 
     /// The pixels an export would write, including the border on the canvas.
     var exportPixels: CGSize {
