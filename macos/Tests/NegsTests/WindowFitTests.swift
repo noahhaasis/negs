@@ -8,21 +8,24 @@ final class WindowFitTests: XCTestCase {
 
     private func fit(_ canvas: CGSize) -> CGSize { WindowFit.contentSize(canvas: canvas, chrome: chrome, limit: limit) }
 
+    private let mat = WindowFit.padding * 2
+
+    /// The export keeps its size, with the mat around it.
     func testAnExportThatFitsIsShownAtItsSize() {
-        XCTAssertEqual(fit(CGSize(width: 1000, height: 700)), CGSize(width: 1400, height: 900))
+        XCTAssertEqual(fit(CGSize(width: 1000, height: 700)), CGSize(width: 1400 + mat, height: 900 + mat))
     }
 
     /// Too big for the screen, it scales down in the same shape.
     func testAnExportTooBigForTheScreenKeepsItsShape() {
         let size = fit(CGSize(width: 2457, height: 1775))
         XCTAssertEqual(size.height, limit.height, accuracy: 0.5)
-        XCTAssertEqual((size.width - chrome.width) / (size.height - chrome.height), 2457.0 / 1775, accuracy: 0.001)
+        XCTAssertEqual((size.width - chrome.width - mat) / (size.height - chrome.height - mat), 2457.0 / 1775, accuracy: 0.001)
     }
 
     func testASmallExportStillGetsAUsableCanvas() {
         let size = fit(CGSize(width: 32, height: 24))
-        XCTAssertEqual(size.height - chrome.height, WindowFit.minimumCanvas, accuracy: 0.5)
-        XCTAssertEqual((size.width - chrome.width) / (size.height - chrome.height), 32.0 / 24, accuracy: 0.001)
+        XCTAssertEqual(size.height - chrome.height - mat, WindowFit.minimumCanvas, accuracy: 0.5)
+        XCTAssertEqual((size.width - chrome.width - mat) / (size.height - chrome.height - mat), 32.0 / 24, accuracy: 0.001)
     }
 
     /// Two exports of one size give one window, so changing photographs doesn't move it.
@@ -63,11 +66,13 @@ final class WindowFitTests: XCTestCase {
     func testLockedFitFillsTheCanvasAboveOneToOne() {
         let scroll = canvas(viewport: 1000, photo: CGSize(width: 100, height: 100))
         scroll.locksToFit = true
-        XCTAssertEqual(scroll.magnification, 10, accuracy: 0.01)
+        // The canvas less the mat on each side.
+        let filled = (1000 - WindowFit.padding * 2) / 100
+        XCTAssertEqual(scroll.magnification, filled, accuracy: 0.01)
         scroll.zoom(by: 2)
-        XCTAssertEqual(scroll.magnification, 10, accuracy: 0.01)
+        XCTAssertEqual(scroll.magnification, filled, accuracy: 0.01)
         scroll.toggleZoom(about: .zero)
-        XCTAssertEqual(scroll.magnification, 10, accuracy: 0.01)
+        XCTAssertEqual(scroll.magnification, filled, accuracy: 0.01)
         XCTAssertTrue(scroll.fitting)
     }
 

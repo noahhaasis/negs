@@ -6,14 +6,17 @@ import CoreGraphics
 enum WindowFit {
     /// A smaller export still gets a usable canvas, on its shorter side.
     static let minimumCanvas: CGFloat = 240
+    /// The white mat around the export, on each side.
+    static let padding: CGFloat = 32
 
     /// The export at its size, scaled down in the same shape to stay on `limit`.
     static func contentSize(canvas: CGSize, chrome: CGSize, limit: CGSize) -> CGSize {
         var (w, h) = (max(canvas.width, 1), max(canvas.height, 1))
         let short = min(w, h)
         if short < minimumCanvas { (w, h) = (w * minimumCanvas / short, h * minimumCanvas / short) }
-        let scale = min(1, (limit.width - chrome.width) / w, (limit.height - chrome.height) / h)
-        return CGSize(width: w * scale + chrome.width, height: h * scale + chrome.height)
+        let mat = padding * 2
+        let scale = min(1, (limit.width - chrome.width - mat) / w, (limit.height - chrome.height - mat) / h)
+        return CGSize(width: w * scale + mat + chrome.width, height: h * scale + mat + chrome.height)
     }
 }
 

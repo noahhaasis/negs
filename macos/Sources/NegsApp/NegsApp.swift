@@ -244,7 +244,7 @@ struct CanvasArea: View {
 
     var body: some View {
         ZStack {
-            // White while locked to the export size; the saved colour stays saved.
+            // The white mat while locked to the export size; the saved colour stays saved.
             model.windowLockedToPhotograph ? Color.white : ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
             if let session = model.cropSession, let image = model.image {
                 CropEditor(session: session, image: image)

@@ -196,7 +196,9 @@ final class ImageScrollView: NSScrollView {
         // 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
         // photograph, but never enlarges it past 1:1.
         let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
-        let fit = min(contentSize.width / size.width, contentSize.height / size.height)
+        // Locked to the export size, a white mat runs around it.
+        let mat = locksToFit ? WindowFit.padding * 2 : 0
+        let fit = min(max(contentSize.width - mat, 1) / size.width, max(contentSize.height - mat, 1) / size.height)
         let amount = locksToFit ? fit : fitting ? min(fit, oneToOne) : oneToOne
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
     }

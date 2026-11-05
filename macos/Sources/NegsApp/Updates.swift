@@ -163,7 +163,7 @@ struct UpdateSettings: View {
             Section("Viewer") {
                 Toggle("Lock the window to the export size (P)", isOn: Binding(
                     get: { model.windowLockedToPhotograph }, set: { model.windowLockedToPhotograph = $0 }))
-                Text("Shows the export one pixel to a screen pixel, border included, or smaller if it won't fit the screen. The window can't be resized, zoomed or panned, and the background is white.")
+                Text("Shows the export one pixel to a screen pixel, border included, or smaller if it won't fit the screen. The window can't be resized, zoomed or panned, on a white mat.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Toggle("Custom background", isOn: $customBackground)
