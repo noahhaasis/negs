@@ -159,6 +159,16 @@ Files: [`linux/appimage/`](../linux/appimage/).
 - Runtime: the static type-2 runtime `20251108` (sha256 pinned). It mounts with
   `fusermount3` or `fusermount` and doesn't need libfuse2. Without FUSE, run
   `./Negs-*.AppImage --appimage-extract-and-run`.
+- **Display backend.** Unless `GDK_BACKEND` is already set, AppRun selects
+  `x11,wayland` when `DISPLAY` is nonempty. This prefers X11/XWayland and
+  avoids the reported 0.13.0 crash in bundled GTK on some Wayland desktops.
+  GTK can still try Wayland if it cannot open the X display; this does not
+  recover from a crash after a backend has opened. Without `DISPLAY`, GTK's
+  default selection remains in effect. Use `GDK_BACKEND=wayland ./Negs-*.AppImage`
+  to opt into native Wayland. The original backend environment is restored for
+  host programs launched by Negs. This is a compatibility workaround, not a
+  confirmed fix to the underlying GTK bug; the report has no symbolized stack.
+  XWayland presentation and scaling can differ from native Wayland.
 
 Build and check locally (needs Docker):
 

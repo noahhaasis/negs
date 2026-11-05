@@ -158,6 +158,8 @@ chmod +x Negs-0.13.0-x86_64.AppImage
 
 Download [`Negs-0.13.0-x86_64.AppImage`](https://github.com/noahhaasis/negs/releases/download/v0.13.0/Negs-0.13.0-x86_64.AppImage). If your system has no FUSE, run it with `--appimage-extract-and-run`. To update, download the newer AppImage. Settings and presets are kept in `~/.config/negs` either way.
 
+If 0.13.0 crashes on a Wayland desktop, try `GDK_BACKEND=x11 ./Negs-0.13.0-x86_64.AppImage` (requires XWayland). The next release prefers X11/XWayland automatically when available; native Wayland remains available with `GDK_BACKEND=wayland`.
+
 The Flatpak keeps its settings and presets separately, in `~/.var/app/io.github.noahhaasis.negs`. Export presets from one version and import them in the other to move them. How both are built and tested: [Linux Flatpak and AppImage](docs/linux-distribution.md).
 
 #### Arch and Omarchy

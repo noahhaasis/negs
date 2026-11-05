@@ -149,6 +149,7 @@ const BUNDLE_VARIABLES: &[&str] = &[
     "GIO_EXTRA_MODULES",
     "GSETTINGS_SCHEMA_DIR",
     "LD_LIBRARY_PATH",
+    "GDK_BACKEND",
 ];
 
 /// A launch context for host programs that restores the launcher's saved

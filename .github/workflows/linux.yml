@@ -118,6 +118,8 @@ jobs:
       RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Test AppImage launcher backend selection
+        run: python3 -I -m unittest discover -s linux -p 'test_appimage_launcher.py'
       - name: Archive this commit
         run: python3 linux/release.py prepare --out target/appimage/release
       - uses: actions/cache@v4

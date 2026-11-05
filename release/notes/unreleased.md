@@ -1,5 +1,8 @@
 # Negs (unreleased)
 
+- The Linux AppImage now prefers X11/XWayland when available to avoid a
+  reported GTK Wayland crash. Explicit `GDK_BACKEND` choices are respected;
+  Wayland-only desktops continue to use Wayland.
 - Linux's Film grid now supports search, Return to select and Escape to clear.
   Large-photo edits show a quick canvas-size preview before settling; brightness
   matching holds the previous frame until the exposure is resolved. Quick frames
