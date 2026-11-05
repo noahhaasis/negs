@@ -148,6 +148,15 @@ struct UpdateSettings: View {
                     Text("Install a release build to receive updates.").foregroundStyle(.secondary)
                 }
             }
+            Section("Inspector") {
+                Picker("Controls", selection: Binding(
+                    get: { model.inspectorMode }, set: { model.inspectorMode = $0 })) {
+                    ForEach(InspectorMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text("Simple shows the everyday controls on one page. Anything set in Advanced still applies to the photograph.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Section("Previews") {
                 Toggle("Film, paper and preset previews", isOn: Binding(
                     get: { model.previews.enabled }, set: { model.setPreviews($0) }))

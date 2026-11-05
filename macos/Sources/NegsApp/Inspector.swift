@@ -24,6 +24,14 @@ enum InspectorSection: String, CaseIterable {
     case camera = "Camera", film = "Film", print = "Print", scan = "Scan & Color"
 }
 
+/// How much of the inspector shows: everything on its tabs, or the everyday
+/// controls on one page. Only the controls change, never the photograph.
+enum InspectorMode: String, CaseIterable {
+    case simple, advanced
+
+    var title: String { rawValue.capitalized }
+}
+
 /// The inspector's workflow steps, in the order the light takes them: how the
 /// camera saw the photograph, the film and print that carry it, the scanner
 /// that reads it, the finishing edits, and the export.
@@ -55,6 +63,15 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 /// film; the newest controls call it Midtone Detail.
 let scanDetailControls: [Adjustment] = [
     .slider("Midtone Detail", "prep.midtone_detail", -100...100, 1)
+]
+
+/// Tone lives in Finish, and on Simple's page.
+let toneControls: [Adjustment] = [
+    .slider("Brightness", "post.brightness", -100...100, 1),
+    .slider("Contrast", "post.contrast", -100...100, 1),
+    .slider("Whites", "post.whites", -100...100, 1),
+    .slider("Blacks", "post.blacks", -100...100, 1),
+    .slider("Saturation", "post.saturation", -100...100, 1)
 ]
 
 struct AdjustmentGroup: Identifiable {
@@ -172,6 +189,15 @@ let adjustmentGroups: [AdjustmentGroup] = [
         .choice("Spectral upsampling", "settings.rgb_to_raw_method", ["hanatos2025", "arctic2026beta04", "mallett2019"])
     ])
 ]
+
+/// Simple's sliders, found by path in Advanced's lists so the two can't disagree
+/// about a range.
+private func adjustments(_ paths: String...) -> [Adjustment] {
+    let all = adjustmentGroups.flatMap(\.controls) + scanDetailControls
+    return paths.compactMap { path in all.first { $0.id == path } }
+}
+let simplePrintControls = adjustments("enlarger.print_exposure")
+let simpleDetailControls = adjustments("prep.midtone_detail", "scanner.unsharp_mask.0", "scanner.unsharp_mask.1")
 
 struct AdjustmentControl: View {
     let model: EditorModel
@@ -638,31 +664,36 @@ struct AdjustmentInspector: View {
     /// The selected tab lives on the model, so changing photos or switching
     /// to Presets keeps it for this session without carrying it into the next.
     private var tab: InspectorTab { model.inspectorTab }
+    private var simple: Bool { model.inspectorMode == .simple }
 
     var body: some View {
         // The histogram and workflow tabs stay put above the tab's scrolling sections.
         VStack(spacing: 0) {
             VStack(spacing: 10) {
                 HistogramView(histogram: model.histogram).frame(height: 88)
-                InspectorTabBar(model: model)
+                if !simple { InspectorTabBar(model: model) }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
             Divider()
             Form {
-                switch tab {
-                case .camera: cameraTab
-                case .film: filmTab
-                case .print: printTab
-                case .scan: scanTab
-                case .finish: finishTab
-                case .export: exportTab
+                if simple {
+                    simplePage
+                } else {
+                    switch tab {
+                    case .camera: cameraTab
+                    case .film: filmTab
+                    case .print: printTab
+                    case .scan: scanTab
+                    case .finish: finishTab
+                    case .export: exportTab
+                    }
                 }
             }
             .formStyle(.grouped)
             // A fresh Form per tab starts at the top rather than inheriting
             // the last tab's scroll offset.
-            .id(tab)
+            .id(simple ? "simple" : tab.rawValue)
             footer
         }
         .disabled(!model.hasCatalog)
@@ -677,6 +708,36 @@ struct AdjustmentInspector: View {
         .help("Restore defaults on every tab while keeping the film, paper, rotation, crop, border, and Image Size. You can undo this.")
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
+    }
+
+    // MARK: Simple
+
+    /// The everyday controls on one page, from the film to the export. Whatever
+    /// Advanced has set still applies.
+    @ViewBuilder private var simplePage: some View {
+        let scanning = model.value("io.scan_film").bool
+        Section("Film & Paper") {
+            filmPicker
+            Group {
+                paperPicker
+                ForEach(simplePrintControls) { control($0) }
+            }
+            .opacity(scanning ? 0.45 : 1)
+            .disabled(scanning)
+            if scanning {
+                Text("This film is scanned directly, so there’s no print to adjust.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        Section("Tone") {
+            ForEach(toneControls) { control($0) }
+        }
+        Section("Detail") {
+            ForEach(simpleDetailControls) { control($0) }
+        }
+        ImageSizeSection(model: model)
+        fileSection
+        exportButton
     }
 
     // MARK: Camera
@@ -817,11 +878,7 @@ struct AdjustmentInspector: View {
     /// film produced; detail the paper clipped comes back only in Camera.
     @ViewBuilder private var finishTab: some View {
         Section {
-            control(.slider("Brightness", "post.brightness", -100...100, 1))
-            control(.slider("Contrast", "post.contrast", -100...100, 1))
-            control(.slider("Whites", "post.whites", -100...100, 1))
-            control(.slider("Blacks", "post.blacks", -100...100, 1))
-            control(.slider("Saturation", "post.saturation", -100...100, 1))
+            ForEach(toneControls) { control($0) }
         } header: { Text("Tone") } footer: {
             Text("Adjusts the finished scan. To recover a clipped highlight, use Exposure in Camera.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -852,36 +909,7 @@ struct AdjustmentInspector: View {
 
     @ViewBuilder private var exportTab: some View {
         ImageSizeSection(model: model)
-        Section("File") {
-            Picker("Format", selection: Binding(get: { model.exportFormat }, set: { model.exportFormat = $0 })) {
-                ForEach(OutputFormat.allCases, id: \.rawValue) { format in
-                    Text(format.title).tag(format)
-                }
-            }
-            .help("The file type, and the extension the save panel offers.")
-            Picker("Bit depth", selection: Binding(get: { model.exportBitDepth }, set: { model.exportBitDepth = $0 })) {
-                Text("8-bit").tag(8)
-                Text("16-bit").tag(16)
-            }
-            .disabled(model.exportFormat == .jpeg)
-            .help(model.exportFormat == .jpeg ? "JPEG is 8-bit only." : "Bits per channel, for PNG and TIFF.")
-            if model.exportFormat == .jpeg {
-                LabeledContent {
-                    HStack(spacing: 8) {
-                        Slider(value: Binding(get: { Double(model.exportQuality) },
-                                              set: { model.exportQuality = Int($0.rounded()) }),
-                               in: Double(SaveSettings.qualityRange.lowerBound)...Double(SaveSettings.qualityRange.upperBound),
-                               step: 1)
-                        .frame(width: 140)
-                        Text("\(model.exportQuality)").monospacedDigit().frame(width: 28, alignment: .trailing)
-                    }
-                } label: { Text("JPEG quality") }
-            }
-            if model.exportBitDepth == 8, model.previewSpace == SaveSettings.colorSpaces[SaveSettings.prophoto] {
-                Text("ProPhoto RGB needs 16 bits; exports use Adobe RGB (1998) at 8 bits.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
+        fileSection
         Section("Output") {
             Picker("Colour space", selection: Binding(get: { model.previewSpace }, set: model.choosePreviewSpace)) {
                 ForEach(SaveSettings.colorSpaces, id: \.self) { Text($0).tag($0) }
@@ -929,6 +957,43 @@ struct AdjustmentInspector: View {
             Toggle("Use less memory for export", isOn: model.toggle("settings.serial_grain"))
                 .help("Processes grain channels one at a time. Same result, less memory, longer export.")
         }
+        exportButton
+    }
+
+    @ViewBuilder private var fileSection: some View {
+        Section("File") {
+            Picker("Format", selection: Binding(get: { model.exportFormat }, set: { model.exportFormat = $0 })) {
+                ForEach(OutputFormat.allCases, id: \.rawValue) { format in
+                    Text(format.title).tag(format)
+                }
+            }
+            .help("The file type, and the extension the save panel offers.")
+            Picker("Bit depth", selection: Binding(get: { model.exportBitDepth }, set: { model.exportBitDepth = $0 })) {
+                Text("8-bit").tag(8)
+                Text("16-bit").tag(16)
+            }
+            .disabled(model.exportFormat == .jpeg)
+            .help(model.exportFormat == .jpeg ? "JPEG is 8-bit only." : "Bits per channel, for PNG and TIFF.")
+            if model.exportFormat == .jpeg {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        Slider(value: Binding(get: { Double(model.exportQuality) },
+                                              set: { model.exportQuality = Int($0.rounded()) }),
+                               in: Double(SaveSettings.qualityRange.lowerBound)...Double(SaveSettings.qualityRange.upperBound),
+                               step: 1)
+                        .frame(width: 140)
+                        Text("\(model.exportQuality)").monospacedDigit().frame(width: 28, alignment: .trailing)
+                    }
+                } label: { Text("JPEG quality") }
+            }
+            if model.exportBitDepth == 8, model.previewSpace == SaveSettings.colorSpaces[SaveSettings.prophoto] {
+                Text("ProPhoto RGB needs 16 bits; exports use Adobe RGB (1998) at 8 bits.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var exportButton: some View {
         Section {
             Button { model.savePanel(export: true) } label: {
                 Text("Export Image…").frame(maxWidth: .infinity)

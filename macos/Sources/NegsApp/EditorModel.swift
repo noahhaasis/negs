@@ -174,6 +174,10 @@ import UniformTypeIdentifiers
     /// The inspector tab chosen in this session. Like the pane, it survives
     /// changing photos; unlike it, it isn't carried into the next launch.
     var inspectorTab = InspectorTab.camera
+    /// Settings › Inspector: every control on its tab, or the everyday ones on one page.
+    var inspectorMode = InspectorMode(rawValue: UserDefaults.standard.string(forKey: "inspectorMode") ?? "") ?? .advanced {
+        didSet { UserDefaults.standard.set(inspectorMode.rawValue, forKey: "inspectorMode") }
+    }
     /// Film format › Custom picked while the value is still a format's, so the
     /// slider stays. Reset Adjustments and a fresh photograph clear it, as they
     /// do the edits.

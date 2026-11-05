@@ -216,6 +216,14 @@ The inspector includes film/paper profiles, development times, exposure, RAW WB,
 halation, DIR couplers, lens diffusion, grain, glare, print curves, scanner, color
 management, enlarger, and output options. Default film/paper pairing and direct
 scanning follow the profile metadata. Controls and reset participate in Undo.
+
+Settings › Inspector chooses Advanced, the six workflow tabs and the default, or
+Simple, which replaces the tabs with one page: film, paper and print exposure; the
+five tone sliders; Midtone Detail and the unsharp mask; Image Size; file format and
+bit depth; and the Export button. Simple reuses Advanced's controls and ranges and
+changes only what shows, so anything set in Advanced still applies, and Reset
+Adjustments still restores it. A film scanned directly has no print, so paper and
+print exposure dim there, since Simple has no switch for scanning.
 JPEG inputs now use the same shared loader for CLI export as for preview.
 
 ## The zone system
