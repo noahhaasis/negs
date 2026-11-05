@@ -1311,6 +1311,44 @@ mod tests {
         }
     }
 
+    /// The app renders a film change at canvas size first (ticket 28): the
+    /// export-size render that follows matches one made without that step,
+    /// in the kept output and in the display buffer.
+    #[test]
+    fn a_quick_frame_before_a_film_change_leaves_its_settled_render_unchanged() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = std::env::temp_dir().join(format!("negs-quick-frame-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (input, preview) = (dir.join("input.png"), dir.join("preview.rgba"));
+        let pixels = (0..96 * 64 * 3).map(|i| ((i * 37) % 255) as spektrafilm_math::Scalar / 255.0).collect();
+        spektrafilm_io::save_image(&ImageBuf::from_data(96, 64, pixels), &input, None).unwrap();
+        let with_film = |film: &str, interactive_scale: Option<f32>| {
+            let Command::Render { mut params, .. } = render(&input, &preview, None, None, None) else { unreachable!() };
+            params.settings.serial_grain = false;
+            Command::Render {
+                input: input.clone(), source_generation: 1, film: film.into(), paper: "kodak_portra_endura".into(),
+                params, limit_preview: false, preview_path: preview.clone(), interactive_scale, crop: None,
+            }
+        };
+        let settled = |quick_first: bool| {
+            let mut session = Session::default();
+            session.handle(Request { id: 1, command: with_film("kodak_portra_400", None) }, &data).unwrap();
+            if quick_first {
+                let quick = session.handle(Request { id: 2, command: with_film("kodak_gold_200", Some(0.5)) }, &data).unwrap();
+                assert_eq!(quick["output_width"].as_u64(), Some(48));
+                assert_eq!(quick["export_resolution"].as_bool(), Some(false));
+            }
+            let response = session.handle(Request { id: 3, command: with_film("kodak_gold_200", None) }, &data).unwrap();
+            assert_eq!(response["export_resolution"].as_bool(), Some(true));
+            (session.output.unwrap().image.data, std::fs::read(&preview).unwrap())
+        };
+        let (direct, direct_display) = settled(false);
+        let (after_quick, after_quick_display) = settled(true);
+        assert!(direct == after_quick, "the settled render differs after a quick frame");
+        assert!(direct_display == after_quick_display, "the display buffer differs after a quick frame");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn image_size_renders_report_sizes_reuse_pans_and_keep_drags_within_the_source() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");

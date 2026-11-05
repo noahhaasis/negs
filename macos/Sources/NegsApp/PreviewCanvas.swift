@@ -66,7 +66,10 @@ struct PreviewCanvas: NSViewRepresentable {
 /// zoom. A render this much smaller than the photograph looks the same on screen.
 @MainActor final class CanvasScale {
     fileprivate weak var view: ImageScrollView?
+    /// Stands in for the canvas in tests, which have no window.
+    var fixed: CGFloat?
     var screenPixelsPerPhotoPixel: CGFloat? {
+        if let fixed { return fixed }
         guard let view, let window = view.window, view.magnification > 0 else { return nil }
         return view.magnification * window.backingScaleFactor
     }
