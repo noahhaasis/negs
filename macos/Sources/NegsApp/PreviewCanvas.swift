@@ -341,6 +341,15 @@ final class PhotographView: NSView {
 
     private var overlay: PinOverlayView? { (enclosingScrollView as? ImageScrollView)?.overlay }
 
+    /// Takes the keyboard focus on appearing. Nothing else claims it, and with
+    /// Keyboard Navigation on AppKit would otherwise ring a toolbar button.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        window.initialFirstResponder = self
+        if !(window.firstResponder is NSText) { window.makeFirstResponder(self) }
+    }
+
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 53:

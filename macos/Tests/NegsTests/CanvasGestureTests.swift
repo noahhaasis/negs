@@ -381,6 +381,30 @@ extension CanvasGestureTests {
         XCTAssertNil(scroll.overlay.pinCircle(at: CGPoint(x: point.x, y: point.y + 120)))
     }
 
+    /// The photograph takes the keyboard focus when it appears, so with Keyboard
+    /// Navigation on, AppKit doesn't put a focus ring on a toolbar button instead.
+    func testThePhotographTakesTheKeyboardFocus() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: true)
+        let view = PhotographView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        window.contentView = view
+        XCTAssertTrue(window.firstResponder === view)
+        XCTAssertTrue(window.initialFirstResponder === view)
+    }
+
+    /// It never takes the focus from a field being edited.
+    func testThePhotographLeavesAFieldBeingEditedAlone() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: true)
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        window.contentView = host
+        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+        host.addSubview(text)
+        XCTAssertTrue(window.makeFirstResponder(text))
+        host.addSubview(PhotographView(frame: NSRect(x: 0, y: 40, width: 100, height: 100)))
+        XCTAssertTrue(window.firstResponder === text)
+    }
+
     func testClickingEmptyPhotographDeselects() throws {
         let (scroll, view) = makeCanvas()
         var selections: [Int?] = []
