@@ -185,6 +185,12 @@ pub struct EngineClient {
     sender: Sender<Message>,
     child: Arc<Mutex<Option<u32>>>,
     stopped: Arc<AtomicBool>,
+    /// Tests only: requests whose reply hasn't run yet, and every command
+    /// in the order it went to the helper (with its `id`).
+    #[cfg(test)]
+    pub inflight: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    pub commands: Arc<Mutex<Vec<Value>>>,
 }
 
 impl EngineClient {
@@ -193,9 +199,29 @@ impl EngineClient {
         let (sender, receiver) = mpsc::channel::<Message>();
         let child = Arc::new(Mutex::new(None));
         let stopped = Arc::new(AtomicBool::new(false));
-        let worker = Worker { paths: paths.clone(), scratch: scratch.clone(), helper: None, sequence: 0, pid: child.clone() };
+        #[cfg(test)]
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let worker = Worker {
+            paths: paths.clone(),
+            scratch: scratch.clone(),
+            helper: None,
+            sequence: 0,
+            pid: child.clone(),
+            #[cfg(test)]
+            commands: commands.clone(),
+        };
         std::thread::Builder::new().name("engine".into()).spawn(move || worker.run(receiver))?;
-        Ok(Self { paths, scratch, sender, child, stopped })
+        Ok(Self {
+            paths,
+            scratch,
+            sender,
+            child,
+            stopped,
+            #[cfg(test)]
+            inflight: Arc::default(),
+            #[cfg(test)]
+            commands,
+        })
     }
 
     /// Sends `command`; `reply` runs on the worker thread with the request's
@@ -204,6 +230,20 @@ impl EngineClient {
         if self.stopped.load(Ordering::Relaxed) {
             return;
         }
+        #[cfg(test)]
+        let reply = {
+            let inflight = self.inflight.clone();
+            inflight.fetch_add(1, Ordering::SeqCst);
+            move |result| {
+                reply(result);
+                inflight.fetch_sub(1, Ordering::SeqCst);
+            }
+        };
+        #[cfg(test)]
+        if self.sender.send(Message::Request { command, timeout, reply: Box::new(reply) }).is_err() {
+            self.inflight.fetch_sub(1, Ordering::SeqCst);
+        }
+        #[cfg(not(test))]
         let _ = self.sender.send(Message::Request { command, timeout, reply: Box::new(reply) });
     }
 
@@ -236,6 +276,8 @@ struct Worker {
     helper: Option<Helper>,
     sequence: u64,
     pid: Arc<Mutex<Option<u32>>>,
+    #[cfg(test)]
+    commands: Arc<Mutex<Vec<Value>>>,
 }
 
 impl Worker {
@@ -300,9 +342,13 @@ impl Worker {
         self.sequence += 1;
         let id = self.sequence;
         command["id"] = json!(id);
+        #[cfg(test)]
+        self.commands.lock().unwrap().push(command.clone());
         let mut line = serde_json::to_vec(&command)?;
         line.push(b'\n');
         let helper = self.start()?;
+        let sent = crate::trace::enabled().then(Instant::now);
+        crate::trace::event("helper_send", || json!({"request": id, "command": command["command"]}));
         let reply = (|| -> Result<String> {
             helper.stdin.write_all(&line).map_err(|_| anyhow!(STOPPED))?;
             helper.stdin.flush().map_err(|_| anyhow!(STOPPED))?;
@@ -315,6 +361,7 @@ impl Worker {
                 ),
             }
         })();
+        crate::trace::event("helper_reply", || json!({"request": id, "command": command["command"], "ok": reply.is_ok(), "ms": sent.map(elapsed_ms)}));
         let reply = match reply {
             Ok(reply) => reply,
             Err(error) => {

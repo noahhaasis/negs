@@ -252,6 +252,48 @@ pub struct Rendered {
     pub cached: Option<(String, Frame)>,
 }
 
+/// What kind of frame the canvas shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameKind {
+    /// A render of the photograph at its preview size (export size unless limited).
+    Settled,
+    /// A canvas-size render while a slider or handle moves.
+    Drag,
+    /// The previous launch's frame from the rendered-preview cache.
+    Cached,
+}
+
+impl FrameKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            FrameKind::Settled => "settled",
+            FrameKind::Drag => "drag",
+            FrameKind::Cached => "cached",
+        }
+    }
+}
+
+/// Which render the shown image came from: the helper's request id, the
+/// edit and photograph it was asked for, and its kind. Only the timing trace
+/// (`crate::trace`) and the tests read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameTag {
+    pub request: u64,
+    pub revision: u64,
+    pub generation: u64,
+    pub kind: FrameKind,
+}
+
+/// A render request as the model sent it, for the lifecycle tests.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderRequest {
+    pub kind: FrameKind,
+    pub revision: u64,
+    pub generation: u64,
+    pub interactive_scale: Option<f64>,
+}
+
 pub struct Model {
     pub state: EditState,
     pub defaults: Value,
@@ -383,6 +425,11 @@ pub struct Model {
     /// Save or Export waiting for a pending brightness match and its preview,
     /// so they write what the inspector shows (at most 30 s).
     waiting_output: Option<(Instant, Box<dyn FnOnce(&mut Model)>)>,
+    /// The render `image` came from; None for no image.
+    pub shown_frame: Option<FrameTag>,
+    /// Every render request sent, in order (tests only).
+    #[cfg(test)]
+    pub render_log: Vec<RenderRequest>,
 }
 
 /// What the adjustments column shows.
@@ -487,6 +534,9 @@ impl Model {
             match_request: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             brightness_failure: None,
             waiting_output: None,
+            shown_frame: None,
+            #[cfg(test)]
+            render_log: vec![],
         }
     }
 
@@ -1473,6 +1523,7 @@ impl Model {
         }
         self.source = Some(path.to_path_buf());
         self.image = None;
+        self.shown_frame = None;
         self.placeholder = None;
         self.source_size = (0, 0);
         self.working_size = Size::ZERO;
@@ -1572,7 +1623,11 @@ impl Model {
         let state = self.render_state();
         self.input_colour = Value::Null;
         self.lens_supported = false;
+        #[cfg(test)]
+        let background = ui::testing::background();
         let fallback = move || {
+            #[cfg(test)]
+            let _background = background;
             if let Some((picture, size)) = crate::thumbnail::placeholder(&path) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
             }
@@ -1594,6 +1649,7 @@ impl Model {
                         model.image = Some(picture); model.image_size = size; model.is_raw = raw; model.lens_supported = lens_supported;
                         model.source_size = source_size; model.working_size = working; model.preview_scale = scale;
                         model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
+                        model.shown_frame = Some(FrameTag { request: 0, revision: model.revision, generation, kind: FrameKind::Cached });
                         model.update_histogram();
                         model.mark(dirty::CANVAS | dirty::STATUS | dirty::INSPECTOR);
                     });
@@ -1953,6 +2009,7 @@ impl Model {
             self.showing_cached_preview = false;
         }
         self.revision += 1;
+        crate::trace::event("edit", || json!({"revision": self.revision, "generation": self.source_generation, "interacting": self.interacting()}));
         self.preview_current = false;
         if self.render_failed {
             self.render_failed = false;
@@ -2007,11 +2064,21 @@ impl Model {
             let r = self.state.crop.rect;
             command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": self.state.crop.angle});
         }
+        let kind = if interactive_scale.is_some() { FrameKind::Drag } else { FrameKind::Settled };
+        #[cfg(test)]
+        self.render_log.push(RenderRequest { kind, revision, generation, interactive_scale });
+        crate::trace::event("render_request", || json!({"kind": kind.name(), "revision": revision, "generation": generation, "interactive_scale": interactive_scale}));
         let started = Instant::now();
         let paths = self.paths.clone();
         std::thread::spawn(move || {
             let cache_key = if interactive_scale.is_none() { paths.and_then(|paths| rendered_preview::key(&source, &state, &paths)) } else { None };
             engine.request(command, engine::timeout_for("render"), move |result| {
+                crate::trace::event("render_reply", || match &result {
+                    Ok((id, r)) => json!({"kind": kind.name(), "revision": revision, "generation": generation, "request": id,
+                        "elapsed_ms": r["elapsed_ms"], "cached_pipeline": r["cached_pipeline"], "pipeline_ms": r["pipeline_ms"],
+                        "backend": r["backend"], "width": r["width"], "height": r["height"], "round_trip_ms": engine::elapsed_ms(started)}),
+                    Err(error) => json!({"kind": kind.name(), "revision": revision, "generation": generation, "error": format!("{error:#}")}),
+                });
                 // Read the buffer off the UI thread, before the next render can
                 // overwrite it.
                 let rendered = result.and_then(|(id, result)| {
@@ -2045,8 +2112,18 @@ impl Model {
     fn render_finished(&mut self, rendered: Result<Rendered>, revision: u64, generation: u64, interactive: bool) {
         self.rendering = false;
         self.mark(dirty::CHROME);
+        crate::trace::event("render_finished", || json!({
+            "revision": revision, "generation": generation, "interactive": interactive, "ok": rendered.is_ok(),
+            "shown": rendered.is_ok() && self.should_show(revision, generation), "current_revision": self.revision,
+        }));
         match rendered {
             Ok(rendered) if self.should_show(revision, generation) => {
+                self.shown_frame = Some(FrameTag {
+                    request: rendered.id,
+                    revision,
+                    generation,
+                    kind: if rendered.interactive { FrameKind::Drag } else { FrameKind::Settled },
+                });
                 let result = &rendered.result;
                 self.image_size = Size::new(json::number(&result["photo_width"]), json::number(&result["photo_height"]));
                 self.source_size = (json::number(&result["source_width"]) as u32, json::number(&result["source_height"]) as u32);
@@ -2134,7 +2211,11 @@ impl Model {
             return;
         };
         let (request, crop, rotation) = (self.histogram_request, self.state.crop, self.rotation());
+        #[cfg(test)]
+        let background = ui::testing::background();
         std::thread::spawn(move || {
+            #[cfg(test)]
+            let _background = background;
             let scopes = image.scopes(&crop, rotation);
             ui::post(move |app: &mut App| {
                 let model = &mut app.model;
@@ -2490,6 +2571,7 @@ impl Model {
         json::set(&mut request.params, "prep", json::get(&self.defaults, "prep").clone());
         json::set(&mut request.params, "enlarger.print_exposure", json::get(&self.defaults, "enlarger.print_exposure").clone());
         let reference = engine.directory().join(format!("camera-brightness-{id}.png"));
+        crate::trace::event("match_start", || json!({"match": id, "revision": self.revision, "generation": generation}));
         self.matching_brightness = true;
         self.mark(dirty::INSPECTOR);
         std::thread::spawn(move || {
@@ -2516,6 +2598,10 @@ impl Model {
     }
 
     fn brightness_solved(&mut self, id: u64, generation: u64, inputs: Value, result: Result<Value>) {
+        crate::trace::event("match_solved", || match &result {
+            Ok(r) => json!({"match": id, "generation": generation, "exposure_ev": r["exposure_ev"], "elapsed_ms": r["elapsed_ms"]}),
+            Err(error) => json!({"match": id, "generation": generation, "error": format!("{error:#}")}),
+        });
         // Opening another photograph or shutting down superseded this one.
         if id != self.match_request.load(std::sync::atomic::Ordering::Relaxed) {
             return;
@@ -2542,6 +2628,17 @@ impl Model {
         }
         self.reconcile_brightness_match();
         self.settle_outputs();
+    }
+
+    /// Nothing for the preview to do: no render running or scheduled, no
+    /// solve running or due, and the shown preview is the current edit's (or
+    /// it failed). The render benchmark (`crate::trace`) waits for this.
+    pub fn render_idle(&self) -> bool {
+        !self.rendering
+            && !self.pending_render
+            && !self.matching_brightness
+            && !self.brightness_match_pending()
+            && (self.preview_current || self.render_failed)
     }
 
     /// Moves the total with the match, keeping the user's exposure above it.
@@ -3256,6 +3353,11 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+pub mod harness;
+#[cfg(test)]
+mod lifecycle_tests;
+
 /// Presets through the real helper (`target\release`, built from this
 /// checkout); skipped without it. `NEGS_PRESETS_TEST_DIR` (or
 /// `%USERPROFILE%\negs-presets-test`) adds every file there.
@@ -3289,6 +3391,7 @@ mod preset_tests {
     /// own requests go nowhere (no window); tests ask the helper themselves.
     fn live(test: &str) -> Option<Live> {
         let Ok(paths) = EnginePaths::locate() else {
+            assert!(std::env::var_os("NEGS_REQUIRE_HELPER").is_none(), "NEGS_REQUIRE_HELPER is set and the release helper isn't built");
             eprintln!("skipped: build the release helper first");
             return None;
         };

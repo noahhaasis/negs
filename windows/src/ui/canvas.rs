@@ -100,6 +100,8 @@ pub struct Scene {
     pub drop_target: bool,
     /// The tools under the photograph; None while cropping.
     pub tools: Option<Tools>,
+    /// The render the developed picture came from, for the timing trace.
+    pub frame: Option<crate::model::FrameTag>,
 }
 
 /// The photograph's tools, in a pill floating under it: zoom, rotate and
@@ -263,6 +265,8 @@ struct View {
     /// The tools' tooltips, and the size their rectangles were placed for.
     tips: HWND,
     tips_for: Option<(u32, u32, u32)>,
+    /// The last developed frame drawn (`Scene::frame`).
+    presented: Option<crate::model::FrameTag>,
 }
 
 #[derive(Clone, Copy)]
@@ -338,6 +342,7 @@ pub fn init(hwnd: HWND, dpi: u32) {
             pressed: None,
             tips: HWND::default(),
             tips_for: None,
+            presented: None,
         })
     });
 }
@@ -449,9 +454,33 @@ pub fn monitor_may_have_changed() {
 }
 
 /// How many screen pixels a pixel of the photograph covers. A render this much
-/// smaller than the photograph looks the same on screen.
+/// smaller than the photograph looks the same on screen. The canvas is
+/// per-monitor DPI aware (`negs.manifest`), so these are physical pixels:
+/// the same window at 150 % has 1.5 times the scale it has at 100 %.
 pub fn screen_pixels_per_photo_pixel() -> Option<f64> {
+    #[cfg(test)]
+    if let Some(scale) = FIXED_SCALE.with(Cell::get) {
+        return (scale > 0.0).then_some(scale);
+    }
     with_view(|view| (view.zoom > 0.0 && view.document.0 > 0.0).then_some(view.zoom)).flatten()
+}
+
+#[cfg(test)]
+thread_local! {
+    static FIXED_SCALE: Cell<Option<f64>> = const { Cell::new(None) };
+}
+
+/// Tests: the scale `screen_pixels_per_photo_pixel` reports on this thread,
+/// in place of a canvas (the Mac's `CanvasScale.fixed`). `Some(0.0)` reports
+/// no canvas; None goes back to the canvas.
+#[cfg(test)]
+pub fn set_fixed_scale(scale: Option<f64>) {
+    FIXED_SCALE.with(|s| s.set(scale));
+}
+
+/// The developed frame the canvas last drew, for the render benchmark.
+pub fn presented_frame() -> Option<crate::model::FrameTag> {
+    with_view(|view| view.presented).flatten()
 }
 
 pub fn zoom_by(factor: f64) {
@@ -498,6 +527,7 @@ pub fn update_scene(app: &mut App) {
         }),
         cropping,
         drop_target: app.drop_target_active,
+        frame: if developed { model.shown_frame } else { None },
     };
     let first = scene.developed;
     let hwnd = with_view(|view| {
@@ -728,12 +758,32 @@ impl View {
         let clear = background().map(|c| c as f32 / 255.0);
         gpu::draw(&gpu, &target, &globals.bind_group, clear, &items);
         frame.present();
+        if photo_drawn {
+            self.note_presented("vulkan");
+        }
         if photo_drawn && self.scene.developed && !self.first_image_presented {
             self.first_image_presented = true;
             std::thread::spawn(|| {
                 super::dwm_flush();
                 let at = crate::platform::qpc();
                 post(move |app: &mut App| app.report.line(&format!("first_image_on_screen {at}")));
+            });
+        }
+    }
+
+    /// Records a developed frame drawn for the first time, for the render
+    /// trace and benchmark, with the time DWM composed it.
+    fn note_presented(&mut self, canvas: &'static str) {
+        if self.scene.frame.is_none() || self.scene.frame == self.presented {
+            return;
+        }
+        self.presented = self.scene.frame;
+        if crate::trace::enabled() {
+            let frame = crate::trace::frame_json(self.presented);
+            crate::trace::event("present", || serde_json::json!({"frame": frame, "canvas": canvas}));
+            std::thread::spawn(move || {
+                super::dwm_flush();
+                crate::trace::event("composited", || serde_json::json!({"frame": frame, "canvas": canvas}));
             });
         }
     }
@@ -762,6 +812,9 @@ impl View {
                 let _ = GdiFlush();
             }
             let _ = EndPaint(self.hwnd, &ps);
+        }
+        if self.width > 0 && self.height > 0 && self.scene.picture.is_some() {
+            self.note_presented("software");
         }
         if self.width > 0 && self.height > 0 && self.scene.developed
             && self.scene.picture.is_some() && !self.first_image_presented {

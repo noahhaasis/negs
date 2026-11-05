@@ -270,6 +270,16 @@ impl Inspector {
     /// The empty column for the first frame; `build` fills it.
     pub fn create(main: HWND, fonts: &super::Fonts, dpi: u32) -> Self {
         let panel = create(w!("NegsInspector"), "Adjustments", WS_CHILD | WS_CLIPCHILDREN, WINDOW_EX_STYLE(WS_EX_CONTROLPARENT.0), main, 0, HFONT::default());
+        Self::with_panel(panel, fonts.line, dpi)
+    }
+
+    /// Tests: an inspector with no windows, never built, for a headless `App`.
+    #[cfg(test)]
+    pub fn headless() -> Self {
+        Self::with_panel(HWND::default(), 16, 96)
+    }
+
+    fn with_panel(panel: HWND, line: i32, dpi: u32) -> Self {
         Self {
             panel,
             scope: HWND::default(),
@@ -293,7 +303,7 @@ impl Inspector {
             grids: [None, None],
             dev_times: [vec![], vec![]],
             decimal: '.',
-            line: fonts.line,
+            line,
             slide: false,
             sliding: None,
             placed: Default::default(),
