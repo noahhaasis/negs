@@ -12,6 +12,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run  # noqa: E402
@@ -106,6 +107,39 @@ class CompareTest(unittest.TestCase):
                 (Path(tmp) / side / "case1.f64.f64").write_bytes(bytes(4 * 2 * 3 * 8))
             self.assertEqual(compare(MANIFEST, b, exact=False, dumps_a=str(Path(tmp) / "a"),
                                      dumps_b=str(Path(tmp) / "b")), 1)
+
+
+class RenderDumpRetentionTest(unittest.TestCase):
+    def check_retention(self, hashes_only, self_check_code=0):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dumps, work = root / "dumps", root / "work"
+            dumps.mkdir()
+            work.mkdir()
+            dump = dumps / "case.f64.f64"
+            dump.write_bytes(b"raw pixels")
+            (work / "case.f64.tiff").write_bytes(b"TIFF pixels")
+            args = SimpleNamespace(dump_dir=dumps, bin_dir=root, inputs=root, data_dir=root,
+                                   threads=0, hashes_only=hashes_only)
+            case = {"name": "case", "preset": "default"}
+            check = SimpleNamespace(returncode=self_check_code, stdout="self check", stderr="")
+            with patch.object(run, "process_cmd", return_value=["render"]), \
+                    patch.object(run, "run_logged", return_value=(0, "Saved: output (4x2)")), \
+                    patch.object(run, "tool", return_value=root / "golden_compare"), \
+                    patch.object(run.subprocess, "run", return_value=check):
+                _, _, result = run.render(args, work, case, "f64")
+            self.assertIn("f64", result)
+            self.assertEqual("error" in result, self_check_code != 0)
+            return dump.exists()
+
+    def test_default_retains_successful_dumps(self):
+        self.assertTrue(self.check_retention(hashes_only=False))
+
+    def test_hashes_only_discards_successful_dumps(self):
+        self.assertFalse(self.check_retention(hashes_only=True))
+
+    def test_hashes_only_retains_failed_dumps(self):
+        self.assertTrue(self.check_retention(hashes_only=True, self_check_code=1))
 
 
 class MatrixTest(unittest.TestCase):

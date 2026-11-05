@@ -49,6 +49,35 @@ Windows builds use the WGSL/wgpu backend by default. The CPU fallback path avoid
 
 WGSL is the default GPU backend and can be selected explicitly with `SPEKTRAFILM_BACKEND=wgpu`. An experimental native CUDA backend can be built with `--features spektrafilm-gpu/cuda-backend` and selected with `SPEKTRAFILM_BACKEND=cuda`. It uses CUDA 12 driver/NVRTC bindings through dynamic loading, so the NVIDIA driver and NVRTC runtime DLLs must be available. Set `SPEKTRAFILM_CUDA_DEVICE=1` (or another zero-based index) to pick a non-default CUDA device. Both GPU paths have a resident preview implementation: front pass, highlight boost, camera diffusion, camera lens blur, halation, DIR couplers, grain, density curves, enlarger diffusion, print/scan spectral reductions, glare, output gamut compression, scanner lens blur, unsharp, and one readback.
 
+## Build storage
+
+Each worktree has its own Rust and Swift build outputs. Development and test
+builds use limited debug information (`debug = 1`) to keep source locations and
+backtraces without full variable/type information for every dependency. Use
+`CARGO_PROFILE_DEV_DEBUG=2 CARGO_PROFILE_TEST_DEBUG=2` for a debugging session
+that needs to inspect local variables.
+
+With builds stopped, preview or remove disposable outputs in the current checkout:
+
+```bash
+python3 scripts/cleanup_storage.py                 # dry run
+python3 scripts/cleanup_storage.py --apply         # incremental cache, old study TIFFs, packaging scratch
+python3 scripts/cleanup_storage.py --debug --apply # also remove the complete development build
+```
+
+The cleanup keeps RAW inputs, source snapshots, scripts, logs, measurement JSON,
+release packages, and all other worktrees. It does not delete the whole `target/`
+directory: that also contains experiment inputs and handoff material. macOS
+packaging removes its temporary app copies on exit and saves the audit report in
+`dist/negs-macos/package-report.json` (or the configured `DIST_DIR`).
+
+A full golden matrix retains roughly 6 GiB of dumps. Use
+[`run --hashes-only`](../scripts/golden/README.md) for repeat runs checked with
+`compare --exact`; retain dumps for numeric tolerance and GPU quality checks.
+Reuse output labels instead of keeping a new directory for every run. Once a
+worktree is finished, review its status and merge ancestry, then retire it with
+`git worktree remove <path>` rather than leaving its build products indefinitely.
+
 ## Usage
 
 ### GUI

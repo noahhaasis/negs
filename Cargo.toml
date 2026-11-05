@@ -48,6 +48,11 @@ rustfft = "6"
 # std::time on native; performance.now() in the browser, where std panics.
 web-time = "1"
 
+# Keep source locations and backtraces without full type/variable debug info
+# for every dependency and worktree. Tests inherit the development profile.
+[profile.dev]
+debug = 1
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

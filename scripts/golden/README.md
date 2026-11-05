@@ -82,7 +82,24 @@ python3 -I scripts/golden/run.py compare-probe target/golden/probe/macos-arm64 \
 python3 -I -m unittest discover -s scripts/golden -p 'test_*.py'
 ```
 
-`run` takes about 2.5 minutes on an M1 Pro and 11 on the Windows box (October 23, default `--jobs`) and keeps about 6 GB of dumps.
+For repeat runs that only need bit-identical comparison, retain the manifest
+and discard successful raw dumps as soon as each TIFF self-check passes:
+
+```bash
+python3 -I scripts/golden/run.py run --label repeat \
+  --out scripts/golden/manifests/repeat.json \
+  --dump-dir target/golden/dumps/repeat --hashes-only
+python3 -I scripts/golden/run.py compare --exact \
+  scripts/golden/manifests/macos-arm64.json scripts/golden/manifests/repeat.json
+```
+
+`--hashes-only` keeps failed dumps and logs for diagnosis. It does not support
+subsequent `quality` or numeric tolerance comparisons; those require the raw
+dumps. The default keeps dumps for those workflows. Reuse the same output
+directory for repeat runs, and remove obsolete dump/probe directories and
+transfer archives once their manifests and reports have been saved.
+
+`run` takes about 2.5 minutes on an M1 Pro and 11 on the Windows box (October 23, default `--jobs`) and keeps about 6 GB of dumps unless `--hashes-only` is set.
 Every render runs with a clean environment (no inherited `SPEKTRAFILM_*`,
 `WGPU_*`, `RAYON_NUM_THREADS`, `RUST_LOG`), a timeout, and a log on failure.
 GPU renders must report the wgpu backend and the GPU-resident path, or they

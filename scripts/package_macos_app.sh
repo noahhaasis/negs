@@ -177,16 +177,19 @@ cp "$DIST_DIR/README.txt" "$RELEASE_DIR/INSTALL.txt"
 cp "$DIST_DIR/BUILD-INFO.txt" "$RELEASE_DIR/BUILD-INFO.txt"
 
 # A native drag-to-Applications installer, with no system-wide components.
-stage="$(mktemp -d "$BUILD_TARGET_DIR/dmg.XXXXXX")"
+stage="$(mktemp -d "$BUILD_TARGET_DIR/package.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
-ditto "$APP_BUNDLE" "$stage/$APP_NAME.app"
-ln -s /Applications "$stage/Applications"
-cp "$DIST_DIR/README.txt" "$stage/Installation.txt"
-hdiutil create -volname "Negs" -srcfolder "$stage" -format UDZO -ov "$RELEASE_DIR/$release_name.dmg"
+mkdir "$stage/dmg"
+ditto "$APP_BUNDLE" "$stage/dmg/$APP_NAME.app"
+ln -s /Applications "$stage/dmg/Applications"
+cp "$DIST_DIR/README.txt" "$stage/dmg/Installation.txt"
+hdiutil create -volname "Negs" -srcfolder "$stage/dmg" -format UDZO -ov "$RELEASE_DIR/$release_name.dmg"
 hdiutil verify "$RELEASE_DIR/$release_name.dmg"
 "$PYTHON" scripts/verify_macos_package.py --zip "$zip_path" \
     --source "$RELEASE_DIR/$release_name-source.tar.gz" \
-    --output-dir "$(mktemp -d "$BUILD_TARGET_DIR/verify.XXXXXX")/unpacked"
+    --output-dir "$stage/unpacked"
+# Keep the small audit report, then let the EXIT trap remove both app copies.
+cp "$stage/unpacked/package-report.json" "$DIST_DIR/package-report.json"
 (
     cd "$RELEASE_DIR"
     shasum -a 256 "$release_name.zip" "$release_name.dmg" "$release_name-source.tar.gz" > SHA256SUMS
