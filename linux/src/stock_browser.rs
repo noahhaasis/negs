@@ -349,6 +349,9 @@ fn arrange(ui: &Editor, grid: &Grid) {
     }
     for tile in &grid.tiles {
         if let Some(child) = tile.widget.parent().and_downcast::<gtk::FlowBoxChild>() {
+            // Event dispatch can retain a removed wrapper. Detach the tile
+            // explicitly before appending it to the rebuilt grid.
+            child.set_child(None::<&gtk::Widget>);
             if let Some(flow) = child.parent().and_downcast::<gtk::FlowBox>() {
                 flow.remove(&child);
             }
@@ -959,6 +962,49 @@ pub fn pump(ui: &Rc<Editor>) {
 mod tests {
     use super::*;
 
+    fn assert_grid_tiles(grid: &Grid) {
+        let mut ids = Vec::new();
+        let mut section = grid.body.first_child();
+        while let Some(widget) = section {
+            section = widget.next_sibling();
+            let Ok(flow) = widget.downcast::<gtk::FlowBox>() else {
+                continue;
+            };
+            let mut child = flow.first_child();
+            while let Some(widget) = child {
+                child = widget.next_sibling();
+                let content = widget
+                    .downcast::<gtk::FlowBoxChild>()
+                    .unwrap()
+                    .child()
+                    .expect("Every grid slot must contain a stock tile");
+                let tile = grid
+                    .tiles
+                    .iter()
+                    .find(|tile| tile.widget.upcast_ref::<gtk::Widget>() == &content)
+                    .expect("Every grid slot must contain an existing stock tile");
+                ids.push(tile.stock.id.clone());
+            }
+        }
+        assert_eq!(
+            ids,
+            grid.order
+                .borrow()
+                .iter()
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>(),
+            "The displayed tiles must match the complete stock order"
+        );
+    }
+
+    fn toggle_and_check_grid(grid: &Grid, tile: &Tile) {
+        // GTK can retain the clicked tile's wrapper through event dispatch.
+        let previous_parent = tile.widget.parent().unwrap();
+        tile.favorite.emit_clicked();
+        assert_grid_tiles(grid);
+        drop(previous_parent);
+    }
+
     #[test]
     #[ignore = "Requires a desktop and isolated NEGS_PROFILE_DIR; run separately with --ignored --test-threads=1"]
     fn film_search_filters_without_editing_and_keeps_tiles() {
@@ -999,6 +1045,7 @@ mod tests {
             film.order.borrow().as_slice(),
             &[("kodak_portra_400".into(), false)]
         );
+        assert_grid_tiles(&film);
         assert_eq!(ui.history.borrow().state, before);
         assert!(!ui.history.borrow().can_undo());
         assert!(tile.thumb.picture.paintable().is_some());
@@ -1030,6 +1077,7 @@ mod tests {
         assert_eq!(ui.history.borrow().state, chosen);
         search.emit_by_name::<()>("stop-search", &[]);
         assert!(search.text().is_empty());
+        assert_grid_tiles(&film);
         assert_eq!(
             film.order.borrow().len(),
             crate::catalog::stocks(false).len()
@@ -1103,7 +1151,7 @@ mod tests {
         );
         tile.thumb
             .show(Some(&texture), 7, "kept-stock-thumbnail".into());
-        tile.favorite.emit_clicked();
+        toggle_and_check_grid(&film, tile);
         assert!(is_favorite(&ui, false, &tile.stock.id));
         assert_eq!(ordered_stocks(&ui, false)[0].id, tile.stock.id);
         assert_eq!(film.order.borrow()[0], (tile.stock.id.clone(), true));
@@ -1111,6 +1159,12 @@ mod tests {
         assert_eq!(picker.ids.borrow()[0], tile.stock.id);
         assert!(picker.model.string(0).unwrap().starts_with("Favourites · "));
         assert_eq!(picker.ids.borrow()[picker.row.selected() as usize], current);
+        for grid in [&film, &paper] {
+            let tile = grid.tiles.last().unwrap();
+            for _ in 0..4 {
+                toggle_and_check_grid(grid, tile);
+            }
+        }
         assert_eq!(
             ui.history.borrow().state,
             before,
@@ -1133,7 +1187,7 @@ mod tests {
         apply(&ui);
         assert!(picker.row.is_visible() && !film.row.is_visible());
         assert_eq!(picker.ids.borrow()[0], tile.stock.id);
-        tile.favorite.emit_clicked();
+        toggle_and_check_grid(&film, tile);
         assert!(!is_favorite(&ui, false, &tile.stock.id));
         assert_eq!(
             picker.ids.borrow().as_slice(),
@@ -1142,7 +1196,7 @@ mod tests {
                 .map(|s| s.id.clone())
                 .collect::<Vec<_>>()
         );
-        tile.favorite.emit_clicked();
+        toggle_and_check_grid(&film, tile);
         ui.save_session().unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(Editor::session_path()).unwrap()).unwrap();
