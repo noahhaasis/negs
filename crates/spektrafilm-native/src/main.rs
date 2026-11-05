@@ -84,6 +84,14 @@ enum Command {
     PreviewColourSpace {
         input: PathBuf,
     },
+    /// A colour-managed camera/original reference for clients without a
+    /// native colour-managed extractor. Independent of retained render state.
+    BrightnessReference {
+        input: PathBuf,
+        reference_path: PathBuf,
+        expected_width: u32,
+        expected_height: u32,
+    },
     /// Fit the graded exposure to an embedded camera-preview reference without
     /// replacing the current render or changing the decoded source.
     PlaceExposure {
@@ -304,7 +312,7 @@ fn catalog(data: &Path) -> Result<Value> {
         data.display()
     );
     catalog["protocol"] = json!(1);
-    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true, "tone_curve": true, "place_exposure": true});
+    catalog["capabilities"] = json!({"save_options": true, "crop_after_post": true, "color_space": true, "presets": true, "input_interpretation": true, "preview_color_space": true, "tone_curve": true, "place_exposure": true, "brightness_reference": true});
     // What a preset leaves as it is: a preset's thumbnail changes only with these.
     catalog["preset_kept"] = json!(presets::KEPT);
     Ok(catalog)
@@ -587,6 +595,28 @@ impl Session {
                     Declared::Other => "other",
                 });
                 Ok(json!({ "colour_space": space }))
+            }
+            Command::BrightnessReference { input, reference_path, expected_width, expected_height } => {
+                ensure!(expected_width > 0 && expected_height > 0,
+                    "The brightness reference needs the photograph's dimensions");
+                ensure!(input != reference_path
+                    && !std::fs::canonicalize(&reference_path).ok().is_some_and(|output|
+                        std::fs::canonicalize(&input).ok().as_ref() == Some(&output)),
+                    "The brightness reference must not replace the original photograph");
+                match spektrafilm_io::brightness::reference(&input, (expected_width, expected_height)) {
+                    Ok(reference) => {
+                        spektrafilm_io::brightness::write_reference(&reference, &reference_path)?;
+                        Ok(json!({"usable": true, "reference_path": reference_path,
+                            "width": reference.width(), "height": reference.height()}))
+                    }
+                    Err(error) => {
+                        if let Some(spektrafilm_io::brightness::Unusable(reason)) = error.downcast_ref::<spektrafilm_io::brightness::Unusable>() {
+                            Ok(json!({"usable": false, "reason": reason, "for_photo": true}))
+                        } else {
+                            Err(error)
+                        }
+                    }
+                }
             }
             Command::PlaceExposure { input, source_generation, film, paper, mut params, reference_path } => {
                 let started = Instant::now();
@@ -1018,6 +1048,48 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn brightness_reference_is_independent_and_refuses_to_replace_the_photo() {
+        let dir = std::env::temp_dir().join(format!("negs-reference-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("input.png");
+        let source = ImageBuf::from_data(4, 2, [0.2, 0.5, 0.8].repeat(8));
+        spektrafilm_io::save_image(&source, &input, None).unwrap();
+        let before = std::fs::read(&input).unwrap();
+        let mut session = Session {
+            source_generation: 31,
+            output: Some(Rendered { id: 7, key: Value::Null, response: Value::Null,
+                source: input.clone(), film: "kodak_gold_200".into(), encoding: Encoding::from(true),
+                post: PostParams::default(), image: source.clone() }),
+            ..Default::default()
+        };
+        let output = dir.join("reference.png");
+        let command = |reference_path| Command::BrightnessReference {
+            input: input.clone(), reference_path, expected_width: 4, expected_height: 2,
+        };
+        let result = session.handle(Request { id: 8, command: command(output.clone()) }, Path::new(".")).unwrap();
+        assert_eq!((result["usable"].as_bool(), result["width"].as_u64(), result["height"].as_u64()),
+            (Some(true), Some(4), Some(2)));
+        assert!(session.source.is_none() && session.pipeline.is_none());
+        assert_eq!(session.source_generation, 31);
+        let retained = session.output.as_ref().unwrap();
+        assert_eq!(retained.id, 7);
+        assert_eq!(retained.image.data, source.data);
+        let reference = placement_reference(&output, &source).unwrap();
+        assert_eq!(reference.width, 4);
+        let error = session.handle(Request { id: 9, command: command(input.clone()) }, Path::new(".")).unwrap_err();
+        assert!(error.to_string().contains("must not replace"));
+        assert_eq!(std::fs::read(&input).unwrap(), before);
+        let alpha = dir.join("alpha.png");
+        image::RgbaImage::from_pixel(4, 2, image::Rgba([128, 128, 128, 255])).save(&alpha).unwrap();
+        let unsuitable = session.handle(Request { id: 10, command: Command::BrightnessReference {
+            input: alpha, reference_path: output, expected_width: 4, expected_height: 2,
+        } }, Path::new(".")).unwrap();
+        assert_eq!(unsuitable["usable"], false);
+        assert_eq!(unsuitable["for_photo"], true);
+        assert_eq!(unsuitable["reason"], "Transparent images can’t be matched.");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn bw_expansion_catalog_keeps_negative_reversal_and_paper_distinct() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");

@@ -52,6 +52,7 @@ pub fn build(ui: &Rc<Editor>) {
         "Custom",
     ]);
     ratios.set_hexpand(true);
+    ratios.set_tooltip_text(Some("Constrains the crop’s aspect ratio. Original keeps the photograph’s shape; Freeform lets each edge move independently."));
     ratios.update_property(&[gtk::accessible::Property::Label("Crop aspect ratio")]);
     let portrait = gtk::ToggleButton::with_label("Portrait");
     portrait.set_tooltip_text(Some("Swap between landscape and portrait aspect ratios"));
@@ -60,9 +61,13 @@ pub fn build(ui: &Rc<Editor>) {
     let custom = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let width = gtk::SpinButton::with_range(0.01, 1000., 0.01);
     width.set_value(5.);
+    width.set_tooltip_text(Some(
+        "The relative width of a custom crop ratio. For a 5:4 crop, enter 5 here and 4 for height.",
+    ));
     width.set_width_chars(4);
     let height = gtk::SpinButton::with_range(0.01, 1000., 0.01);
     height.set_value(4.);
+    height.set_tooltip_text(Some("The relative height of a custom crop ratio."));
     height.set_width_chars(4);
     width.update_property(&[gtk::accessible::Property::Label("Custom crop ratio width")]);
     height.update_property(&[gtk::accessible::Property::Label("Custom crop ratio height")]);
@@ -78,6 +83,11 @@ pub fn build(ui: &Rc<Editor>) {
     for (title, action) in [("Cancel", "win.crop-cancel"), ("Done", "win.crop-done")] {
         let button = gtk::Button::with_label(title);
         button.set_action_name(Some(action));
+        button.set_tooltip_text(Some(if title == "Done" {
+            "Applies crop and straighten as one undoable edit (Enter)."
+        } else {
+            "Discards this crop and straighten change (Escape)."
+        }));
         if title == "Done" {
             button.add_css_class("suggested-action");
         }
@@ -89,6 +99,7 @@ pub fn build(ui: &Rc<Editor>) {
 
     let dial = gtk::Scale::new(gtk::Orientation::Horizontal, Some(&a));
     dial.set_draw_value(false);
+    dial.set_tooltip_text(Some("Rotates the photograph to straighten it. The crop fits inside the rotated image; double-click to reset the angle."));
     dial.set_hexpand(true);
     dial.update_property(&[gtk::accessible::Property::Label("Straighten angle")]);
     crate::inspector::reset_on_double_click(
@@ -101,6 +112,7 @@ pub fn build(ui: &Rc<Editor>) {
     );
     let spin = gtk::SpinButton::new(Some(&a), 0.1, 1);
     spin.set_width_chars(4);
+    spin.set_tooltip_text(Some("The straighten angle in degrees, from −45 to +45."));
     spin.update_property(&[gtk::accessible::Property::Label("Straighten degrees")]);
     angle_line.append(&dial);
     angle_line.append(&spin);

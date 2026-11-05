@@ -1,6 +1,8 @@
 # Linux feature port after 0.13.0
 
-Status: plan only; no application changes implemented by this document.
+Status: functionality implemented and locally validated (2026-11-05).
+See [implementation and results](linux-prep-port.md). The inventory and sequence
+below preserve the approved scope.
 Prepared 2026-11-04 against `main` at `bb7ccd9` after fetching `origin`.
 Baseline: [Negs 0.13.0](https://github.com/noahhaasis/negs/releases/tag/v0.13.0),
 tag commit `a06ba88`, published 2026-11-02 (marked prerelease, as the 0.x releases are).

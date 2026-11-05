@@ -1,0 +1,664 @@
+//! The tooltips of the inspector's controls, keyed by parameter path, and of
+//! its groups, keyed by title: the same texts as `ControlHelp.swift`, which a
+//! test compares this table with. A control without an entry has no tooltip.
+
+/// A control's tooltip. A grain lane (`film_render.grain.rms_granularity.1`)
+/// shares its array's.
+pub fn text(path: &str) -> Option<&'static str> {
+    let lookup = |p: &str| {
+        PATHS
+            .iter()
+            .find(|(key, _)| *key == p)
+            .map(|(_, text)| *text)
+    };
+    lookup(path)
+        .or_else(|| {
+            path.rsplit_once('.')
+                .filter(|(_, lane)| lane.parse::<usize>().is_ok())
+                .and_then(|(base, _)| lookup(base))
+        })
+        .or_else(|| {
+            EXTRA
+                .iter()
+                .find(|(key, _)| *key == path)
+                .map(|(_, text)| *text)
+        })
+}
+
+pub fn group(title: &str) -> Option<&'static str> {
+    GROUPS
+        .iter()
+        .chain(EXTRA_GROUPS)
+        .find(|(key, _)| *key == title)
+        .map(|(_, text)| *text)
+}
+
+pub const FILM: &str = "The film the photograph is shot on: its colour response, contrast, grain and halation, from the stock’s measured data.";
+pub const PAPER: &str = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless Settings › Keep paper when changing film is on.";
+
+const PATHS: &[(&str, &str)] = &[
+    // Prep: white balance and brightness
+    (
+        "io.raw_white_balance.mode",
+        "How the RAW’s colours are balanced before the film. As Shot uses the camera’s setting; Daylight and Tungsten balance for that light; Custom sets temperature and tint. Presets set it too, as they do in the Python app.",
+    ),
+    (
+        "io.raw_white_balance.temperature",
+        "The colour of the light to balance for, in kelvin. Lower makes the photograph cooler, higher warmer; 6504 K is Daylight.",
+    ),
+    (
+        "io.raw_white_balance.tint",
+        "1 is neutral. Higher is greener, lower more magenta.",
+    ),
+    (
+        "camera.auto_exposure_method",
+        "Which part of the photograph the meter reads. Average and Median read the whole frame; Center-Weighted, Partial and Multi-Zone favour the centre; Matrix weighs a 5 × 5 grid; Highlight-Weighted favours bright areas, to keep them from clipping.",
+    ),
+    // Prep: tone, colour, detail. Applied to the scene before the film.
+    (
+        "prep.highlights",
+        "Darkens (left) or brightens (right) the brightest parts of the scene before the film sees them. Far left recovers highlights that would otherwise crowd the film’s shoulder.",
+    ),
+    (
+        "prep.shadows",
+        "Brightens (right) or darkens (left) the darkest parts of the scene before the film sees them.",
+    ),
+    (
+        "prep.contrast",
+        "Spreads the scene’s tones apart or draws them together around the mid-tones, before the film adds its own contrast.",
+    ),
+    (
+        "prep.lift",
+        "Raises or lowers the scene’s blacks, with less effect on brighter tones.",
+    ),
+    (
+        "prep.gain",
+        "Brightens or darkens the scene’s brighter tones, with less effect on the blacks.",
+    ),
+    (
+        "prep.color_boost",
+        "Strengthens or mutes muted colours more than colours that are already strong, before the film.",
+    ),
+    (
+        "prep.saturation",
+        "Strengthens or mutes all colours evenly, before the film.",
+    ),
+    (
+        "prep.midtone_detail",
+        "Local contrast in the mid-tones: right adds texture and clarity, left softens it.",
+    ),
+    // Prep: how the file is read
+    (
+        "io.input_interpretation.linear",
+        "The file holds linear values, without the colour space’s curve.",
+    ),
+    (
+        "io.input_color_space",
+        "The colour space the file’s values are in.",
+    ),
+    (
+        "io.input_cctf_decoding",
+        "Decodes the colour space’s curve (its gamma) to linear light. Turn it off for files that are already linear.",
+    ),
+    // Lab: camera
+    (
+        "camera.exposure_compensation_ev",
+        "Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative’s density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.",
+    ),
+    (
+        "camera.film_format_mm",
+        "The film the photograph was taken on, by the frame’s long edge. Grain, halation, scatter and diffusion are all sized on the film, so a smaller format shows them larger.",
+    ),
+    (
+        "camera.lens_blur_um",
+        "Softness of the taking lens, measured on the film. 0 is a perfect lens.",
+    ),
+    // Lens Diffusion
+    (
+        "camera.diffusion_filter.filter_family",
+        "The filter in front of the lens. Glimmerglass is the subtlest and tightest; Black Pro-Mist a concentrated, warm halo that also lifts the shadows; Pro-Mist a wider glow; CineBloom the widest, warmest bloom.",
+    ),
+    (
+        "camera.diffusion_filter.strength",
+        "The filter’s grade, as sold: 1/8, 1/4, 1/2, 1 and 2. More spreads more light into the halo, which also lifts shadows and lowers contrast.",
+    ),
+    (
+        "camera.diffusion_filter.spatial_scale",
+        "How far the halo spreads from each highlight, without changing how much light it takes.",
+    ),
+    (
+        "camera.diffusion_filter.halo_warmth",
+        "Warms (right) or cools (left) the halo, on top of the filter’s own tint. 0 keeps the filter’s.",
+    ),
+    (
+        "camera.diffusion_filter.core_intensity",
+        "The share of diffused light kept close to each highlight. 1 is the filter’s own; the core, halo and bloom shares are balanced to add up.",
+    ),
+    (
+        "camera.diffusion_filter.halo_intensity",
+        "The share of diffused light in the mid-sized halo. 1 is the filter’s own.",
+    ),
+    (
+        "camera.diffusion_filter.bloom_intensity",
+        "The share of diffused light in the wide bloom. 1 is the filter’s own.",
+    ),
+    (
+        "camera.diffusion_filter.halo_size",
+        "The mid-sized halo’s radius. 1 is the filter’s own.",
+    ),
+    (
+        "camera.diffusion_filter.bloom_size",
+        "The wide bloom’s radius. 1 is the filter’s own.",
+    ),
+    // Film Curves
+    (
+        "film_render.density_curves_morph.gamma_factor",
+        "The film’s development contrast. 1 is normal development; higher is like pushing, lower like pulling.",
+    ),
+    (
+        "film_render.density_curves_morph.gamma_factor_fast",
+        "Contrast of the film’s fastest, most light-sensitive layer, which records the shadows.",
+    ),
+    (
+        "film_render.density_curves_morph.gamma_factor_slow",
+        "Contrast of the film’s medium and slow layers, which record the mid-tones and highlights.",
+    ),
+    (
+        "film_render.density_curves_morph.gamma_factor_red",
+        "Contrast of the film’s red-sensitive (cyan) layer alone. Uneven contrast between layers gives shadows and highlights opposite colour casts.",
+    ),
+    (
+        "film_render.density_curves_morph.gamma_factor_green",
+        "Contrast of the film’s green-sensitive (magenta) layer alone.",
+    ),
+    (
+        "film_render.density_curves_morph.gamma_factor_blue",
+        "Contrast of the film’s blue-sensitive (yellow) layer alone.",
+    ),
+    (
+        "film_render.density_curves_morph.developer_exhaustion",
+        "Developer running out in dense, brightly exposed areas: the highlights roll off more gently, mid-grey stays put. 0 is off.",
+    ),
+    // Grain
+    (
+        "film_render.grain.rms_granularity",
+        "How coarse the grain is, from the film’s datasheet (RMS granularity). Fine films measure about 4, coarse ones 40.",
+    ),
+    (
+        "film_render.grain.uniformity",
+        "How evenly the crystals are spread. Higher makes the grain peak in the mid-tones and ease off in the densest areas; lower lets it keep growing into them.",
+    ),
+    (
+        "film_render.grain.particle_scale_sublayers",
+        "The crystal size of one of the emulsion’s three sub-layers, relative to the film’s own. Larger crystals make coarser, stronger grain.",
+    ),
+    (
+        "film_render.grain.blur_dye_clouds_um",
+        "How far the dye cloud around each developed crystal spreads, on the film. Visible only at high magnification.",
+    ),
+    (
+        "film_render.grain.blur",
+        "Softens the grain after it’s drawn, in pixels. Raise it for large exports, where a crystal covers several pixels; lower it for small ones.",
+    ),
+    (
+        "film_render.grain.mult_usm_amount",
+        "Restores the sharpness the grain blur takes away, without adding noise. Too much looks crunchy; 0 is off.",
+    ),
+    (
+        "film_render.grain.mult_usm_sigma",
+        "The radius of that sharpening, in pixels.",
+    ),
+    (
+        "film_render.grain.micro_structure.0",
+        "Blur of the grain’s finest structure, in µm. Only for extreme magnification.",
+    ),
+    (
+        "film_render.grain.micro_structure.1",
+        "Size of the molecular clumps within the grain, in nm. Only for extreme magnification.",
+    ),
+    // Halation
+    (
+        "film_render.halation.halation_amount",
+        "The red glow around bright highlights, from light reflecting off the back of the film base. 1 is the film’s own; films with little or no anti-halation layer glow most.",
+    ),
+    (
+        "film_render.halation.halation_spatial_scale",
+        "How far the halation glow spreads. 1 is the film’s own.",
+    ),
+    (
+        "film_render.halation.scatter_amount",
+        "Light scattering sideways inside the emulsion, which softens the whole frame slightly. 1 is the film’s own and the most; lower is sharper than the film.",
+    ),
+    (
+        "film_render.halation.scatter_spatial_scale",
+        "How far that scatter spreads. 1 is the film’s own; above it the whole frame softens quickly.",
+    ),
+    (
+        "film_render.halation.halation_n_bounces",
+        "How many times light bounces between the emulsion and the back of the base. Typically 2 or 3.",
+    ),
+    (
+        "film_render.halation.halation_bounce_decay",
+        "How much of the glow each bounce keeps. Lower fades the later bounces faster.",
+    ),
+    // DIR Couplers
+    (
+        "film_render.dir_couplers.amount",
+        "Development inhibitor couplers: each colour layer holds back the others as it develops, which gives colour negative film its saturation and edge sharpness. 1 is the film’s own, 0 off.",
+    ),
+    (
+        "film_render.dir_couplers.diffusion_size_um",
+        "How far the inhibitor spreads in the emulsion, in µm. Wider makes bright areas hold back development past their edges, which reads as extra clarity; 5–20 µm is the useful range.",
+    ),
+    (
+        "film_render.dir_couplers.diffusion_tail_um",
+        "The length of a faint, long-range tail on that spread, in µm, which gives large bright areas a broad, gentle falloff.",
+    ),
+    (
+        "film_render.dir_couplers.diffusion_tail_weight",
+        "The share of the inhibitor in the long tail. 0 removes the tail.",
+    ),
+    // Film Base
+    (
+        "film_render.base.scale",
+        "The density of the film base and fog (the orange mask of colour negatives). 1 is the film’s own. After changing it, use Balance Print.",
+    ),
+    (
+        "film_render.base.tilt",
+        "Tilts the base’s density across the spectrum: right adds density in the reds and takes it from the blues, left the reverse.",
+    ),
+    (
+        "film_render.base.cyan",
+        "Adds or removes cyan in the film base. 1 is neutral.",
+    ),
+    (
+        "film_render.base.magenta",
+        "Adds or removes magenta in the film base. 1 is neutral.",
+    ),
+    (
+        "film_render.base.yellow",
+        "Adds or removes yellow in the film base. 1 is neutral.",
+    ),
+    // Enlarger
+    (
+        "enlarger.print_exposure",
+        "The enlarger’s exposure time. 1 is a normal print; higher prints darker, lower lighter, as with a real enlarger.",
+    ),
+    (
+        "enlarger.m_filter_shift",
+        "Magenta filtration of the enlarger, in Kodak CC units from neutral. More magenta in the light makes the print greener; less makes it more magenta.",
+    ),
+    (
+        "enlarger.y_filter_shift",
+        "Yellow filtration of the enlarger, in Kodak CC units from neutral. More yellow in the light makes the print bluer; less makes it more yellow.",
+    ),
+    (
+        "enlarger.print_exposure_compensation",
+        "Prints the negative to the same mid-grey whatever its Negative exposure, as a printer would. Off, Negative exposure changes the print’s brightness, as with a fixed enlarger setting.",
+    ),
+    (
+        "enlarger.preflash_exposure",
+        "A brief, even exposure of the paper before the print: lifts the deepest shadows and lowers contrast. 0 is off.",
+    ),
+    (
+        "enlarger.preflash_m_filter_shift",
+        "Magenta filtration for the preflash alone, in Kodak CC units, to tint the lifted shadows.",
+    ),
+    (
+        "enlarger.preflash_y_filter_shift",
+        "Yellow filtration for the preflash alone, in Kodak CC units, to tint the lifted shadows.",
+    ),
+    // Print Curves
+    (
+        "print_render.density_curves_morph.gamma_factor",
+        "The paper’s contrast, like a paper grade. 1 is the paper’s own.",
+    ),
+    (
+        "print_render.density_curves_morph.gamma_factor_fast",
+        "Contrast of the paper’s fastest layer, which prints the photograph’s highlights.",
+    ),
+    (
+        "print_render.density_curves_morph.gamma_factor_slow",
+        "Contrast of the paper’s medium and slow layers, which print the mid-tones and shadows.",
+    ),
+    (
+        "print_render.density_curves_morph.gamma_factor_red",
+        "Contrast of the paper’s red-sensitive (cyan) layer alone. Uneven layers give shadows and highlights opposite casts that filtration can’t fix.",
+    ),
+    (
+        "print_render.density_curves_morph.gamma_factor_green",
+        "Contrast of the paper’s green-sensitive (magenta) layer alone.",
+    ),
+    (
+        "print_render.density_curves_morph.gamma_factor_blue",
+        "Contrast of the paper’s blue-sensitive (yellow) layer alone.",
+    ),
+    (
+        "print_render.density_curves_morph.developer_exhaustion",
+        "Developer running out in the print’s dense, dark areas: the shadows roll off more gently, mid-grey stays put. 0 is off.",
+    ),
+    // Print Base
+    (
+        "print_render.base.scale",
+        "The density of the paper’s base, its whitest white. 1 is the paper’s own.",
+    ),
+    (
+        "print_render.base.cyan",
+        "Scales the cyan in the paper’s base. 1 is the paper’s own.",
+    ),
+    (
+        "print_render.base.magenta",
+        "Scales the magenta in the paper’s base. 1 is the paper’s own.",
+    ),
+    (
+        "print_render.base.yellow",
+        "Scales the yellow in the paper’s base. 1 is the paper’s own.",
+    ),
+    // Glare
+    (
+        "print_render.glare.percent",
+        "A faint veil of room light reflecting off the print’s surface, which lifts the deepest blacks slightly.",
+    ),
+    (
+        "print_render.glare.roughness",
+        "How unevenly the veil falls across the print, as on a textured surface.",
+    ),
+    (
+        "print_render.glare.blur",
+        "Softens the veil’s unevenness, in pixels.",
+    ),
+    // Scanner
+    (
+        "scanner.lens_blur",
+        "Softness of the scanner’s lens, in pixels. 0 is off.",
+    ),
+    (
+        "scanner.unsharp_mask.0",
+        "The radius of the scanner’s sharpening, in pixels.",
+    ),
+    (
+        "scanner.unsharp_mask.1",
+        "The strength of the scanner’s sharpening. 0 is off, for sharpening later in another app.",
+    ),
+    (
+        "scanner.white_correction",
+        "Sets the scan’s lightest tone to White level. Off, the highlights stay where the paper puts them. Mostly for slides.",
+    ),
+    (
+        "scanner.white_level",
+        "The lightest tone with White correction on. 1 is full white.",
+    ),
+    (
+        "scanner.black_correction",
+        "Sets the scan’s darkest tone to Black level. Off, the shadows stay where the paper puts them. Mostly for slides.",
+    ),
+    (
+        "scanner.black_level",
+        "The darkest tone with Black correction on. 0 is true black; higher lifts and fades the blacks.",
+    ),
+    // Color Management
+    (
+        "io.output_gamut_compress.algorithm",
+        "Rolls colours the output colour space can’t hold back inside it, leaving colours within it untouched. ACES RGC is the industry standard; OKLCh, OKLrab and CAM16-UCS keep hue more evenly. Off clips them.",
+    ),
+    (
+        "io.input_gamut_compress.algorithm",
+        "Pulls the photograph’s colours that lie outside what eyes can see (possible in wide-gamut RAWs) inside, before they become spectra. Off passes them as they are.",
+    ),
+    (
+        "settings.use_cat16",
+        "Adapts the photograph’s white to the light the film was characterised in, with CAT16. Off uses CAT02.",
+    ),
+    (
+        "settings.rgb_to_raw_method",
+        "How each colour is turned into the spectrum of light the film is exposed to. Hanatos 2025 covers every visible colour; Mallett 2019 only sRGB, clipping the rest; Arctic 2026 is a newer method in testing.",
+    ),
+];
+
+const GROUPS: &[(&str, &str)] = &[
+    (
+        "Lens Diffusion",
+        "A diffusion filter on the camera lens: highlights bloom into a soft halo.",
+    ),
+    (
+        "Film Curves",
+        "Shapes how the film develops: its contrast, per layer and per colour.",
+    ),
+    (
+        "Grain",
+        "The film’s silver grain, drawn from the stock’s measured granularity.",
+    ),
+    (
+        "Halation",
+        "Light scattering inside the film and bouncing back off its base: a red glow around bright highlights.",
+    ),
+    (
+        "DIR Couplers",
+        "Chemical crosstalk between the film’s colour layers: saturation and edge sharpness.",
+    ),
+    (
+        "Film Base",
+        "The colour and density of the clear film, the orange mask of colour negatives.",
+    ),
+    (
+        "Enlarger",
+        "Prints the negative: exposure time, colour filtration and preflash.",
+    ),
+    (
+        "Print Curves",
+        "Shapes how the paper develops: its contrast, per layer and per colour.",
+    ),
+    (
+        "Print Base",
+        "The colour and density of the paper itself, its whitest white.",
+    ),
+    ("Glare", "Room light reflecting off the print’s surface."),
+    (
+        "Scanner",
+        "Scans the finished print: sharpness and black and white points.",
+    ),
+    (
+        "Color Management",
+        "How colours enter and leave the spectral simulation.",
+    ),
+    (
+        "Input Colour",
+        "How the file’s values are read: its colour space and curve.",
+    ),
+    ("Output", "The colour space the preview develops in."),
+];
+
+/// Inspector actions whose help is inline in the other native apps.
+pub const MATCH: &str = "Keeps the developed photograph about as bright as the camera’s preview, or the original JPEG, PNG or TIFF. Film and paper changes solve it again; Exposure adds your own offset.";
+pub const SCOPE: &str = "Shows the developed photograph’s RGB histogram or its RGB levels from left to right. Crop and rotation follow the photograph; borders are excluded.";
+pub const SCOPE_RESIZE: &str =
+    "Drag to resize the scope. Double-click to reset its height; use Up and Down when focused.";
+pub const TONE_GRAPH: &str = "Drag the middle handle sideways for Print exposure, the side handles vertically for Slow/Fast gamma, or the curve for Gamma. Double-click a handle to reset it.";
+pub const ALL_CONTROLS: &str = "Shows every Lab control. Off, the basic controls and any advanced controls you changed remain visible.";
+pub const FAVORITE: &str =
+    "Keeps this stock at the top of its grid and menu. This does not change the photograph.";
+
+const EXTRA: &[(&str, &str)] = &[
+    (
+        "prep.exposure_ev",
+        "Changes scene brightness before the film. With Match camera brightness on, this is your offset above the matched exposure. 0 keeps the matched brightness.",
+    ),
+    (
+        "camera.auto_exposure",
+        "Meters the photograph and sets a starting camera exposure. Turn it off to set exposure from the file’s original scene light.",
+    ),
+    (
+        "io.scan_film",
+        "Scans the developed film directly, skipping the enlarger and paper.",
+    ),
+    (
+        "io.lens_correction.enabled",
+        "Corrects distortion, vignetting and colour fringing using the lens data in this RAW. Changing it re-decodes the photograph.",
+    ),
+    (
+        "io.input_interpretation.mode",
+        "Automatic reads the file’s profile or colour tags, with untagged files read as sRGB. Assume overrides its colour space and curve. Manual uses the engine’s input colour controls.",
+    ),
+    (
+        "io.input_interpretation.color_space",
+        "The colour space to assume for this file, replacing its profile and colour tags.",
+    ),
+    (
+        "io.output_color_space",
+        "The colour space the preview develops in. The save and export dialogs choose the output file’s colour space.",
+    ),
+    (
+        "io.output_cctf_encoding",
+        "Applies the output colour space’s curve. Off keeps scene-linear values for further processing.",
+    ),
+    (
+        "io.photo_long_side_px",
+        "The size the photograph is developed at, before borders. Changing it also changes grain and other effects measured in pixels.",
+    ),
+    (
+        "settings.serial_grain",
+        "Develops grain one colour at a time during export. The result is unchanged, with less memory and a longer export.",
+    ),
+    (
+        "film_render.development_time",
+        "Chooses the film’s measured development time. Profile default uses the stock’s normal development.",
+    ),
+    (
+        "print_render.development_time",
+        "Chooses the paper’s measured development time. Profile default uses the stock’s normal development.",
+    ),
+    (
+        "film_render.density_curves_morph.active",
+        "Enables the film development curve adjustments. Off uses the stock’s measured curves.",
+    ),
+    (
+        "film_render.grain.active",
+        "Draws the film’s grain. Off keeps the developed image smooth.",
+    ),
+    (
+        "film_render.halation.active",
+        "Enables light scattering and halation in the film.",
+    ),
+    (
+        "film_render.dir_couplers.active",
+        "Enables the film’s development inhibitor couplers.",
+    ),
+    (
+        "film_render.base.active",
+        "Applies the film base and fog adjustments.",
+    ),
+    (
+        "camera.diffusion_filter.active",
+        "Places a diffusion filter in front of the taking lens.",
+    ),
+    (
+        "print_render.density_curves_morph.active",
+        "Enables the paper development curve adjustments. Off uses the paper’s measured curves.",
+    ),
+    (
+        "print_render.base.active",
+        "Applies the paper base adjustments.",
+    ),
+    (
+        "print_render.glare.active",
+        "Adds the paper’s reflected room-light glare to the scan.",
+    ),
+];
+const EXTRA_GROUPS: &[(&str, &str)] = &[
+    (
+        "Brightness",
+        "Sets scene brightness before the film, with optional matching to the camera or original photograph.",
+    ),
+    (
+        "Tone",
+        "Adjusts the scene’s shadows, highlights and contrast before the film develops it.",
+    ),
+    (
+        "Color",
+        "Adjusts scene colour before the film adds its own response.",
+    ),
+    (
+        "Detail",
+        "Adjusts local contrast and texture before the film.",
+    ),
+    (
+        "Camera",
+        "Sets exposure, film format and taking-lens softness.",
+    ),
+    (
+        "Image Size",
+        "Sets the photograph’s development size. Export can reduce this size afterwards.",
+    ),
+    (
+        "Border",
+        "Frames the finished photograph. Borders do not enter the scopes.",
+    ),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn swift_pairs(source: &str, name: &str) -> Vec<(String, String)> {
+        let start = source.find(&format!("static let {name}")).unwrap();
+        let body = &source[start..source[start..].find("\n    ]").unwrap() + start];
+        body.lines()
+            .filter_map(|line| {
+                let line = line.trim().trim_end_matches(',');
+                let (key, text) = line.strip_prefix('"')?.split_once("\": \"")?;
+                Some((key.to_string(), text.strip_suffix('"')?.to_string()))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shared_tooltip_text_matches_macos() {
+        let swift = include_str!("../../macos/Sources/NegsApp/ControlHelp.swift");
+        let own = |table: &[(&str, &str)]| {
+            table
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(swift_pairs(swift, "paths"), own(PATHS));
+        assert_eq!(swift_pairs(swift, "groups"), own(GROUPS));
+        assert!(swift.contains(&format!("static let film = \"{FILM}\"")));
+        assert!(swift.contains(&format!("static let paper = \"{PAPER}\"")));
+    }
+
+    #[test]
+    fn all_linux_lab_parameters_and_groups_have_help() {
+        for g in crate::fixtures::GROUPS {
+            assert!(group(g.name).is_some(), "{}", g.name);
+            for knob in g.knobs {
+                let key = format!("{}.{}", g.name, knob.0);
+                if let Some(path) = crate::parameters::path(&key) {
+                    assert!(text(&path).is_some(), "{key}: {path}");
+                }
+            }
+        }
+        for (_, path) in crate::parameters::TOGGLES {
+            assert!(text(path).is_some(), "{path}");
+        }
+        for (_, path, _) in crate::parameters::CHOICES {
+            assert!(text(path).is_some(), "{path}");
+        }
+        for path in [
+            "prep.exposure_ev",
+            "prep.highlights",
+            "prep.shadows",
+            "prep.contrast",
+            "prep.lift",
+            "prep.gain",
+            "prep.color_boost",
+            "prep.saturation",
+            "prep.midtone_detail",
+        ] {
+            assert!(text(path).is_some(), "{path}");
+        }
+        assert_eq!(
+            text("film_render.grain.uniformity.2"),
+            text("film_render.grain.uniformity")
+        );
+    }
+}

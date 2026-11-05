@@ -37,6 +37,7 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         .selected(p.export_engine.min(1))
         .visible(!lut && !preview)
         .build();
+    engine.set_tooltip_text(Some("Fast develops with the GPU when available; Reference uses the CPU at higher numerical precision."));
     group.add(&engine);
     let format = adw::ComboRow::builder()
         .title("Format")
@@ -47,17 +48,26 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         }))
         .selected(if lut { 0 } else { p.output_format.min(2) })
         .build();
+    format.set_tooltip_text(Some(if lut {
+        "Exports the film and paper look as a 33 × 33 × 33 Cube LUT."
+    } else {
+        "Chooses the output file format: PNG and TIFF are lossless; JPEG is smaller and lossy."
+    }));
     group.add(&format);
     let depth = adw::ComboRow::builder()
         .title("Bit depth")
         .model(&gtk::StringList::new(&["8-bit", "16-bit"]))
         .visible(!lut)
         .build();
+    depth.set_tooltip_text(Some("16-bit preserves finer tonal steps and is recommended for further editing. JPEG supports 8-bit only."));
     group.add(&depth);
     let color_space = adw::ComboRow::builder()
         .title("Colour space")
         .visible(!lut)
         .build();
+    color_space.set_tooltip_text(Some(
+        "The output file’s colour space and embedded profile. ProPhoto RGB requires 16-bit output.",
+    ));
     group.add(&color_space);
     // Set while refresh rewrites the rows, so their handlers don't store it.
     let updating = Rc::new(std::cell::Cell::new(false));
@@ -72,6 +82,7 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
     let quality_row = adw::ActionRow::builder().title("JPEG quality").build();
     let quality = gtk::Scale::with_range(gtk::Orientation::Horizontal, 1., 100., 1.);
     quality.set_value(p.jpeg_quality.clamp(1, 100) as f64);
+    quality.set_tooltip_text(Some("Higher JPEG quality retains more detail at a larger file size. It does not affect PNG or TIFF."));
     quality.set_digits(0);
     quality.set_draw_value(true);
     quality.set_value_pos(gtk::PositionType::Left);
@@ -90,11 +101,13 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         .selected(p.export_edge.min(2))
         .visible(!lut)
         .build();
+    edge.set_tooltip_text(Some("Full Size keeps the developed dimensions. Long Edge or Short Edge reduces the photograph to fit that edge without enlargement."));
     group.add(&edge);
     let pixels_row = adw::ActionRow::builder().title("Edge pixels").build();
     let pixels = gtk::SpinButton::with_range(16., 65535., 1.);
     pixels.set_value(p.export_pixels.clamp(16, 65535) as f64);
     pixels.set_width_chars(7);
+    pixels.set_tooltip_text(Some("The selected output edge in pixels, from 16 to 65,535. The photograph is reduced to fit and is never enlarged."));
     pixels.set_valign(gtk::Align::Center);
     pixels.update_property(&[gtk::accessible::Property::Label("Export edge pixels")]);
     pixels_row.add_suffix(&pixels);
@@ -104,16 +117,21 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         .active(ui.history.borrow().state.border.export)
         .visible(!lut)
         .build();
+    border.set_tooltip_text(Some(
+        "Includes the border configured in Output. The photograph’s border must also be enabled.",
+    ));
     group.add(&border);
     let metadata = adw::SwitchRow::builder()
         .title("Copy photograph metadata")
         .active(p.metadata)
         .visible(!lut)
         .build();
+    metadata.set_tooltip_text(Some("Copies supported camera, lens, exposure, capture-time and other photograph metadata to the saved file."));
     group.add(&metadata);
     drop(p);
     body.append(&group);
     let filename = gtk::Entry::new();
+    filename.set_tooltip_text(Some("The suggested output filename. Choose Destination opens the system save dialog to select its folder and name."));
     filename.update_property(&[gtk::accessible::Property::Label("Output filename")]);
     let stem = ui
         .current_path
@@ -193,12 +211,23 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
             updating.set(true);
             depth.set_selected(if bits == 16 { 1 } else { 0 });
             depth.set_sensitive(format.selected() != 1);
-            depth.set_subtitle(if format.selected() == 1 { "JPEG is 8-bit only" } else { "" });
-            if color_space.model().is_none_or(|m| m.n_items() as usize != spaces.len()) {
+            depth.set_subtitle(if format.selected() == 1 {
+                "JPEG is 8-bit only"
+            } else {
+                ""
+            });
+            if color_space
+                .model()
+                .is_none_or(|m| m.n_items() as usize != spaces.len())
+            {
                 color_space.set_model(Some(&gtk::StringList::new(spaces)));
             }
             color_space.set_selected(spaces.iter().position(|s| *s == space).unwrap_or(0) as u32);
-            color_space.set_subtitle(if bits == 16 { "" } else { "ProPhoto RGB needs 16-bit" });
+            color_space.set_subtitle(if bits == 16 {
+                ""
+            } else {
+                "ProPhoto RGB needs 16-bit"
+            });
             updating.set(false);
             let current = filename.text();
             let stem = std::path::Path::new(current.as_str())
@@ -215,7 +244,7 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
                 filename.set_text(&name);
             }
             let mut message: String = if lut {
-                "33³ Cube includes film, paper, manual exposure, development, print filters and color. Excludes auto exposure, grain, halation/scatter, highlight boost, glare, diffusion, blur/sharpening, RAW development, resizing and Post edits. DIR inhibition stays active without spatial diffusion.".into()
+                "33³ Cube includes film, paper, manual exposure, development, print filters and color. Excludes auto exposure, grain, halation/scatter, highlight boost, glare, diffusion, blur/sharpening, Prep, RAW development, resizing and Post edits. DIR inhibition stays active without spatial diffusion.".into()
             } else if preview {
                 "Saves the current developed preview as shown.".into()
             } else if engine.selected() == 0 {
@@ -230,7 +259,9 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
                 if border.is_active() && ui.history.borrow().state.border.enabled {
                     message.push_str(" Adds the border.");
                 }
-                if let Some(summary) = space_summary(&space, &crate::preferences::preview_space(), !preview) {
+                if let Some(summary) =
+                    space_summary(&space, &crate::preferences::preview_space(), !preview)
+                {
                     message.push_str(&format!(" {summary}."));
                 }
                 if edge.selected() != 0 {
@@ -308,7 +339,9 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
         move |r| {
             if !updating.get() {
                 let bits = if r.selected() == 1 { 16 } else { 8 };
-                ui.preferences.borrow_mut().set_bit_depth(format.selected(), bits);
+                ui.preferences
+                    .borrow_mut()
+                    .set_bit_depth(format.selected(), bits);
                 refresh();
             }
         }
@@ -385,7 +418,7 @@ pub fn present(ui: &Rc<Editor>, kind: &str) {
     save.set_tooltip_text(Some(if crate::runtime::ui_only() {
         "Requires the film engine connection"
     } else {
-        "Choose a filename and save atomically"
+        "Choose the output filename and save the photograph with these settings"
     }));
     save.connect_clicked(glib::clone!(#[weak] ui,#[weak] dialog,#[weak] filename,#[weak] format,#[weak] engine,move |_|{
         if preview && ui.runtime.borrow().retained_id.is_none() {ui.toast.add_toast(adw::Toast::new("Wait for the current preview to finish developing."));return;}
@@ -427,14 +460,22 @@ fn same_file(a: &PathBuf, b: &PathBuf) -> bool {
 /// For the dialog's message; None for sRGB in an sRGB preview. The preview
 /// develops in `preview_space`; afterwards it follows this save.
 fn space_summary(space: &str, preview_space: &str, export: bool) -> Option<String> {
-    let follows = if space == preview_space { String::new() } else { format!("; the preview then shows {space}") };
+    let follows = if space == preview_space {
+        String::new()
+    } else {
+        format!("; the preview then shows {space}")
+    };
     if export {
-        return (space != "sRGB" || !follows.is_empty()).then(|| format!("Develops in {space} and embeds its profile{follows}"));
+        return (space != "sRGB" || !follows.is_empty())
+            .then(|| format!("Develops in {space} and embeds its profile{follows}"));
     }
     if space == preview_space {
-        return (space != "sRGB").then(|| format!("Keeps the preview's {space} colours and embeds its profile"));
+        return (space != "sRGB")
+            .then(|| format!("Keeps the preview's {space} colours and embeds its profile"));
     }
-    Some(format!("Converts the {preview_space} preview to {space}, clipping colours outside the smaller space{follows}"))
+    Some(format!(
+        "Converts the {preview_space} preview to {space}, clipping colours outside the smaller space{follows}"
+    ))
 }
 
 #[cfg(test)]
@@ -445,11 +486,19 @@ mod space_tests {
     fn summaries_say_whether_the_save_converts() {
         assert_eq!(space_summary("sRGB", "sRGB", true), None);
         assert_eq!(space_summary("sRGB", "sRGB", false), None);
-        assert_eq!(space_summary("Display P3", "Display P3", false).as_deref(), Some("Keeps the preview's Display P3 colours and embeds its profile"));
+        assert_eq!(
+            space_summary("Display P3", "Display P3", false).as_deref(),
+            Some("Keeps the preview's Display P3 colours and embeds its profile")
+        );
         assert_eq!(
             space_summary("Display P3", "sRGB", false).as_deref(),
-            Some("Converts the sRGB preview to Display P3, clipping colours outside the smaller space; the preview then shows Display P3")
+            Some(
+                "Converts the sRGB preview to Display P3, clipping colours outside the smaller space; the preview then shows Display P3"
+            )
         );
-        assert_eq!(space_summary("sRGB", "Display P3", true).as_deref(), Some("Develops in sRGB and embeds its profile; the preview then shows sRGB"));
+        assert_eq!(
+            space_summary("sRGB", "Display P3", true).as_deref(),
+            Some("Develops in sRGB and embeds its profile; the preview then shows sRGB")
+        );
     }
 }

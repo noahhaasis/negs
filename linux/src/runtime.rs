@@ -14,6 +14,8 @@ pub struct Runtime {
     pub client: Option<Arc<Engine>>,
     pub defaults: Value,
     pub ready: bool,
+    pub supports_tone_curve: bool,
+    pub supports_brightness_reference: bool,
     pub starting: bool,
     pub closing: bool,
     pub rendering: bool,
@@ -130,6 +132,8 @@ impl Editor {
                         runtime.client = Some(client);
                         runtime.defaults = defaults;
                         runtime.ready = true;
+                        runtime.supports_tone_curve = catalog["capabilities"]["tone_curve"] == true;
+                        runtime.supports_brightness_reference = catalog["capabilities"]["brightness_reference"] == true;
                     }
                     ui.perf.mark("engine_catalog_ready_ms");
                     ui.maybe_build_inspector();
@@ -254,9 +258,17 @@ impl Editor {
         let paper = crate::catalog::selected(&state, true).id.clone();
         let extent = (!params["io"]["photo_long_side_px"].is_null())
             .then(|| state.crop.map(|c| [c[2], c[3]]));
-        let desired = json!({"params":params,"film":film,"paper":paper,"limit_preview":crate::inspector::flag(&state,"Limit preview to 12 MP",false),"extent":extent,"interactive":r.interacting});
+        let desired = json!({"params":params,"film":film,"paper":paper,"limit_preview":self.preferences.borrow().limit_preview.unwrap_or(false),"extent":extent,"interactive":r.interacting});
         let identity = Some((source.clone(), stamp));
-        if r.source != identity {
+        let source_changed = r.source != identity;
+        if source_changed {
+            // The first decoded source may restore an already-solved session.
+            // A subsequent source refresh needs a new solution for its pixels.
+            if r.source.is_some()
+                && let Some(matched) = self.history.borrow_mut().state.brightness_match.as_mut()
+            {
+                matched.inputs = None;
+            }
             r.source = identity;
             r.source_generation += 1;
             r.hist_generation += 1;
@@ -270,16 +282,22 @@ impl Editor {
             self.lens_supported.set(false);
         }
         // The original view follows the decode and the preview space.
-        let original_key = json!([params["io"]["raw_white_balance"], params["io"]["lens_correction"], desired["limit_preview"],
-            params["io"]["input_interpretation"], params["io"]["input_color_space"],
-            params["io"]["input_cctf_decoding"], params["io"]["output_color_space"]]);
+        let original_key = json!([
+            params["io"]["raw_white_balance"],
+            params["io"]["lens_correction"],
+            desired["limit_preview"],
+            params["io"]["input_interpretation"],
+            params["io"]["input_color_space"],
+            params["io"]["input_cctf_decoding"],
+            params["io"]["output_color_space"]
+        ]);
         let release_original = r.showing_original && r.original_key != original_key;
         if r.original_key != original_key {
             r.original_key = original_key;
             r.original = None;
             r.original_loading = false;
         }
-        let histogram_crop = json!([state.crop, state.straighten]);
+        let histogram_crop = json!([state.crop, state.straighten, state.rotation]);
         let histogram_changed = r.histogram_crop != histogram_crop;
         r.histogram_crop = histogram_crop;
         if r.desired == desired {
@@ -301,6 +319,11 @@ impl Editor {
         r.retained_id = None;
         drop(r);
         if let Some(ui) = self.owner.borrow().upgrade() {
+            if source_changed {
+                crate::brightness::clear(&ui);
+                crate::tone_graph::clear(&ui);
+                crate::scopes::clear(&ui);
+            }
             if release_original {
                 ui.show_original(false);
             }
@@ -398,6 +421,7 @@ impl Editor {
                     let show = !r.showing_original;
                     drop(r);
                     if show { ui.present_engine_frame(&frame,true); }
+                    crate::tone_graph::rendered(&ui, &frame.result);
                     ui.update_engine_histogram();
                 }
                 Ok(Ok(_)) => { drop(r); }
@@ -407,6 +431,8 @@ impl Editor {
             }
             ui.sync_history();
             ui.render_next();
+            crate::brightness::pump(&ui);
+            crate::tone_graph::pump(&ui);
             crate::stock_browser::pump(&ui);
         });
     }
@@ -417,7 +443,9 @@ impl Editor {
             gdk::MemoryFormat::R8g8b8a8,
             &glib::Bytes::from_owned(frame.pixels.clone()),
             frame.width as usize * 4,
-            &crate::canvas::display_color_state(frame.result["display_color_space"].as_str().unwrap_or("")),
+            &crate::canvas::display_color_state(
+                frame.result["display_color_space"].as_str().unwrap_or(""),
+            ),
         );
         let dimension = |key: &str, fallback: i32| {
             frame.result[key]
@@ -574,30 +602,7 @@ impl Editor {
         });
     }
     pub fn update_engine_histogram(self: &Rc<Self>) {
-        let state = self.history.borrow().state.clone();
-        let mut r = self.runtime.borrow_mut();
-        let Some(frame) = (if r.showing_original {
-            r.original.clone()
-        } else {
-            r.developed.clone()
-        }) else {
-            return;
-        };
-        r.hist_generation += 1;
-        let generation = r.hist_generation;
-        drop(r);
-        let ui = self.clone();
-        glib::MainContext::default().spawn_local(async move {
-            let bins = gio::spawn_blocking(move || histogram(&frame, &state)).await;
-            if ui.runtime.borrow().hist_generation == generation
-                && let Ok(bins) = bins
-            {
-                ui.hist.replace(Some(bins));
-                if let Some(hist) = ui.histogram.borrow().as_ref() {
-                    hist.queue_draw();
-                }
-            }
-        });
+        crate::scopes::update(self);
     }
 }
 /// How the helper read the photograph's colours, for the inspector: its
@@ -613,33 +618,4 @@ pub(crate) fn input_summary(colour: &Value) -> String {
     }
     lines.retain(|l| !l.is_empty());
     lines.join("\n")
-}
-
-fn histogram(frame: &Frame, state: &crate::model::State) -> [Vec<u32>; 3] {
-    let mut bins = [vec![0; 256], vec![0; 256], vec![0; 256]];
-    let [x, y, w, h] = state.crop.unwrap_or([0., 0., 1., 1.]);
-    let width = frame.width as f64;
-    let height = frame.height as f64;
-    let step = ((width * height * w * h / 1_000_000.).sqrt().ceil() as usize).max(1);
-    let (sin, cos) = (-state.straighten.to_radians()).sin_cos();
-    for py in ((y * height).max(0.) as usize..((y + h) * height).min(height) as usize).step_by(step)
-    {
-        for px in
-            ((x * width).max(0.) as usize..((x + w) * width).min(width) as usize).step_by(step)
-        {
-            let (dx, dy) = (px as f64 - width / 2., py as f64 - height / 2.);
-            let (sx, sy) = (
-                (width / 2. + dx * cos - dy * sin).round() as i32,
-                (height / 2. + dx * sin + dy * cos).round() as i32,
-            );
-            if sx < 0 || sy < 0 || sx >= frame.width || sy >= frame.height {
-                continue;
-            }
-            let p = (sy as usize * frame.width as usize + sx as usize) * 4;
-            for c in 0..3 {
-                bins[c][frame.pixels[p + c] as usize] += 1;
-            }
-        }
-    }
-    bins
 }

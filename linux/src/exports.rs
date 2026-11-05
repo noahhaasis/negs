@@ -52,6 +52,9 @@ impl Drop for Staging {
 }
 impl Editor {
     pub fn begin_export(self: &Rc<Self>, output: PathBuf, kind: Kind) {
+        if kind != Kind::Lut && crate::brightness::defer_output(self, output.clone(), kind) {
+            return;
+        }
         let mut r = self.runtime.borrow_mut();
         if !r.ready || r.exporting.is_some() || (kind == Kind::Preview && r.retained_id.is_none()) {
             return;
@@ -73,7 +76,12 @@ impl Editor {
         }
         let state = self.history.borrow().state.clone();
         let p = self.preferences.borrow();
-        let format = match output.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        let format = match output
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
             Some("jpg" | "jpeg") => 1,
             Some("tif" | "tiff") => 2,
             _ => 0,
@@ -88,7 +96,9 @@ impl Editor {
         // again in it, where Save Preview converts what it shows.
         let retained = if kind == Kind::Preview
             || (kind == Kind::Fast
-                && r.developed.as_ref().is_some_and(|f| f.result["output_color_space"] == color_space.as_str())
+                && r.developed
+                    .as_ref()
+                    .is_some_and(|f| f.result["output_color_space"] == color_space.as_str())
                 && r.current_revision == Some(r.revision)
                 && r.developed
                     .as_ref()
@@ -99,10 +109,16 @@ impl Editor {
             None
         };
         let source_stamp = source.as_ref().map(|p| crate::filmstrip::stamp(p));
+        let mut params = parameters::runtime(&state, &r.defaults);
+        parameters::set(
+            &mut params,
+            "settings.serial_grain",
+            json!(p.low_memory_export.unwrap_or(false)),
+        );
         let snapshot = Snapshot {
             source,
             output: output.clone(),
-            params: parameters::runtime(&state, &r.defaults),
+            params,
             film: crate::catalog::selected(&state, false).id.clone(),
             paper: crate::catalog::selected(&state, true).id.clone(),
             state,

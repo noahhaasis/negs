@@ -198,8 +198,15 @@ impl Editor {
             h.state
                 .choices
                 .insert("Scan film directly".into(), positive.to_string());
+            h.state.custom_film_format = false;
+            h.state.brightness_match = ui
+                .preferences
+                .borrow()
+                .match_new_photos
+                .then(Default::default);
             h.commit();
             drop(h);
+            crate::brightness::clear(ui);
             ui.sync_state();
         });
         self.action("crop", |ui| {
@@ -489,18 +496,20 @@ impl Editor {
                 }
             ),
         );
-        let mut requested = self.history.borrow().state.clone();
-        if self
-            .current_path
-            .borrow()
-            .as_ref()
-            .is_some_and(|p| p != &path)
+        let mut requested = if !self.restoring_session.get()
+            && self.current_path.borrow().as_ref() != Some(&path)
         {
-            requested.crop = None;
-            requested.rotation = 0;
-            requested.straighten = 0.;
-            requested.choices.insert(crate::parameters::LENS_CORRECTIONS.into(), "true".into());
-        }
+            let prefs = self.preferences.borrow();
+            crate::parameters::for_new_photo(
+                &self.history.borrow().state,
+                &self.runtime.borrow().defaults,
+                prefs.fresh_edits,
+                prefs.match_new_photos,
+            )
+        } else {
+            self.history.borrow().state.clone()
+        };
+        self.preferences.borrow().apply_to_state(&mut requested);
         let requested_identity =
             crate::preview_cache::identity(&requested, &self.runtime.borrow().defaults);
         let defaults = self.runtime.borrow().defaults.clone();
@@ -536,20 +545,25 @@ impl Editor {
             ui.pending_path.take();
             match result {
                 Ok(Ok(opened)) => {
-                    if ui
-                        .current_path
-                        .borrow()
-                        .as_ref()
-                        .is_some_and(|p| p != &path)
-                    {
-                        let mut state = ui.history.borrow().state.clone();
-                        state.crop = None;
-                        state.rotation = 0;
-                        state.straighten = 0.;
-                        // Lens corrections are per photograph: on for a new one.
-                        state.choices.insert(crate::parameters::LENS_CORRECTIONS.into(), "true".into());
-                        ui.history.replace(crate::model::History::new(state));
+                    let changed_source = ui.current_path.borrow().as_ref() != Some(&path);
+                    if changed_source {
+                        crate::brightness::clear(&ui);
+                        crate::scopes::clear(&ui);
+                        crate::tone_graph::clear(&ui);
+                        if !ui.restoring_session.replace(false) {
+                            let prefs = ui.preferences.borrow();
+                            let next = crate::parameters::for_new_photo(
+                                &ui.history.borrow().state,
+                                &ui.runtime.borrow().defaults,
+                                prefs.fresh_edits,
+                                prefs.match_new_photos,
+                            );
+                            ui.history.replace(crate::model::History::new(next));
+                        }
                     }
+                    ui.preferences
+                        .borrow()
+                        .apply_to_state(&mut ui.history.borrow_mut().state);
                     if matches!(opened, Opened::Cached(_))
                         && crate::preview_cache::identity(
                             &ui.history.borrow().state,
@@ -681,6 +695,7 @@ impl Editor {
                     ui.perf.write();
                 }
                 Ok(Err(error)) => {
+                    ui.restoring_session.set(false);
                     ui.status.set_text("Could not open photograph");
                     ui.recent.borrow_mut().retain(|p| p != &path);
                     ui.refresh_recent();
@@ -690,6 +705,7 @@ impl Editor {
                     }
                 }
                 Err(_) => {
+                    ui.restoring_session.set(false);
                     ui.status.set_text("Image decoder stopped");
                 }
             }

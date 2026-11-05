@@ -378,6 +378,7 @@ impl Editor {
     }
     pub fn show_pane(self: &Rc<Self>, name: &str) {
         let opening = self.pane() != name || !self.split.shows_sidebar();
+        self.ensure_sidebar_space();
         self.sidebar_pages.set_visible_child_name(name);
         self.split.set_show_sidebar(true);
         self.preferences.borrow_mut().pane = name.into();
@@ -387,6 +388,7 @@ impl Editor {
         }
     }
     pub fn sync_panes(&self) {
+        self.update_window_minimum();
         let shown = self.split.shows_sidebar();
         let pane = self.pane();
         for (action, name) in [("inspector", "adjustments"), ("presets", "presets")] {

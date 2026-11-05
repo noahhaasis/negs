@@ -105,12 +105,38 @@ two are exclusive, and the open page is remembered. Presets are Python
 spektrafilm GUI-state files in `$XDG_DATA_HOME/negs/presets/`
 (`$NEGS_PROFILE_DIR/presets/` when set), ordered by `.order.json` as on macOS.
 Clicking a preset applies its film, paper and Lab settings as one undo step;
-Image Size, crop, rotation, border, output encoding, the preview limit and Post
-stay. New Preset (Ctrl+Shift+S) saves the current settings and starts naming
+Image Size, crop, rotation, border, Prep and its brightness-match metadata,
+output encoding and app preview/export preferences stay. New Preset
+(Ctrl+Shift+S) saves the current settings and starts naming
 them; Import Presets… (Ctrl+Shift+O) and dropped files copy files the engine
 reads; each row's context menu applies, renames, exports or deletes. Writes
 never replace a file, and renames and deletes act only on the file as listed.
 See [the presets design](presets-design.md).
+
+## Prep, scopes and the post-0.13.0 port
+
+The inspector has Prep / Lab / Output, with film and paper pinned above them.
+Prep contains input preparation, live camera/original brightness matching and
+nine pre-film adjustments. Lab has the stills-format picker and basic controls;
+changed advanced controls remain visible, and Show all controls reveals the rest.
+Output contains Image Size and Border. Film and paper can be starred as favourites.
+All inspector controls and groups have tooltips; native numeric controls also
+expose their help as accessible descriptions.
+
+The scope switches between Histogram and RGB waveform and remembers its mode
+and resized height. Print Curves has an interactive RGB/R/G/B tone graph with
+undoable exposure/gamma handles. Settings controls the new-photo policy,
+automatic brightness matching, preview limit, export memory and viewer background.
+The GTK controls retain the existing appearance; a visual polish pass is separate.
+
+Session schema 4 removes old Post tone/saturation overrides from both the saved
+params and control values. This intentionally neutralizes those finished-image
+edits, as macOS/Windows do; no exact conversion to Prep exists. Older sessions
+without match metadata keep matching off. New photographs default to Start fresh
+and matching on; Keep the previous edits remains available in Settings.
+
+Implementation details, validation results and limitations:
+[Linux feature port](linux-prep-port.md).
 
 `linux/check_presets.py` exercises the page on the desktop with the real engine
 and its own profile. Local test presets in `~/Work/negs-presets-test` (or

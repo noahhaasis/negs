@@ -3,36 +3,41 @@
 The Prep tab, camera brightness matching, the scopes and the Apple RAW 9 → 8 →
 rawler fallback come from yosoyelchris's fork of Negs (branch `prep-raw-scopes`,
 commit `d2a144d`, based on `d3f06c7`). The shared Rust engine accepts the Prep
-parameters on every platform; for now only the native macOS inspector shows
-them. Product spec: ticket 26.
+parameters on every platform; macOS, Windows, Linux and the web expose the
+controls. Product spec: ticket 26. Linux implementation and validation:
+[Linux port results](linux-prep-port.md).
 
-- **Prep / Lab / Post:** Prep sits immediately before Lab. Tone has Highlights,
+- **Prep / Lab / Output:** Prep sits immediately before Lab. Tone has Highlights,
   Shadows, Contrast, Lift and Gain; Color has Color Boost and Saturation; Detail
   has Midtone Detail. All eight default to zero. Highlights spans −180…100,
   retaining Sawmill's extended recovery range; the others span −100…100.
 - **Starting brightness:** Prep also has an independent Exposure control and
   **Match camera brightness**, which places the graded brightness against the
   RAW's embedded camera preview while limiting highlight crowding. Settings ›
-  *Match new RAWs to camera brightness* (on by default) runs it once on every
-  fresh RAW open. See [exposure placement](exposure-placement.md).
+  *Match new photographs to camera brightness* (on by default in the native
+  apps) enables the per-photo switch on new opens. Matching re-solves when the
+  selected look changes; manual Prep Exposure is an offset above that solution.
+  JPEG/PNG/TIFF use their original pixels as the reference in the native apps.
+  See [exposure placement](exposure-placement.md).
 - **Default marker:** on macOS 26 each slider's track fills from its default
   (`NSSlider.neutralValue`), so a moved slider shows where it started.
 - **New photograph:** Settings › New photographs. *Keep the previous edits*
-  (the default) carries Prep, Lab and Post over as Negs always did; *Start
-  fresh* resets Prep, Lab and Post adjustments, white balance and the border,
+  carries adjustments over as earlier versions did; *Start fresh* (the default)
+  resets Prep, Lab and Post adjustments, white balance and the border,
   keeping film/paper, Image Size and output colour. Crop, rotation and lens
   corrections reset either way. Relaunching restores the current session's
   edits, including Prep. Fresh RAW opens are then matched to the camera's
   brightness when that's on.
-- **Scopes:** a 190-point RGB histogram replaces the old 88-point plot; drag the
+- **Scopes:** the RGB histogram and waveform share bounded sampling; drag the
   handle below it to resize it (88–420 pt, remembered). The dropdown switches
   to RGB waveform and remembers the choice. Both use the
   developed preview, honour crop/straightening, exclude borders, and update off
   the main thread. The waveform follows quarter-turn rotation and uses bounded
   sampling even for very wide or tall images.
-- **RAW:** test each file against Apple RAW 9, then Apple RAW 8, then rawler.
+- **RAW on macOS:** test each file against Apple RAW 9, then Apple RAW 8, then rawler.
   Selection uses the filter's supported versions and completed render; no
-  camera-model allowlist. See [camera results](raw-compatibility-2026-11-01.md).
+  camera-model allowlist. Linux and Windows use rawler.
+  See [camera results](raw-compatibility-2026-11-01.md).
 
 ## Processing and persistence
 
@@ -55,7 +60,7 @@ on: a few isolated grain specks; approved 2026-11-04, see
 source-only GPU upload keys; successive edits cannot reuse stale prepared pixels. Reference builds retain the recovered f32 control math
 inside the otherwise f64 pipeline. Whole-frame spatial processing runs on CPU
 (in parallel) before the GPU film stage. Interactive previews apply it at
-preview resolution. The macOS helper keeps the prepared photograph-size and
+preview resolution. The native helper keeps the prepared photograph-size and
 interactive frames (`Pipeline::with_prepared_frame`) keyed by everything Prep
 reads, bit for bit: the Prep settings, both exposures before it, the input
 decoding and the frame size. Lab edits that change none of those (print
@@ -75,15 +80,13 @@ on its build machine: [validation results](prep-validation-2026-11-01.md).
 
 ## Open
 
-- **Linux inspector.** The engine is shared, so Linux renders Prep (neutral unless set), but
-  only macOS, Windows (`docs/windows-app.md`, branch `windows-prep-port`) and the web (branch
-  `web-prep-port`, [results](web-prep-port-plan.md#built-2026-11-04)) have the controls.
-  Needed before Prep counts as shipped on every platform. The web has no JPEG/PNG match yet.
+- **Web matching.** The web has no JPEG/PNG brightness match yet.
+  Linux's native port is implemented, unreleased; see [results](linux-prep-port.md).
 - **Highlights centring.** The range is −180…100 (the recovered extended recovery travel), so 0
   sits at 64 % of the track. Options: a piecewise mapping that centres 0, −100…100, or leave it.
   Above an encoded base of 1.0 (linear ≈ 4.2) the tone table's end slope is extrapolated, so
   negative Highlights brightens extreme speculars (−180: +2.3 stops at linear 8).
-- **Tab-switch lag.** Already on main before Prep (Lab → Output ≈ 180 ms, back ≈ 305 ms; → Prep
+- **macOS tab-switch lag.** Already on main before Prep (Lab → Output ≈ 180 ms, back ≈ 305 ms; → Prep
   110–170 ms). Keeping the tabs alive switches in 45–60 ms but makes a slider drag cost ≈ 50 %
   more main-thread time.
 - **Apple RAW 9.** No RAW decodes with RAW 9 on macOS 26.5; it seems to arrive with macOS 27.

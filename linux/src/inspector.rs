@@ -29,6 +29,9 @@ pub fn knob(ui: &Rc<Editor>, group: &str, knob: &Knob) -> gtk::ListBoxRow {
     ui.adjustments
         .borrow_mut()
         .push((format!("{group}.{}", knob.0), adjustment));
+    if let Some(path) = crate::parameters::path(&format!("{group}.{}", knob.0)) {
+        control_help(&row, crate::help::text(&path));
+    }
     row
 }
 
@@ -50,6 +53,12 @@ fn grain_knob(ui: &Rc<Editor>, key: String, knob: &Knob) -> gtk::ListBoxRow {
         move |state, value| {
             crate::parameters::set_grain_lane(state, &edit, value);
         },
+    );
+    control_help(
+        &n.row,
+        crate::parameters::path(&key)
+            .as_deref()
+            .and_then(crate::help::text),
     );
     ui.adjustments
         .borrow_mut()
@@ -126,7 +135,12 @@ fn number_row(
     let outer = gtk::Box::new(gtk::Orientation::Vertical, 0);
     outer.add_css_class("adjustment");
     let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let label = gtk::Label::new(Some(knob.0));
+    let shown = if knob.0 == "Exposure" && knob.1 == -5. {
+        "Negative exposure"
+    } else {
+        knob.0
+    };
+    let label = gtk::Label::new(Some(shown));
     label.set_hexpand(true);
     label.set_xalign(0.);
     line.append(&label);
@@ -145,13 +159,13 @@ fn number_row(
     spin.set_numeric(true);
     spin.update_property(&[gtk::accessible::Property::Label(&format!(
         "{} value",
-        knob.0
+        shown
     ))]);
     let reset = gtk::Button::from_icon_name("edit-undo-symbolic");
     reset.add_css_class("flat");
     reset.update_property(&[gtk::accessible::Property::Label(&format!(
         "Reset {}",
-        knob.0
+        shown
     ))]);
     reset.connect_clicked(glib::clone!(
         #[weak]
@@ -182,7 +196,7 @@ fn number_row(
     wheel_only_when_focused(&scale);
     scale.set_draw_value(false);
     scale.set_hexpand(true);
-    scale.update_property(&[gtk::accessible::Property::Label(knob.0)]);
+    scale.update_property(&[gtk::accessible::Property::Label(shown)]);
     reset_on_double_click(
         &scale,
         glib::clone!(
@@ -194,7 +208,7 @@ fn number_row(
     outer.append(&scale);
     row.set_child(Some(&outer));
     reset_menu(&row, &reset);
-    let (name, unit) = (knob.0, knob.5);
+    let (name, unit) = (shown, knob.5);
     let update_modified = glib::clone!(
         #[weak]
         reset_slot,
@@ -261,7 +275,7 @@ fn number_row(
     // Observe raw events without competing with GtkRange's own drag gesture.
     let gesture = gtk::EventControllerLegacy::new();
     gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let title = format!("Change {}", knob.0);
+    let title = format!("Change {shown}");
     let step = knob.3;
     gesture.connect_event(glib::clone!(
         #[weak]
@@ -375,6 +389,18 @@ fn list() -> gtk::ListBox {
 }
 fn section(body: &gtk::Box, name: &str) {
     let label = gtk::Label::new(Some(name));
+    label.set_tooltip_text(Some(match name {
+        "BRIGHTNESS" => "Set the scene's starting brightness before film simulation, independently of print exposure.",
+        "TONE" => "Adjust the scene's tonal range before film simulation.",
+        "COLOR" => "Adjust colour strength before film simulation.",
+        "DETAIL" => "Adjust midtone detail before film simulation.",
+        "CAMERA" => "Set the negative's exposure, film format and optical blur.",
+        "DEVELOPMENT" => "Develop the selected film and paper with the Lab's physical controls.",
+        "SCAN & COLOR" => "Choose spectral upsampling, gamut handling and output colour encoding.",
+        "IMAGE SIZE" => "Set the photograph's dimensions before film simulation. Exports use this working size.",
+        "FRAME" => "Add a border to the developed photograph.",
+        _ => "Adjust the photograph using this group of controls.",
+    }));
     label.set_xalign(0.);
     label.add_css_class("section-label");
     body.append(&label);
@@ -382,6 +408,7 @@ fn section(body: &gtk::Box, name: &str) {
 pub fn combo(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, options: &[&str]) -> adw::ComboRow {
     let model = gtk::StringList::new(options);
     let row = adw::ComboRow::builder().title(title).model(&model).build();
+    help_choice(&row, title);
     row.set_selected(
         ui.history
             .borrow()
@@ -428,6 +455,7 @@ pub fn toggle(ui: &Rc<Editor>, list: &gtk::ListBox, title: &str, active: bool) -
         .title(title)
         .active(active)
         .build();
+    help_choice(&row, title);
     let key = title.to_owned();
     if let Some(v) = ui.history.borrow().state.choices.get(&key) {
         row.set_active(v == "true");
@@ -465,55 +493,10 @@ pub fn build(ui: &Rc<Editor>) {
     title.add_css_class("caption");
     title.add_css_class("inspector-title");
     head.append(&title);
-    let histogram = gtk::DrawingArea::new();
-    histogram.set_content_height(82);
-    histogram.add_css_class("histogram");
-    histogram.update_property(&[gtk::accessible::Property::Label(
-        "RGB histogram of the camera preview",
-    )]);
-    histogram.set_draw_func(glib::clone!(
-        #[weak]
-        ui,
-        move |_, cr, w, h| {
-            cr.set_source_rgb(0.095, 0.098, 0.106);
-            let _ = cr.paint();
-            let hist = ui.hist.borrow();
-            let Some(hist) = hist.as_ref() else {
-                return;
-            };
-            let max = hist
-                .iter()
-                .flat_map(|h| h[1..255].iter())
-                .copied()
-                .max()
-                .unwrap_or(1)
-                .max(1) as f64;
-            cr.set_operator(gtk::cairo::Operator::Add);
-            for (n, color) in [
-                (0, (0.92, 0.31, 0.25)),
-                (1, (0.36, 0.78, 0.49)),
-                (2, (0.35, 0.57, 0.94)),
-            ] {
-                cr.set_source_rgba(color.0, color.1, color.2, 0.48);
-                cr.move_to(0., h as f64);
-                for (i, v) in hist[n].iter().enumerate() {
-                    cr.line_to(
-                        i as f64 / 255. * w as f64,
-                        h as f64 - (*v as f64 / max).min(1.) * (h as f64 - 8.),
-                    );
-                }
-                cr.line_to(w as f64, h as f64);
-                cr.close_path();
-                let _ = cr.fill();
-            }
-        }
-    ));
-    ui.histogram.replace(Some(histogram.clone()));
-    head.append(&histogram);
+    head.append(&crate::scopes::build(ui));
     let switch = gtk::StackSwitcher::new();
     switch.set_halign(gtk::Align::Fill);
     switch.set_hexpand(true);
-    head.append(&switch);
     ui.inspector.append(&head);
     let stack = gtk::Stack::new();
     stack.set_vexpand(true);
@@ -521,27 +504,40 @@ pub fn build(ui: &Rc<Editor>) {
     switch.set_stack(Some(&stack));
     let lab = gtk::Box::new(gtk::Orientation::Vertical, 0);
     lab.add_css_class("inspector-body");
-    section(&lab, "FILM & PAPER");
+    let prep = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    prep.add_css_class("inspector-body");
     let profiles = list();
     // Menus or preview grids, as Settings says; both are built so the
     // setting switches without rebuilding the inspector.
     let film = stock(ui, &profiles, false).upcast();
     crate::stock_browser::rows(ui, &profiles, false, film);
-    development(ui, &profiles, false);
-    toggle(ui, &profiles, "Scan film directly", false);
+
     // Shown unless scanning the film directly (see `stock_browser::apply`).
     let paper = stock(ui, &profiles, true).upcast();
     crate::stock_browser::rows(ui, &profiles, true, paper);
-    development(ui, &profiles, true);
-    lab.append(&profiles);
-    section(&lab, "IMAGE SIZE");
-    image_size(ui, &lab);
-    section(&lab, "CAMERA");
-    let camera = list();
-    toggle(ui, &camera, "Auto exposure", true);
+    let skipped = adw::ActionRow::builder()
+        .title("Paper")
+        .subtitle("Skipped — scanning film")
+        .build();
+    control_help(
+        &skipped,
+        Some(
+            "Direct scanning skips the paper and print stages. Turn off Scan film directly in the Lab to choose a paper.",
+        ),
+    );
+    visible(ui, &skipped, |state| {
+        flag(state, "Scan film directly", false)
+    });
+    profiles.append(&skipped);
+    head.append(&profiles);
+    head.append(&switch);
+    section(&prep, "BRIGHTNESS");
+    prep.append(&crate::brightness::build(ui));
+    let brightness = list();
+    let auto = toggle(ui, &brightness, "Auto exposure", true);
     let meter = combo(
         ui,
-        &camera,
+        &brightness,
         "Metering",
         &[
             "Average",
@@ -553,10 +549,44 @@ pub fn build(ui: &Rc<Editor>) {
             "Highlight-Weighted",
         ],
     );
-    visible(ui, &meter, |s| flag(s, "Auto exposure", true));
-    for k in fixtures::GROUPS[0].knobs {
-        camera.append(&knob(ui, "Camera", k));
+    let owner = Rc::downgrade(ui);
+    visible(ui, &auto, move |s| {
+        owner
+            .upgrade()
+            .is_some_and(|ui| crate::brightness::shows_meter(&ui, s))
+    });
+    let owner = Rc::downgrade(ui);
+    visible(ui, &meter, move |s| {
+        flag(s, "Auto exposure", true)
+            && owner
+                .upgrade()
+                .is_some_and(|ui| crate::brightness::shows_meter(&ui, s))
+    });
+    prep.append(&brightness);
+    for (title, knobs) in [
+        ("TONE", &fixtures::PREP[1..6]),
+        ("COLOR", &fixtures::PREP[6..8]),
+        ("DETAIL", &fixtures::PREP[8..]),
+    ] {
+        section(&prep, title);
+        let controls = list();
+        for k in knobs {
+            controls.append(&knob(ui, "Prep", k));
+        }
+        prep.append(&controls);
     }
+    section(&lab, "CAMERA");
+    let camera = list();
+    camera.append(&knob(
+        ui,
+        "Camera",
+        &Knob("Exposure", -5., 5., 0.1, 0., "EV"),
+    ));
+    if let Some(row) = camera.first_child() {
+        row.set_tooltip_text(crate::help::text("camera.exposure_compensation_ev"));
+    }
+    camera.append(&film_format(ui));
+    camera.append(&knob(ui, "Camera", &fixtures::GROUPS[0].knobs[2]));
     lab.append(&camera);
     let raw = list();
     combo(
@@ -577,13 +607,30 @@ pub fn build(ui: &Rc<Editor>) {
     // profile and tags, as an assumed colour space, or (Manual) by the input
     // colour space and curve, as Negs 0.8 read every file.
     let input = list();
-    let mode = combo(ui, &input, "Input colour", &["Automatic", "Assume", "Manual"]);
-    mode.set_subtitle("Automatic reads the embedded profile or tags; untagged files are read as sRGB");
-    let assumed = combo(ui, &input, "Assumed colour space", crate::parameters::ASSUMED_SPACES);
+    let mode = combo(
+        ui,
+        &input,
+        "Input colour",
+        &["Automatic", "Assume", "Manual"],
+    );
+    mode.set_subtitle(
+        "Automatic reads the embedded profile or tags; untagged files are read as sRGB",
+    );
+    let assumed = combo(
+        ui,
+        &input,
+        "Assumed colour space",
+        crate::parameters::ASSUMED_SPACES,
+    );
     visible(ui, &assumed, |s| choice(s, "Input colour") == 1);
     let linear = toggle(ui, &input, "Linear input", false);
     visible(ui, &linear, |s| choice(s, "Input colour") == 1);
-    let manual = combo(ui, &input, "Manual colour space", crate::parameters::MANUAL_SPACES);
+    let manual = combo(
+        ui,
+        &input,
+        "Manual colour space",
+        crate::parameters::MANUAL_SPACES,
+    );
     visible(ui, &manual, |s| choice(s, "Input colour") == 2);
     let decode = toggle(ui, &input, "Decode input curve", true);
     visible(ui, &decode, |s| choice(s, "Input colour") == 2);
@@ -593,9 +640,9 @@ pub fn build(ui: &Rc<Editor>) {
     ui.input_summary.add_css_class("dim-label");
     let input_caption = gtk::Label::new(Some("Input colour"));
     input_caption.add_css_class("caption");
-    lab.append(&input_caption);
-    lab.append(&input);
-    lab.append(&ui.input_summary);
+    prep.append(&input_caption);
+    prep.append(&input);
+    prep.append(&ui.input_summary);
     for widget in [
         input.upcast::<gtk::Widget>(),
         input_caption.upcast::<gtk::Widget>(),
@@ -618,13 +665,15 @@ pub fn build(ui: &Rc<Editor>) {
     lens.set_subtitle("Distortion, vignetting and colour fringing");
     {
         let owner = Rc::downgrade(ui);
-        visible(ui, &lens, move |_| owner.upgrade().is_some_and(|ui| ui.lens_supported.get()));
+        visible(ui, &lens, move |_| {
+            owner.upgrade().is_some_and(|ui| ui.lens_supported.get())
+        });
     }
     let raw_caption = gtk::Label::new(Some("RAW development · changes re-decode the photograph"));
     raw_caption.set_wrap(true);
     raw_caption.add_css_class("caption");
-    lab.append(&raw_caption);
-    lab.append(&raw);
+    prep.append(&raw_caption);
+    prep.append(&raw);
     for widget in [
         raw.upcast::<gtk::Widget>(),
         raw_caption.upcast::<gtk::Widget>(),
@@ -642,6 +691,28 @@ pub fn build(ui: &Rc<Editor>) {
             }
         }));
     }
+    let prepscroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .child(&prep)
+        .build();
+    stack.add_titled(&prepscroll, Some("prep"), "Prep");
+    let basics = gtk::CheckButton::with_label("Show all controls");
+    basics.set_active(ui.preferences.borrow().lab_all_controls);
+    basics.set_tooltip_text(Some(crate::help::ALL_CONTROLS));
+    basics.connect_toggled(glib::clone!(
+        #[weak]
+        ui,
+        move |button| {
+            ui.preferences.borrow_mut().lab_all_controls = button.is_active();
+            ui.sync_state();
+        }
+    ));
+    lab.append(&basics);
+    let development_rows = list();
+    development(ui, &development_rows, false);
+    development(ui, &development_rows, true);
+    toggle(ui, &development_rows, "Scan film directly", false);
+    lab.append(&development_rows);
     section(&lab, "DEVELOPMENT");
     let groups = fixtures::GROUPS
         .iter()
@@ -654,6 +725,10 @@ pub fn build(ui: &Rc<Editor>) {
     for group in groups {
         let rows = list();
         let expander = adw::ExpanderRow::builder().title(group.name).build();
+        expander.set_tooltip_text(crate::help::group(group.name));
+        if let Some(help) = crate::help::group(group.name) {
+            expander.update_property(&[gtk::accessible::Property::Description(help)]);
+        }
         if matches!(
             group.name,
             "Film Curves"
@@ -769,6 +844,22 @@ pub fn build(ui: &Rc<Editor>) {
         ) {
             sensitive(ui, &expander, |s| !flag(s, "Scan film directly", false));
         }
+        if group.name == "Scanner" {
+            let owner = Rc::downgrade(ui);
+            visible(ui, &rows, move |state| {
+                owner.upgrade().is_some_and(|ui| {
+                    ui.preferences.borrow().lab_all_controls
+                        || group.knobs.iter().any(|knob| {
+                            state
+                                .values
+                                .get(&format!("Scanner.{}", knob.0))
+                                .is_some_and(|v| (*v - knob.4).abs() > 1e-6)
+                        })
+                        || modified_choice(state, "White correction")
+                        || modified_choice(state, "Black correction")
+                })
+            });
+        }
         rows.append(&expander);
         lab.append(&rows);
     }
@@ -788,7 +879,6 @@ pub fn build(ui: &Rc<Editor>) {
         "Spectral upsampling",
         &["Hanatos 2025", "Arctic 2026 (Beta)", "Mallett 2019"],
     );
-    toggle(ui, &color, "Limit preview to 12 MP", true);
     // The preview space is the app's, not the edit's: no undo, no session.
     let spaces = gtk::StringList::new(&crate::preferences::COLOR_SPACES);
     let preview_space = adw::ComboRow::builder()
@@ -797,12 +887,19 @@ pub fn build(ui: &Rc<Editor>) {
         .model(&spaces)
         .build();
     let current = crate::preferences::preview_space();
-    preview_space.set_selected(crate::preferences::COLOR_SPACES.iter().position(|s| *s == current).unwrap_or(0) as u32);
+    preview_space.set_selected(
+        crate::preferences::COLOR_SPACES
+            .iter()
+            .position(|s| *s == current)
+            .unwrap_or(0) as u32,
+    );
     preview_space.connect_selected_notify(glib::clone!(
         #[weak]
         ui,
         move |row| {
-            let Some(space) = crate::preferences::COLOR_SPACES.get(row.selected() as usize) else { return };
+            let Some(space) = crate::preferences::COLOR_SPACES.get(row.selected() as usize) else {
+                return;
+            };
             ui.preferences.borrow_mut().color_space = (*space).into();
             if crate::preferences::set_preview_space(space) {
                 ui.observe_edit();
@@ -814,7 +911,10 @@ pub fn build(ui: &Rc<Editor>) {
         let row = preview_space.clone();
         ui.rules.borrow_mut().push(Box::new(move |_| {
             let current = crate::preferences::preview_space();
-            let index = crate::preferences::COLOR_SPACES.iter().position(|s| *s == current).unwrap_or(0) as u32;
+            let index = crate::preferences::COLOR_SPACES
+                .iter()
+                .position(|s| *s == current)
+                .unwrap_or(0) as u32;
             if row.selected() != index {
                 row.set_selected(index);
             }
@@ -822,8 +922,24 @@ pub fn build(ui: &Rc<Editor>) {
     }
     color.append(&preview_space);
     // The session key keeps its old name; the curve is the output space's.
-    toggle(ui, &color, "Encode output as sRGB", true).set_title("Encode with the colour space’s curve");
-    toggle(ui, &color, "Use less memory for export", false);
+    toggle(ui, &color, "Encode output as sRGB", true)
+        .set_title("Encode with the colour space’s curve");
+    let owner = Rc::downgrade(ui);
+    visible(ui, &color, move |state| {
+        owner.upgrade().is_some_and(|ui| {
+            ui.preferences.borrow().lab_all_controls
+                || [
+                    "Output gamut",
+                    "Input gamut",
+                    "CAT16 adaptation",
+                    "Spectral upsampling",
+                    "Encode output as sRGB",
+                ]
+                .iter()
+                .any(|key| modified_choice(state, key))
+                || crate::preferences::preview_space() != "sRGB"
+        })
+    });
     lab.append(&color);
     let scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -832,19 +948,15 @@ pub fn build(ui: &Rc<Editor>) {
     stack.add_titled(&scroll, Some("lab"), "Lab");
     let post = gtk::Box::new(gtk::Orientation::Vertical, 0);
     post.add_css_class("inspector-body");
-    section(&post, "TONE & COLOR");
-    let tone = list();
-    for k in fixtures::POST {
-        tone.append(&knob(ui, "Post", k));
-    }
-    post.append(&tone);
+    section(&post, "IMAGE SIZE");
+    image_size(ui, &post);
     section(&post, "FRAME");
     post.append(&crate::border_ui::build(ui));
     let postscroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&post)
         .build();
-    stack.add_titled(&postscroll, Some("post"), "Post");
+    stack.add_titled(&postscroll, Some("output"), "Output");
     ui.inspector.append(&stack);
     let footer = gtk::Box::new(gtk::Orientation::Vertical, 8);
     footer.add_css_class("inspector-footer");
@@ -866,7 +978,9 @@ pub fn build(ui: &Rc<Editor>) {
         ui,
         move |s| {
             if let Some(name) = s.visible_child_name() {
-                ui.preferences.borrow_mut().tab = name.to_string();
+                let mut prefs = ui.preferences.borrow_mut();
+                prefs.tab = name.to_string();
+                prefs.tab_chosen = true;
             }
         }
     ));
@@ -875,6 +989,121 @@ pub fn build(ui: &Rc<Editor>) {
         .detail("initial_slider_count", ui.adjustments.borrow().len() + 3);
     ui.perf.mark("inspector_ready_ms");
     ui.perf.write();
+}
+
+fn help_choice(row: &impl IsA<gtk::Widget>, key: &str) {
+    let path = crate::parameters::TOGGLES
+        .iter()
+        .map(|(k, p)| (*k, *p))
+        .chain(crate::parameters::CHOICES.iter().map(|(k, p, _)| (*k, *p)))
+        .find(|(k, _)| *k == key)
+        .map(|(_, p)| p);
+    let help = path.and_then(crate::help::text).or_else(|| match key {
+        "Develop at" => Some("The photograph's working size. Longest side develops at the requested size; Original size keeps the source dimensions."),
+        "Development" => Some("The film's measured development time. Profile default uses its recommended development."),
+        "Print development" => Some("The paper's measured development time. Profile default uses its recommended development."),
+        _ => None,
+    });
+    control_help(row, help);
+}
+
+/// Native range widgets expose their own accessibility nodes. Give those
+/// the row's help too, so both hover and screen-reader users can read it.
+pub(crate) fn control_help(widget: &impl IsA<gtk::Widget>, help: Option<&str>) {
+    let widget = widget.upcast_ref::<gtk::Widget>();
+    widget.set_tooltip_text(help);
+    let Some(help) = help else {
+        return;
+    };
+    widget.update_property(&[gtk::accessible::Property::Description(help)]);
+    let mut pending = vec![widget.clone().upcast::<gtk::Widget>()];
+    while let Some(parent) = pending.pop() {
+        let mut child = parent.first_child();
+        while let Some(node) = child {
+            child = node.next_sibling();
+            if node.is::<gtk::Scale>() || node.is::<gtk::SpinButton>() {
+                node.set_tooltip_text(Some(help));
+                node.update_property(&[gtk::accessible::Property::Description(help)]);
+            }
+            pending.push(node);
+        }
+    }
+}
+fn modified_choice(state: &crate::model::State, key: &str) -> bool {
+    let fallback = match key {
+        "Auto exposure"
+        | "Exposure compensation"
+        | "Encode output as sRGB"
+        | "White correction"
+        | "Black correction" => "true",
+        "Metering" => "2",
+        _ if crate::parameters::TOGGLES.iter().any(|(k, _)| *k == key) => "false",
+        _ => "0",
+    };
+    let defaults = choice_default(&serde_json::Value::Null, key, fallback);
+    state.choices.get(key).is_some_and(|v| *v != defaults)
+}
+fn advanced_choice(ui: &Rc<Editor>, row: &impl IsA<gtk::Widget>, key: &'static str) {
+    let owner = Rc::downgrade(ui);
+    visible(ui, row, move |state| {
+        owner.upgrade().is_some_and(|ui| {
+            ui.preferences.borrow().lab_all_controls || modified_choice(state, key)
+        })
+    });
+}
+fn film_format(ui: &Rc<Editor>) -> gtk::ListBoxRow {
+    let outer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let list = list();
+    let names: Vec<_> = fixtures::FILM_FORMATS
+        .iter()
+        .map(|(name, _)| *name)
+        .chain(std::iter::once("Custom…"))
+        .collect();
+    let row = adw::ComboRow::builder()
+        .title("Film format")
+        .model(&gtk::StringList::new(&names))
+        .build();
+    row.set_tooltip_text(crate::help::text("camera.film_format_mm"));
+    list.append(&row);
+    let slider = knob(ui, "Camera", &Knob("Film format", 4., 120., 0.1, 35., "mm"));
+    list.append(&slider);
+    outer.append(&list);
+    row.connect_selected_notify(glib::clone!(
+        #[weak]
+        ui,
+        move |row| {
+            if ui.syncing.get() {
+                return;
+            }
+            let mut h = ui.history.borrow_mut();
+            h.begin("Change Film Format");
+            h.state.custom_film_format = row.selected() as usize >= fixtures::FILM_FORMATS.len();
+            if let Some((_, mm)) = fixtures::FILM_FORMATS.get(row.selected() as usize) {
+                h.state.values.insert("Camera.Film format".into(), *mm);
+            }
+            h.commit();
+            drop(h);
+            ui.sync_state();
+        }
+    ));
+    ui.rules.borrow_mut().push(Box::new(move |state| {
+        let mm = state
+            .values
+            .get("Camera.Film format")
+            .copied()
+            .unwrap_or(35.);
+        let selected = if state.custom_film_format {
+            None
+        } else {
+            fixtures::film_format(mm)
+        };
+        row.set_selected(selected.unwrap_or(fixtures::FILM_FORMATS.len()) as u32);
+        slider.set_visible(selected.is_none());
+    }));
+    let wrapper = gtk::ListBoxRow::new();
+    wrapper.set_activatable(false);
+    wrapper.set_child(Some(&outer));
+    wrapper
 }
 
 pub fn flag(s: &crate::model::State, key: &str, default: bool) -> bool {
@@ -905,6 +1134,9 @@ fn sensitive(
 }
 fn group_controls(ui: &Rc<Editor>, expander: &adw::ExpanderRow, group: &'static fixtures::Group) {
     let content = list();
+    if group.name == "Print Curves" {
+        expander.add_row(&crate::tone_graph::build(ui));
+    }
     let key = format!("{} enabled", group.name);
     let default = effect_default(ui, group.name);
     sensitive(ui, &content, move |s| flag(s, &key, default));
@@ -918,15 +1150,21 @@ fn group_controls(ui: &Rc<Editor>, expander: &adw::ExpanderRow, group: &'static 
             );
         }
         "Enlarger" => {
-            toggle(ui, &content, "Exposure compensation", true);
+            let row = toggle(ui, &content, "Exposure compensation", true);
+            advanced_choice(ui, &row, "Exposure compensation");
         }
         "Scanner" => {
-            toggle(ui, &content, "White correction", true);
-            toggle(ui, &content, "Black correction", true);
+            let white = toggle(ui, &content, "White correction", true);
+            advanced_choice(ui, &white, "White correction");
+            let black = toggle(ui, &content, "Black correction", true);
+            advanced_choice(ui, &black, "Black correction");
         }
         _ => {}
     }
-    for k in group.knobs {
+    for (index, k) in group.knobs.iter().enumerate() {
+        if group.name == "Enlarger" && index == 3 {
+            content.append(&balance_print(ui));
+        }
         let row = knob(ui, group.name, k);
         if k.0 == "White level" {
             sensitive(ui, &row, |s| flag(s, "White correction", true));
@@ -934,22 +1172,48 @@ fn group_controls(ui: &Rc<Editor>, expander: &adw::ExpanderRow, group: &'static 
         if k.0 == "Black level" {
             sensitive(ui, &row, |s| flag(s, "Black correction", true));
         }
-        if matches!(
-            k.0,
-            "Red gamma"
-                | "Green gamma"
-                | "Blue gamma"
-                | "Magenta shift"
-                | "Yellow shift"
-                | "Preflash magenta"
-                | "Preflash yellow"
-        ) {
-            visible(ui, &row, |s| !crate::catalog::selected(s, false).bw);
-        }
+        let basic = match group.name {
+            "Grain" => index < 3,
+            "Enlarger" => index < 3,
+            "Scanner" => false,
+            _ => index == 0,
+        };
+        let key = format!("{}.{}", group.name, k.0);
+        let default = crate::parameters::path(&key)
+            .and_then(|p| crate::parameters::get(&ui.runtime.borrow().defaults, &p).as_f64())
+            .unwrap_or(k.4);
+        let color_only = crate::parameters::color_only(&key)
+            || matches!(
+                k.0,
+                "Red gamma"
+                    | "Green gamma"
+                    | "Blue gamma"
+                    | "Magenta shift"
+                    | "Yellow shift"
+                    | "Preflash magenta"
+                    | "Preflash yellow"
+            );
+        let owner = Rc::downgrade(ui);
+        visible(ui, &row, move |state| {
+            let Some(ui) = owner.upgrade() else {
+                return false;
+            };
+            let changed = if let Some((field, lane)) = crate::parameters::grain_lane(&key) {
+                state.values.get(&key).is_some_and(|v| {
+                    (*v - crate::parameters::grain_preset(state, field, lane).unwrap_or(default))
+                        .abs()
+                        > 1e-6
+                })
+            } else {
+                state
+                    .values
+                    .get(&key)
+                    .is_some_and(|v| (*v - default).abs() > 1e-6)
+            };
+            (!color_only || !crate::catalog::selected(state, false).bw)
+                && (basic || changed || ui.preferences.borrow().lab_all_controls)
+        });
         content.append(&row);
-    }
-    if group.name == "Enlarger" {
-        content.append(&balance_print(ui));
     }
     expander.add_row(&content);
 }
@@ -978,141 +1242,11 @@ fn balance_print(ui: &Rc<Editor>) -> gtk::ListBoxRow {
     row
 }
 fn stock(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ComboRow {
-    let stocks = crate::catalog::stocks(paper);
-    let labels: Vec<_> = stocks
-        .iter()
-        .map(|s| format!("{} · {}", s.group, s.name))
-        .collect();
-    let names: Vec<_> = labels.iter().map(String::as_str).collect();
-    let model = gtk::SortListModel::new(Some(gtk::StringList::new(&names)), None::<gtk::Sorter>);
-    model.set_section_sorter(Some(&gtk::CustomSorter::new(|a, b| {
-        let rank = |item: &glib::Object| {
-            let text = item.downcast_ref::<gtk::StringObject>().unwrap().string();
-            crate::catalog::group_order(text.split_once(" · ").unwrap().0)
-        };
-        rank(a).cmp(&rank(b)).into()
-    })));
-    let row = adw::ComboRow::builder()
-        .title(if paper { "Paper" } else { "Film" })
-        .model(&model)
-        .expression(gtk::PropertyExpression::new(
-            gtk::StringObject::static_type(),
-            None::<gtk::Expression>,
-            "string",
-        ))
-        .enable_search(true)
-        .search_match_mode(gtk::StringFilterMatchMode::Substring)
-        .build();
-    row.set_selected(
-        stocks
-            .iter()
-            .position(|s| s.id == crate::catalog::selected(&ui.history.borrow().state, paper).id)
-            .unwrap_or(0) as u32,
-    );
-    let selected_factory = gtk::SignalListItemFactory::new();
-    selected_factory.connect_setup(|_, o| {
-        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
-        let label = gtk::Label::new(None);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_max_width_chars(23);
-        item.set_child(Some(&label));
-    });
-    selected_factory.connect_bind(|_, o| {
-        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
-        let text = item
-            .item()
-            .and_downcast::<gtk::StringObject>()
-            .unwrap()
-            .string();
-        item.child()
-            .and_downcast::<gtk::Label>()
-            .unwrap()
-            .set_text(text.split_once(" · ").unwrap().1);
-    });
-    row.set_factory(Some(&selected_factory));
-    let popup_factory = gtk::SignalListItemFactory::new();
-    popup_factory.connect_setup(|_, o| {
-        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
-        let name = gtk::Label::new(None);
-        name.set_xalign(0.);
-        name.set_wrap(true);
-        item.set_child(Some(&name));
-    });
-    popup_factory.connect_bind(|_, o| {
-        let item = o.downcast_ref::<gtk::ListItem>().unwrap();
-        let text = item
-            .item()
-            .and_downcast::<gtk::StringObject>()
-            .unwrap()
-            .string();
-        item.child()
-            .and_downcast::<gtk::Label>()
-            .unwrap()
-            .set_text(text.split_once(" · ").unwrap().1);
-    });
-    row.set_list_factory(Some(&popup_factory));
-    // Real section headers stay outside selectable rows, including during search.
-    let header_factory = gtk::SignalListItemFactory::new();
-    header_factory.connect_setup(|_, o| {
-        let header = o.downcast_ref::<gtk::ListHeader>().unwrap();
-        let label = gtk::Label::new(None);
-        label.set_xalign(0.);
-        label.add_css_class("heading");
-        label.add_css_class("dim-label");
-        label.set_margin_start(12);
-        label.set_margin_end(12);
-        label.set_margin_top(8);
-        label.set_margin_bottom(4);
-        header.set_child(Some(&label));
-    });
-    header_factory.connect_bind(|_, o| {
-        let header = o.downcast_ref::<gtk::ListHeader>().unwrap();
-        let text = header
-            .item()
-            .and_downcast::<gtk::StringObject>()
-            .unwrap()
-            .string();
-        header
-            .child()
-            .and_downcast::<gtk::Label>()
-            .unwrap()
-            .set_text(text.split_once(" · ").unwrap().0);
-    });
-    row.set_header_factory(Some(&header_factory));
-    row.connect_selected_notify(glib::clone!(
-        #[weak]
-        ui,
-        move |r| {
-            if ui.syncing.get() {
-                return;
-            }
-            let Some(stock) = stocks.get(r.selected() as usize) else {
-                return;
-            };
-            let mut h = ui.history.borrow_mut();
-            h.begin(if paper { "Change Paper" } else { "Change Film" });
-            crate::catalog::choose(&mut h.state, stock, ui.preferences.borrow().keep_paper);
-            h.commit();
-            drop(h);
-            ui.sync_state();
-        }
-    ));
-    let stocks = crate::catalog::stocks(paper);
-    ui.rules.borrow_mut().push(Box::new(glib::clone!(
-        #[weak]
-        row,
-        move |s| {
-            row.set_selected(
-                stocks
-                    .iter()
-                    .position(|stock| stock.id == crate::catalog::selected(s, paper).id)
-                    .unwrap_or(0) as u32,
-            );
-        }
-    )));
+    let row = crate::stock_browser::menu(ui, paper);
     list.append(&row);
     row
 }
+
 fn development(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) {
     let title = if paper {
         "Print development"
@@ -1145,6 +1279,7 @@ fn image_size(ui: &Rc<Editor>, body: &gtk::Box) {
         &["Original size", "Longest side…"],
     );
     let row = adw::ActionRow::builder().title("Longest side").build();
+    row.set_tooltip_text(Some("The longest edge in pixels, after cropping. The preview and full exports develop at this Image Size."));
     let entry = gtk::Entry::builder()
         .width_chars(7)
         .max_width_chars(9)
@@ -1483,35 +1618,28 @@ mod layout_tests {
         );
         ui.canvas.set_texture(&texture, (6000, 4000));
         let all = widgets(&ui.inspector);
-        let enlarger = all
-            .iter()
-            .find_map(|widget| {
-                widget
-                    .clone()
-                    .downcast::<adw::ExpanderRow>()
-                    .ok()
-                    .filter(|row| row.title() == "Enlarger")
-            })
-            .unwrap();
-        enlarger.set_expanded(true);
-        let adjustment = ui
-            .adjustments
+        ui.history.borrow_mut().state.border.enabled = true;
+        ui.tabs
             .borrow()
-            .iter()
-            .find(|(key, _)| key == "Enlarger.Magenta shift")
+            .as_ref()
             .unwrap()
-            .1
-            .clone();
-        let scale = all
+            .set_visible_child_name("output");
+        let mat = all
             .iter()
             .find_map(|widget| {
                 widget
                     .clone()
-                    .downcast::<gtk::Scale>()
+                    .downcast::<gtk::Label>()
                     .ok()
-                    .filter(|scale| scale.adjustment() == adjustment)
+                    .filter(|label| label.text() == "Mat thickness")
             })
             .unwrap();
+        let mat_row = mat.ancestor(gtk::ListBoxRow::static_type()).unwrap();
+        let scale = widgets(&mat_row)
+            .into_iter()
+            .find_map(|widget| widget.downcast::<gtk::Scale>().ok())
+            .unwrap();
+        let adjustment = scale.adjustment();
         ui.sync_history();
         let readout = all
             .iter()
@@ -1530,6 +1658,13 @@ mod layout_tests {
             }
             ancestor = ancestor.parent().unwrap();
         };
+        // Output is shorter than the former Lab. Give its real scroller a
+        // bounded viewport so this still exercises a scrolled inspector.
+        scroll.set_min_content_height(180);
+        scroll.set_max_content_height(180);
+        scroll.set_propagate_natural_height(true);
+        scroll.set_vexpand(false);
+        scroll.set_valign(gtk::Align::Start);
         let form = readout.parent().unwrap();
         ui.window.present();
         settle_layout();
@@ -1596,7 +1731,11 @@ mod layout_tests {
         ui.observe_edit();
         assert_eq!(ui.runtime.borrow().preview_scale, None);
         ui.sync_history();
-        assert!(readout.text().contains("Developing the current adjustments"));
+        assert!(
+            readout
+                .text()
+                .contains("Developing the current adjustments")
+        );
         ui.window.destroy();
     }
 }

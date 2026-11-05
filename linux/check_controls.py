@@ -22,7 +22,7 @@ for path in (root / 'target/linux-validation/ui-demo').glob('*.jpg'):
 report = out / 'native-controls.json'
 report.unlink(missing_ok=True)
 env = dict(os.environ, NEGS_UI_ONLY="1", GTK_A11Y='atspi', NEGS_PROFILE_DIR=str(out / 'profile'),
-           NEGS_UI_AUDIT=str(report), NEGS_INSPECTOR_MODE='eager', NEGS_QUIT_AFTER_MS='22000')
+           NEGS_UI_AUDIT=str(report), NEGS_UI_SCENE='lab', NEGS_INSPECTOR_MODE='eager', NEGS_QUIT_AFTER_MS='22000')
 
 def wait_for(fn, description, seconds=6):
     until = time.monotonic() + seconds
