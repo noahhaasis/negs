@@ -119,6 +119,15 @@ fn unsolved(ui: &Editor, state: &State) -> bool {
         })
 }
 
+pub fn running(ui: &Editor) -> bool {
+    ui.brightness.running.get()
+}
+
+/// Unlike `pending`, this excludes the final settled render after a solve.
+pub fn needs_solution(ui: &Editor) -> bool {
+    unsolved(ui, &ui.history.borrow().state)
+}
+
 /// Outputs also wait for the render caused by the applied match. Optional
 /// graph/thumbnail work uses this to yield to matching and the main preview.
 pub fn pending(ui: &Editor) -> bool {
@@ -350,6 +359,13 @@ pub fn pump(ui: &Rc<Editor>) {
         if ui.brightness.running.replace(false) {
             ui.brightness.token.fetch_add(1, Ordering::Relaxed);
         }
+        ui.release_held_frame();
+        ui.render_next();
+        return;
+    }
+    if !ui.brightness.running.get() && !unsolved(ui, &state) {
+        ui.release_held_frame();
+        ui.render_next();
         return;
     }
     if crate::runtime::ui_only()
@@ -366,14 +382,13 @@ pub fn pump(ui: &Rc<Editor>) {
         || runtime.rendering
         || runtime.block_helper_render
         || runtime.exporting.is_some()
-        || runtime.current_revision != Some(runtime.revision)
     {
         return;
     }
     let (Some(client), Some((source, _)), Some(frame)) = (
         runtime.client.clone(),
         runtime.source.clone(),
-        runtime.developed.clone(),
+        runtime.matching_frame(),
     ) else {
         return;
     };
@@ -428,7 +443,7 @@ pub fn pump(ui: &Rc<Editor>) {
         if ui.runtime.borrow().closing || ui.runtime.borrow().source_generation!=generation {return;}
         let current=ui.history.borrow().state.clone();
         if current.brightness_match.is_none() || match_inputs(&current,&ui.runtime.borrow().defaults)!=inputs {
-            pump(&ui); return;
+            pump(&ui); ui.render_next(); return;
         }
         let result=match result {
             Ok(Ok(Some(result)))=>match result["exposure_ev"].as_f64().filter(|ev|ev.is_finite() && (-3.0..=3.0).contains(ev)) {
@@ -453,6 +468,8 @@ pub fn pump(ui: &Rc<Editor>) {
         }
         ui.sync_state();
         pump(&ui);
+        ui.render_next();
+        crate::tone_graph::pump(&ui);
         crate::stock_browser::pump(&ui);
     });
 }
@@ -500,7 +517,10 @@ pub fn defer_output(ui: &Rc<Editor>, output: PathBuf, kind: crate::exports::Kind
             return glib::ControlFlow::Break;
         }
         if pending(&ui) {
-            if started.elapsed() < Duration::from_secs(30) {
+            // CPU fallback on a large RAW can spend over 30 seconds on the
+            // final frame alone. Allow the bounded reference/solve/render
+            // chain to finish instead of abandoning an otherwise valid Save.
+            if started.elapsed() < Duration::from_secs(10 * 60) {
                 return glib::ControlFlow::Continue;
             }
             ui.status.set_text(
@@ -627,6 +647,64 @@ mod tests {
                 .title()
                 .contains("original")
         );
+
+        // A sub-threshold rematch releases the held settled frame without
+        // an exposure edit or another render, and enables Save again.
+        let previous = ui.runtime.borrow().developed.clone().unwrap();
+        let exposure = total_ev(&ui.history.borrow().state);
+        ui.history
+            .borrow_mut()
+            .state
+            .values
+            .insert("Camera.Exposure".into(), 0.0001);
+        ui.sync_state();
+        let revision = ui.runtime.borrow().revision;
+        wait("unchanged solve started", &|| running(&ui));
+        assert!(Arc::ptr_eq(
+            ui.runtime.borrow().developed.as_ref().unwrap(),
+            &previous
+        ));
+        wait("unchanged solve released", &|| !pending(&ui));
+        assert_eq!(ui.runtime.borrow().revision, revision);
+        assert_eq!(total_ev(&ui.history.borrow().state), exposure);
+        assert!(ui.runtime.borrow().retained_id.is_some());
+        assert!(
+            ui.window
+                .lookup_action("save-preview")
+                .unwrap()
+                .is_enabled()
+        );
+
+        // Failure may belong to this look or to the photograph. Supersede
+        // the worker with that verdict and verify that its held frame is
+        // released, rather than leaving matching/output permanently pending.
+        for (for_photo, value) in [(false, 0.1), (true, 0.2)] {
+            ui.history
+                .borrow_mut()
+                .state
+                .values
+                .insert("Camera.Exposure".into(), value);
+            ui.sync_state();
+            wait("failing solve started", &|| running(&ui));
+            ui.brightness.token.fetch_add(1, Ordering::Relaxed);
+            ui.brightness.running.set(false);
+            let inputs = match_inputs(&ui.history.borrow().state, &ui.runtime.borrow().defaults);
+            ui.brightness.failure.replace(Some(Failure {
+                generation: ui.runtime.borrow().source_generation,
+                inputs: (!for_photo).then_some(inputs),
+                message: "Test match unavailable".into(),
+            }));
+            ui.sync_state();
+            wait("failed solve released", &|| !pending(&ui));
+            assert!(ui.runtime.borrow().retained_id.is_some());
+            assert!(
+                ui.window
+                    .lookup_action("save-preview")
+                    .unwrap()
+                    .is_enabled()
+            );
+            ui.brightness.failure.take();
+        }
 
         // A new dependency set invalidates the solution; the result must
         // describe the latest look, even if an earlier solve was already sent.

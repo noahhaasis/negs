@@ -120,6 +120,11 @@ Prep contains input preparation, live camera/original brightness matching and
 nine pre-film adjustments. Lab has the stills-format picker and basic controls;
 changed advanced controls remain visible, and Show all controls reveals the rest.
 Output contains Image Size and Border. Film and paper can be starred as favourites.
+The Film preview grid has a search field: every word matches the film's name,
+ID or group, ignoring case and accents. Return chooses the first result and
+Escape clears the search. Searching preserves favourites and cached thumbnails.
+New profiles start with Gold 200, Portra 400, Ektar 100 and C200 starred; saved
+custom or empty lists remain respected.
 All inspector controls and groups have tooltips; native numeric controls also
 expose their help as accessible descriptions.
 
@@ -152,7 +157,17 @@ a bounded texture cache. Rapid stock changes coalesce behind one border load.
 See [border performance measurements](linux-border-performance.md) for selection
 latency, cache limits and validation.
 Interactive renders use a viewport proxy; releasing the slider rebuilds the
-full preview. The last image remains visible while processing. Re-selecting
+full preview. Discrete edits also show a canvas-size preview first when the
+photo is at least 4.5 MP and the canvas uses at most half of its pixels.
+The settled render starts immediately afterward. First open, small photos,
+launch-cache restoration and post-only edits that reuse the helper's float
+output skip this extra step. Quick frames never become saveable or enter the
+launch cache. Matching keeps the previous frame visible until the new exposure
+is resolved and uses the small decode before doing the settled render.
+The helper shares calibrated pipelines across main renders, thumbnails,
+Print Curves and brightness matching; input-gamut remap coordinates are cached
+by the shared core. See the [November port results](linux-macos-nov5-port.md)
+for validation, measured latency and memory costs. Re-selecting
 the same filmstrip file preserves the texture, edits and history.
 Filmstrip thumbnails and camera previews use the primary RAW orientation for
 TIFF-based containers (including NEF), overriding conflicting embedded JPEG tags.

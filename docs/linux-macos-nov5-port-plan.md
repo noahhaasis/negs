@@ -1,7 +1,7 @@
 # Linux port of the 5 November macOS changes
 
-Prepared 2026-11-05. Status: surveyed and planned; implementation and new Linux
-performance measurements are pending.
+Prepared 2026-11-05. Implementation and validation are recorded in
+[the port results](linux-macos-nov5-port.md). The original survey and plan follow.
 
 Surveyed local `main` at `c84cd0d`, which merges the Mac's `main` at `5872dfc`.
 The Mac's branch tip was independently confirmed over SSH. A fresh origin fetch
@@ -215,6 +215,6 @@ the change complete. The shared-cache commit reports pipeline builds dropping
 from about 16 to 5.5 ms and warm quick-size A/B switches from about 76 to 60 ms;
 Linux hardware/backend results remain unmeasured.
 
-No app code, tests, installations or release publishing were performed for this
-survey. Existing `linux/run.sh` mode changes and the untracked highlights/shadows
+No app code, tests, installations or release publishing were performed during the
+initial survey. Existing `linux/run.sh` mode changes and the untracked highlights/shadows
 draft are outside this planning change.

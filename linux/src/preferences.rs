@@ -509,6 +509,29 @@ pub fn apply_appearance(index: u32) {
 mod port_tests {
     use super::*;
     #[test]
+    fn default_favourites_preserve_missing_custom_and_explicitly_empty_lists() {
+        let defaults = Preferences::default();
+        assert_eq!(defaults.favorite_films, DEFAULT_FAVORITE_FILMS);
+        assert!(defaults.favorite_papers.is_empty());
+        let mut saved = serde_json::to_value(defaults).unwrap();
+        saved.as_object_mut().unwrap().remove("favorite_films");
+        assert_eq!(
+            serde_json::from_value::<Preferences>(saved.clone())
+                .unwrap()
+                .favorite_films,
+            DEFAULT_FAVORITE_FILMS
+        );
+        for list in [vec![], vec!["ilford_hp5_plus"]] {
+            saved["favorite_films"] = serde_json::json!(list);
+            assert_eq!(
+                serde_json::from_value::<Preferences>(saved.clone())
+                    .unwrap()
+                    .favorite_films,
+                list
+            );
+        }
+    }
+    #[test]
     fn current_preferences_survive_undo_and_reset_and_key_the_cached_preview() {
         let mut preferences = Preferences::default();
         let mut history = crate::model::History::new(crate::fixtures::state());

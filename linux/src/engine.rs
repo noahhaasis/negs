@@ -3,10 +3,7 @@ use serde_json::{Value, json};
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
-    os::unix::{
-        fs::DirBuilderExt,
-        process::CommandExt,
-    },
+    os::unix::{fs::DirBuilderExt, process::CommandExt},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
@@ -199,6 +196,9 @@ pub struct Engine {
     worker: Mutex<Worker>,
     child: Mutex<Option<Child>>,
     stopped: AtomicBool,
+    connection_epoch: AtomicU64,
+    #[cfg(test)]
+    pub request_log: Mutex<Vec<String>>,
 }
 impl Engine {
     pub fn new() -> Result<Self> {
@@ -211,6 +211,9 @@ impl Engine {
             worker: Mutex::new(Worker::default()),
             child: Mutex::new(None),
             stopped: AtomicBool::new(false),
+            connection_epoch: AtomicU64::new(0),
+            #[cfg(test)]
+            request_log: Mutex::new(Vec::new()),
         })
     }
     fn connect(&self) -> Result<Connection> {
@@ -316,6 +319,11 @@ impl Engine {
         if self.stopped.load(Ordering::Acquire) {
             return Err(STOPPED.into());
         }
+        #[cfg(test)]
+        self.request_log
+            .lock()
+            .unwrap()
+            .push(command["command"].as_str().unwrap_or("").into());
         worker.sequence = worker
             .sequence
             .checked_add(1)
@@ -381,6 +389,7 @@ impl Engine {
         }
     }
     fn kill(&self) {
+        self.connection_epoch.fetch_add(1, Ordering::AcqRel);
         if let Ok(mut guard) = self.child.lock()
             && let Some(mut child) = guard.take()
         {
@@ -389,6 +398,7 @@ impl Engine {
         }
     }
     pub fn stop(&self) {
+        self.connection_epoch.fetch_add(1, Ordering::AcqRel);
         self.stopped.store(true, Ordering::Release);
         if let Ok(mut guard) = self.child.lock()
             && let Some(mut child) = guard.take()
@@ -398,6 +408,24 @@ impl Engine {
                 let _ = child.wait();
             });
         }
+    }
+    /// Retained render assumptions cannot survive a helper restart/cancel.
+    pub fn connection_epoch(&self) -> u64 {
+        self.connection_epoch.load(Ordering::Acquire)
+    }
+    #[cfg(test)]
+    pub fn memory_kib(&self) -> Value {
+        let guard = self.child.lock().unwrap();
+        let pid = guard.as_ref().unwrap().id();
+        let status = fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+        let kib = |key: &str| {
+            status
+                .lines()
+                .find(|line| line.starts_with(key))
+                .and_then(|line| line.split_whitespace().nth(1))
+                .and_then(|value| value.parse::<u64>().ok())
+        };
+        json!({"resident":kib("VmRSS:"),"peak":kib("VmHWM:")})
     }
 }
 impl Drop for Engine {
@@ -738,11 +766,24 @@ for line in sys.stdin:
         })
         .unwrap();
         for command in ["error", "eof", "bad_id", "slow"] {
+            let epoch = engine.connection_epoch();
             assert!(
                 engine
                     .request(json!({"command":command}), Duration::from_millis(150))
                     .is_err()
             );
+            if command == "error" {
+                assert_eq!(
+                    engine.connection_epoch(),
+                    epoch,
+                    "A valid error keeps the connection"
+                );
+            } else {
+                assert!(
+                    engine.connection_epoch() > epoch,
+                    "Lost helper output must invalidate reuse"
+                );
+            }
             assert_eq!(
                 engine
                     .request(json!({"command":"catalog"}), Duration::from_secs(3))

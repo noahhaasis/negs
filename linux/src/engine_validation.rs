@@ -259,7 +259,7 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                             ui.begin_export(out.join("wide.png"), Kind::Reference);
                             a.step = 20;
                         }
-                        20 if idle && out.join("wide.png").exists() => {
+                        20 if idle && current && out.join("wide.png").exists() => {
                             let (depth, icc) = png_depth_and_icc(&out.join("wide.png"));
                             assert_eq!((depth, icc), (16, true));
                             a.checks.push(
@@ -274,6 +274,11 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                             std::fs::write(out.join("cancelled.png"), b"existing destination")
                                 .unwrap();
                             ui.begin_export(out.join("cancelled.png"), Kind::Reference);
+                            // The preceding export changes preview space. Wait
+                            // for that preview before testing an active job's
+                            // Cancel, rather than clicking while output is
+                            // still deferred behind brightness/main rendering.
+                            assert!(ui.runtime.borrow().exporting.is_some());
                             ui.export_cancel.emit_clicked();
                             a.step = 10;
                         }

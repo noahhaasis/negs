@@ -77,6 +77,8 @@ struct Grid {
     paper: bool,
     body: gtk::Box,
     viewport: gtk::Viewport,
+    scroll: gtk::ScrolledWindow,
+    search: Option<gtk::SearchEntry>,
     order: RefCell<Vec<(String, bool)>>,
     tiles: Vec<Tile>,
 }
@@ -316,10 +318,24 @@ pub fn refresh_favorites(ui: &Rc<Editor>) {
 }
 
 fn arrange(ui: &Editor, grid: &Grid) {
-    let stocks = ordered_stocks(ui, grid.paper);
+    let query = grid.search.as_ref().map(|s| s.text()).unwrap_or_default();
+    let searching = !query.trim().is_empty();
+    let stocks = if searching {
+        crate::catalog::stocks(grid.paper)
+            .into_iter()
+            .filter(|s| crate::catalog::matches(s, &query))
+            .collect()
+    } else {
+        ordered_stocks(ui, grid.paper)
+    };
     let order: Vec<_> = stocks
         .iter()
-        .map(|s| (s.id.clone(), is_favorite(ui, grid.paper, &s.id)))
+        .map(|s| {
+            (
+                s.id.clone(),
+                !searching && is_favorite(ui, grid.paper, &s.id),
+            )
+        })
         .collect();
     for tile in &grid.tiles {
         favorite_label(
@@ -341,10 +357,17 @@ fn arrange(ui: &Editor, grid: &Grid) {
     while let Some(child) = grid.body.first_child() {
         grid.body.remove(&child);
     }
+    if stocks.is_empty() {
+        let empty = gtk::Label::new(Some("No films found"));
+        empty.add_css_class("dim-label");
+        empty.set_margin_top(12);
+        empty.set_margin_bottom(12);
+        grid.body.append(&empty);
+    }
     let mut group = String::new();
     let mut flow: Option<gtk::FlowBox> = None;
     for stock in stocks {
-        let heading = if is_favorite(ui, grid.paper, &stock.id) {
+        let heading = if !searching && is_favorite(ui, grid.paper, &stock.id) {
             "Favourites"
         } else {
             &stock.group
@@ -371,6 +394,29 @@ fn arrange(ui: &Editor, grid: &Grid) {
         }
     }
     grid.order.replace(order);
+}
+
+fn scroll_to_result(ui: &Editor, grid: &Grid) {
+    let searching = grid
+        .search
+        .as_ref()
+        .is_some_and(|s| !s.text().trim().is_empty());
+    let id = if searching {
+        grid.order.borrow().first().map(|(id, _)| id.clone())
+    } else {
+        Some(
+            crate::catalog::selected(&ui.history.borrow().state, grid.paper)
+                .id
+                .clone(),
+        )
+    };
+    if let Some(tile) = grid.tiles.iter().find(|t| Some(&t.stock.id) == id.as_ref()) {
+        let button = tile.button.clone();
+        let viewport = grid.viewport.clone();
+        glib::idle_add_local_once(move || viewport.scroll_to(&button, None));
+    } else {
+        grid.scroll.vadjustment().set_value(0.);
+    }
 }
 
 fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
@@ -482,17 +528,55 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
     let holder = gtk::ListBoxRow::new();
     holder.set_activatable(false);
     holder.set_selectable(false);
-    holder.set_child(Some(&scroll));
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let search = (!paper).then(|| {
+        let entry = gtk::SearchEntry::new();
+        entry.set_placeholder_text(Some("Search films"));
+        entry.update_property(&[gtk::accessible::Property::Label("Search films")]);
+        entry.set_margin_start(6);
+        entry.set_margin_end(6);
+        entry.set_margin_top(6);
+        content.append(&entry);
+        entry
+    });
+    content.append(&scroll);
+    holder.set_child(Some(&content));
     row.add_row(&holder);
     let grid = Rc::new(Grid {
         row: row.clone(),
         paper,
         body,
         viewport,
+        scroll,
+        search,
         order: RefCell::new(Vec::new()),
         tiles,
     });
     arrange(ui, &grid);
+    if let Some(search) = &grid.search {
+        search.connect_changed(glib::clone!(
+            #[weak]
+            ui,
+            #[weak]
+            grid,
+            move |_| {
+                arrange(&ui, &grid);
+                scroll_to_result(&ui, &grid);
+                pump_soon(&ui);
+            }
+        ));
+        search.connect_activate(glib::clone!(
+            #[weak]
+            grid,
+            move |_| {
+                let id = grid.order.borrow().first().map(|(id, _)| id.clone());
+                if let Some(tile) = grid.tiles.iter().find(|t| Some(&t.stock.id) == id.as_ref()) {
+                    tile.button.emit_clicked();
+                }
+            }
+        ));
+        search.connect_stop_search(|entry| entry.set_text(""));
+    }
     ui.stock_browser.grids.borrow_mut().push(grid.clone());
     row.connect_expanded_notify(glib::clone!(
         #[weak]
@@ -509,12 +593,7 @@ fn row(ui: &Rc<Editor>, list: &gtk::ListBox, paper: bool) -> adw::ExpanderRow {
                         other.row.set_expanded(false);
                     }
                 }
-                let selected = crate::catalog::selected(&ui.history.borrow().state, paper);
-                if let Some(tile) = grid.tiles.iter().find(|t| t.stock.id == selected.id) {
-                    let button = tile.button.clone();
-                    let viewport = grid.viewport.clone();
-                    glib::idle_add_local_once(move || viewport.scroll_to(&button, None));
-                }
+                scroll_to_result(&ui, &grid);
             }
             pump(&ui);
         }
@@ -775,12 +854,8 @@ pub fn pump(ui: &Rc<Editor>) {
         if !grid.row.is_expanded() || !grid.row.is_mapped() {
             continue;
         }
-        for stock in ordered_stocks(ui, grid.paper) {
-            let tile = grid
-                .tiles
-                .iter()
-                .find(|tile| tile.stock.id == stock.id)
-                .unwrap();
+        for (id, _) in grid.order.borrow().iter() {
+            let tile = grid.tiles.iter().find(|tile| tile.stock.id == *id).unwrap();
             let Some((generation, command, key)) = request(ui, tile.stock) else {
                 return;
             };
@@ -813,7 +888,7 @@ pub fn pump(ui: &Rc<Editor>) {
             || r.rendering
             || r.interacting
             || r.block_helper_render
-            || r.requested_revision != r.revision
+            || r.current_revision != Some(r.revision)
         {
             return;
         }
@@ -885,6 +960,88 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Requires a desktop and isolated NEGS_PROFILE_DIR; run separately with --ignored --test-threads=1"]
+    fn film_search_filters_without_editing_and_keeps_tiles() {
+        assert!(std::env::var_os("NEGS_PROFILE_DIR").is_some());
+        adw::init().unwrap();
+        let app = adw::Application::builder()
+            .application_id("org.negs.FilmSearchTest")
+            .flags(gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gio::Cancellable>).unwrap();
+        let ui = Editor::new(&app, crate::perf::Perf::new());
+        let list = gtk::ListBox::new();
+        ui.inspector.append(&list);
+        row(&ui, &list, false);
+        row(&ui, &list, true);
+        ui.window.present();
+        let film = ui.stock_browser.grids.borrow()[0].clone();
+        let paper = ui.stock_browser.grids.borrow()[1].clone();
+        assert!(paper.search.is_none());
+        film.row.set_expanded(true);
+        let search = film.search.as_ref().unwrap();
+        let before = ui.history.borrow().state.clone();
+        let tile = film
+            .tiles
+            .iter()
+            .find(|t| t.stock.id == "kodak_portra_400")
+            .unwrap();
+        let texture = crate::canvas::srgb_texture(
+            1,
+            1,
+            gdk::MemoryFormat::R8g8b8,
+            &glib::Bytes::from_owned(vec![128; 3]),
+            3,
+        );
+        tile.thumb.show(Some(&texture), 7, "retained".into());
+        search.set_text("PORTRA 400");
+        assert_eq!(
+            film.order.borrow().as_slice(),
+            &[("kodak_portra_400".into(), false)]
+        );
+        assert_eq!(ui.history.borrow().state, before);
+        assert!(!ui.history.borrow().can_undo());
+        assert!(tile.thumb.picture.paintable().is_some());
+        tile.favorite.emit_clicked();
+        assert_eq!(film.order.borrow().len(), 1);
+        assert_eq!(
+            film.order.borrow()[0].1,
+            false,
+            "Search uses catalog groups, once each"
+        );
+        search.emit_by_name::<()>("activate", &[]);
+        assert_eq!(
+            crate::catalog::selected(&ui.history.borrow().state, false).id,
+            tile.stock.id
+        );
+        assert!(ui.history.borrow().can_undo());
+        search.set_text("not-a-film");
+        assert!(film.order.borrow().is_empty());
+        assert_eq!(
+            film.body
+                .first_child()
+                .and_downcast::<gtk::Label>()
+                .unwrap()
+                .text(),
+            "No films found"
+        );
+        let chosen = ui.history.borrow().state.clone();
+        search.emit_by_name::<()>("activate", &[]);
+        assert_eq!(ui.history.borrow().state, chosen);
+        search.emit_by_name::<()>("stop-search", &[]);
+        assert!(search.text().is_empty());
+        assert_eq!(
+            film.order.borrow().len(),
+            crate::catalog::stocks(false).len()
+        );
+        assert!(tile.thumb.picture.paintable().is_some());
+        paper.row.set_expanded(true);
+        assert!(!film.row.is_expanded());
+        ui.window.destroy();
+        while glib::MainContext::default().iteration(false) {}
+    }
+
+    #[test]
     #[ignore = "Requires a desktop and an isolated NEGS_PROFILE_DIR; run explicitly with --ignored --test-threads=1"]
     fn native_stock_favourites_preserve_edits_thumbnails_and_foldout_space() {
         use std::time::Instant;
@@ -899,6 +1056,10 @@ mod tests {
             .build();
         app.register(None::<&gio::Cancellable>).unwrap();
         let ui = Editor::new(&app, crate::perf::Perf::new());
+        // This ordering test starts with no stars. Default favourite migration
+        // is covered separately; new profiles now already contain four films.
+        ui.preferences.borrow_mut().favorite_films.clear();
+        ui.preferences.borrow_mut().favorite_papers.clear();
         let list = gtk::ListBox::new();
         ui.inspector.append(&list);
         for paper in [false, true] {
