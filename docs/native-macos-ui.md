@@ -254,12 +254,13 @@ change of the clip view's bounds. A pin whose spot is outside the crop is hidden
 `post.tone_anchors` lives in Post, the finishing stage, which already tabulates
 its tone curve once into a 4096-entry LUT on √Y, applied on the CPU at save and by
 the same table in the GPU display pass, so the preview and the file agree without
-a shader change. The pins bend what the Post knobs produced. The curve is
-piecewise linear in L\*: the pins, and an end point for each end, and it must keep
-rising. A pin it can't honour, such as zone VI on something darker than zone V's
-spot, has no effect and is never removed: `AnchorCurve` is the one rule for this,
-the helper reports those pins as `ignored_pins` with each render, and their lines
-turn red.
+a shader change. The pins bend what the Post knobs produced. The curve is a monotone
+cubic in L\* through the pins and an end point for each end: its slope has no corners,
+every pin lands exactly, and it can't overshoot or turn back between pins. It flattens
+into a black or white point a pin sets, for a soft toe and shoulder. A pin it can't
+honour, such as zone 6 on something darker than zone 5's spot, has no effect and is
+never removed: `AnchorCurve` is the one rule for this, the helper reports those pins
+as `ignored_pins` with each render, and their lines turn red.
 
 A pin's input comes from the helper's `sample_tone` (`render_id`, `x`, `y`,
 `radius`), which reads the retained render through the knobs alone, not the

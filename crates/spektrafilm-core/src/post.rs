@@ -164,17 +164,24 @@ fn luminance_of(value: f64) -> f64 {
     }
 }
 
-/// The pins as a rising curve in L\*. The brightest pin aimed at 0 is the
-/// black point and the darkest aimed at 100 the white point, whatever order
-/// they were made in; the others bend the curve between them. Tones outside
-/// the ends clamp, which is what setting a black or white point means. With
-/// no pins it is the identity.
+/// The pins as a smooth rising curve in L\*. The brightest pin aimed at 0 is
+/// the black point and the darkest aimed at 100 the white point, whatever order
+/// they were made in; the others bend the curve between them. Tones outside the
+/// ends clamp, which is what setting a black or white point means, and the curve
+/// flattens into a point it sets, so there's no corner there. With no pins it is
+/// the identity.
+///
+/// Between the pins it is a monotone cubic (Fritsch and Butland's tangents):
+/// the slope has no corners, every pin lands exactly, and it never overshoots
+/// or turns back between two pins.
 #[derive(Debug, Clone, Default)]
 pub struct AnchorCurve {
     black: f64,
     white: f64,
     /// Interior pins, strictly between the ends and rising.
     points: Vec<(f64, f64)>,
+    /// The slope at each knot: the black point, the pins, the white point.
+    tangents: Vec<f64>,
     /// The anchors the curve can't honour, as indices into those it was given.
     ignored: Vec<usize>,
 }
@@ -236,7 +243,39 @@ impl AnchorCurve {
             }
         }
         ignored.sort_unstable();
-        Self { black, white, points, ignored }
+        let tangents = Self::tangents(black, white, &points);
+        Self { black, white, points, tangents, ignored }
+    }
+
+    /// Shape-preserving slopes for the knots. An end that's a black or white
+    /// point flattens; an end at the axis's limit keeps its natural slope.
+    fn tangents(black: f64, white: f64, points: &[(f64, f64)]) -> Vec<f64> {
+        let mut knots = Vec::with_capacity(points.len() + 2);
+        knots.push((black, 0.0));
+        knots.extend_from_slice(points);
+        knots.push((white, 100.0));
+        let widths: Vec<f64> = knots.windows(2).map(|k| k[1].0 - k[0].0).collect();
+        let slopes: Vec<f64> = knots.windows(2).zip(&widths).map(|(k, h)| (k[1].1 - k[0].1) / h).collect();
+        // A one-sided, three-point estimate, held to what stays monotone.
+        let end = |h0: f64, h1: f64, s0: f64, s1: f64| {
+            (((2.0 * h0 + h1) * s0 - h0 * s1) / (h0 + h1)).clamp(0.0, 3.0 * s0)
+        };
+        let last = slopes.len() - 1;
+        let mut tangents = vec![0.0; knots.len()];
+        if slopes.len() == 1 {
+            tangents = vec![slopes[0]; 2];
+        } else {
+            tangents[0] = end(widths[0], widths[1], slopes[0], slopes[1]);
+            tangents[last + 1] = end(widths[last], widths[last - 1], slopes[last], slopes[last - 1]);
+            for i in 1..=last {
+                let (h0, h1) = (widths[i - 1], widths[i]);
+                let (w0, w1) = (2.0 * h1 + h0, h1 + 2.0 * h0);
+                tangents[i] = (w0 + w1) / (w0 / slopes[i - 1] + w1 / slopes[i]);
+            }
+        }
+        if black > 0.0 { tangents[0] = 0.0; }
+        if white < 100.0 { tangents[last + 1] = 0.0; }
+        tangents
     }
 
     /// The anchors the curve can't honour: they have no effect until another
@@ -260,14 +299,20 @@ impl AnchorCurve {
         if value >= self.white {
             return 100.0;
         }
-        let mut previous = (self.black, 0.0);
-        for &(input, target) in &self.points {
-            if value <= input {
-                return previous.1 + (target - previous.1) * (value - previous.0) / (input - previous.0);
-            }
-            previous = (input, target);
-        }
-        previous.1 + (100.0 - previous.1) * (value - previous.0) / (self.white - previous.0)
+        // The segment holding the tone, then its cubic Hermite.
+        let index = self.points.partition_point(|&(input, _)| input <= value);
+        let knot = |i: usize| match i {
+            0 => (self.black, 0.0),
+            i if i > self.points.len() => (self.white, 100.0),
+            i => self.points[i - 1],
+        };
+        let ((x0, y0), (x1, y1)) = (knot(index), knot(index + 1));
+        let (m0, m1) = (self.tangents[index], self.tangents[index + 1]);
+        let h = x1 - x0;
+        let t = (value - x0) / h;
+        let (t2, t3) = (t * t, t * t * t);
+        let y = (2.0 * t3 - 3.0 * t2 + 1.0) * y0 + (t3 - 2.0 * t2 + t) * h * m0 + (-2.0 * t3 + 3.0 * t2) * y1 + (t3 - t2) * h * m1;
+        y.clamp(y0, y1)
     }
 
     /// The same curve on a linear luminance.
@@ -659,6 +704,71 @@ mod tests {
     #[test]
     fn non_finite_pins_are_ignored() {
         assert_eq!(AnchorCurve::new(&[pin(f32::NAN, 50.0), pin(50.0, 40.0)]).ignored(), &[0]);
+    }
+
+    /// The steepest change of slope over small steps of the curve.
+    fn sharpest_corner(curve: &AnchorCurve) -> f64 {
+        let step = 0.05;
+        let slopes: Vec<f64> = (0..2000)
+            .map(|i| {
+                let x = f64::from(i) * step;
+                (curve.map(x + step) - curve.map(x)) / step
+            })
+            .collect();
+        slopes.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f64::max)
+    }
+
+    /// No corners at the pins: the slope changes gradually through each one.
+    #[test]
+    fn the_curve_has_no_corners_at_its_pins() {
+        let curve = AnchorCurve::new(&[pin(20.0, 10.0), pin(50.0, 60.0), pin(70.0, 70.0)]);
+        assert!(sharpest_corner(&curve) < 0.1, "{}", sharpest_corner(&curve));
+    }
+
+    /// A black or white point eases in rather than clipping at a corner.
+    #[test]
+    fn black_and_white_points_ease_in() {
+        let curve = AnchorCurve::new(&[pin(20.0, 0.0), pin(50.0, 50.0), pin(85.0, 100.0)]);
+        assert!(sharpest_corner(&curve) < 0.1, "{}", sharpest_corner(&curve));
+        assert_eq!(curve.map(20.0), 0.0);
+        assert_eq!(curve.map(85.0), 100.0);
+        assert!(curve.map(21.0) < 1.0, "{}", curve.map(21.0));
+    }
+
+    /// Smoothing never moves a pin, overshoots between pins or turns back.
+    #[test]
+    fn smoothing_keeps_every_pin_exact_and_the_curve_rising() {
+        let sets = [
+            vec![pin(30.0, 20.0)],
+            vec![pin(10.0, 40.0), pin(12.0, 41.0), pin(80.0, 42.0), pin(82.0, 90.0)],
+            vec![pin(25.0, 0.0), pin(30.0, 50.0), pin(35.0, 55.0), pin(90.0, 100.0)],
+        ];
+        for anchors in sets {
+            let curve = AnchorCurve::new(&anchors);
+            for anchor in &anchors {
+                assert!((curve.map(f64::from(anchor.input)) - f64::from(anchor.target)).abs() < 1e-9, "{anchor:?}");
+            }
+            let mut previous = -1.0;
+            for i in 0..=2000 {
+                let value = curve.map(f64::from(i) * 0.05);
+                assert!(value >= previous - 1e-12 && (0.0..=100.0).contains(&value), "{anchors:?} at {i}: {value}");
+                previous = value;
+            }
+            // Between two close pins with nearly equal targets it stays between them.
+            if anchors.len() == 4 && anchors[1].target == 41.0 {
+                let between = curve.map(50.0);
+                assert!((41.0..=42.0).contains(&between), "{between}");
+            }
+        }
+    }
+
+    /// A pin that doesn't move its tone leaves the photograph alone.
+    #[test]
+    fn a_pin_on_its_own_tone_stays_the_identity() {
+        let curve = AnchorCurve::new(&[pin(50.0, 50.0)]);
+        for value in [0.0, 12.5, 50.0, 87.0, 100.0] {
+            assert!((curve.map(value) - value).abs() < 1e-9, "{value}");
+        }
     }
 
     #[test]
