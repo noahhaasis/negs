@@ -291,7 +291,8 @@ so the perforations run on. Landscape photographs lie on their side as on real f
 portrait ones stand up, cropped to fill the gate. Still films' frames carry their place
 in the folder over the artwork's fixed number; cine and print films keep their own edge
 text. A red grease-pencil box marks the open photograph, and the arrow keys step along
-the roll. The column is the film alone, with no margin around it.
+the roll. The column is the film alone, with no margin around it, and a short folder's
+roll carries on with blank, numbered frames to the bottom of the window.
 
 ## Proof
 

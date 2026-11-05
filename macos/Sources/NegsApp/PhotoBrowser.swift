@@ -94,6 +94,7 @@ struct PhotoBrowser: View {
     @State private var scrollTarget: URL?
 
     @State private var strip: FilmStrip?
+    @State private var viewport: CGFloat = 0
 
     var body: some View {
         ScrollView(.vertical) {
@@ -103,6 +104,11 @@ struct PhotoBrowser: View {
                         if file.url != model.source { model.open(file.url) }
                     }
                     .id(file.url)
+                }
+                // A short folder's roll still runs the window's height.
+                let frame = FilmRollLayout.frameHeight(stripWidth: FilmRollLayout.stripWidth, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
+                ForEach(0..<FilmRollLayout.blankFrames(photos: files.count, viewport: viewport, frameHeight: frame), id: \.self) { index in
+                    BlankFilmFrame(number: files.count + index + 1, strip: strip, film: model.film)
                 }
             }
             .scrollTargetLayout()
@@ -117,6 +123,7 @@ struct PhotoBrowser: View {
             if files.indices.contains(next) { model.open(files[next].url) }
         }
         .frame(width: FilmRollLayout.columnWidth)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
         .background(ViewerColour(model: model))
         .overlay {
             Group {
@@ -124,7 +131,7 @@ struct PhotoBrowser: View {
                 else if failed { Text("This folder couldn’t be read.") }
                 else if files.isEmpty { Text("No supported photographs in this folder.") }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.white.opacity(0.75))
             .multilineTextAlignment(.center)
             .padding(12)
         }

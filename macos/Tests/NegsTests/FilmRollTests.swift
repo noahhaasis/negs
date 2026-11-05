@@ -10,6 +10,15 @@ final class FilmRollTests: XCTestCase {
         XCTAssertEqual(FilmRollLayout.columnWidth, FilmRollLayout.stripWidth)
     }
 
+    /// Blank frames carry a short roll past the column's bottom, and a long one needs none.
+    func testBlankFramesFillTheColumn() {
+        XCTAssertEqual(FilmRollLayout.blankFrames(photos: 2, viewport: 700, frameHeight: 163), 3)
+        XCTAssertEqual(FilmRollLayout.blankFrames(photos: 0, viewport: 700, frameHeight: 163), 5)
+        XCTAssertEqual(FilmRollLayout.blankFrames(photos: 5, viewport: 700, frameHeight: 163), 0)
+        XCTAssertEqual(FilmRollLayout.blankFrames(photos: 30, viewport: 700, frameHeight: 163), 0)
+        XCTAssertEqual(FilmRollLayout.blankFrames(photos: 2, viewport: 0, frameHeight: 163), 0)
+    }
+
     /// A frame is 38 mm of a 35 mm wide film, in whole points so no light shows
     /// between frames.
     func testFramesAreAWholeNumberOfPointsLong() {

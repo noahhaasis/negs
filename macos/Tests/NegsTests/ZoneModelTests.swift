@@ -481,6 +481,8 @@ extension ZoneModelTests {
         let roll = try XCTUnwrap(scrolls.first { abs($0.bounds.width - FilmRollLayout.columnWidth) < 1 }, "\(scrolls.map(\.bounds))")
         XCTAssertEqual(roll.convert(roll.bounds, to: nil).minX, 0, accuracy: 1)
         XCTAssertGreaterThan(roll.bounds.height, 600, "It runs the window's height")
+        let film = try XCTUnwrap(roll.documentView).frame.height
+        XCTAssertGreaterThanOrEqual(film, roll.bounds.height, "With two photographs the film still runs the window's height")
         model.filmstripVisible = false
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(canvas.convert(canvas.bounds, to: nil).minX, ZoneGeometry.panelWidth, accuracy: 1, "Hidden, the canvas takes its room")

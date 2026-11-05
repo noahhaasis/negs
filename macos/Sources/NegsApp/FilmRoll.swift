@@ -28,6 +28,13 @@ enum FilmRollLayout {
     /// real film; a portrait one stands up.
     static func liesOnItsSide(_ image: CGSize) -> Bool { image.width > image.height }
 
+    /// How many blank frames keep the film going to the bottom of a column
+    /// `viewport` tall, after `photos` frames.
+    static func blankFrames(photos: Int, viewport: CGFloat, frameHeight: CGFloat) -> Int {
+        guard frameHeight > 0 else { return 0 }
+        return max(0, Int((viewport / frameHeight).rounded(.up)) - photos)
+    }
+
     /// Still films print a frame number, and the artwork's is always the same
     /// one. Cine and print films have other text in those places.
     static func printsFrameNumbers(film: String) -> Bool {
@@ -56,7 +63,7 @@ struct FilmFrame: View {
         Button(action: open) {
             ZStack(alignment: .topLeading) {
                 photograph(in: gate)
-                artwork(width: width, height: height)
+                FilmArtwork(number: number, strip: strip, film: film)
                 if selected {
                     // A grease pencil's mark, as on a contact sheet.
                     RoundedRectangle(cornerRadius: 4)
@@ -103,9 +110,40 @@ struct FilmFrame: View {
         .clipped()
         .offset(x: gate.minX, y: gate.minY)
     }
+}
+
+/// A frame past the last photograph: the roll carries on, with nothing on it.
+struct BlankFilmFrame: View {
+    let number: Int
+    let strip: FilmStrip?
+    let film: String
+
+    var body: some View {
+        let width = FilmRollLayout.stripWidth
+        let height = FilmRollLayout.frameHeight(stripWidth: width, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
+        let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: CGSize(width: width, height: height))
+        ZStack(alignment: .topLeading) {
+            Color(white: 0.16)
+                .frame(width: gate.width, height: gate.height)
+                .offset(x: gate.minX, y: gate.minY)
+            FilmArtwork(number: number, strip: strip, film: film)
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+        .clipped()
+        .accessibilityHidden(true)
+    }
+}
+
+/// The strip's artwork for one frame of the roll.
+private struct FilmArtwork: View {
+    let number: Int
+    let strip: FilmStrip?
+    let film: String
 
     /// Laid out across, as the artwork is, then turned with it.
-    @ViewBuilder private func artwork(width: CGFloat, height: CGFloat) -> some View {
+    var body: some View {
+        let width = FilmRollLayout.stripWidth
+        let height = FilmRollLayout.frameHeight(stripWidth: width, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
         if let strip {
             ZStack(alignment: .topLeading) {
                 Image(decorative: strip.image, scale: 1)
