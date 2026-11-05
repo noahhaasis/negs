@@ -207,8 +207,8 @@ struct FilmStrip: Equatable {
 
     static func == (a: Self, b: Self) -> Bool { a.film == b.film && a.format == b.format && a.image === b.image }
 
-    /// The film's strip, or the format's generic one.
-    nonisolated static func load(data: URL, film: String, format: FilmFormat) -> FilmStrip? {
+    /// The film's strip, or the format's generic one, no larger than `maxPixelSize`.
+    nonisolated static func load(data: URL, film: String, format: FilmFormat, maxPixelSize: Int = 4096) -> FilmStrip? {
         struct Frame: Decodable { let window: [Double] }
         let root = data.appendingPathComponent("borders/35mm")
         guard let json = try? Data(contentsOf: root.appendingPathComponent("frames.json")),
@@ -223,7 +223,7 @@ struct FilmStrip: Equatable {
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
-                  kCGImageSourceThumbnailMaxPixelSize: 4096,
+                  kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
                   kCGImageSourceShouldCacheImmediately: true,
               ] as CFDictionary) else { return nil }
         return FilmStrip(film: film, format: format, image: image, pixelSize: CGSize(width: width, height: height),

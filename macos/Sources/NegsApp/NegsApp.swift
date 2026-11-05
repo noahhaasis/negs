@@ -162,35 +162,37 @@ import SwiftUI
     func applicationWillTerminate(_ notification: Notification) { updates.stop(); model.shutdown() }
 }
 
-/// The window's main column: the photograph, the drop target, and the status bar.
+/// The window's main column: the film roll down its left, then the zones, the
+/// photograph with its drop target, and the status bar.
 struct EditorCanvas: View {
     let model: EditorModel
     @State private var dropTargeted = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                if model.showsZonePanel { ZonePanel(model: model) }
-                CanvasArea(model: model)
-                    .dropDestination(for: URL.self) { urls, _ in
-                        guard let url = urls.first, url.isFileURL else { return false }
-                        model.open(url); return true
-                    } isTargeted: { dropTargeted = $0 }
-                    .overlay {
-                        if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
-                    }
-            }
-            .coordinateSpace(name: ZonePanel.coordinateSpace)
-            .overlay(alignment: .top) { EdgeLine(horizontal: true) }
+        HStack(spacing: 0) {
             if model.filmstripVisible, let source = model.source {
-                Divider()
                 PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
             }
-            if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
-                Divider()
-                StatusBar(model: model)
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    if model.showsZonePanel { ZonePanel(model: model) }
+                    CanvasArea(model: model)
+                        .dropDestination(for: URL.self) { urls, _ in
+                            guard let url = urls.first, url.isFileURL else { return false }
+                            model.open(url); return true
+                        } isTargeted: { dropTargeted = $0 }
+                        .overlay {
+                            if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
+                        }
+                }
+                .coordinateSpace(name: ZonePanel.coordinateSpace)
+                if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
+                    Divider()
+                    StatusBar(model: model)
+                }
             }
         }
+        .overlay(alignment: .top) { EdgeLine(horizontal: true) }
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }

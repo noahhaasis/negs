@@ -53,7 +53,7 @@ actor PhotoThumbnails {
     }
     private let cache: NSCache<NSURL, Cached> = {
         let cache = NSCache<NSURL, Cached>()
-        cache.totalCostLimit = 16 * 1024 * 1024
+        cache.totalCostLimit = 48 * 1024 * 1024
         cache.countLimit = 160
         return cache
     }()
@@ -71,7 +71,7 @@ actor PhotoThumbnails {
                 [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
             var options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 192,
+                kCGImageSourceThumbnailMaxPixelSize: 360,
                 kCGImageSourceShouldCacheImmediately: true
             ]
             if !EditorModel.rawExtensions.contains(url.pathExtension.lowercased()) {
@@ -93,19 +93,23 @@ struct PhotoBrowser: View {
     @State private var failed = false
     @State private var scrollTarget: URL?
 
+    @State private var strip: FilmStrip?
+
     var body: some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: 8) {
-                ForEach(files, id: \.url) { file in
-                    PhotoThumbnail(file: file, selected: file.url == model.source) {
+        ScrollView(.vertical) {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(files.enumerated()), id: \.element.url) { index, file in
+                    FilmFrame(file: file, number: index + 1, selected: file.url == model.source, strip: strip, film: model.film) {
                         if file.url != model.source { model.open(file.url) }
                     }
                     .id(file.url)
                 }
             }
             .scrollTargetLayout()
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            // One shadow for the whole roll, lifting it off the table.
+            .background(Rectangle().fill(FilmRollLayout.filmBase).shadow(color: .black.opacity(0.45), radius: 5, x: 0, y: 1))
+            .padding(.horizontal, FilmRollLayout.tableMargin)
+            .padding(.vertical, 18)
         }
         .scrollIndicators(.automatic)
         .scrollPosition(id: $scrollTarget, anchor: .center)
@@ -113,18 +117,30 @@ struct PhotoBrowser: View {
         .onMoveCommand { direction in
             guard !model.cropping, let source = model.source,
                   let index = files.firstIndex(where: { $0.url == source }) else { return }
-            let next = direction == .left ? index - 1 : direction == .right ? index + 1 : index
-            if next != index, files.indices.contains(next) { model.open(files[next].url) }
+            let next = direction == .up || direction == .left ? index - 1 : index + 1
+            if files.indices.contains(next) { model.open(files[next].url) }
         }
-        .frame(height: 112)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .frame(width: FilmRollLayout.columnWidth)
+        .background(LightTable())
         .overlay {
-            if loading { ProgressView().controlSize(.small) }
-            else if failed { Text("This folder couldn’t be read.").foregroundStyle(.secondary) }
-            else if files.isEmpty { Text("No supported photographs in this folder.").foregroundStyle(.secondary) }
+            Group {
+                if loading { ProgressView().controlSize(.small) }
+                else if failed { Text("This folder couldn’t be read.") }
+                else if files.isEmpty { Text("No supported photographs in this folder.") }
+            }
+            .foregroundStyle(.black.opacity(0.6))
+            .multilineTextAlignment(.center)
+            .padding(12)
         }
         .disabled(model.cropping)
         .accessibilityLabel("Film Strip")
+        .task(id: "\(model.film) \(model.hasCatalog)") {
+            guard let data = model.dataDirectory else { return }
+            let film = model.film
+            let loaded = await Task.detached(priority: .utility) { FilmStrip.load(data: data, film: film, format: .full, maxPixelSize: 400) }.value
+            guard !Task.isCancelled, let loaded else { return }
+            strip = loaded
+        }
         .task(id: directory) {
             loading = true; failed = false; files = []
             // Arm before the initial scan so arrivals during enumeration are
@@ -154,54 +170,6 @@ struct PhotoBrowser: View {
         } catch {
             guard !Task.isCancelled else { return }
             failed = true; loading = false
-        }
-    }
-}
-
-private struct PhotoThumbnail: View {
-    let file: PhotoFile
-    private var url: URL { file.url }
-    let selected: Bool
-    let open: () -> Void
-    @State private var image: CGImage?
-    @State private var visible = false
-
-    var body: some View {
-        Button(action: open) {
-            VStack(spacing: 5) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.04))
-                    if let image {
-                        Image(decorative: image, scale: 2).resizable().scaledToFit().padding(3)
-                    } else {
-                        Image(systemName: "photo").foregroundStyle(.tertiary)
-                    }
-                }
-                .frame(width: 96, height: 68)
-                .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2) }
-                Text(file.name)
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(selected ? .primary : .secondary)
-            }
-            .frame(width: 96)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(url.lastPathComponent)
-        .accessibilityLabel(url.lastPathComponent)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-        .onAppear { visible = true }
-        .onDisappear { visible = false; image = nil }
-        .task(id: visible ? file : nil) {
-            guard visible else { return }
-            let request = Task.detached(priority: .utility) { await PhotoThumbnails.shared.image(for: file) }
-            let result = await withTaskCancellationHandler {
-                await request.value
-            } onCancel: { request.cancel() }
-            guard !Task.isCancelled else { return }
-            image = result
         }
     }
 }

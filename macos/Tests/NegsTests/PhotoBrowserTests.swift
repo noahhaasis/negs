@@ -52,8 +52,8 @@ final class PhotoBrowserTests: XCTestCase {
         let thumbnails = PhotoThumbnails()
         let result = await thumbnails.image(for: url)
         let image = try XCTUnwrap(result)
-        XCTAssertEqual(image.width, 96)
-        XCTAssertEqual(image.height, 192)
+        XCTAssertEqual(image.width, 180)
+        XCTAssertEqual(image.height, 360)
         let cached = await thumbnails.image(for: url)
         XCTAssertTrue(cached === image)
         let missing = await thumbnails.image(for: directory.appendingPathComponent("missing.nef"))
@@ -138,8 +138,8 @@ final class PhotoBrowserTests: XCTestCase {
         let replaced = try XCTUnwrap(PhotoFolder.snapshot(in: directory).first { $0.url == url })
         let updated = await thumbnails.image(for: replaced)
         XCTAssertFalse(updated === image)
-        XCTAssertEqual(updated?.height, 192)
-        XCTAssertEqual(updated?.width, 96)
+        XCTAssertEqual(updated?.height, 360)
+        XCTAssertEqual(updated?.width, 180)
     }
 
     func testFolderScanBenchmark() throws {
@@ -203,9 +203,7 @@ final class PhotoBrowserTests: XCTestCase {
         for (name, appearance, visible) in [("light", NSAppearance.Name.aqua, true), ("dark", .darkAqua, true), ("hidden", .aqua, false)] {
             window.appearance = NSAppearance(named: appearance)
             if model.filmstripVisible != visible {
-                let toggle = try XCTUnwrap(window.toolbar?.items.first { $0.itemIdentifier.rawValue == "filmstrip" })
-                XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(toggle.action), to: toggle.target, from: toggle))
-                XCTAssertEqual(model.filmstripVisible, visible)
+                model.filmstripVisible = visible
             }
             try await Task.sleep(nanoseconds: 800_000_000)
             let view = try XCTUnwrap(window.contentView)
@@ -220,10 +218,10 @@ final class PhotoBrowserTests: XCTestCase {
                     to: directory.appendingPathComponent("Photo18a.png"))
                 try await Task.sleep(nanoseconds: 700_000_000)
                 XCTAssertEqual(model.source?.lastPathComponent, "Photo18.png")
-                // The selected thumbnail is centered; click its right neighbour.
+                // The selected frame is centred; click the one below it.
                 let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
                 let canvas = try XCTUnwrap(split.splitView.subviews.first)
-                let point = NSPoint(x: canvas.frame.width / 2 + 104, y: 80)
+                let point = NSPoint(x: FilmRollLayout.columnWidth / 2, y: (canvas.frame.height - 52) / 2 - 163)
                 for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                     let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,

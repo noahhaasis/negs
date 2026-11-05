@@ -433,6 +433,9 @@ import UniformTypeIdentifiers
 
     private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }
 
+    /// The engine's data folder, once it has started.
+    var dataDirectory: URL? { engine?.paths.data }
+
     /// Loads the 35mm strip when that border is chosen and the film or the
     /// photograph's format changes.
     private func updateFilmStrip() {

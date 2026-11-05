@@ -458,6 +458,33 @@ extension ZoneModelTests {
         XCTAssertEqual(scroll.magnification * document.frame.width, onScreen, accuracy: onScreen * 0.01)
     }
 
+    /// The roll runs down the window's far left, the zones next to it and the
+    /// canvas after them, and a zone's drop still lands where it's let go.
+    func testTheFilmRollSitsAtTheFarLeft() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        model.filmstripVisible = true
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        controller.showWindow(nil)
+        defer { window.orderOut(nil) }
+        window.setFrame(NSRect(x: 80, y: 80, width: 1300, height: 800), display: true)
+        try await waitUntil { model.previewCurrent }
+        try await Task.sleep(for: .milliseconds(400))
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        let scrolls = all(try XCTUnwrap(window.contentView)).compactMap { $0 as? NSScrollView }
+        let canvas = try XCTUnwrap(scrolls.first { $0 is ImageScrollView })
+        let left = canvas.convert(canvas.bounds, to: nil).minX
+        XCTAssertEqual(left, FilmRollLayout.columnWidth + ZoneGeometry.panelWidth, accuracy: 1)
+        let roll = try XCTUnwrap(scrolls.first { abs($0.bounds.width - FilmRollLayout.columnWidth) < 1 }, "\(scrolls.map(\.bounds))")
+        XCTAssertEqual(roll.convert(roll.bounds, to: nil).minX, 0, accuracy: 1)
+        XCTAssertGreaterThan(roll.bounds.height, 600, "It runs the window's height")
+        model.filmstripVisible = false
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(canvas.convert(canvas.bounds, to: nil).minX, ZoneGeometry.panelWidth, accuracy: 1, "Hidden, the canvas takes its room")
+    }
+
     /// Pins from before zones held their own tone: each takes the zone its
     /// target falls in.
     func testSavedHoldingPinsTakeTheZoneTheirTargetFallsIn() async throws {
