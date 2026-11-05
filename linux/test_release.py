@@ -54,7 +54,14 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(source.read_bytes(), (other / 'assets' / source.name).read_bytes())
         with tarfile.open(source) as archive:
             names = archive.getnames()
+            mac_files = [entry.name for entry in archive.getmembers()
+                         if entry.isfile() and '/macos/' in entry.name]
         self.assertIn('negs-0.8.0/Cargo.toml', names)
+        self.assertIn('negs-0.8.0/macos/Sources/NegsApp/ControlHelp.swift', names)
+        self.assertEqual(
+            mac_files,
+            ['negs-0.8.0/macos/Sources/NegsApp/ControlHelp.swift'],
+        )
         self.assertFalse(any('handoff' in name or 'private' in name for name in names))
         recipe = (self.out / 'build/PKGBUILD').read_text()
         self.assertIn('pkgver=0.8.0', recipe)

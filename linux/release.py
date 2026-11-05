@@ -23,9 +23,12 @@ SOURCE_PATHS = [
     # The patched rawler the workspace builds with ([patch.crates-io]).
     'vendor',
     'linux', 'scripts', 'assets/negs-icon.png', 'assets/negs-icon.svg',
+    # The Linux tooltip parity test checks this shared text reference.
+    'macos/Sources/NegsApp/ControlHelp.swift',
     'docs/linux-app.md', 'docs/linux-core-validation.md',
     'docs/linux-ui-parity.md', 'docs/linux-ui-validation.md',
     'docs/linux-border-performance.md',
+    'docs/linux-prep-port.md', 'docs/linux-prep-port-plan.md',
     'docs/linux-release.md',
     'docs/linux-post-main-validation.md',
 ]
