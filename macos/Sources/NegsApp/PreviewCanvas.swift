@@ -120,17 +120,11 @@ struct PreviewCanvas: NSViewRepresentable {
 }
 
 final class CenteringClipView: NSClipView {
-    /// How far above centre the document sits, in its own units, where it has room.
-    var raise: CGFloat = 0
-
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var bounds = super.constrainBoundsRect(proposedBounds)
         guard let documentView else { return bounds }
         if bounds.width > documentView.frame.width { bounds.origin.x = (documentView.frame.width - bounds.width) / 2 }
-        if bounds.height > documentView.frame.height { 
-            let room = (bounds.height - documentView.frame.height) / 2
-            bounds.origin.y = -room - min(raise, room)
-        }
+        if bounds.height > documentView.frame.height { bounds.origin.y = (documentView.frame.height - bounds.height) / 2 }
         return bounds
     }
 }
@@ -222,9 +216,8 @@ final class ImageScrollView: NSScrollView {
         let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
         let fit = min(contentSize.width / size.width, contentSize.height / size.height)
         let amount = proofMagnification(document: size) ?? (fitting ? min(fit, oneToOne) : oneToOne)
-        (contentView as? CenteringClipView)?.raise = isProof ? Proof.raise(forLongEdge: max(size.width, size.height)) : 0
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
-        // Magnifying centres; constraining again applies the raise.
+        // Constraining again centres whatever is smaller than the window.
         contentView.scroll(to: contentView.bounds.origin)
         reflectScrolledClipView(contentView)
     }

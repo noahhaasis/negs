@@ -1,12 +1,5 @@
 import CoreGraphics
 
-/// How a proof sits in the window.
-enum Proof {
-    /// How far above centre the photograph sits, so it doesn't seem to sink: what
-    /// a framer's mat does, with 1.2 × the width below at 8 % of the long edge.
-    static func raise(forLongEdge long: CGFloat) -> CGFloat { long * 0.008 }
-}
-
 /// The pixels an export would write, in the exporter's order: crop, turn, border, fit.
 enum ExportPixels {
     /// The photograph's own pixels inside an export: turned, without its border,

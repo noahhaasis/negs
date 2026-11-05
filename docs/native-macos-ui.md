@@ -290,8 +290,8 @@ in place of the border. Only the export's settings set that size (`proofPixels`)
 the window's size doesn't, and zooming is off. Proof never changes the window, whose
 size and position stay the user's, including when it turns on or off, a photograph
 of another orientation arrives, or the film strip shows or hides. A proof larger than
-the window can be panned. With room, the photograph sits 0.8 % of its long edge above
-centre so it doesn't seem to sink. Exports still include the border if it's on.
+the window can be panned. Smaller, it's centred as in the normal view, so turning
+Proof on or off doesn't move it. Exports still include the border if it's on.
 
 Otherwise, ⌘+ and ⌘− zoom in and out by a factor of √2.
 

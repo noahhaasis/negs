@@ -81,22 +81,21 @@ import XCTest
         XCTAssertFalse(large.canScroll)
     }
 
-    /// With room, the photograph sits a little above centre, as on a framer's
-    /// mat. Without room, none of it is cut off to do that.
-    func testAProofSitsAboveCentreOnlyWithRoom() throws {
-        func gaps(viewport: CGFloat) throws -> (top: CGFloat, bottom: CGFloat) {
-            let scroll = canvas(viewport: viewport, photo: CGSize(width: 1000, height: 1000))
-            scroll.proofPixels = CGSize(width: 2000, height: 2000)
-            let overlay = scroll.overlay
+    /// Entering and leaving a proof doesn't move the photograph: it's centred
+    /// in both, in the same place.
+    func testAProofIsCentredWhereTheNormalViewIs() throws {
+        let scroll = canvas(viewport: 1200, photo: CGSize(width: 1000, height: 1000))
+        func centre() throws -> CGPoint {
             let photo = try XCTUnwrap(scroll.documentView)
-            let (low, high) = (overlay.convert(CGPoint.zero, from: photo).y, overlay.convert(CGPoint(x: 0, y: 1000), from: photo).y)
-            return (overlay.bounds.height - max(low, high), min(low, high))
+            return scroll.overlay.convert(CGPoint(x: 500, y: 500), from: photo)
         }
-        let roomy = try gaps(viewport: 1200)
-        XCTAssertEqual(roomy.bottom - roomy.top, 16, accuracy: 0.5, "0.8 % of the long edge, twice over")
-        let tight = try gaps(viewport: 1004)
-        XCTAssertGreaterThanOrEqual(tight.top, -0.5)
-        XCTAssertGreaterThanOrEqual(tight.bottom, -0.5)
+        let normal = try centre()
+        scroll.proofPixels = CGSize(width: 2000, height: 2000)
+        let proof = try centre()
+        XCTAssertEqual(proof.x, normal.x, accuracy: 0.5)
+        XCTAssertEqual(proof.y, normal.y, accuracy: 0.5)
+        scroll.proofPixels = nil
+        XCTAssertEqual(try centre().y, normal.y, accuracy: 0.5)
     }
 
     func testLeavingProofGoesBackToTheNormalFit() throws {
