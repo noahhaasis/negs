@@ -216,8 +216,6 @@ struct InspectorPanel: View {
     let model: EditorModel
     /// False until the window is on screen; see EditorWindowController.
     var built = true
-    @AppStorage(ViewerBackground.customKey) private var customBackground = false
-    @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
 
     var body: some View {
         Group {
@@ -227,8 +225,9 @@ struct InspectorPanel: View {
             else { AdjustmentInspector(model: model) }
         }
         .scrollContentBackground(.hidden)
-        // The title bar shows the viewer's background through it, so this matches.
-        .background(ViewerBackground.canvas(custom: customBackground, hex: backgroundHex))
+        // The title bar's colour over the default viewer. Never a custom viewer
+        // colour, which is for the photograph and could hide the controls' text.
+        .background(Color(nsColor: .underPageBackgroundColor))
         // The edge the film strip has on top, down the left, under the toolbar too.
         .overlay(alignment: .leading) { EdgeLine(horizontal: false).ignoresSafeArea() }
         // The line under the toolbar, which continues the canvas's.

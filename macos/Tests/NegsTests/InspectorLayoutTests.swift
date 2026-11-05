@@ -30,6 +30,30 @@ import XCTest
         XCTAssertEqual(try grey(2), try grey(50), accuracy: 1, "It's only one point wide")
     }
 
+    /// A custom viewer colour is for the viewer: the sidebar's light text would
+    /// vanish on a white one.
+    func testACustomViewerColourLeavesTheSidebarAlone() throws {
+        _ = NSApplication.shared
+        let defaults = UserDefaults.standard
+        let saved = (defaults.object(forKey: ViewerBackground.customKey), defaults.object(forKey: ViewerBackground.colorKey))
+        defaults.set(true, forKey: ViewerBackground.customKey)
+        defaults.set("#FFFFFF", forKey: ViewerBackground.colorKey)
+        defer {
+            defaults.set(saved.0, forKey: ViewerBackground.customKey)
+            defaults.set(saved.1, forKey: ViewerBackground.colorKey)
+        }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let host = NSHostingView(rootView: InspectorPanel(model: model, built: false))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.frame = NSRect(x: 0, y: 0, width: 100, height: 100)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let colour = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))
+        XCTAssertEqual(colour.redComponent * 255, 40, accuracy: 2)
+    }
+
     /// The line under the toolbar runs across the canvas and the sidebar, in the
     /// colour of the sidebar's edge.
     func testALineRunsUnderTheToolbar() throws {
