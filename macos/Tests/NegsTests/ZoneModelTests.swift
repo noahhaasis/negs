@@ -459,33 +459,149 @@ extension ZoneModelTests {
         XCTAssertEqual(scroll.magnification * document.frame.width, onScreen, accuracy: onScreen * 0.01)
     }
 
-    /// The roll runs down the window's far left, the zones next to it and the
-    /// canvas after them, and a zone's drop still lands where it's let go.
-    func testTheFilmRollSitsAtTheFarLeft() async throws {
-        let model = try await makeModel()
-        let saved = model.filmstripVisible
-        defer { model.filmstripVisible = saved; model.shutdown() }
+    /// A window on a folder of `photos` frames, with real mouse events to send it.
+    private func openRoll(_ model: EditorModel, photos: Int = 0) async throws -> (EditorWindowController, NSWindow, NSScrollView) {
+        for index in 0..<photos { try FileManager.default.copyItem(at: ramp, to: directory.appendingPathComponent("z\(index).png")) }
         model.filmstripVisible = true
         let controller = EditorWindowController(model: model)
         let window = try XCTUnwrap(controller.window)
         controller.showWindow(nil)
-        defer { window.orderOut(nil) }
         window.setFrame(NSRect(x: 80, y: 80, width: 1300, height: 800), display: true)
         try await waitUntil { model.previewCurrent }
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(700))
         func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
         let scrolls = all(try XCTUnwrap(window.contentView)).compactMap { $0 as? NSScrollView }
-        let canvas = try XCTUnwrap(scrolls.first { $0 is ImageScrollView })
-        let left = canvas.convert(canvas.bounds, to: nil).minX
-        XCTAssertEqual(left, FilmRollLayout.columnWidth + ZoneGeometry.panelWidth, accuracy: 1)
-        let roll = try XCTUnwrap(scrolls.first { abs($0.bounds.width - FilmRollLayout.columnWidth) < 1 }, "\(scrolls.map(\.bounds))")
-        XCTAssertEqual(roll.convert(roll.bounds, to: nil).minX, 0, accuracy: 1)
-        XCTAssertGreaterThan(roll.bounds.height, 600, "It runs the window's height")
-        let film = try XCTUnwrap(roll.documentView).frame.height
-        XCTAssertGreaterThanOrEqual(film, roll.bounds.height, "With two photographs the film still runs the window's height")
+        let roll = try XCTUnwrap(scrolls.first { abs($0.bounds.height - FilmRollLayout.stripHeight) < 1 }, "\(scrolls.map(\.bounds))")
+        return (controller, window, roll)
+    }
+
+    /// `time` is when the event happened, as a real event carries it, so a busy
+    /// test machine can't change how fast a drag looks.
+    private func send(_ type: NSEvent.EventType, _ location: CGPoint, to window: NSWindow, clicks: Int = 1, time: TimeInterval? = nil) throws {
+        window.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+            timestamp: time ?? ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: clicks, pressure: 1)))
+    }
+
+    /// The roll runs across under the photograph, the width of the window, and
+    /// a short folder's film still reaches the end.
+    func testTheFilmRollSitsUnderThePhotograph() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        let (_, window, roll) = try await openRoll(model)
+        defer { window.orderOut(nil) }
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        let canvas = try XCTUnwrap(all(try XCTUnwrap(window.contentView)).compactMap { $0 as? ImageScrollView }.first)
+        let inWindow = roll.convert(roll.bounds, to: nil)
+        XCTAssertEqual(inWindow.minX, 0, accuracy: 1)
+        XCTAssertLessThanOrEqual(inWindow.maxY, canvas.convert(canvas.bounds, to: nil).minY + 1, "It's under the photograph")
+        XCTAssertGreaterThan(inWindow.width, 800)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(roll.documentView).frame.width, roll.bounds.width, "With two photographs the film still runs on")
+        XCTAssertEqual(canvas.convert(canvas.bounds, to: nil).minX, ZoneGeometry.panelWidth, accuracy: 1)
+        let height = canvas.bounds.height
         model.filmstripVisible = false
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(canvas.convert(canvas.bounds, to: nil).minX, ZoneGeometry.panelWidth, accuracy: 1, "Hidden, the canvas takes its room")
+        XCTAssertEqual(canvas.bounds.height, height + FilmRollLayout.stripHeight, accuracy: 1, "Hidden, the canvas takes its room")
+    }
+
+    /// Real clicks: a single click opens nothing, and neither does double-clicking
+    /// the film around a frame. Double-clicking the photograph does.
+    func testOnlyADoubleClickOnThePhotographOpensIt() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        let (_, window, roll) = try await openRoll(model)
+        defer { window.orderOut(nil) }
+        XCTAssertEqual(model.source, ramp)
+        let bounds = roll.convert(roll.bounds, to: nil)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture)
+        // other.png sorts first, so it's the first frame.
+        let photo = CGPoint(x: bounds.minX + frame / 2, y: bounds.midY)
+        let sprockets = CGPoint(x: photo.x, y: bounds.minY + 6)
+        func click(_ point: CGPoint, times: Int) async throws {
+            for count in 1...times {
+                try send(.leftMouseDown, point, to: window, clicks: count)
+                try send(.leftMouseUp, point, to: window, clicks: count)
+            }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        try await click(photo, times: 1)
+        XCTAssertEqual(model.source, ramp, "One click doesn't")
+        try await Task.sleep(for: .milliseconds(500))
+        try await click(sprockets, times: 2)
+        XCTAssertEqual(model.source, ramp, "The sprockets don't")
+        try send(.mouseMoved, photo, to: window)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(model.source, ramp, "Pointing at it doesn't")
+        try await Task.sleep(for: .milliseconds(500))
+        try await click(photo, times: 2)
+        XCTAssertEqual(model.source, other, "A double-click on the photograph does")
+    }
+
+    /// Real drags: the film follows the mouse, coasts on from a flick, stops, and
+    /// opens nothing. Holding still before letting go leaves it where it is.
+    func testDraggingTheRollScrollsItWithInertia() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        let (_, window, roll) = try await openRoll(model, photos: 40)
+        defer { window.orderOut(nil) }
+        let source = model.source
+        let middle = roll.convert(roll.bounds, to: nil).midY
+        func offset() -> CGFloat { roll.contentView.bounds.origin.x }
+        roll.contentView.scroll(to: NSPoint(x: 600, y: roll.contentView.bounds.origin.y))
+        roll.reflectScrolledClipView(roll.contentView)
+        try await Task.sleep(for: .milliseconds(100))
+        let start = offset()
+        // A flick left.
+        var x: CGFloat = 900
+        var clock = ProcessInfo.processInfo.systemUptime
+        try send(.leftMouseDown, CGPoint(x: x, y: middle), to: window, time: clock)
+        for _ in 0..<6 {
+            clock += 0.016
+            x -= 30
+            try send(.leftMouseDragged, CGPoint(x: x, y: middle), to: window, time: clock)
+        }
+        let moved = offset()
+        XCTAssertEqual(moved, start + 180, accuracy: 35, "It followed the pointer")
+        try send(.leftMouseUp, CGPoint(x: x, y: middle), to: window, time: clock + 0.005)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertGreaterThan(offset(), moved + 20, "It coasts on after letting go")
+        // A fast flick takes about 3 seconds to fall to the stopping speed.
+        try await Task.sleep(for: .seconds(4))
+        let rested = offset()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(offset(), rested, accuracy: 0.5, "And comes to rest")
+        XCTAssertEqual(model.source, source, "Dragging opens nothing")
+        // A drag that holds still before letting go.
+        clock = ProcessInfo.processInfo.systemUptime
+        try send(.leftMouseDown, CGPoint(x: 900, y: middle), to: window, time: clock)
+        for step in 1...4 {
+            clock += 0.016
+            try send(.leftMouseDragged, CGPoint(x: 900 + CGFloat(step) * 25, y: middle), to: window, time: clock)
+        }
+        let held = offset()
+        try send(.leftMouseUp, CGPoint(x: 1000, y: middle), to: window, time: clock + 0.25)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(offset(), held, accuracy: 0.5, "No coast after a pause")
+        // A press stops a coast.
+        var y: CGFloat = 700
+        clock = ProcessInfo.processInfo.systemUptime
+        try send(.leftMouseDown, CGPoint(x: y, y: middle), to: window, time: clock)
+        for _ in 0..<5 {
+            clock += 0.016
+            y -= 40
+            try send(.leftMouseDragged, CGPoint(x: y, y: middle), to: window, time: clock)
+        }
+        try send(.leftMouseUp, CGPoint(x: y, y: middle), to: window, time: clock + 0.005)
+        try await Task.sleep(for: .milliseconds(80))
+        try send(.leftMouseDown, CGPoint(x: y, y: middle), to: window)
+        try await Task.sleep(for: .milliseconds(60))
+        let pressed = offset()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(offset(), pressed, accuracy: 0.5, "A press stops it")
+        try send(.leftMouseUp, CGPoint(x: y, y: middle), to: window)
     }
 
     /// The file has the pixels Image Size asks for, not the screen's scale times
@@ -503,50 +619,6 @@ extension ZoneModelTests {
             XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 2000, "\(engine)")
             XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 1500, "\(engine)")
         }
-    }
-
-    /// Real clicks on the roll: the film around a frame does nothing, the
-    /// photograph opens it. Pointing at a frame opens nothing.
-    func testOnlyAFramesPhotographOpensIt() async throws {
-        let model = try await makeModel()
-        let saved = model.filmstripVisible
-        defer { model.filmstripVisible = saved; model.shutdown() }
-        model.filmstripVisible = true
-        let controller = EditorWindowController(model: model)
-        let window = try XCTUnwrap(controller.window)
-        controller.showWindow(nil)
-        defer { window.orderOut(nil) }
-        window.setFrame(NSRect(x: 80, y: 80, width: 1300, height: 800), display: true)
-        try await waitUntil { model.previewCurrent }
-        try await Task.sleep(for: .milliseconds(600))
-        XCTAssertEqual(model.source, ramp)
-        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
-        let scrolls = all(try XCTUnwrap(window.contentView)).compactMap { $0 as? NSScrollView }
-        let roll = try XCTUnwrap(scrolls.first { abs($0.bounds.width - FilmRollLayout.columnWidth) < 1 })
-        let document = try XCTUnwrap(roll.documentView)
-        // The first frame, other.png, sorts before ramp.png, at the top of the film.
-        let frameHeight = FilmRollLayout.frameHeight(stripWidth: FilmRollLayout.stripWidth, texture: FilmRollLayout.defaultTexture)
-        let top = document.convert(document.bounds, to: nil).maxY
-        func send(_ type: NSEvent.EventType, _ location: CGPoint) throws {
-            window.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-                eventNumber: 0, clickCount: 1, pressure: 1)))
-        }
-        func click(_ location: CGPoint) async throws {
-            try send(.leftMouseDown, location)
-            try send(.leftMouseUp, location)
-            try await Task.sleep(for: .milliseconds(150))
-        }
-        let middle = top - frameHeight / 2
-        try await click(CGPoint(x: 8, y: middle))
-        XCTAssertEqual(model.source, ramp, "The sprockets don't open it")
-        try await click(CGPoint(x: FilmRollLayout.stripWidth - 8, y: middle))
-        XCTAssertEqual(model.source, ramp, "Nor the far edge")
-        try send(.mouseMoved, CGPoint(x: FilmRollLayout.stripWidth / 2, y: middle))
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(model.source, ramp, "Pointing at it doesn't")
-        try await click(CGPoint(x: FilmRollLayout.stripWidth / 2, y: middle))
-        XCTAssertEqual(model.source, other, "The photograph does")
     }
 
     /// The DPI in Settings reaches real files, in every format, through both

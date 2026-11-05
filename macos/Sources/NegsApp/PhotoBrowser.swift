@@ -95,35 +95,51 @@ struct PhotoBrowser: View {
 
     @State private var strip: FilmStrip?
     @State private var viewport: CGFloat = 0
+    @State private var scroller = FilmRollScroller()
 
     var body: some View {
-        ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 0) {
                 ForEach(Array(files.enumerated()), id: \.element.url) { index, file in
                     FilmFrame(file: file, number: index + 1, selected: file.url == model.source, strip: strip, film: model.film) {
                         if file.url != model.source { model.open(file.url) }
                     }
                     .id(file.url)
                 }
-                // A short folder's roll still runs the window's height.
-                let frame = FilmRollLayout.frameHeight(stripWidth: FilmRollLayout.stripWidth, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
-                ForEach(0..<FilmRollLayout.blankFrames(photos: files.count, viewport: viewport, frameHeight: frame), id: \.self) { index in
+                // A short folder's roll still runs the window's width.
+                let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
+                ForEach(0..<FilmRollLayout.blankFrames(photos: files.count, viewport: viewport, frameLength: frame), id: \.self) { index in
                     BlankFilmFrame(number: files.count + index + 1, strip: strip, film: model.film)
                 }
             }
             .scrollTargetLayout()
+            .background(EnclosingScrollFinder(scroller: scroller))
         }
-        .scrollIndicators(.automatic)
+        .scrollIndicators(.hidden)
         .scrollPosition(id: $scrollTarget, anchor: .center)
-        .onChange(of: model.source) { _, source in scrollTarget = source }
+        .onChange(of: model.source) { _, source in
+            scroller.stop()
+            scrollTarget = source
+        }
+        .onDisappear { scroller.stop() }
         .onMoveCommand { direction in
             guard !model.cropping, let source = model.source,
                   let index = files.firstIndex(where: { $0.url == source }) else { return }
             let next = direction == .up || direction == .left ? index - 1 : index + 1
             if files.indices.contains(next) { model.open(files[next].url) }
         }
-        .frame(width: FilmRollLayout.columnWidth)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
+        // Over the scroll view, since SwiftUI doesn't pass mouse drags through one.
+        .overlay {
+            FilmMouseSurface(scroller: scroller, enabled: !model.cropping) { point in
+                let frame = CGSize(width: FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture), height: FilmRollLayout.stripHeight)
+                let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: frame)
+                guard let index = FilmRollLayout.photo(at: point, frame: frame, gate: gate, photos: files.count),
+                      files[index].url != model.source else { return }
+                model.open(files[index].url)
+            }
+        }
+        .frame(height: FilmRollLayout.stripHeight)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewport = $0 }
         .background(FilmRollLayout.filmBase)
         .overlay {
             Group {

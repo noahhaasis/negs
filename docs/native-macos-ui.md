@@ -284,16 +284,20 @@ starts with none.
 
 ## Film roll
 
-The film strip shows the photograph's folder as one roll of 35mm film,
-down the window's far left. Each frame is the current film's strip artwork
-(`data/borders/35mm/full`, loaded small) turned a quarter clockwise, with frames butted
-so the perforations run on. Landscape photographs lie on their side as on real film and
-portrait ones stand up, cropped to fill the gate. Still films' frames carry their place
-in the folder over the artwork's fixed number; cine and print films keep their own edge
-text. The open photograph is at full brightness and the others are dimmed to 30 %, and the
-arrow keys step along the roll. Only the photograph in a frame is clickable, and there's
-no tooltip or other response to hovering. The column is the film alone, with no margin around it, and a short folder's
-roll carries on with blank, numbered frames to the bottom of the window.
+The film strip shows the photograph's folder as one roll of 35mm film, running across
+under the photograph with nothing around it. Each frame is the current film's strip
+artwork (`data/borders/35mm/full`, loaded small), with frames butted so the perforations
+run on. Landscape photographs sit upright and portrait ones lie on their side, as on real
+film, cropped to fill the gate. Still films' frames carry their place in the folder over
+the artwork's fixed number; cine and print films keep their own edge text. A short folder's
+roll carries on with blank, numbered frames to the end of the window.
+
+The open photograph is at full brightness and the others are dimmed to 30 %. Clicking and
+dragging anywhere on the film scrolls it (`FilmRollScroller`), and it coasts on from a
+flick, slowing at macOS's normal rate (0.998 of its speed kept per millisecond), until a
+press or an end of the roll stops it. A trackpad scrolls it natively. Double-clicking a
+photograph opens it; nothing else on the film does, and it doesn't respond to hovering.
+The arrow keys step along the roll.
 
 ## Proof
 

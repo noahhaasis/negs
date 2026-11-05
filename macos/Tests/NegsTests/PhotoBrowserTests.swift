@@ -218,15 +218,17 @@ final class PhotoBrowserTests: XCTestCase {
                     to: directory.appendingPathComponent("Photo18a.png"))
                 try await Task.sleep(nanoseconds: 700_000_000)
                 XCTAssertEqual(model.source?.lastPathComponent, "Photo18.png")
-                // The selected frame is centred; click the one below it.
+                // The selected frame is centred; double-click the one after it.
                 let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
                 let canvas = try XCTUnwrap(split.splitView.subviews.first)
-                let point = NSPoint(x: FilmRollLayout.columnWidth / 2, y: (canvas.frame.height - 52) / 2 - 163)
-                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                    let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                        context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
-                    window.sendEvent(event)
+                let point = NSPoint(x: canvas.frame.width / 2 + FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture), y: 28 + FilmRollLayout.stripHeight / 2)
+                for clicks in 1...2 {
+                    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                        let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0, clickCount: clicks, pressure: 1))
+                        window.sendEvent(event)
+                    }
                 }
                 try await Task.sleep(nanoseconds: 100_000_000)
                 XCTAssertEqual(model.source?.lastPathComponent, "Photo18a.png")
