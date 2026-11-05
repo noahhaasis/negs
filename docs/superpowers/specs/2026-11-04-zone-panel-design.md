@@ -10,7 +10,7 @@ Success is that someone can drag zone 0 onto a shadow and watch the black point 
 
 ### The panel
 
-- A **Zones** button in the toolbar's view group, with zoom and crop, shows and hides the panel.
+- The panel is always up with a photograph open, except while cropping.
 - The panel is a column on the left edge of the photograph, about 56 points wide, spanning the canvas height. It sits above the film strip, not beside it.
 - It holds eleven tiles, one for each of Ansel Adams' zones: 0 at the bottom, 10 at the top. Each tile is filled with its zone's grey and shows its number.
 - A tile shows a small dot when its zone is placed, and the selected pin's tile is outlined in the accent colour.
@@ -46,13 +46,13 @@ The tone curve must keep rising, so some pairings are impossible, such as zone V
 
 At L\* = zone × 10: zone 0 is pure black, zone 5 is 18% gray and zone 10 is pure white. A true stop per zone would pass white by zone 8, so the zones are the print's tones, evenly spaced.
 
-### Hiding the panel
+### Hiding the pins
 
-Hiding the panel hides the tiles, lines and pins, but keeps their effect on the photograph. Pin gestures do nothing while it is hidden.
+Z, or a **Pins** button in the toolbar's view group with zoom and crop, hides the lines and pins but keeps their effect on the photograph and leaves the panel up. Pin gestures do nothing while they are hidden. Dropping a zone shows them again.
 
 ### What goes away
 
-- The ⌘-click, ⌘-scroll and ⌘' pin gestures, and the Show Tone Pins menu item. The toolbar button and a menu item for the panel replace them.
+- The ⌘-click, ⌘-scroll and ⌘' pin gestures, and the Show Tone Pins menu item. The Pins toolbar button and a menu item replace them.
 - Holding pins: every pin now belongs to a zone.
 - Clickable histogram bands. The inspector goes back to the plain histogram from `feat/inspector-tabs`, along with any lightness binning and curve code only the zone chart used.
 - The pin-specific captions under the histogram.
@@ -102,7 +102,7 @@ These would make it a failure even if it technically worked:
 
 These were not specified by the user:
 
-- The panel is shown by default on first launch, then remembered.
+- Pins are shown by default on first launch, then remembered.
 - The canvas's 680-point minimum width includes the panel.
 - The panel and pin gestures are unavailable while cropping or showing the Original.
 - A new pin starts at the size last used, or a radius of 2% of the shorter side the first time.

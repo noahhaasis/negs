@@ -69,7 +69,7 @@ import SwiftUI
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
         view.addItem(.separator())
-        command(view, "Hide Zones", #selector(toggleZonePanel), "z", [])
+        command(view, "Hide Pins", #selector(togglePins), "z", [])
         command(view, "Delete Tone Pin", #selector(deleteTonePin), "\u{8}", [])
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
@@ -125,7 +125,7 @@ import SwiftUI
     @objc private func exportLUT() { model.exportLUTPanel() }
     @objc private func saveSettings() { model.saveSettings() }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
-    @objc private func toggleZonePanel() { model.zonePanelVisible.toggle() }
+    @objc private func togglePins() { model.pinsVisible.toggle() }
     @objc private func deleteTonePin() { model.removeSelectedPin() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
     @objc private func togglePresets() { model.togglePane(.presets) }
@@ -154,8 +154,8 @@ import SwiftUI
         case #selector(toggleFilmstrip):
             item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
             return true
-        case #selector(toggleZonePanel):
-            item.title = model.zonePanelVisible ? "Hide Zones" : "Show Zones"
+        case #selector(togglePins):
+            item.title = model.pinsVisible ? "Hide Pins" : "Show Pins"
             return photo && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
         case #selector(deleteTonePin):
             return model.canRemovePin && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)

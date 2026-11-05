@@ -271,24 +271,41 @@ extension ZoneModelTests {
         XCTAssertEqual(try lstar(model, at: light), ZoneScale.zones[3].target, accuracy: 1.5)
     }
 
-    /// Hiding the panel hides the pins, not what they do.
-    func testHidingThePanelHidesPinsButKeepsTheEffect() async throws {
+    /// Z hides the pins and lines, not what they do, and the panel stays.
+    func testHidingPinsKeepsThePanelAndTheEffect() async throws {
         let model = try await makeModel()
-        let saved = UserDefaults.standard.object(forKey: "showZonePanel")
+        let saved = UserDefaults.standard.object(forKey: "showTonePins")
         defer {
             model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "showZonePanel")
+            UserDefaults.standard.set(saved, forKey: "showTonePins")
         }
         try await place(5, on: model)
         let printed = try lstar(model)
-        model.zonePanelVisible = false
+        model.pinsVisible = false
         XCTAssertTrue(model.pinsToShow.isEmpty)
         XCTAssertNil(model.selectedPin)
+        XCTAssertTrue(model.showsZonePanel, "The panel stays up")
         XCTAssertEqual(model.pins.count, 1)
         XCTAssertTrue(model.previewCurrent, "Hiding doesn't develop again")
         XCTAssertEqual(try lstar(model), printed)
-        model.zonePanelVisible = true
+        model.pinsVisible = true
         XCTAssertEqual(model.pinsToShow.count, 1)
+    }
+
+    /// A zone dropped while the pins are hidden brings them back, so the new
+    /// pin can be seen and sized.
+    func testDroppingAZoneShowsThePins() async throws {
+        let model = try await makeModel()
+        let saved = UserDefaults.standard.object(forKey: "showTonePins")
+        defer {
+            model.shutdown()
+            UserDefaults.standard.set(saved, forKey: "showTonePins")
+        }
+        model.pinsVisible = false
+        XCTAssertTrue(model.canPlaceZones)
+        try await place(5, on: model)
+        XCTAssertTrue(model.pinsVisible)
+        XCTAssertEqual(model.pinsToShow.first?.selected, true)
     }
 
     func testThePanelIsHiddenWhileCropping() async throws {
@@ -301,22 +318,23 @@ extension ZoneModelTests {
         XCTAssertFalse(model.canPlaceZones)
     }
 
-    /// The toolbar's Zones button, in the group with zoom and crop, toggles it.
-    func testTheToolbarButtonTogglesThePanel() async throws {
+    /// The toolbar's Pins button, in the group with zoom and crop, does what Z does.
+    func testTheToolbarButtonTogglesThePins() async throws {
         let model = try await makeModel()
-        let saved = UserDefaults.standard.object(forKey: "showZonePanel")
+        let saved = UserDefaults.standard.object(forKey: "showTonePins")
         defer {
             model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "showZonePanel")
+            UserDefaults.standard.set(saved, forKey: "showTonePins")
         }
         let controller = EditorWindowController(model: model)
         let toolbar = try XCTUnwrap(controller.window?.toolbar)
         let groups = toolbar.items.compactMap { $0 as? NSToolbarItemGroup }
         let group = try XCTUnwrap(groups.first { $0.subitems.contains { $0.label == "Crop" } })
-        let button = try XCTUnwrap(group.subitems.first { $0.label == "Zones" })
-        let before = model.zonePanelVisible
+        let button = try XCTUnwrap(group.subitems.first { $0.label == "Pins" })
+        let before = model.pinsVisible
         _ = (button.target as AnyObject).perform(button.action)
-        XCTAssertNotEqual(model.zonePanelVisible, before)
+        XCTAssertNotEqual(model.pinsVisible, before)
+        XCTAssertTrue(model.showsZonePanel)
     }
 
     /// Pins from before zones held their own tone: each takes the zone its

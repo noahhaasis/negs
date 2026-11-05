@@ -169,9 +169,9 @@ import SwiftUI
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
         }
         if let item = items[.zones] {
-            item.toolTip = model.zonePanelVisible ? "Hide the zones (Z)" : "Show the zones (Z)"
-            let icon = symbol("circle.lefthalf.filled", "Zones")
-            item.image = model.zonePanelVisible
+            item.toolTip = model.pinsVisible ? "Hide the pins and lines (Z)" : "Show the pins and lines (Z)"
+            let icon = symbol("circle.lefthalf.filled", "Pins")
+            item.image = model.pinsVisible
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
         }
         setEnabled(.zones, photo && !model.cropping)
@@ -241,7 +241,7 @@ import SwiftUI
             let group = NSToolbarItemGroup(itemIdentifier: id)
             group.subitems = [button(.open, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph)),
                               button(.filmstrip, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip)),
-                              button(.zones, "Zones", "circle.lefthalf.filled", "Show or hide the zones (Z)", #selector(toggleZones)),
+                              button(.zones, "Pins", "circle.lefthalf.filled", "Show or hide the pins and lines (Z)", #selector(toggleZones)),
                               button(.fit, "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
                               button(.actualSize, "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize)),
                               button(.rotate, "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),
@@ -311,7 +311,7 @@ import SwiftUI
     @objc private func applyCrop() { model.endCrop(apply: true) }
     @objc private func export() { model.savePanel(export: true) }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
-    @objc private func toggleZones() { model.zonePanelVisible.toggle() }
+    @objc private func toggleZones() { model.pinsVisible.toggle() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
     @objc private func togglePresets() { model.togglePane(.presets) }
 }

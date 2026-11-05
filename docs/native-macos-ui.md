@@ -220,8 +220,7 @@ JPEG inputs now use the same shared loader for CLI export as for preview.
 
 ## The zone system
 
-The **Zones** button in the toolbar's view group (Z) shows and hides the zone
-panel, a column on the photograph's left edge with a tile for each of Ansel Adams'
+With a photograph open, the zone panel runs down its left edge, with a tile for each of Ansel Adams'
 eleven zones: 0 at the bottom, 10 at the top. The zones are evenly spaced in L\*, at
 zone × 10, which puts zone 5 at 18 % gray. On the negative a zone is a stop, but
 five stops above 18 % is far past white, so these are the tones a print compresses
@@ -267,8 +266,9 @@ A pin's input comes from the helper's `sample_tone` (`render_id`, `x`, `y`,
 preview: the preview already shows the other pins' curve.
 
 Because Post runs on the clipped scan, a pin shapes the tones the film produced
-but cannot recover a highlight that clipped; the exposure controls do that. Hiding
-the panel hides the pins but keeps their effect. A preset neither carries nor
+but cannot recover a highlight that clipped; the exposure controls do that. Z, or
+the Pins button in the toolbar's view group, hides the pins and lines but keeps their
+effect and the panel, to judge the photograph clean. Dropping a zone shows them again. A preset neither carries nor
 replaces a photograph's pins, a session restores them, and opening another file
 starts with none.
 

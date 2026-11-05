@@ -61,7 +61,7 @@ import UniformTypeIdentifiers
 
     /// The pins the canvas draws, with a resize in progress already applied.
     var pinsToShow: [TonePinMarker] {
-        guard zonePanelVisible, original == nil, !holdingOriginal else { return [] }
+        guard pinsVisible, original == nil, !holdingOriginal else { return [] }
         return pins.enumerated().compactMap { index, pin in
             guard var source = pin.source else { return nil }
             if let pendingResize, pendingResize.index == index { source.radius = pendingResize.radius }
@@ -72,16 +72,17 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// Whether the zone panel is on. Remembered between launches.
-    var zonePanelVisible = UserDefaults.standard.object(forKey: "showZonePanel") as? Bool ?? true {
+    /// Whether the pins and their lines are drawn; hidden, they still shape the
+    /// photograph. Remembered between launches.
+    var pinsVisible = UserDefaults.standard.object(forKey: "showTonePins") as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(zonePanelVisible, forKey: "showZonePanel")
-            if !zonePanelVisible { selectedPin = nil }
+            UserDefaults.standard.set(pinsVisible, forKey: "showTonePins")
+            if !pinsVisible { selectedPin = nil }
         }
     }
 
     /// The panel shows with a photograph, except while cropping.
-    var showsZonePanel: Bool { zonePanelVisible && source != nil && !cropping }
+    var showsZonePanel: Bool { source != nil && !cropping }
 
     /// A zone being dragged from the panel.
     var zoneDrag: ZoneDrag?
@@ -1170,6 +1171,8 @@ import UniformTypeIdentifiers
         let placed = pins.firstIndex { $0.zone == zone }
         if let placed { anchors[placed] = anchor } else { anchors.append(anchor) }
         setAnchors(anchors, action: placed == nil ? "Place Tone Pin" : "Move Tone Pin")
+        // A new pin is there to be seen and sized.
+        pinsVisible = true
         selectedPin = placed ?? anchors.indices.last
     }
 
