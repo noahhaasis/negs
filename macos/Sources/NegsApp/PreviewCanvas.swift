@@ -104,7 +104,9 @@ struct PreviewCanvas: NSViewRepresentable {
     func unitPoint(canvasPoint point: CGPoint) -> CGPoint? {
         guard let view, let photo = view.documentView as? PhotographView,
               point.x >= 0, point.y >= 0, point.x < view.bounds.width, point.y < view.bounds.height else { return nil }
-        return photo.unitPoint(at: photo.convert(CGPoint(x: point.x, y: view.bounds.height - point.y), from: view))
+        // Through the overlay, which is y-up: NSScrollView itself is flipped.
+        let overlay = view.overlay
+        return photo.unitPoint(at: photo.convert(CGPoint(x: point.x, y: overlay.bounds.height - point.y), from: overlay))
     }
 }
 

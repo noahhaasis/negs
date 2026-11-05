@@ -300,15 +300,14 @@ extension CanvasGestureTests {
         let (scroll, view) = makeCanvas()
         let scale = CanvasScale()
         scale.view = scroll
-        let height = scroll.bounds.height
-        // A canvas point is from the top left, and the scroll view is y-up.
-        let inScroll = scroll.convert(viewPoint(CGPoint(x: 0.25, y: 0.75), in: view), from: view)
-        let centre = try XCTUnwrap(scale.unitPoint(canvasPoint: CGPoint(x: inScroll.x, y: height - inScroll.y)))
+        // A canvas point is from the top left. The overlay is the one view here
+        // known to be y-up, whichever way the scroll view runs.
+        let inOverlay = scroll.overlay.convert(viewPoint(CGPoint(x: 0.25, y: 0.75), in: view), from: view)
+        let centre = try XCTUnwrap(scale.unitPoint(canvasPoint: CGPoint(x: inOverlay.x, y: scroll.overlay.bounds.height - inOverlay.y)))
         XCTAssertEqual(centre.x, 0.25, accuracy: 0.01)
         XCTAssertEqual(centre.y, 0.75, accuracy: 0.01)
-        XCTAssertNil(scale.unitPoint(canvasPoint: CGPoint(x: -10, y: height / 2)), "Over the panel")
-        let outside = scroll.convert(view.bounds.origin, from: view)
-        XCTAssertNil(scale.unitPoint(canvasPoint: CGPoint(x: outside.x + 500, y: height - outside.y)), "On the empty canvas beside the photograph")
+        XCTAssertNil(scale.unitPoint(canvasPoint: CGPoint(x: -10, y: scroll.overlay.bounds.height / 2)), "Over the panel")
+        XCTAssertNil(scale.unitPoint(canvasPoint: CGPoint(x: inOverlay.x + 500, y: scroll.overlay.bounds.height - inOverlay.y)), "On the empty canvas beside the photograph")
     }
 
     /// The unit point reads the photograph as shown: near the top of a
