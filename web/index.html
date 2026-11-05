@@ -159,6 +159,18 @@
   .stock-tile.stale .stock-thumb { opacity: .55; }
   .stock-tile.selected .stock-thumb { outline: 2px solid var(--accent); outline-offset: -2px; }
   .stock-tile.selected { color: var(--fg); }
+  /* The star over a tile's corner (macOS StockTileView): on a favourite, or
+     while the pointer is over the tile; always there without a pointer. */
+  .stock-cell { position: relative; min-width: 0; display: grid; }
+  .stock-favorites[hidden] { display: none; }
+  .stock-favorites { margin-top: 8px; }
+  .stock-star { position: absolute; top: 0; right: 0; width: 26px; height: 26px; padding: 0; border: 0; background: none; cursor: pointer;
+    color: #fff; visibility: hidden; filter: drop-shadow(0 0 1.5px rgb(0 0 0 / .8)); }
+  .stock-star::before { content: "☆"; font-size: 14px; line-height: 26px; }
+  .stock-cell:hover .stock-star, .stock-star:focus-visible, .stock-cell.favorite .stock-star { visibility: visible; }
+  .stock-cell.favorite .stock-star { color: #f5c518; }
+  .stock-cell.favorite .stock-star::before { content: "★"; }
+  @media (hover: none) { .stock-star { visibility: visible; opacity: .75; } .stock-cell.favorite .stock-star { opacity: 1; } }
   select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
   select:disabled { color: var(--faint); }
   fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }

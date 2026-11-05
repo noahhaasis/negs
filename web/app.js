@@ -813,6 +813,27 @@ function paperGroups() {
     (s) => s.bw ? "Black & White" : isMotionPicturePrint(s) ? "Motion Picture Print" : "Color Paper");
 }
 
+// Starred stocks, in the order starred (macOS Previews.favoriteFilms): first
+// in the grids and the menus, each staying in its group too. The menus'
+// copies have their own values, so the closed menu shows the group's entry.
+const FAVORITE = "favorite:";
+const favoritesKey = (which) => (which === "film" ? "favoriteFilms" : "favoritePapers");
+// Until a viewer changes them, the films start with these starred; what
+// they unstar stays unstarred (an empty list is remembered too).
+const DEFAULT_FAVORITES = { film: ["kodak_gold_200", "kodak_portra_400", "kodak_ektar_100", "fujifilm_c200"], paper: [] };
+const favorites = (which) => remembered(favoritesKey(which), DEFAULT_FAVORITES[which]);
+const stockValue = (value) => (value.startsWith(FAVORITE) ? value.slice(FAVORITE.length) : value);
+function fillFavorites(which) {
+  const select = $(which);
+  select.querySelector("optgroup.favorites")?.remove();
+  const ids = favorites(which).filter((id) => stock(id)?.paper === (which === "paper"));
+  if (!ids.length) return;
+  const og = Object.assign(document.createElement("optgroup"), { label: "Favorites", className: "favorites" });
+  for (const id of ids) og.append(new Option(`★ ${stock(id).name}`, FAVORITE + id));
+  select.prepend(og);
+  select.value = which === "film" ? state.film : state.paper;
+}
+
 function fillStocks() {
   const fill = (select, groups) => {
     for (const g of groups) {
@@ -823,6 +844,8 @@ function fillStocks() {
   };
   fill($("film"), filmGroups());
   fill($("paper"), paperGroups());
+  fillFavorites("film");
+  fillFavorites("paper");
   labelInfo($("film").closest("label"), Help.FILM);
   labelInfo($("paper-row"), Help.PAPER);
   labelInfo($("film-time-row"), Help.PATHS["film_render.development_time"]);
@@ -1812,7 +1835,8 @@ let folds = null;
 function buildPreviews() {
   const opened = remembered("stockFolds", {});
   const fold = (which, title, groups, choose) => {
-    const f = Stocks.foldout(title, groups, (id) => { choose(id); sync(); schedule("settled"); }, refreshPreviews, !!opened[which]);
+    const f = Stocks.foldout(title, groups, (id) => { choose(id); sync(); schedule("settled"); }, refreshPreviews, !!opened[which],
+      favorites(which), (ids) => { remember(favoritesKey(which), ids); fillFavorites(which); });
     f.root.addEventListener("toggle", () => remember("stockFolds", { ...remembered("stockFolds", {}), [which]: f.root.open }));
     return f;
   };
@@ -2828,8 +2852,8 @@ globalThis.negs = {
 };
 
 syncs.push(fetchBorderTexture);
-$("film").addEventListener("change", () => { chooseFilm($("film").value); sync(); schedule("settled"); });
-$("paper").addEventListener("change", () => { choosePaper($("paper").value); sync(); schedule("settled"); });
+$("film").addEventListener("change", () => { chooseFilm(stockValue($("film").value)); sync(); schedule("settled"); });
+$("paper").addEventListener("change", () => { choosePaper(stockValue($("paper").value)); sync(); schedule("settled"); });
 $("reset").addEventListener("click", () => { resetAdjustments(); forgetRevealed(); schedule("settled"); });
 $("scan-film").addEventListener("change", () => { set("io.scan_film", $("scan-film").checked); sync(); schedule("settled"); });
 $("engine").addEventListener("change", async () => {
