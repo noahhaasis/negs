@@ -35,8 +35,8 @@ enum FilmRollLayout {
         return max(0, Int((viewport / frameHeight).rounded(.up)) - photos)
     }
 
-    /// The open photograph is at full brightness; the rest dim to under half, over black.
-    static func photographOpacity(selected: Bool) -> Double { selected ? 1 : 0.45 }
+    /// The open photograph is at full brightness; the rest dim well down, over black.
+    static func photographOpacity(selected: Bool) -> Double { selected ? 1 : 0.3 }
 
     /// Still films print a frame number, and the artwork's is always the same
     /// one. Cine and print films have other text in those places.
@@ -63,19 +63,24 @@ struct FilmFrame: View {
         let width = FilmRollLayout.stripWidth
         let height = FilmRollLayout.frameHeight(stripWidth: width, texture: texture)
         let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: CGSize(width: width, height: height))
-        Button(action: open) {
-            ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topLeading) {
+            // Solid film, so nothing behind the roll shows round the gate.
+            FilmRollLayout.filmBase
+            // Only the photograph opens the frame, and only on a click.
+            Button(action: open) {
                 photograph(in: gate)
-                FilmArtwork(number: number, strip: strip, film: film)
+                    .contentShape(Rectangle())
             }
-            .frame(width: width, height: height, alignment: .topLeading)
-            .clipped()
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .frame(width: gate.width, height: gate.height)
+            .offset(x: gate.minX, y: gate.minY)
+            .accessibilityLabel(file.name)
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+            FilmArtwork(number: number, strip: strip, film: film)
+                .allowsHitTesting(false)
         }
-        .buttonStyle(.plain)
-        .help(file.name)
-        .accessibilityLabel(file.name)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .frame(width: width, height: height, alignment: .topLeading)
+        .clipped()
         .onAppear { visible = true }
         .onDisappear { visible = false; image = nil }
         .task(id: visible ? file : nil) {
@@ -105,7 +110,6 @@ struct FilmFrame: View {
         }
         .frame(width: gate.width, height: gate.height)
         .clipped()
-        .offset(x: gate.minX, y: gate.minY)
     }
 }
 
@@ -120,6 +124,7 @@ struct BlankFilmFrame: View {
         let height = FilmRollLayout.frameHeight(stripWidth: width, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
         let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: CGSize(width: width, height: height))
         ZStack(alignment: .topLeading) {
+            FilmRollLayout.filmBase
             Color.black
                 .frame(width: gate.width, height: gate.height)
                 .offset(x: gate.minX, y: gate.minY)

@@ -505,6 +505,50 @@ extension ZoneModelTests {
         }
     }
 
+    /// Real clicks on the roll: the film around a frame does nothing, the
+    /// photograph opens it. Pointing at a frame opens nothing.
+    func testOnlyAFramesPhotographOpensIt() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        model.filmstripVisible = true
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        controller.showWindow(nil)
+        defer { window.orderOut(nil) }
+        window.setFrame(NSRect(x: 80, y: 80, width: 1300, height: 800), display: true)
+        try await waitUntil { model.previewCurrent }
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(model.source, ramp)
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        let scrolls = all(try XCTUnwrap(window.contentView)).compactMap { $0 as? NSScrollView }
+        let roll = try XCTUnwrap(scrolls.first { abs($0.bounds.width - FilmRollLayout.columnWidth) < 1 })
+        let document = try XCTUnwrap(roll.documentView)
+        // The first frame, other.png, sorts before ramp.png, at the top of the film.
+        let frameHeight = FilmRollLayout.frameHeight(stripWidth: FilmRollLayout.stripWidth, texture: FilmRollLayout.defaultTexture)
+        let top = document.convert(document.bounds, to: nil).maxY
+        func send(_ type: NSEvent.EventType, _ location: CGPoint) throws {
+            window.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1)))
+        }
+        func click(_ location: CGPoint) async throws {
+            try send(.leftMouseDown, location)
+            try send(.leftMouseUp, location)
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        let middle = top - frameHeight / 2
+        try await click(CGPoint(x: 8, y: middle))
+        XCTAssertEqual(model.source, ramp, "The sprockets don't open it")
+        try await click(CGPoint(x: FilmRollLayout.stripWidth - 8, y: middle))
+        XCTAssertEqual(model.source, ramp, "Nor the far edge")
+        try send(.mouseMoved, CGPoint(x: FilmRollLayout.stripWidth / 2, y: middle))
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(model.source, ramp, "Pointing at it doesn't")
+        try await click(CGPoint(x: FilmRollLayout.stripWidth / 2, y: middle))
+        XCTAssertEqual(model.source, other, "The photograph does")
+    }
+
     /// Pins from before zones held their own tone: each takes the zone its
     /// target falls in.
     func testSavedHoldingPinsTakeTheZoneTheirTargetFallsIn() async throws {

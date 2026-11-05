@@ -10,7 +10,7 @@ final class FilmRollTests: XCTestCase {
     /// The open photograph stands out by being brighter, not by a mark.
     func testOnlyTheOtherFramesAreDimmed() {
         XCTAssertEqual(FilmRollLayout.photographOpacity(selected: true), 1)
-        XCTAssertEqual(FilmRollLayout.photographOpacity(selected: false), 0.45)
+        XCTAssertEqual(FilmRollLayout.photographOpacity(selected: false), 0.3)
     }
 
     /// The column is the film, with no margin around it.
@@ -82,5 +82,40 @@ final class FilmRollTests: XCTestCase {
         let colour = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))
         XCTAssertEqual(colour.alphaComponent, 1, accuracy: 0.01)
         XCTAssertEqual(colour.redComponent, 0, accuracy: 0.01)
+    }
+
+    /// Nothing behind the roll shows through a frame: on Proof's white, the edge
+    /// of the gate stays dark all the way round, with the artwork loaded.
+    @MainActor func testNoLightShowsAroundTheGate() throws {
+        _ = NSApplication.shared
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let strip = try XCTUnwrap(FilmStrip.load(data: root.appendingPathComponent("data"), film: "kodak_portra_400", format: .full, maxPixelSize: 400))
+        let file = PhotoFile(url: URL(fileURLWithPath: "/nonexistent/frame.png"))
+        let frame = FilmFrame(file: file, number: 1, selected: false, strip: strip, film: "kodak_portra_400") {}
+        let host = NSHostingView(rootView: frame.background(Color.white))
+        let size = CGSize(width: 150, height: FilmRollLayout.frameHeight(stripWidth: 150, texture: strip.pixelSize))
+        host.frame = NSRect(origin: .zero, size: size)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let scale = CGFloat(bitmap.pixelsWide) / size.width
+        func brightness(_ x: CGFloat, _ y: CGFloat) throws -> CGFloat {
+            try XCTUnwrap(bitmap.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB)).redComponent
+        }
+        let gate = FilmRollLayout.gate(window: strip.window, frame: size)
+        // Rings just inside, on and just outside each edge of the gate.
+        for offset: CGFloat in [-1, -0.5, 0, 0.5, 1] {
+            for step in stride(from: gate.minY + 8, to: gate.maxY - 8, by: 8) {
+                XCTAssertLessThan(try brightness(gate.minX + offset, step), 0.25, "left \(offset), \(step)")
+                XCTAssertLessThan(try brightness(gate.maxX + offset, step), 0.25, "right \(offset), \(step)")
+            }
+            for step in stride(from: gate.minX + 8, to: gate.maxX - 8, by: 8) {
+                XCTAssertLessThan(try brightness(step, gate.minY + offset), 0.25, "top \(offset), \(step)")
+                XCTAssertLessThan(try brightness(step, gate.maxY + offset), 0.25, "bottom \(offset), \(step)")
+            }
+        }
+        // The gate's rounded corners too.
+        XCTAssertLessThan(try brightness(gate.minX + 0.5, gate.minY + 0.5), 0.25)
+        XCTAssertLessThan(try brightness(gate.maxX - 0.5, gate.maxY - 0.5), 0.25)
     }
 }

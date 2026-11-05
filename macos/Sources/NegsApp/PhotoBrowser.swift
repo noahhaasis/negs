@@ -124,7 +124,7 @@ struct PhotoBrowser: View {
         }
         .frame(width: FilmRollLayout.columnWidth)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
-        .background(ViewerColour(model: model))
+        .background(FilmRollLayout.filmBase)
         .overlay {
             Group {
                 if loading { ProgressView().controlSize(.small) }
