@@ -169,14 +169,18 @@ struct EditorCanvas: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CanvasArea(model: model)
-                .dropDestination(for: URL.self) { urls, _ in
-                    guard let url = urls.first, url.isFileURL else { return false }
-                    model.open(url); return true
-                } isTargeted: { dropTargeted = $0 }
-                .overlay {
-                    if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
-                }
+            HStack(spacing: 0) {
+                if model.showsZonePanel { ZonePanel(model: model) }
+                CanvasArea(model: model)
+                    .dropDestination(for: URL.self) { urls, _ in
+                        guard let url = urls.first, url.isFileURL else { return false }
+                        model.open(url); return true
+                    } isTargeted: { dropTargeted = $0 }
+                    .overlay {
+                        if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
+                    }
+            }
+            .coordinateSpace(name: ZonePanel.coordinateSpace)
             if model.filmstripVisible, let source = model.source {
                 Divider()
                 PhotoBrowser(model: model, directory: source.deletingLastPathComponent())

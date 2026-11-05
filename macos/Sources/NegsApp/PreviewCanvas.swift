@@ -142,6 +142,8 @@ final class ImageScrollView: NSScrollView {
     /// Lines follow every pan and zoom, which all move the clip view's bounds.
     override func tile() {
         super.tile()
+        // The clip view and scrollers arrive after the overlay does.
+        if subviews.last !== overlay { addSubview(overlay, positioned: .above, relativeTo: nil) }
         overlay.frame = bounds
         guard observedClip !== contentView else { return }
         if let observedClip { NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: observedClip) }

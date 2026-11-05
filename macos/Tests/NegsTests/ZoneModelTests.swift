@@ -291,6 +291,34 @@ extension ZoneModelTests {
         XCTAssertEqual(model.pinsToShow.count, 1)
     }
 
+    func testThePanelIsHiddenWhileCropping() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        XCTAssertTrue(model.showsZonePanel)
+        XCTAssertTrue(model.canPlaceZones)
+        model.beginCrop()
+        XCTAssertFalse(model.showsZonePanel)
+        XCTAssertFalse(model.canPlaceZones)
+    }
+
+    /// The toolbar's Zones button, in the group with zoom and crop, toggles it.
+    func testTheToolbarButtonTogglesThePanel() async throws {
+        let model = try await makeModel()
+        let saved = UserDefaults.standard.object(forKey: "showZonePanel")
+        defer {
+            model.shutdown()
+            UserDefaults.standard.set(saved, forKey: "showZonePanel")
+        }
+        let controller = EditorWindowController(model: model)
+        let toolbar = try XCTUnwrap(controller.window?.toolbar)
+        let groups = toolbar.items.compactMap { $0 as? NSToolbarItemGroup }
+        let group = try XCTUnwrap(groups.first { $0.subitems.contains { $0.label == "Crop" } })
+        let button = try XCTUnwrap(group.subitems.first { $0.label == "Zones" })
+        let before = model.zonePanelVisible
+        _ = (button.target as AnyObject).perform(button.action)
+        XCTAssertNotEqual(model.zonePanelVisible, before)
+    }
+
     /// Pins from before zones held their own tone: each takes the zone its
     /// target falls in.
     func testSavedHoldingPinsTakeTheZoneTheirTargetFallsIn() async throws {

@@ -133,6 +133,28 @@ extension CanvasGestureTests {
         scroll.overlay.convert(viewPoint(unit, in: view), from: view)
     }
 
+    /// Set up as the app does: the clip view, scrollers and document all arrive
+    /// after the overlay, which must still end up on top and tracking the clip.
+    func testTheOverlayStaysOnTopOfTheAppsScrollViewSetup() throws {
+        _ = NSApplication.shared
+        let scroll = ImageScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        scroll.contentView = CenteringClipView()
+        scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true; scroll.scrollerStyle = .overlay
+        scroll.allowsMagnification = true
+        let view = PhotographView(frame: CGRect(origin: .zero, size: size))
+        scroll.documentView = view
+        scroll.tile()
+        view.show(NSImage(size: size), size: size, rotation: 0)
+        view.layout()
+        XCTAssertTrue(scroll.subviews.last === scroll.overlay, "\(scroll.subviews)")
+        XCTAssertEqual(scroll.overlay.frame, scroll.bounds)
+        scroll.showPins([marker()], dragged: nil)
+        let before = try XCTUnwrap(scroll.overlay.links[0]).to
+        scroll.contentView.scroll(to: CGPoint(x: 40, y: 20))
+        XCTAssertEqual(try XCTUnwrap(scroll.overlay.links[0]).to.x, before.x - 40, accuracy: 0.5, "It follows the app's own clip view")
+    }
+
     func testAChipIs24PointsAtAnyZoomRotationAndBorder() throws {
         for (rotation, frame) in [(0, nil), (1, nil), (0, CGSize(width: 800, height: 600))] as [(Int, CGSize?)] {
             let (scroll, view) = makeCanvas(rotation: rotation, frame: frame)

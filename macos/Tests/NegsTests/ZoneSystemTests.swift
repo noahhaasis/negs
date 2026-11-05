@@ -42,6 +42,11 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertEqual(ZoneScale.zone(forTarget: 100), 8)
     }
 
+    func testTileLabelsNameTheZoneAndWhetherItIsPlaced() {
+        XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[5], placed: true), "Zone V, Middle grey, placed")
+        XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[0], placed: false), "Zone 0, Pure black, not placed")
+    }
+
     func testGreysRiseFromBlackToPaperWhite() throws {
         let levels = try ZoneScale.zones.map { zone -> CGFloat in
             try XCTUnwrap(ZoneScale.grey(zone.index).usingColorSpace(.sRGB)).redComponent

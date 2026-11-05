@@ -220,71 +220,55 @@ JPEG inputs now use the same shared loader for CLI export as for preview.
 
 ## The zone system
 
-The graph over the inspector is the print's zone scale. Its x axis is CIE
-L\* 0–100, and the print's nine zones (0 and I to VIII) are drawn as
-alternating bands with Roman numerals; the R, G and B fills and the
-photograph's own L\* line are drawn over them. There are no rulers, ticks or
-channel markers: **each band is a button**. Hovering a band names it and its
-share of the photograph's tones (`Zone V  Middle grey  9.4%`), and clicking
-one holds that reading, or aims the selected pin there. Bins 0–4 and 251–255
-never set the graph's vertical scale, so clipped ends run off the top.
+The **Zones** button in the toolbar's view group (⌥⌘Z) shows and hides the zone
+panel, a column on the photograph's left edge with one tile per zone: 0 at the
+bottom, then I to VIII. Zones 0–VII are one stop apart from 18 % grey and VIII is
+paper white. A reflection print can't hold a stop above that, so Adams' zones IX
+and X have no place here.
 
-Zones 0–VII are one stop apart from 18 % grey; zone VIII is **paper white**.
-A reflection print can't hold a stop above that, so Adams' zones IX (paper
-white without texture) and X (the specular light source) have no place on
-this axis. Because the ends are the print's limits, the first and last bands
-are the **black and white points**: a pin aimed at zone 0 prints at L\* 0, one
-aimed at VIII at L\* 100, and the bands in between aim at their middles.
+To place a pin, drag a tile onto the photograph and let go. The averaged tone
+under the pin then prints as that zone: the middle of the zone in L\*, except 0,
+which is L\* 0, and VIII, which is L\* 100. Dragging zone 0 onto something that is
+really zone III raises the black point. Each further pin recalculates the curve.
+A zone has one pin, so dragging a placed tile moves its pin. A drop during a
+render waits for it and then measures.
 
-Every bar is an L\* bin, so the bars and the bands share an axis: bin `i`
-sits at L\* `i / 255 × 100`. The channels are their own values read as tones
-(a saturated red's red channel is bright, its blue channel dark), and the
-lightness line is the pixel's luminance, which is what the zones mean.
+On the canvas:
 
-A **pin** is a tone measured on the photograph and held on the curve. On the
-canvas:
+- a placed pin is selected. With a pin selected, the scroll wheel sizes its
+  circle, and the tone is measured again when the wheel stops. A new pin starts
+  at the size last used.
+- click a pin's chip to select it, click empty photograph to deselect, and drag
+  a chip to measure another spot. ⌫ deletes the selected pin and Esc deselects.
+- with nothing selected, plain drag and scroll pan, including inside a pin's
+  circle. Double-click fits or shows 1:1. Crop mode has its own gestures.
 
-- holding ⌘ shows the circle a pin would average, at the pointer. ⌘-scroll
-  sizes it, down to the one pixel under the pointer, and the size carries to the
-  next pin. Its radius is a fraction of the photograph's shorter side, so it
-  covers the same area at any zoom.
-- ⌘-click pins the average inside the circle.
-- a pin is a numbered chip over the spot it averaged, 18 points across at any
-  zoom and upright on a turned photograph, filled with its tone's own grey,
-  with a thin ring around the area it averaged.
-- click a chip to select the pin, then click a zone band to aim it there.
-  Drag a chip to measure the tone somewhere else. ⌫ deletes the selected pin,
-  Esc drops the selection, and ⌘' hides every pin.
-- a plain drag pans, including inside a pin's ring; double-click fits or shows
-  1:1; two-finger scroll and pinch are unchanged; crop mode has its own
-  gestures.
+Placing, moving, resizing and deleting are each one undo step.
 
-A pin starts by **holding** its tone: its target is its own L\*, so the
-photograph doesn't change. Aiming it at a zone gives it that zone's tone
-instead. A zone holds one pin: a new measurement in an occupied zone replaces
-that zone's pin, and aiming a pin at an occupied zone selects the pin already
-there. Adding, moving, aiming and deleting are each one undo step.
+Pins and their lines are drawn by `PinOverlayView`, a subview of the canvas's
+scroll view above the document. The photograph's zoom, rotation and crop don't
+touch it, so a chip is the same size and upright everywhere. It redraws on every
+change of the clip view's bounds. A pin whose spot is outside the crop is hidden.
 
-`post.tone_anchors` lives in Post, the finishing stage, which already
-tabulates its tone curve once into a 4096-entry LUT on √Y, applied on the CPU
-at save and by the same table in the GPU display pass, so the preview and the
-file agree without a shader change. The pins bend what the Post knobs
-(brightness, contrast, whites, blacks) produced, so a holding pin leaves a Post
-edit as it was. The curve is piecewise linear in L\*: the pins, and an end point
-for each end. **Only the target matters, never the order**: the black point is
-the brightest pin aimed at black and the white point the darkest aimed at
-white, and tones outside the ends clamp. Two pins aimed at the same target
-collapse to one, the lowest input winning, so the curve always rises.
+`post.tone_anchors` lives in Post, the finishing stage, which already tabulates
+its tone curve once into a 4096-entry LUT on √Y, applied on the CPU at save and by
+the same table in the GPU display pass, so the preview and the file agree without
+a shader change. The pins bend what the Post knobs produced. The curve is
+piecewise linear in L\*: the pins, and an end point for each end, and it must keep
+rising. A pin it can't honour, such as zone VI on something darker than zone V's
+spot, has no effect and is never removed: `AnchorCurve` is the one rule for this,
+the helper reports those pins as `ignored_pins` with each render, and their lines
+turn red.
 
 A pin's input comes from the helper's `sample_tone` (`render_id`, `x`, `y`,
 `radius`), which reads the retained render through the knobs alone, not the
-preview: the preview already shows the other pins' curve, so measuring it would
-put every pin after the first in the wrong place.
+preview: the preview already shows the other pins' curve.
 
-Because Post runs on the clipped scan, a pin shapes the tones the film
-produced but cannot recover a highlight that clipped; the exposure controls do
-that. A preset keeps the photograph's pins, a session restores them, and
-opening another file starts with none.
+Because Post runs on the clipped scan, a pin shapes the tones the film produced
+but cannot recover a highlight that clipped; the exposure controls do that. Hiding
+the panel hides the pins but keeps their effect. A preset neither carries nor
+replaces a photograph's pins, a session restores them, and opening another file
+starts with none.
 
 ## Build and run
 
@@ -325,14 +309,12 @@ while a render is in flight, undo/redo including one step per slider drag,
 slider snapping, canvas rotation, cancellation preserving an existing output,
 cleanup of files and exporters left by a crashed launch, and the export engine
 choice (tool lookup, binary and backend, CPU-fallback detection). The zone
-tests pin the ladder and zone bands, the L\* bins and the share of tones
-inside each band, the gesture map (⌘ pins, a drag pans, a click on a pin
-selects it) and the circle sampler, and, through the release helper, that a
-pin holds its tone with and without a Post edit, that a later pin reads the
-tone before the earlier pin's curve, that aiming lands on the zone's tone with
-print compensation on and off, one pin per zone, and one undo step per action.
-The engine's own tests cover the curve (order-independent end points, one pin
-per target, a rising map) and the measurement.
+tests pin the ladder, the gesture map, the overlay's chips and links through zoom,
+rotation, pan and crop, and, through the release helper, that a dropped zone prints
+at its tone with print compensation on and off, that later pins read the tones
+before the curve, that a drop during a render lands, that a crossed pin is marked and
+recovers, and one undo step per action. The engine's own tests cover the curve
+(order-independent end points, reported pins, a rising map) and the measurement.
 `testRealExportsFromJobList` runs real exports through `ExportJob` when
 `SPEKTRAFILM_EXPORT_JOBS` names a JSON job list (source, destination, params,
 film, paper, engine), for end-to-end engine comparisons.

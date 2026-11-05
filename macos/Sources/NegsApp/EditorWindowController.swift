@@ -168,6 +168,13 @@ import SwiftUI
             item.image = model.filmstripVisible
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
         }
+        if let item = items[.zones] {
+            item.toolTip = model.zonePanelVisible ? "Hide the zones (⌥⌘Z)" : "Show the zones (⌥⌘Z)"
+            let icon = symbol("circle.lefthalf.filled", "Zones")
+            item.image = model.zonePanelVisible
+                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+        }
+        setEnabled(.zones, photo && !model.cropping)
         setEnabled(.fit, photo && !model.cropping)
         setEnabled(.actualSize, photo && !model.cropping)
         setEnabled(.rotate, photo)
@@ -234,6 +241,7 @@ import SwiftUI
             let group = NSToolbarItemGroup(itemIdentifier: id)
             group.subitems = [button(.open, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph)),
                               button(.filmstrip, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip)),
+                              button(.zones, "Zones", "circle.lefthalf.filled", "Show or hide the zones (⌥⌘Z)", #selector(toggleZones)),
                               button(.fit, "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
                               button(.actualSize, "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize)),
                               button(.rotate, "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),
@@ -303,13 +311,14 @@ import SwiftUI
     @objc private func applyCrop() { model.endCrop(apply: true) }
     @objc private func export() { model.savePanel(export: true) }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
+    @objc private func toggleZones() { model.zonePanelVisible.toggle() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
     @objc private func togglePresets() { model.togglePane(.presets) }
 }
 
 private extension NSToolbarItem.Identifier {
     static let controls = Self("controls"), actions = Self("actions")
-    static let filmstrip = Self("filmstrip"), open = Self("open")
+    static let filmstrip = Self("filmstrip"), open = Self("open"), zones = Self("zones")
     static let fit = Self("fit"), actualSize = Self("actualSize"), rotate = Self("rotate"), crop = Self("crop")
     static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
 }
