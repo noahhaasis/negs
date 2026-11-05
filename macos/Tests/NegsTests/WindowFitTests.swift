@@ -151,6 +151,36 @@ final class WindowFitTests: XCTestCase {
         XCTAssertEqual(ExportPixels.size(photograph: photo, rotated: false, withBorder: nil, fit: ExportSize(edge: .long, pixels: 9000)), photo)
     }
 
+    /// Locked, the mat replaces the border, so only the photograph sets the size.
+    func testThePhotographsOwnPixelsLeaveOutTheBorder() {
+        let photo = CGSize(width: 4096, height: 2731)
+        let framed: (CGSize) -> CGSize = { CGSize(width: $0.width + 818, height: $0.height + 818) }
+        XCTAssertEqual(ExportPixels.photograph(photo, rotated: false, withBorder: framed, fit: .full), photo)
+        XCTAssertEqual(ExportPixels.photograph(photo, rotated: true, withBorder: framed, fit: .full), CGSize(width: 2731, height: 4096))
+    }
+
+    /// An export limit fits the framed file, so the photograph inside it is smaller.
+    func testAnExportLimitScalesThePhotographInsideTheFrame() {
+        let size = ExportPixels.photograph(CGSize(width: 800, height: 400), rotated: false, withBorder: { CGSize(width: $0.width + 200, height: $0.height + 200) }, fit: ExportSize(edge: .long, pixels: 500))
+        XCTAssertEqual(size, CGSize(width: 400, height: 200))
+    }
+
+    func testTheCanvasDropsTheBorderWhileLocked() {
+        let model = EditorModel()
+        let saved = UserDefaults.standard.object(forKey: "lockWindowToPhotograph")
+        defer {
+            model.shutdown()
+            UserDefaults.standard.set(saved, forKey: "lockWindowToPhotograph")
+        }
+        model.border(\.enabled).wrappedValue = true
+        let photo = CGSize(width: 800, height: 600)
+        model.windowLockedToPhotograph = false
+        XCTAssertNotNil(model.canvasBorder(for: photo))
+        model.windowLockedToPhotograph = true
+        XCTAssertNil(model.canvasBorder(for: photo))
+        XCTAssertTrue(model.border.enabled, "The setting stays for when it's unlocked")
+    }
+
     func testTheBorderCantBeEditedWhileLocked() {
         let model = EditorModel()
         let saved = UserDefaults.standard.object(forKey: "lockWindowToPhotograph")

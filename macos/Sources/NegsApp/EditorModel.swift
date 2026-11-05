@@ -672,15 +672,21 @@ import UniformTypeIdentifiers
         didSet { UserDefaults.standard.set(windowLockedToPhotograph, forKey: "lockWindowToPhotograph") }
     }
     var canZoom: Bool { source != nil && !cropping && !windowLockedToPhotograph }
-    /// The border's controls: locked to the export size, its frame is settled.
+    /// The border to draw around a photograph on the canvas. Locked to the export
+    /// size, the mat replaces it.
+    func canvasBorder(for size: CGSize) -> BorderSettings? { windowLockedToPhotograph ? nil : border.shown(for: size) }
+
+    /// The border's controls: locked to the export size, the mat replaces it.
     var canEditBorder: Bool { !windowLockedToPhotograph }
 
-    /// The pixels an export would write, including the border on the canvas.
+    /// The photograph's pixels in an export, which the locked canvas shows. The
+    /// mat stands in for the border there, so the border isn't counted, though
+    /// an export limit that fits the framed file still scales the photograph.
     var exportPixels: CGSize {
         let rotated = imageRotation % 2 != 0
         let turned = rotated ? CGSize(width: photographSize.height, height: photographSize.width) : photographSize
-        let frame = border.shown(for: turned)
-        return ExportPixels.size(photograph: photographSize, rotated: rotated, withBorder: frame.map { frame in
+        let frame = border.exported(for: turned)
+        return ExportPixels.photograph(photographSize, rotated: rotated, withBorder: frame.map { frame in
             { size in
                 let canvas = frame.canvas(for: size, strip: self.filmStrip)
                 return frame.instagram ? frame.instagramCanvas(for: canvas) : canvas
