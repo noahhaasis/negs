@@ -35,6 +35,9 @@ enum FilmRollLayout {
         return max(0, Int((viewport / frameHeight).rounded(.up)) - photos)
     }
 
+    /// The open photograph is at full brightness; the rest dim a little, over black.
+    static func photographOpacity(selected: Bool) -> Double { selected ? 1 : 0.72 }
+
     /// Still films print a frame number, and the artwork's is always the same
     /// one. Cine and print films have other text in those places.
     static func printsFrameNumbers(film: String) -> Bool {
@@ -64,13 +67,6 @@ struct FilmFrame: View {
             ZStack(alignment: .topLeading) {
                 photograph(in: gate)
                 FilmArtwork(number: number, strip: strip, film: film)
-                if selected {
-                    // A grease pencil's mark, as on a contact sheet.
-                    RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(Color(red: 0.88, green: 0.14, blue: 0.1), lineWidth: 2.5)
-                        .frame(width: gate.width + 6, height: gate.height + 6)
-                        .offset(x: gate.minX - 3, y: gate.minY - 3)
-                }
             }
             .frame(width: width, height: height, alignment: .topLeading)
             .clipped()
@@ -104,6 +100,7 @@ struct FilmFrame: View {
                     .frame(width: sideways ? gate.height : gate.width, height: sideways ? gate.width : gate.height)
                     .clipped()
                     .rotationEffect(.degrees(sideways ? 90 : 0))
+                    .opacity(FilmRollLayout.photographOpacity(selected: selected))
             }
         }
         .frame(width: gate.width, height: gate.height)

@@ -7,6 +7,13 @@ final class FilmRollTests: XCTestCase {
     private let texture = CGSize(width: 3800, height: 3500)
     private let window = CGRect(x: 0.026316, y: 0.157143, width: 0.947368, height: 0.685714)
 
+    /// The open photograph stands out by being brighter, not by a mark.
+    func testOnlyTheOtherFramesAreDimmed() {
+        XCTAssertEqual(FilmRollLayout.photographOpacity(selected: true), 1)
+        XCTAssertLessThan(FilmRollLayout.photographOpacity(selected: false), 1)
+        XCTAssertGreaterThan(FilmRollLayout.photographOpacity(selected: false), 0.5, "Only slightly")
+    }
+
     /// The column is the film, with no margin around it.
     func testTheColumnIsJustTheFilm() {
         XCTAssertEqual(FilmRollLayout.columnWidth, FilmRollLayout.stripWidth)
