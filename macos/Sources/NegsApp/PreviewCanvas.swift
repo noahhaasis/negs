@@ -118,11 +118,14 @@ struct PreviewCanvas: NSViewRepresentable {
 }
 
 final class CenteringClipView: NSClipView {
+    /// How far above centre the document sits, in its own units.
+    var raise: CGFloat = 0
+
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var bounds = super.constrainBoundsRect(proposedBounds)
         guard let documentView else { return bounds }
         if bounds.width > documentView.frame.width { bounds.origin.x = (documentView.frame.width - bounds.width) / 2 }
-        if bounds.height > documentView.frame.height { bounds.origin.y = (documentView.frame.height - bounds.height) / 2 }
+        if bounds.height > documentView.frame.height { bounds.origin.y = (documentView.frame.height - bounds.height) / 2 - raise }
         return bounds
     }
 }
@@ -196,11 +199,18 @@ final class ImageScrollView: NSScrollView {
         // 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
         // photograph, but never enlarges it past 1:1.
         let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
-        // Locked to the export size, a white mat runs around it.
-        let mat = locksToFit ? WindowFit.padding * 2 : 0
-        let fit = min(max(contentSize.width - mat, 1) / size.width, max(contentSize.height - mat, 1) / size.height)
+        // Locked to the export size, the photograph and its mat fill the canvas.
+        let mat = WindowFit.mat(forLongEdge: max(size.width, size.height))
+        let framed = locksToFit
+            ? CGSize(width: size.width + mat.side * 2, height: size.height + mat.top + mat.bottom)
+            : size
+        let fit = min(contentSize.width / framed.width, contentSize.height / framed.height)
         let amount = locksToFit ? fit : fitting ? min(fit, oneToOne) : oneToOne
+        (contentView as? CenteringClipView)?.raise = locksToFit ? (mat.bottom - mat.top) / 2 : 0
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
+        // Magnifying centres; constraining again applies the raise.
+        contentView.scroll(to: contentView.bounds.origin)
+        reflectScrolledClipView(contentView)
     }
     /// Whether the photograph is larger than the viewport, so panning has
     /// somewhere to go.

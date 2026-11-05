@@ -6,17 +6,24 @@ import CoreGraphics
 enum WindowFit {
     /// A smaller export still gets a usable canvas, on its shorter side.
     static let minimumCanvas: CGFloat = 240
-    /// The white mat around the export, on each side.
-    static let padding: CGFloat = 32
+
+    /// The white mat around the export: a framer's proportions, smaller because
+    /// it's on a screen. 8 % of the long edge, with the bottom 1.2 × that so the
+    /// photograph sits at the optical centre rather than seeming to sink.
+    static func mat(forLongEdge long: CGFloat) -> (side: CGFloat, top: CGFloat, bottom: CGFloat) {
+        let width = long * 0.08
+        return (width, width, width * 1.2)
+    }
 
     /// The export at its size, scaled down in the same shape to stay on `limit`.
     static func contentSize(canvas: CGSize, chrome: CGSize, limit: CGSize) -> CGSize {
         var (w, h) = (max(canvas.width, 1), max(canvas.height, 1))
         let short = min(w, h)
         if short < minimumCanvas { (w, h) = (w * minimumCanvas / short, h * minimumCanvas / short) }
-        let mat = padding * 2
-        let scale = min(1, (limit.width - chrome.width - mat) / w, (limit.height - chrome.height - mat) / h)
-        return CGSize(width: w * scale + mat + chrome.width, height: h * scale + mat + chrome.height)
+        let mat = mat(forLongEdge: max(w, h))
+        let (fullWidth, fullHeight) = (w + mat.side * 2, h + mat.top + mat.bottom)
+        let scale = min(1, (limit.width - chrome.width) / fullWidth, (limit.height - chrome.height) / fullHeight)
+        return CGSize(width: fullWidth * scale + chrome.width, height: fullHeight * scale + chrome.height)
     }
 }
 

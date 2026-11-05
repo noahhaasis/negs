@@ -377,9 +377,9 @@ extension ZoneModelTests {
         func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
         let scroll = try XCTUnwrap(all(try XCTUnwrap(window.contentView)).compactMap { $0 as? ImageScrollView }.first)
         // The 64 × 48 ramp is smaller than the usable minimum, so it scales up in shape.
-        let mat = WindowFit.padding * 2
-        XCTAssertEqual((scroll.bounds.width - mat) / (scroll.bounds.height - mat), 64.0 / 48, accuracy: 0.02, "\(scroll.bounds)")
-        XCTAssertEqual(scroll.bounds.height - mat, WindowFit.minimumCanvas, accuracy: 2, "\(scroll.bounds)")
+        // The 64 × 48 ramp is scaled up to 320 × 240, with its mat.
+        XCTAssertEqual(scroll.bounds.width, 320 + 51.2, accuracy: 2, "\(scroll.bounds)")
+        XCTAssertEqual(scroll.bounds.height, 240 + 25.6 + 30.72, accuracy: 2, "\(scroll.bounds)")
         XCTAssertTrue(scroll.locksToFit)
         XCTAssertFalse(scroll.canScroll)
         XCTAssertFalse(model.canZoom)

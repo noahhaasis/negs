@@ -8,24 +8,35 @@ final class WindowFitTests: XCTestCase {
 
     private func fit(_ canvas: CGSize) -> CGSize { WindowFit.contentSize(canvas: canvas, chrome: chrome, limit: limit) }
 
-    private let mat = WindowFit.padding * 2
+    /// The mat is 8 % of the long edge on the sides and top, 1.2 × that below.
+    func testTheMatScalesWithThePhotographAndWeightsTheBottom() {
+        let mat = WindowFit.mat(forLongEdge: 1000)
+        XCTAssertEqual(mat.side, 80, accuracy: 0.001)
+        XCTAssertEqual(mat.top, 80, accuracy: 0.001)
+        XCTAssertEqual(mat.bottom, 96, accuracy: 0.001)
+    }
 
     /// The export keeps its size, with the mat around it.
     func testAnExportThatFitsIsShownAtItsSize() {
-        XCTAssertEqual(fit(CGSize(width: 1000, height: 700)), CGSize(width: 1400 + mat, height: 900 + mat))
+        let size = fit(CGSize(width: 1000, height: 700))
+        XCTAssertEqual(size.width, 1000 + 160 + chrome.width, accuracy: 0.01)
+        XCTAssertEqual(size.height, 700 + 80 + 96 + chrome.height, accuracy: 0.01)
     }
 
-    /// Too big for the screen, it scales down in the same shape.
+    /// Too big for the screen, photograph and mat scale down together.
     func testAnExportTooBigForTheScreenKeepsItsShape() {
         let size = fit(CGSize(width: 2457, height: 1775))
+        let mat = WindowFit.mat(forLongEdge: 2457)
         XCTAssertEqual(size.height, limit.height, accuracy: 0.5)
-        XCTAssertEqual((size.width - chrome.width - mat) / (size.height - chrome.height - mat), 2457.0 / 1775, accuracy: 0.001)
+        XCTAssertEqual((size.width - chrome.width) / (size.height - chrome.height),
+                       (2457 + mat.side * 2) / (1775 + mat.top + mat.bottom), accuracy: 0.001)
     }
 
     func testASmallExportStillGetsAUsableCanvas() {
         let size = fit(CGSize(width: 32, height: 24))
-        XCTAssertEqual(size.height - chrome.height - mat, WindowFit.minimumCanvas, accuracy: 0.5)
-        XCTAssertEqual((size.width - chrome.width - mat) / (size.height - chrome.height - mat), 32.0 / 24, accuracy: 0.001)
+        // Scaled up to 320 × 240, with the mat of that size.
+        XCTAssertEqual(size.height - chrome.height, 240 + 25.6 + 30.72, accuracy: 0.01)
+        XCTAssertEqual(size.width - chrome.width, 320 + 51.2, accuracy: 0.01)
     }
 
     /// Two exports of one size give one window, so changing photographs doesn't move it.
@@ -66,14 +77,37 @@ final class WindowFitTests: XCTestCase {
     func testLockedFitFillsTheCanvasAboveOneToOne() {
         let scroll = canvas(viewport: 1000, photo: CGSize(width: 100, height: 100))
         scroll.locksToFit = true
-        // The canvas less the mat on each side.
-        let filled = (1000 - WindowFit.padding * 2) / 100
+        // Photograph and mat fill the canvas: 100 + 8 + 9.6 tall sets the scale.
+        let filled: CGFloat = 1000 / 117.6
         XCTAssertEqual(scroll.magnification, filled, accuracy: 0.01)
         scroll.zoom(by: 2)
         XCTAssertEqual(scroll.magnification, filled, accuracy: 0.01)
         scroll.toggleZoom(about: .zero)
         XCTAssertEqual(scroll.magnification, filled, accuracy: 0.01)
         XCTAssertTrue(scroll.fitting)
+    }
+
+    /// The photograph sits above centre, with 1.2 × the mat below as above it.
+    func testTheLockedPhotographSitsAboveCentre() throws {
+        let scroll = canvas(viewport: 1000, photo: CGSize(width: 100, height: 100))
+        scroll.locksToFit = true
+        let photo = try XCTUnwrap(scroll.documentView)
+        let overlay = scroll.overlay
+        let (low, high) = (overlay.convert(CGPoint.zero, from: photo).y, overlay.convert(CGPoint(x: 0, y: 100), from: photo).y)
+        let (bottom, top) = (min(low, high), overlay.bounds.height - max(low, high))
+        XCTAssertEqual(bottom / top, 1.2, accuracy: 0.02, "top \(top) bottom \(bottom)")
+        XCTAssertEqual(top, 8 * 1000 / 117.6, accuracy: 1)
+    }
+
+    /// Unlocked it's centred, as ever.
+    func testAnUnlockedPhotographIsCentred() throws {
+        let scroll = canvas(viewport: 1000, photo: CGSize(width: 100, height: 100))
+        scroll.locksToFit = true
+        scroll.locksToFit = false
+        let photo = try XCTUnwrap(scroll.documentView)
+        let overlay = scroll.overlay
+        let (low, high) = (overlay.convert(CGPoint.zero, from: photo).y, overlay.convert(CGPoint(x: 0, y: 100), from: photo).y)
+        XCTAssertEqual(min(low, high), overlay.bounds.height - max(low, high), accuracy: 1)
     }
 
     /// Locked, nothing pans: a press can't scroll, and neither can the wheel.
