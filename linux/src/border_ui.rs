@@ -65,6 +65,11 @@ fn color_row(
     color: Color,
 ) -> (adw::ActionRow, gtk::Entry, gtk::ColorDialogButton) {
     let row = adw::ActionRow::builder().title(title).build();
+    row.set_tooltip_text(Some(if line {
+        "The colour of the fine line between the photograph and its mat."
+    } else {
+        "The colour of the mat surrounding the photograph."
+    }));
     let entry = gtk::Entry::builder()
         .text(color.hex())
         .max_length(7)
@@ -81,6 +86,7 @@ fn color_row(
     let picker = gtk::ColorDialogButton::new(Some(dialog));
     picker.set_valign(gtk::Align::Center);
     picker.set_rgba(&color.rgba());
+    picker.set_tooltip_text(Some(&format!("Choose {title}")));
     picker.update_property(&[gtk::accessible::Property::Label(title)]);
     let commit = Rc::new(glib::clone!(
         #[weak]
@@ -148,6 +154,7 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
         .title("Add border")
         .active(state.enabled)
         .build();
+    enabled.set_tooltip_text(Some("Frames the finished photograph with a mat, keyline or film border. Borders are excluded from the scopes."));
     let heading = gtk::ListBox::new();
     heading.set_selection_mode(gtk::SelectionMode::None);
     heading.add_css_class("boxed-list");
@@ -168,6 +175,7 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
         .model(&gtk::StringList::new(&["Solid", "Film", "Keyline", "35mm"]))
         .selected(state.style.index())
         .build();
+    style.set_tooltip_text(Some("Solid adds a coloured mat; Keyline adds a thin inner line; Film uses a film frame; 35mm adds the stock’s film edge and sprocket holes to a compatible crop."));
     enabled.connect_active_notify(glib::clone!(
         #[weak]
         ui,
@@ -278,6 +286,15 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
         true,
         |s, v| s.border.film_width = v / 100.,
     );
+    width.0.set_tooltip_text(Some(
+        "The mat’s thickness, as a percentage of the photograph’s long edge.",
+    ));
+    line.0.set_tooltip_text(Some(
+        "The keyline’s thickness, as a percentage of the photograph’s long edge.",
+    ));
+    film_width.0.set_tooltip_text(Some(
+        "Additional black outside the film frame, as a percentage of the photograph’s long edge.",
+    ));
     for row in [&width.0, &line.0, &film_width.0] {
         options.append(row);
     }
@@ -289,6 +306,7 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
         .title("Extend to 3:4 for Instagram")
         .active(state.instagram)
         .build();
+    instagram.set_tooltip_text(Some("Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post."));
     instagram.connect_active_notify(glib::clone!(
         #[weak]
         ui,
@@ -312,7 +330,7 @@ pub fn build(ui: &Rc<Editor>) -> gtk::Box {
         ui,
         move |row| update(&ui, "Change Border Export", |s| s.export = row.is_active())
     ));
-    export.set_subtitle("Saved for when export is connected");
+    export.set_tooltip_text(Some("Includes this border in saved previews and exported photographs. Off saves the photograph without its frame."));
     reset_control(
         ui,
         &export,

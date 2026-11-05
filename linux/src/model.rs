@@ -15,10 +15,30 @@ pub struct State {
     pub crop: Option<[f64; 4]>,
     #[serde(default)]
     pub straighten: f64,
+    #[serde(default)]
+    pub brightness_match: Option<BrightnessMatch>,
+    #[serde(default)]
+    pub custom_film_format: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrightnessMatch {
+    pub ev: Option<f64>,
+    pub inputs: Option<serde_json::Value>,
+    #[serde(default)]
+    pub highlight_limited: bool,
 }
 
 impl State {
     pub fn sanitize(&mut self) {
+        if let Some(matched) = self.brightness_match.as_mut()
+            && matched
+                .ev
+                .is_some_and(|ev| !ev.is_finite() || !(-3.0..=3.0).contains(&ev))
+        {
+            matched.ev = None;
+            matched.inputs = None;
+        }
         self.rotation %= 4;
         self.straighten = if self.straighten.is_finite() {
             self.straighten.clamp(-45., 45.)
@@ -52,6 +72,11 @@ impl State {
         }
         for knob in crate::fixtures::POST {
             if let Some(value) = self.values.get_mut(&format!("Post.{}", knob.0)) {
+                *value = value.clamp(knob.1, knob.2);
+            }
+        }
+        for knob in crate::fixtures::PREP {
+            if let Some(value) = self.values.get_mut(&format!("Prep.{}", knob.0)) {
                 *value = value.clamp(knob.1, knob.2);
             }
         }

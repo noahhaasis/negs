@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use spektrafilm_math::image::ImageBuf;
+use std::path::Path;
 
 /// Why the photograph can't serve as its own reference. Retrying the same
 /// photograph gives the same answer, so the app stops offering it.
@@ -29,6 +30,69 @@ pub const LONG_SIDE: u32 = 512;
 
 pub fn same_shape(aspect: f64, expected: f64) -> bool {
     aspect.max(expected) / aspect.min(expected) <= 1.02
+}
+
+/// The original photograph as a brightness reference, independent of its
+/// current editing/decode state. RAW uses only the camera's embedded preview;
+/// rendered files use their original profile and orientation, never an input
+/// interpretation override or a new RAW development.
+pub fn reference(path: &Path, expected: (u32, u32)) -> Result<image::RgbImage> {
+    if crate::is_raw(path) {
+        camera_preview(&std::fs::read(path)?, expected)
+    } else {
+        file_reference(path, expected)
+    }
+}
+
+/// A JPEG, PNG or TIFF's own pixels as an opaque, small encoded-sRGB
+/// reference. Decode/profile/orientation handling is shared with the input
+/// loader. Alpha and floating-point files have no unambiguous display-referred
+/// reference and are refused, as in the macOS and Windows clients.
+pub fn file_reference(path: &Path, expected: (u32, u32)) -> Result<image::RgbImage> {
+    let (mut decoded, info, format) = crate::decode_no_limits(path)?;
+    if !matches!(format, image::ImageFormat::Jpeg | image::ImageFormat::Png | image::ImageFormat::Tiff) {
+        return unusable("The photograph couldn’t be read for matching.");
+    }
+    if decoded.color().has_alpha() {
+        return unusable("Transparent images can’t be matched.");
+    }
+    if info.float {
+        return unusable("Floating-point images can’t be matched.");
+    }
+    let (width, height) = (decoded.width(), decoded.height());
+    if width < 2 || height < 2 || expected.0 == 0 || expected.1 == 0 {
+        return unusable("The photograph couldn’t be read for matching.");
+    }
+    if !same_shape(width as f64 / height as f64, expected.0 as f64 / expected.1 as f64) {
+        return unusable("The photograph’s orientation couldn’t be matched.");
+    }
+    // Keep profile conversion bounded to the small reference, retaining the
+    // original sample depth. Like camera-preview reduction this resamples
+    // stored display values, before converting their colour encoding.
+    if width.max(height) > LONG_SIDE {
+        decoded = decoded.resize(LONG_SIDE, LONG_SIDE, image::imageops::FilterType::Triangle);
+    }
+    let (linear, _) = crate::colour::convert(decoded, &info, &Default::default(), format == image::ImageFormat::Png)
+        .map_err(|_| Unusable("The photograph couldn’t be read for matching.".into()))?;
+    use spektrafilm_math::precision::{srgb_encode, to_f64};
+    let pixels = linear.data.iter().map(|&value| {
+        (to_f64(srgb_encode(value)).clamp(0.0, 1.0) * 255.0).round() as u8
+    }).collect();
+    image::RgbImage::from_raw(linear.width, linear.height, pixels)
+        .ok_or_else(|| anyhow::anyhow!("The brightness reference has invalid dimensions"))
+}
+
+/// Write encoded-sRGB reference samples with an explicit sRGB profile. The
+/// helper's colour-managed reference reader therefore sees the same light.
+pub fn write_reference(rgb: &image::RgbImage, path: &Path) -> Result<()> {
+    use image::ImageEncoder;
+    use std::io::Write;
+    let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut encoder = image::codecs::png::PngEncoder::new(&mut file);
+    encoder.set_icc_profile(crate::icc::profile(&spektrafilm_math::colorspace::SRGB, false))?;
+    encoder.write_image(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)?;
+    file.flush()?;
+    Ok(())
 }
 
 /// A RAW's embedded preview in `file`, oriented, trimmed of letterbox bars
@@ -380,6 +444,76 @@ pub fn failure_reason(reason: &str) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ReferenceFiles(std::path::PathBuf);
+    impl ReferenceFiles {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("negs-brightness-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+        fn path(&self, name: &str) -> std::path::PathBuf { self.0.join(name) }
+    }
+    impl Drop for ReferenceFiles {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+
+    #[test]
+    fn original_file_reference_obeys_its_profile_and_round_trips_as_srgb() {
+        let files = ReferenceFiles::new("profile");
+        let source = files.path("adobe.png");
+        let pixels = ImageBuf::from_data(4, 2, [0.2, 0.45, 0.7].repeat(8));
+        let options = crate::save::SaveOptions { color_space: "Adobe RGB (1998)".into(), ..Default::default() };
+        crate::save::save_image_with_options(&pixels, &source, None, &options).unwrap();
+        let rgb = file_reference(&source, (4, 2)).unwrap();
+        assert_eq!(rgb.dimensions(), (4, 2));
+        assert_ne!(rgb.get_pixel(0, 0).0, [51, 115, 179], "profile conversion must not pass stored Adobe RGB through as sRGB");
+        let output = files.path("reference.png");
+        write_reference(&rgb, &output).unwrap();
+        let expected = crate::load_image(&source, crate::Formats::Any).unwrap();
+        let roundtrip = crate::load_image(&output, crate::Formats::Any).unwrap();
+        for (&a, &b) in expected.data.iter().zip(&roundtrip.data) {
+            // The display-referred reference clips to sRGB's gamut.
+            assert!((a.clamp(0.0, 1.0) - b).abs() < 0.006, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn original_file_reference_is_bounded_and_rejects_ambiguous_pixels() {
+        let files = ReferenceFiles::new("kinds");
+        let input = files.path("large.png");
+        image::RgbImage::from_pixel(1024, 512, image::Rgb([128, 128, 128])).save(&input).unwrap();
+        let rgb = reference(&input, (1024, 512)).unwrap();
+        assert_eq!(rgb.dimensions(), (512, 256));
+        assert_eq!(rgb.get_pixel(0, 0).0, [128; 3], "untagged integer images are sRGB");
+        assert_eq!(failure(&reference(&input, (512, 1024)).unwrap_err()),
+            ("The photograph’s orientation couldn’t be matched.".into(), true));
+        let alpha = files.path("alpha.png");
+        image::RgbaImage::from_pixel(4, 2, image::Rgba([128, 128, 128, 255])).save(&alpha).unwrap();
+        assert_eq!(failure(&reference(&alpha, (4, 2)).unwrap_err()),
+            ("Transparent images can’t be matched.".into(), true));
+        let float = files.path("float.tiff");
+        image::DynamicImage::ImageRgb32F(image::Rgb32FImage::from_pixel(4, 2, image::Rgb([0.18; 3])))
+            .save(&float).unwrap();
+        assert_eq!(failure(&reference(&float, (4, 2)).unwrap_err()),
+            ("Floating-point images can’t be matched.".into(), true));
+    }
+
+    #[test]
+    fn original_file_reference_applies_orientation_once() {
+        use image::ImageEncoder;
+        let files = ReferenceFiles::new("orientation");
+        let input = files.path("portrait.png");
+        // TIFF orientation 6 (90 degrees clockwise), embedded in PNG's eXIf.
+        let mut exif = b"II*\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x06\0\0\0\0\0\0\0".to_vec();
+        let mut encoder = image::codecs::png::PngEncoder::new(std::fs::File::create(&input).unwrap());
+        encoder.set_exif_metadata(std::mem::take(&mut exif)).unwrap();
+        let pixels = image::RgbImage::from_fn(4, 2, |x, y| image::Rgb([(x * 60) as u8, (y * 150) as u8, 100]));
+        encoder.write_image(pixels.as_raw(), 4, 2, image::ExtendedColorType::Rgb8).unwrap();
+        let rgb = file_reference(&input, (2, 4)).unwrap();
+        assert_eq!(rgb.dimensions(), (2, 4));
+        assert_eq!(rgb, image::imageops::rotate90(&pixels));
+    }
 
     /// A grey test preview with a textured picture and black bars (value 2,
     /// like the Leica previews) on the given edges.

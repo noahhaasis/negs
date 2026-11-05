@@ -9,11 +9,42 @@ pub fn srgb_texture(
     bytes: &glib::Bytes,
     stride: usize,
 ) -> gdk::Texture {
-    texture(width, height, format, bytes, stride, &gdk::ColorState::srgb())
+    texture(
+        width,
+        height,
+        format,
+        bytes,
+        stride,
+        &gdk::ColorState::srgb(),
+    )
 }
 
 /// The helper's name for its wide proxy: Rec. 2020 primaries, sRGB curve.
 pub const WIDE_DISPLAY_SPACE: &str = "Rec. 2020 (sRGB transfer)";
+
+/// A photograph pixel is at most one physical display pixel in Fit. Sizes
+/// are the working photograph (including its crop/border), never a reduced
+/// interactive texture; the canvas coordinate system is in logical pixels.
+fn fit_scale(available: (f64, f64), image: (f64, f64), device_scale: f64) -> f64 {
+    let device_scale = if device_scale.is_finite() && device_scale > 0. {
+        device_scale
+    } else {
+        1.
+    };
+    (available.0 / image.0.max(1.))
+        .min(available.1 / image.1.max(1.))
+        .clamp(0.005, 1. / device_scale)
+}
+
+// GTK 4.16 has no replacement for named theme-colour lookup. Keep this
+// fallback in one place until our minimum GTK provides CSS variable access.
+#[allow(deprecated)]
+fn theme_background(widget: &impl IsA<gtk::Widget>) -> gdk::RGBA {
+    widget
+        .style_context()
+        .lookup_color("view_bg_color")
+        .unwrap_or_else(|| gdk::RGBA::new(24. / 255., 25. / 255., 27. / 255., 1.))
+}
 
 /// The colour state of a helper frame (`display_color_space`): sRGB, or
 /// BT.2020 primaries with the sRGB transfer (CICP 9/13/0, full range), so
@@ -27,7 +58,8 @@ pub fn display_color_state(display_space: &str) -> gdk::ColorState {
     cicp.set_transfer_function(13);
     cicp.set_matrix_coefficients(0);
     cicp.set_range(gdk::CicpRange::Full);
-    cicp.build_color_state().unwrap_or_else(|_| gdk::ColorState::srgb())
+    cicp.build_color_state()
+        .unwrap_or_else(|_| gdk::ColorState::srgb())
 }
 
 pub fn texture(
@@ -61,6 +93,7 @@ mod imp {
     #[derive(Default)]
     pub struct Canvas {
         pub texture: RefCell<Option<gdk::Texture>>,
+        pub background: RefCell<Option<gdk::RGBA>>,
         pub source_size: Cell<(i32, i32)>,
         pub photo_size: Cell<(i32, i32)>,
         pub zoom: Cell<f64>,
@@ -102,7 +135,13 @@ mod imp {
             // including when an input image contains transparent pixels.
             rect(
                 snapshot,
-                &gdk::RGBA::new(24. / 255., 25. / 255., 27. / 255., 1.),
+                &if adw::StyleManager::default().is_high_contrast() {
+                    theme_background(&*obj)
+                } else {
+                    self.background
+                        .borrow()
+                        .unwrap_or_else(|| theme_background(&*obj))
+                },
                 0.,
                 0.,
                 obj.width() as f64,
@@ -378,6 +417,16 @@ mod border_tests {
     use super::*;
 
     #[test]
+    fn fit_caps_small_photographs_at_physical_one_to_one() {
+        assert_eq!(fit_scale((1000., 800.), (400., 300.), 1.), 1.);
+        assert_eq!(fit_scale((1000., 800.), (400., 300.), 2.), 0.5);
+        assert_eq!(fit_scale((1000., 800.), (400., 300.), 1.5), 1. / 1.5);
+        assert_eq!(fit_scale((1000., 800.), (4000., 3000.), 2.), 0.25);
+        assert_eq!(fit_scale((800., 600.), (3000., 4000.), 2.), 0.15);
+        assert_eq!(fit_scale((1000., 800.), (400., 300.), f64::NAN), 1.);
+    }
+
+    #[test]
     #[ignore = "Requires the real desktop and system PNG loader; run explicitly with --ignored"]
     fn border_texture_reuse_and_latest_selection() {
         gtk::init().unwrap();
@@ -513,6 +562,18 @@ mod border_tests {
 }
 
 impl Canvas {
+    /// The canvas background is an app preference, outside photograph edits.
+    pub fn set_viewer_background(&self, custom: bool, color: &str) {
+        let color = custom.then(|| {
+            crate::border::Color::try_from(color.to_string())
+                .unwrap_or(crate::border::Color([36; 3]))
+                .rgba()
+        });
+        if *self.imp().background.borrow() != color {
+            self.imp().background.replace(color);
+            self.queue_draw();
+        }
+    }
     pub fn border_ready(&self) -> bool {
         self.imp().asset_key.borrow().is_none() || self.imp().asset.borrow().is_some()
     }
@@ -742,9 +803,17 @@ impl Canvas {
             (w, h)
         };
         let layout = self.border_layout(w, h);
-        (((self.width() - 72).max(1) as f64 / layout.width)
-            .min((self.height() - 72).max(1) as f64 / layout.height))
-        .max(0.005)
+        fit_scale(
+            (
+                (self.width() - 72).max(1) as f64,
+                (self.height() - 72).max(1) as f64,
+            ),
+            (layout.width, layout.height),
+            self.native()
+                .and_then(|n| n.surface())
+                .map(|s| s.scale())
+                .unwrap_or(1.),
+        )
     }
 
     fn image_point(&self, x: f64, y: f64) -> (f64, f64) {

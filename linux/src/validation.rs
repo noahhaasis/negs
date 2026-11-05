@@ -26,9 +26,14 @@ pub fn schedule(ui: &Rc<Editor>) {
                 );
                 if let Ok(scene) = std::env::var("NEGS_UI_SCENE") {
                     match scene.as_str() {
-                        "post" => {
+                        "prep" | "lab" => {
                             if let Some(tabs) = ui.tabs.borrow().as_ref() {
-                                tabs.set_visible_child_name("post");
+                                tabs.set_visible_child_name(&scene);
+                            }
+                        }
+                        "post" | "output" => {
+                            if let Some(tabs) = ui.tabs.borrow().as_ref() {
+                                tabs.set_visible_child_name("output");
                             }
                             ui.history.borrow_mut().state.border.enabled = true;
                             ui.history.borrow_mut().state.border.style =
@@ -181,6 +186,11 @@ fn activate(ui: &Editor, name: &str) {
     gtk::prelude::WidgetExt::activate_action(&ui.window, &format!("win.{name}"), None).unwrap();
 }
 fn control_audit(ui: &Rc<Editor>, path: std::path::PathBuf) {
+    ui.preferences.borrow_mut().lab_all_controls = true;
+    if let Some(tabs) = ui.tabs.borrow().as_ref() {
+        tabs.set_visible_child_name("lab");
+    }
+    ui.sync_state();
     let initial = ui.history.borrow().state.clone();
     let mut checks = Vec::new();
     let films = crate::catalog::stocks(false);

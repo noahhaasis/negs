@@ -512,7 +512,7 @@ pub fn apply(state: &mut State, film: &str, paper: &str, params: &Value) -> Resu
     }
     for &(key, path) in parameters::TOGGLES {
         // Per photograph, like the crop (`presets::KEPT` in the engine).
-        if key == parameters::LENS_CORRECTIONS {
+        if key == parameters::LENS_CORRECTIONS || key == "Use less memory for export" {
             continue;
         }
         let value = parameters::get(params, path)
@@ -933,6 +933,16 @@ mod tests {
     fn difference(a: &Value, b: &Value, path: &str) -> Option<String> {
         match (a, b) {
             (Value::Number(x), Value::Number(y)) if x.as_f64() == y.as_f64() => None,
+            // Prep's schema stores f32 values. A user's decimal and the
+            // helper's widened JSON value must round to the identical f32.
+            (Value::Number(x), Value::Number(y))
+                if path.starts_with("prep.")
+                    && x.as_f64()
+                        .zip(y.as_f64())
+                        .is_some_and(|(x, y)| (x as f32).to_bits() == (y as f32).to_bits()) =>
+            {
+                None
+            }
             (Value::Object(x), Value::Object(y)) if x.len() == y.len() => {
                 x.iter().find_map(|(k, v)| {
                     let child = if path.is_empty() {
@@ -965,6 +975,13 @@ mod tests {
         state.values.insert("Image Size.Longest side".into(), 3000.);
         state.choices.insert("Develop at".into(), "1".into());
         state.values.insert("Post.Contrast".into(), 20.);
+        state.values.insert("Prep.Highlights".into(), -40.);
+        state.values.insert("Prep.Exposure".into(), 0.7);
+        state.brightness_match = Some(crate::model::BrightnessMatch {
+            ev: Some(0.4),
+            inputs: Some(json!({"saved_match":true})),
+            ..Default::default()
+        });
         state.values.insert("Camera.Exposure".into(), 1.5);
         for (key, value) in [
             ("CAT16 adaptation", "false"),
@@ -1042,7 +1059,13 @@ mod tests {
                 (applied.rotation, applied.crop, &applied.border),
                 (before.rotation, before.crop, &before.border)
             );
-            for key in ["Image Size.Longest side", "Post.Contrast"] {
+            assert_eq!(applied.brightness_match, before.brightness_match, "{name}");
+            for key in [
+                "Image Size.Longest side",
+                "Post.Contrast",
+                "Prep.Highlights",
+                "Prep.Exposure",
+            ] {
                 assert_eq!(applied.values[key], before.values[key], "{name}: {key}");
             }
             for key in [
@@ -1122,7 +1145,11 @@ mod tests {
             .unwrap();
         let mut params = result["params"].clone();
         for field in parameters::GRAIN_STOCK_FIELDS {
-            parameters::set(&mut params, &format!("film_render.grain.{field}"), Value::Null);
+            parameters::set(
+                &mut params,
+                &format!("film_render.grain.{field}"),
+                Value::Null,
+            );
         }
         let mut applied = before.clone();
         for key in value_keys().filter(|key| parameters::grain_lane(key).is_some()) {

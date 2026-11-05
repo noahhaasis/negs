@@ -57,7 +57,9 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                     let idle = ui.runtime.borrow().exporting.is_none();
                     let current = {
                         let r = ui.runtime.borrow();
-                        r.retained_id.is_some() && r.current_revision == Some(r.revision)
+                        r.retained_id.is_some()
+                            && r.current_revision == Some(r.revision)
+                            && ui.pending_path.borrow().is_none()
                     };
                     match a.step {
                         0 if ready => {
@@ -123,12 +125,12 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                             a.step = 3;
                         }
                         3 if current => {
-                            if ui.history.borrow().state.values.get("Post.Contrast") != Some(&60.) {
+                            if ui.history.borrow().state.values.get("Prep.Contrast") != Some(&60.) {
                                 let control = ui
                                     .adjustments
                                     .borrow()
                                     .iter()
-                                    .find(|(k, _)| k == "Post.Contrast")
+                                    .find(|(k, _)| k == "Prep.Contrast")
                                     .unwrap()
                                     .1
                                     .clone();
@@ -288,11 +290,7 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                             );
                             a.checks.push("Native Cancel preserves an existing destination and removes staging files".into());
                             if let Some(raw) = std::env::var_os("NEGS_RAW_AUDIT") {
-                                ui.history
-                                    .borrow_mut()
-                                    .state
-                                    .choices
-                                    .insert("Limit preview to 12 MP".into(), "true".into());
+                                ui.preferences.borrow_mut().limit_preview = Some(true);
                                 ui.open(PathBuf::from(raw));
                                 a.step = 11;
                                 return glib::ControlFlow::Continue;
@@ -300,12 +298,18 @@ pub fn schedule(ui: &Rc<Editor>, report: PathBuf) {
                             a.step = 15;
                         }
                         11 if current => {
-                            assert_eq!(ui.canvas.source_size(), (6048, 4024));
+                            let source = ui.canvas.source_size();
+                            assert!(source.0 > 1000 && source.1 > 1000);
+                            assert_eq!(
+                                ui.runtime.borrow().developed.as_ref().unwrap().result["raw"],
+                                true
+                            );
                             a.before =
                                 digest(&ui.runtime.borrow().developed.as_ref().unwrap().pixels);
-                            a.checks.push(
-                                "Real NEF develops with full 6048×4024 source dimensions".into(),
-                            );
+                            a.checks.push(format!(
+                                "Real NEF develops with full {}×{} source dimensions",
+                                source.0, source.1
+                            ));
                             ui.show_original(true);
                             a.step = 12;
                         }

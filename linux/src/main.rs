@@ -1,6 +1,7 @@
 mod actions;
 mod border;
 mod border_ui;
+mod brightness;
 mod canvas;
 mod catalog;
 mod crop_geometry;
@@ -11,6 +12,7 @@ mod export_ui;
 mod exports;
 mod filmstrip;
 mod fixtures;
+mod help;
 mod image_size;
 mod inspector;
 mod model;
@@ -23,7 +25,9 @@ mod preset_ui;
 mod presets;
 mod preview_cache;
 mod runtime;
+mod scopes;
 mod stock_browser;
+mod tone_graph;
 mod validation;
 
 use adw::prelude::*;
@@ -42,6 +46,7 @@ pub(crate) struct Editor {
     shell_painted: Cell<bool>,
     cache: std::sync::Arc<preview_cache::Cache>,
     pending_view: RefCell<Option<serde_json::Value>>,
+    restoring_session: Cell<bool>,
     window: adw::ApplicationWindow,
     canvas: canvas::Canvas,
     split: adw::OverlaySplitView,
@@ -102,6 +107,9 @@ pub(crate) struct Editor {
     folder_debounce: RefCell<Option<glib::SourceId>>,
     preferences: RefCell<preferences::Preferences>,
     stock_browser: stock_browser::Browser,
+    brightness: brightness::Panel,
+    scopes: scopes::Panel,
+    tone_graph: tone_graph::Panel,
 }
 
 fn icon(name: &str, tooltip: &str, action: &str) -> gtk::Button {
@@ -220,6 +228,9 @@ impl Editor {
         }
         header.pack_end(&panes);
         let export = gtk::Button::with_label("Export…");
+        export.set_tooltip_text(Some(
+            "Export the developed photograph with size, colour and format options.",
+        ));
         export.add_css_class("suggested-action");
         export.set_action_name(Some("win.export"));
         header.pack_end(&export);
@@ -352,6 +363,9 @@ impl Editor {
         let export_elapsed = gtk::Label::new(None);
         export_progress.append(&export_elapsed);
         let export_cancel = gtk::Button::with_label("Cancel");
+        export_cancel.set_tooltip_text(Some(
+            "Cancel the current export. An existing file at its destination is preserved.",
+        ));
         export_cancel.set_action_name(Some("win.cancel-export"));
         export_progress.append(&export_cancel);
         export_progress.set_visible(false);
@@ -441,6 +455,10 @@ impl Editor {
             folder_debounce: RefCell::new(None),
             preferences: RefCell::new(preferences::Preferences::default()),
             stock_browser: stock_browser::Browser::default(),
+            brightness: brightness::Panel::default(),
+            scopes: scopes::Panel::default(),
+            tone_graph: tone_graph::Panel::default(),
+            restoring_session: Cell::new(false),
         });
         ui.owner.replace(Rc::downgrade(&ui));
         let hold_original = gtk::GestureClick::new();
@@ -611,6 +629,7 @@ impl Editor {
                     return glib::Propagation::Stop;
                 }
                 ui.perf.write();
+                crate::brightness::clear(&ui);
                 let mut runtime = ui.runtime.borrow_mut();
                 runtime.closing = true;
                 if let Some(job)=&runtime.exporting {job.cancel();}
@@ -630,12 +649,52 @@ impl Editor {
         ui
     }
     fn resize_inspector(&self, width: f64) {
-        let width = width.clamp(280., 560.);
+        let available = (self.window.width().max(967) - 687).max(280) as f64;
+        let width = width.clamp(280., 560.).min(available);
         self.split.set_min_sidebar_width(width);
         self.split.set_max_sidebar_width(width);
         self.preferences.borrow_mut().sidebar_width = width;
     }
+    fn monitor_size(&self) -> (i32, i32) {
+        self.window
+            .surface()
+            .and_then(|surface| {
+                gtk::prelude::WidgetExt::display(&self.window).monitor_at_surface(&surface)
+            })
+            .map(|monitor| {
+                let g = monitor.geometry();
+                (g.width(), g.height())
+            })
+            .unwrap_or((1920, 1080))
+    }
+    pub fn update_window_minimum(&self) {
+        let (width, height) = window_minimum(self.split.shows_sidebar(), self.monitor_size());
+        self.window.set_size_request(width, height);
+        if !self.window.is_maximized() && !self.window.is_fullscreen() {
+            let requested = if self.window.is_mapped() {
+                (self.window.width(), self.window.height())
+            } else {
+                self.window.default_size()
+            };
+            if requested.0 < width || requested.1 < height {
+                self.window
+                    .set_default_size(requested.0.max(width), requested.1.max(height));
+            }
+        }
+    }
+    pub fn ensure_sidebar_space(&self) {
+        let (width, height) = window_minimum(true, self.monitor_size());
+        if !self.window.is_maximized() && !self.window.is_fullscreen() {
+            self.window.set_default_size(
+                self.window.width().max(width),
+                self.window.height().max(height),
+            );
+        }
+    }
     fn sync_history(&self) {
+        self.preferences
+            .borrow()
+            .apply_to_state(&mut self.history.borrow_mut().state);
         let h = self.history.borrow();
         self.undo.set_enabled(h.can_undo());
         self.redo.set_enabled(h.can_redo());
@@ -733,6 +792,10 @@ impl Editor {
         self.syncing.set(syncing);
         drop(h);
         self.observe_edit();
+        if let Some(ui) = self.owner.borrow().upgrade() {
+            crate::brightness::pump(&ui);
+            crate::tone_graph::pump(&ui);
+        }
     }
     fn sync_state(&self) {
         self.syncing.set(true);
@@ -806,6 +869,13 @@ impl Editor {
         std::fs::write(path.with_extension("tmp"), bytes).map_err(|e| e.to_string())?;
         std::fs::rename(path.with_extension("tmp"), path).map_err(|e| e.to_string())
     }
+}
+
+fn window_minimum(sidebar: bool, monitor: (i32, i32)) -> (i32, i32) {
+    (
+        (if sidebar { 967 } else { 680 }).min(monitor.0.max(360)),
+        560.min(monitor.1.max(360)),
+    )
 }
 
 fn data_root() -> PathBuf {
@@ -915,9 +985,13 @@ fn main() -> glib::ExitCode {
         {
             let mut state = state;
             // Sessions before schema 1 was written count as schema 1.
-            let schema = session.as_ref().and_then(|s| s["schema"].as_u64()).unwrap_or(1);
+            let schema = session
+                .as_ref()
+                .and_then(|s| s["schema"].as_u64())
+                .unwrap_or(1);
             parameters::migrate_session(schema, &mut state);
             ui.history.borrow_mut().state = state;
+            ui.restoring_session.set(true);
             ui.history.borrow_mut().state.sanitize();
             ui.pending_view
                 .replace(session.as_ref().and_then(|s| s.get("view")).cloned());

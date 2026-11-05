@@ -156,9 +156,39 @@ pub const POST: &[Knob] = &[
     Knob("Saturation", -100., 100., 1., 0., ""),
 ];
 
+pub const PREP: &[Knob] = &[
+    Knob("Exposure", -3., 3., 0.05, 0., "EV"),
+    Knob("Highlights", -180., 100., 1., 0., ""),
+    Knob("Shadows", -100., 100., 1., 0., ""),
+    Knob("Contrast", -100., 100., 1., 0., ""),
+    Knob("Lift", -100., 100., 1., 0., ""),
+    Knob("Gain", -100., 100., 1., 0., ""),
+    Knob("Color Boost", -100., 100., 1., 0., ""),
+    Knob("Saturation", -100., 100., 1., 0., ""),
+    Knob("Midtone Detail", -100., 100., 1., 0., ""),
+];
+
+pub const FILM_FORMATS: &[(&str, f64)] = &[
+    ("110", 17.),
+    ("Half frame", 24.),
+    ("35 mm (135)", 35.),
+    ("6×4.5 / 6×6", 56.),
+    ("6×7", 70.),
+    ("6×9", 84.),
+    ("4×5", 120.),
+];
+pub fn film_format(mm: f64) -> Option<usize> {
+    FILM_FORMATS
+        .iter()
+        .position(|(_, value)| (value - mm).abs() < 0.05)
+}
+
 /// A Lab control's slider range, by its "Group.Name" key.
 pub fn range(key: &str) -> Option<(f64, f64)> {
     let (group, name) = key.split_once('.')?;
+    if group == "Prep" {
+        return PREP.iter().find(|k| k.0 == name).map(|k| (k.1, k.2));
+    }
     let group = GROUPS.iter().find(|g| g.name == group)?;
     group.knobs.iter().find(|k| k.0 == name).map(|k| (k.1, k.2))
 }
@@ -176,6 +206,9 @@ pub fn state() -> crate::model::State {
     }
     for k in POST {
         state.values.insert(format!("Post.{}", k.0), k.4);
+    }
+    for k in PREP {
+        state.values.insert(format!("Prep.{}", k.0), k.4);
     }
     state
 }

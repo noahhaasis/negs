@@ -45,6 +45,15 @@ pub fn number(value: f64) -> Value {
 
 pub fn path(key: &str) -> Option<String> {
     let (group, name) = key.split_once('.')?;
+    if group == "Prep" {
+        return Some(format!(
+            "prep.{}",
+            match name {
+                "Exposure" => "exposure_ev".into(),
+                _ => name.to_lowercase().replace(' ', "_"),
+            }
+        ));
+    }
     let direct = match (group, name) {
         ("Camera", "Exposure") => "camera.exposure_compensation_ev",
         ("Camera", "Film format") => "camera.film_format_mm",
@@ -244,9 +253,23 @@ pub const TOGGLES: &[(&str, &str)] = &[
     ("Use less memory for export", "settings.serial_grain"),
 ];
 /// The colour spaces Assume offers, as `spektrafilm-io::colour::ASSUMABLE`.
-pub const ASSUMED_SPACES: &[&str] = &["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020"];
+pub const ASSUMED_SPACES: &[&str] = &[
+    "sRGB",
+    "Display P3",
+    "Adobe RGB (1998)",
+    "ProPhoto RGB",
+    "ITU-R BT.2020",
+];
 /// Manual: the pipeline's own input colour space, as Negs 0.8 used it.
-pub const MANUAL_SPACES: &[&str] = &["sRGB", "Display P3", "Adobe RGB (1998)", "ProPhoto RGB", "ITU-R BT.2020", "ACES2065-1", "ACEScg"];
+pub const MANUAL_SPACES: &[&str] = &[
+    "sRGB",
+    "Display P3",
+    "Adobe RGB (1998)",
+    "ProPhoto RGB",
+    "ITU-R BT.2020",
+    "ACES2065-1",
+    "ACEScg",
+];
 pub const CHOICES: &[(&str, &str, &[&str])] = &[
     (
         "Metering",
@@ -267,8 +290,16 @@ pub const CHOICES: &[(&str, &str, &[&str])] = &[
         &["as_shot", "daylight", "tungsten", "custom"],
     ),
     // How a non-RAW photograph's values are read.
-    ("Input colour", "io.input_interpretation.mode", &["auto", "assume", "manual"]),
-    ("Assumed colour space", "io.input_interpretation.color_space", ASSUMED_SPACES),
+    (
+        "Input colour",
+        "io.input_interpretation.mode",
+        &["auto", "assume", "manual"],
+    ),
+    (
+        "Assumed colour space",
+        "io.input_interpretation.color_space",
+        ASSUMED_SPACES,
+    ),
     ("Manual colour space", "io.input_color_space", MANUAL_SPACES),
     (
         "Filter",
@@ -296,6 +327,12 @@ pub const CHOICES: &[(&str, &str, &[&str])] = &[
 /// for the grain preset lanes, every film's resolved preset.
 pub fn validate(catalog: &Value) -> Result<(), String> {
     let defaults = &catalog["defaults"];
+    for knob in crate::fixtures::PREP {
+        let field = path(&format!("Prep.{}", knob.0)).unwrap();
+        if !get(defaults, &field).is_number() {
+            return Err(format!("The engine has no numeric parameter {field}."));
+        }
+    }
     for group in crate::fixtures::GROUPS {
         for knob in group.knobs {
             let key = format!("{}.{}", group.name, knob.0);
@@ -366,6 +403,15 @@ pub fn install_defaults(state: &mut State, defaults: &Value, reset: bool) {
             reset,
         );
     }
+    for knob in crate::fixtures::PREP {
+        apply_default(
+            state,
+            &fixture,
+            defaults,
+            &format!("Prep.{}", knob.0),
+            reset,
+        );
+    }
     for key in ["RAW.Temperature", "RAW.Tint"] {
         apply_default(state, &fixture, defaults, key, reset);
     }
@@ -401,7 +447,11 @@ fn apply_default(state: &mut State, fixture: &State, defaults: &Value, key: &str
 pub fn runtime(state: &State, defaults: &Value) -> Value {
     let mut params = merge(defaults, &state.params);
     // The helper renders in the preview space; exports name their own.
-    set(&mut params, "io.output_color_space", json!(crate::preferences::preview_space()));
+    set(
+        &mut params,
+        "io.output_color_space",
+        json!(crate::preferences::preview_space()),
+    );
     for (key, value) in &state.values {
         if value.is_finite()
             && grain_lane(key).is_none()
@@ -479,7 +529,79 @@ pub fn runtime(state: &State, defaults: &Value) -> Value {
             .unwrap_or(2048.) as u32
     });
     set(&mut params, "io.photo_long_side_px", json!(target));
+    // Serial grain is an export preference, never a preview or photo edit.
+    set(&mut params, "settings.serial_grain", json!(false));
     params
+}
+
+/// Carry workflow choices while starting a new photograph. Source refreshes and
+/// session restoration deliberately do not use this path.
+pub fn for_new_photo(previous: &State, defaults: &Value, fresh: bool, matching: bool) -> State {
+    let offset = previous.values.get("Prep.Exposure").copied().unwrap_or(0.)
+        - previous
+            .brightness_match
+            .as_ref()
+            .and_then(|m| m.ev)
+            .unwrap_or(0.);
+    let mut next = if fresh {
+        let mut next = crate::fixtures::state();
+        next.params = defaults.clone();
+        install_defaults(&mut next, defaults, true);
+        for (key, value) in &previous.choices {
+            if [
+                "Film",
+                "Paper",
+                "Film ID",
+                "Paper ID",
+                "Develop at",
+                "Encode output as sRGB",
+            ]
+            .contains(&key.as_str())
+            {
+                next.choices.insert(key.clone(), value.clone());
+            }
+        }
+        for (key, value) in &previous.values {
+            if key.starts_with("Image Size.") {
+                next.values.insert(key.clone(), *value);
+            }
+        }
+        next.choices.insert(
+            "Scan film directly".into(),
+            crate::catalog::selected(&next, false).positive.to_string(),
+        );
+        next
+    } else {
+        previous.clone()
+    };
+    next.crop = None;
+    next.straighten = 0.;
+    next.rotation = 0;
+    for key in [
+        LENS_CORRECTIONS,
+        "Input colour",
+        "Assumed colour space",
+        "Linear input",
+        "Manual colour space",
+        "Decode input curve",
+    ] {
+        next.choices.remove(key);
+    }
+    for path in [
+        LENS_CORRECTION_PATH,
+        "io.input_interpretation",
+        "io.input_color_space",
+        "io.input_cctf_decoding",
+    ] {
+        set(&mut next.params, path, get(defaults, path).clone());
+    }
+    next.choices.insert(LENS_CORRECTIONS.into(), "true".into());
+    next.brightness_match = matching.then(Default::default);
+    next.values.insert(
+        "Prep.Exposure".into(),
+        if fresh { 0. } else { offset.clamp(-3., 3.) },
+    );
+    next
 }
 
 /// Values a film's presets fill while the edit leaves them null. Choosing a
@@ -504,16 +626,24 @@ pub const STOCK_PRESET_PATHS: [&str; 10] = [
 /// them (the last six of `STOCK_PRESET_PATHS`).
 /// Schema 3: lens corrections. Earlier photographs were developed without
 /// them, so they stay off and a saved crop keeps its place.
-pub const SESSION_SCHEMA: u64 = 3;
+pub const SESSION_SCHEMA: u64 = 4;
 
 pub fn migrate_session(schema: u64, state: &mut State) {
+    if schema < 4 {
+        if let Some(params) = state.params.as_object_mut() {
+            params.remove("post");
+        }
+        state.values.retain(|key, _| !key.starts_with("Post."));
+    }
     if schema < 2 {
         for path in &STOCK_PRESET_PATHS[4..] {
             set(&mut state.params, path, Value::Null);
         }
     }
     if schema < 3 {
-        state.choices.insert(LENS_CORRECTIONS.into(), "false".into());
+        state
+            .choices
+            .insert(LENS_CORRECTIONS.into(), "false".into());
     }
 }
 
@@ -525,13 +655,21 @@ static NULLABLE_PATHS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec
 pub fn set_nullable_paths(catalog: &Value) {
     let paths = catalog["nullable_paths"]
         .as_array()
-        .map(|paths| paths.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect())
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(|p| p.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
     *NULLABLE_PATHS.lock().unwrap_or_else(|e| e.into_inner()) = paths;
 }
 
 pub fn merge(defaults: &Value, saved: &Value) -> Value {
-    let nullable = NULLABLE_PATHS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let nullable = NULLABLE_PATHS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     merge_at(defaults, saved, &nullable, "")
 }
 
@@ -543,18 +681,29 @@ fn merge_at(defaults: &Value, saved: &Value, nullable: &[String], path: &str) ->
         (Value::Object(d), Value::Object(s)) => {
             let mut out = d.clone();
             for (key, value) in s {
-                let child = if path.is_empty() { key.clone() } else { format!("{path}.{key}") };
+                let child = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
                 out.insert(
                     key.clone(),
-                    d.get(key)
-                        .map_or_else(|| value.clone(), |old| merge_at(old, value, nullable, &child)),
+                    d.get(key).map_or_else(
+                        || value.clone(),
+                        |old| merge_at(old, value, nullable, &child),
+                    ),
                 );
             }
             Value::Object(out)
         }
         (Value::Array(d), Value::Array(s)) if d.len() == s.len() => {
             let element = format!("{path}[*]");
-            Value::Array(d.iter().zip(s).map(|(a, b)| merge_at(a, b, nullable, &element)).collect())
+            Value::Array(
+                d.iter()
+                    .zip(s)
+                    .map(|(a, b)| merge_at(a, b, nullable, &element))
+                    .collect(),
+            )
         }
         (Value::Number(_), Value::Number(_))
         | (Value::String(_), Value::String(_))
@@ -753,6 +902,9 @@ mod tests {
         for (_, field) in TOGGLES {
             put(field, json!(true));
         }
+        for knob in crate::fixtures::PREP {
+            put(&path(&format!("Prep.{}", knob.0)).unwrap(), json!(knob.4));
+        }
         for (_, field, options) in CHOICES {
             put(field, json!(options[0]));
         }
@@ -771,6 +923,80 @@ mod tests {
         let mut old = State::default();
         old.choices.insert("Film".into(), "0".into());
         assert_eq!(crate::catalog::selected(&old, false).id, "kodak_portra_400");
+    }
+
+    #[test]
+    fn new_photo_policies_keep_workflow_and_reset_photo_identity() {
+        let defaults = json!({"io":{"raw_white_balance":{"mode":"as_shot"},"input_interpretation":{"mode":"auto"},
+            "input_color_space":"sRGB","input_cctf_decoding":true,"lens_correction":{"enabled":true}},
+            "prep":{"exposure_ev":0.,"contrast":0.},"settings":{"serial_grain":false}});
+        let mut old = crate::fixtures::state();
+        old.params = defaults.clone();
+        old.values.insert("Prep.Exposure".into(), 1.8);
+        old.values.insert("Prep.Contrast".into(), 30.);
+        old.values.insert("Camera.Exposure".into(), 1.2);
+        old.values.insert("Image Size.Longest side".into(), 3200.);
+        old.choices
+            .insert("Film ID".into(), "kodak_portra_400".into());
+        old.choices
+            .insert("Paper ID".into(), "kodak_portra_endura".into());
+        old.choices.insert("Develop at".into(), "1".into());
+        old.choices.insert("White balance".into(), "3".into());
+        old.choices.insert("Input colour".into(), "1".into());
+        old.choices.insert(LENS_CORRECTIONS.into(), "false".into());
+        old.brightness_match = Some(crate::model::BrightnessMatch {
+            ev: Some(1.3),
+            inputs: Some(json!({"old":true})),
+            ..Default::default()
+        });
+        old.border.enabled = true;
+        old.crop = Some([0.1, 0.1, 0.8, 0.8]);
+        old.straighten = 3.;
+        old.rotation = 1;
+        old.custom_film_format = true;
+        let fresh = for_new_photo(&old, &defaults, true, true);
+        assert_eq!(fresh.values["Prep.Exposure"], 0.);
+        assert_eq!(fresh.values["Prep.Contrast"], 0.);
+        assert_eq!(fresh.values["Camera.Exposure"], 0.);
+        assert!(!fresh.border.enabled && !fresh.custom_film_format);
+        assert_eq!(fresh.choices["Film ID"], old.choices["Film ID"]);
+        assert_eq!(fresh.choices["Paper ID"], old.choices["Paper ID"]);
+        assert_eq!(fresh.values["Image Size.Longest side"], 3200.);
+        assert_eq!(fresh.choices["Develop at"], "1");
+        assert_eq!(fresh.choices["White balance"], "0");
+        assert_eq!(fresh.brightness_match.as_ref().unwrap().ev, None);
+        let keep = for_new_photo(&old, &defaults, false, true);
+        assert!((keep.values["Prep.Exposure"] - 0.5).abs() < 1e-9);
+        assert_eq!(keep.values["Prep.Contrast"], 30.);
+        assert_eq!(keep.values["Camera.Exposure"], 1.2);
+        assert_eq!(keep.choices["White balance"], "3");
+        assert!(keep.border.enabled && keep.custom_film_format);
+        assert_eq!((keep.crop, keep.straighten, keep.rotation), (None, 0., 0));
+        assert_eq!(keep.choices[LENS_CORRECTIONS], "true");
+        assert!(!keep.choices.contains_key("Input colour"));
+        assert_eq!(keep.params["io"]["input_interpretation"]["mode"], "auto");
+        assert_eq!(old.values["Prep.Exposure"], 1.8);
+        assert!(
+            for_new_photo(&old, &defaults, false, false)
+                .brightness_match
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn legacy_post_migration_clears_both_representations_and_keeps_prep() {
+        let mut old = crate::fixtures::state();
+        old.params = json!({"post":{"brightness":40.,"contrast":50.},"prep":{"contrast":10.}});
+        old.values.insert("Post.Contrast".into(), 50.);
+        old.values.insert("Prep.Contrast".into(), 10.);
+        migrate_session(3, &mut old);
+        assert!(old.params.get("post").is_none());
+        assert!(old.values.keys().all(|key| !key.starts_with("Post.")));
+        old.sanitize();
+        assert_eq!(old.values["Post.Contrast"], 0.);
+        assert_eq!(old.values["Prep.Contrast"], 10.);
+        let encoded = serde_json::to_vec(&old).unwrap();
+        assert_eq!(serde_json::from_slice::<State>(&encoded).unwrap(), old);
     }
 
     /// The helper's own defaults, from its `catalog` reply.
@@ -929,7 +1155,10 @@ mod tests {
             merge_at(&defaults, &saved, &nullable, ""),
             json!({"dir": {"langmuir": [null, 0.5, null], "gamma": [0.52, 0.51, 0.26]}, "gamut": {"lightness": null, "knee": 1}})
         );
-        assert_eq!(merge_at(&defaults, &saved, &[], "")["dir"]["langmuir"], json!([1, 0.5, 1]));
+        assert_eq!(
+            merge_at(&defaults, &saved, &[], "")["dir"]["langmuir"],
+            json!([1, 0.5, 1])
+        );
     }
 
     #[test]
@@ -938,14 +1167,20 @@ mod tests {
             "dir_couplers": {"gamma_samelayer_rgb": [0.341, 0.324, 0.273], "amount": 0.8},
             "halation": {"halation_strength": [0.05, 0.015, 0.0]},
             "grain": {"rms_granularity": [12, 13, 12]}}});
-        let mut old = State { params: params.clone(), ..Default::default() };
+        let mut old = State {
+            params: params.clone(),
+            ..Default::default()
+        };
         migrate_session(1, &mut old);
         let render = &old.params["film_render"];
         assert!(render["dir_couplers"]["gamma_samelayer_rgb"].is_null());
         assert!(render["halation"]["halation_strength"].is_null());
         assert_eq!(render["dir_couplers"]["amount"], json!(0.8));
         assert_eq!(render["grain"]["rms_granularity"], json!([12, 13, 12]));
-        let mut current = State { params: params.clone(), ..Default::default() };
+        let mut current = State {
+            params: params.clone(),
+            ..Default::default()
+        };
         migrate_session(SESSION_SCHEMA, &mut current);
         assert_eq!(current.params, params);
     }
@@ -956,12 +1191,21 @@ mod tests {
         let mut old = State::default();
         migrate_session(2, &mut old);
         install_defaults(&mut old, &defaults, false);
-        assert_eq!(old.choices.get(LENS_CORRECTIONS).map(String::as_str), Some("false"));
-        assert_eq!(runtime(&old, &defaults)["io"]["lens_correction"]["enabled"], json!(false));
+        assert_eq!(
+            old.choices.get(LENS_CORRECTIONS).map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            runtime(&old, &defaults)["io"]["lens_correction"]["enabled"],
+            json!(false)
+        );
         let mut current = State::default();
         migrate_session(SESSION_SCHEMA, &mut current);
         install_defaults(&mut current, &defaults, false);
-        assert_eq!(current.choices.get(LENS_CORRECTIONS).map(String::as_str), Some("true"));
+        assert_eq!(
+            current.choices.get(LENS_CORRECTIONS).map(String::as_str),
+            Some("true")
+        );
     }
 
     #[test]
