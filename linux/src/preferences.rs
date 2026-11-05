@@ -4,6 +4,15 @@ use gtk::{gio, glib};
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, rc::Rc};
 
+/// Starred for new users, as on the web and the Mac; once they change the
+/// list, theirs is kept, even when empty.
+pub const DEFAULT_FAVORITE_FILMS: [&str; 4] = [
+    "kodak_gold_200",
+    "kodak_portra_400",
+    "kodak_ektar_100",
+    "fujifilm_c200",
+];
+
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
@@ -82,7 +91,10 @@ impl Default for Preferences {
             scope_mode: "Histogram".into(),
             scope_height: 88.,
             tone_graph_channel: "RGB".into(),
-            favorite_films: Vec::new(),
+            favorite_films: DEFAULT_FAVORITE_FILMS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             favorite_papers: Vec::new(),
             viewer_background_custom: false,
             viewer_background_color: "#242424".into(),

@@ -173,6 +173,9 @@ struct StockEntry {
     var keepPaper: Bool { didSet { defaults.set(keepPaper, forKey: Self.keepPaperKey) } }
     static let favoriteFilmsKey = "favoriteFilms"
     static let favoritePapersKey = "favoritePapers"
+    /// Starred for new users, as on the web; once they change the list,
+    /// theirs is kept, even when empty.
+    static let defaultFavoriteFilms = ["kodak_gold_200", "kodak_portra_400", "kodak_ektar_100", "fujifilm_c200"]
     /// Starred stock ids, in the order starred. Ids the catalog no longer
     /// has are kept, in case it brings them back.
     private(set) var favoriteFilms: [String] { didSet { defaults.set(favoriteFilms, forKey: Self.favoriteFilmsKey) } }
@@ -196,7 +199,7 @@ struct StockEntry {
         self.defaults = defaults
         enabled = defaults.object(forKey: Self.defaultsKey) as? Bool ?? true
         keepPaper = defaults.object(forKey: Self.keepPaperKey) as? Bool ?? false
-        favoriteFilms = defaults.stringArray(forKey: Self.favoriteFilmsKey) ?? []
+        favoriteFilms = defaults.stringArray(forKey: Self.favoriteFilmsKey) ?? Self.defaultFavoriteFilms
         favoritePapers = defaults.stringArray(forKey: Self.favoritePapersKey) ?? []
     }
 

@@ -207,6 +207,10 @@ pub struct Preferences {
     pub viewer_background: String,
 }
 
+/// Starred for new users, as on the web and the Mac; once they change the
+/// list, theirs is kept, even when empty.
+pub const DEFAULT_FAVORITE_FILMS: [&str; 4] = ["kodak_gold_200", "kodak_portra_400", "kodak_ektar_100", "fujifilm_c200"];
+
 /// The scope's heights in DIPs; it starts at the smallest, leaving the room
 /// to the controls.
 pub const SCOPE_HEIGHTS: (f64, f64) = (88.0, 420.0);
@@ -243,7 +247,7 @@ impl Default for Preferences {
             lab_all_controls: false,
             scope_mode: "Histogram".into(),
             scope_height: SCOPE_HEIGHTS.0,
-            favorite_films: vec![],
+            favorite_films: DEFAULT_FAVORITE_FILMS.iter().map(|s| s.to_string()).collect(),
             favorite_papers: vec![],
             viewer_background_custom: false,
             // A neutral dark grey, near the dark theme's.

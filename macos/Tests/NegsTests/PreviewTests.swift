@@ -247,6 +247,15 @@ final class PreviewTests: XCTestCase {
         XCTAssertNotEqual(StockFoldout.favoriteID("kodak_gold_200"), "kodak_gold_200")
     }
 
+    @MainActor func testNewUsersStartWithDefaultFavoritesAndKeepTheirOwnList() {
+        let suite = "negs-favorites-default-\(UUID().uuidString)", defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(Previews(defaults: defaults).favoriteFilms, Previews.defaultFavoriteFilms)
+        XCTAssertEqual(Previews(defaults: defaults).favoritePapers, [])
+        for id in Previews.defaultFavoriteFilms { Previews(defaults: defaults).toggleFavorite(id, paper: false) }
+        XCTAssertEqual(Previews(defaults: defaults).favoriteFilms, [])
+    }
+
     @MainActor func testAFavoriteMissingFromTheCatalogIsKeptButNotShown() {
         let suite = "negs-favorites-missing-\(UUID().uuidString)", defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
