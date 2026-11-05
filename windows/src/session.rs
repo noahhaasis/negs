@@ -503,7 +503,8 @@ mod tests {
 
     #[test]
     fn favourites_keep_the_order_starred() {
-        let mut prefs = Preferences::default();
+        // A user who cleared the defaults; new users start with four (below).
+        let mut prefs = Preferences { favorite_films: vec![], ..Preferences::default() };
         prefs.toggle_favorite("portra", false);
         prefs.toggle_favorite("gold", false);
         prefs.toggle_favorite("endura", true);
