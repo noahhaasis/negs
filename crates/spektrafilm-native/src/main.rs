@@ -27,6 +27,8 @@ use std::{
     time::Instant,
 };
 
+mod pipelines;
+
 /// EditorModel.readPreview rejects larger preview buffers.
 const DISPLAY_MAX_DIM: usize = 8192;
 
@@ -202,18 +204,14 @@ struct Session {
     /// at any preview or working size, meters it, as the exporter does, so
     /// the preview's exposure is the export's.
     metering: Option<ImageBuf>,
-    pipeline: Option<(String, Pipeline)>,
+    /// Calibrated pipelines for every command that renders (ticket 29).
+    pipelines: pipelines::Pipelines,
     output: Option<Rendered>,
     /// The source reduced for stock and preset thumbnails.
     thumbnail_source: Option<((u32, u32), ImageBuf)>,
-    /// Calibrated pipelines for thumbnails, most recent last. A stock's
-    /// pipeline outlives edits that don't change its key (exposure, grain…).
-    thumbnail_pipelines: Vec<(String, Pipeline)>,
     /// Reduced sources for preset thumbnails whose RAW white balance isn't
     /// the main source's, most recent last.
     thumbnail_wb_sources: Vec<WbSource>,
-    /// The tone graph's calibrated pipeline (per-pixel params).
-    tone_pipeline: Option<(String, Pipeline)>,
     /// The metering frame's film exposure in stops for the tone graph's
     /// histogram, keyed by the source and the render pipeline.
     film_stops: Option<(String, Vec<[f32; 3]>)>,
@@ -230,8 +228,6 @@ struct WbSource {
     metering: ImageBuf,
 }
 
-/// Every film with its paper, and every paper with the current film.
-const THUMBNAIL_PIPELINES: usize = 40;
 /// The longest frame developed for a cropped thumbnail.
 const THUMBNAIL_FRAME_MAX: u32 = 1280;
 /// White balances kept for preset thumbnails (few presets differ).
@@ -458,22 +454,9 @@ impl Session {
         };
         let resampled = started.elapsed();
         let key = preview_pipeline_cache_key(&film, &paper, &params);
-        let cached = self.thumbnail_pipelines.iter().position(|(k, _)| *k == key);
-        let calibrated = match cached {
-            Some(index) => self.thumbnail_pipelines.remove(index).1,
-            None => {
-                let film_profile = profile::load_profile_by_name(data, &film)?;
-                let print_profile =
-                    profile::load_profile_by_name(data, if params.io.scan_film { &film } else { &paper })?;
-                Pipeline::new_with_spectral(film_profile, print_profile, (*params).clone(), data)
-                    .map_err(anyhow::Error::msg)?
-            }
-        };
+        let (calibrated, cached) =
+            self.pipelines.get_or_build(&key, false, || build_pipeline(data, &film, &paper, &params))?;
         let mut pipeline = calibrated.clone().with_params((*params).clone());
-        if self.thumbnail_pipelines.len() >= THUMBNAIL_PIPELINES {
-            self.thumbnail_pipelines.remove(0);
-        }
-        self.thumbnail_pipelines.push((key, calibrated));
         if let Some(metering) = metering {
             pipeline = pipeline.with_metering_preview(metering);
         }
@@ -489,7 +472,7 @@ impl Session {
         Ok(json!({
             "width": width, "height": height, "backend": used_backend,
             "display_color_space": DisplaySpace::of(encoding).name(),
-            "elapsed_ms": ms(started.elapsed()), "cached_pipeline": cached.is_some(),
+            "elapsed_ms": ms(started.elapsed()), "cached_pipeline": cached,
             "timing_ms": {"decode": ms(decoded), "resample": ms(resampled - decoded),
                 "pipeline": ms(built - resampled), "process": ms(processed - built),
                 "write": ms(started.elapsed() - processed)},
@@ -559,16 +542,9 @@ impl Session {
                 let started = Instant::now();
                 let params = spektrafilm_core::tone_curve::tone_params(&params);
                 let key = preview_pipeline_cache_key(&film, &paper, &params);
-                let cached = self.tone_pipeline.as_ref().is_some_and(|(old, _)| old == &key);
-                if !cached {
-                    let film_profile = profile::load_profile_by_name(data, &film)?;
-                    let print_profile =
-                        profile::load_profile_by_name(data, if params.io.scan_film { &film } else { &paper })?;
-                    let pipeline = Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data)
-                        .map_err(anyhow::Error::msg)?;
-                    self.tone_pipeline = Some((key, pipeline));
-                }
-                let pipeline = self.tone_pipeline.as_ref().unwrap().1.clone().with_params(params);
+                let (calibrated, cached) =
+                    self.pipelines.get_or_build(&key, false, || build_pipeline(data, &film, &paper, &params))?;
+                let pipeline = calibrated.clone().with_params(params);
                 let built = started.elapsed();
                 let curve = spektrafilm_core::tone_curve::tone_curve(&pipeline, count.unwrap_or(256));
                 let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
@@ -582,7 +558,7 @@ impl Session {
             }
             Command::ReleaseThumbnails => {
                 self.thumbnail_source = None;
-                self.thumbnail_pipelines = Vec::new();
+                self.pipelines.release_unpinned();
                 self.thumbnail_wb_sources = Vec::new();
                 Ok(json!({}))
             }
@@ -640,16 +616,9 @@ impl Session {
                 let key = preview_pipeline_cache_key(&film, &paper, &params);
                 // Borrow the calibrated look when possible, but keep all
                 // placement work local. Save must still see the last preview.
-                let pipeline = if let Some((cached_key, pipeline)) = &self.pipeline {
-                    if cached_key == &key { Some(pipeline.clone()) } else { None }
-                } else { None };
-                let mut pipeline = match pipeline {
-                    Some(pipeline) => pipeline.with_params((*params).clone()),
-                    None => Pipeline::new_with_spectral(
-                        profile::load_profile_by_name(data, &film)?,
-                        profile::load_profile_by_name(data, if params.io.scan_film { &film } else { &paper })?,
-                        (*params).clone(), data,
-                    ).map_err(anyhow::Error::msg)?,
+                let mut pipeline = match self.pipelines.peek(&key) {
+                    Some(pipeline) => pipeline.clone().with_params((*params).clone()),
+                    None => build_pipeline(data, &film, &paper, &params)?,
                 };
                 if let Some(metering) = &self.metering {
                     pipeline = pipeline.with_metering_preview(metering.clone());
@@ -827,28 +796,11 @@ impl Session {
                     return Ok(response);
                 }
                 let key = preview_pipeline_cache_key(&film, &paper, &params);
-                if self.pipeline.as_ref().is_none_or(|(old, _)| old != &key) {
-                    let film_profile = profile::load_profile_by_name(data, &film)?;
-                    let print_profile = profile::load_profile_by_name(
-                        data,
-                        if params.io.scan_film { &film } else { &paper },
-                    )?;
-                    let pipeline = Pipeline::new_with_spectral(
-                        film_profile,
-                        print_profile,
-                        (*params).clone(),
-                        data,
-                    )
-                    .map_err(anyhow::Error::msg)?;
-                    self.pipeline = Some((key, pipeline));
-                }
-                let mut pipeline = self
-                    .pipeline
-                    .as_ref()
-                    .unwrap()
-                    .1
-                    .clone()
-                    .with_params((*params).clone());
+                let before_build = started.elapsed();
+                let (calibrated, cached_pipeline) =
+                    self.pipelines.get_or_build(&key, true, || build_pipeline(data, &film, &paper, &params))?;
+                let mut pipeline = calibrated.clone().with_params((*params).clone());
+                let pipeline_ms = (started.elapsed() - before_build).as_secs_f64() * 1000.0;
                 if let Some(metering) = &self.metering {
                     pipeline = pipeline.with_metering_preview(metering.clone());
                 }
@@ -863,7 +815,7 @@ impl Session {
                         .get_or_insert_with(|| spektrafilm_core::stages::filming::metering_preview(source));
                     let ae = if params.camera.auto_exposure { pipeline.metering_film_raw(metering).1 } else { 0.0 };
                     let reshaped = !spektrafilm_core::prep::PrepParams { exposure_ev: 0.0, ..params.prep }.is_identity();
-                    let mut stops_key = format!("{}|{source_generation}|{}", input.display(), self.pipeline.as_ref().unwrap().0);
+                    let mut stops_key = format!("{}|{source_generation}|{}", input.display(), key);
                     if reshaped {
                         stops_key += &format!("|{:?}|{ae}|{}", params.prep, params.camera.exposure_compensation_ev);
                     }
@@ -923,6 +875,7 @@ impl Session {
                     "display_color_space": DisplaySpace::of(encoding).name(),
                     "elapsed_ms": started.elapsed().as_secs_f64() * 1000.0,
                     "film_histogram": histogram,
+                    "cached_pipeline": cached_pipeline, "pipeline_ms": pipeline_ms,
                 });
                 self.output = Some(Rendered {
                     id: request.id,
@@ -985,6 +938,13 @@ fn write_display(
         display_rgba_with_post(image, DISPLAY_MAX_DIM, encoding, post.as_ref());
     std::fs::write(path, bytes).context("Writing preview buffer")?;
     Ok((width, height))
+}
+
+/// A calibrated pipeline for `film` printed on `paper` (or scanned).
+fn build_pipeline(data: &Path, film: &str, paper: &str, params: &RuntimeParams) -> Result<Pipeline> {
+    let film_profile = profile::load_profile_by_name(data, film)?;
+    let print_profile = profile::load_profile_by_name(data, if params.io.scan_film { film } else { paper })?;
+    Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data).map_err(anyhow::Error::msg)
 }
 
 /// The source at `dimensions`. A resampled copy is kept until the source or
@@ -1070,7 +1030,7 @@ mod tests {
         let result = session.handle(Request { id: 8, command: command(output.clone()) }, Path::new(".")).unwrap();
         assert_eq!((result["usable"].as_bool(), result["width"].as_u64(), result["height"].as_u64()),
             (Some(true), Some(4), Some(2)));
-        assert!(session.source.is_none() && session.pipeline.is_none());
+        assert!(session.source.is_none() && !session.pipelines.has_main());
         assert_eq!(session.source_generation, 31);
         let retained = session.output.as_ref().unwrap();
         assert_eq!(retained.id, 7);
@@ -1175,7 +1135,7 @@ mod tests {
         assert_eq!(with_preset, applied);
         let (_, plain) = thumbnail(&mut session, "kodak_gold_200", "kodak_supra_endura", current, None, "plain.rgba");
         assert_ne!(with_preset, plain);
-        assert!(session.output.is_none() && session.pipeline.is_none());
+        assert!(session.output.is_none() && !session.pipelines.has_main());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
