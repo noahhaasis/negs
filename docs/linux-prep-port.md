@@ -102,6 +102,9 @@ screenshots, logs and scratch files remain outside git, under `target/` or `/tmp
 | Viewer/export smoke | 7 checks passed, including real 1600 × 1067 output |
 | Native GTK stock/favourites test | Passed |
 | Scrolled Output layout regression | Passed |
+| Clean Flatpak and AppImage CI | Passed, including installation/runtime smoke checks |
+| Arch CI at `0631b9e` | GTK test compilation failed on an omitted tooltip reference; fixed locally in `9dd3b0f` |
+| Exact Linux source archive after the local fix | 65 passed, 10 ignored, including strict tooltip parity |
 
 The broader shared test run uses `OPENBLAS_NUM_THREADS=1`, as Linux CI does,
 with normal device/runtime access. An earlier sandboxed run segfaulted during
@@ -164,5 +167,17 @@ speedup claim is made. Two warm launches on `docs/card.jpg` (1320 × 900,
 1.25× display scale) presented their first frame at 371–376 ms and a developed
 image at 1.05–1.14 s; the restored cached frame appeared at 421 ms.
 
-Distribution workflow validation follows the committed source; this report is
-updated with its run/results separately.
+[Linux CI run 41988059600](https://github.com/noahhaasis/negs/actions/runs/41988059600)
+validated `0631b9e`. Flatpak built, installed and passed its sandbox checks;
+AppImage passed Ubuntu, Fedora and Arch runtime smoke checks. The Arch job
+compiled/tested the shared engine, then failed to compile the GTK tests because
+the source archive omitted `macos/Sources/NegsApp/ControlHelp.swift`.
+
+Local fix `9dd3b0f` adds only that Swift text reference to the archive allowlist,
+preserves the strict tooltip parity test and adds a release regression assertion
+that no other macOS files are included. The Linux port documentation is included
+as well. All six release-generator tests pass. The exact archive was generated
+from an isolated checkout, extracted, and its release GTK suite passed 65 tests
+(10 opt-in tests ignored). Evidence is under
+`target/linux-validation/prep-port/archive-local-fix/` and `archive-tests.log`.
+This packaging fix is local; remote Arch CI has not been rerun with it.
