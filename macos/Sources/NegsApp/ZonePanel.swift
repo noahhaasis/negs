@@ -34,6 +34,8 @@ struct ZonePanel: View {
         .frame(width: ZoneGeometry.panelWidth)
         .allowsHitTesting(model.canPlaceZones)
         .opacity(model.canPlaceZones ? 1 : 0.5)
+        // A mid grey, so it shows against a white mat and the darkest tile alike.
+        .overlay(alignment: .trailing) { Rectangle().fill(Color(white: 0.5)).frame(width: 1).allowsHitTesting(false) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Zones")
     }
@@ -71,7 +73,6 @@ private struct ZoneTile: View {
             }
         }
         .frame(maxHeight: .infinity)
-        .overlay(alignment: .bottom) { Rectangle().fill(.black.opacity(0.5)).frame(height: 1) }
         .overlay { if selected { Rectangle().strokeBorder(Color.accentColor, lineWidth: 2.5) } }
         .contentShape(Rectangle())
         .gesture(

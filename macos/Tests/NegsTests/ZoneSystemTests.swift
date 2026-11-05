@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import NegsApp
 
@@ -49,6 +50,40 @@ final class ZoneSystemTests: XCTestCase {
     func testTileLabelsNameTheZoneAndWhetherItIsPlaced() {
         XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[5], placed: true), "Zone 5, Middle gray, placed")
         XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[0], placed: false), "Zone 0, Pure black, not placed")
+    }
+
+    /// The column is one scale, with no lines between its tiles, and a line down
+    /// its right side that shows against a white mat as well as the dark tiles.
+    @MainActor func testTheZoneColumnHasARightEdgeAndNoRowLines() throws {
+        _ = NSApplication.shared
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let height = 550
+        let host = NSHostingView(rootView: ZonePanel(model: model).frame(height: CGFloat(height)).background(Color.white))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.frame = NSRect(x: 0, y: 0, width: ZoneGeometry.panelWidth, height: CGFloat(height))
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let scale = bitmap.pixelsHigh / height
+        func grey(_ x: Int, _ y: Int) throws -> CGFloat {
+            try XCTUnwrap(bitmap.colorAt(x: x, y: y * scale)?.usingColorSpace(.sRGB)).redComponent * 255
+        }
+        // Down a column clear of the numerals, the tone only ever falls: a row
+        // line would show as a dip darker than the tile below it.
+        var previous: CGFloat = 256
+        for y in 0..<height {
+            let value = try grey(4 * scale, y)
+            XCTAssertLessThanOrEqual(value, previous + 0.5, "A line at row \(y)")
+            previous = value
+        }
+        // Tile 10 is white, so the edge has to be darker than it.
+        let right = bitmap.pixelsWide - 1
+        XCTAssertLessThan(try grey(right, 25), try grey(right - 3 * scale, 25) - 20)
+        // A steady mid grey top to bottom, so it's lighter than the darkest tile too.
+        // (The panel is dimmed in this render, with no photograph; the line isn't.)
+        XCTAssertEqual(try grey(right, 25), 128, accuracy: 3)
+        XCTAssertEqual(try grey(right, height - 25), 128, accuracy: 3)
     }
 
     /// Tab shows and hides the pins, and stands down while typing in a field.
