@@ -209,9 +209,10 @@ final class QuickFrameStepTests: XCTestCase {
         XCTAssertEqual(try bytes(quick.image), try bytes(direct.image), "The settled frame is byte-identical")
     }
 
-    /// Clicking through films faster than the settle delay shows quick
-    /// frames only, then one export-size render of the last film.
-    func testRapidFilmSwitchingRendersOneSettledFrame() async throws {
+    /// Clicking through films while full renders run: each edit renders at
+    /// most a quick and a full frame, superseded ones aren't shown, and the
+    /// last film settles.
+    func testRapidFilmSwitchingDoesNotPileUpRenders() async throws {
         let model = try await openModel(scale: 0.25)
         let start = model.renderLog.count
         let films = ["kodak_portra_160", "kodak_ektar_100", "kodak_portra_400", "kodak_ultramax_400", "kodak_portra_800"]
@@ -223,12 +224,14 @@ final class QuickFrameStepTests: XCTestCase {
         }
         try await settled(model)
         let log = steps(model, after: start)
-        XCTAssertEqual(log.filter { $0 == .settled }.count, 1, "\(log)")
+        XCTAssertLessThanOrEqual(log.count, 2 * films.count, "\(log)")
+        XCTAssertLessThan(log.filter { $0 == .settled }.count, films.count, "Superseded edits skip their full render: \(log)")
         XCTAssertEqual(log.last, .settled)
         XCTAssertEqual(model.film, films.last)
+        XCTAssertFalse(model.status.hasPrefix("Preview"), model.status)
     }
 
-    /// Undo while waiting to settle settles the restored film once.
+    /// Undo right after a quick frame settles the restored film.
     func testUndoBeforeTheSettledFrameSettlesTheRestoredFilm() async throws {
         let model = try await openModel(scale: 0.25)
         let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
@@ -239,8 +242,10 @@ final class QuickFrameStepTests: XCTestCase {
         XCTAssertEqual(model.film, film)
         try await settled(model)
         let log = steps(model, after: start)
-        XCTAssertEqual(log.filter { $0 == .settled }.count, 1, "\(log)")
+        XCTAssertLessThanOrEqual(log.filter { $0 == .settled }.count, 2, "\(log)")
         XCTAssertEqual(log.last, .settled)
+        XCTAssertEqual(model.film, film)
+        XCTAssertTrue(model.previewCurrent)
     }
 
     /// Post-only edits keep reusing the helper's output: no quick frame,
@@ -267,31 +272,49 @@ final class QuickFrameStepTests: XCTestCase {
         XCTAssertNotEqual(model.value("io.upscale_factor"), .null)
         model.set("io.upscale_factor", .number(5))
         try await waitUntil { model.renderFailed }
-        try await Task.sleep(for: EditorModel.settleDelay * 3)
+        try await Task.sleep(for: .milliseconds(1500))
         XCTAssertEqual(steps(model, after: start), [.quick(0.25), .settled])
         XCTAssertNotNil(model.error)
         model.error = nil
     }
 
-    /// A slider grabbed while waiting to settle holds the settled render
-    /// until it's let go.
-    func testADragWhileWaitingToSettleSettlesOnRelease() async throws {
+    /// A slider grabbed right after a quick frame: letting go goes straight
+    /// to export size, as after any drag.
+    func testADragRightAfterAQuickFrameSettlesOnRelease() async throws {
         let model = try await openModel(scale: 0.25)
         let start = model.renderLog.count
         model.chooseFilm(otherFilm(model))
         try await waitUntil { model.status.hasPrefix("Preview") }
         model.beginInteraction()
-        try await Task.sleep(for: EditorModel.settleDelay + .milliseconds(300))
-        XCTAssertFalse(steps(model, after: start).contains(.settled))
+        model.set("camera.exposure_compensation_ev", .number(0.5))
+        try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(model.previewCurrent)
         model.endInteraction()
         try await settled(model)
-        XCTAssertEqual(steps(model, after: start), [.quick(0.25), .settled])
+        let log = steps(model, after: start)
+        XCTAssertEqual(log.first, .quick(0.25), "\(log)")
+        XCTAssertEqual(log.last, .settled)
+        XCTAssertEqual(log.lastIndex(of: .quick(0.25)), 0, "No quick frame after the drag: \(log)")
     }
 
     /// With the brightness match on, the match runs on the quick frame's
     /// decode, before any export-size render: one settled render, of the
     /// matched exposure.
+    /// Letting go of a slider renders at export size, without a quick frame.
+    func testADragSettlesWithoutAQuickFrame() async throws {
+        let model = try await openModel(scale: 0.25)
+        let start = model.renderLog.count
+        model.beginInteraction()
+        model.set("camera.exposure_compensation_ev", .number(0.5))
+        try await waitUntil { model.status.hasPrefix("Preview") }
+        model.set("camera.exposure_compensation_ev", .number(0.7))
+        model.endInteraction()
+        try await settled(model)
+        let log = steps(model, after: start)
+        XCTAssertFalse(log.contains(.quick(0.25)), "\(log)")
+        XCTAssertEqual(log.last, .settled)
+    }
+
     func testTheMatchRunsBeforeTheSettledRender() async throws {
         let model = try await openModel(scale: 0.25, match: true)
         guard model.brightnessMatchActive else { throw XCTSkip("The test photo can't be matched: \(model.brightnessMatchNote ?? "")") }

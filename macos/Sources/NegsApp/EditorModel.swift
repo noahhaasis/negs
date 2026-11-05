@@ -162,11 +162,6 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var quickStep: FrameID?
     /// The shown frame is the quick frame of this edit.
     @ObservationIgnored private var quickFrame: FrameID?
-    /// Waits for edits to stop before the export-size render after a quick
-    /// frame, so clicking through films doesn't queue behind a full render.
-    @ObservationIgnored private var settleTask: Task<Void, Never>?
-    /// The last edit made by the user (not by a brightness match).
-    @ObservationIgnored private var lastUserEdit = ContinuousClock.now
     /// The helper's last output, when it's a settled render: the request
     /// without its post adjustments, which the helper applies to the kept
     /// output instead of rendering again. A quick frame would replace it.
@@ -527,6 +522,8 @@ import UniformTypeIdentifiers
         guard let start = interactionStart else { return }
         interactionStart = nil
         if start != state { registerUndo(restoring: start, action: action) }
+        // The drag frames were canvas-size already: letting go settles.
+        quickStep = FrameID(revision: revision, generation: sourceGeneration)
         if showingInteractiveFrame, ready, source != nil, !closing { scheduleRender() }
         if !previewCurrent { scheduleActivity() }
         pumpPreviews()
@@ -589,11 +586,10 @@ import UniformTypeIdentifiers
     }
     /// A border, crop, or rotation change only redraws the canvas; anything
     /// else re-renders.
-    private func replaceState(_ next: EditState, byUser: Bool = true) {
+    private func replaceState(_ next: EditState) {
         guard !closing else { return }
         let next = withPreferences(next)
         let render = next.rendered != state.rendered
-        if render, byUser { lastUserEdit = .now }
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
         if render { changed() } else { pumpPreviews() }
@@ -967,7 +963,6 @@ import UniformTypeIdentifiers
 
     private func changed(invalidateCache: Bool = true) {
         heldPreview = nil
-        settleTask?.cancel(); settleTask = nil
         scheduleToneCurve()
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
@@ -1006,11 +1001,6 @@ import UniformTypeIdentifiers
     /// shows at most half of its pixels.
     nonisolated static let quickFrameMinimumPixels = 4.5e6
     nonisolated static let quickFrameMaximumPixelFraction = 0.5
-    /// After a quick frame, the export-size render starts once no edit came
-    /// for this long: longer than macOS's default key-repeat delay, so
-    /// holding or tapping an arrow key in the film grid shows quick frames
-    /// without waiting behind full renders.
-    nonisolated static let settleDelay = Duration.milliseconds(400)
 
     nonisolated static func renderStep(interacting: Bool, screenScale: CGFloat?, framePixels: Double,
                                        hasFrame: Bool, quickFrameDone: Bool, reusesHelperOutput: Bool) -> RenderStep {
@@ -1083,8 +1073,7 @@ import UniformTypeIdentifiers
             let (id, result) = try await engine.request(command)
             if step == .settled { helperOutput = reuseKey }
             // A quick frame of an earlier edit still shows while edits keep
-            // coming (an arrow key held in the film grid); the current one
-            // renders next.
+            // coming (Undo held down); the current one renders next.
             let quick = step.isQuick
             func showable() -> Bool { quick ? !closing && generation == sourceGeneration : shouldShow(currentRevision, generation) }
             guard showable() else { return }
@@ -1150,23 +1139,15 @@ import UniformTypeIdentifiers
     }
 
     /// After a quick frame of the current edit, renders it at export size
-    /// once edits have stopped for `settleDelay`, and no brightness match is
-    /// pending or running: a match that changes the exposure is a new edit,
-    /// with its own quick frame. Called wherever one of these conditions can
-    /// clear; does nothing until all hold.
+    /// once no brightness match is pending or running: a match that changes
+    /// the exposure is a new edit, with its own quick frame. Called wherever
+    /// one of these conditions can clear; does nothing until all hold. A
+    /// slider's release renders by itself.
     private func settleQuickFrame() {
         let frame = FrameID(revision: revision, generation: sourceGeneration)
-        guard settleTask == nil, quickStep == frame, !previewCurrent, !renderFailed, !interacting, !rendering, pendingRender == nil,
+        guard quickStep == frame, !previewCurrent, !renderFailed, !interacting, !rendering, pendingRender == nil,
               matchTask == nil, heldPreview == nil, ready, source != nil, !closing else { return }
-        let wait = Self.settleDelay - (ContinuousClock.now - lastUserEdit)
-        settleTask = Task { [weak self] in
-            if wait > .zero { try? await Task.sleep(for: wait) }
-            guard let self, !Task.isCancelled else { return }
-            settleTask = nil
-            // Edits cancel this task; a slider's release renders by itself.
-            guard quickStep == FrameID(revision: revision, generation: sourceGeneration), !previewCurrent, !interacting, !closing else { return }
-            scheduleRender()
-        }
+        scheduleRender()
     }
 
     /// While a slider moves, show each finished frame. Otherwise only the
@@ -1564,8 +1545,7 @@ import UniformTypeIdentifiers
         }
         match.inputs = inputs; match.highlightLimited = limited
         next.brightnessMatch = match
-        // Not an edit to wait out: the user stopped before the match ran.
-        replaceState(next, byUser: false)
+        replaceState(next)
     }
 
     // MARK: Print balance
@@ -2009,7 +1989,6 @@ import UniformTypeIdentifiers
 
     func shutdown() {
         cancelBrightnessMatch()
-        settleTask?.cancel(); settleTask = nil
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
         exportJob?.cancel(); engine?.stop()

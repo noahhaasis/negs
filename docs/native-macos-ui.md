@@ -293,9 +293,9 @@ never dragged. On an M1 Pro, 24 MP NEF and 60 MP Leica Q3 drag frames at a
 
 A discrete edit (film, paper, preset, menu, checkbox, undo) also shows such a
 frame first, marked "Preview", then the export-size one (ticket 28,
-`EditorModel.RenderStep.quick`). The export-size render starts once no edit came
-for 400 ms (`settleDelay`), so clicking or holding an arrow key through the film
-grid shows quick frames without queueing behind full renders. With the
+`EditorModel.RenderStep.quick`), then the export-size one right after. The
+helper can't stop a running render, so a click during a full render gets its
+quick frame once that render ends. Letting go of a slider settles directly. With the
 brightness match on, the quick frame is held and the match runs on its decode;
 the export-size render then develops the matched exposure only. No quick frame
 for photographs under 4.5 MP, when the canvas shows over half the pixels
