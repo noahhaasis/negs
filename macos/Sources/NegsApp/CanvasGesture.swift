@@ -27,13 +27,19 @@ enum SampleSize {
     static let smallest = 0.002
     static let largest = 0.5
 
-    /// One step of the scroll wheel, in the direction ⌥-scroll zooms in. A wheel's
+    /// One step of the scroll wheel: pushed up grows, pulled down shrinks. A wheel's
     /// notch moves as far as ten pixels of a trackpad's scroll.
+    /// A scroll's delta as the hand moved: positive is the wheel pushed up,
+    /// whatever the natural scrolling setting does to the event.
+    static func handDelta(scrollingDeltaY delta: Double, inverted: Bool) -> Double {
+        inverted ? -delta : delta
+    }
+
     static func radius(from radius: Double, scrollDelta: Double, precise: Bool) -> Double {
         let step = precise ? scrollDelta : scrollDelta * 10
         guard step != 0 else { return radius }
-        guard radius >= smallest else { return step < 0 ? smallest : 0 }
-        let next = radius * exp(-step * 0.01)
+        guard radius >= smallest else { return step > 0 ? smallest : 0 }
+        let next = radius * exp(step * 0.01)
         return next < smallest ? 0 : min(next, largest)
     }
 }

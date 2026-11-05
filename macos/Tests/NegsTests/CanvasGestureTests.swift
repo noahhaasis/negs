@@ -259,13 +259,23 @@ extension CanvasGestureTests {
         try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     }
 
+    /// Pushing the wheel up, away from you, grows the circle. Pulling it down
+    /// shrinks it to one pixel, and it never passes half the photograph.
     func testScrollingScalesTheCircleWithinItsLimits() {
-        XCTAssertGreaterThan(SampleSize.radius(from: 0.1, scrollDelta: -10, precise: true), 0.1)
-        XCTAssertLessThan(SampleSize.radius(from: 0.1, scrollDelta: 10, precise: true), 0.1)
-        XCTAssertGreaterThan(SampleSize.radius(from: 0.1, scrollDelta: -1, precise: false), SampleSize.radius(from: 0.1, scrollDelta: -1, precise: true))
-        XCTAssertEqual(SampleSize.radius(from: 0.5, scrollDelta: -100, precise: true), 0.5)
-        XCTAssertEqual(SampleSize.radius(from: SampleSize.smallest, scrollDelta: 100, precise: true), 0)
-        XCTAssertEqual(SampleSize.radius(from: 0, scrollDelta: -1, precise: true), SampleSize.smallest)
+        XCTAssertGreaterThan(SampleSize.radius(from: 0.1, scrollDelta: 10, precise: true), 0.1)
+        XCTAssertLessThan(SampleSize.radius(from: 0.1, scrollDelta: -10, precise: true), 0.1)
+        XCTAssertGreaterThan(SampleSize.radius(from: 0.1, scrollDelta: 1, precise: false), SampleSize.radius(from: 0.1, scrollDelta: 1, precise: true))
+        XCTAssertEqual(SampleSize.radius(from: 0.5, scrollDelta: 100, precise: true), 0.5)
+        XCTAssertEqual(SampleSize.radius(from: SampleSize.smallest, scrollDelta: -100, precise: true), 0)
+        XCTAssertEqual(SampleSize.radius(from: 0, scrollDelta: 1, precise: true), SampleSize.smallest)
+    }
+
+    /// The direction follows the hand, not the natural scrolling setting: a
+    /// wheel pulled down reports a negative delta with it off, and a positive
+    /// one, flagged inverted, with it on.
+    func testTheWheelsDirectionIgnoresNaturalScrolling() {
+        XCTAssertEqual(SampleSize.handDelta(scrollingDeltaY: -3, inverted: false), -3)
+        XCTAssertEqual(SampleSize.handDelta(scrollingDeltaY: 3, inverted: true), -3)
     }
 
     /// With a pin selected the wheel sizes it; otherwise it pans as ever.

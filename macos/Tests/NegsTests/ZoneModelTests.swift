@@ -203,7 +203,7 @@ extension ZoneModelTests {
         await model.movePin(0, to: centre)
         try await waitUntil { model.previewCurrent }
         let moved = model.pins[0]
-        for _ in 0..<5 { model.resizeSelectedPin(scrollDelta: -60, precise: true) }
+        for _ in 0..<5 { model.resizeSelectedPin(scrollDelta: 60, precise: true) }
         let shown = try XCTUnwrap(model.pinsToShow.first).source.radius
         XCTAssertGreaterThan(shown, 0, "The circle follows the wheel at once")
         XCTAssertEqual(model.pins[0].source?.radius, 0, "It isn't an edit yet")
@@ -223,7 +223,7 @@ extension ZoneModelTests {
         defer { model.shutdown() }
         try await place(5, on: model)
         model.selectPin(nil)
-        model.resizeSelectedPin(scrollDelta: -60, precise: true)
+        model.resizeSelectedPin(scrollDelta: 60, precise: true)
         XCTAssertEqual(model.pinsToShow.first?.source.radius, 0)
         XCTAssertEqual(model.sampleRadius, 0)
     }

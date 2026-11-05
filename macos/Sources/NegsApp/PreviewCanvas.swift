@@ -228,7 +228,8 @@ final class ImageScrollView: NSScrollView {
             let center = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
             setMagnification(min(max(magnification * exp(-event.scrollingDeltaY * 0.01), minMagnification), maxMagnification), centeredAt: center)
         } else if overlay.pins.contains(where: \.selected), let onScrollPin {
-            onScrollPin(Double(event.scrollingDeltaY), event.hasPreciseScrollingDeltas)
+            let delta = SampleSize.handDelta(scrollingDeltaY: Double(event.scrollingDeltaY), inverted: event.isDirectionInvertedFromDevice)
+            onScrollPin(delta, event.hasPreciseScrollingDeltas)
         } else {
             super.scrollWheel(with: event)
         }
