@@ -24,9 +24,9 @@ Omarchy, the same layout is drawn with the theme's colours.
 - Work on `main`, following `AGENTS.md`: commit and push completed changes
   directly, with no PR. The main checkout
   (`/home/noah/Work/Negs`) may hold other people's uncommitted work. On
-  5 November that was `linux/src/stock_browser.rs`, `linux/run.sh` and
-  `docs/highlights-shadows-plan.md`. Do not commit, revert or reformat those.
-  If they are still dirty, work in a separate worktree from `main`.
+  5 November that was `linux/run.sh` and `docs/highlights-shadows-plan.md`.
+  Do not commit, revert or reformat those. If the checkout is dirty, work in
+  a separate worktree from `main`.
 - End commit messages with
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Linux only. Do not change the macOS, Windows or web clients.
@@ -244,9 +244,8 @@ through, and none of it may be faded with opacity. This has two layers.
 - No `set_opacity` below 1 on any widget that shows a photo.
   `stock_browser.rs:44` sets 0.55 on stale previews today. Replace that with
   an opaque treatment, such as a spinner or a busy badge, so the preview
-  pixels stay at full opacity. That file has uncommitted work by someone else
-  (see "Where things are"). Coordinate with the user, or do this change last,
-  once it has landed.
+  pixels stay at full opacity. That file changed recently (0d096e2), so
+  re-read it before editing.
 - Filmstrip thumbnails stay at full opacity (see the look).
 - Omarchy's Glassy mode adds `window { backdrop-filter: blur(20px); }` to the
   user's `~/.config/gtk-4.0/gtk.css`. User CSS outranks application CSS.
