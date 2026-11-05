@@ -30,6 +30,37 @@ import XCTest
         XCTAssertEqual(try grey(2), try grey(50), accuracy: 1, "It's only one point wide")
     }
 
+    /// Locked to the export size, the viewer's background is white, and the
+    /// saved colour comes back when it's unlocked.
+    func testTheViewerIsWhiteWhileLocked() throws {
+        _ = NSApplication.shared
+        let defaults = UserDefaults.standard
+        let saved = (defaults.object(forKey: "lockWindowToPhotograph"), defaults.object(forKey: ViewerBackground.customKey))
+        defaults.set(false, forKey: ViewerBackground.customKey)
+        defer {
+            defaults.set(saved.0, forKey: "lockWindowToPhotograph")
+            defaults.set(saved.1, forKey: ViewerBackground.customKey)
+        }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        func background() throws -> Int {
+            let host = NSHostingView(rootView: CanvasArea(model: model))
+            host.appearance = NSAppearance(named: .darkAqua)
+            host.frame = NSRect(x: 0, y: 0, width: 800, height: 800)
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            let colour = try XCTUnwrap(bitmap.colorAt(x: 8, y: bitmap.pixelsHigh - 8)?.usingColorSpace(.sRGB))
+            return Int((colour.redComponent * 255).rounded())
+        }
+        model.windowLockedToPhotograph = false
+        XCTAssertEqual(try background(), 40, accuracy: 2)
+        model.windowLockedToPhotograph = true
+        XCTAssertEqual(try background(), 255)
+        model.windowLockedToPhotograph = false
+        XCTAssertEqual(try background(), 40, accuracy: 2)
+    }
+
     /// A custom viewer colour is for the viewer: the sidebar's light text would
     /// vanish on a white one.
     func testACustomViewerColourLeavesTheSidebarAlone() throws {

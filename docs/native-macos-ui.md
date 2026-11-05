@@ -279,8 +279,8 @@ starts with none.
 P, the Lock Size button in the toolbar's view group, or Settings › Viewer locks the
 window to the export: the canvas shows the pixels an export would write, border
 included, one to a screen pixel, or scaled down in the same shape if they won't fit
-the screen (`WindowFit`). The window can't be resized, and zooming and panning are
-off. It refits when the export's size changes, or what's around the canvas does, so
+the screen (`WindowFit`). The window can't be resized, zooming and panning are off,
+and the viewer's background is white. It refits when the export's size changes, or what's around the canvas does, so
 photographs with the same export size keep the window where it is. It waits while
 cropping and in full screen.
 
