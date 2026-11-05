@@ -178,7 +178,7 @@ final class PinOverlayView: NSView {
         face.backgroundColor = ZoneScale.grey(zone).cgColor
         face.borderColor = edge.cgColor
         face.borderWidth = edgeWidth
-        let numeral = ZoneLadder.names[zone]
+        let numeral = ZoneScale.zones[zone].numeral
         let size: CGFloat = numeral.count > 3 ? 9.5 : numeral.count > 2 ? 11 : 12.5
         label.string = numeral
         label.fontSize = size

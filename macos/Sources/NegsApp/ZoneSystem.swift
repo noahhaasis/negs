@@ -1,74 +1,39 @@
 import AppKit
 
-/// The zone ladder: where each zone begins, in CIE Lab lightness.
-enum ZoneLadder {
-    /// Zone 0, then I…VIII. Zone VIII is paper white: a reflection print
-    /// cannot hold a stop above it, so Ansel Adams' zones IX and X (paper
-    /// white without texture, and the specular light source) have no place on
-    /// this axis.
-    static let names = ["0", "I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
-
-    /// Each zone's tone in relative luminance: 18 % × 2^(n − 5) for 0…VII,
-    /// then paper white for VIII.
-    static let centres: [Double] =
-        (0..<8).map { 0.18 / pow(2, 5) * pow(2, Double($0)) } + [0.9]
-
-    /// The ten boundaries, L\* 0…100: black, the geometric midpoint between
-    /// neighbouring zones (a half stop apart through the midtones), and paper
-    /// white. Zone VII ends at L\* 92.6 and VIII runs to 100.
-    static let lstar: [Double] =
-        [0] + (1..<centres.count).map { lstar(sqrt(centres[$0 - 1] * centres[$0])) } + [100]
-
-    /// CIE Lab lightness of a relative luminance.
-    static func lstar(_ y: Double) -> Double {
-        y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
-    }
-}
-
-/// One zone of the print, as a band on the L\* axis.
+/// One of Ansel Adams' zones, as a tone of the print.
 struct Zone: Identifiable, Hashable, Sendable {
     let index: Int
-    let numeral: String
     let name: String
-    /// The band's edges on the 0…100 L\* axis.
-    let lStarRange: ClosedRange<Double>
+    /// What typically belongs in this zone.
+    let note: String
     var id: Int { index }
-    var centre: Double { (lStarRange.lowerBound + lStarRange.upperBound) / 2 }
-    /// Where a pin on this band lands: black for zone 0, paper white for the
-    /// last zone, and the middle of the band in between.
-    var target: Double {
-        if lStarRange.lowerBound <= 0 { return 0 }
-        if lStarRange.upperBound >= 100 { return 100 }
-        return centre
-    }
+    var numeral: String { "\(index)" }
+    /// Where a pin on this zone prints, in L\* 0…100.
+    var target: Double { Double(index) * 10 }
 }
 
-/// The zones on the L\* axis, from the same ladder the engine's tone curve
-/// uses (`ZoneLadder`): zones 0–VII one stop apart from 18 % grey, then
-/// zone VIII, paper white.
+/// The eleven zones, evenly spaced in L\*, which puts zone 5 at 18 % gray
+/// (L\* 49.5). On the negative a zone is a stop, but 18 % × 2⁵ is far past
+/// white: the print compresses that range onto paper, and these are the tones
+/// it prints.
 enum ZoneScale {
-    static let names = [
-        "Pure black", "Near black", "First texture", "Dark detail",
-        "Open shadow", "Middle grey", "Light midtone", "Light texture", "Paper white"
-    ]
+    static let zones: [Zone] = [
+        ("Pure black", "No tone at all."),
+        ("Near black", "A slight tonality, but no detail."),
+        ("Dark black", "Slight detail in the shadows."),
+        ("Very dark gray", "Shadows with distinct, visible texture."),
+        ("Medium dark gray", "Slightly darker Black skin, dark foliage, landscape shadows."),
+        ("Middle gray", "18% gray: darker tan white skin, lighter Black skin, light foliage, dark blue sky."),
+        ("Middle light gray", "Average white skin, light stone, shadow areas on snow."),
+        ("Light gray", "Pale white skin, concrete or gray asphalt in sunlight."),
+        ("Gray-white", "Detail in highlights: white walls in sunlight, bright surfaces."),
+        ("Bright white", "Slight detail in highlights: white paper, snow, white water."),
+        ("Pure white", "No detail: light sources, specular highlights.")
+    ].enumerated().map { Zone(index: $0.offset, name: $0.element.0, note: $0.element.1) }
 
-    static let zones: [Zone] = {
-        var out: [Zone] = []
-        for index in ZoneLadder.names.indices {
-            let lower = ZoneLadder.lstar[index]
-            guard lower < 100 else { break }
-            let upper = min(100, ZoneLadder.lstar[min(index + 1, ZoneLadder.lstar.count - 1)])
-            out.append(Zone(
-                index: index, numeral: ZoneLadder.names[index], name: names[index],
-                lStarRange: lower...upper
-            ))
-        }
-        return out
-    }()
-
-    /// The band containing a tone, L\* 0…100.
+    /// The zone nearest a tone, L\* 0…100.
     static func zone(forTarget target: Double) -> Int {
-        zones.last { $0.lStarRange.lowerBound <= target }?.index ?? 0
+        min(max(Int((target / 10).rounded()), 0), zones.count - 1)
     }
 
     /// The grey a zone prints as, on its tile and its pins.

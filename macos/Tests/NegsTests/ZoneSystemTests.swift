@@ -4,46 +4,50 @@ import XCTest
 
 /// The zones: where they sit on the L\* axis and the tones they print as.
 final class ZoneSystemTests: XCTestCase {
-    func testTheZonesTileTheAxisFromTheLadder() {
+    /// Adams' eleven zones, evenly spaced in lightness as a print shows them.
+    func testTheElevenZonesRunFromPureBlackToPureWhite() throws {
         let zones = ZoneScale.zones
-        XCTAssertEqual(zones.count, 9)
-        XCTAssertEqual(zones.first?.lStarRange.lowerBound, 0)
-        XCTAssertEqual(zones.last?.lStarRange.upperBound, 100)
+        try XCTSkipUnless(zones.count == 11 || { XCTFail("\(zones.count) zones"); return false }())
         for (index, zone) in zones.enumerated() {
             XCTAssertEqual(zone.index, index)
-            XCTAssertEqual(zone.numeral, ZoneLadder.names[index])
-            XCTAssertEqual(zone.lStarRange.lowerBound, ZoneLadder.lstar[index], accuracy: 1e-12)
-            if index > 0 {
-                // No gaps, no overlaps.
-                XCTAssertEqual(zone.lStarRange.lowerBound, zones[index - 1].lStarRange.upperBound, accuracy: 1e-12)
-            }
+            XCTAssertEqual(zone.numeral, "\(index)")
+            XCTAssertEqual(zone.target, Double(index) * 10)
         }
-        XCTAssertEqual(zones[5].name, "Middle grey")
-        XCTAssertEqual(zones[5].lStarRange.lowerBound, 42.35, accuracy: 0.01)
-        XCTAssertEqual(zones[5].centre, (42.35 + 57.52) / 2, accuracy: 0.01)
-        // Zone VIII is paper white, not a stop above VII.
-        XCTAssertEqual(zones[8].numeral, "VIII")
-        XCTAssertEqual(zones[8].name, "Paper white")
-        XCTAssertEqual(zones[8].lStarRange.lowerBound, 91.91, accuracy: 0.05)
-        XCTAssertEqual(zones[8].lStarRange.upperBound, 100)
-        XCTAssertEqual(zones[7].lStarRange.upperBound, zones[8].lStarRange.lowerBound, accuracy: 1e-12)
+        XCTAssertEqual(zones[0].name, "Pure black")
+        XCTAssertEqual(zones[5].name, "Middle gray")
+        XCTAssertEqual(zones[10].name, "Pure white")
     }
 
-    /// The extreme bands are the black and white points; the rest pin to
-    /// their middles.
-    func testZoneTargetsSetTheBlackAndWhitePoints() {
-        let zones = ZoneScale.zones
-        XCTAssertEqual(zones[0].target, 0)
-        XCTAssertEqual(zones[8].target, 100)
-        XCTAssertEqual(zones[5].target, zones[5].centre)
-        XCTAssertEqual(zones[4].target, zones[4].centre)
+    /// Zone 5 is 18 % gray, the point meters are calibrated to.
+    func testZoneFiveIsEighteenPercentGray() {
+        let y = pow((ZoneScale.zones[5].target + 16) / 116, 3)
+        XCTAssertEqual(y, 0.18, accuracy: 0.005)
+    }
+
+    func testATargetFallsInTheNearestZone() {
         XCTAssertEqual(ZoneScale.zone(forTarget: 0), 0)
+        XCTAssertEqual(ZoneScale.zone(forTarget: 4.9), 0)
+        XCTAssertEqual(ZoneScale.zone(forTarget: 5.1), 1)
         XCTAssertEqual(ZoneScale.zone(forTarget: 50), 5)
-        XCTAssertEqual(ZoneScale.zone(forTarget: 100), 8)
+        XCTAssertEqual(ZoneScale.zone(forTarget: 100), 10)
+        XCTAssertEqual(ZoneScale.zone(forTarget: 140), 10)
+        XCTAssertEqual(ZoneScale.zone(forTarget: -5), 0)
+    }
+
+    /// A tile's tooltip names the zone and says what belongs in it.
+    func testATilesTooltipDescribesTheZone() {
+        let tip = ZonePanel.tooltip(for: ZoneScale.zones[5])
+        XCTAssertTrue(tip.hasPrefix("Zone 5: Middle gray\n"), tip)
+        XCTAssertTrue(tip.contains("18% gray"), tip)
+        XCTAssertTrue(tip.contains("dark blue sky"), tip)
+        for zone in ZoneScale.zones {
+            XCTAssertFalse(zone.note.isEmpty, zone.numeral)
+            XCTAssertTrue(ZonePanel.tooltip(for: zone).contains(zone.note), zone.numeral)
+        }
     }
 
     func testTileLabelsNameTheZoneAndWhetherItIsPlaced() {
-        XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[5], placed: true), "Zone V, Middle grey, placed")
+        XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[5], placed: true), "Zone 5, Middle gray, placed")
         XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[0], placed: false), "Zone 0, Pure black, not placed")
     }
 
@@ -54,6 +58,6 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(levels.first), 0, accuracy: 1e-9)
         XCTAssertEqual(try XCTUnwrap(levels.last), 1, accuracy: 1e-9)
         XCTAssertEqual(levels, levels.sorted())
-        XCTAssertEqual(Set(levels).count, 9)
+        XCTAssertEqual(Set(levels).count, 11)
     }
 }

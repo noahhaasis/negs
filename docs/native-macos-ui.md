@@ -221,16 +221,16 @@ JPEG inputs now use the same shared loader for CLI export as for preview.
 ## The zone system
 
 The **Zones** button in the toolbar's view group (⌥⌘Z) shows and hides the zone
-panel, a column on the photograph's left edge with one tile per zone: 0 at the
-bottom, then I to VIII. Zones 0–VII are one stop apart from 18 % grey and VIII is
-paper white. A reflection print can't hold a stop above that, so Adams' zones IX
-and X have no place here.
+panel, a column on the photograph's left edge with a tile for each of Ansel Adams'
+eleven zones: 0 at the bottom, 10 at the top. The zones are evenly spaced in L\*, at
+zone × 10, which puts zone 5 at 18 % gray. On the negative a zone is a stop, but
+five stops above 18 % is far past white, so these are the tones a print compresses
+that range onto.
 
-To place a pin, drag a tile onto the photograph and let go. The averaged tone
-under the pin then prints as that zone: the middle of the zone in L\*, except 0,
-which is L\* 0, and VIII, which is L\* 100. Dragging zone 0 onto something that is
-really zone III raises the black point. Each further pin recalculates the curve.
-A zone has one pin, so dragging a placed tile moves its pin. A drop during a
+To place a pin, drag a tile onto the photograph and let go. The averaged tone under
+the pin then prints as that zone. Dragging zone 0 onto something lighter raises the
+black point, and zone 10 sets the white point. Each further pin recalculates the
+curve. A zone has one pin, so dragging a placed tile moves its pin. A drop during a
 render waits for it and then measures.
 
 On the canvas:

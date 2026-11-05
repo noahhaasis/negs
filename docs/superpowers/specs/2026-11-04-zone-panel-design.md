@@ -12,7 +12,7 @@ Success is that someone can drag zone 0 onto a shadow and watch the black point 
 
 - A **Zones** button in the toolbar's view group, with zoom and crop, shows and hides the panel.
 - The panel is a column on the left edge of the photograph, about 56 points wide, spanning the canvas height. It sits above the film strip, not beside it.
-- It holds nine tiles, one per zone: 0 at the bottom, then I to VIII with VIII at the top. Each tile is filled with its zone's grey and shows its Roman numeral.
+- It holds eleven tiles, one for each of Ansel Adams' zones: 0 at the bottom, 10 at the top. Each tile is filled with its zone's grey and shows its number.
 - A tile shows a small dot when its zone is placed, and the selected pin's tile is outlined in the accent colour.
 - The inspector stays on the right and the film strip stays below, running under both the panel and the photograph.
 
@@ -44,7 +44,7 @@ The tone curve must keep rising, so some pairings are impossible, such as zone V
 
 ### Where a pin lands
 
-At the middle of its zone in L\*, except zone 0, which is L\* 0, and zone VIII, which is L\* 100. These are the existing `ZoneScale` targets.
+At L\* = zone × 10: zone 0 is pure black, zone 5 is 18% gray and zone 10 is pure white. A true stop per zone would pass white by zone 8, so the zones are the print's tones, evenly spaced.
 
 ### Hiding the panel
 

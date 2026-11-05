@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The zones, white at the top. Drag one onto the photograph and that spot's
+/// Adams' zones, white at the top. Drag one onto the photograph and that spot's
 /// tone becomes that zone. It sits directly left of the canvas, so
 /// `ZoneGeometry` and the overlay's lines line up with its rows.
 struct ZonePanel: View {
@@ -11,6 +11,10 @@ struct ZonePanel: View {
 
     static func label(for zone: Zone, placed: Bool) -> String {
         "Zone \(zone.numeral), \(zone.name), \(placed ? "placed" : "not placed")"
+    }
+
+    static func tooltip(for zone: Zone) -> String {
+        "Zone \(zone.numeral): \(zone.name)\n\(zone.note)\nDrag onto the photograph to make that tone this zone."
     }
 
     var body: some View {
@@ -56,7 +60,7 @@ private struct ZoneTile: View {
         ZStack(alignment: .topTrailing) {
             Rectangle().fill(Color(nsColor: ZoneScale.grey(zone.index)))
             Text(zone.numeral)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: zone.index == 5 ? .heavy : .medium))
                 .foregroundStyle(ink)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if placed {
@@ -82,7 +86,7 @@ private struct ZoneTile: View {
         }
         // Hiding the panel under the pointer sends no hover event.
         .onDisappear { if hovering { hovering = false; NSCursor.pop() } }
-        .help("Zone \(zone.numeral), \(zone.name). Drag onto the photograph to make that tone this zone.")
+        .help(ZonePanel.tooltip(for: zone))
         .accessibilityElement()
         .accessibilityLabel(ZonePanel.label(for: zone, placed: placed))
         .accessibilityAddTraits(selected ? .isSelected : [])
