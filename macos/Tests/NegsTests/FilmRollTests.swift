@@ -10,8 +10,7 @@ final class FilmRollTests: XCTestCase {
     /// The open photograph stands out by being brighter, not by a mark.
     func testOnlyTheOtherFramesAreDimmed() {
         XCTAssertEqual(FilmRollLayout.photographOpacity(selected: true), 1)
-        XCTAssertLessThan(FilmRollLayout.photographOpacity(selected: false), 1)
-        XCTAssertGreaterThan(FilmRollLayout.photographOpacity(selected: false), 0.5, "Only slightly")
+        XCTAssertEqual(FilmRollLayout.photographOpacity(selected: false), 0.45)
     }
 
     /// The column is the film, with no margin around it.

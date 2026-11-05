@@ -290,7 +290,7 @@ down the window's far left. Each frame is the current film's strip artwork
 so the perforations run on. Landscape photographs lie on their side as on real film and
 portrait ones stand up, cropped to fill the gate. Still films' frames carry their place
 in the folder over the artwork's fixed number; cine and print films keep their own edge
-text. The open photograph is at full brightness and the others are slightly dimmed, and the
+text. The open photograph is at full brightness and the others are dimmed to 45 %, and the
 arrow keys step along the roll. The column is the film alone, with no margin around it, and a short folder's
 roll carries on with blank, numbered frames to the bottom of the window.
 

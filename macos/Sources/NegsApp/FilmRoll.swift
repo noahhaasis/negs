@@ -35,8 +35,8 @@ enum FilmRollLayout {
         return max(0, Int((viewport / frameHeight).rounded(.up)) - photos)
     }
 
-    /// The open photograph is at full brightness; the rest dim a little, over black.
-    static func photographOpacity(selected: Bool) -> Double { selected ? 1 : 0.72 }
+    /// The open photograph is at full brightness; the rest dim to under half, over black.
+    static func photographOpacity(selected: Bool) -> Double { selected ? 1 : 0.45 }
 
     /// Still films print a frame number, and the artwork's is always the same
     /// one. Cine and print films have other text in those places.
