@@ -201,12 +201,23 @@ struct InspectorPanel: View {
     let model: EditorModel
     /// False until the window is on screen; see EditorWindowController.
     var built = true
+    @AppStorage(ViewerBackground.customKey) private var customBackground = false
+    @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
 
     var body: some View {
-        if !built { Color.clear }
-        else if let session = model.cropSession { CropInspector(model: model, session: session) }
-        else if model.inspectorPane == .presets { PresetInspector(model: model) }
-        else { AdjustmentInspector(model: model) }
+        Group {
+            if !built { Color.clear }
+            else if let session = model.cropSession { CropInspector(model: model, session: session) }
+            else if model.inspectorPane == .presets { PresetInspector(model: model) }
+            else { AdjustmentInspector(model: model) }
+        }
+        .scrollContentBackground(.hidden)
+        // The title bar shows the viewer's background through it, so this matches.
+        .background(ViewerBackground.canvas(custom: customBackground, hex: backgroundHex))
+        // The edge the film strip has on top, down the left, under the toolbar too.
+        .overlay(alignment: .leading) {
+            Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1).ignoresSafeArea()
+        }
     }
 }
 

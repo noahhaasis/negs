@@ -4,6 +4,32 @@ import XCTest
 @testable import NegsApp
 
 @MainActor final class InspectorLayoutTests: XCTestCase {
+    /// The sidebar is the title bar's colour, the viewer's background showing
+    /// through it, with a 1-point edge on its left like the film strip's on top.
+    func testTheSidebarMatchesTheTitleBarAndHasALeftEdge() throws {
+        _ = NSApplication.shared
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: ViewerBackground.customKey)
+        defaults.set(false, forKey: ViewerBackground.customKey)
+        defer { defaults.set(saved, forKey: ViewerBackground.customKey) }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let host = NSHostingView(rootView: InspectorPanel(model: model, built: false))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.frame = NSRect(x: 0, y: 0, width: 100, height: 100)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        func grey(_ x: Int) throws -> Int {
+            let colour = try XCTUnwrap(bitmap.colorAt(x: x * bitmap.pixelsWide / 100, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))
+            XCTAssertEqual(colour.alphaComponent, 1, accuracy: 0.01, "at \(x)")
+            return Int((colour.redComponent * 255).rounded())
+        }
+        XCTAssertEqual(try grey(50), 40, accuracy: 2, "The title bar samples at 40 in dark mode")
+        XCTAssertGreaterThan(try grey(0), try grey(50) + 8, "The left edge is lighter")
+        XCTAssertEqual(try grey(2), try grey(50), accuracy: 1, "It's only one point wide")
+    }
+
     func testInspectorDoesNotMoveWhenInteractivePreviewFinishes() async throws {
         try await checkInspectorLayout(limited: false)
     }
