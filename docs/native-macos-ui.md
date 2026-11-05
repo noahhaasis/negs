@@ -274,17 +274,17 @@ effect and the panel, to judge the photograph clean. Dropping a zone shows them 
 replaces a photograph's pins, a session restores them, and opening another file
 starts with none.
 
-## Fitting the window to the photograph
+## Locking the window to the export size
 
-Settings › Viewer › Fit the window to the photograph gives the canvas the shape of
-the photograph with its border, and locks the zoom to fit, so all of it always
-shows. It fills the canvas even above 1:1, and Zoom In, Zoom Out, Fit, Actual Size,
-pinch, ⌥-scroll and double-click are off. Dragging the window's edge keeps the shape,
-and `WindowFit` keeps it on the screen. Cropping, rotating or changing the border,
-film strip or sidebar takes the new shape at about the same canvas area. It waits
-while cropping and in full screen.
+P, the Lock Size button in the toolbar's view group, or Settings › Viewer locks the
+window to the export: the canvas shows the pixels an export would write, border
+included, one to a screen pixel, or scaled down in the same shape if they won't fit
+the screen (`WindowFit`). The window can't be resized, and zooming and panning are
+off. It refits when the export's size changes, or what's around the canvas does, so
+photographs with the same export size keep the window where it is. It waits while
+cropping and in full screen.
 
-Otherwise, ⌘+ and ⌘− zoom in and out by half a stop of magnification.
+Otherwise, ⌘+ and ⌘− zoom in and out by a factor of √2.
 
 ## Settings files
 

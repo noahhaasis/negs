@@ -20,7 +20,7 @@ import SwiftUI
 /// inspector column. The window, toolbar, and columns are AppKit; the canvas
 /// and inspector contents are SwiftUI. They follow the model through
 /// Observation, like the views.
-@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSWindowDelegate {
+@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate {
     private let model: EditorModel
     private let inspector: NSSplitViewItem
     private let canvasItem: NSSplitViewItem
@@ -57,6 +57,8 @@ import SwiftUI
         inspector.minimumThickness = 340
         inspector.maximumThickness = 440
         inspector.isCollapsed = !model.inspectorVisible
+        // One toolbar across the window, with the sidebar below it.
+        inspector.allowsFullHeightLayout = false
         let split = NSSplitViewController()
         split.addSplitViewItem(canvasItem)
         split.addSplitViewItem(inspector)
@@ -83,7 +85,6 @@ import SwiftUI
         window.contentViewController = split
         window.setFrameAutosaveName("editor")
         super.init(window: window)
-        window.delegate = self
         model.canvasScale.needsWindowFit = { [weak self] in self?.requestWindowFit() }
         shouldCascadeWindows = false
 
@@ -106,7 +107,7 @@ import SwiftUI
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self else { return false }
-                return self.holdOriginal(event) || self.togglePins(event)
+                return self.holdOriginal(event) || self.togglePins(event) || self.toggleWindowLock(event)
             } ? nil : event
         }
         resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
@@ -138,6 +139,19 @@ import SwiftUI
 
     /// Holding \ shows the original, as in Lightroom, unless text is being
     /// typed. True if the event was handled.
+    /// Whether a key press is the bare P that locks the window to the export size.
+    static func togglesWindowLock(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
+        keyCode == 35 && modifiers.isDisjoint(with: [.shift, .control, .option, .command]) && !(firstResponder is NSText)
+    }
+
+    private func toggleWindowLock(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.window === window, model.source != nil, !model.cropping,
+              Self.togglesWindowLock(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
+        else { return false }
+        if !event.isARepeat { model.windowLockedToPhotograph.toggle() }
+        return true
+    }
+
     /// Whether a key press is the bare Tab that shows or hides the pins. It stands
     /// down while a field is being edited, so Tab still moves between fields.
     static func togglesPins(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
@@ -182,29 +196,11 @@ import SwiftUI
         }
     }
 
-    // MARK: Locked to the photograph
+    // MARK: Locked to the export size
 
     private var fitsWindow: Bool { model.windowLockedToPhotograph && !model.cropping }
 
-    /// The photograph's size with its border, and everything around the canvas.
-    private func windowFitInputs() -> (document: CGSize, chrome: CGSize, limit: CGSize)? {
-        guard let window, !window.styleMask.contains(.fullScreen), let scroll = model.canvasScale.view,
-              let document = scroll.documentView?.frame.size, document.width > 0, document.height > 0,
-              let screen = window.screen ?? NSScreen.main else { return nil }
-        let content = window.contentRect(forFrameRect: window.frame).size
-        let limit = window.contentRect(forFrameRect: screen.visibleFrame).size
-        return (document, CGSize(width: content.width - scroll.bounds.width, height: content.height - scroll.bounds.height), limit)
-    }
-
-    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        guard fitsWindow, let inputs = windowFitInputs() else { return frameSize }
-        let size = WindowFit.resized(document: inputs.document, chrome: inputs.chrome,
-                                     proposed: sender.contentRect(forFrameRect: NSRect(origin: .zero, size: frameSize)).size,
-                                     current: sender.contentRect(forFrameRect: sender.frame).size, limit: inputs.limit)
-        return sender.frameRect(forContentRect: NSRect(origin: .zero, size: size)).size
-    }
-
-    /// Takes the photograph's shape on the next pass, once layout has settled.
+    /// Fits the window on the next pass, once layout has settled.
     private func requestWindowFit() {
         guard fitsWindow, !fitPending else { return }
         fitPending = true
@@ -214,30 +210,38 @@ import SwiftUI
         }
     }
 
+    /// Makes the canvas the export's pixels, one to a screen pixel. Two exports of
+    /// one size give one window, so changing photographs doesn't move it.
     private func fitWindow() {
-        guard fitsWindow, let window, !window.inLiveResize, let inputs = windowFitInputs() else { return }
+        guard fitsWindow, let window, !window.styleMask.contains(.fullScreen), let scroll = model.canvasScale.view,
+              let screen = window.screen ?? NSScreen.main else { return }
+        let pixels = model.exportPixels
+        guard pixels.width > 0, pixels.height > 0 else { return }
         let content = window.contentRect(forFrameRect: window.frame).size
-        let size = WindowFit.refitted(document: inputs.document, chrome: inputs.chrome, current: content, limit: inputs.limit)
+        let chrome = CGSize(width: content.width - scroll.bounds.width, height: content.height - scroll.bounds.height)
+        let scale = window.backingScaleFactor
+        let size = WindowFit.contentSize(canvas: CGSize(width: pixels.width / scale, height: pixels.height / scale), chrome: chrome,
+                                         limit: window.contentRect(forFrameRect: screen.visibleFrame).size)
         guard abs(size.width - content.width) > 1.5 || abs(size.height - content.height) > 1.5 else { return }
         var frame = window.frameRect(forContentRect: NSRect(origin: window.frame.origin, size: size))
         // Keep the top left corner, then stay on the screen.
         frame.origin.y = window.frame.maxY - frame.height
-        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
-            frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
-            frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
-        }
+        frame.origin.x = min(max(frame.minX, screen.visibleFrame.minX), screen.visibleFrame.maxX - frame.width)
+        frame.origin.y = min(max(frame.minY, screen.visibleFrame.minY), screen.visibleFrame.maxY - frame.height)
         window.setFrame(frame, display: true)
     }
 
-    /// A locked window can be narrower than the columns' usual minimums.
+    /// Locked, the window can't be dragged to another size, and can be smaller
+    /// than the columns' usual minimums.
     private func applyWindowLock() {
         guard let window, appliedLock != model.windowLockedToPhotograph else { return }
         appliedLock = model.windowLockedToPhotograph
         if appliedLock {
+            if !window.styleMask.contains(.fullScreen) { window.styleMask.remove(.resizable) }
             canvasItem.minimumThickness = ZoneGeometry.panelWidth + WindowFit.minimumCanvas
             window.contentMinSize = NSSize(width: canvasItem.minimumThickness + inspector.minimumThickness, height: 320)
-            requestWindowFit()
         } else {
+            window.styleMask.insert(.resizable)
             canvasItem.minimumThickness = 680
             window.contentMinSize = unlockedMinimum
             let content = window.contentRect(forFrameRect: window.frame).size
@@ -250,6 +254,9 @@ import SwiftUI
     private func update() {
         guard let window else { return }
         applyWindowLock()
+        // Anything that changes the export or what's around the canvas refits it.
+        _ = (model.exportPixels, model.filmstripVisible, model.inspectorVisible, model.showsZonePanel, model.cropping)
+        requestWindowFit()
         let photo = model.source != nil
         window.title = model.source?.lastPathComponent ?? "Negs"
         window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
@@ -267,6 +274,13 @@ import SwiftUI
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
         }
         setEnabled(.zones, photo && !model.cropping)
+        if let item = items[.windowLock] {
+            item.toolTip = model.windowLockedToPhotograph ? "Unlock the window (P)" : "Lock the window to the export size (P)"
+            let icon = symbol("lock.rectangle", "Lock Size")
+            item.image = model.windowLockedToPhotograph
+                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+        }
+        setEnabled(.windowLock, photo && !model.cropping)
         setEnabled(.fit, model.canZoom)
         setEnabled(.actualSize, model.canZoom)
         setEnabled(.rotate, photo)
@@ -317,7 +331,7 @@ import SwiftUI
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.controls, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .actions]
+        [.controls, .flexibleSpace, .actions]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -334,6 +348,7 @@ import SwiftUI
             group.subitems = [button(.open, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph)),
                               button(.filmstrip, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip)),
                               button(.zones, "Pins", "circle.lefthalf.filled", "Show or hide the pins and lines (Tab)", #selector(toggleZones)),
+                              button(.windowLock, "Lock Size", "lock.rectangle", "Lock the window to the export size (P)", #selector(toggleLock)),
                               button(.fit, "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
                               button(.actualSize, "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize)),
                               button(.rotate, "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),
@@ -404,13 +419,14 @@ import SwiftUI
     @objc private func export() { model.savePanel(export: true) }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
     @objc private func toggleZones() { model.pinsVisible.toggle() }
+    @objc private func toggleLock() { model.windowLockedToPhotograph.toggle() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
     @objc private func togglePresets() { model.togglePane(.presets) }
 }
 
 private extension NSToolbarItem.Identifier {
     static let controls = Self("controls"), actions = Self("actions")
-    static let filmstrip = Self("filmstrip"), open = Self("open"), zones = Self("zones")
+    static let filmstrip = Self("filmstrip"), open = Self("open"), zones = Self("zones"), windowLock = Self("windowLock")
     static let fit = Self("fit"), actualSize = Self("actualSize"), rotate = Self("rotate"), crop = Self("crop")
     static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
 }

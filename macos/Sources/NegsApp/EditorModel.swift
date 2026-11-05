@@ -666,12 +666,25 @@ import UniformTypeIdentifiers
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
-    /// The window takes the shape of the photograph with its border, locked to
-    /// the fit zoom. Settings › Viewer.
+    /// The window is locked to the export size, showing all of it: it can't be
+    /// resized, zoomed or panned. P, the toolbar, or Settings › Viewer.
     var windowLockedToPhotograph = UserDefaults.standard.bool(forKey: "lockWindowToPhotograph") {
         didSet { UserDefaults.standard.set(windowLockedToPhotograph, forKey: "lockWindowToPhotograph") }
     }
     var canZoom: Bool { source != nil && !cropping && !windowLockedToPhotograph }
+
+    /// The pixels an export would write, including the border on the canvas.
+    var exportPixels: CGSize {
+        let rotated = imageRotation % 2 != 0
+        let turned = rotated ? CGSize(width: photographSize.height, height: photographSize.width) : photographSize
+        let frame = border.shown(for: turned)
+        return ExportPixels.size(photograph: photographSize, rotated: rotated, withBorder: frame.map { frame in
+            { size in
+                let canvas = frame.canvas(for: size, strip: self.filmStrip)
+                return frame.instagram ? frame.instagramCanvas(for: canvas) : canvas
+            }
+        }, fit: exportSize)
+    }
     func zoomIn() { canvasScale.view?.zoom(by: ImageScrollView.zoomStep) }
     func zoomOut() { canvasScale.view?.zoom(by: 1 / ImageScrollView.zoomStep) }
 

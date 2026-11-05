@@ -228,8 +228,8 @@ struct InspectorPanel: View {
         // The title bar's colour over the default viewer. Never a custom viewer
         // colour, which is for the photograph and could hide the controls' text.
         .background(Color(nsColor: .underPageBackgroundColor))
-        // The edge the film strip has on top, down the left, under the toolbar too.
-        .overlay(alignment: .leading) { EdgeLine(horizontal: false).ignoresSafeArea() }
+        // The edge the film strip has on top, down the left.
+        .overlay(alignment: .leading) { EdgeLine(horizontal: false) }
         // The line under the toolbar, which continues the canvas's.
         .overlay(alignment: .top) { EdgeLine(horizontal: true) }
     }

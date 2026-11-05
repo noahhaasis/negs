@@ -161,9 +161,9 @@ struct UpdateSettings: View {
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("Viewer") {
-                Toggle("Fit the window to the photograph", isOn: Binding(
+                Toggle("Lock the window to the export size (P)", isOn: Binding(
                     get: { model.windowLockedToPhotograph }, set: { model.windowLockedToPhotograph = $0 }))
-                Text("The window takes the shape of the photograph with its border, always showing all of it. Zooming is off.")
+                Text("Shows the export one pixel to a screen pixel, border included, or smaller if it won't fit the screen. The window can't be resized, zoomed or panned.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Toggle("Custom background", isOn: $customBackground)

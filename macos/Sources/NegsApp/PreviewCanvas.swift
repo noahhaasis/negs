@@ -203,7 +203,7 @@ final class ImageScrollView: NSScrollView {
     /// Whether the photograph is larger than the viewport, so panning has
     /// somewhere to go.
     var canScroll: Bool {
-        guard let documentView else { return false }
+        guard !locksToFit, let documentView else { return false }
         return documentView.frame.width > contentSize.width + 0.5
             || documentView.frame.height > contentSize.height + 0.5
     }
@@ -264,7 +264,7 @@ final class ImageScrollView: NSScrollView {
         } else if overlay.pins.contains(where: \.selected), let onScrollPin {
             let delta = SampleSize.handDelta(scrollingDeltaY: Double(event.scrollingDeltaY), inverted: event.isDirectionInvertedFromDevice)
             onScrollPin(delta, event.hasPreciseScrollingDeltas)
-        } else {
+        } else if !locksToFit {
             super.scrollWheel(with: event)
         }
     }

@@ -355,6 +355,46 @@ extension ZoneModelTests {
         XCTAssertTrue(model.showsZonePanel)
     }
 
+    /// Through a real window: locked, it takes the export's shape and can't be
+    /// resized, a photograph of the same size leaves it alone, and unlocking
+    /// gives resizing back.
+    func testLockingTheWindowToTheExportSize() async throws {
+        let model = try await makeModel()
+        let saved = UserDefaults.standard.object(forKey: "lockWindowToPhotograph")
+        defer {
+            model.shutdown()
+            UserDefaults.standard.set(saved, forKey: "lockWindowToPhotograph")
+        }
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        controller.showWindow(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        model.windowLockedToPhotograph = true
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertFalse(window.styleMask.contains(.resizable))
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        let scroll = try XCTUnwrap(all(try XCTUnwrap(window.contentView)).compactMap { $0 as? ImageScrollView }.first)
+        // The 64 × 48 ramp is smaller than the usable minimum, so it scales up in shape.
+        XCTAssertEqual(scroll.bounds.width / scroll.bounds.height, 64.0 / 48, accuracy: 0.02, "\(scroll.bounds)")
+        XCTAssertEqual(scroll.bounds.height, WindowFit.minimumCanvas, accuracy: 2, "\(scroll.bounds)")
+        XCTAssertTrue(scroll.locksToFit)
+        XCTAssertFalse(scroll.canScroll)
+        XCTAssertFalse(model.canZoom)
+
+        let frame = window.frame
+        model.open(other)
+        try await waitUntil { model.previewCurrent }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(window.frame, frame, "A photograph of the same size leaves the window alone")
+
+        model.windowLockedToPhotograph = false
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertGreaterThanOrEqual(window.contentRect(forFrameRect: window.frame).width, 1020)
+    }
+
     /// Pins from before zones held their own tone: each takes the zone its
     /// target falls in.
     func testSavedHoldingPinsTakeTheZoneTheirTargetFallsIn() async throws {

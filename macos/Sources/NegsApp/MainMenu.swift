@@ -74,6 +74,7 @@ import SwiftUI
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
         command(view, "Actual Size", #selector(actualSize), "1")
+        command(view, "Lock Window to Export Size", #selector(toggleWindowLock), "p", [])
         command(view, "Zoom In", #selector(zoomIn), "=")
         command(view, "Zoom Out", #selector(zoomOut), "-")
         // ⌘+ with Shift held, for keyboards where + needs it. It has no row of its own.
@@ -140,6 +141,7 @@ import SwiftUI
     @objc private func importPresets() { model.importPresetsPanel() }
     @objc private func fitPhotograph() { model.zoom(fit: true) }
     @objc private func actualSize() { model.zoom(fit: false) }
+    @objc private func toggleWindowLock() { model.windowLockedToPhotograph.toggle() }
     @objc private func zoomIn() { model.zoomIn() }
     @objc private func zoomOut() { model.zoomOut() }
     @objc private func rotate() { model.rotate() }
@@ -174,6 +176,9 @@ import SwiftUI
             item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return true
         case #selector(newPreset), #selector(importPresets): return model.canChangePresets
         case #selector(fitPhotograph), #selector(actualSize), #selector(zoomIn), #selector(zoomOut): return model.canZoom
+        case #selector(toggleWindowLock):
+            item.state = model.windowLockedToPhotograph ? .on : .off
+            return photo && !model.cropping && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
         case #selector(rotate): return photo
         case #selector(crop):
             item.title = model.cropping ? "Done Cropping" : "Crop"
