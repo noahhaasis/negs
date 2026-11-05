@@ -69,7 +69,7 @@ import SwiftUI
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
         view.addItem(.separator())
-        command(view, "Hide Zones", #selector(toggleZonePanel), "z", [.command, .option])
+        command(view, "Hide Zones", #selector(toggleZonePanel), "z", [])
         command(view, "Delete Tone Pin", #selector(deleteTonePin), "\u{8}", [])
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
@@ -137,6 +137,10 @@ import SwiftUI
     @objc private func crop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
     @objc private func resetAdjustments() { model.reset() }
 
+    /// A shortcut with no modifier stands down while a field is being edited,
+    /// so Delete still deletes text and Z still types a z.
+    static func bareKeysAllowed(firstResponder: NSResponder?) -> Bool { !(firstResponder is NSText) }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if removingAppData { return false }
         let photo = model.source != nil
@@ -152,10 +156,9 @@ import SwiftUI
             return true
         case #selector(toggleZonePanel):
             item.title = model.zonePanelVisible ? "Hide Zones" : "Show Zones"
-            return photo
+            return photo && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
         case #selector(deleteTonePin):
-            // Delete still deletes text while a field is being edited.
-            return model.canRemovePin && !(NSApp.keyWindow?.firstResponder is NSText)
+            return model.canRemovePin && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
         case #selector(toggleAdjustments):
             item.state = model.inspectorVisible && model.inspectorPane == .adjustments ? .on : .off; return true
         case #selector(togglePresets):

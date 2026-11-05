@@ -169,7 +169,7 @@ import SwiftUI
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
         }
         if let item = items[.zones] {
-            item.toolTip = model.zonePanelVisible ? "Hide the zones (⌥⌘Z)" : "Show the zones (⌥⌘Z)"
+            item.toolTip = model.zonePanelVisible ? "Hide the zones (Z)" : "Show the zones (Z)"
             let icon = symbol("circle.lefthalf.filled", "Zones")
             item.image = model.zonePanelVisible
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
@@ -241,7 +241,7 @@ import SwiftUI
             let group = NSToolbarItemGroup(itemIdentifier: id)
             group.subitems = [button(.open, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph)),
                               button(.filmstrip, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip)),
-                              button(.zones, "Zones", "circle.lefthalf.filled", "Show or hide the zones (⌥⌘Z)", #selector(toggleZones)),
+                              button(.zones, "Zones", "circle.lefthalf.filled", "Show or hide the zones (Z)", #selector(toggleZones)),
                               button(.fit, "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
                               button(.actualSize, "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize)),
                               button(.rotate, "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),

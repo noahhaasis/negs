@@ -51,6 +51,13 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[0], placed: false), "Zone 0, Pure black, not placed")
     }
 
+    /// Z and Delete have no modifier, so they stand down while typing in a field.
+    @MainActor func testBareKeysStandDownWhileEditingText() {
+        XCTAssertFalse(MainMenu.bareKeysAllowed(firstResponder: NSTextView()))
+        XCTAssertTrue(MainMenu.bareKeysAllowed(firstResponder: NSView()))
+        XCTAssertTrue(MainMenu.bareKeysAllowed(firstResponder: nil))
+    }
+
     func testGreysRiseFromBlackToPaperWhite() throws {
         let levels = try ZoneScale.zones.map { zone -> CGFloat in
             try XCTUnwrap(ZoneScale.grey(zone.index).usingColorSpace(.sRGB)).redComponent
