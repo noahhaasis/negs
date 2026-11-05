@@ -95,7 +95,7 @@ struct FilmFrame: View {
 
     @ViewBuilder private func photograph(in gate: CGRect) -> some View {
         ZStack {
-            Color(white: 0.16)
+            Color.black
             if let image {
                 let sideways = FilmRollLayout.liesOnItsSide(CGSize(width: image.width, height: image.height))
                 Image(decorative: image, scale: 1)
@@ -123,7 +123,7 @@ struct BlankFilmFrame: View {
         let height = FilmRollLayout.frameHeight(stripWidth: width, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
         let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: CGSize(width: width, height: height))
         ZStack(alignment: .topLeading) {
-            Color(white: 0.16)
+            Color.black
                 .frame(width: gate.width, height: gate.height)
                 .offset(x: gate.minX, y: gate.minY)
             FilmArtwork(number: number, strip: strip, film: film)

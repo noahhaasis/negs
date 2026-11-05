@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import NegsApp
 
@@ -61,5 +63,18 @@ final class FilmRollTests: XCTestCase {
         let strip = try XCTUnwrap(FilmStrip.load(data: root.appendingPathComponent("data"), film: "kodak_portra_400", format: .full, maxPixelSize: 400))
         XCTAssertEqual(max(strip.image.width, strip.image.height), 400)
         XCTAssertEqual(strip.pixelSize, texture, "It still knows the file's proportions")
+    }
+
+    /// An empty slot is black behind the gate, not whatever's behind the window.
+    @MainActor func testAnEmptySlotIsBlack() throws {
+        _ = NSApplication.shared
+        let host = NSHostingView(rootView: BlankFilmFrame(number: 3, strip: nil, film: "kodak_portra_400"))
+        host.frame = NSRect(x: 0, y: 0, width: 150, height: 163)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let colour = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))
+        XCTAssertEqual(colour.alphaComponent, 1, accuracy: 0.01)
+        XCTAssertEqual(colour.redComponent, 0, accuracy: 0.01)
     }
 }
