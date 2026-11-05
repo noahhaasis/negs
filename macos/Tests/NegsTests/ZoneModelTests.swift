@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import XCTest
 @testable import NegsApp
 
@@ -483,6 +484,23 @@ extension ZoneModelTests {
         model.filmstripVisible = false
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(canvas.convert(canvas.bounds, to: nil).minX, ZoneGeometry.panelWidth, accuracy: 1, "Hidden, the canvas takes its room")
+    }
+
+    /// The file has the pixels Image Size asks for, not the screen's scale times
+    /// them: read back from real exports through both engines.
+    func testAnExportHasThePixelsImageSizeAsksFor() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        model.set(ImageSize.targetPath, .number(2000))
+        try await waitUntil { model.previewCurrent }
+        for engine in ExportEngine.allCases {
+            let url = directory.appendingPathComponent("export-\(engine.rawValue).png")
+            await model.export(to: url, engine: engine, size: .full, save: SaveSettings())
+            let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil), "\(engine)")
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+            XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 2000, "\(engine)")
+            XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 1500, "\(engine)")
+        }
     }
 
     /// Pins from before zones held their own tone: each takes the zone its

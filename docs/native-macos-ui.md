@@ -284,14 +284,14 @@ starts with none.
 
 ## Film roll
 
-The film strip shows the photograph's folder as one roll of 35mm film on a light table,
+The film strip shows the photograph's folder as one roll of 35mm film,
 down the window's far left. Each frame is the current film's strip artwork
 (`data/borders/35mm/full`, loaded small) turned a quarter clockwise, with frames butted
 so the perforations run on. Landscape photographs lie on their side as on real film and
 portrait ones stand up, cropped to fill the gate. Still films' frames carry their place
 in the folder over the artwork's fixed number; cine and print films keep their own edge
 text. A red grease-pencil box marks the open photograph, and the arrow keys step along
-the roll. The table is the colour of the artwork's perforations, so they read as lit.
+the roll. The column is the film alone, with no margin around it.
 
 ## Proof
 

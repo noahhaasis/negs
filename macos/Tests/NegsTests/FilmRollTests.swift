@@ -5,6 +5,11 @@ final class FilmRollTests: XCTestCase {
     private let texture = CGSize(width: 3800, height: 3500)
     private let window = CGRect(x: 0.026316, y: 0.157143, width: 0.947368, height: 0.685714)
 
+    /// The column is the film, with no margin around it.
+    func testTheColumnIsJustTheFilm() {
+        XCTAssertEqual(FilmRollLayout.columnWidth, FilmRollLayout.stripWidth)
+    }
+
     /// A frame is 38 mm of a 35 mm wide film, in whole points so no light shows
     /// between frames.
     func testFramesAreAWholeNumberOfPointsLong() {

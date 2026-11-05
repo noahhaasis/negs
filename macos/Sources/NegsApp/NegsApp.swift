@@ -199,6 +199,18 @@ struct EditorCanvas: View {
     }
 }
 
+/// The viewer's background: white in a proof, where the saved colour stays saved.
+struct ViewerColour: View {
+    let model: EditorModel
+    /// Settings › Viewer background.
+    @AppStorage(ViewerBackground.customKey) private var customBackground = false
+    @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
+
+    var body: some View {
+        model.proofing ? Color.white : ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
+    }
+}
+
 /// The 1-point line between the window's regions: under the toolbar and down
 /// the sidebar's left edge.
 struct EdgeLine: View {

@@ -106,10 +106,6 @@ struct PhotoBrowser: View {
                 }
             }
             .scrollTargetLayout()
-            // One shadow for the whole roll, lifting it off the table.
-            .background(Rectangle().fill(FilmRollLayout.filmBase).shadow(color: .black.opacity(0.45), radius: 5, x: 0, y: 1))
-            .padding(.horizontal, FilmRollLayout.tableMargin)
-            .padding(.vertical, 18)
         }
         .scrollIndicators(.automatic)
         .scrollPosition(id: $scrollTarget, anchor: .center)
@@ -121,14 +117,14 @@ struct PhotoBrowser: View {
             if files.indices.contains(next) { model.open(files[next].url) }
         }
         .frame(width: FilmRollLayout.columnWidth)
-        .background(LightTable())
+        .background(ViewerColour(model: model))
         .overlay {
             Group {
                 if loading { ProgressView().controlSize(.small) }
                 else if failed { Text("This folder couldn’t be read.") }
                 else if files.isEmpty { Text("No supported photographs in this folder.") }
             }
-            .foregroundStyle(.black.opacity(0.6))
+            .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .padding(12)
         }

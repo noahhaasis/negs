@@ -1,14 +1,11 @@
 import SwiftUI
 
-/// The folder as a roll of 35mm film on a light table. The strip artwork runs
+/// The folder as a roll of 35mm film. The strip artwork runs
 /// across, so the roll turns it a quarter clockwise to run down the window.
 enum FilmRollLayout {
     static let stripWidth: CGFloat = 150
-    static let tableMargin: CGFloat = 14
-    static var columnWidth: CGFloat { stripWidth + tableMargin * 2 }
-    /// The artwork's perforations are this colour, so they read as the table's
-    /// light coming through the film.
-    static let tableLight = Color(red: 247.0 / 255, green: 244.0 / 255, blue: 236.0 / 255)
+    /// The column is the film and nothing else.
+    static var columnWidth: CGFloat { stripWidth }
     /// The artwork's film base, for frames before it has loaded.
     static let filmBase = Color(red: 15.0 / 255, green: 13.0 / 255, blue: 12.0 / 255)
     /// Until the artwork loads: its proportions and gate, from `frames.json`.
@@ -159,16 +156,6 @@ private extension View {
     func reverseMask<Mask: View>(@ViewBuilder _ mask: () -> Mask) -> some View {
         self.mask {
             Rectangle().overlay { mask().blendMode(.destinationOut) }.compositingGroup()
-        }
-    }
-}
-
-/// The surface the roll lies on: lit from below, a little brighter in the middle.
-struct LightTable: View {
-    var body: some View {
-        ZStack {
-            FilmRollLayout.tableLight
-            LinearGradient(colors: [.black.opacity(0.05), .clear, .clear, .black.opacity(0.05)], startPoint: .leading, endPoint: .trailing)
         }
     }
 }
