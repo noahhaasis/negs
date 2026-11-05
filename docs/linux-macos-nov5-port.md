@@ -36,7 +36,8 @@ No simulation math, profile data, export algorithm or reference image changed.
 ## Measured behavior
 
 The comparison uses the same rebuilt helper and shared caches on both sides.
-The baseline is the GTK scheduler/brightness lifecycle at `424076a`, compiled
+The baseline is the GTK scheduler/brightness lifecycle at `1d9a0e0` (the same
+source tree as the original survey commit `424076a`), compiled
 in an isolated source copy with the same timing harness. Both use an isolated
 profile, the same Sony ILCE-7M3 RAW, Gold 200 / Portra 400 alternating four times
 per setting, unlimited preview, bounded BLAS threads and physical canvas scale
@@ -125,7 +126,17 @@ The cancellation audit now waits for the preceding export’s preview-space rend
 before testing the next active export job; clicking Cancel before deferred output
 starts does not exercise job cancellation.
 
-Package workflow and final integration audit results are recorded after the
-committed source has completed those checks. No installed app, user profile,
-other worktree, unrelated `linux/run.sh` mode change or highlights/shadows draft
-is replaced by this port.
+Package CI for implementation commit `a6f4337` completed successfully:
+[Linux workflow 42058673345](https://github.com/noahhaasis/negs/actions/runs/42058673345).
+Arch built and tested both Cargo workspaces from the committed archive and
+verified the package and per-user OpenBLAS bundle. Flatpak built offline and
+verified inside its sandbox. AppImage built on Ubuntu 24.04 and passed clean
+Ubuntu, Fedora and Arch checks. The source archive contains the shared tooltip
+parity reference, fixing the earlier Arch packaging failure.
+
+A local native bundle staged from the clean `a6f4337` checkout also passes the
+packaged-binary/desktop/OpenBLAS verification and 40 CPU protocol/export requests
+(all 62 profiles, f64 export and retained Fast export). Its source archive and
+staged bundle are under `target/linux-validation/macos-nov5/local-package-clean/`.
+No installed app, real user profile, existing worktree, unrelated `linux/run.sh`
+mode change or highlights/shadows draft is replaced by this port.
