@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import Observation
@@ -172,6 +173,9 @@ struct StockEntry {
     var keepPaper: Bool { didSet { defaults.set(keepPaper, forKey: Self.keepPaperKey) } }
     static let favoriteFilmsKey = "favoriteFilms"
     static let favoritePapersKey = "favoritePapers"
+    /// Starred for new users, as on the web; once they change the list,
+    /// theirs is kept, even when empty.
+    static let defaultFavoriteFilms = ["kodak_gold_200", "kodak_portra_400", "kodak_ektar_100", "fujifilm_c200"]
     /// Starred stock ids, in the order starred. Ids the catalog no longer
     /// has are kept, in case it brings them back.
     private(set) var favoriteFilms: [String] { didSet { defaults.set(favoriteFilms, forKey: Self.favoriteFilmsKey) } }
@@ -195,7 +199,7 @@ struct StockEntry {
         self.defaults = defaults
         enabled = defaults.object(forKey: Self.defaultsKey) as? Bool ?? true
         keepPaper = defaults.object(forKey: Self.keepPaperKey) as? Bool ?? false
-        favoriteFilms = defaults.stringArray(forKey: Self.favoriteFilmsKey) ?? []
+        favoriteFilms = defaults.stringArray(forKey: Self.favoriteFilmsKey) ?? Self.defaultFavoriteFilms
         favoritePapers = defaults.stringArray(forKey: Self.favoritePapersKey) ?? []
     }
 
@@ -252,10 +256,12 @@ struct StockEntry {
 // MARK: Views
 
 /// A Film or Paper foldout: the current stock's name on the header, a
-/// two-column grid of tiles under the menu's headings inside.
+/// two-column grid of tiles under the menu's headings inside. Film, the
+/// long list, has a search field over its grid.
 struct StockFoldout: View {
     let model: EditorModel
     let paper: Bool
+    @State private var query = ""
     /// About two and a half rows of tiles, so the cut-off row shows it scrolls.
     static let gridHeight: CGFloat = 290
     static func favoriteID(_ id: String) -> String { "favorite:\(id)" }
@@ -280,12 +286,26 @@ struct StockFoldout: View {
             // switch below, in reach however far down the stocks go. It
             // opens on the current stock.
             ScrollViewReader { proxy in
+                if !paper {
+                    StockSearchField(text: $query, prompt: "Search films") {
+                        // Return takes the first match, as listed.
+                        if let first = StockGroup.matching(query, in: model.filmGroups).first?.stocks.first {
+                            model.chooseFilm(first.id)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
                 ScrollView {
-                    StockGrid(model: model, paper: paper)
+                    StockGrid(model: model, paper: paper, query: query)
                 }
                 .scrollDisabled(false)
                 .frame(height: StockFoldout.gridHeight)
                 .onAppear { proxy.scrollTo(scrollID, anchor: .center) }
+                // Each search starts at the top of its matches; clearing it
+                // goes back to the current stock.
+                .onChange(of: query) {
+                    if query.isEmpty { proxy.scrollTo(scrollID, anchor: .center) } else { proxy.scrollTo(StockGrid.topID, anchor: .top) }
+                }
             }
         } label: {
             HStack {
@@ -304,17 +324,28 @@ struct StockFoldout: View {
 private struct StockGrid: View {
     let model: EditorModel
     let paper: Bool
+    var query = ""
+    static let topID = "stock-grid-top"
 
     var body: some View {
         let previews = model.previews
-        let favorites = previews.favorites(in: paper ? model.papers : model.films, paper: paper)
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        let groups = StockGroup.matching(query, in: paper ? model.paperGroups : model.filmGroups)
+        // While searching, the matches show once, under their groups.
+        let favorites = searching ? [] : previews.favorites(in: paper ? model.papers : model.films, paper: paper)
+        Color.clear.frame(height: 0).id(Self.topID)
+        if groups.isEmpty {
+            Text("No \(paper ? "papers" : "films") match “\(query.trimmingCharacters(in: .whitespaces))”")
+                .font(.callout).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity).padding(.top, 24)
+        }
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), spacing: 8, alignment: .top)],
                   alignment: .leading, spacing: 8) {
             // The favourites first, untitled; each stays in its group too.
             if !favorites.isEmpty {
                 Section { tiles(favorites, favorites: true) }
             }
-            ForEach(paper ? model.paperGroups : model.filmGroups) { group in
+            ForEach(groups) { group in
                 Section {
                     tiles(group.stocks)
                 } header: {
@@ -348,6 +379,50 @@ private struct StockGrid: View {
     private func setShown(_ shown: Bool) {
         if paper { model.previews.paperShown = shown } else { model.previews.filmShown = shown }
         model.pumpPreviews()
+    }
+}
+
+/// A native search field: filters as you type, Escape or its clear button
+/// empties it, Return calls `submit`.
+private struct StockSearchField: NSViewRepresentable {
+    @Binding var text: String
+    let prompt: String
+    let submit: () -> Void
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.controlSize = .small
+        field.font = .systemFont(ofSize: NSFont.systemFontSize(for: .small))
+        field.placeholderString = prompt
+        field.setAccessibilityLabel(prompt)
+        field.sendsSearchStringImmediately = true
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.changed(_:))
+        field.delegate = context.coordinator
+        field.stringValue = text
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.parent = self
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var parent: StockSearchField
+        init(_ parent: StockSearchField) { self.parent = parent }
+
+        @objc func changed(_ field: NSSearchField) {
+            if parent.text != field.stringValue { parent.text = field.stringValue }
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+            parent.submit()
+            return true
+        }
     }
 }
 

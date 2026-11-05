@@ -139,7 +139,8 @@
   .tucked:not(.tour-control, .tour-group, .tour-section) { display: none !important; }
   .advanced-hint { margin: 12px 14px 16px; }
   .side:not(.sheet) .advanced-hint.per-tab, .side.sheet .advanced-hint.lab-end { display: none; }
-  .stock { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
+  /* minmax(0, …): a long film or paper name in a fold's summary would otherwise widen the column past the sidebar. */
+  .stock { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); }
   .stock label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
   .stock label.row { display: flex; }
   .stock label[hidden] { display: none; }
@@ -159,6 +160,22 @@
   .stock-tile.stale .stock-thumb { opacity: .55; }
   .stock-tile.selected .stock-thumb { outline: 2px solid var(--accent); outline-offset: -2px; }
   .stock-tile.selected { color: var(--fg); }
+  /* The star over a tile's corner (macOS StockTileView): on a favourite, or
+     while the pointer is over the tile; always there without a pointer. */
+  .stock-cell { position: relative; min-width: 0; display: grid; }
+  .stock-favorites[hidden], .stock-grid[hidden], .stock-fold h3[hidden], .stock-cell[hidden], .stock-empty[hidden] { display: none; }
+  .stock-search { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--field); color: var(--fg); font: inherit; font-size: 12px; }
+  .stock-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .stock-empty { margin: 24px 0 8px; text-align: center; color: var(--muted); font-size: 12px; }
+  .stock-favorites { margin-top: 8px; }
+  .stock-star { position: absolute; top: 0; right: 0; width: 26px; height: 26px; padding: 0; border: 0; background: none; cursor: pointer;
+    color: #fff; visibility: hidden; filter: drop-shadow(0 0 1.5px rgb(0 0 0 / .8)); }
+  .stock-star::before { content: "☆"; font-size: 14px; line-height: 26px; }
+  .stock-cell:hover .stock-star, .stock-star:focus-visible, .stock-cell.favorite .stock-star { visibility: visible; }
+  .stock-cell.favorite .stock-star { color: #f5c518; }
+  .stock-cell.favorite .stock-star::before { content: "★"; }
+  @media (hover: none) { .stock-star { visibility: visible; opacity: .75; } .stock-cell.favorite .stock-star { opacity: 1; } }
   select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
   select:disabled { color: var(--faint); }
   fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
@@ -290,7 +307,7 @@
      Fields stay at 16px, below which iOS zooms the page on focus. */
   @media (pointer: coarse) {
     body { font-size: 15px; }
-    select, .value-field, .crop-inspector input[type=number], .dialog input[type=text] { font-size: 16px; }
+    select, .value-field, .crop-inspector input[type=number], .dialog input[type=text], .stock-search { font-size: 16px; }
     .menu button { min-height: 40px; }
     select { padding: 8px 10px; }
     .btn { min-height: 40px; padding: 8px 14px; }

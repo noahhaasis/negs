@@ -291,6 +291,19 @@ every effect on, from an area-averaged copy of the source. The status line says
 never dragged. On an M1 Pro, 24 MP NEF and 60 MP Leica Q3 drag frames at a
 ≈1960 px canvas take ≈90 ms (11 fps), against 0.85 s and 2.4 s at export size.
 
+A discrete edit (film, paper, preset, menu, checkbox, undo) also shows such a
+frame first, marked "Preview", then the export-size one (ticket 28,
+`EditorModel.RenderStep.quick`), then the export-size one right after. The
+helper can't stop a running render, so a click during a full render gets its
+quick frame once that render ends. Letting go of a slider settles directly. With the
+brightness match on, the quick frame is held and the match runs on its decode;
+the export-size render then develops the matched exposure only. No quick frame
+for photographs under 4.5 MP, when the canvas shows over half the pixels
+(zoomed in), for a new photograph's first frame, or for post-only edits (the
+helper reuses its output for those). The settled frame is byte-identical to one
+rendered without the quick frame. Timings: `NEGS_QUICK_FRAME_BENCH=<photo>
+swift test -c release -Xswiftc -DDEBUG --filter testFilmClickTimings`.
+
 An optional native-window smoke test captures light/dark views:
 
 ```sh

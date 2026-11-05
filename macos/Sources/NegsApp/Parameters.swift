@@ -133,6 +133,21 @@ struct StockGroup: Identifiable {
         }
     }
 
+    /// The stocks matching every word of `query` in their name, id or group
+    /// title, ignoring case and accents ("portra 160", "kodak slide");
+    /// groups left empty drop out.
+    static func matching(_ query: String, in groups: [StockGroup]) -> [StockGroup] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return groups }
+        return groups.compactMap { group in
+            let stocks = group.stocks.filter { stock in
+                let text = "\(stock.name) \(stock.id.replacingOccurrences(of: "_", with: " ")) \(group.title)"
+                return words.allSatisfy { text.localizedStandardContains($0) }
+            }
+            return stocks.isEmpty ? nil : StockGroup(title: group.title, stocks: stocks)
+        }
+    }
+
     private static func group(_ stocks: [Stock], order: [String], kind: (Stock) -> String) -> [StockGroup] {
         let grouped = Dictionary(grouping: stocks, by: kind)
         return order.compactMap { title in grouped[title].map { StockGroup(title: title, stocks: $0) } }

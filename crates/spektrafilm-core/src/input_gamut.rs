@@ -9,6 +9,7 @@
 //! experimental 28bf883's optional smooth inscribed hull.
 
 use rustfft::{FftPlanner, num_complex::Complex};
+use std::sync::{Arc, Mutex};
 use spektrafilm_math::spectral::{self, CMF_X_F64, CMF_Y_F64, CMF_Z_F64, TcLut};
 
 use crate::gamut_compression::reinhard_knee;
@@ -213,35 +214,69 @@ impl InputGamutCompress {
         } else {
             ref_xy
         };
-        let hull = self
-            .hull_detail
-            .map(|detail| inscribed_locus_hull(ref_xy, detail, &self.locus));
-        let boundary = hull.as_deref().unwrap_or(&self.locus);
         let size = lut.size;
         let ch = lut.channels;
-        let inv = 1.0 / (size as f64 - 1.0);
+        let coords = self.sample_coords(ref_xy, size);
         let mut data = vec![0.0f64; size * size * ch];
-        // Each cell is independent; rows in parallel (a film change rebuilds this).
-        use rayon::prelude::*;
-        data.par_chunks_mut(size * ch).enumerate().for_each(|(i, row)| {
-            for j in 0..size {
-                // Step 1: tc cell → CIE xy.
-                let (x, y) = spectral::tc_to_xy(i as f64 * inv, j as f64 * inv);
-                // Step 2: compress.
-                let cxy = compress_xy_radial([x, y], ref_xy, self.knee, boundary);
-                // Step 3: compressed xy → tc.
-                let (tx, ty) = spectral::xy_to_tc(cxy[0], cxy[1]);
-                // Step 4: bilinear sample original LUT at (tx, ty) grid coords.
-                let sample =
-                    bilinear_sample(lut, tx * (size as f64 - 1.0), ty * (size as f64 - 1.0));
-                row[j * ch..j * ch + ch].copy_from_slice(&sample[..ch]);
-            }
-        });
+        // Step 4: bilinear sample original LUT at (tx, ty) grid coords.
+        for (cell, &(ci, cj)) in data.chunks_exact_mut(ch).zip(coords.iter()) {
+            let sample = bilinear_sample(lut, ci, cj);
+            cell.copy_from_slice(&sample[..ch]);
+        }
         TcLut {
             size,
             channels: ch,
             data,
         }
+    }
+
+    /// Steps 1–3 of [`Self::remap`]: the grid coordinates each cell of a
+    /// `size`² LUT samples. They don't depend on the LUT (the film), only on
+    /// the white and the compressor, so every film with the same reference
+    /// white shares them: kept for the process, ~0.6 MB each at 192², and the
+    /// 62 stocks have 4 whites. The key holds every input exactly (bits); the
+    /// locus is a constant. Ticket 29: a film change built this in ~11 ms.
+    fn sample_coords(&self, ref_xy: [f64; 2], size: usize) -> Arc<Vec<(f64, f64)>> {
+        type Key = ([u64; 2], [u64; 3], Option<u64>, usize);
+        static CACHE: Mutex<Vec<(Key, Arc<Vec<(f64, f64)>>)>> = Mutex::new(Vec::new());
+        const ENTRIES: usize = 8;
+        let key: Key = (
+            ref_xy.map(f64::to_bits),
+            [self.knee.0.to_bits(), self.knee.1.to_bits(), self.knee.2.to_bits()],
+            self.hull_detail.map(f64::to_bits),
+            size,
+        );
+        if let Some((_, coords)) = CACHE.lock().unwrap().iter().find(|(k, _)| *k == key) {
+            #[cfg(test)]
+            tests::CACHE_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return coords.clone();
+        }
+        let hull = self
+            .hull_detail
+            .map(|detail| inscribed_locus_hull(ref_xy, detail, &self.locus));
+        let boundary = hull.as_deref().unwrap_or(&self.locus);
+        let inv = 1.0 / (size as f64 - 1.0);
+        let mut coords = vec![(0.0, 0.0); size * size];
+        // Each cell is independent; rows in parallel.
+        use rayon::prelude::*;
+        coords.par_chunks_mut(size).enumerate().for_each(|(i, row)| {
+            for (j, slot) in row.iter_mut().enumerate() {
+                // Step 1: tc cell → CIE xy.
+                let (x, y) = spectral::tc_to_xy(i as f64 * inv, j as f64 * inv);
+                // Step 2: compress.
+                let cxy = compress_xy_radial([x, y], ref_xy, self.knee, boundary);
+                // Step 3: compressed xy → tc, as grid coordinates.
+                let (tx, ty) = spectral::xy_to_tc(cxy[0], cxy[1]);
+                *slot = (tx * (size as f64 - 1.0), ty * (size as f64 - 1.0));
+            }
+        });
+        let coords = Arc::new(coords);
+        let mut cache = CACHE.lock().unwrap();
+        if cache.len() >= ENTRIES {
+            cache.remove(0);
+        }
+        cache.push((key, coords.clone()));
+        coords
     }
 }
 
@@ -279,6 +314,10 @@ fn bilinear_sample(lut: &TcLut, ci: f64, cj: f64) -> [f64; 3] {
 mod tests {
     use super::*;
     use serde::Deserialize;
+
+    /// Cache hits in `sample_coords`, so the bit-identity test can show it
+    /// compared cached results, not only fresh ones.
+    pub(super) static CACHE_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     #[derive(Deserialize)]
     struct HullFixture {
@@ -432,5 +471,153 @@ mod tests {
         let lut = synthetic_lut(16);
         let out = spec.remap(&lut, [0.3127, 0.3290]);
         assert_eq!(out.data, lut.data);
+    }
+
+    /// `remap` before ticket 29 (main 5a1fa3c), verbatim but for the name:
+    /// every cell computed in one pass, nothing cached.
+    fn remap_uncached(g: &InputGamutCompress, lut: &TcLut, ref_xy: [f64; 2]) -> TcLut {
+        if !g.active {
+            return lut.clone();
+        }
+        let ref_xy = if g.center_d65 {
+            let (x, y) = spectral::illuminant_to_xy(&spectral::ILLUMINANT_D65);
+            [x, y]
+        } else {
+            ref_xy
+        };
+        let hull = g
+            .hull_detail
+            .map(|detail| inscribed_locus_hull(ref_xy, detail, &g.locus));
+        let boundary = hull.as_deref().unwrap_or(&g.locus);
+        let size = lut.size;
+        let ch = lut.channels;
+        let inv = 1.0 / (size as f64 - 1.0);
+        let mut data = vec![0.0f64; size * size * ch];
+        use rayon::prelude::*;
+        data.par_chunks_mut(size * ch).enumerate().for_each(|(i, row)| {
+            for j in 0..size {
+                let (x, y) = spectral::tc_to_xy(i as f64 * inv, j as f64 * inv);
+                let cxy = compress_xy_radial([x, y], ref_xy, g.knee, boundary);
+                let (tx, ty) = spectral::xy_to_tc(cxy[0], cxy[1]);
+                let sample =
+                    bilinear_sample(lut, tx * (size as f64 - 1.0), ty * (size as f64 - 1.0));
+                row[j * ch..j * ch + ch].copy_from_slice(&sample[..ch]);
+            }
+        });
+        TcLut {
+            size,
+            channels: ch,
+            data,
+        }
+    }
+
+    /// Ticket 29: the cached remap is the uncached one, bit for bit, for real
+    /// film TC LUTs, every white the stocks use, every boundary and center,
+    /// random knees and hull details, other LUT sizes, and enough distinct
+    /// keys in a shuffled order to hit, miss and evict the cache many times.
+    #[test]
+    fn cached_remap_is_bit_identical_to_uncached() {
+        check_cached_remap(&["kodak_portra_400", "kodak_aerochrome_1443"]);
+    }
+
+    /// The same with more films: `cargo test --release -p spektrafilm-core
+    /// --lib cached_remap -- --ignored` (~10–40 s).
+    #[test]
+    #[ignore]
+    fn cached_remap_is_bit_identical_to_uncached_more_films() {
+        check_cached_remap(&["kodak_portra_400", "kodak_vision3_500t", "fujifilm_velvia_50", "kodak_aerochrome_1443"]);
+    }
+
+    fn check_cached_remap(films: &[&str]) {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let method = crate::spectral_service::upsampling_method("hanatos2025").unwrap();
+        let spectra = crate::spectral_service::load_method_lut(&data, method).unwrap();
+        // A few real film LUTs (different sensitivities) and every white.
+        let mut luts = Vec::new();
+        for film in films {
+            let profile = crate::profile::load_profile_by_name(&data, film).unwrap();
+            let sens: Vec<[f64; 3]> = profile
+                .log_sensitivity_f64()
+                .iter()
+                .map(|row| row.map(|v| { let x = 10f64.powf(v); if x.is_nan() { 0.0 } else { x } }))
+                .collect();
+            luts.push(crate::spectral_service::compute_tc_lut(&spectra, &sens));
+        }
+        // Small synthetic LUTs for other sizes (edge rows, odd sizes).
+        let mut state = 0x9e3779b97f4a7c15u64;
+        let mut rand = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for size in [2usize, 17, 64] {
+            let data = (0..size * size * 3).map(|_| rand() * 4.0).collect();
+            luts.push(TcLut { size, channels: 3, data });
+        }
+        let mut whites: Vec<[f64; 2]> = ["D55", "D65", "D50", "BB3200", "TH-KG3", "T"]
+            .iter()
+            .map(|name| {
+                let (x, y) = spectral::illuminant_to_xy(&crate::illuminants::select_illuminant(name));
+                [x, y]
+            })
+            .collect();
+        whites.push([0.3324, 0.3474]);
+        let mut settings = Vec::new();
+        for boundary in ["inscribed_hull", "locus"] {
+            for center in ["reference", "D65"] {
+                settings.push(InputGamutCompressParams { boundary: boundary.into(), center: center.into(), ..Default::default() });
+            }
+        }
+        for _ in 0..6 {
+            settings.push(InputGamutCompressParams {
+                knee: [(rand() * 0.95) as f32, (0.2 + rand() * 2.0) as f32, (0.3 + rand() * 3.0) as f32],
+                hull_detail: 1.0 + rand() * 40.0,
+                ..Default::default()
+            });
+        }
+        // Each key part alone: knees with the default hull, hull details with
+        // the default knee (a key that drops either part must fail here).
+        for _ in 0..3 {
+            settings.push(InputGamutCompressParams {
+                knee: [(rand() * 0.95) as f32, (0.2 + rand() * 2.0) as f32, (0.3 + rand() * 3.0) as f32],
+                ..Default::default()
+            });
+            settings.push(InputGamutCompressParams { hull_detail: 1.0 + rand() * 40.0, ..Default::default() });
+        }
+        settings.push(InputGamutCompressParams { algorithm: "off".into(), ..Default::default() });
+        let mut cases = Vec::new();
+        for (l, _) in luts.iter().enumerate() {
+            for (w, _) in whites.iter().enumerate() {
+                for (p, _) in settings.iter().enumerate() {
+                    cases.push((l, w, p));
+                }
+            }
+        }
+        // In order, so the four film LUTs share each key (a miss, then hits),
+        // then shuffled, so keys are evicted and rebuilt in any order.
+        let mut shuffled = cases.clone();
+        for i in (1..shuffled.len()).rev() {
+            shuffled.swap(i, (rand() * (i + 1) as f64) as usize);
+        }
+        let mut grouped = cases.clone();
+        grouped.sort_by_key(|&(l, w, p)| (w, p, l));
+        let order: Vec<_> = grouped.into_iter().chain(shuffled).collect();
+        let hits_before = CACHE_HITS.load(std::sync::atomic::Ordering::Relaxed);
+        let mut compared = 0usize;
+        for (l, w, p) in order {
+            let g = InputGamutCompress::from_params(&settings[p]).unwrap();
+            let (lut, white) = (&luts[l], whites[w]);
+            let want = remap_uncached(&g, lut, white);
+            let got = g.remap(lut, white);
+            assert_eq!((got.size, got.channels), (want.size, want.channels));
+            let same = got.data.iter().zip(&want.data).all(|(a, b)| a.to_bits() == b.to_bits());
+            assert!(same, "lut {l} white {white:?} settings {:?}", settings[p]);
+            compared += got.data.len();
+        }
+        let hits = CACHE_HITS.load(std::sync::atomic::Ordering::Relaxed) - hits_before;
+        // 7 whites × 16 active settings, hit by every film LUT but the first.
+        assert!(hits >= 7 * 16 * (films.len() - 1), "only {hits} cache hits");
+        eprintln!("compared {compared} values in {} remaps, {hits} cache hits", 2 * cases.len());
     }
 }

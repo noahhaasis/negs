@@ -274,6 +274,8 @@ def render(args, work, case, engine):
     if check.returncode != 0:
         return name, engine, {"error": f"TIFF self-check failed: {check.stdout or check.stderr}",
                               **result}
+    if args.hashes_only:
+        dump.unlink()
     return name, engine, result
 
 
@@ -287,6 +289,7 @@ def provenance(args, engines):
         "cpu": cpu_model(),
         "cpu_count": os.cpu_count(),
         "threads": args.threads or "all",
+        "dump_policy": "failures" if args.hashes_only else "all",
         "git_rev": rev,
         "git_dirty_hash": hashlib.sha256((status or "").encode()).hexdigest() if status else None,
         "cargo_lock": sha256(ROOT / "Cargo.lock"),
@@ -612,6 +615,9 @@ def main():
     r.add_argument("--data-dir", default=str(ROOT / "data"))
     r.add_argument("--out", required=True)
     r.add_argument("--dump-dir", required=True, help="raw f64 dumps, kept for compare")
+    r.add_argument("--hashes-only", action="store_true",
+                   help="discard successful dumps after hashing and TIFF self-check; keep failures. "
+                        "Supports compare --exact, but not quality or tolerance comparisons")
     r.add_argument("--label", default="")
     r.add_argument("--engines", default=",".join(ALL_ENGINES))
     r.add_argument("--threads", type=int, default=0, help="RAYON_NUM_THREADS; 0 = all cores")

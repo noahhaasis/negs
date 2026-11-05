@@ -151,6 +151,27 @@ import UniformTypeIdentifiers
     /// The one brightness solve in flight; its completion looks again.
     @ObservationIgnored private var matchTask: Task<Void, Never>?
     @ObservationIgnored private var matchRequest: UUID?
+    /// A settled preview rendered while the brightness match was pending:
+    /// shown only if the match leaves the render as it is, so the canvas
+    /// goes from the previous frame straight to the matched one.
+    @ObservationIgnored private var heldPreview: (revision: Int, generation: Int, show: () -> Void)?
+    /// A discrete edit renders a canvas-size frame first, then the export-size
+    /// one (`RenderStep.quick`). This is the edit whose quick frame is done
+    /// (shown, held for the brightness match, or failed): its next render
+    /// settles.
+    @ObservationIgnored private var quickStep: FrameID?
+    /// The shown frame is the quick frame of this edit.
+    @ObservationIgnored private var quickFrame: FrameID?
+    /// The helper's last output, when it's a settled render: the request
+    /// without its post adjustments, which the helper applies to the kept
+    /// output instead of rendering again. A quick frame would replace it.
+    @ObservationIgnored private var helperOutput: [String: JSONValue]?
+    struct FrameID: Equatable { var revision: Int, generation: Int }
+    #if DEBUG
+    /// Each render sent to the helper, for tests.
+    @ObservationIgnored private(set) var renderLog: [RenderStep] = []
+    var holdingFrameForMatch: Bool { heldPreview != nil }
+    #endif
     @ObservationIgnored private var renderID = 0
     /// The last render is at export size: saving it gives the same file as
     /// a Fast export, byte for byte.
@@ -501,6 +522,8 @@ import UniformTypeIdentifiers
         guard let start = interactionStart else { return }
         interactionStart = nil
         if start != state { registerUndo(restoring: start, action: action) }
+        // The drag frames were canvas-size already: letting go settles.
+        quickStep = FrameID(revision: revision, generation: sourceGeneration)
         if showingInteractiveFrame, ready, source != nil, !closing { scheduleRender() }
         if !previewCurrent { scheduleActivity() }
         pumpPreviews()
@@ -939,6 +962,7 @@ import UniformTypeIdentifiers
     }
 
     private func changed(invalidateCache: Bool = true) {
+        heldPreview = nil
         scheduleToneCurve()
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
@@ -961,79 +985,169 @@ import UniformTypeIdentifiers
             self.pumpPreviews()
         }
     }
+    /// What a render develops: the export-size frame, or as many pixels as
+    /// the canvas shows, while a slider moves (`drag`) or ahead of the
+    /// export-size frame of a discrete edit (`quick`).
+    enum RenderStep: Equatable {
+        case settled, drag(CGFloat), quick(CGFloat)
+        var interactiveScale: CGFloat? {
+            switch self { case .settled: nil; case .drag(let scale), .quick(let scale): scale }
+        }
+        var isDrag: Bool { if case .drag = self { true } else { false } }
+        var isQuick: Bool { if case .quick = self { true } else { false } }
+    }
+    /// A quick frame only pays when the export-size render takes a while
+    /// (about 33 ms per megapixel on the GPU, so ~150 ms here) and the canvas
+    /// shows at most half of its pixels.
+    nonisolated static let quickFrameMinimumPixels = 4.5e6
+    nonisolated static let quickFrameMaximumPixelFraction = 0.5
+
+    nonisolated static func renderStep(interacting: Bool, screenScale: CGFloat?, framePixels: Double,
+                                       hasFrame: Bool, quickFrameDone: Bool, reusesHelperOutput: Bool) -> RenderStep {
+        let scale = screenScale.flatMap { $0 > 0 && $0 < 1 ? $0 : nil }
+        if interacting { return scale.map(RenderStep.drag) ?? .settled }
+        guard let scale, hasFrame, !quickFrameDone, !reusesHelperOutput,
+              framePixels >= quickFrameMinimumPixels,
+              Double(scale * scale) <= quickFrameMaximumPixelFraction else { return .settled }
+        return .quick(scale)
+    }
+    /// The parts of a render request the helper's reuse depends on.
+    nonisolated static func reuseKey(_ command: [String: JSONValue]) -> [String: JSONValue] {
+        var key = command
+        key["preview_path"] = nil
+        key["params"]?["post"] = .null
+        return key
+    }
+
     private func render() async {
         guard !rendering, !closing, let source, let engine else { return }
         let currentRevision = revision, snapshot = renderState, generation = sourceGeneration
-        // While a slider moves, render only as many pixels as the canvas
-        // shows; the frame on release is the export-size one.
-        let interactiveScale = interacting ? canvasScale.screenPixelsPerPhotoPixel.flatMap { $0 < 1 ? $0 : nil } : nil
-        rendering = true
+        let frame = FrameID(revision: currentRevision, generation: generation)
         let buffer = engine.directory.appendingPathComponent("preview.rgba")
+        var command: [String: JSONValue] = [
+            "command": .string("render"), "input": .string(source.path),
+            "source_generation": .number(Double(generation)),
+            "film": .string(snapshot.film), "paper": .string(snapshot.paper), "params": snapshot.params,
+            "limit_preview": .bool(snapshot.limitPreview), "preview_path": .string(buffer.path)
+        ]
+        // The target describes the cropped photograph; the helper sizes the frame from the crop.
+        if ImageSize.mode(of: snapshot.params) == .longestSide, let crop = Self.cropJSON(snapshot.crop) { command["crop"] = crop }
+        let reuseKey = Self.reuseKey(command)
+        // While a slider moves, render only as many pixels as the canvas
+        // shows; the frame on release is the export-size one. A discrete
+        // edit shows such a frame first, unless the helper can answer
+        // quickly anyway: a small photograph, or post adjustments alone.
+        let step = Self.renderStep(
+            interacting: interacting, screenScale: canvasScale.screenPixelsPerPhotoPixel,
+            framePixels: Double(imageSize.width * imageSize.height),
+            hasFrame: image != nil && !showingCachedPreview, quickFrameDone: quickStep == frame,
+            reusesHelperOutput: helperOutput == reuseKey)
+        let interactiveScale = step.interactiveScale
+        if let interactiveScale { command["interactive_scale"] = .number(Double(interactiveScale)) }
+        rendering = true
         defer {
             rendering = false
-            if revision != currentRevision || (interactiveScale != nil && !interacting), !closing { scheduleRender() }
+            // The quick frame is done: the next render settles. Once that
+            // ran, failed or not, nothing waits to settle (no retries).
+            if revision == currentRevision, generation == sourceGeneration {
+                if step.isQuick { quickStep = frame } else if step == .settled { quickStep = nil }
+            }
+            if step.isDrag, !interacting, !closing { scheduleRender() }
+            if revision != currentRevision, !closing { scheduleRender() }
             // The settled preview of the current settings is shown: the helper
             // holds their decode, so a stale brightness match can be solved.
             reconcileBrightnessMatch()
+            settleQuickFrame()
         }
         do {
             let cacheKey = await Task.detached(priority: .utility) {
                 interactiveScale == nil ? RenderedPreviewCache.key(source: source, state: snapshot, paths: engine.paths) : nil
             }.value
             guard shouldShow(currentRevision, generation) else { return }
-            var command: [String: JSONValue] = [
-                "command": .string("render"), "input": .string(source.path),
-                "source_generation": .number(Double(generation)),
-                "film": .string(snapshot.film), "paper": .string(snapshot.paper), "params": snapshot.params,
-                "limit_preview": .bool(snapshot.limitPreview), "preview_path": .string(buffer.path)
-            ]
-            if let interactiveScale { command["interactive_scale"] = .number(Double(interactiveScale)) }
-            // The target describes the cropped photograph; the helper sizes the frame from the crop.
-            if ImageSize.mode(of: snapshot.params) == .longestSide, let crop = Self.cropJSON(snapshot.crop) { command["crop"] = crop }
+            // The helper replaces its kept output with each render, and keeps
+            // none if this one fails.
+            helperOutput = nil
+            #if DEBUG
+            renderLog.append(step)
+            #endif
             let (id, result) = try await engine.request(command)
-            guard shouldShow(currentRevision, generation) else { return }
+            if step == .settled { helperOutput = reuseKey }
+            // A quick frame of an earlier edit still shows while edits keep
+            // coming (Undo held down); the current one renders next.
+            let quick = step.isQuick
+            func showable() -> Bool { quick ? !closing && generation == sourceGeneration : shouldShow(currentRevision, generation) }
+            guard showable() else { return }
             let width = Int(result["width"].double), height = Int(result["height"].double)
             let display = result["display_color_space"].string
             let developed = try await Task.detached(priority: .userInitiated) {
                 try Self.readPreview(buffer, width: width, height: height, displaySpace: display)
             }.value
-            guard shouldShow(currentRevision, generation) else { return }
-            imageSize = CGSize(width: result["photo_width"].double, height: result["photo_height"].double)
+            guard showable() else { return }
+            // The brightness match reads these; the rest waits for the frame.
             sourceSize = CGSize(width: result["source_width"].double, height: result["source_height"].double)
-            workingSize = CGSize(width: result["working_width"].double, height: result["working_height"].double)
-            if interactiveScale == nil {
-                previewScale = workingSize.width > 0 ? min(Double(width) / workingSize.width, 1) : 1
-            }
-            showingInteractiveFrame = interactiveScale != nil
-            image = developed; placeholder = nil
-            updateHistogram()
-            let film = FilmHistogram(result["film_histogram"])
-            if film != filmHistogram { filmHistogram = film }
-            cropSession?.update(photo: shownImageSize, rotation: imageRotation)
-            updateFilmStrip()
             isRaw = result["raw"].bool
-            if inputColour != result["input_colour"] { inputColour = result["input_colour"] }
-            lensCorrectionSupported = result["lens_correction_supported"].bool
-            if revision == currentRevision, interactiveScale == nil {
-                renderID = id; previewCurrent = true; hideActivity()
-                showingCachedPreview = false
-                renderAtExportSize = result["export_resolution"].bool
-                renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
-                if let cacheKey { previewCache.save(developed, photoSize: imageSize, sourceSize: sourceSize, workingSize: workingSize, raw: isRaw, key: cacheKey) }
+            let show = { [weak self] in
+                guard let self else { return }
+                imageSize = CGSize(width: result["photo_width"].double, height: result["photo_height"].double)
+                workingSize = CGSize(width: result["working_width"].double, height: result["working_height"].double)
+                if interactiveScale == nil {
+                    previewScale = workingSize.width > 0 ? min(Double(width) / workingSize.width, 1) : 1
+                }
+                showingInteractiveFrame = interactiveScale != nil
+                quickFrame = quick ? frame : nil
+                image = developed; placeholder = nil
+                updateHistogram()
+                let film = FilmHistogram(result["film_histogram"])
+                if film != filmHistogram { filmHistogram = film }
+                cropSession?.update(photo: shownImageSize, rotation: imageRotation)
+                updateFilmStrip()
+                if inputColour != result["input_colour"] { inputColour = result["input_colour"] }
+                lensCorrectionSupported = result["lens_correction_supported"].bool
+                if revision == currentRevision, interactiveScale == nil {
+                    renderID = id; previewCurrent = true; hideActivity()
+                    showingCachedPreview = false
+                    renderAtExportSize = result["export_resolution"].bool
+                    renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
+                    if let cacheKey { previewCache.save(developed, photoSize: imageSize, sourceSize: sourceSize, workingSize: workingSize, raw: isRaw, key: cacheKey) }
+                }
+                let seconds = result["elapsed_ms"].double / 1000
+                let time = "developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
+                // The photograph as exported, and whether the shown texture has fewer
+                // pixels: inspect grain in an export when it does.
+                let photograph = crop.size(of: workingSize)
+                status = interactiveScale != nil
+                    ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
+                    : "\(Int(photograph.width)) × \(Int(photograph.height))\(previewScale < 1 ? " · shown at \(Self.percent(previewScale))" : "") · \(time)"
             }
-            let seconds = result["elapsed_ms"].double / 1000
-            let time = "developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
-            // The photograph as exported, and whether the shown texture has fewer
-            // pixels: inspect grain in an export when it does.
-            let photograph = crop.size(of: workingSize)
-            status = interactiveScale != nil
-                ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
-                : "\(Int(photograph.width)) × \(Int(photograph.height))\(previewScale < 1 ? " · shown at \(Self.percent(previewScale))" : "") · \(time)"
+            // A settled or quick frame with a stale match would show the old
+            // exposure for as long as the solve and the next render take: keep
+            // the previous frame and the activity badge up until the match is
+            // in. The match can run once the quick frame is held (the helper
+            // then holds the decode), before the export-size render.
+            if !step.isDrag, revision == currentRevision, !interacting, !cropping, brightnessMatchPending {
+                heldPreview = (currentRevision, generation, show)
+            } else {
+                show()
+            }
         } catch {
+            // A failed quick frame leaves the error to the export-size render that follows.
+            if step.isQuick { return }
             if currentRevision == revision, generation == sourceGeneration, !closing {
                 renderFailed = true; hideActivity(); report(error)
             }
         }
+    }
+
+    /// After a quick frame of the current edit, renders it at export size
+    /// once no brightness match is pending or running: a match that changes
+    /// the exposure is a new edit, with its own quick frame. Called wherever
+    /// one of these conditions can clear; does nothing until all hold. A
+    /// slider's release renders by itself.
+    private func settleQuickFrame() {
+        let frame = FrameID(revision: revision, generation: sourceGeneration)
+        guard quickStep == frame, !previewCurrent, !renderFailed, !interacting, !rendering, pendingRender == nil,
+              matchTask == nil, heldPreview == nil, ready, source != nil, !closing else { return }
+        scheduleRender()
     }
 
     /// While a slider moves, show each finished frame. Otherwise only the
@@ -1351,7 +1465,7 @@ import UniformTypeIdentifiers
     /// whose match is stale is solved again.
     func reconcileBrightnessMatch() {
         // Cheap checks first: this runs on every edit, drag frames included.
-        guard matchTask == nil, !interacting, previewCurrent, !rendering, ready, !cropping, !closing,
+        guard matchTask == nil, !interacting, previewCurrent || heldPreview != nil || showsQuickFrame, !rendering, ready, !cropping, !closing,
               let engine, let source, brightnessMatchPending else { return }
         let inputs = matchInputs(state)
         let id = UUID(), generation = sourceGeneration, size = sourceSize, raw = isRaw
@@ -1366,6 +1480,7 @@ import UniformTypeIdentifiers
                 if let self, self.matchRequest == id {
                     self.matchTask = nil; self.matchRequest = nil; self.matchingBrightness = false
                     self.reconcileBrightnessMatch()
+                    if self.matchTask == nil { self.showHeldPreview(); self.settleQuickFrame() }
                 }
             }
             do {
@@ -1404,6 +1519,19 @@ import UniformTypeIdentifiers
             }
         }
     }
+
+    /// The match is in, or failed, without changing the render: the held
+    /// frame is the current one. A change re-renders and drops it.
+    private func showHeldPreview() {
+        guard let held = heldPreview else { return }
+        heldPreview = nil
+        guard held.revision == revision, held.generation == sourceGeneration, !closing else { return }
+        held.show()
+        pumpPreviews()
+        settleQuickFrame()
+    }
+    /// The quick frame of the current edit is shown: the helper holds its decode.
+    private var showsQuickFrame: Bool { quickFrame == FrameID(revision: revision, generation: sourceGeneration) }
 
     /// Moves the total with the match, keeping the user's exposure above it.
     /// A change under 0.05 EV keeps the values and only marks them current.
