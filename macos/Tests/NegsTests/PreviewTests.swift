@@ -227,6 +227,20 @@ final class PreviewTests: XCTestCase {
         XCTAssertEqual(Previews(defaults: defaults).favorites(in: stocks, paper: false).map(\.id), ["gold", "trix"])
     }
 
+    func testFilmSearchMatchesEveryWordInNameIdOrGroup() {
+        let films = stocks.filter { !$0.paper }, papers = stocks.filter(\.paper)
+        let groups = StockGroup.films(films, papers: papers)
+        func ids(_ query: String) -> [String] { StockGroup.matching(query, in: groups).flatMap(\.stocks).map(\.id) }
+        XCTAssertEqual(ids(""), ["gold", "velvia", "trix"])
+        XCTAssertEqual(ids("  "), ["gold", "velvia", "trix"])
+        XCTAssertEqual(ids("tri-x"), ["trix"])
+        XCTAssertEqual(ids("GOLD 200"), ["gold"])
+        XCTAssertEqual(ids("slide"), ["velvia"])
+        XCTAssertEqual(ids("black 400"), ["trix"])
+        XCTAssertEqual(ids("gold 400"), [])
+        XCTAssertEqual(StockGroup.matching("velvia", in: groups).map(\.title), ["Color Slide"])
+    }
+
     func testAFavoritesOwnTagStandsForItsStock() {
         XCTAssertEqual(StockFoldout.stockID(tag: StockFoldout.favoriteID("kodak_gold_200")), "kodak_gold_200")
         XCTAssertEqual(StockFoldout.stockID(tag: "kodak_gold_200"), "kodak_gold_200")
