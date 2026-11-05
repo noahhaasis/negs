@@ -21,8 +21,8 @@ struct PreviewCanvas: NSViewRepresentable {
     /// A zone being dragged from the panel, and the size its circle starts at.
     var dragged: ZoneDrag? = nil
     var draggedRadius = SampleSize.initial
-    /// The window is locked to the photograph, so the zoom is locked to fit.
-    var locksToFit = false
+    /// In a proof, the pixels the export writes: they alone set the photograph's size.
+    var proofPixels: CGSize? = nil
     /// A click on a pin's chip, or nil on empty photograph.
     var onSelectPin: ((Int?) -> Void)? = nil
     /// Called when a placed pin is dragged to a new point.
@@ -59,8 +59,7 @@ struct PreviewCanvas: NSViewRepresentable {
         photo.onMovePin = onMovePin
         photo.draggedRadius = draggedRadius
         scroll.onScrollPin = onScrollPin
-        scroll.locksToFit = locksToFit
-        scroll.onNeedsWindowFit = { [weak scale] in scale?.needsWindowFit?() }
+        scroll.proofPixels = proofPixels
         // Esc and Delete reach the photograph once a pin is selected.
         let selected = pins.first(where: \.selected)?.index
         if selected != nil, selected != photo.selectedPin { scroll.window?.makeFirstResponder(photo) }
@@ -76,9 +75,15 @@ struct PreviewCanvas: NSViewRepresentable {
         // A different crop (such as an undone one) is a new picture: fit it.
         let recropped = photo.crop != crop && oldSize.width != 0
         if recropped { scroll.fitting = true }
+        // The same picture at another resolution, as during a slider drag: a
+        // proof looks the same, and stays where it's been panned to.
+        let sameProof = proofPixels != nil && !commanded && !recropped && oldSize.width > 0 && oldSize != documentSize
+            && abs(oldSize.width / oldSize.height - documentSize.width / documentSize.height) < 0.01
         photo.show(image, size: size, rotation: rotation, crop: crop, border: border, filmTexture: filmTexture, filmStrip: filmStrip)
         if oldSize != documentSize {
-            if commanded || scroll.fitting || oldSize.width == 0 {
+            if sameProof {
+                scroll.keepVisibleContent(resizingDocumentFrom: oldSize, to: documentSize)
+            } else if commanded || scroll.fitting || oldSize.width == 0 {
                 photo.setFrameSize(documentSize)
             } else if oldPhotoSize != displaySize {
                 scroll.keepVisibleContent(resizingDocumentFrom: oldSize, to: documentSize)
@@ -88,11 +93,10 @@ struct PreviewCanvas: NSViewRepresentable {
             }
         }
         if commanded {
-            scroll.lastCommand = zoomCommand; scroll.fitting = fit || locksToFit
+            scroll.lastCommand = zoomCommand; scroll.fitting = fit || proofPixels != nil
             scroll.applyZoom()
-        } else if oldSize != documentSize || recropped, scroll.fitting { scroll.applyZoom() }
+        } else if oldSize != documentSize || recropped, scroll.fitting, !sameProof { scroll.applyZoom() }
         scroll.showPins(pins, dragged: dragged)
-        if locksToFit { scroll.onNeedsWindowFit?() }
     }
 }
 
@@ -100,8 +104,6 @@ struct PreviewCanvas: NSViewRepresentable {
 /// zoom. A render this much smaller than the photograph looks the same on screen.
 @MainActor final class CanvasScale {
     weak var view: ImageScrollView?
-    /// Asks the window to take the photograph's shape again.
-    var needsWindowFit: (() -> Void)?
     var screenPixelsPerPhotoPixel: CGFloat? {
         guard let view, let window = view.window, view.magnification > 0 else { return nil }
         return view.magnification * window.backingScaleFactor
@@ -118,14 +120,17 @@ struct PreviewCanvas: NSViewRepresentable {
 }
 
 final class CenteringClipView: NSClipView {
-    /// How far above centre the document sits, in its own units.
+    /// How far above centre the document sits, in its own units, where it has room.
     var raise: CGFloat = 0
 
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var bounds = super.constrainBoundsRect(proposedBounds)
         guard let documentView else { return bounds }
         if bounds.width > documentView.frame.width { bounds.origin.x = (documentView.frame.width - bounds.width) / 2 }
-        if bounds.height > documentView.frame.height { bounds.origin.y = (documentView.frame.height - bounds.height) / 2 - raise }
+        if bounds.height > documentView.frame.height { 
+            let room = (bounds.height - documentView.frame.height) / 2
+            bounds.origin.y = -room - min(raise, room)
+        }
         return bounds
     }
 }
@@ -137,20 +142,28 @@ final class ImageScrollView: NSScrollView {
     var onScrollPin: ((Double, Bool) -> Void)?
     /// One step of ⌘+ or ⌘−.
     static let zoomStep: CGFloat = 2.0.squareRoot()
-    /// Locked to the fit zoom, with the photograph filling the canvas even above
-    /// 1:1. Nothing else can zoom it.
-    var locksToFit = false {
+    /// In a proof, the pixels the export writes, shown one to a screen pixel.
+    /// Only they set the zoom: the window's size doesn't, and nothing else can.
+    var proofPixels: CGSize? {
         didSet {
-            guard locksToFit != oldValue else { return }
-            if locksToFit { setFitting(true) }
+            guard proofPixels != oldValue else { return }
+            if proofPixels != nil { setFitting(true) }
             applyZoom()
         }
     }
-    var onNeedsWindowFit: (() -> Void)?
+    private var isProof: Bool { proofPixels != nil }
+    /// The zoom that makes the document the export's size. By the long edges, so
+    /// a photograph of another orientation that's still arriving has the same scale.
+    private func proofMagnification(document size: CGSize) -> CGFloat? {
+        guard let proofPixels, max(size.width, size.height) > 0 else { return nil }
+        let long = max(proofPixels.width, proofPixels.height)
+        guard long > 0 else { return nil }
+        return long / max(size.width, size.height) / (window?.backingScaleFactor ?? 2)
+    }
 
     /// ⌘+ and ⌘−, about the middle of what's on screen.
     func zoom(by factor: CGFloat) {
-        guard !locksToFit, documentView != nil else { return }
+        guard !isProof, documentView != nil else { return }
         setFitting(false)
         let visible = contentView.bounds
         setMagnification(min(max(magnification * factor, minMagnification), maxMagnification), centeredAt: NSPoint(x: visible.midX, y: visible.midY))
@@ -189,9 +202,17 @@ final class ImageScrollView: NSScrollView {
         super.layout()
         if lastViewport != contentSize {
             lastViewport = contentSize
-            if fitting { applyZoom() }
-            if locksToFit { onNeedsWindowFit?() }
+            if isProof, let documentView, let wanted = proofMagnification(document: documentView.frame.size), abs(magnification - wanted) < 0.0001 {
+                // A new window size doesn't change the zoom, only what's centred.
+                contentView.scroll(to: contentView.bounds.origin)
+                reflectScrolledClipView(contentView)
+            } else if fitting || isProof { applyZoom() }
         }
+    }
+    /// Moved to a screen with another scale, a proof stays one pixel to a pixel.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        if isProof { applyZoom() }
     }
     func applyZoom() {
         guard let documentView, documentView.frame.width > 0, contentSize.width > 0 else { return }
@@ -199,14 +220,9 @@ final class ImageScrollView: NSScrollView {
         // 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
         // photograph, but never enlarges it past 1:1.
         let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
-        // Locked to the export size, the photograph and its mat fill the canvas.
-        let mat = WindowFit.mat(forLongEdge: max(size.width, size.height))
-        let framed = locksToFit
-            ? CGSize(width: size.width + mat.side * 2, height: size.height + mat.top + mat.bottom)
-            : size
-        let fit = min(contentSize.width / framed.width, contentSize.height / framed.height)
-        let amount = locksToFit ? fit : fitting ? min(fit, oneToOne) : oneToOne
-        (contentView as? CenteringClipView)?.raise = locksToFit ? (mat.bottom - mat.top) / 2 : 0
+        let fit = min(contentSize.width / size.width, contentSize.height / size.height)
+        let amount = proofMagnification(document: size) ?? (fitting ? min(fit, oneToOne) : oneToOne)
+        (contentView as? CenteringClipView)?.raise = isProof ? Proof.raise(forLongEdge: max(size.width, size.height)) : 0
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
         // Magnifying centres; constraining again applies the raise.
         contentView.scroll(to: contentView.bounds.origin)
@@ -215,14 +231,15 @@ final class ImageScrollView: NSScrollView {
     /// Whether the photograph is larger than the viewport, so panning has
     /// somewhere to go.
     var canScroll: Bool {
-        guard !locksToFit, let documentView else { return false }
-        return documentView.frame.width > contentSize.width + 0.5
-            || documentView.frame.height > contentSize.height + 0.5
+        guard let documentView else { return false }
+        let visible = contentView.bounds.size
+        return documentView.frame.width > visible.width + 0.5
+            || documentView.frame.height > visible.height + 0.5
     }
     /// Double-click: fit the whole photograph, or show it at 1:1 about the
     /// clicked point, which then stays under the pointer.
     func toggleZoom(about point: CGPoint) {
-        guard !locksToFit else { return }
+        guard !isProof else { return }
         if fitting {
             setFitting(false)
             let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
@@ -263,20 +280,20 @@ final class ImageScrollView: NSScrollView {
         onFitChanged?(value)
     }
     override func magnify(with event: NSEvent) {
-        guard !locksToFit else { return }
+        guard !isProof else { return }
         setFitting(false)
         super.magnify(with: event)
     }
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.option) {
-            guard !locksToFit else { return }
+            guard !isProof else { return }
             setFitting(false)
             let center = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
             setMagnification(min(max(magnification * exp(-event.scrollingDeltaY * 0.01), minMagnification), maxMagnification), centeredAt: center)
         } else if overlay.pins.contains(where: \.selected), let onScrollPin {
             let delta = SampleSize.handDelta(scrollingDeltaY: Double(event.scrollingDeltaY), inverted: event.isDirectionInvertedFromDevice)
             onScrollPin(delta, event.hasPreciseScrollingDeltas)
-        } else if !locksToFit {
+        } else {
             super.scrollWheel(with: event)
         }
     }

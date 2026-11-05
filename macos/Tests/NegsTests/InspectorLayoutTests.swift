@@ -30,15 +30,15 @@ import XCTest
         XCTAssertEqual(try grey(2), try grey(50), accuracy: 1, "It's only one point wide")
     }
 
-    /// Locked to the export size, the viewer's background is white, and the
-    /// saved colour comes back when it's unlocked.
-    func testTheViewerIsWhiteWhileLocked() throws {
+    /// In a proof, the viewer's background is white, and the
+    /// saved colour comes back when it ends.
+    func testTheViewerIsWhiteInAProof() throws {
         _ = NSApplication.shared
         let defaults = UserDefaults.standard
-        let saved = (defaults.object(forKey: "lockWindowToPhotograph"), defaults.object(forKey: ViewerBackground.customKey))
+        let saved = (defaults.object(forKey: "proofMode"), defaults.object(forKey: ViewerBackground.customKey))
         defaults.set(false, forKey: ViewerBackground.customKey)
         defer {
-            defaults.set(saved.0, forKey: "lockWindowToPhotograph")
+            defaults.set(saved.0, forKey: "proofMode")
             defaults.set(saved.1, forKey: ViewerBackground.customKey)
         }
         let model = EditorModel()
@@ -53,11 +53,11 @@ import XCTest
             let colour = try XCTUnwrap(bitmap.colorAt(x: 8, y: bitmap.pixelsHigh - 8)?.usingColorSpace(.sRGB))
             return Int((colour.redComponent * 255).rounded())
         }
-        model.windowLockedToPhotograph = false
+        model.proofing = false
         XCTAssertEqual(try background(), 40, accuracy: 2)
-        model.windowLockedToPhotograph = true
+        model.proofing = true
         XCTAssertEqual(try background(), 255)
-        model.windowLockedToPhotograph = false
+        model.proofing = false
         XCTAssertEqual(try background(), 40, accuracy: 2)
     }
 

@@ -274,18 +274,16 @@ effect and the panel, to judge the photograph clean. Dropping a zone shows them 
 replaces a photograph's pins, a session restores them, and opening another file
 starts with none.
 
-## Locking the window to the export size
+## Proof
 
-P, the Lock Size button in the toolbar's view group, or Settings › Viewer locks the
-window to the export: the canvas shows the photograph's pixels in an export, one to
-a screen pixel, or scaled down in the same shape if they won't fit
-the screen (`WindowFit`). The window can't be resized, zooming and panning are off,
-and the export sits on a white mat: 8 % of its long edge on the sides and top, and
-1.2 × that below, so it sits at the optical centre. The mat replaces the border on
-screen and its controls are off; exports still include the border if it's on. It refits when the export's size changes, or what's around the canvas does, so
-photographs with the same export size keep the window where it is. It waits while
-cropping and in full screen. The window's top left corner never moves: near the screen's
-edge, the export scales to the room it has.
+P, the Proof button in the toolbar's view group, or Settings › Viewer shows the
+photograph at the size it will export, one export pixel to a screen pixel, on white
+in place of the border. Only the export's settings set that size (`proofPixels`):
+the window's size doesn't, and zooming is off. Proof never changes the window, whose
+size and position stay the user's, including when it turns on or off, a photograph
+of another orientation arrives, or the film strip shows or hides. A proof larger than
+the window can be panned. With room, the photograph sits 0.8 % of its long edge above
+centre so it doesn't seem to sink. Exports still include the border if it's on.
 
 Otherwise, ⌘+ and ⌘− zoom in and out by a factor of √2.
 

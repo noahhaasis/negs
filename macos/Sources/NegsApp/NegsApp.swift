@@ -244,8 +244,8 @@ struct CanvasArea: View {
 
     var body: some View {
         ZStack {
-            // The white mat while locked to the export size; the saved colour stays saved.
-            model.windowLockedToPhotograph ? Color.white : ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
+            // White in a proof; the saved colour stays saved.
+            model.proofing ? Color.white : ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
             if let session = model.cropSession, let image = model.image {
                 CropEditor(session: session, image: image)
             } else if let image = model.image {
@@ -265,7 +265,7 @@ struct CanvasArea: View {
                       pins: model.pinsToShow,
                       dragged: model.zoneDrag,
                       draggedRadius: model.sampleRadius,
-                      locksToFit: model.windowLockedToPhotograph,
+                      proofPixels: model.proofing ? model.exportPixels : nil,
                       onSelectPin: { model.selectPin($0) },
                       onMovePin: { index, centre in Task { await model.movePin(index, to: centre) } },
                       onScrollPin: { model.resizeSelectedPin(scrollDelta: $0, precise: $1) },

@@ -828,7 +828,7 @@ struct AdjustmentInspector: View {
         }
         Section("Border") {
             if !model.canEditBorder {
-                Text("The window is locked to the export size, so a mat replaces the border on screen. Press P to change it. Exports still include the border if it’s on.")
+                Text("Proof shows the photograph on white, without its border. Press P to leave it. Exports still include the border if it’s on.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Toggle("Add border", isOn: model.border(\.enabled))

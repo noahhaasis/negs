@@ -355,98 +355,107 @@ extension ZoneModelTests {
         XCTAssertTrue(model.showsZonePanel)
     }
 
-    /// Through a real window: locked, it takes the export's shape and can't be
-    /// resized, a photograph of the same size leaves it alone, and unlocking
-    /// gives resizing back.
-    func testLockingTheWindowToTheExportSize() async throws {
+    /// Through a real window: the proof is the export's size whatever happens,
+    /// and nothing changes the window's size or position, which stays the user's.
+    func testAProofNeverTouchesTheWindowOrResizesThePhotograph() async throws {
         let model = try await makeModel()
-        let saved = UserDefaults.standard.object(forKey: "lockWindowToPhotograph")
+        let saved = UserDefaults.standard.object(forKey: "proofMode")
         defer {
             model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "lockWindowToPhotograph")
+            UserDefaults.standard.set(saved, forKey: "proofMode")
         }
         let controller = EditorWindowController(model: model)
         let window = try XCTUnwrap(controller.window)
         controller.showWindow(nil)
         defer { window.orderOut(nil) }
+        model.proofing = false
+        window.setFrame(NSRect(x: 80, y: 80, width: 1100, height: 640), display: true)
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertTrue(window.styleMask.contains(.resizable))
-        model.windowLockedToPhotograph = true
-        try await Task.sleep(for: .milliseconds(500))
-        XCTAssertFalse(window.styleMask.contains(.resizable))
         func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
         let scroll = try XCTUnwrap(all(try XCTUnwrap(window.contentView)).compactMap { $0 as? ImageScrollView }.first)
-        // The 64 × 48 ramp is smaller than the usable minimum, so it scales up in shape.
-        // The 64 × 48 ramp is scaled up to 320 × 240, with its mat.
-        XCTAssertEqual(scroll.bounds.width, 320 + 51.2, accuracy: 2, "\(scroll.bounds)")
-        XCTAssertEqual(scroll.bounds.height, 240 + 25.6 + 30.72, accuracy: 2, "\(scroll.bounds)")
-        XCTAssertTrue(scroll.locksToFit)
-        XCTAssertFalse(scroll.canScroll)
-        XCTAssertFalse(model.canZoom)
-
-        let frame = window.frame
-        model.open(other)
-        try await waitUntil { model.previewCurrent }
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(window.frame, frame, "A photograph of the same size leaves the window alone")
-
-        model.windowLockedToPhotograph = false
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertTrue(window.styleMask.contains(.resizable))
-        XCTAssertGreaterThanOrEqual(window.contentRect(forFrameRect: window.frame).width, 1020)
-    }
-
-    /// The window's top left corner never moves, whatever happens: locking,
-    /// rotating, changing photographs or unlocking, even near the screen's corner.
-    func testTheWindowNeverMovesItself() async throws {
-        let model = try await makeModel()
-        let saved = UserDefaults.standard.object(forKey: "lockWindowToPhotograph")
-        defer {
-            model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "lockWindowToPhotograph")
-        }
-        let controller = EditorWindowController(model: model)
-        let window = try XCTUnwrap(controller.window)
-        let visible = try XCTUnwrap(NSScreen.main?.visibleFrame)
-        controller.showWindow(nil)
-        defer { window.orderOut(nil) }
-        model.windowLockedToPhotograph = false
-        window.setFrame(NSRect(x: visible.maxX - 1100, y: visible.minY + 40, width: 1040, height: 640), display: true)
-        try await Task.sleep(for: .milliseconds(300))
-        let corner = CGPoint(x: window.frame.minX, y: window.frame.maxY)
-        func assertInPlace(_ step: String, line: UInt = #line) {
-            XCTAssertEqual(window.frame.minX, corner.x, accuracy: 0.5, step, line: line)
-            XCTAssertEqual(window.frame.maxY, corner.y, accuracy: 0.5, step, line: line)
-        }
+        var frame = window.frame
         func settle() async throws {
             try await waitUntil { model.previewCurrent }
             try await Task.sleep(for: .milliseconds(400))
         }
-        // A large export, which won't fit where the window is.
-        model.set(ImageSize.targetPath, .number(6000))
+        func assertProof(_ step: String, line: UInt = #line) throws {
+            XCTAssertEqual(window.frame, frame, step, line: line)
+            let document = try XCTUnwrap(scroll.documentView).frame.size
+            let onScreen = max(document.width, document.height) * scroll.magnification * window.backingScaleFactor
+            let export = max(model.exportPixels.width, model.exportPixels.height)
+            XCTAssertEqual(onScreen, export, accuracy: export * 0.01, step, line: line)
+        }
+        model.set(ImageSize.targetPath, .number(2000))
         try await settle()
-        assertInPlace("Large image size")
-        model.windowLockedToPhotograph = true
+        model.proofing = true
         try await settle()
-        assertInPlace("Locking")
-        XCTAssertLessThanOrEqual(window.frame.maxX, visible.maxX + 0.5, "It fits the room it has")
-        XCTAssertGreaterThanOrEqual(window.frame.minY, visible.minY - 0.5, "It fits the room it has")
+        XCTAssertTrue(window.styleMask.contains(.resizable), "The window stays resizable")
+        XCTAssertFalse(model.canZoom)
+        try assertProof("Entering")
         model.rotate()
         try await settle()
-        assertInPlace("Rotating")
+        try assertProof("A different orientation")
         model.set("io.rotate_cw", .number(0))
         try await settle()
-        assertInPlace("Rotating back")
+        try assertProof("Turned back")
         model.filmstripVisible.toggle()
         try await settle()
-        assertInPlace("Film strip")
+        try assertProof("Film strip")
         model.filmstripVisible.toggle()
+        try await settle()
+        model.set(ImageSize.targetPath, .number(1000))
+        try await settle()
+        try assertProof("A new export size")
         model.open(other)
         try await settle()
-        assertInPlace("Another photograph")
-        model.windowLockedToPhotograph = false
+        try assertProof("Another photograph")
+        frame = NSRect(x: 120, y: 120, width: 1300, height: 800)
+        window.setFrame(frame, display: true)
         try await settle()
-        assertInPlace("Unlocking")
+        try assertProof("The user resizes the window")
+        model.proofing = false
+        try await settle()
+        XCTAssertEqual(window.frame, frame, "Leaving")
+    }
+
+    /// A panned proof stays on the same part of the photograph when the preview
+    /// changes resolution, as it does during a slider drag.
+    func testAProofKeepsItsPlaceWhenThePreviewChangesResolution() async throws {
+        let model = try await makeModel()
+        let saved = UserDefaults.standard.object(forKey: "proofMode")
+        defer {
+            model.limitPreview(false)
+            model.shutdown()
+            UserDefaults.standard.set(saved, forKey: "proofMode")
+        }
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        controller.showWindow(nil)
+        defer { window.orderOut(nil) }
+        func settle() async throws {
+            try await waitUntil { model.previewCurrent }
+            try await Task.sleep(for: .milliseconds(400))
+        }
+        model.limitPreview(false)
+        model.set(ImageSize.targetPath, .number(6000))
+        model.proofing = true
+        try await settle()
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        let scroll = try XCTUnwrap(all(try XCTUnwrap(window.contentView)).compactMap { $0 as? ImageScrollView }.first)
+        let document = try XCTUnwrap(scroll.documentView)
+        XCTAssertTrue(scroll.canScroll)
+        let before = document.frame.size
+        let visible = scroll.contentView.bounds
+        scroll.contentView.scroll(to: CGPoint(x: visible.minX + visible.width * 0.2, y: visible.minY))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        func place() -> CGFloat { scroll.contentView.bounds.midX / document.frame.width }
+        let placed = place()
+        let onScreen = scroll.magnification * before.width
+        model.limitPreview(true)
+        try await settle()
+        XCTAssertLessThan(document.frame.width, before.width, "The preview's resolution changed")
+        XCTAssertEqual(place(), placed, accuracy: 0.01)
+        XCTAssertEqual(scroll.magnification * document.frame.width, onScreen, accuracy: onScreen * 0.01)
     }
 
     /// Pins from before zones held their own tone: each takes the zone its

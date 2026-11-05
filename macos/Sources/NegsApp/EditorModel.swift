@@ -666,21 +666,22 @@ import UniformTypeIdentifiers
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
-    /// The window is locked to the export size, showing all of it: it can't be
-    /// resized, zoomed or panned. P, the toolbar, or Settings › Viewer.
-    var windowLockedToPhotograph = UserDefaults.standard.bool(forKey: "lockWindowToPhotograph") {
-        didSet { UserDefaults.standard.set(windowLockedToPhotograph, forKey: "lockWindowToPhotograph") }
+    /// Proof: the photograph is the export's size, one pixel to a screen pixel,
+    /// on white. Nothing zooms it, and it never touches the window, which stays
+    /// the user's to size and place. P, the toolbar, or Settings › Viewer.
+    var proofing = UserDefaults.standard.bool(forKey: "proofMode") {
+        didSet { UserDefaults.standard.set(proofing, forKey: "proofMode") }
     }
-    var canZoom: Bool { source != nil && !cropping && !windowLockedToPhotograph }
-    /// The border to draw around a photograph on the canvas. Locked to the export
-    /// size, the mat replaces it.
-    func canvasBorder(for size: CGSize) -> BorderSettings? { windowLockedToPhotograph ? nil : border.shown(for: size) }
+    var canZoom: Bool { source != nil && !cropping && !proofing }
+    /// The border to draw around a photograph on the canvas. A proof shows
+    /// the photograph alone, on white.
+    func canvasBorder(for size: CGSize) -> BorderSettings? { proofing ? nil : border.shown(for: size) }
 
-    /// The border's controls: locked to the export size, the mat replaces it.
-    var canEditBorder: Bool { !windowLockedToPhotograph }
+    /// The border's controls: a proof doesn't show the border.
+    var canEditBorder: Bool { !proofing }
 
-    /// The photograph's pixels in an export, which the locked canvas shows. The
-    /// mat stands in for the border there, so the border isn't counted, though
+    /// The photograph's pixels in an export, which a proof shows. The border
+    /// isn't shown there, so it isn't counted, though
     /// an export limit that fits the framed file still scales the photograph.
     var exportPixels: CGSize {
         let rotated = imageRotation % 2 != 0
