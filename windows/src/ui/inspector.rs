@@ -46,10 +46,14 @@ const TAB_OUTPUT: u16 = 901;
 const RESET_ALL: u16 = 902;
 const TAB_PREP: u16 = 903;
 const SCOPE_MODE: u16 = 904;
+/// The Film grid's search field, on the pinned panel.
+const FILM_SEARCH: u16 = 905;
 const TABS: [(u16, &str); 3] = [(TAB_PREP, "Prep"), (TAB_LAB, "Lab"), (TAB_OUTPUT, "Output")];
 /// An open stock grid's height, in DIPs: it scrolls inside itself, keeping
 /// the tabs in reach.
 const GRID_HEIGHT: f64 = 290.0;
+/// The search field over the Film grid: 4 DIPs above a 24 DIP field, 4 below.
+const SEARCH_HEIGHT: f64 = 32.0;
 const CROP_FIRST: u16 = 950;
 
 /// Prepare the photograph, develop the film, then finish it; the pinned
@@ -193,6 +197,10 @@ pub struct Inspector {
     stocks_filled: String,
     /// The film and paper tiles, built the first time each foldout opens.
     grids: [Option<StockGrid>; 2],
+    /// The search field over the Film grid, made with its first grid. It
+    /// outlives the grids' rebuilds, which starring a film makes, so typing
+    /// in it goes on.
+    film_search: HWND,
     dev_times: [Vec<f64>; 2],
     decimal: char,
     /// The UI font's line height, for value boxes inside their fields.
@@ -291,6 +299,7 @@ impl Inspector {
             dpi,
             stocks_filled: String::new(),
             grids: [None, None],
+            film_search: HWND::default(),
             dev_times: [vec![], vec![]],
             decimal: '.',
             line: fonts.line,
@@ -564,7 +573,7 @@ pub fn dpi_changed(app: &mut App) {
             }
         }
     }
-    for &c in ins.tabs.iter().chain([&ins.reset]) {
+    for &c in ins.tabs.iter().chain([&ins.reset]).chain([&ins.film_search].into_iter().filter(|s| !s.is_invalid())) {
         unsafe {
             SendMessageW(c, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
         }
@@ -858,10 +867,15 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
                 (grid.scroll, grid.was_open, grid.anchor) = (scroll, true, anchor);
             }
             ins.grids[paper as usize] = Some(grid);
+            if !paper && ins.film_search.is_invalid() {
+                ins.film_search = create_film_search(ins.pinned, &app.fonts, model);
+            }
             created = true;
             fix_z_order(ins);
         }
     }
+    // The search changed elsewhere: Settings turning previews off clears it.
+    let refiltered = sync_film_search(ins, model);
     // A note's height follows its text, so set it before laying out.
     let mut note_changed = false;
     for row in ins.rows.iter().filter(|r| r.shown) {
@@ -874,7 +888,7 @@ fn sync_column(app: &mut App, structure: bool, held: bool) {
         }
     }
     let t1 = crate::platform::qpc();
-    if changed || created || structure || note_changed {
+    if changed || created || structure || note_changed || refiltered {
         layout_rows(ins, model);
     }
     let t2 = crate::platform::qpc();
@@ -1141,9 +1155,13 @@ fn fix_z_order(ins: &Inspector) {
     for pinned in [true, false] {
         let mut previous = HWND_TOP;
         for row in ins.rows.iter().filter(|r| (r.tab == Tab::Pinned) == pinned) {
-            let grid = match row.kind {
-                Kind::Foldout(paper) => ins.grids[paper as usize].as_ref().map(|g| g.window),
-                _ => None,
+            // The Film grid's search field, then its tiles.
+            let grid: Vec<HWND> = match row.kind {
+                Kind::Foldout(paper) => {
+                    let search = (!paper && !ins.film_search.is_invalid()).then_some(ins.film_search);
+                    search.into_iter().chain(ins.grids[paper as usize].as_ref().map(|g| g.window)).collect()
+                }
+                _ => vec![],
             };
             for &c in row.controls.iter().chain(grid.iter()) {
                 unsafe {
@@ -1289,12 +1307,22 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                 positions.push((c[0], pad - ins.px(8.0), y + ins.px(2.0), right - pad + ins.px(8.0), ins.px(28.0)));
                 let header = ins.px(32.0);
                 let open = model.previews.open(paper);
+                // The Film grid's search field sits over the grid, outside its
+                // scrolling, so it stays in reach.
+                let search = (!paper && !ins.film_search.is_invalid()).then(|| (ins.film_search, ins.field(x, y + header + ins.px(4.0), right - x), ins.px(SEARCH_HEIGHT)));
                 match &mut ins.grids[paper as usize] {
                     Some(grid) if open => {
                         grids_shown[paper as usize] = true;
+                        let below = match search {
+                            Some((field, r, height)) => {
+                                positions.push((field, r.left, r.top, r.right - r.left, r.bottom - r.top));
+                                height
+                            }
+                            None => 0,
+                        };
                         let height = layout_grid(grid, right - x, grid_height, dpi);
-                        positions.push((grid.window, x, y + header, right - x, height));
-                        header + height + ins.px(8.0)
+                        positions.push((grid.window, x, y + header + below, right - x, height));
+                        header + below + height + ins.px(8.0)
                     }
                     _ => header,
                 }
@@ -1328,6 +1356,11 @@ fn place_rows(ins: &mut Inspector, model: &Model, pinned: bool) -> i32 {
                 unsafe {
                     let _ = ShowWindow(grid.window, if shown { SW_SHOWNA } else { SW_HIDE });
                 }
+            }
+        }
+        if !ins.film_search.is_invalid() {
+            unsafe {
+                let _ = ShowWindow(ins.film_search, if grids_shown[0] { SW_SHOWNA } else { SW_HIDE });
             }
         }
         place(&positions, 0);
@@ -1770,6 +1803,9 @@ fn update_values(ins: &mut Inspector, model: &Model, expanded: &[bool]) {
                     select_tile(grid, if paper { &model.state.paper } else { &model.state.film });
                     enable(grid.window, catalog);
                 }
+                if !paper && !ins.film_search.is_invalid() {
+                    enable(ins.film_search, catalog);
+                }
             }
             Kind::DevTime(paper) => {
                 let times = stock_times(model, paper);
@@ -1940,6 +1976,12 @@ fn command(app: &mut App, id: u16, code: u32, hwnd: HWND) {
     }
     if id == RESET_ALL {
         app.model.reset();
+        return;
+    }
+    if id == FILM_SEARCH {
+        if code == EN_CHANGE {
+            film_search_changed(app, window_text(hwnd));
+        }
         return;
     }
     let Some((index, part)) = row_of(id) else { return };
@@ -2603,7 +2645,9 @@ fn commit_edit(hwnd: HWND) {
 /// An open foldout: the favourites, untitled, then headings and a
 /// two-column grid of tiles, one owner-drawn button per stock, under the
 /// menu's headings in catalog order. A favourite's tile is there twice. At
-/// most `GRID_HEIGHT` tall, it scrolls inside itself.
+/// most `GRID_HEIGHT` tall, it scrolls inside itself. While the Film grid
+/// searches, its matches show once each, under their groups, and the other
+/// tiles hide: they and their thumbnails stay for when the search clears.
 struct StockGrid {
     window: HWND,
     /// Each tile's stock id and button, in order.
@@ -2621,6 +2665,14 @@ struct StockGrid {
     was_open: bool,
     /// The tile to keep in place at the next layout (`pointed_tile`).
     anchor: Option<(String, bool, i32)>,
+    /// The search the tiles are filtered for, as typed, and which tiles
+    /// match it (never the favourites' copies); None while not searching.
+    query: String,
+    matches: Option<Vec<bool>>,
+    /// The Film grid's "No films match …" line.
+    no_matches: Option<HWND>,
+    /// The search was cleared: the next layout goes back to the current stock.
+    recenter: bool,
 }
 
 /// A tile as drawn.
@@ -2677,21 +2729,160 @@ fn build_grid(parent: HWND, fonts: &super::Fonts, model: &Model, paper: bool, ke
         })
         .collect();
     TILES.with(|t| t.borrow_mut()[paper as usize] = looks);
-    let grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false, anchor: None };
+    // A quiet line in the grid when nothing matches; hidden until then.
+    let no_matches = (!paper).then(|| create(w!("STATIC"), "", WS_CHILD | WINDOW_STYLE(SS_CENTER.0 | SS_NOPREFIX.0 | SS_ENDELLIPSIS.0), WINDOW_EX_STYLE(0), window, 0, fonts.ui));
+    let mut grid = StockGrid { window, tiles, headings, key, scroll: 0, content: 0, view: 0, was_open: false, anchor: None, query: String::new(), matches: None, no_matches, recenter: false };
+    if !paper {
+        filter_grid(&mut grid, model);
+    }
     select_tile(&grid, if paper { &model.state.paper } else { &model.state.film });
     grid
 }
 
-/// Where the headings and tiles go for `width`, and the content's height.
-fn grid_positions(grid: &StockGrid, width: i32, dpi: u32) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
+/// Which of the Film grid's tiles the search shows (`state::matching`):
+/// each match once, under its group, so never the favourites' copies.
+/// None while the search is empty or only spaces.
+fn search_matches(grid: &StockGrid, model: &Model, query: &str) -> Option<Vec<bool>> {
+    if query.trim().is_empty() {
+        return None;
+    }
+    let (films, papers) = (model.films(), model.papers());
+    let matched: std::collections::HashSet<&str> =
+        state::matching(query, state::film_groups(&films, &papers)).iter().flat_map(|g| g.stocks.iter().map(|s| s.id.as_str())).collect();
+    Some((0..grid.tiles.len()).map(|i| !among_favorites(grid, i) && matched.contains(grid.tiles[i].0.as_str())).collect())
+}
+
+/// Filters the Film grid for the model's search, hiding rather than
+/// rebuilding tiles; the next layout places what shows.
+fn filter_grid(grid: &mut StockGrid, model: &Model) {
+    let query = model.previews.film_query.clone();
+    grid.matches = search_matches(grid, model, &query);
+    if let Some(label) = grid.no_matches {
+        set_text(label, &format!("No films match \u{201c}{}\u{201d}", query.trim()));
+    }
+    // The tile under the pointer may hide.
+    if HOVER_TILE.get().is_some_and(|(paper, _)| !paper) {
+        HOVER_TILE.set(None);
+    }
+    grid.query = query;
+}
+
+/// The Film grid's search field: "Search films" until something is typed.
+fn create_film_search(parent: HWND, fonts: &super::Fonts, model: &Model) -> HWND {
+    let search = create(w!("EDIT"), &model.previews.film_query, WS_CHILD | WS_TABSTOP | WINDOW_STYLE(ES_AUTOHSCROLL as u32), WINDOW_EX_STYLE(0), parent, FILM_SEARCH, fonts.ui);
+    draw::set_role(search, Role::Field);
+    draw::track_hover(search);
+    super::accessible_name(search, "Search films");
+    let prompt = wide("Search films");
+    unsafe {
+        // Shown while focused too, as the Mac's placeholder is.
+        SendMessageW(search, EM_SETCUEBANNER, WPARAM(1), LPARAM(prompt.as_ptr() as isize));
+        let _ = SetWindowSubclass(search, Some(film_search_subclass), 1, 0);
+    }
+    search
+}
+
+/// The field and the Film grid follow the model's search when something
+/// other than typing changed it. True when the grid was filtered again.
+fn sync_film_search(ins: &mut Inspector, model: &Model) -> bool {
+    let query = &model.previews.film_query;
+    if !ins.film_search.is_invalid() && window_text(ins.film_search) != *query {
+        set_text(ins.film_search, query);
+    }
+    match ins.grids[0].as_mut() {
+        Some(grid) if grid.query != *query => {
+            filter_grid(grid, model);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Typing in the search field filters the Film grid at once, and never
+/// edits the photograph. Each search starts at the top of its matches;
+/// clearing it goes back to the current film.
+fn film_search_changed(app: &mut App, text: String) {
+    if app.model.previews.film_query == text {
+        return;
+    }
+    let cleared = text.is_empty();
+    app.model.previews.film_query = text;
+    // The thumbnails asked for follow the matches.
+    app.model.dirty |= dirty::PREVIEWS;
+    let ins = &mut app.inspector;
+    let (limit, dpi) = (ins.px(GRID_HEIGHT), ins.dpi);
+    let Some(grid) = ins.grids[0].as_mut() else { return };
+    filter_grid(grid, &app.model);
+    if cleared {
+        grid.recenter = true;
+    } else {
+        grid.scroll = 0;
+    }
+    grid.anchor = None;
+    // Only the grid moves: it keeps its height while searching, so the
+    // field and the rows below stay where they are, undrawn.
+    let mut r = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(grid.window, &mut r);
+    }
+    if layout_grid(grid, r.right - r.left, limit, dpi) != r.bottom - r.top {
+        layout_rows(ins, &app.model);
+    }
+}
+
+/// Return in the search field chooses the first match, as listed: one
+/// undo step, as clicking its tile makes.
+fn choose_first_match(app: &mut App) {
+    let query = app.model.previews.film_query.clone();
+    if query.trim().is_empty() {
+        return;
+    }
+    let (films, papers) = (app.model.films(), app.model.papers());
+    let first = state::matching(&query, state::film_groups(&films, &papers)).first().and_then(|g| g.stocks.first()).map(|s| s.id.clone());
+    if let Some(id) = first {
+        app.model.choose_film(&id);
+    }
+}
+
+/// The search field: Return chooses the first match, Escape clears it.
+extern "system" fn film_search_subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_GETDLGCODE if matches!(VIRTUAL_KEY(wparam.0 as u16), VK_RETURN | VK_ESCAPE) => LRESULT(DLGC_WANTALLKEYS as isize),
+            WM_KEYDOWN if wparam.0 == VK_RETURN.0 as usize => {
+                post(choose_first_match);
+                LRESULT(0)
+            }
+            WM_KEYDOWN if wparam.0 == VK_ESCAPE.0 as usize => {
+                // Sends EN_CHANGE, which clears the search.
+                if GetWindowTextLengthW(hwnd) > 0 {
+                    set_text(hwnd, "");
+                }
+                LRESULT(0)
+            }
+            WM_CHAR if wparam.0 == 13 || wparam.0 == 27 => LRESULT(0),
+            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
+/// Where the headings and tiles go for `width`, and the content's height:
+/// those the search shows if `filtered`, else every one. A heading shows
+/// only over tiles; with none, the "No films match" line does.
+fn grid_positions(grid: &StockGrid, width: i32, dpi: u32, filtered: bool) -> (Vec<(HWND, i32, i32, i32, i32)>, i32) {
     let px = |dip: f64| (dip * dpi as f64 / 96.0).round() as i32;
     let gap = px(TILE_GAP);
     let column = ((width - gap) / 2).max(1);
     let tile = px(TILE_IMAGE + TILE_CAPTION);
+    let matches = grid.matches.as_ref().filter(|_| filtered);
     let mut y = 0;
     let mut positions = vec![];
     for (g, &(heading, first)) in grid.headings.iter().enumerate() {
         let end = grid.headings.get(g + 1).map_or(grid.tiles.len(), |h| h.1);
+        let shown: Vec<HWND> = (first..end).filter(|&i| matches.is_none_or(|m| m[i])).map(|i| grid.tiles[i].1).collect();
+        if shown.is_empty() {
+            continue;
+        }
         match heading {
             Some(heading) => {
                 positions.push((heading, 0, y + px(6.0), width, px(16.0)));
@@ -2699,12 +2890,16 @@ fn grid_positions(grid: &StockGrid, width: i32, dpi: u32) -> (Vec<(HWND, i32, i3
             }
             None => y += px(4.0),
         }
-        for (i, (_, button)) in grid.tiles[first..end].iter().enumerate() {
+        for (i, button) in shown.iter().enumerate() {
             let (col, row) = (i as i32 % 2, i as i32 / 2);
             positions.push((*button, col * (column + gap), y + row * (tile + gap), column, tile));
         }
-        let rows = (end - first).div_ceil(2) as i32;
+        let rows = shown.len().div_ceil(2) as i32;
         y += rows * tile + (rows - 1).max(0) * gap + px(2.0);
+    }
+    if let (Some(_), Some(label), true) = (matches, grid.no_matches, positions.is_empty()) {
+        positions.push((label, 0, px(24.0), width, px(20.0)));
+        y = px(24.0 + 20.0);
     }
     (positions, y)
 }
@@ -2713,28 +2908,47 @@ fn grid_positions(grid: &StockGrid, width: i32, dpi: u32) -> (Vec<(HWND, i32, i3
 /// scroll bar beyond it; returns the grid's height. Opening it shows the
 /// current stock's tile in the middle.
 fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
-    let (mut positions, mut content) = grid_positions(grid, width, dpi);
-    if content > limit {
+    // While searching the grid keeps its height, as the Mac's fixed frame
+    // does: the rows below stay put as the matches change.
+    let view = if grid.matches.is_some() { grid_positions(grid, width, dpi, false).1.min(limit) } else { limit };
+    let (mut positions, mut content) = grid_positions(grid, width, dpi, true);
+    if content > view {
         let bar = unsafe { windows::Win32::UI::HiDpi::GetSystemMetricsForDpi(SM_CXVSCROLL, dpi) };
-        (positions, content) = grid_positions(grid, width - bar, dpi);
+        (positions, content) = grid_positions(grid, width - bar, dpi, true);
     }
     grid.content = content;
-    grid.view = content.min(limit);
+    grid.view = if grid.matches.is_some() { view } else { content.min(limit) };
     if let Some((id, favorite, top)) = grid.anchor.take() {
         let index = (0..grid.tiles.len()).find(|&i| grid.tiles[i].0 == id && among_favorites(grid, i) == favorite);
         if let Some(&(_, _, y, _, _)) = index.and_then(|i| positions.iter().find(|p| p.0 == grid.tiles[i].1)) {
             grid.scroll = y - top;
         }
-    } else if !grid.was_open {
-        let selected = TILES.with(|t| {
+    } else if !grid.was_open || std::mem::take(&mut grid.recenter) {
+        // The current stock's first tile on show: the favourites' copy if
+        // it is starred, unless a search hides that.
+        let selected: Vec<usize> = TILES.with(|t| {
             let paper = unsafe { GetWindowLongPtrW(grid.window, GWLP_USERDATA) } != 0;
-            t.borrow()[paper as usize].iter().position(|look| look.selected)
+            t.borrow()[paper as usize].iter().enumerate().filter(|(_, look)| look.selected).map(|(i, _)| i).collect()
         });
-        let tile = selected.and_then(|i| positions.iter().find(|p| p.0 == grid.tiles[i].1));
+        let tile = selected.iter().find_map(|&i| positions.iter().find(|p| p.0 == grid.tiles[i].1));
         grid.scroll = tile.map_or(0, |&(_, _, y, _, h)| y + h / 2 - grid.view / 2);
     }
     grid.scroll = grid.scroll.clamp(0, (grid.content - grid.view).max(0));
+    // What the search hides goes first, then the rest move, then what it
+    // brings back shows in its place.
+    let wanted = |hwnd: HWND| positions.iter().any(|p| p.0 == hwnd);
+    let children: Vec<HWND> = grid.tiles.iter().map(|t| t.1).chain(grid.headings.iter().filter_map(|h| h.0)).chain(grid.no_matches).collect();
+    for &child in &children {
+        if !wanted(child) {
+            show_child(child, false);
+        }
+    }
     place(&positions, grid.scroll);
+    for &child in &children {
+        if wanted(child) {
+            show_child(child, true);
+        }
+    }
     unsafe {
         let info = SCROLLINFO {
             cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
@@ -2749,6 +2963,16 @@ fn layout_grid(grid: &mut StockGrid, width: i32, limit: i32, dpi: u32) -> i32 {
         let _ = InvalidateRect(grid.window, None, true);
     }
     grid.view
+}
+
+/// Shows or hides a grid's tile, heading or line, if it isn't already.
+fn show_child(hwnd: HWND, show: bool) {
+    unsafe {
+        let visible = GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_VISIBLE.0 != 0;
+        if visible != show {
+            let _ = ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
+        }
+    }
 }
 
 /// Whether the tile at `index` is among the favourites, the untitled section.
@@ -2768,6 +2992,10 @@ fn pointed_tile(grid: &StockGrid) -> Option<(String, bool, i32)> {
         GetCursorPos(&mut p).ok()?;
         let _ = ScreenToClient(grid.window, &mut p);
         grid.tiles.iter().enumerate().find_map(|(i, (id, tile))| {
+            // A tile the search hides keeps its old place.
+            if GetWindowLongW(*tile, GWL_STYLE) as u32 & WS_VISIBLE.0 == 0 {
+                return None;
+            }
             let mut r = RECT::default();
             let _ = GetWindowRect(*tile, &mut r);
             let mut corners = [POINT { x: r.left, y: r.top }, POINT { x: r.right, y: r.bottom }];
@@ -3874,6 +4102,62 @@ mod tests {
         assert_eq!(parse_number("1x2"), None);
         assert_eq!(parse_number("NaN"), None);
         assert_eq!(parse_number("inf"), None);
+    }
+
+    /// A grid of a starred Gold (its copy among the favourites), Color
+    /// Negative's Gold and Portra, and Black & White's Tri-X. The windows are
+    /// stand-ins: laying out only reads them.
+    fn search_grid() -> StockGrid {
+        let h = |n: usize| HWND(n as *mut _);
+        StockGrid {
+            window: HWND::default(),
+            tiles: vec![("gold".into(), h(1)), ("gold".into(), h(2)), ("portra".into(), h(3)), ("trix".into(), h(4))],
+            headings: vec![(None, 0), (Some(h(10)), 1), (Some(h(11)), 3)],
+            key: String::new(),
+            scroll: 0,
+            content: 0,
+            view: 0,
+            was_open: true,
+            anchor: None,
+            query: String::new(),
+            matches: None,
+            no_matches: Some(h(20)),
+            recenter: false,
+        }
+    }
+
+    /// While searching, each match shows once under its group, without the
+    /// favourites or empty groups' headings; with none, the quiet line.
+    #[test]
+    fn a_search_shows_each_match_once_under_its_group() {
+        use crate::session::Preferences;
+        let stock = |id: &str, name: &str, bw: bool| state::Stock {
+            id: id.into(), name: name.into(), paper: false, positive: false, bw, target: String::new(), times: vec![], grain: Value::Null,
+        };
+        let mut model = Model::new(Preferences { favorite_films: vec!["gold".into()], ..Preferences::default() });
+        model.stocks = vec![stock("gold", "Gold 200", false), stock("portra", "Portra 400", false), stock("trix", "Tri-X 400", true)];
+        let mut grid = search_grid();
+        let shown = |grid: &StockGrid| grid_positions(grid, 200, 96, true).0.iter().map(|p| p.0.0 as usize).collect::<Vec<_>>();
+        // Not searching: the favourites first, then every group.
+        for query in ["", "   "] {
+            assert_eq!(search_matches(&grid, &model, query), None);
+        }
+        assert_eq!(shown(&grid), [1, 10, 2, 3, 11, 4]);
+        // A starred match shows once, under its group.
+        grid.matches = search_matches(&grid, &model, "GOLD");
+        assert_eq!(grid.matches, Some(vec![false, true, false, false]));
+        assert_eq!(shown(&grid), [10, 2]);
+        grid.matches = search_matches(&grid, &model, "black 400");
+        assert_eq!(shown(&grid), [11, 4]);
+        grid.matches = search_matches(&grid, &model, "400");
+        assert_eq!(shown(&grid), [10, 3, 11, 4]);
+        grid.matches = search_matches(&grid, &model, "gold 400");
+        assert_eq!(shown(&grid), [20]);
+        // The unfiltered layout, which keeps the grid's height while searching.
+        assert_eq!(grid_positions(&grid, 200, 96, false).0.len(), 6);
+        assert!(grid_positions(&grid, 200, 96, false).1 > grid_positions(&grid, 200, 96, true).1);
+        // Searching never edits.
+        assert!(model.undo_title().is_none());
     }
 
     #[test]

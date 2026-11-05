@@ -1737,6 +1737,10 @@ impl Model {
         }
         self.prefs.previews = on;
         self.prefs.save();
+        // The grid goes, and its search with it, as the Mac's foldout does.
+        if !on {
+            self.previews.film_query.clear();
+        }
         if !on && self.previews.clear() {
             if let Some(engine) = &self.engine {
                 engine.request(json!({"command": "release_thumbnails"}), engine::timeout_for("release_thumbnails"), |_| {});
@@ -1806,9 +1810,12 @@ impl Model {
                 continue;
             }
             let (films, papers) = (self.films(), self.papers());
-            let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
-            // The favourites first, so their thumbnails come first.
-            let favorites = self.favorite_stocks(paper);
+            // While the Film grid searches, only its matches, as listed.
+            let query = if paper { "" } else { self.previews.film_query.as_str() };
+            let searching = !query.trim().is_empty();
+            let groups = if paper { state::paper_groups(&papers) } else { state::matching(query, state::film_groups(&films, &papers)) };
+            // The favourites first, so their thumbnails come first; a search hides them.
+            let favorites = if searching { vec![] } else { self.favorite_stocks(paper) };
             let rest = groups.iter().flat_map(|g| g.stocks.iter().copied()).filter(|s| !favorites.iter().any(|f| f.id == s.id));
             for stock in favorites.iter().copied().chain(rest) {
                 let command = previews::stock_command(&state, stock, &self.stocks, self.prefs.keep_paper, source, generation);
@@ -2903,6 +2910,41 @@ mod tests {
             model.pair_film(&mut loaded);
             assert_eq!(loaded.paper, "print_film");
         }
+    }
+
+    /// The Film grid's search: thumbnails only for its matches, in the order
+    /// the grid lists them, without the favourites; cleared, every film
+    /// again with the favourites first. Searching never edits.
+    #[test]
+    fn a_film_search_asks_only_for_its_matching_thumbnails() {
+        let prefs = Preferences { previews: true, inspector_pane: "Adjustments".into(), favorite_films: vec!["gold".into()], ..Preferences::default() };
+        let mut model = catalog_model(prefs);
+        model.source = Some(PathBuf::from("photo.png"));
+        model.previews.film_open = true;
+        model.previews.paper_open = true;
+        let wanted = |model: &Model, paper: bool| -> Vec<String> {
+            model.wanted_previews().into_iter().filter_map(|(target, ..)| match target { Target::Stock { id, paper: p } if p == paper => Some(id), _ => None }).collect()
+        };
+        assert_eq!(wanted(&model, false), ["gold", "portra"]);
+        let (edit, undo) = (model.state.clone(), model.undo_title().map(str::to_owned));
+        model.previews.film_query = "PORTRA".into();
+        assert_eq!(wanted(&model, false), ["portra"]);
+        // A favourite that matches is asked for once, under its group.
+        model.previews.film_query = "gold color negative".into();
+        assert_eq!(wanted(&model, false), ["gold"]);
+        // Both, in catalog order: the favourite no longer leads.
+        model.previews.film_query = "color".into();
+        assert_eq!(wanted(&model, false), ["portra", "gold"]);
+        model.previews.film_query = "nothing like it".into();
+        assert!(wanted(&model, false).is_empty());
+        // Papers have no search.
+        assert_eq!(wanted(&model, true), ["endura", "crystal"]);
+        // Only spaces, or cleared: everything, favourites first.
+        for query in ["   ", ""] {
+            model.previews.film_query = query.into();
+            assert_eq!(wanted(&model, false), ["gold", "portra"]);
+        }
+        assert_eq!((model.state.clone(), model.undo_title().map(str::to_owned)), (edit, undo));
     }
 
     /// Lens corrections: on for every new edit and after Reset, though the
