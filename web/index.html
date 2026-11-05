@@ -162,7 +162,11 @@
   /* The star over a tile's corner (macOS StockTileView): on a favourite, or
      while the pointer is over the tile; always there without a pointer. */
   .stock-cell { position: relative; min-width: 0; display: grid; }
-  .stock-favorites[hidden] { display: none; }
+  .stock-favorites[hidden], .stock-grid[hidden], .stock-fold h3[hidden], .stock-cell[hidden], .stock-empty[hidden] { display: none; }
+  .stock-search { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--field); color: var(--fg); font: inherit; font-size: 12px; }
+  .stock-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .stock-empty { margin: 24px 0 8px; text-align: center; color: var(--muted); font-size: 12px; }
   .stock-favorites { margin-top: 8px; }
   .stock-star { position: absolute; top: 0; right: 0; width: 26px; height: 26px; padding: 0; border: 0; background: none; cursor: pointer;
     color: #fff; visibility: hidden; filter: drop-shadow(0 0 1.5px rgb(0 0 0 / .8)); }
@@ -302,7 +306,7 @@
      Fields stay at 16px, below which iOS zooms the page on focus. */
   @media (pointer: coarse) {
     body { font-size: 15px; }
-    select, .value-field, .crop-inspector input[type=number], .dialog input[type=text] { font-size: 16px; }
+    select, .value-field, .crop-inspector input[type=number], .dialog input[type=text], .stock-search { font-size: 16px; }
     .menu button { min-height: 40px; }
     select { padding: 8px 10px; }
     .btn { min-height: 40px; padding: 8px 14px; }

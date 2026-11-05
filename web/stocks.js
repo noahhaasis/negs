@@ -14,8 +14,9 @@ const el = (tag, props = {}, ...children) => {
 // observer, which the panel's scroll clips). `starred`: the favourite ids in
 // the order starred (macOS Previews.favoriteFilms), which `starredChanged`
 // hears of. The favourites come first, untitled, and each stays in its group
-// too: a copy of its tile showing the same picture.
-export function foldout(title, groups, choose, shown, open = false, starred = [], starredChanged = () => {}) {
+// too: a copy of its tile showing the same picture. `search`: the prompt of
+// a search field over the grid (macOS StockFoldout, Film only), or none.
+export function foldout(title, groups, choose, shown, open = false, starred = [], starredChanged = () => {}, search = null) {
   const current = el("span", { className: "stock-current" });
   const summary = el("summary", {}, el("span", { className: "stock-title", textContent: title }), current);
   // In the sidebar a fixed window onto the grid keeps the tabs below in
@@ -30,6 +31,8 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
     shown();
   }, { rootMargin: "120px 0px" });
   let favorites = [];
+  // The search field's words; while there are any, no favourites.
+  let query = "";
   // A tile's cell: the button that chooses, and the star over its corner,
   // outside it so a click stars rather than chooses.
   const cell = (tile) => {
@@ -42,16 +45,23 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
     observer.observe(button);
     return { root: el("div", { className: "stock-cell" }, button, star), button, canvas, star };
   };
+  const sections = [];
   for (const g of groups) {
     const grid = el("div", { className: "stock-grid" });
+    const heading = el("h3", { textContent: g.title });
+    const section = { heading, grid, tiles: [] };
     for (const s of g.stocks) {
       // key: what the picture shows; photo: whose; failed: the key it failed at.
-      const tile = { id: s.id, name: s.name, key: null, photo: null, failed: null, copy: null };
+      // text: what a search looks in (macOS StockGroup.matching).
+      const tile = { id: s.id, name: s.name, key: null, photo: null, failed: null, copy: null,
+        text: `${s.name} ${s.id.replaceAll("_", " ")} ${g.title}`.toLocaleLowerCase() };
       Object.assign(tile, cell(tile));
       grid.append(tile.root);
       tiles.set(s.id, tile);
+      section.tiles.push(tile);
     }
-    body.append(el("h3", { textContent: g.title }), grid);
+    sections.push(section);
+    body.append(heading, grid);
   }
   const favoriteGrid = el("div", { className: "stock-grid stock-favorites" });
   body.prepend(favoriteGrid);
@@ -88,7 +98,7 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
       }
       favoriteGrid.append(t.copy.root);
     }
-    favoriteGrid.hidden = !favoriteGrid.childElementCount;
+    favoriteGrid.hidden = !favoriteGrid.childElementCount || !!query.trim();
     markStars();
   };
   const toggle = (id) => {
@@ -110,6 +120,49 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
   details.addEventListener("toggle", () => { center(); shown(); });
   favorites = starred.slice();
   layOut();
+
+  // The search: every word somewhere in a stock's name, id or group. The
+  // matches show once, under their groups (no favourites); each search
+  // starts at the top of its matches, and clearing it goes back to the
+  // current stock. Return takes the first match, Escape clears.
+  const empty = el("p", { className: "stock-empty", hidden: true });
+  body.append(empty);
+  const matches = (query) => {
+    const words = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    return sections.flatMap((s) => s.tiles).filter((t) => words.every((w) => t.text.includes(w)));
+  };
+  const filter = (text) => {
+    query = text;
+    const searching = !!query.trim();
+    const hits = new Set(searching ? matches(query) : tiles.values());
+    for (const s of sections) {
+      for (const t of s.tiles) t.root.hidden = !hits.has(t);
+      s.heading.hidden = s.grid.hidden = !s.tiles.some((t) => hits.has(t));
+    }
+    favoriteGrid.hidden = searching || !favoriteGrid.childElementCount;
+    empty.hidden = !searching || hits.size > 0;
+    empty.textContent = `No ${title.toLowerCase()}s match “${query.trim()}”`;
+    if (searching) body.scrollTop = 0; else center();
+    shown();
+  };
+  if (search) {
+    const field = el("input", { type: "search", className: "stock-search", placeholder: search, spellcheck: false, autocomplete: "off" });
+    field.setAttribute("aria-label", search);
+    field.addEventListener("input", () => filter(field.value));
+    field.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const first = field.value.trim() && matches(field.value)[0];
+        if (first) choose(first.id);
+      } else if (e.key === "Escape" && field.value) {
+        e.preventDefault();
+        e.stopPropagation();
+        field.value = "";
+        filter("");
+      }
+    });
+    body.before(field);
+  }
   return {
     root: details,
     tiles,
