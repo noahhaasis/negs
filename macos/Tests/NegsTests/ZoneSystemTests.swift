@@ -77,13 +77,22 @@ final class ZoneSystemTests: XCTestCase {
             XCTAssertLessThanOrEqual(value, previous + 0.5, "A line at row \(y)")
             previous = value
         }
-        // Tile 10 is white, so the edge has to be darker than it.
+        // Translucent grey: only slightly darker than the white tile under it.
         let right = bitmap.pixelsWide - 1
-        XCTAssertLessThan(try grey(right, 25), try grey(right - 3 * scale, 25) - 20)
-        // A steady mid grey top to bottom, so it's lighter than the darkest tile too.
-        // (The panel is dimmed in this render, with no photograph; the line isn't.)
-        XCTAssertEqual(try grey(right, 25), 128, accuracy: 3)
-        XCTAssertEqual(try grey(right, height - 25), 128, accuracy: 3)
+        let edge = try grey(right, 25)
+        XCTAssertLessThan(edge, try grey(right - 3 * scale, 25) - 20, "It shows on white")
+        XCTAssertGreaterThan(edge, 190, "It's very slight")
+    }
+
+    /// The same line over a dark tile comes out lighter than the tile.
+    @MainActor func testTheZoneEdgeIsLighterThanADarkTone() throws {
+        let host = NSHostingView(rootView: Color.black.overlay { Rectangle().fill(ZonePanel.edgeColour) })
+        host.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let colour = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))
+        XCTAssertGreaterThan(colour.redComponent * 255, 20)
     }
 
     /// Tab shows and hides the pins, and stands down while typing in a field.

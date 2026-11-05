@@ -8,6 +8,8 @@ struct ZonePanel: View {
     let model: EditorModel
     /// The space shared with the canvas, for a drag that crosses into it.
     static let coordinateSpace = "zoneCanvas"
+    /// A faint translucent grey, which shows on a white mat and on dark tiles alike.
+    static let edgeColour = Color(white: 0.5, opacity: 0.3)
 
     static func label(for zone: Zone, placed: Bool) -> String {
         "Zone \(zone.numeral), \(zone.name), \(placed ? "placed" : "not placed")"
@@ -34,8 +36,7 @@ struct ZonePanel: View {
         .frame(width: ZoneGeometry.panelWidth)
         .allowsHitTesting(model.canPlaceZones)
         .opacity(model.canPlaceZones ? 1 : 0.5)
-        // A mid grey, so it shows against a white mat and the darkest tile alike.
-        .overlay(alignment: .trailing) { Rectangle().fill(Color(white: 0.5)).frame(width: 1).allowsHitTesting(false) }
+        .overlay(alignment: .trailing) { Rectangle().fill(Self.edgeColour).frame(width: 1).allowsHitTesting(false) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Zones")
     }
