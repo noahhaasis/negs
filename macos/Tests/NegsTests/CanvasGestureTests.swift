@@ -327,6 +327,60 @@ extension CanvasGestureTests {
         XCTAssertEqual(scroll.contentView.bounds.origin, held, "It doesn't pan while sizing")
     }
 
+    /// A click inside a pin's circle selects it; the marker isn't the only target.
+    func testClickingInsideACircleSelectsThePin() throws {
+        let (scroll, view) = makeCanvas()
+        var selections: [Int?] = []
+        view.onSelectPin = { selections.append($0) }
+        scroll.showPins([marker(at: CGPoint(x: 0.5, y: 0.5), radius: 0.4)], dragged: nil)
+        let inside = viewPoint(CGPoint(x: 0.5, y: 0.3), in: view)
+        view.mouseDown(with: try mouse(.leftMouseDown, at: inside))
+        view.mouseUp(with: try mouse(.leftMouseUp, at: inside))
+        XCTAssertEqual(selections, [0])
+    }
+
+    /// A drag that starts inside a circle still pans, and selects nothing.
+    func testDraggingInsideACircleDoesNotSelect() throws {
+        let (scroll, view) = makeCanvas()
+        var selections: [Int?] = []
+        view.onSelectPin = { selections.append($0) }
+        scroll.showPins([marker(at: CGPoint(x: 0.5, y: 0.5), radius: 0.4)], dragged: nil)
+        let inside = viewPoint(CGPoint(x: 0.5, y: 0.3), in: view)
+        let away = CGPoint(x: inside.x + 20, y: inside.y)
+        view.mouseDown(with: try mouse(.leftMouseDown, at: inside))
+        view.mouseDragged(with: try mouse(.leftMouseDragged, at: away))
+        view.mouseUp(with: try mouse(.leftMouseUp, at: away))
+        XCTAssertEqual(selections, [])
+    }
+
+    /// A hand's small wobble during a click is still a click.
+    func testASmallWobbleIsStillAClick() throws {
+        let (scroll, view) = makeCanvas()
+        var selections: [Int?] = []
+        view.onSelectPin = { selections.append($0) }
+        scroll.showPins([marker(at: CGPoint(x: 0.5, y: 0.5), radius: 0.4)], dragged: nil)
+        let inside = viewPoint(CGPoint(x: 0.5, y: 0.3), in: view)
+        let wobble = CGPoint(x: inside.x + 1, y: inside.y + 1)
+        view.mouseDown(with: try mouse(.leftMouseDown, at: inside))
+        view.mouseDragged(with: try mouse(.leftMouseDragged, at: wobble))
+        view.mouseUp(with: try mouse(.leftMouseUp, at: wobble))
+        XCTAssertEqual(selections, [0])
+    }
+
+    /// Where circles overlap, the smallest under the pointer wins, so a small
+    /// circle inside a big one can still be reached.
+    func testTheSmallestOverlappingCircleWins() throws {
+        let (scroll, view) = makeCanvas()
+        let centre = CGPoint(x: 0.5, y: 0.5)
+        scroll.showPins([marker(0, at: centre, radius: 0.3), marker(1, zone: 7, at: centre, radius: 0.1)], dragged: nil)
+        let point = scroll.overlay.convert(viewPoint(CGPoint(x: 0.5, y: 0.5), in: view), from: view)
+        let near = CGPoint(x: point.x, y: point.y + 20)   // inside both
+        let far = CGPoint(x: point.x, y: point.y + 60)    // inside the big one only
+        XCTAssertEqual(scroll.overlay.pinCircle(at: near), 1)
+        XCTAssertEqual(scroll.overlay.pinCircle(at: far), 0)
+        XCTAssertNil(scroll.overlay.pinCircle(at: CGPoint(x: point.x, y: point.y + 120)))
+    }
+
     func testClickingEmptyPhotographDeselects() throws {
         let (scroll, view) = makeCanvas()
         var selections: [Int?] = []

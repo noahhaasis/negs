@@ -39,6 +39,7 @@ final class PinOverlayView: NSView {
     private let dragChip = PinOverlayView.makeChip()
     private var chipCentres: [Int: CGPoint] = [:]
     private var labelFrames: [Int: CGRect] = [:]
+    private var circles: [Int: (centre: CGPoint, radius: CGFloat)] = [:]
     private(set) var drawnCircles = 0
     private(set) var pins: [TonePinMarker] = []
     private(set) var dragged: ZoneDrag?
@@ -87,6 +88,12 @@ final class PinOverlayView: NSView {
 
     func labelFrame(_ index: Int) -> CGRect? { labelFrames[index] }
 
+    /// The pin whose circle holds `point`; the smallest, where they overlap.
+    func pinCircle(at point: CGPoint) -> Int? {
+        circles.filter { hypot(point.x - $0.value.centre.x, point.y - $0.value.centre.y) <= $0.value.radius }
+            .min { $0.value.radius < $1.value.radius }?.key
+    }
+
     /// A chip's frame in this view, for tests.
     func chipLayer(_ index: Int) -> CALayer? { chips[index] }
     var isShowingIgnoredLink: Bool { ignored.path != nil }
@@ -109,6 +116,7 @@ final class PinOverlayView: NSView {
         links = [:]
         chipCentres = [:]
         labelFrames = [:]
+        circles = [:]
         drawnCircles = 0
         for marker in pins {
             // A pin outside the crop has no spot on screen to point at.
@@ -125,6 +133,7 @@ final class PinOverlayView: NSView {
             let radius = photo.radiusInPoints(marker.source.radius) * scroll.magnification
             if radius >= ZoneGeometry.smallestCircle {
                 drawnCircles += 1
+                circles[marker.index] = (centre, radius)
                 all.addPath(circle(centre, radius))
                 path.addPath(circle(centre, radius))
                 if marker.selected { fill.addPath(circle(centre, radius)) }

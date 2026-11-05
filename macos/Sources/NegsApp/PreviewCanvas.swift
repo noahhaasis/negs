@@ -264,7 +264,8 @@ final class PhotographView: NSView {
     var onDeleteKey: (() -> Void)?
     /// The drag in progress.
     private enum Drag {
-        /// A plain press: a click if it doesn't move, a pan if it can.
+        /// A plain press: a click if it doesn't move, a pan if it can. Clicking
+        /// in a pin's circle selects it, while dragging from there still pans.
         case press(start: CGPoint, moved: Bool, canScroll: Bool)
         /// A pin dragged from its chip: it follows the pointer from where it
         /// was grabbed, and the tone is measured again on mouse-up.
@@ -382,7 +383,9 @@ final class PhotographView: NSView {
             drag = .movePin(index: index, start: start, grab: grab, unit: unit)
             movedPin = (index, centre)
             overlay?.redraw()
-        case .press(let start, _, let canScroll):
+        case .press(let start, let moved, let canScroll):
+            // A small wobble while clicking is still a click.
+            guard moved || hypot(point.x - start.x, point.y - start.y) > 3 else { return }
             drag = .press(start: start, moved: true, canScroll: canScroll)
             guard canScroll, let scroll = enclosingScrollView else { return }
             var origin = scroll.contentView.bounds.origin
@@ -399,8 +402,9 @@ final class PhotographView: NSView {
         switch drag {
         case .movePin(let index, _, _, let unit?):
             onMovePin?(index, unit)
-        case .press(_, false, _):
-            onSelectPin?(nil)
+        case .press(let start, false, _):
+            // A click inside a pin's circle selects it; on empty photograph it deselects.
+            onSelectPin?(overlay.flatMap { $0.pinCircle(at: $0.convert(start, from: self)) })
         default:
             break
         }

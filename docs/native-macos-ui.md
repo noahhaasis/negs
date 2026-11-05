@@ -238,10 +238,11 @@ On the canvas:
   circle, and the tone is measured again when the wheel stops. A new pin starts
   at the size last used.
 - a pin is a small dot on the exact spot, with its zone's number beside it, so
-  its circle can shrink well below the label. Click the dot or number to select
-  it, click empty photograph to deselect, and drag it to measure another spot. ⌫ deletes the selected pin and Esc deselects.
-- with nothing selected, plain drag and scroll pan, including inside a pin's
-  circle. Double-click fits or shows 1:1. Crop mode has its own gestures.
+  its circle can shrink well below the label. Click the dot, number or inside the
+  circle to select it, where the smallest circle wins, and click empty photograph
+  to deselect. Drag the dot or number to measure another spot. ⌫ deletes the selected pin and Esc deselects.
+- with nothing selected, plain drag and scroll pan, including a drag that starts
+  inside a pin's circle. Double-click fits or shows 1:1. Crop mode has its own gestures.
 
 Placing, moving, resizing and deleting are each one undo step.
 

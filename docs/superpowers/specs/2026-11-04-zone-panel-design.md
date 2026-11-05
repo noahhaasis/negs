@@ -25,7 +25,7 @@ Success is that someone can drag zone 0 onto a shadow and watch the black point 
 
 ### Working with a placed pin
 
-- Click a pin to select it. Click empty photograph to deselect.
+- Click a pin or inside its circle to select it, where the smallest circle wins. Click empty photograph to deselect. A drag that starts inside a circle still pans.
 - Drag a selected pin to measure a different spot. Its line and circle follow from where it was grabbed.
 - Scroll to resize the selected pin's circle. With nothing selected, scrolling pans as it does today. Scrolling does nothing during a drag.
 - Delete removes the selected pin, and Esc deselects.
