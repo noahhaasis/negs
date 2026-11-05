@@ -181,6 +181,7 @@ struct EditorCanvas: View {
                     }
             }
             .coordinateSpace(name: ZonePanel.coordinateSpace)
+            .overlay(alignment: .top) { EdgeLine(horizontal: true) }
             if model.filmstripVisible, let source = model.source {
                 Divider()
                 PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
@@ -193,6 +194,20 @@ struct EditorCanvas: View {
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+    }
+}
+
+/// The 1-point line between the window's regions: under the toolbar and down
+/// the sidebar's left edge.
+struct EdgeLine: View {
+    let horizontal: Bool
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: horizontal ? nil : 1, height: horizontal ? 1 : nil)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
     }
 }
 
@@ -215,9 +230,9 @@ struct InspectorPanel: View {
         // The title bar shows the viewer's background through it, so this matches.
         .background(ViewerBackground.canvas(custom: customBackground, hex: backgroundHex))
         // The edge the film strip has on top, down the left, under the toolbar too.
-        .overlay(alignment: .leading) {
-            Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1).ignoresSafeArea()
-        }
+        .overlay(alignment: .leading) { EdgeLine(horizontal: false).ignoresSafeArea() }
+        // The line under the toolbar, which continues the canvas's.
+        .overlay(alignment: .top) { EdgeLine(horizontal: true) }
     }
 }
 

@@ -30,6 +30,32 @@ import XCTest
         XCTAssertEqual(try grey(2), try grey(50), accuracy: 1, "It's only one point wide")
     }
 
+    /// The line under the toolbar runs across the canvas and the sidebar, in the
+    /// colour of the sidebar's edge.
+    func testALineRunsUnderTheToolbar() throws {
+        _ = NSApplication.shared
+        let model = EditorModel()
+        defer { model.shutdown() }
+        func rows<V: View>(_ view: V) throws -> (top: Int, below: Int) {
+            let host = NSHostingView(rootView: view)
+            host.appearance = NSAppearance(named: .darkAqua)
+            host.frame = NSRect(x: 0, y: 0, width: 800, height: 800)
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            func grey(_ y: Int) throws -> Int {
+                let colour = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: y * bitmap.pixelsHigh / 800)?.usingColorSpace(.sRGB))
+                return Int((colour.redComponent * 255).rounded())
+            }
+            return (try grey(0), try grey(4))
+        }
+        let sidebar = try rows(InspectorPanel(model: model, built: false))
+        XCTAssertGreaterThan(sidebar.top, sidebar.below + 8, "Over the sidebar")
+        let canvas = try rows(EditorCanvas(model: model))
+        XCTAssertGreaterThan(canvas.top, canvas.below + 8, "Over the canvas")
+        XCTAssertEqual(canvas.top, sidebar.top, accuracy: 2, "The same colour across both")
+    }
+
     func testInspectorDoesNotMoveWhenInteractivePreviewFinishes() async throws {
         try await checkInspectorLayout(limited: false)
     }
