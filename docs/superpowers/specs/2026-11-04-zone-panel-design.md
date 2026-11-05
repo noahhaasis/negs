@@ -48,7 +48,7 @@ At L\* = zone × 10: zone 0 is pure black, zone 5 is 18% gray and zone 10 is pur
 
 ### Hiding the pins
 
-Z, or a **Pins** button in the toolbar's view group with zoom and crop, hides the lines and pins but keeps their effect on the photograph and leaves the panel up. Pin gestures do nothing while they are hidden. Dropping a zone shows them again.
+Tab, or a **Pins** button in the toolbar's view group with zoom and crop, hides the lines and pins but keeps their effect on the photograph and leaves the panel up. Pin gestures do nothing while they are hidden. Dropping a zone shows them again.
 
 ### What goes away
 

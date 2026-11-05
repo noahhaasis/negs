@@ -51,7 +51,19 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[0], placed: false), "Zone 0, Pure black, not placed")
     }
 
-    /// Z and Delete have no modifier, so they stand down while typing in a field.
+    /// Tab shows and hides the pins, and stands down while typing in a field.
+    @MainActor func testTabTogglesThePinsOutsideTextFields() {
+        let tab: UInt16 = 48
+        XCTAssertTrue(EditorWindowController.togglesPins(keyCode: tab, modifiers: [], firstResponder: NSView()))
+        XCTAssertTrue(EditorWindowController.togglesPins(keyCode: tab, modifiers: [], firstResponder: nil))
+        XCTAssertTrue(EditorWindowController.togglesPins(keyCode: tab, modifiers: [.capsLock], firstResponder: nil), "Caps Lock doesn't matter")
+        XCTAssertFalse(EditorWindowController.togglesPins(keyCode: tab, modifiers: [], firstResponder: NSTextView()))
+        XCTAssertFalse(EditorWindowController.togglesPins(keyCode: tab, modifiers: [.shift], firstResponder: nil), "Shift-Tab keeps its meaning")
+        XCTAssertFalse(EditorWindowController.togglesPins(keyCode: tab, modifiers: [.control], firstResponder: nil))
+        XCTAssertFalse(EditorWindowController.togglesPins(keyCode: 6, modifiers: [], firstResponder: nil), "Z no longer does")
+    }
+
+    /// Delete has no modifier, so it stands down while typing in a field.
     @MainActor func testBareKeysStandDownWhileEditingText() {
         XCTAssertFalse(MainMenu.bareKeysAllowed(firstResponder: NSTextView()))
         XCTAssertTrue(MainMenu.bareKeysAllowed(firstResponder: NSView()))

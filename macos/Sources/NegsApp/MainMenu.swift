@@ -69,7 +69,7 @@ import SwiftUI
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
         view.addItem(.separator())
-        command(view, "Hide Pins", #selector(togglePins), "z", [])
+        command(view, "Hide Pins", #selector(togglePins), "\t", [])
         command(view, "Delete Tone Pin", #selector(deleteTonePin), "\u{8}", [])
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
@@ -138,7 +138,7 @@ import SwiftUI
     @objc private func resetAdjustments() { model.reset() }
 
     /// A shortcut with no modifier stands down while a field is being edited,
-    /// so Delete still deletes text and Z still types a z.
+    /// so Delete still deletes text and Tab still moves between fields.
     static func bareKeysAllowed(firstResponder: NSResponder?) -> Bool { !(firstResponder is NSText) }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {

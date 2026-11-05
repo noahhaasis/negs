@@ -271,7 +271,7 @@ extension ZoneModelTests {
         XCTAssertEqual(try lstar(model, at: light), ZoneScale.zones[3].target, accuracy: 1.5)
     }
 
-    /// Z hides the pins and lines, not what they do, and the panel stays.
+    /// Tab hides the pins and lines, not what they do, and the panel stays.
     func testHidingPinsKeepsThePanelAndTheEffect() async throws {
         let model = try await makeModel()
         let saved = UserDefaults.standard.object(forKey: "showTonePins")

@@ -267,7 +267,7 @@ A pin's input comes from the helper's `sample_tone` (`render_id`, `x`, `y`,
 preview: the preview already shows the other pins' curve.
 
 Because Post runs on the clipped scan, a pin shapes the tones the film produced
-but cannot recover a highlight that clipped; the exposure controls do that. Z, or
+but cannot recover a highlight that clipped; the exposure controls do that. Tab, or
 the Pins button in the toolbar's view group, hides the pins and lines but keeps their
 effect and the panel, to judge the photograph clean. Dropping a zone shows them again. A preset neither carries nor
 replaces a photograph's pins, a session restores them, and opening another file

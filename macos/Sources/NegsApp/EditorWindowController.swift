@@ -97,7 +97,10 @@ import SwiftUI
             MainActor.assumeIsolated { self?.windowChangedOcclusion() }
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            MainActor.assumeIsolated { self?.holdOriginal(event) ?? false } ? nil : event
+            MainActor.assumeIsolated {
+                guard let self else { return false }
+                return self.holdOriginal(event) || self.togglePins(event)
+            } ? nil : event
         }
         resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -128,6 +131,22 @@ import SwiftUI
 
     /// Holding \ shows the original, as in Lightroom, unless text is being
     /// typed. True if the event was handled.
+    /// Whether a key press is the bare Tab that shows or hides the pins. It stands
+    /// down while a field is being edited, so Tab still moves between fields.
+    static func togglesPins(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
+        keyCode == 48 && modifiers.isDisjoint(with: [.shift, .control, .option, .command]) && !(firstResponder is NSText)
+    }
+
+    /// Handled here rather than by the menu alone, because Tab otherwise moves
+    /// the keyboard focus before a menu shortcut sees it. True if it was Tab.
+    private func togglePins(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.window === window, model.source != nil, !model.cropping,
+              Self.togglesPins(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
+        else { return false }
+        if !event.isARepeat { model.pinsVisible.toggle() }
+        return true
+    }
+
     private func holdOriginal(_ event: NSEvent) -> Bool {
         if event.type == .keyUp {
             guard event.keyCode == originalKey else { return false }
@@ -169,7 +188,7 @@ import SwiftUI
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
         }
         if let item = items[.zones] {
-            item.toolTip = model.pinsVisible ? "Hide the pins and lines (Z)" : "Show the pins and lines (Z)"
+            item.toolTip = model.pinsVisible ? "Hide the pins and lines (Tab)" : "Show the pins and lines (Tab)"
             let icon = symbol("circle.lefthalf.filled", "Pins")
             item.image = model.pinsVisible
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
@@ -241,7 +260,7 @@ import SwiftUI
             let group = NSToolbarItemGroup(itemIdentifier: id)
             group.subitems = [button(.open, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph)),
                               button(.filmstrip, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip)),
-                              button(.zones, "Pins", "circle.lefthalf.filled", "Show or hide the pins and lines (Z)", #selector(toggleZones)),
+                              button(.zones, "Pins", "circle.lefthalf.filled", "Show or hide the pins and lines (Tab)", #selector(toggleZones)),
                               button(.fit, "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
                               button(.actualSize, "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize)),
                               button(.rotate, "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),
