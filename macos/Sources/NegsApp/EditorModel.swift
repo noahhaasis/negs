@@ -422,6 +422,8 @@ import UniformTypeIdentifiers
         PreviewRules.pairFilm(in: &next, stocks: stocks)
         state = next
         previews.update(stocks: stocks)
+        // A photograph opened before the catalog arrived, as from the command line.
+        if let source, launchRestore == nil { _ = loadSettings(beside: source) }
     }
 
     private func setFilmTexture(_ texture: CGImage?) { filmTexture = texture }
@@ -789,15 +791,7 @@ import UniformTypeIdentifiers
         sourceGeneration += 1
         let generation = sourceGeneration
         if let session {
-            var restored = session.state
-            let lensCorrection = restored.params[Self.lensCorrectionPath]
-            restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
-            // A session from before lens correction was developed without it.
-            if lensCorrection == .null { restored.params[Self.lensCorrectionPath] = .bool(false) }
-            // Sessions from before Image Size may carry the old working-resolution factor.
-            let factor = defaults[ImageSize.factorPath]
-            if factor != .null { restored.params[ImageSize.factorPath] = factor }
-            state = restored
+            state = merged(session.state)
             inspectorVisible = session.inspectorVisible
         } else {
             state.params["io.rotate_cw"] = .number(0)
@@ -813,8 +807,11 @@ import UniformTypeIdentifiers
             state.crop = CropSettings()
             customFilmFormat = false
         }
+        // A photograph's own settings file, unless a session restored something newer.
+        let beforeSettings = session == nil ? loadSettings(beside: url) : nil
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()
+        if let beforeSettings { registerUndo(restoring: beforeSettings, action: "Load Settings") }
         // Launch fits the restored photograph (never past 1:1). Changing
         // photographs keeps the fit or 1:1 setting the previous one was at.
         zoom(fit: session == nil ? fitImage : true)
@@ -1110,6 +1107,42 @@ import UniformTypeIdentifiers
     }
 
     // MARK: Settings file
+
+    /// Saved state brought up to the engine's current parameters.
+    private func merged(_ saved: EditState) -> EditState {
+        var restored = saved
+        let lensCorrection = restored.params[Self.lensCorrectionPath]
+        restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
+        // Saved from before lens correction, it was developed without it.
+        if lensCorrection == .null { restored.params[Self.lensCorrectionPath] = .bool(false) }
+        // Saved from before Image Size, it may carry the old working-resolution factor.
+        let factor = defaults[ImageSize.factorPath]
+        if factor != .null { restored.params[ImageSize.factorPath] = factor }
+        return restored
+    }
+
+    /// Applies the settings file beside a photograph, if it has one, and returns
+    /// the state it replaced. A file that can't be used is reported, and the
+    /// photograph opens without it.
+    private func loadSettings(beside url: URL) -> EditState? {
+        guard hasCatalog else { return nil }
+        do {
+            guard let saved = try PhotoSettingsFile.read(beside: url) else { return nil }
+            try EditorSession(source: url, state: saved.state).validate()
+            guard films.contains(where: { $0.id == saved.state.film }),
+                  papers.contains(where: { $0.id == saved.state.paper }) else {
+                throw EngineError(message: "“\(url.lastPathComponent)” has settings for a film or paper that isn’t available, so it opened without them.")
+            }
+            let before = state
+            state = merged(saved.state)
+            return before
+        } catch let failure as EngineError {
+            error = failure.message
+        } catch {
+            self.error = error.localizedDescription
+        }
+        return nil
+    }
 
     /// Saves the photograph's edit to a JSON file beside it.
     func saveSettings() {

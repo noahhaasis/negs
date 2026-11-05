@@ -345,6 +345,115 @@ extension ZoneModelTests {
         XCTAssertEqual(model.status, "Saved ramp.json")
     }
 
+    /// Settings saved for one photograph, written beside `other`.
+    private func saved(on model: EditorModel, film: String? = nil, name: String = "other.json", image: String = "other.png") throws -> EditState {
+        var state = model.state
+        state.params["post.contrast"] = .number(33)
+        state.params["post.tone_anchors"] = .array([.object([
+            "input": .number(30), "target": .number(50),
+            "source": .object(["x": .number(0.5), "y": .number(0.5), "radius": .number(0.04)])
+        ])])
+        state.crop = CropSettings(rect: CGRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5))
+        if let film { state.film = film }
+        let data = try JSONEncoder().encode(PhotoSettingsFile(image: image, state: state))
+        try data.write(to: directory.appendingPathComponent(name))
+        return state
+    }
+
+    func testOpeningAPhotographLoadsItsSettings() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        _ = try saved(on: model)
+        model.open(other)
+        XCTAssertEqual(model.value("post.contrast").double, 33)
+        XCTAssertEqual(model.pins.count, 1)
+        XCTAssertEqual(model.pins[0].zone, 5)
+        XCTAssertEqual(model.state.crop.rect.width, 0.5, accuracy: 1e-9)
+        XCTAssertNil(model.error)
+        try await waitUntil { model.previewCurrent }
+    }
+
+    func testTheFallbackNameLoadsToo() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        _ = try saved(on: model, name: "other.png.json")
+        model.open(other)
+        XCTAssertEqual(model.pins.count, 1)
+    }
+
+    /// What a save writes, an open reads back unchanged.
+    func testSavingThenReopeningRestoresTheEdit() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await place(5, on: model)
+        model.set("post.contrast", .number(12))
+        model.saveSettings()
+        let edited = model.state
+        model.open(other)
+        try await waitUntil { model.previewCurrent }
+        XCTAssertTrue(model.pins.isEmpty)
+        model.open(ramp)
+        XCTAssertEqual(model.state, edited)
+        try await waitUntil { model.previewCurrent }
+    }
+
+    func testAnotherPhotographsFileIsNotLoaded() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        _ = try saved(on: model, image: "other.nef")
+        model.open(other)
+        XCTAssertTrue(model.pins.isEmpty)
+        XCTAssertNil(model.error)
+    }
+
+    func testAnUnrelatedJSONFileIsIgnored() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try Data("{\"mine\": true}".utf8).write(to: directory.appendingPathComponent("other.json"))
+        model.open(other)
+        XCTAssertTrue(model.pins.isEmpty)
+        XCTAssertNil(model.error)
+    }
+
+    /// A damaged file of its own says so, and the photograph still opens.
+    func testADamagedFileIsReportedAndThePhotographOpens() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try Data("{\"negsSettings\": 1, \"image\": \"other.png\", \"state\": 7}".utf8).write(to: directory.appendingPathComponent("other.json"))
+        model.open(other)
+        XCTAssertEqual(model.source, other)
+        XCTAssertTrue(model.pins.isEmpty)
+        XCTAssertNotNil(model.error)
+        model.error = nil
+        try await waitUntil { model.previewCurrent }
+    }
+
+    func testAnUnavailableFilmIsReportedAndThePhotographOpens() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let film = model.state.film
+        _ = try saved(on: model, film: "no_such_film")
+        model.open(other)
+        XCTAssertEqual(model.state.film, film)
+        XCTAssertTrue(model.pins.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(model.error).contains("film"))
+    }
+
+    /// Loading is one undo step, back to what opening alone would have given.
+    func testLoadingSettingsIsOneUndoStep() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let undo = UndoManager()
+        model.undoManager = undo
+        _ = try saved(on: model)
+        model.open(other)
+        XCTAssertEqual(undo.undoActionName, "Load Settings")
+        undo.undo()
+        XCTAssertTrue(model.pins.isEmpty)
+        XCTAssertNotEqual(model.value("post.contrast").double, 33)
+        try await waitUntil { model.previewCurrent }
+    }
+
     /// A new photograph starts with no pins: they describe the tones of the
     /// file they were measured on.
     func testANewPhotographKeepsNoPins() async throws {

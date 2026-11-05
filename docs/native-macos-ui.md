@@ -220,7 +220,7 @@ JPEG inputs now use the same shared loader for CLI export as for preview.
 
 ## The zone system
 
-The **Zones** button in the toolbar's view group (⌥⌘Z) shows and hides the zone
+The **Zones** button in the toolbar's view group (Z) shows and hides the zone
 panel, a column on the photograph's left edge with a tile for each of Ansel Adams'
 eleven zones: 0 at the bottom, 10 at the top. The zones are evenly spaced in L\*, at
 zone × 10, which puts zone 5 at 18 % gray. On the negative a zone is a stop, but
@@ -278,7 +278,13 @@ the film and paper, every parameter, the pins, crop and border, as readable JSON
 beside it: `DSC_0001.json` for `DSC_0001.NEF`. Saving again replaces that
 photograph's file. If the name holds another photograph's settings, as a RAW and its
 JPEG would, or a JSON file that isn't ours, it writes `DSC_0001.NEF.json` instead and
-never overwrites the other file. Nothing reads these files back yet.
+never overwrites the other file.
+
+Opening a photograph loads its settings file, as one undo step. Only a file saved
+for that photograph counts: other photographs' files and other JSON are ignored. A
+damaged file, or one naming a film or paper that isn't available, is reported and
+the photograph opens without it. A session restored at launch wins over the file,
+since it's the newer edit.
 
 ## Build and run
 
