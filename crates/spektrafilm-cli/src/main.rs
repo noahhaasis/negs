@@ -38,6 +38,10 @@ enum Commands {
             |s: String| s.parse::<u8>().unwrap(),
         ))]
         bit_depth: Option<u8>,
+        /// The resolution written into the file, in dots per inch. It changes
+        /// no pixels. Without it, PNG and JPEG are untagged and TIFF says 72.
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+        dpi: Option<u16>,
         /// Output colour space, as colour names it (e.g. sRGB, "Display P3",
         /// "Adobe RGB (1998)", "ProPhoto RGB"). Overrides
         /// io.output_color_space in --params; the file carries its ICC profile.
@@ -174,6 +178,7 @@ fn main() -> Result<()> {
             output,
             jpeg_quality,
             bit_depth,
+            dpi,
             color_space,
             input_colour,
             input_linear,
@@ -221,6 +226,7 @@ fn main() -> Result<()> {
                     jpeg_quality,
                     copy_metadata: !no_metadata,
                     bit_depth,
+                    dpi,
                     ..Default::default()
                 },
                 color_space.as_deref(),

@@ -45,6 +45,10 @@ pub struct SaveOptions {
     /// `io.output_color_space`). Only its profile is written: the caller
     /// renders or converts the image into it.
     pub color_space: String,
+    /// The resolution written into the file, in dots per inch. It changes no
+    /// pixels, only how large apps that read it show the file. `None` leaves
+    /// PNG and JPEG untagged and writes TIFF's required tag as 72.
+    pub dpi: Option<u16>,
     /// The pixels are linear (`io.output_cctf_encoding` off), so the
     /// profile gets a linear tone curve.
     #[serde(skip)]
@@ -57,6 +61,7 @@ impl Default for SaveOptions {
             copy_metadata: true,
             bit_depth: None,
             color_space: "sRGB".into(),
+            dpi: None,
             linear: false,
         }
     }
@@ -82,9 +87,9 @@ pub fn save_image_with_options(
         None
     };
     match format {
-        Format::Tiff => save_tiff(img, path, metadata, depth, icc),
-        Format::Png => save_png(img, path, metadata, depth, icc),
-        Format::Jpeg(quality) => save_jpeg(img, path, metadata, quality, icc),
+        Format::Tiff => save_tiff(img, path, metadata, depth, icc, options.dpi),
+        Format::Png => save_png(img, path, metadata, depth, icc, options.dpi),
+        Format::Jpeg(quality) => save_jpeg(img, path, metadata, quality, icc, options.dpi),
     }
 }
 
@@ -99,6 +104,7 @@ impl SaveOptions {
             (1..=100).contains(&self.jpeg_quality),
             "JPEG quality must be between 1 and 100"
         );
+        ensure!(self.dpi != Some(0), "DPI must be at least 1");
         let space = RgbColourspace::find(&self.color_space)
             .with_context(|| format!("unknown colour space: {}", self.color_space))?;
         let ext = extension(path);
@@ -153,12 +159,69 @@ fn exif_blob(img: &ImageBuf, metadata: Option<&ImageMetadata>) -> Result<Vec<u8>
         .to_exif_blob(img.width, img.height)
 }
 
+/// PNG's checksum, over a chunk's type and data.
+fn png_crc(bytes: &[u8]) -> u32 {
+    !bytes.iter().fold(!0u32, |crc, &byte| {
+        (0..8).fold(crc ^ u32::from(byte), |crc, _| {
+            if crc & 1 == 1 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 }
+        })
+    })
+}
+
+/// A `pHYs` chunk recording `dpi`, which PNG keeps in pixels per metre.
+fn png_phys_chunk(dpi: u16) -> Vec<u8> {
+    let per_metre = (f64::from(dpi) / 0.0254).round() as u32;
+    let mut chunk = 9u32.to_be_bytes().to_vec();
+    chunk.extend(b"pHYs");
+    chunk.extend(per_metre.to_be_bytes());
+    chunk.extend(per_metre.to_be_bytes());
+    chunk.push(1);
+    let crc = png_crc(&chunk[4..]);
+    chunk.extend(crc.to_be_bytes());
+    chunk
+}
+
+/// Passes a PNG through, adding `chunk` right after the signature and `IHDR`,
+/// which the encoder has no option for. Streams, so a large export isn't held
+/// in memory twice.
+struct PngChunkWriter<W: Write> {
+    inner: W,
+    /// Bytes until the chunk goes in.
+    until: usize,
+    chunk: Option<Vec<u8>>,
+}
+impl<W: Write> PngChunkWriter<W> {
+    /// The 8-byte signature and the 25 bytes of `IHDR`.
+    const AFTER_HEADER: usize = 33;
+    fn new(inner: W, chunk: Option<Vec<u8>>) -> Self {
+        Self { inner, until: Self::AFTER_HEADER, chunk }
+    }
+}
+impl<W: Write> Write for PngChunkWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.chunk.is_some() && self.until == 0 {
+            let chunk = self.chunk.take().unwrap_or_default();
+            self.inner.write_all(&chunk)?;
+        }
+        if self.chunk.is_none() {
+            return self.inner.write(buf);
+        }
+        let written = self.inner.write(&buf[..buf.len().min(self.until)])?;
+        self.until -= written;
+        Ok(written)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 fn save_png(
     img: &ImageBuf,
     path: &Path,
     metadata: Option<&ImageMetadata>,
     depth: u8,
     icc: Vec<u8>,
+    dpi: Option<u16>,
 ) -> Result<()> {
     // The encoder takes 16-bit samples in native byte order.
     let (data, color) = if depth == 16 {
@@ -167,7 +230,7 @@ fn save_png(
     } else {
         (quantize_u8(img), image::ExtendedColorType::Rgb8)
     };
-    let mut file = create(path)?;
+    let mut file = PngChunkWriter::new(create(path)?, dpi.map(png_phys_chunk));
     let mut enc = image::codecs::png::PngEncoder::new(&mut file);
     enc.set_exif_metadata(exif_blob(img, metadata)?)
         .map_err(|e| anyhow!("PNG EXIF: {e}"))?;
@@ -186,10 +249,14 @@ fn save_jpeg(
     metadata: Option<&ImageMetadata>,
     quality: u8,
     icc: Vec<u8>,
+    dpi: Option<u16>,
 ) -> Result<()> {
     let data = quantize_u8(img);
     let mut file = create(path)?;
     let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, quality);
+    if let Some(dpi) = dpi {
+        enc.set_pixel_density(image::codecs::jpeg::PixelDensity::dpi(dpi));
+    }
     enc.set_exif_metadata(exif_blob(img, metadata)?)
         .map_err(|e| anyhow!("JPEG EXIF: {e}"))?;
     enc.set_icc_profile(icc)
@@ -209,13 +276,14 @@ fn save_tiff(
     metadata: Option<&ImageMetadata>,
     depth: u8,
     icc: Vec<u8>,
+    dpi: Option<u16>,
 ) -> Result<()> {
     let mut file = create(path)?;
     let tiff = TiffWriter::new(&mut file).map_err(tiff_err)?;
     let written = if depth == 16 {
-        write_tiff_image(tiff, &quantize_u16(img), img.width, img.height, metadata, icc)
+        write_tiff_image(tiff, &quantize_u16(img), img.width, img.height, metadata, icc, dpi)
     } else {
-        write_tiff_image(tiff, &quantize_u8(img), img.width, img.height, metadata, icc)
+        write_tiff_image(tiff, &quantize_u8(img), img.width, img.height, metadata, icc, dpi)
     };
     written
         .and_then(|()| Ok(file.flush()?))
@@ -248,6 +316,7 @@ fn write_tiff_image<W: Write + Seek, S: Sample>(
     height: u32,
     metadata: Option<&ImageMetadata>,
     icc: Vec<u8>,
+    dpi: Option<u16>,
 ) -> Result<()> {
     let row_len = width as usize * 3;
     if row_len == 0 || height == 0 {
@@ -277,8 +346,9 @@ fn write_tiff_image<W: Write + Seek, S: Sample>(
     root.add_tag(TiffCommonTag::RowsPerStrip, rows_per_strip as u32);
     root.add_tag(TiffCommonTag::StripByteCounts, &counts);
     root.add_tag(ExifTag::PlanarConfiguration, 1u16);
-    root.add_tag(TiffCommonTag::XResolution, Rational::new(72, 1));
-    root.add_tag(TiffCommonTag::YResolution, Rational::new(72, 1));
+    let resolution = u32::from(dpi.unwrap_or(72));
+    root.add_tag(TiffCommonTag::XResolution, Rational::new(resolution, 1));
+    root.add_tag(TiffCommonTag::YResolution, Rational::new(resolution, 1));
     root.add_tag(TiffCommonTag::ResolutionUnit, 2u16);
     root.add_untyped_tag(TIFF_ICC_PROFILE, Value::Undefined(icc));
     metadata
@@ -320,6 +390,88 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn tiny() -> ImageBuf {
+        ImageBuf { width: 4, height: 3, data: vec![from_f32(0.5); 36] }
+    }
+
+    fn at(dpi: Option<u16>) -> SaveOptions {
+        SaveOptions { dpi, ..Default::default() }
+    }
+
+    /// A PNG's chunks, by type.
+    fn png_chunks(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+        let mut chunks = Vec::new();
+        let mut at = 8;
+        while at < bytes.len() {
+            let len = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+            let name = String::from_utf8_lossy(&bytes[at + 4..at + 8]).into_owned();
+            let data = bytes[at + 8..at + 8 + len].to_vec();
+            let crc = u32::from_be_bytes(bytes[at + 8 + len..at + 12 + len].try_into().unwrap());
+            assert_eq!(crc, png_crc(&bytes[at + 4..at + 8 + len]), "{name}'s checksum");
+            chunks.push((name, data));
+            at += 12 + len;
+        }
+        chunks
+    }
+
+    /// 144 DPI is 5669 pixels a metre, in a chunk before the pixels.
+    #[test]
+    fn png_records_its_dpi() {
+        let dir = Scratch::new("png-dpi");
+        let path = dir.path("a.png");
+        save_image_with_options(&tiny(), &path, None, &at(Some(144))).unwrap();
+        let chunks = png_chunks(&std::fs::read(&path).unwrap());
+        let names: Vec<&str> = chunks.iter().map(|c| c.0.as_str()).collect();
+        let phys = names.iter().position(|n| *n == "pHYs").expect("a pHYs chunk");
+        assert!(phys < names.iter().position(|n| *n == "IDAT").unwrap());
+        let data = &chunks[phys].1;
+        assert_eq!(u32::from_be_bytes(data[0..4].try_into().unwrap()), 5669);
+        assert_eq!(u32::from_be_bytes(data[4..8].try_into().unwrap()), 5669);
+        assert_eq!(data[8], 1, "In metres");
+        assert_eq!(image::open(&path).unwrap().width(), 4, "It still decodes");
+    }
+
+    #[test]
+    fn png_without_a_dpi_has_no_chunk() {
+        let dir = Scratch::new("png-no-dpi");
+        let path = dir.path("a.png");
+        save_image_with_options(&tiny(), &path, None, &at(None)).unwrap();
+        assert!(!png_chunks(&std::fs::read(&path).unwrap()).iter().any(|c| c.0 == "pHYs"));
+    }
+
+    #[test]
+    fn jpeg_records_its_dpi() {
+        let dir = Scratch::new("jpeg-dpi");
+        let path = dir.path("a.jpg");
+        save_image_with_options(&tiny(), &path, None, &at(Some(144))).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let jfif = bytes.windows(5).position(|w| w == b"JFIF\0").expect("a JFIF header");
+        assert_eq!(bytes[jfif + 7], 1, "Dots per inch");
+        assert_eq!(u16::from_be_bytes([bytes[jfif + 8], bytes[jfif + 9]]), 144);
+        assert_eq!(u16::from_be_bytes([bytes[jfif + 10], bytes[jfif + 11]]), 144);
+    }
+
+    #[test]
+    fn tiff_records_its_dpi_and_defaults_to_72() {
+        let dir = Scratch::new("tiff-dpi");
+        for (dpi, want) in [(Some(144u16), 144.0f32), (None, 72.0)] {
+            let path = dir.path("a.tif");
+            save_image_with_options(&tiny(), &path, None, &at(dpi)).unwrap();
+            let bytes = std::fs::read(&path).unwrap();
+            let root = IFD::new_root_with_correction(&mut std::io::Cursor::new(bytes), 0, 0, 0, 1, &[]).unwrap();
+            let x = root.get_entry(TiffCommonTag::XResolution).unwrap().value.clone();
+            match x {
+                Value::Rational(v) => assert_eq!(v[0].n as f32 / v[0].d as f32, want),
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_dpi_of_zero_is_refused() {
+        assert!(at(Some(0)).check(Path::new("a.png")).is_err());
     }
 
     fn sample_metadata() -> ImageMetadata {

@@ -17,6 +17,9 @@ final class SaveSettingsTests: XCTestCase {
         XCTAssertFalse(save.isSRGB)
         // The defaults leave the bit depth to the format and save sRGB.
         XCTAssertEqual(SaveSettings().arguments, ["--jpeg-quality", "95", "--color-space", "sRGB"])
+        let tagged = SaveSettings(dpi: 144)
+        XCTAssertEqual(tagged.arguments, ["--jpeg-quality", "95", "--color-space", "sRGB", "--dpi", "144"])
+        XCTAssertEqual(tagged.json["dpi"].double, 144)
         XCTAssertNil(SaveSettings().summary(export: true, previewSpace: "sRGB"))
     }
 

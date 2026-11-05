@@ -308,6 +308,13 @@ Proof on or off doesn't move it. Exports still include the border if it's on.
 
 Otherwise, ⌘+ and ⌘− zoom in and out by a factor of √2.
 
+## Export DPI
+
+Settings › Export sets the DPI written into exported files: a `pHYs` chunk in PNG, the
+JFIF density in JPEG and the resolution tags in TIFF. It changes no pixels. The default,
+144, makes apps that read it show a file at the size Proof does on a Retina display:
+one file pixel to one screen pixel. Not every app reads it.
+
 ## Settings files
 
 File › Save Settings (⇧⌘S) writes everything edited on the photograph, including

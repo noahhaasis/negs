@@ -549,6 +549,35 @@ extension ZoneModelTests {
         XCTAssertEqual(model.source, other, "The photograph does")
     }
 
+    /// The DPI in Settings reaches real files, in every format, through both
+    /// export engines, and changes none of their pixels.
+    func testAnExportCarriesTheDPIFromSettings() async throws {
+        let model = try await makeModel()
+        let saved = UserDefaults.standard.object(forKey: "exportDPI")
+        defer {
+            model.shutdown()
+            UserDefaults.standard.set(saved, forKey: "exportDPI")
+        }
+        model.set(ImageSize.targetPath, .number(1024))
+        try await waitUntil { model.previewCurrent }
+        model.exportDPI = 144
+        XCTAssertEqual(model.exportSaveSettings.dpi, 144)
+        for engine in ExportEngine.allCases {
+            for ext in ["png", "jpg", "tif"] {
+                let url = directory.appendingPathComponent("dpi-\(engine.rawValue).\(ext)")
+                var save = model.exportSaveSettings
+                save.bitDepth = ext == "tif" ? 16 : 8
+                await model.export(to: url, engine: engine, size: .full, save: save)
+                let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil), "\(engine) \(ext)")
+                let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+                XCTAssertEqual((properties[kCGImagePropertyDPIWidth] as? NSNumber)?.doubleValue ?? 0, 144, accuracy: 0.1, "\(engine) \(ext)")
+                XCTAssertEqual((properties[kCGImagePropertyDPIHeight] as? NSNumber)?.doubleValue ?? 0, 144, accuracy: 0.1, "\(engine) \(ext)")
+                XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 1024, "\(engine) \(ext)")
+                XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 768, "\(engine) \(ext)")
+            }
+        }
+    }
+
     /// Pins from before zones held their own tone: each takes the zone its
     /// target falls in.
     func testSavedHoldingPinsTakeTheZoneTheirTargetFallsIn() async throws {

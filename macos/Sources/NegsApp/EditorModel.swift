@@ -150,6 +150,10 @@ import UniformTypeIdentifiers
     var exportEngine = ExportEngine.selected {
         didSet { ExportEngine.selected = exportEngine }
     }
+    /// Settings › Export: the resolution written into saved files.
+    var exportDPI = SaveSettings.lastDPI {
+        didSet { SaveSettings.lastDPI = exportDPI }
+    }
     var exportSize = ExportSize.last {
         didSet { ExportSize.last = exportSize }
     }
@@ -165,7 +169,7 @@ import UniformTypeIdentifiers
         let depth = exportFormat == .jpeg ? 8 : exportBitDepth
         let chosen = SaveSettings.colorSpaces.firstIndex(of: previewSpace) ?? SaveSettings.chosenSpace
         return SaveSettings(bitDepth: depth, colorSpace: SaveSettings.effectiveSpace(chosen, bitDepth: depth),
-                            jpegQuality: exportQuality)
+                            jpegQuality: exportQuality, dpi: exportDPI)
     }
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
@@ -1959,6 +1963,17 @@ struct SaveSettings: Equatable {
     var bitDepth: Int? = nil
     var colorSpace = 0
     var jpegQuality = 95
+    /// Written into the file; it changes no pixels. nil leaves it to the format.
+    var dpi: Int? = nil
+
+    static let dpiRange = 1...9600
+    /// 144 is 72 × 2, so apps that read it show a file at the size it has on a
+    /// Retina screen at one file pixel to one screen pixel.
+    static let defaultDPI = 144
+    static var lastDPI: Int {
+        get { let dpi = UserDefaults.standard.integer(forKey: "exportDPI"); return dpiRange.contains(dpi) ? dpi : defaultDPI }
+        set { UserDefaults.standard.set(min(max(newValue, dpiRange.lowerBound), dpiRange.upperBound), forKey: "exportDPI") }
+    }
 
     static func effectiveSpace(_ chosen: Int, bitDepth: Int) -> Int {
         let chosen = min(max(chosen, 0), colorSpaces.count - 1)
@@ -1971,11 +1986,13 @@ struct SaveSettings: Equatable {
     var json: JSONValue {
         var options: [String: JSONValue] = ["jpeg_quality": .number(Double(jpegQuality)), "color_space": .string(spaceName)]
         if let bitDepth { options["bit_depth"] = .number(Double(bitDepth)) }
+        if let dpi { options["dpi"] = .number(Double(dpi)) }
         return .object(options)
     }
     /// The exporter's arguments.
     var arguments: [String] {
         ["--jpeg-quality", "\(jpegQuality)", "--color-space", spaceName] + (bitDepth.map { ["--bit-depth", "\($0)"] } ?? [])
+            + (dpi.map { ["--dpi", "\($0)"] } ?? [])
     }
     /// For the save panel's message; nil for sRGB in an sRGB preview. The
     /// preview develops in `previewSpace`; afterwards it follows this save.

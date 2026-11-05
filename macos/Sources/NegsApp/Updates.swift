@@ -169,6 +169,19 @@ struct UpdateSettings: View {
                 Text("Writes the Finish tab's tone settings into new presets and applies them when a preset is chosen. Off, presets leave the photograph's Finish settings alone.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            Section("Export") {
+                LabeledContent("DPI") {
+                    TextField("DPI", value: Binding(
+                        get: { model.exportDPI },
+                        set: { model.exportDPI = min(max($0, SaveSettings.dpiRange.lowerBound), SaveSettings.dpiRange.upperBound) }
+                    ), format: .number.grouping(.never))
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 72)
+                }
+                Text("Written into exported PNG, JPEG and TIFF files. It changes no pixels, only how large apps that read it show the file. At 144, they show it at the size Proof does on a Retina display. Not every app reads it.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Section("Viewer") {
                 Toggle("Proof at the export size (P)", isOn: Binding(
                     get: { model.proofing }, set: { model.proofing = $0 }))
