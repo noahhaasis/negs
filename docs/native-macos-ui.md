@@ -284,7 +284,8 @@ and the export sits on a white mat: 8 % of its long edge on the sides and top, a
 1.2 × that below, so it sits at the optical centre. The mat replaces the border on
 screen and its controls are off; exports still include the border if it's on. It refits when the export's size changes, or what's around the canvas does, so
 photographs with the same export size keep the window where it is. It waits while
-cropping and in full screen.
+cropping and in full screen. The window's top left corner never moves: near the screen's
+edge, the export scales to the room it has.
 
 Otherwise, ⌘+ and ⌘− zoom in and out by a factor of √2.
 

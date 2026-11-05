@@ -396,6 +396,59 @@ extension ZoneModelTests {
         XCTAssertGreaterThanOrEqual(window.contentRect(forFrameRect: window.frame).width, 1020)
     }
 
+    /// The window's top left corner never moves, whatever happens: locking,
+    /// rotating, changing photographs or unlocking, even near the screen's corner.
+    func testTheWindowNeverMovesItself() async throws {
+        let model = try await makeModel()
+        let saved = UserDefaults.standard.object(forKey: "lockWindowToPhotograph")
+        defer {
+            model.shutdown()
+            UserDefaults.standard.set(saved, forKey: "lockWindowToPhotograph")
+        }
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        let visible = try XCTUnwrap(NSScreen.main?.visibleFrame)
+        controller.showWindow(nil)
+        defer { window.orderOut(nil) }
+        model.windowLockedToPhotograph = false
+        window.setFrame(NSRect(x: visible.maxX - 1100, y: visible.minY + 40, width: 1040, height: 640), display: true)
+        try await Task.sleep(for: .milliseconds(300))
+        let corner = CGPoint(x: window.frame.minX, y: window.frame.maxY)
+        func assertInPlace(_ step: String, line: UInt = #line) {
+            XCTAssertEqual(window.frame.minX, corner.x, accuracy: 0.5, step, line: line)
+            XCTAssertEqual(window.frame.maxY, corner.y, accuracy: 0.5, step, line: line)
+        }
+        func settle() async throws {
+            try await waitUntil { model.previewCurrent }
+            try await Task.sleep(for: .milliseconds(400))
+        }
+        // A large export, which won't fit where the window is.
+        model.set(ImageSize.targetPath, .number(6000))
+        try await settle()
+        assertInPlace("Large image size")
+        model.windowLockedToPhotograph = true
+        try await settle()
+        assertInPlace("Locking")
+        XCTAssertLessThanOrEqual(window.frame.maxX, visible.maxX + 0.5, "It fits the room it has")
+        XCTAssertGreaterThanOrEqual(window.frame.minY, visible.minY - 0.5, "It fits the room it has")
+        model.rotate()
+        try await settle()
+        assertInPlace("Rotating")
+        model.set("io.rotate_cw", .number(0))
+        try await settle()
+        assertInPlace("Rotating back")
+        model.filmstripVisible.toggle()
+        try await settle()
+        assertInPlace("Film strip")
+        model.filmstripVisible.toggle()
+        model.open(other)
+        try await settle()
+        assertInPlace("Another photograph")
+        model.windowLockedToPhotograph = false
+        try await settle()
+        assertInPlace("Unlocking")
+    }
+
     /// Pins from before zones held their own tone: each takes the zone its
     /// target falls in.
     func testSavedHoldingPinsTakeTheZoneTheirTargetFallsIn() async throws {

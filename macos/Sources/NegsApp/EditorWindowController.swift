@@ -211,7 +211,7 @@ import SwiftUI
     }
 
     /// Makes the canvas the export's pixels, one to a screen pixel. Two exports of
-    /// one size give one window, so changing photographs doesn't move it.
+    /// one size give one window, so changing photographs doesn't resize it.
     private func fitWindow() {
         guard fitsWindow, let window, !window.styleMask.contains(.fullScreen), let scroll = model.canvasScale.view,
               let screen = window.screen ?? NSScreen.main else { return }
@@ -220,14 +220,21 @@ import SwiftUI
         let content = window.contentRect(forFrameRect: window.frame).size
         let chrome = CGSize(width: content.width - scroll.bounds.width, height: content.height - scroll.bounds.height)
         let scale = window.backingScaleFactor
+        // The room to the screen's edges from where the window is: it never moves.
+        let visible = screen.visibleFrame
+        let room = NSRect(x: window.frame.minX, y: visible.minY, width: visible.maxX - window.frame.minX, height: window.frame.maxY - visible.minY)
         let size = WindowFit.contentSize(canvas: CGSize(width: pixels.width / scale, height: pixels.height / scale), chrome: chrome,
-                                         limit: window.contentRect(forFrameRect: screen.visibleFrame).size)
+                                         limit: window.contentRect(forFrameRect: room).size)
         guard abs(size.width - content.width) > 1.5 || abs(size.height - content.height) > 1.5 else { return }
-        var frame = window.frameRect(forContentRect: NSRect(origin: window.frame.origin, size: size))
-        // Keep the top left corner, then stay on the screen.
+        resizeKeepingCorner(to: size)
+    }
+
+    /// Resizes the window with its top left corner exactly where it is.
+    private func resizeKeepingCorner(to content: NSSize) {
+        guard let window else { return }
+        var frame = window.frameRect(forContentRect: NSRect(origin: window.frame.origin, size: content))
+        frame.origin.x = window.frame.minX
         frame.origin.y = window.frame.maxY - frame.height
-        frame.origin.x = min(max(frame.minX, screen.visibleFrame.minX), screen.visibleFrame.maxX - frame.width)
-        frame.origin.y = min(max(frame.minY, screen.visibleFrame.minY), screen.visibleFrame.maxY - frame.height)
         window.setFrame(frame, display: true)
     }
 
@@ -246,7 +253,7 @@ import SwiftUI
             window.contentMinSize = unlockedMinimum
             let content = window.contentRect(forFrameRect: window.frame).size
             if content.width < unlockedMinimum.width || content.height < unlockedMinimum.height {
-                window.setContentSize(NSSize(width: max(content.width, unlockedMinimum.width), height: max(content.height, unlockedMinimum.height)))
+                resizeKeepingCorner(to: NSSize(width: max(content.width, unlockedMinimum.width), height: max(content.height, unlockedMinimum.height)))
             }
         }
     }

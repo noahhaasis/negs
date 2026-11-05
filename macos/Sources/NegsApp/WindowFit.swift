@@ -15,14 +15,17 @@ enum WindowFit {
         return (width, width, width * 1.2)
     }
 
-    /// The export at its size, scaled down in the same shape to stay on `limit`.
+    /// The export at its size, scaled down in the same shape to fit `limit`.
     static func contentSize(canvas: CGSize, chrome: CGSize, limit: CGSize) -> CGSize {
         var (w, h) = (max(canvas.width, 1), max(canvas.height, 1))
         let short = min(w, h)
         if short < minimumCanvas { (w, h) = (w * minimumCanvas / short, h * minimumCanvas / short) }
         let mat = mat(forLongEdge: max(w, h))
         let (fullWidth, fullHeight) = (w + mat.side * 2, h + mat.top + mat.bottom)
-        let scale = min(1, (limit.width - chrome.width) / fullWidth, (limit.height - chrome.height) / fullHeight)
+        // The window never moves, so `limit` is the room it has from where it is.
+        // With too little, it keeps a usable canvas and runs off the screen.
+        let usable = min(1, minimumCanvas / min(w, h))
+        let scale = max(usable, min(1, (limit.width - chrome.width) / fullWidth, (limit.height - chrome.height) / fullHeight))
         return CGSize(width: fullWidth * scale + chrome.width, height: fullHeight * scale + chrome.height)
     }
 }

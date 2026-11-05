@@ -39,6 +39,13 @@ final class WindowFitTests: XCTestCase {
         XCTAssertEqual(size.width - chrome.width, 320 + 51.2, accuracy: 0.01)
     }
 
+    /// With little room left, the window still gets a usable canvas: it may run
+    /// off the screen, because it never moves to make room.
+    func testALowWindowKeepsAUsableCanvas() {
+        let size = WindowFit.contentSize(canvas: CGSize(width: 2000, height: 1000), chrome: chrome, limit: CGSize(width: 500, height: 300))
+        XCTAssertEqual(size.height - chrome.height - WindowFit.mat(forLongEdge: 480).top - WindowFit.mat(forLongEdge: 480).bottom, WindowFit.minimumCanvas, accuracy: 1)
+    }
+
     /// Two exports of one size give one window, so changing photographs doesn't move it.
     func testTheSameExportSizeGivesTheSameWindow() {
         XCTAssertEqual(fit(CGSize(width: 1228, height: 887)), fit(CGSize(width: 1228, height: 887)))
