@@ -161,6 +161,10 @@ struct UpdateSettings: View {
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("Viewer") {
+                Toggle("Fit the window to the photograph", isOn: Binding(
+                    get: { model.windowLockedToPhotograph }, set: { model.windowLockedToPhotograph = $0 }))
+                Text("The window takes the shape of the photograph with its border, always showing all of it. Zooming is off.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Toggle("Custom background", isOn: $customBackground)
                     Spacer(minLength: 0)

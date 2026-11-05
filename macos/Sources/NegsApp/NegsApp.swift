@@ -265,6 +265,7 @@ struct CanvasArea: View {
                       pins: model.pinsToShow,
                       dragged: model.zoneDrag,
                       draggedRadius: model.sampleRadius,
+                      locksToFit: model.windowLockedToPhotograph,
                       onSelectPin: { model.selectPin($0) },
                       onMovePin: { index, centre in Task { await model.movePin(index, to: centre) } },
                       onScrollPin: { model.resizeSelectedPin(scrollDelta: $0, precise: $1) },

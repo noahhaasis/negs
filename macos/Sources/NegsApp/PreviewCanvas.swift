@@ -21,6 +21,8 @@ struct PreviewCanvas: NSViewRepresentable {
     /// A zone being dragged from the panel, and the size its circle starts at.
     var dragged: ZoneDrag? = nil
     var draggedRadius = SampleSize.initial
+    /// The window is locked to the photograph, so the zoom is locked to fit.
+    var locksToFit = false
     /// A click on a pin's chip, or nil on empty photograph.
     var onSelectPin: ((Int?) -> Void)? = nil
     /// Called when a placed pin is dragged to a new point.
@@ -57,6 +59,8 @@ struct PreviewCanvas: NSViewRepresentable {
         photo.onMovePin = onMovePin
         photo.draggedRadius = draggedRadius
         scroll.onScrollPin = onScrollPin
+        scroll.locksToFit = locksToFit
+        scroll.onNeedsWindowFit = { [weak scale] in scale?.needsWindowFit?() }
         // Esc and Delete reach the photograph once a pin is selected.
         let selected = pins.first(where: \.selected)?.index
         if selected != nil, selected != photo.selectedPin { scroll.window?.makeFirstResponder(photo) }
@@ -84,10 +88,11 @@ struct PreviewCanvas: NSViewRepresentable {
             }
         }
         if commanded {
-            scroll.lastCommand = zoomCommand; scroll.fitting = fit
+            scroll.lastCommand = zoomCommand; scroll.fitting = fit || locksToFit
             scroll.applyZoom()
         } else if oldSize != documentSize || recropped, scroll.fitting { scroll.applyZoom() }
         scroll.showPins(pins, dragged: dragged)
+        if locksToFit { scroll.onNeedsWindowFit?() }
     }
 }
 
@@ -95,6 +100,8 @@ struct PreviewCanvas: NSViewRepresentable {
 /// zoom. A render this much smaller than the photograph looks the same on screen.
 @MainActor final class CanvasScale {
     weak var view: ImageScrollView?
+    /// Asks the window to take the photograph's shape again.
+    var needsWindowFit: (() -> Void)?
     var screenPixelsPerPhotoPixel: CGFloat? {
         guard let view, let window = view.window, view.magnification > 0 else { return nil }
         return view.magnification * window.backingScaleFactor
@@ -125,6 +132,26 @@ final class ImageScrollView: NSScrollView {
     var fitting = true
     var onFitChanged: ((Bool) -> Void)?
     var onScrollPin: ((Double, Bool) -> Void)?
+    /// One step of ⌘+ or ⌘−.
+    static let zoomStep: CGFloat = 2.0.squareRoot()
+    /// Locked to the fit zoom, with the photograph filling the canvas even above
+    /// 1:1. Nothing else can zoom it.
+    var locksToFit = false {
+        didSet {
+            guard locksToFit != oldValue else { return }
+            if locksToFit { setFitting(true) }
+            applyZoom()
+        }
+    }
+    var onNeedsWindowFit: (() -> Void)?
+
+    /// ⌘+ and ⌘−, about the middle of what's on screen.
+    func zoom(by factor: CGFloat) {
+        guard !locksToFit, documentView != nil else { return }
+        setFitting(false)
+        let visible = contentView.bounds
+        setMagnification(min(max(magnification * factor, minMagnification), maxMagnification), centeredAt: NSPoint(x: visible.midX, y: visible.midY))
+    }
     /// The pins and their lines, above the document.
     let overlay = PinOverlayView(frame: .zero)
     private var lastViewport = CGSize.zero
@@ -160,6 +187,7 @@ final class ImageScrollView: NSScrollView {
         if lastViewport != contentSize {
             lastViewport = contentSize
             if fitting { applyZoom() }
+            if locksToFit { onNeedsWindowFit?() }
         }
     }
     func applyZoom() {
@@ -169,7 +197,7 @@ final class ImageScrollView: NSScrollView {
         // photograph, but never enlarges it past 1:1.
         let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
         let fit = min(contentSize.width / size.width, contentSize.height / size.height)
-        let amount = fitting ? min(fit, oneToOne) : oneToOne
+        let amount = locksToFit ? fit : fitting ? min(fit, oneToOne) : oneToOne
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
     }
     /// Whether the photograph is larger than the viewport, so panning has
@@ -182,6 +210,7 @@ final class ImageScrollView: NSScrollView {
     /// Double-click: fit the whole photograph, or show it at 1:1 about the
     /// clicked point, which then stays under the pointer.
     func toggleZoom(about point: CGPoint) {
+        guard !locksToFit else { return }
         if fitting {
             setFitting(false)
             let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
@@ -221,9 +250,14 @@ final class ImageScrollView: NSScrollView {
         fitting = value
         onFitChanged?(value)
     }
-    override func magnify(with event: NSEvent) { setFitting(false); super.magnify(with: event) }
+    override func magnify(with event: NSEvent) {
+        guard !locksToFit else { return }
+        setFitting(false)
+        super.magnify(with: event)
+    }
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.option) {
+            guard !locksToFit else { return }
             setFitting(false)
             let center = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
             setMagnification(min(max(magnification * exp(-event.scrollingDeltaY * 0.01), minMagnification), maxMagnification), centeredAt: center)

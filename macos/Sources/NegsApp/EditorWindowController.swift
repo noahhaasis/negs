@@ -20,9 +20,13 @@ import SwiftUI
 /// inspector column. The window, toolbar, and columns are AppKit; the canvas
 /// and inspector contents are SwiftUI. They follow the model through
 /// Observation, like the views.
-@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate {
+@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSWindowDelegate {
     private let model: EditorModel
     private let inspector: NSSplitViewItem
+    private let canvasItem: NSSplitViewItem
+    private let unlockedMinimum: NSSize
+    private var appliedLock = false
+    private var fitPending = false
     private let panel: NSHostingController<InspectorPanel>
     private var items: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
     private lazy var cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelCrop))
@@ -46,7 +50,7 @@ import SwiftUI
         panel = NSHostingController(rootView: InspectorPanel(model: model, built: false))
         panel.sizingOptions = []
         panel.view.frame.size = NSSize(width: 340, height: 860)
-        let canvasItem = NSSplitViewItem(viewController: canvas)
+        canvasItem = NSSplitViewItem(viewController: canvas)
         canvasItem.minimumThickness = 680
         inspector = NSSplitViewItem(inspectorWithViewController: panel)
         // Wide enough for the six workflow tabs and their labels.
@@ -68,6 +72,7 @@ import SwiftUI
         // The split view cannot keep both columns at their minimums in a
         // narrower window, so the window itself enforces their sum.
         let minimum = NSSize(width: 680 + 340 + split.splitView.dividerThickness, height: 560)
+        unlockedMinimum = minimum
         window.contentMinSize = minimum
         let restored = window.contentRect(forFrameRect: window.frame).size
         if restored.width < minimum.width || restored.height < minimum.height {
@@ -78,6 +83,8 @@ import SwiftUI
         window.contentViewController = split
         window.setFrameAutosaveName("editor")
         super.init(window: window)
+        window.delegate = self
+        model.canvasScale.needsWindowFit = { [weak self] in self?.requestWindowFit() }
         shouldCascadeWindows = false
 
         let toolbar = NSToolbar(identifier: "editor")
@@ -175,8 +182,74 @@ import SwiftUI
         }
     }
 
+    // MARK: Locked to the photograph
+
+    private var fitsWindow: Bool { model.windowLockedToPhotograph && !model.cropping }
+
+    /// The photograph's size with its border, and everything around the canvas.
+    private func windowFitInputs() -> (document: CGSize, chrome: CGSize, limit: CGSize)? {
+        guard let window, !window.styleMask.contains(.fullScreen), let scroll = model.canvasScale.view,
+              let document = scroll.documentView?.frame.size, document.width > 0, document.height > 0,
+              let screen = window.screen ?? NSScreen.main else { return nil }
+        let content = window.contentRect(forFrameRect: window.frame).size
+        let limit = window.contentRect(forFrameRect: screen.visibleFrame).size
+        return (document, CGSize(width: content.width - scroll.bounds.width, height: content.height - scroll.bounds.height), limit)
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard fitsWindow, let inputs = windowFitInputs() else { return frameSize }
+        let size = WindowFit.resized(document: inputs.document, chrome: inputs.chrome,
+                                     proposed: sender.contentRect(forFrameRect: NSRect(origin: .zero, size: frameSize)).size,
+                                     current: sender.contentRect(forFrameRect: sender.frame).size, limit: inputs.limit)
+        return sender.frameRect(forContentRect: NSRect(origin: .zero, size: size)).size
+    }
+
+    /// Takes the photograph's shape on the next pass, once layout has settled.
+    private func requestWindowFit() {
+        guard fitsWindow, !fitPending else { return }
+        fitPending = true
+        DispatchQueue.main.async { [weak self] in
+            self?.fitPending = false
+            self?.fitWindow()
+        }
+    }
+
+    private func fitWindow() {
+        guard fitsWindow, let window, !window.inLiveResize, let inputs = windowFitInputs() else { return }
+        let content = window.contentRect(forFrameRect: window.frame).size
+        let size = WindowFit.refitted(document: inputs.document, chrome: inputs.chrome, current: content, limit: inputs.limit)
+        guard abs(size.width - content.width) > 1.5 || abs(size.height - content.height) > 1.5 else { return }
+        var frame = window.frameRect(forContentRect: NSRect(origin: window.frame.origin, size: size))
+        // Keep the top left corner, then stay on the screen.
+        frame.origin.y = window.frame.maxY - frame.height
+        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
+            frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
+            frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
+        }
+        window.setFrame(frame, display: true)
+    }
+
+    /// A locked window can be narrower than the columns' usual minimums.
+    private func applyWindowLock() {
+        guard let window, appliedLock != model.windowLockedToPhotograph else { return }
+        appliedLock = model.windowLockedToPhotograph
+        if appliedLock {
+            canvasItem.minimumThickness = ZoneGeometry.panelWidth + WindowFit.minimumCanvas
+            window.contentMinSize = NSSize(width: canvasItem.minimumThickness + inspector.minimumThickness, height: 320)
+            requestWindowFit()
+        } else {
+            canvasItem.minimumThickness = 680
+            window.contentMinSize = unlockedMinimum
+            let content = window.contentRect(forFrameRect: window.frame).size
+            if content.width < unlockedMinimum.width || content.height < unlockedMinimum.height {
+                window.setContentSize(NSSize(width: max(content.width, unlockedMinimum.width), height: max(content.height, unlockedMinimum.height)))
+            }
+        }
+    }
+
     private func update() {
         guard let window else { return }
+        applyWindowLock()
         let photo = model.source != nil
         window.title = model.source?.lastPathComponent ?? "Negs"
         window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
@@ -194,8 +267,8 @@ import SwiftUI
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
         }
         setEnabled(.zones, photo && !model.cropping)
-        setEnabled(.fit, photo && !model.cropping)
-        setEnabled(.actualSize, photo && !model.cropping)
+        setEnabled(.fit, model.canZoom)
+        setEnabled(.actualSize, model.canZoom)
         setEnabled(.rotate, photo)
         setEnabled(.crop, model.image != nil)
         if let crop = items[.crop] {

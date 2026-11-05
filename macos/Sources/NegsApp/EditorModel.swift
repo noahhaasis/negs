@@ -666,6 +666,15 @@ import UniformTypeIdentifiers
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
+    /// The window takes the shape of the photograph with its border, locked to
+    /// the fit zoom. Settings › Viewer.
+    var windowLockedToPhotograph = UserDefaults.standard.bool(forKey: "lockWindowToPhotograph") {
+        didSet { UserDefaults.standard.set(windowLockedToPhotograph, forKey: "lockWindowToPhotograph") }
+    }
+    var canZoom: Bool { source != nil && !cropping && !windowLockedToPhotograph }
+    func zoomIn() { canvasScale.view?.zoom(by: ImageScrollView.zoomStep) }
+    func zoomOut() { canvasScale.view?.zoom(by: 1 / ImageScrollView.zoomStep) }
+
     // MARK: Image Size
 
     /// Original develops the source's own pixels; Longest side resizes the
