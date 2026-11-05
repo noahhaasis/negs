@@ -49,8 +49,9 @@ import SwiftUI
         command(file, "Save Preview…", #selector(savePreview), "s")
         command(file, "Export Photograph…", #selector(exportPhotograph), "e", [.command, .shift])
         command(file, "Export LUT…", #selector(exportLUT), "l", [.command, .shift])
+        command(file, "Save Settings", #selector(saveSettings), "s", [.command, .shift])
         file.addItem(.separator())
-        command(file, "New Preset", #selector(newPreset), "s", [.command, .shift])
+        command(file, "New Preset", #selector(newPreset), "s", [.command, .option])
         command(file, "Import Presets…", #selector(importPresets), "o", [.command, .shift])
 
         let edit = submenu("Edit")
@@ -122,6 +123,7 @@ import SwiftUI
     @objc private func savePreview() { model.savePanel(export: false) }
     @objc private func exportPhotograph() { model.savePanel(export: true) }
     @objc private func exportLUT() { model.exportLUTPanel() }
+    @objc private func saveSettings() { model.saveSettings() }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
     @objc private func toggleZonePanel() { model.zonePanelVisible.toggle() }
     @objc private func deleteTonePin() { model.removeSelectedPin() }
@@ -144,6 +146,7 @@ import SwiftUI
         case #selector(savePreview): return model.canSave
         case #selector(exportPhotograph): return photo && model.ready && !model.exporting && !model.saving && !model.cropping
         case #selector(exportLUT): return model.canExportLUT
+        case #selector(saveSettings): return photo && !model.cropping
         case #selector(toggleFilmstrip):
             item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
             return true

@@ -331,6 +331,20 @@ extension ZoneModelTests {
         XCTAssertEqual(model.pinsToShow.first?.zone, ZoneScale.zone(forTarget: 30))
     }
 
+    /// The menu command saves the photograph's edit, pins included, beside it.
+    func testSavingSettingsWritesThePinsBesideThePhotograph() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await place(5, on: model)
+        model.saveSettings()
+        let file = directory.appendingPathComponent("ramp.json")
+        let saved = try JSONDecoder().decode(PhotoSettingsFile.self, from: Data(contentsOf: file))
+        XCTAssertEqual(saved.image, "ramp.png")
+        XCTAssertEqual(saved.state, model.state)
+        XCTAssertEqual(saved.state.params["post.tone_anchors"].array.count, 1)
+        XCTAssertEqual(model.status, "Saved ramp.json")
+    }
+
     /// A new photograph starts with no pins: they describe the tones of the
     /// file they were measured on.
     func testANewPhotographKeepsNoPins() async throws {

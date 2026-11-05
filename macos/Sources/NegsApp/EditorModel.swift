@@ -1109,6 +1109,19 @@ import UniformTypeIdentifiers
         histogram = counted
     }
 
+    // MARK: Settings file
+
+    /// Saves the photograph's edit to a JSON file beside it.
+    func saveSettings() {
+        guard let source else { return }
+        do {
+            let url = try PhotoSettingsFile(image: source.lastPathComponent, state: state).write(beside: source)
+            status = "Saved \(url.lastPathComponent)"
+        } catch {
+            report(error)
+        }
+    }
+
     // MARK: The zone system
 
     /// Makes the tone of the circle at `centre` print as `zone`, and selects

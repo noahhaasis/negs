@@ -271,6 +271,15 @@ the panel hides the pins but keeps their effect. A preset neither carries nor
 replaces a photograph's pins, a session restores them, and opening another file
 starts with none.
 
+## Settings files
+
+File › Save Settings (⇧⌘S) writes everything edited on the photograph, including
+the film and paper, every parameter, the pins, crop and border, as readable JSON
+beside it: `DSC_0001.json` for `DSC_0001.NEF`. Saving again replaces that
+photograph's file. If the name holds another photograph's settings, as a RAW and its
+JPEG would, or a JSON file that isn't ours, it writes `DSC_0001.NEF.json` instead and
+never overwrites the other file. Nothing reads these files back yet.
+
 ## Build and run
 
 From the repository root, with Rust and Xcode installed:

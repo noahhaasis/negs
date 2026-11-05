@@ -40,7 +40,7 @@ struct PresetInspector: View {
             Button(action: model.newPreset) { Image(systemName: "plus") }
                 .buttonStyle(.borderless)
                 .foregroundStyle(model.canChangePresets ? .primary : .tertiary)
-                .help("Save the film, paper and Lab settings as a preset (⇧⌘S)")
+                .help("Save the film, paper and Lab settings as a preset (⌥⌘S)")
                 .accessibilityLabel("New Preset")
             Menu {
                 Button("Import Presets…", action: model.importPresetsPanel)
