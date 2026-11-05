@@ -151,6 +151,10 @@ import UniformTypeIdentifiers
     /// The one brightness solve in flight; its completion looks again.
     @ObservationIgnored private var matchTask: Task<Void, Never>?
     @ObservationIgnored private var matchRequest: UUID?
+    /// A settled preview rendered while the brightness match was pending:
+    /// shown only if the match leaves the render as it is, so the canvas
+    /// goes from the previous frame straight to the matched one.
+    @ObservationIgnored private var heldPreview: (revision: Int, generation: Int, show: () -> Void)?
     @ObservationIgnored private var renderID = 0
     /// The last render is at export size: saving it gives the same file as
     /// a Fast export, byte for byte.
@@ -939,6 +943,7 @@ import UniformTypeIdentifiers
     }
 
     private func changed(invalidateCache: Bool = true) {
+        heldPreview = nil
         scheduleToneCurve()
         if invalidateCache { previewCache.invalidate(); showingCachedPreview = false }
         revision += 1; previewCurrent = false
@@ -998,37 +1003,49 @@ import UniformTypeIdentifiers
                 try Self.readPreview(buffer, width: width, height: height, displaySpace: display)
             }.value
             guard shouldShow(currentRevision, generation) else { return }
-            imageSize = CGSize(width: result["photo_width"].double, height: result["photo_height"].double)
+            // The brightness match reads these; the rest waits for the frame.
             sourceSize = CGSize(width: result["source_width"].double, height: result["source_height"].double)
-            workingSize = CGSize(width: result["working_width"].double, height: result["working_height"].double)
-            if interactiveScale == nil {
-                previewScale = workingSize.width > 0 ? min(Double(width) / workingSize.width, 1) : 1
-            }
-            showingInteractiveFrame = interactiveScale != nil
-            image = developed; placeholder = nil
-            updateHistogram()
-            let film = FilmHistogram(result["film_histogram"])
-            if film != filmHistogram { filmHistogram = film }
-            cropSession?.update(photo: shownImageSize, rotation: imageRotation)
-            updateFilmStrip()
             isRaw = result["raw"].bool
-            if inputColour != result["input_colour"] { inputColour = result["input_colour"] }
-            lensCorrectionSupported = result["lens_correction_supported"].bool
-            if revision == currentRevision, interactiveScale == nil {
-                renderID = id; previewCurrent = true; hideActivity()
-                showingCachedPreview = false
-                renderAtExportSize = result["export_resolution"].bool
-                renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
-                if let cacheKey { previewCache.save(developed, photoSize: imageSize, sourceSize: sourceSize, workingSize: workingSize, raw: isRaw, key: cacheKey) }
+            let show = { [weak self] in
+                guard let self else { return }
+                imageSize = CGSize(width: result["photo_width"].double, height: result["photo_height"].double)
+                workingSize = CGSize(width: result["working_width"].double, height: result["working_height"].double)
+                if interactiveScale == nil {
+                    previewScale = workingSize.width > 0 ? min(Double(width) / workingSize.width, 1) : 1
+                }
+                showingInteractiveFrame = interactiveScale != nil
+                image = developed; placeholder = nil
+                updateHistogram()
+                let film = FilmHistogram(result["film_histogram"])
+                if film != filmHistogram { filmHistogram = film }
+                cropSession?.update(photo: shownImageSize, rotation: imageRotation)
+                updateFilmStrip()
+                if inputColour != result["input_colour"] { inputColour = result["input_colour"] }
+                lensCorrectionSupported = result["lens_correction_supported"].bool
+                if revision == currentRevision, interactiveScale == nil {
+                    renderID = id; previewCurrent = true; hideActivity()
+                    showingCachedPreview = false
+                    renderAtExportSize = result["export_resolution"].bool
+                    renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
+                    if let cacheKey { previewCache.save(developed, photoSize: imageSize, sourceSize: sourceSize, workingSize: workingSize, raw: isRaw, key: cacheKey) }
+                }
+                let seconds = result["elapsed_ms"].double / 1000
+                let time = "developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
+                // The photograph as exported, and whether the shown texture has fewer
+                // pixels: inspect grain in an export when it does.
+                let photograph = crop.size(of: workingSize)
+                status = interactiveScale != nil
+                    ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
+                    : "\(Int(photograph.width)) × \(Int(photograph.height))\(previewScale < 1 ? " · shown at \(Self.percent(previewScale))" : "") · \(time)"
             }
-            let seconds = result["elapsed_ms"].double / 1000
-            let time = "developed in \(seconds.formatted(.number.precision(.fractionLength(seconds < 10 ? 2 : 1)))) s"
-            // The photograph as exported, and whether the shown texture has fewer
-            // pixels: inspect grain in an export when it does.
-            let photograph = crop.size(of: workingSize)
-            status = interactiveScale != nil
-                ? "Preview · \(Int(result["output_width"].double)) × \(Int(result["output_height"].double)) · \(time)"
-                : "\(Int(photograph.width)) × \(Int(photograph.height))\(previewScale < 1 ? " · shown at \(Self.percent(previewScale))" : "") · \(time)"
+            // A settled frame with a stale match would show the old exposure
+            // for as long as the solve and the next render take: keep the
+            // previous frame and the activity badge up until the match is in.
+            if interactiveScale == nil, revision == currentRevision, !interacting, !cropping, brightnessMatchPending {
+                heldPreview = (currentRevision, generation, show)
+            } else {
+                show()
+            }
         } catch {
             if currentRevision == revision, generation == sourceGeneration, !closing {
                 renderFailed = true; hideActivity(); report(error)
@@ -1351,7 +1368,7 @@ import UniformTypeIdentifiers
     /// whose match is stale is solved again.
     func reconcileBrightnessMatch() {
         // Cheap checks first: this runs on every edit, drag frames included.
-        guard matchTask == nil, !interacting, previewCurrent, !rendering, ready, !cropping, !closing,
+        guard matchTask == nil, !interacting, previewCurrent || heldPreview != nil, !rendering, ready, !cropping, !closing,
               let engine, let source, brightnessMatchPending else { return }
         let inputs = matchInputs(state)
         let id = UUID(), generation = sourceGeneration, size = sourceSize, raw = isRaw
@@ -1366,6 +1383,7 @@ import UniformTypeIdentifiers
                 if let self, self.matchRequest == id {
                     self.matchTask = nil; self.matchRequest = nil; self.matchingBrightness = false
                     self.reconcileBrightnessMatch()
+                    if self.matchTask == nil { self.showHeldPreview() }
                 }
             }
             do {
@@ -1403,6 +1421,16 @@ import UniformTypeIdentifiers
                 self.brightnessMatchFailure = (generation, failure.forPhoto ? nil : inputs, failure.message)
             }
         }
+    }
+
+    /// The match is in, or failed, without changing the render: the held
+    /// frame is the current one. A change re-renders and drops it.
+    private func showHeldPreview() {
+        guard let held = heldPreview else { return }
+        heldPreview = nil
+        guard held.revision == revision, held.generation == sourceGeneration, !closing else { return }
+        held.show()
+        pumpPreviews()
     }
 
     /// Moves the total with the match, keeping the user's exposure above it.
