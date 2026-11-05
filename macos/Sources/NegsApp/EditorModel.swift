@@ -1158,22 +1158,20 @@ import UniformTypeIdentifiers
 
     // MARK: The zone system
 
-    /// Makes the tone of the circle at `centre` print as `zone`, and selects
-    /// its pin. A zone has one pin, so a placed zone's pin moves here. A drop
-    /// during a render waits for it. `centre` is in fractions of the uncropped
-    /// photograph.
+    /// Adds a pin reading the circle at `centre` to `zone`, and selects it. The
+    /// average of a zone's pins prints as that zone. A drop during a render waits
+    /// for it. `centre` is in fractions of the uncropped photograph.
     func placeZone(_ zone: Int, at centre: CGPoint) async {
         guard ZoneScale.zones.indices.contains(zone) else { return }
         let radius = sampleRadius
         guard let lstar = await measureTone(at: centre, radius: radius) else { return }
         let anchor = Self.anchor(input: lstar, target: ZoneScale.zones[zone].target, centre: centre, radius: radius)
         var anchors = state.params["post.tone_anchors"].array
-        let placed = pins.firstIndex { $0.zone == zone }
-        if let placed { anchors[placed] = anchor } else { anchors.append(anchor) }
-        setAnchors(anchors, action: placed == nil ? "Place Tone Pin" : "Move Tone Pin")
+        anchors.append(anchor)
+        setAnchors(anchors, action: "Place Tone Pin")
         // A new pin is there to be seen and sized.
         pinsVisible = true
-        selectedPin = placed ?? anchors.indices.last
+        selectedPin = anchors.indices.last
     }
 
     /// Measures a pin again at a new spot, keeping its zone and size.

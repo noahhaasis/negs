@@ -14,6 +14,7 @@
 //! accuracy to about 2e-7, far below a 16-bit output step, and the f64
 //! build's purpose, parity with the Python reference, doesn't cover Post.
 use rayon::prelude::*;
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use spektrafilm_math::colorspace::RgbColourspace;
 use spektrafilm_math::image::ImageBuf;
@@ -164,9 +165,10 @@ fn luminance_of(value: f64) -> f64 {
     }
 }
 
-/// The pins as a smooth rising curve in L\*. The brightest pin aimed at 0 is
-/// the black point and the darkest aimed at 100 the white point, whatever order
-/// they were made in; the others bend the curve between them. Tones outside the
+/// The pins as a smooth rising curve in L\*. Pins on one target are averaged:
+/// that average prints as the target. The average aimed at 0 is the black point
+/// and the one aimed at 100 the white point; the others bend the curve between
+/// them. Tones outside the
 /// ends clamp, which is what setting a black or white point means, and the curve
 /// flattens into a point it sets, so there's no corner there. With no pins it is
 /// the identity.
@@ -195,43 +197,46 @@ impl PartialEq for AnchorCurve {
 
 impl AnchorCurve {
     pub fn new(anchors: &[ToneAnchor]) -> Self {
-        // Only the target matters, never the order: every pin aimed at black
-        // must print black, so the black point is the brightest of them;
-        // every pin aimed at white must print white, so the white point is
-        // the darkest of them. Tones outside clamp.
-        let (mut black, mut white) = (0.0f64, 100.0f64);
-        let mut white_index = None;
-        let mut interior = Vec::new();
+        // Pins on one target are one reading of that tone: their average prints
+        // there. Only the targets matter, never the order.
         let mut ignored = Vec::new();
+        let mut zones: BTreeMap<i64, (f64, Vec<usize>)> = BTreeMap::new();
         for (index, anchor) in anchors.iter().enumerate() {
             let input = f64::from(anchor.input);
             if !input.is_finite() || !anchor.target.is_finite() || !(0.0..100.0).contains(&input) {
                 ignored.push(index);
                 continue;
             }
-            let target = f64::from(anchor.target.clamp(0.0, 100.0));
+            let key = (f64::from(anchor.target.clamp(0.0, 100.0)) * 2.0).round() as i64;
+            let zone = zones.entry(key).or_default();
+            zone.0 += input;
+            zone.1.push(index);
+        }
+        let (mut black, mut white) = (0.0f64, 100.0f64);
+        let mut white_pins = Vec::new();
+        let mut interior = Vec::new();
+        for (key, (sum, pins)) in zones {
+            let (input, target) = (sum / pins.len() as f64, key as f64 / 2.0);
             if target <= 0.0 {
-                black = black.max(input);
+                black = input;
             } else if target >= 100.0 {
-                if input < white {
-                    white = input;
-                    white_index = Some(index);
-                }
+                white = input;
+                white_pins = pins;
             } else {
-                interior.push((input, target, index));
+                interior.push((input, target, pins));
             }
         }
         // A white point at or below the black point leaves no room for a curve.
         if white <= black + 0.5 {
-            ignored.extend(white_index);
+            ignored.append(&mut white_pins);
             white = 100.0;
         }
-        // Sorted by input, then by target, so ties resolve the same way
-        // whatever order the pins were made in. The curve must rise, so a pin
-        // that would turn it back is dropped; the lowest input is kept.
+        // Sorted by input, then by target, so ties resolve the same way whatever
+        // order the pins were made in. The curve must rise, so a zone that would
+        // turn it back is dropped; the lowest input is kept.
         interior.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
         let mut points: Vec<(f64, f64)> = Vec::with_capacity(interior.len());
-        for (input, target, index) in interior {
+        for (input, target, mut pins) in interior {
             let inside = input > black + 0.5 && input < white - 0.5;
             let rising = points
                 .last()
@@ -239,7 +244,7 @@ impl AnchorCurve {
             if inside && rising {
                 points.push((input, target));
             } else {
-                ignored.push(index);
+                ignored.append(&mut pins);
             }
         }
         ignored.sort_unstable();
@@ -771,6 +776,42 @@ mod tests {
         }
     }
 
+    /// Pins on one zone count as one reading: their average prints as the zone.
+    #[test]
+    fn pins_on_a_zone_average_their_readings() {
+        let curve = AnchorCurve::new(&[pin(40.0, 50.0), pin(60.0, 50.0)]);
+        assert!((curve.map(50.0) - 50.0).abs() < 1e-9, "{}", curve.map(50.0));
+        assert!(curve.map(40.0) < 50.0 && curve.map(60.0) > 50.0);
+        assert!(curve.ignored().is_empty());
+
+        let curve = AnchorCurve::new(&[pin(40.0, 30.0), pin(60.0, 30.0), pin(20.0, 30.0)]);
+        assert!((curve.map(40.0) - 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pins_on_black_and_white_average_too() {
+        let curve = AnchorCurve::new(&[pin(10.0, 0.0), pin(30.0, 0.0), pin(70.0, 100.0), pin(90.0, 100.0)]);
+        assert_eq!(curve.map(20.0), 0.0);
+        assert!(curve.map(25.0) > 0.0, "The black point is the average, not the brightest");
+        assert_eq!(curve.map(80.0), 100.0);
+        assert!(curve.map(75.0) < 100.0, "The white point is the average, not the darkest");
+        assert!(curve.ignored().is_empty());
+    }
+
+    /// A zone the curve can't honour marks every pin on it.
+    #[test]
+    fn a_dropped_zone_reports_all_its_pins() {
+        let curve = AnchorCurve::new(&[pin(25.0, 60.0), pin(50.0, 20.0), pin(70.0, 20.0)]);
+        assert_eq!(curve.ignored(), &[1, 2]);
+    }
+
+    #[test]
+    fn averaging_ignores_the_order_of_the_pins() {
+        let a = AnchorCurve::new(&[pin(40.0, 50.0), pin(60.0, 50.0), pin(20.0, 0.0)]);
+        let b = AnchorCurve::new(&[pin(20.0, 0.0), pin(60.0, 50.0), pin(40.0, 50.0)]);
+        assert_eq!(a, b);
+    }
+
     #[test]
     fn no_pins_leave_the_tones_alone() {
         let curve = AnchorCurve::new(&[]);
@@ -808,19 +849,19 @@ mod tests {
     }
 
     /// Only the zones matter, never the order: two pins aimed at black hold
-    /// the brightest of them, whichever came first.
+    /// their average, whichever came first.
     #[test]
     fn pin_order_never_changes_the_curve() {
         let a = AnchorCurve::new(&[pin(30.0, 0.0), pin(10.0, 0.0), pin(60.0, 50.0)]);
         let b = AnchorCurve::new(&[pin(60.0, 50.0), pin(10.0, 0.0), pin(30.0, 0.0)]);
         assert_eq!(a, b);
-        assert_eq!(a.map(20.0), 0.0, "everything under the brightest black pin is black");
+        assert_eq!(a.map(20.0), 0.0, "everything under the black pins' average is black");
     }
 
-    /// One pin per zone: two aimed at the same target collapse to one, so the
-    /// curve keeps rising instead of flattening.
+    /// Two pins aimed at the same target make one knot, so the curve keeps rising
+    /// instead of flattening.
     #[test]
-    fn one_pin_per_zone() {
+    fn pins_on_one_target_make_one_knot() {
         let curve = AnchorCurve::new(&[pin(40.0, 50.0), pin(70.0, 50.0)]);
         assert!(curve.points.len() == 1);
         let mut previous = -1.0;

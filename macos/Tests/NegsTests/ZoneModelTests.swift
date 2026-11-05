@@ -153,15 +153,33 @@ extension ZoneModelTests {
         XCTAssertEqual(try lstar(model, at: light), ZoneScale.zones[7].target, accuracy: 1.5)
     }
 
-    /// Dragging a zone that's already placed moves its pin.
-    func testDraggingAPlacedZoneMovesItsPin() async throws {
+    /// Dragging a zone again adds a pin, and the average of a zone's readings
+    /// prints as the zone.
+    func testPinsOnAZoneAverageTheirReadings() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
-        try await place(5, on: model)
+        let target = ZoneScale.zones[5].target
+        try await place(5, at: dark, on: model)
         try await place(5, at: light, on: model)
+        XCTAssertEqual(model.pins.count, 2)
+        XCTAssertEqual(model.selectedPin, 1)
+        XCTAssertEqual(model.pinsToShow.map(\.zone), [5, 5])
+        XCTAssertEqual(model.pinsToShow.map(\.ignored), [false, false])
+        // The ramp's two spots straddle the average, which prints as the zone.
+        XCTAssertLessThan(try lstar(model, at: dark), target - 3)
+        XCTAssertGreaterThan(try lstar(model, at: light), target + 3)
+    }
+
+    /// Removing one of a zone's pins leaves the others averaging.
+    func testRemovingOnePinKeepsTheZonesOthers() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await place(5, at: dark, on: model)
+        try await place(5, at: light, on: model)
+        model.removeSelectedPin()
+        try await waitUntil { model.previewCurrent }
         XCTAssertEqual(model.pins.count, 1)
-        XCTAssertEqual(try XCTUnwrap(model.pins[0].source).centre.x, light.x, accuracy: 0.001)
-        XCTAssertEqual(try lstar(model, at: light), ZoneScale.zones[5].target, accuracy: 1.5)
+        XCTAssertEqual(try lstar(model, at: dark), ZoneScale.zones[5].target, accuracy: 1.5)
     }
 
     /// A drop while a render is running waits for it instead of vanishing.

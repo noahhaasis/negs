@@ -29,7 +29,7 @@ Success is that someone can drag zone 0 onto a shadow and watch the black point 
 - Drag a selected pin to measure a different spot. Its line and circle follow from where it was grabbed.
 - Scroll to resize the selected pin's circle. With nothing selected, scrolling pans as it does today. Scrolling does nothing during a drag.
 - Delete removes the selected pin, and Esc deselects.
-- Dragging a tile that is already placed moves that zone's pin: a zone has one pin.
+- Dragging a tile again adds another pin to that zone. The average of a zone's readings prints as the zone, including zones 0 and 10.
 - Each drop, move, resize gesture and delete is one undo step. A resize is one step however many scroll events it takes.
 
 ### Reading the pins
