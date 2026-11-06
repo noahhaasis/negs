@@ -622,6 +622,110 @@ grey again.
 test only), a monitor smaller than the minimum, other scaling than 100 %, light theme and
 high contrast with a custom background.
 
+## Render lifecycle tests and timing (2026-11-06)
+
+Groundwork for the held frame and quick frames (`docs/windows-nov5-port`, chunk 0).
+
+**Lifecycle harness** (`windows/src/model/harness.rs`). It drives the model's real lifecycle
+against the release helper: `render`, then `render_finished`, `reconcile_brightness_match`,
+`brightness_solved` and `render` again, as the app runs it. The model finishes every request by
+posting a task to the UI thread (`ui::post`, and `ui::after` for timers).
+- **Headless app.** The harness wraps the model in an `App` with no windows and runs those tasks
+  unchanged, one at a time, as the message loop's `drain` does.
+- **After each task**, it does what `App::refresh` does with the model: it takes the dirty marks,
+  collects a reported error and pumps the thumbnails.
+- **Isolation.** The task queue is process-wide, and other unit tests post to it. So each
+  lifecycle test re-runs itself alone in a child process with a scratch `NEGS_PROFILE_DIR`, one
+  child at a time.
+
+Run the lifecycle tests with
+`cargo test --release --locked --manifest-path windows/Cargo.toml lifecycle`. They need the
+release helper built from the same checkout. Without it they print "skipped" and pass. With
+`NEGS_REQUIRE_HELPER=1`, a missing helper fails these tests and the other live tests instead.
+
+What a test can use:
+- `lifecycle_test!`, which runs the test in its own child process.
+- `Harness::start`, `open`, `edit` (a click or key followed by a refresh), `idle` and
+  `run_until`.
+- `fire_timers`: runs `ui::after` tasks early.
+- `model.render_log`: every render request (kind, revision, generation, interactive scale).
+- `commands()`: every helper command, in the order sent.
+- `frames`: every frame shown. `errors`: every error reported.
+- `ui::canvas::set_fixed_scale`: stands in for the canvas. Its value is in physical screen pixels
+  per photograph pixel; the app is per-monitor DPI aware, so the same view at 150 % has 1.5 times
+  the scale it has at 100 %.
+- A deterministic 3072 × 2048 test photograph (6.3 MP).
+
+**Trace and benchmark** (`windows/src/trace.rs`). Both are off unless their environment variable
+is set.
+- `NEGS_RENDER_TRACE=<file>` writes JSON lines with QPC times: each edit, each render request and
+  reply (`elapsed_ms`, `cached_pipeline`, `pipeline_ms`), every helper command, each brightness
+  solve (with the Exposure note when idle), and the canvas's first present of each frame (after
+  the Vulkan present or the software blit) with DWM's composition after it.
+- `NEGS_RENDER_BENCH=<film>,<film>` alternates the films once the preview is idle and shown.
+- `windows/measure_render.ps1 -Photo … -Match on|off -Backend vulkan|cpu` runs one benchmark with
+  a fresh profile, with previews off and the window at 1600 × 1000 DIP. It samples the helper's
+  working set, and `windows/render_trace.py` summarises the run. Steps 1–2 are warm-up; the
+  medians are over the rest.
+
+**Baseline**, before the held frame and quick frames, on this machine:
+- **Machine and build:** Ryzen 5 3600, GTX 1660 SUPER, Windows 10 19045, one 3440 × 1440 monitor
+  at 125 %, mains power, nothing else running. Helper and app built from `3c9e166` (the crates
+  are unchanged on this branch); the CPU fallback used `RAYON_NUM_THREADS=6`.
+- **Photographs:** a 60 MP Leica M11 DNG (9504 × 6320, from Lightroom), a 33 MP Sony ARW
+  (7008 × 4672) and a 12.2 MP iPhone JPEG (4032 × 3024).
+- **Edits:** Gold 200 and Portra 400 alternated, warm, 8 measured changes on Vulkan and 4 on the
+  CPU.
+
+All times are from the edit to the frame presented, median ms. With matching on, these two films
+match within 0.05 EV of each other, so the solve doesn't render again, and the settled frame is
+the first frame.
+
+| Photograph | Matching | Vulkan first = settled | Vulkan solve | CPU first = settled | CPU solve | Helper working set, idle / peak (Vulkan; CPU) |
+|---|---|---|---|---|---|---|
+| 60 MP DNG | off (on: refused, see below) | 3717 (3308–5933) | – | 96 922 | – | 1606 / 2301 MB; 1401 / 6233 MB |
+| 33 MP ARW | off | 1873 | – | 51 984 | – | 961 / 1340 MB; 772 / 3397 MB |
+| 33 MP ARW | on | 1913 | 212 | 52 056 | 1452 | 970 / 1349 MB; 774 / 3398 MB |
+| 12 MP JPEG | off | 695 | – | 19 733 | – | 622 / 764 MB; 295 / 1274 MB |
+| 12 MP JPEG | on | 734 | 209 | 19 040 | 1570 | 623 / 765 MB; 295 / 1274 MB |
+
+Notes on the table:
+- **Where the time goes.** Nearly all of it is the helper's render: medians of 3363, 1585 and
+  632 ms on Vulkan, and 96 818, 51 868 and 19 928 ms on the CPU. On Vulkan the rest (sending,
+  reading the buffer back, uploading and presenting) is about 60 ms at 12 MP and 290–350 ms at
+  33–60 MP. DWM composes 3–13 ms after the present.
+- **The solve's place.** It runs after the settled frame is on screen, so it isn't in the first or
+  settled times above.
+- **The 60 MP DNG on Vulkan varies run to run** (3.0–5.7 s in the helper). On Vulkan the
+  33 MP times spread by at most 10 %, and the 12 MP ones ran 611–746 ms with matching off and
+  700–1006 ms with it on. On the CPU every photograph spread by under 5 %.
+- **The `pipeline_ms` field.** With the pipeline cached it is about 1 ms; building one takes
+  30–70 ms.
+- **The 60 MP DNG refuses matching** with "The camera preview is framed differently from the
+  photo.", so it measures matching off only. Its Lightroom preview has another shape.
+
+**Shared changes checked on Windows.** Tests in `session.rs` and `model/lifecycle_tests.rs`:
+- **Favourites:** a new profile has the four films. An emptied or custom list is kept. In the
+  release app a new profile shows Gold 200, Portra 400, Ektar 100 and C200 starred, before the
+  groups.
+- **Fotufilm:** 52 films and 10 papers, each film in exactly one group, the new films with their
+  own 35mm strips (Tri-X 400 keeps the generic one). A catalog cache from before Fotufilm (23
+  films) is replaced at launch, both under the current helper's key and as an older helper's
+  file. In the release app the grid scrolls through all 52 tiles. With previews on, the 52
+  thumbnails of the 12 MP JPEG took 3.5 s (49 ms each in the helper). CineStill 800T shows its
+  own 35mm strip on the canvas.
+- **Pipeline cache:** a thumbnail's pipeline is reused by the main render. The main render's
+  last films stay cached through 49 more thumbnails and `release_thumbnails`. Turning previews
+  off sends `release_thumbnails` and still renders.
+- **Brightness colour rule:** these files match in the release app:
+  - a Lightroom 6.8 DNG of a Leica M10, at −0.23 EV
+  - a Leica Q DNG, at +0.45 EV
+  - the ARW, at −0.33 EV
+
+  All their previews declare sRGB. No ProPhoto or gray-gamma preview was available, so "The
+  camera preview's colour space isn't supported." wasn't seen end to end. The note shows other
+  refusals, such as the M11's, the same way.
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,
