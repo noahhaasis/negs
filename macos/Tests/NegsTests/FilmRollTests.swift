@@ -114,9 +114,9 @@ final class FilmRollTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let strip = try XCTUnwrap(FilmStrip.load(data: root.appendingPathComponent("data"), film: "kodak_portra_400", format: .full, maxPixelSize: 400))
         let file = PhotoFile(url: URL(fileURLWithPath: "/nonexistent/frame.png"))
-        let frame = FilmFrame(file: file, number: 1, selected: false, strip: strip, film: "kodak_portra_400") {}
+        let frame = FilmFrame(height: FilmRollLayout.defaultStripHeight, file: file, number: 1, selected: false, strip: strip, film: "kodak_portra_400") {}
         let host = NSHostingView(rootView: frame.background(Color.white))
-        let size = CGSize(width: FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: strip.pixelSize), height: FilmRollLayout.stripHeight)
+        let size = CGSize(width: FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: strip.pixelSize), height: FilmRollLayout.defaultStripHeight)
         host.frame = NSRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))

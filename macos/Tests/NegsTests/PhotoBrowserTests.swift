@@ -52,8 +52,8 @@ final class PhotoBrowserTests: XCTestCase {
         let thumbnails = PhotoThumbnails()
         let result = await thumbnails.image(for: url)
         let image = try XCTUnwrap(result)
-        XCTAssertEqual(image.width, 240)
-        XCTAssertEqual(image.height, 480)
+        XCTAssertEqual(image.width, 320)
+        XCTAssertEqual(image.height, 640)
         let cached = await thumbnails.image(for: url)
         XCTAssertTrue(cached === image)
         let missing = await thumbnails.image(for: directory.appendingPathComponent("missing.nef"))
@@ -223,11 +223,11 @@ final class PhotoBrowserTests: XCTestCase {
                 let canvas = try XCTUnwrap(split.splitView.subviews.first)
                 // The new frame may be out of view: bring it to the strip's left end.
                 func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
-                let roll = try XCTUnwrap(all(canvas).compactMap { $0 as? NSScrollView }.first { abs($0.bounds.height - FilmRollLayout.stripHeight) < 1 })
-                let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture)
+                let roll = try XCTUnwrap(all(canvas).compactMap { $0 as? NSScrollView }.first { abs($0.bounds.height - FilmRollLayout.defaultStripHeight) < 1 })
+                let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
                 roll.contentView.scroll(to: NSPoint(x: 18 * frame, y: 0))
                 roll.reflectScrolledClipView(roll.contentView)
-                let point = NSPoint(x: frame / 2, y: 28 + FilmRollLayout.stripHeight / 2)
+                let point = NSPoint(x: frame / 2, y: 28 + FilmRollLayout.defaultStripHeight / 2)
                 for clicks in 1...2 {
                     for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                         let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],

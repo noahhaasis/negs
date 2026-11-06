@@ -463,6 +463,7 @@ extension ZoneModelTests {
     private func openRoll(_ model: EditorModel, photos: Int = 0) async throws -> (EditorWindowController, NSWindow, NSScrollView) {
         for index in 0..<photos { try FileManager.default.copyItem(at: ramp, to: directory.appendingPathComponent("z\(index).png")) }
         model.filmstripVisible = true
+        model.filmstripHeight = FilmRollLayout.defaultStripHeight
         let controller = EditorWindowController(model: model)
         let window = try XCTUnwrap(controller.window)
         controller.showWindow(nil)
@@ -471,7 +472,7 @@ extension ZoneModelTests {
         try await Task.sleep(for: .milliseconds(700))
         func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
         let scrolls = all(try XCTUnwrap(window.contentView)).compactMap { $0 as? NSScrollView }
-        let roll = try XCTUnwrap(scrolls.first { abs($0.bounds.height - FilmRollLayout.stripHeight) < 1 }, "\(scrolls.map(\.bounds))")
+        let roll = try XCTUnwrap(scrolls.first { abs($0.bounds.height - FilmRollLayout.defaultStripHeight) < 1 }, "\(scrolls.map(\.bounds))")
         return (controller, window, roll)
     }
 
@@ -502,7 +503,7 @@ extension ZoneModelTests {
         let height = canvas.bounds.height
         model.filmstripVisible = false
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(canvas.bounds.height, height + FilmRollLayout.stripHeight, accuracy: 1, "Hidden, the canvas takes its room")
+        XCTAssertEqual(canvas.bounds.height, height + FilmRollLayout.defaultStripHeight, accuracy: 1, "Hidden, the canvas takes its room")
     }
 
     /// Real clicks: a single click opens nothing, and neither does double-clicking
@@ -515,7 +516,7 @@ extension ZoneModelTests {
         defer { window.orderOut(nil) }
         XCTAssertEqual(model.source, ramp)
         let bounds = roll.convert(roll.bounds, to: nil)
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
         // other.png sorts first, so it's the first frame.
         let photo = CGPoint(x: bounds.minX + frame / 2, y: bounds.midY)
         let sprockets = CGPoint(x: photo.x, y: bounds.minY + 6)
@@ -539,6 +540,61 @@ extension ZoneModelTests {
         XCTAssertEqual(model.source, other, "A double-click on the photograph does")
     }
 
+    /// Real drags on the strip's top edge: it grows and shrinks within its limits,
+    /// the canvas gives way, the window stays put, and the size is remembered.
+    /// Dragging on the film itself doesn't resize it.
+    func testDraggingTheTopEdgeResizesTheStrip() async throws {
+        let model = try await makeModel()
+        let saved = (model.filmstripVisible, UserDefaults.standard.object(forKey: "filmstripHeight"))
+        defer {
+            model.filmstripVisible = saved.0
+            model.shutdown()
+            UserDefaults.standard.set(saved.1, forKey: "filmstripHeight")
+        }
+        let (_, window, roll) = try await openRoll(model, photos: 12)
+        defer { window.orderOut(nil) }
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        let canvas = try XCTUnwrap(all(try XCTUnwrap(window.contentView)).compactMap { $0 as? ImageScrollView }.first)
+        let frame = window.frame
+        let canvasHeight = canvas.bounds.height
+        let x = roll.convert(roll.bounds, to: nil).midX
+        func drag(fromY start: CGFloat, by delta: CGFloat) async throws {
+            try send(.leftMouseDown, CGPoint(x: x, y: start), to: window)
+            for step in 1...3 {
+                try send(.leftMouseDragged, CGPoint(x: x, y: start + delta * CGFloat(step) / 3), to: window)
+                try await Task.sleep(for: .milliseconds(30))
+            }
+            try send(.leftMouseUp, CGPoint(x: x, y: start + delta), to: window)
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        func top() -> CGFloat { roll.convert(roll.bounds, to: nil).maxY }
+        try await drag(fromY: top(), by: 60)
+        XCTAssertEqual(model.filmstripHeight, 240, accuracy: 0.5)
+        XCTAssertEqual(roll.bounds.height, 240, accuracy: 1)
+        XCTAssertEqual(canvas.bounds.height, canvasHeight - 60, accuracy: 1, "The canvas gives way")
+        XCTAssertEqual(window.frame, frame, "The window stays put")
+        XCTAssertEqual(UserDefaults.standard.double(forKey: "filmstripHeight"), 240, accuracy: 0.5)
+        let frameLength = FilmRollLayout.frameLength(stripHeight: 240, texture: FilmRollLayout.defaultTexture)
+        XCTAssertGreaterThan(try XCTUnwrap(roll.documentView).frame.width, frameLength * 13, "The frames grow with it")
+        try await drag(fromY: top(), by: -100)
+        XCTAssertEqual(model.filmstripHeight, 140, accuracy: 0.5, "Down")
+        // Past the limits.
+        try await drag(fromY: top(), by: 1000)
+        XCTAssertEqual(model.filmstripHeight, FilmRollLayout.stripHeightRange.upperBound, accuracy: 0.5)
+        XCTAssertEqual(window.frame, frame, "Even at the top")
+        try await drag(fromY: top(), by: -1000)
+        XCTAssertEqual(model.filmstripHeight, FilmRollLayout.stripHeightRange.lowerBound, accuracy: 0.5)
+        // The middle of the film only scrolls.
+        let before = model.filmstripHeight
+        try await drag(fromY: roll.convert(roll.bounds, to: nil).midY, by: 40)
+        XCTAssertEqual(model.filmstripHeight, before)
+        // A new window reads the remembered size.
+        model.filmstripHeight = 210
+        let reopened = EditorModel()
+        defer { reopened.shutdown() }
+        XCTAssertEqual(reopened.filmstripHeight, 210)
+    }
+
     /// Nothing but the person moves the film: opening a photograph in view leaves
     /// it, even at the far side, and only a frame wholly out of view brings it round.
     func testTheStripDoesNotCentreTheOpenPhotograph() async throws {
@@ -549,8 +605,8 @@ extension ZoneModelTests {
         defer { window.orderOut(nil) }
         func offset() -> CGFloat { roll.contentView.bounds.origin.x }
         func file(_ index: Int) -> URL { directory.appendingPathComponent("z\(index).png") }
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture)
-        XCTAssertEqual(FilmRollLayout.stripHeight, 180)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
+        XCTAssertEqual(FilmRollLayout.defaultStripHeight, 180)
         XCTAssertEqual(roll.bounds.height, 180, accuracy: 1)
         let bounds = roll.convert(roll.bounds, to: nil)
         // Double-clicking a frame at the strip's far side, sorted other, ramp, z0, z1…
@@ -588,7 +644,7 @@ extension ZoneModelTests {
         try await waitUntil { model.previewCurrent }
         let (_, window, roll) = try await openRoll(model)
         defer { window.orderOut(nil) }
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
         let start = 32 * frame
         let visible = roll.contentView.bounds
         XCTAssertLessThan(visible.minX, start + frame, "\(visible)")

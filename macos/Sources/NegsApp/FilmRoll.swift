@@ -4,8 +4,9 @@ import SwiftUI
 /// The folder as a roll of 35mm film under the photograph, running across as
 /// the strip artwork does.
 enum FilmRollLayout {
-    /// The strip's height: the film and nothing else.
-    static let stripHeight: CGFloat = 180
+    /// The strip's height, the film and nothing else, until it's dragged.
+    static let defaultStripHeight: CGFloat = 180
+    static let stripHeightRange: ClosedRange<CGFloat> = 90...300
     /// The artwork's film base, for frames before it has loaded.
     static let filmBase = Color(red: 15.0 / 255, green: 13.0 / 255, blue: 12.0 / 255)
     /// Until the artwork loads: its proportions and gate, from `frames.json`.
@@ -167,6 +168,35 @@ enum FilmRollLayout {
     }
 }
 
+/// The strip's top edge, which resizes it. The window's coordinates stay put
+/// while the strip changes height, so a drag is measured against them.
+struct StripResizeHandle: NSViewRepresentable {
+    let height: CGFloat
+    let resize: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> Handle { Handle() }
+    func updateNSView(_ view: Handle, context: Context) {
+        view.height = height
+        view.resize = resize
+    }
+
+    final class Handle: NSView {
+        var height: CGFloat = 0
+        var resize: ((CGFloat) -> Void)?
+        private var grab: (y: CGFloat, height: CGFloat)?
+
+        override func isAccessibilityElement() -> Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeUpDown) }
+        override func mouseDown(with event: NSEvent) { grab = (event.locationInWindow.y, height) }
+        override func mouseDragged(with event: NSEvent) {
+            guard let grab else { return }
+            resize?(grab.height + event.locationInWindow.y - grab.y)
+        }
+        override func mouseUp(with event: NSEvent) { grab = nil }
+    }
+}
+
 /// Finds the scroll view of the strip it sits in.
 struct EnclosingScrollFinder: NSViewRepresentable {
     let scroller: FilmRollScroller
@@ -242,6 +272,7 @@ struct FilmMouseSurface: NSViewRepresentable {
 
 /// One frame of the roll: the photograph, with the strip's artwork over it.
 struct FilmFrame: View {
+    let height: CGFloat
     let file: PhotoFile
     /// Its place on the roll, from 1.
     let number: Int
@@ -253,7 +284,7 @@ struct FilmFrame: View {
     @State private var visible = false
 
     var body: some View {
-        let frame = FilmArtwork.size(strip)
+        let frame = FilmArtwork.size(strip, height: height)
         let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: frame)
         ZStack(alignment: .topLeading) {
             // Solid film, so nothing behind the roll shows round the gate.
@@ -265,7 +296,7 @@ struct FilmFrame: View {
                 .accessibilityLabel(file.name)
                 .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
                 .accessibilityAction(.default, open)
-            FilmArtwork(number: number, strip: strip, film: film)
+            FilmArtwork(height: height, number: number, strip: strip, film: film)
                 .allowsHitTesting(false)
         }
         .frame(width: frame.width, height: frame.height, alignment: .topLeading)
@@ -304,19 +335,20 @@ struct FilmFrame: View {
 
 /// A frame past the last photograph: the roll carries on, with nothing on it.
 struct BlankFilmFrame: View {
+    var height = FilmRollLayout.defaultStripHeight
     let number: Int
     let strip: FilmStrip?
     let film: String
 
     var body: some View {
-        let frame = FilmArtwork.size(strip)
+        let frame = FilmArtwork.size(strip, height: height)
         let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: frame)
         ZStack(alignment: .topLeading) {
             FilmRollLayout.filmBase
             Color.black
                 .frame(width: gate.width, height: gate.height)
                 .offset(x: gate.minX, y: gate.minY)
-            FilmArtwork(number: number, strip: strip, film: film)
+            FilmArtwork(height: height, number: number, strip: strip, film: film)
                 .allowsHitTesting(false)
         }
         .frame(width: frame.width, height: frame.height, alignment: .topLeading)
@@ -327,17 +359,17 @@ struct BlankFilmFrame: View {
 
 /// The strip's artwork for one frame of the roll.
 private struct FilmArtwork: View {
+    let height: CGFloat
     let number: Int
     let strip: FilmStrip?
     let film: String
 
-    static func size(_ strip: FilmStrip?) -> CGSize {
-        let height = FilmRollLayout.stripHeight
-        return CGSize(width: FilmRollLayout.frameLength(stripHeight: height, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture), height: height)
+    static func size(_ strip: FilmStrip?, height: CGFloat) -> CGSize {
+        CGSize(width: FilmRollLayout.frameLength(stripHeight: height, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture), height: height)
     }
 
     var body: some View {
-        let frame = Self.size(strip)
+        let frame = Self.size(strip, height: height)
         if let strip {
             ZStack(alignment: .topLeading) {
                 Image(decorative: strip.image, scale: 1)

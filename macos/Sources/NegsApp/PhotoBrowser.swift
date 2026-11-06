@@ -53,7 +53,7 @@ actor PhotoThumbnails {
     }
     private let cache: NSCache<NSURL, Cached> = {
         let cache = NSCache<NSURL, Cached>()
-        cache.totalCostLimit = 64 * 1024 * 1024
+        cache.totalCostLimit = 96 * 1024 * 1024
         cache.countLimit = 160
         return cache
     }()
@@ -71,7 +71,7 @@ actor PhotoThumbnails {
                 [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
             var options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 480,
+                kCGImageSourceThumbnailMaxPixelSize: 640,
                 kCGImageSourceShouldCacheImmediately: true
             ]
             if !EditorModel.rawExtensions.contains(url.pathExtension.lowercased()) {
@@ -100,15 +100,15 @@ struct PhotoBrowser: View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
                 ForEach(Array(files.enumerated()), id: \.element.url) { index, file in
-                    FilmFrame(file: file, number: index + 1, selected: file.url == model.source, strip: strip, film: model.film) {
+                    FilmFrame(height: height, file: file, number: index + 1, selected: file.url == model.source, strip: strip, film: model.film) {
                         if file.url != model.source { model.open(file.url) }
                     }
                     .id(file.url)
                 }
                 // A short folder's roll still runs the window's width.
-                let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
+                let frame = frameLength
                 ForEach(0..<FilmRollLayout.blankFrames(photos: files.count, viewport: viewport, frameLength: frame), id: \.self) { index in
-                    BlankFilmFrame(number: files.count + index + 1, strip: strip, film: model.film)
+                    BlankFilmFrame(height: height, number: files.count + index + 1, strip: strip, film: model.film)
                 }
             }
             .scrollTargetLayout()
@@ -126,14 +126,25 @@ struct PhotoBrowser: View {
         // Over the scroll view, since SwiftUI doesn't pass mouse drags through one.
         .overlay {
             FilmMouseSurface(scroller: scroller, enabled: !model.cropping) { point in
-                let frame = CGSize(width: FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture), height: FilmRollLayout.stripHeight)
+                let frame = CGSize(width: frameLength, height: height)
                 let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: frame)
                 guard let index = FilmRollLayout.photo(at: point, frame: frame, gate: gate, photos: files.count),
                       files[index].url != model.source else { return }
                 model.open(files[index].url)
             }
         }
-        .frame(height: FilmRollLayout.stripHeight)
+        // Half over the canvas, so the edge is easy to catch.
+        .overlay(alignment: .top) {
+            StripResizeHandle(height: height) { model.filmstripHeight = $0 }
+                .frame(height: 8)
+                .offset(y: -4)
+        }
+        .frame(height: height)
+        // The same part of the roll stays in view as its frames change size.
+        .onChange(of: height) { old, new in
+            let offset = scroller.offset * new / old
+            DispatchQueue.main.async { scroller.offset = offset }
+        }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewport = $0 }
         .background(FilmRollLayout.filmBase)
         .overlay {
@@ -151,7 +162,7 @@ struct PhotoBrowser: View {
         .task(id: "\(model.film) \(model.hasCatalog)") {
             guard let data = model.dataDirectory else { return }
             let film = model.film
-            let loaded = await Task.detached(priority: .utility) { FilmStrip.load(data: data, film: film, format: .full, maxPixelSize: 480) }.value
+            let loaded = await Task.detached(priority: .utility) { FilmStrip.load(data: data, film: film, format: .full, maxPixelSize: 720) }.value
             guard !Task.isCancelled, let loaded else { return }
             strip = loaded
         }
@@ -171,11 +182,16 @@ struct PhotoBrowser: View {
         }
     }
 
+    private var height: CGFloat { model.filmstripHeight }
+    private var frameLength: CGFloat {
+        FilmRollLayout.frameLength(stripHeight: height, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
+    }
+
     /// The open photograph's frame, if it's wholly out of view. Nothing else
     /// moves the film but the person.
     private func revealOpenPhotograph() {
         guard let source = model.source, let index = files.firstIndex(where: { $0.url == source }) else { return }
-        scroller.reveal(frame: index, length: FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture))
+        scroller.reveal(frame: index, length: frameLength)
     }
 
     private func refresh(initial: Bool) async {

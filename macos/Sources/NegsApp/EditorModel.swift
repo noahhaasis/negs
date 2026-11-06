@@ -171,6 +171,19 @@ import UniformTypeIdentifiers
         return SaveSettings(bitDepth: depth, colorSpace: SaveSettings.effectiveSpace(chosen, bitDepth: depth),
                             jpegQuality: exportQuality, dpi: exportDPI)
     }
+    /// The film strip's height, set by dragging its top edge.
+    var filmstripHeight = EditorModel.savedFilmstripHeight {
+        didSet {
+            let range = FilmRollLayout.stripHeightRange
+            let clamped = min(max(filmstripHeight, range.lowerBound), range.upperBound)
+            if clamped != filmstripHeight { filmstripHeight = clamped }
+            UserDefaults.standard.set(Double(filmstripHeight), forKey: "filmstripHeight")
+        }
+    }
+    private static var savedFilmstripHeight: CGFloat {
+        let saved = UserDefaults.standard.double(forKey: "filmstripHeight")
+        return FilmRollLayout.stripHeightRange.contains(saved) ? saved : FilmRollLayout.defaultStripHeight
+    }
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
     }
