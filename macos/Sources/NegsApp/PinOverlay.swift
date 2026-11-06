@@ -28,6 +28,14 @@ enum ZoneGeometry {
 /// sits above the document, so the photograph's zoom, rotation and crop never
 /// touch it, and it takes no mouse events.
 final class PinOverlayView: NSView {
+    /// The camera details, above and below the photograph.
+    private let exifTop = CATextLayer()
+    private let exifBottom = CATextLayer()
+    /// The lines' height, and their gap from the photograph.
+    static let exifHeight: CGFloat = 18, exifGap: CGFloat = 4
+    /// How much room a fitted photograph leaves above and below for them.
+    static var exifMargin: CGFloat { exifHeight + exifGap * 2 }
+    private(set) var exifLines: (top: String, bottom: String)?
     private let casing = CAShapeLayer()
     private let selectedFill = CAShapeLayer()
     private let normal = CAShapeLayer()
@@ -66,6 +74,12 @@ final class PinOverlayView: NSView {
         for shape in [normal, selected, ignored] { shape.lineWidth = 1.75 }
         dragChip.isHidden = true
         layer?.addSublayer(dragChip)
+        for line in [exifTop, exifBottom] {
+            line.actions = none.merging(["string": NSNull(), "contents": NSNull(), "hidden": NSNull()]) { $1 }
+            line.foregroundColor = EdgePrint.colour.cgColor
+            line.isHidden = true
+            layer?.insertSublayer(line, at: 0)
+        }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
@@ -88,6 +102,35 @@ final class PinOverlayView: NSView {
 
     func labelFrame(_ index: Int) -> CGRect? { labelFrames[index] }
 
+    func showExif(_ exif: PhotoExif?) {
+        let lines = exif.map { (top: $0.topLine, bottom: $0.bottomLine) }
+        guard lines?.top != exifLines?.top || lines?.bottom != exifLines?.bottom else { return }
+        exifLines = lines
+        redraw()
+    }
+
+    /// The two lines' frames, for tests.
+    var exifFrames: (top: CGRect, bottom: CGRect)? { exifLines == nil ? nil : (exifTop.frame, exifBottom.frame) }
+
+    /// The lines sit just outside the photograph, at its left, and stay on the
+    /// canvas when it's zoomed past the edges.
+    private func layoutExif(photo: PhotographView) {
+        let rect = convert(photo.bounds, from: photo)
+        let scale = window?.backingScaleFactor ?? 2
+        let (height, gap) = (Self.exifHeight, Self.exifGap)
+        let font = EdgePrint.font(size: 14)
+        let left = max(rect.minX, gap * 2), width = max(bounds.width - left - gap * 2, 1)
+        for (line, text, y) in [(exifTop, exifLines?.top ?? "", min(rect.maxY + gap, bounds.height - height - gap)),
+                                (exifBottom, exifLines?.bottom ?? "", max(rect.minY - gap - height, gap))] {
+            line.isHidden = text.isEmpty
+            line.string = text
+            line.font = font
+            line.fontSize = 14
+            line.contentsScale = scale
+            line.frame = CGRect(x: left, y: y, width: width, height: height)
+        }
+    }
+
     /// The pin whose circle holds `point`; the smallest, where they overlap.
     func pinCircle(at point: CGPoint) -> Int? {
         circles.filter { hypot(point.x - $0.value.centre.x, point.y - $0.value.centre.y) <= $0.value.radius }
@@ -104,6 +147,7 @@ final class PinOverlayView: NSView {
         guard let scroll = enclosingScrollView ?? superview as? NSScrollView,
               let photo = scroll.documentView as? PhotographView else { return }
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        layoutExif(photo: photo)
         let all = CGMutablePath(), plain = CGMutablePath(), accent = CGMutablePath(), red = CGMutablePath(), fill = CGMutablePath()
         let scale = window?.backingScaleFactor ?? 2
         func tile(_ zone: Int) -> CGPoint {

@@ -50,4 +50,4 @@ The lettering is a reconstruction over the shared scanned material, not a
 new stock-specific 400TX border scan. Tri-X 7266 reversal remains generic.
 
 The edge print uses Barlow Condensed (SIL OFL, in
-`crates/spektrafilm-io/fonts`).
+`crates/spektrafilm-io/fonts`, with a copy in `data/fonts` for the macOS app).

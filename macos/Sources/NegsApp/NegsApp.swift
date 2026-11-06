@@ -270,6 +270,7 @@ struct CanvasArea: View {
                       dragged: model.zoneDrag,
                       draggedRadius: model.sampleRadius,
                       proofPixels: model.proofing ? model.exportPixels : nil,
+                      exif: model.photoExif,
                       onSelectPin: { model.selectPin($0) },
                       onMovePin: { index, centre in Task { await model.movePin(index, to: centre) } },
                       onScrollPin: { model.resizeSelectedPin(scrollDelta: $0, precise: $1) },

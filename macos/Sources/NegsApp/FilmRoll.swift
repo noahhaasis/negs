@@ -434,8 +434,8 @@ private struct FilmArtwork: View {
         let scale = length / 38
         let label = { (text: String, x: CGFloat, y: CGFloat) in
             Text(text)
-                .font(.system(size: 1.2 * scale, weight: .semibold).width(.condensed))
-                .foregroundStyle(Color(red: 0.97, green: 0.63, blue: 0.2))
+                .font(Font(EdgePrint.font(size: 1.2 * scale)))
+                .foregroundStyle(Color(nsColor: EdgePrint.colour))
                 .fixedSize()
                 .frame(width: 2.2 * scale, height: 1.4 * scale, alignment: .leading)
                 .background(FilmRollLayout.filmBase)

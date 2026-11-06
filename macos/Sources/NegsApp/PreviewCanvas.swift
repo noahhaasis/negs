@@ -23,6 +23,8 @@ struct PreviewCanvas: NSViewRepresentable {
     var draggedRadius = SampleSize.initial
     /// In a proof, the pixels the export writes: they alone set the photograph's size.
     var proofPixels: CGSize? = nil
+    /// The camera details shown above and below the photograph.
+    var exif: PhotoExif? = nil
     /// A click on a pin's chip, or nil on empty photograph.
     var onSelectPin: ((Int?) -> Void)? = nil
     /// Called when a placed pin is dragged to a new point.
@@ -60,6 +62,7 @@ struct PreviewCanvas: NSViewRepresentable {
         photo.draggedRadius = draggedRadius
         scroll.onScrollPin = onScrollPin
         scroll.proofPixels = proofPixels
+        scroll.exif = exif
         // Esc and Delete reach the photograph once a pin is selected.
         let selected = pins.first(where: \.selected)?.index
         if selected != nil, selected != photo.selectedPin { scroll.window?.makeFirstResponder(photo) }
@@ -146,6 +149,14 @@ final class ImageScrollView: NSScrollView {
         }
     }
     private var isProof: Bool { proofPixels != nil }
+    /// A fitted photograph leaves room for these above and below it.
+    var exif: PhotoExif? {
+        didSet {
+            guard exif != oldValue else { return }
+            overlay.showExif(exif)
+            if (exif == nil) != (oldValue == nil), fitting { applyZoom() }
+        }
+    }
     /// The zoom that makes the document the export's size. By the long edges, so
     /// a photograph of another orientation that's still arriving has the same scale.
     private func proofMagnification(document size: CGSize) -> CGFloat? {
@@ -214,7 +225,8 @@ final class ImageScrollView: NSScrollView {
         // 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
         // photograph, but never enlarges it past 1:1.
         let oneToOne = 1 / (window?.backingScaleFactor ?? 2)
-        let fit = min(contentSize.width / size.width, contentSize.height / size.height)
+        let margin = exif == nil ? 0 : PinOverlayView.exifMargin * 2
+        let fit = min(contentSize.width / size.width, max(contentSize.height - margin, 1) / size.height)
         let amount = proofMagnification(document: size) ?? (fitting ? min(fit, oneToOne) : oneToOne)
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
         // Constraining again centres whatever is smaller than the window.

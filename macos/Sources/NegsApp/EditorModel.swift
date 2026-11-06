@@ -453,6 +453,7 @@ import UniformTypeIdentifiers
     func start(paths: EnginePaths? = nil, restoration: Task<EditorSession?, Error>? = nil) async {
         launch(paths: paths)
         guard let request = catalogRequest, let engine else { return }
+        EdgePrint.registerFont(data: engine.paths.data)
         catalogRequest = nil
         var restoration = restoration
         do {
@@ -918,6 +919,11 @@ import UniformTypeIdentifiers
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         sourceGeneration += 1
         let generation = sourceGeneration
+        photoExif = nil
+        Task { [weak self] in
+            let exif = await Task.detached(priority: .userInitiated) { PhotoExif.read(url) }.value
+            if let self, self.sourceGeneration == generation { self.photoExif = exif }
+        }
         sameLookForRoll = Self.rollLooks[url.deletingLastPathComponent().standardizedFileURL.path] != nil
         if let session {
             state = merged(session.state)
@@ -1330,6 +1336,9 @@ import UniformTypeIdentifiers
         next.crop = CropSettings()
         return next
     }
+
+    /// The open photograph's camera details, if it has any.
+    private(set) var photoExif: PhotoExif?
 
     /// Whether this photograph's folder is on one look.
     private(set) var sameLookForRoll = false

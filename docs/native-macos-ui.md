@@ -302,6 +302,14 @@ The arrow keys step along the roll. Only the person moves the film: opening a ph
 leaves it where it is, unless that frame is wholly out of view, when it comes just far
 enough in. That also shows the open photograph when a folder first appears.
 
+## Camera details
+
+In the edit view, the photograph's camera and lens print above it and its exposure and date
+below, in the film's edge-print font (Barlow Condensed SemiBold, in `data/fonts`) and
+colour (`EdgePrint`). They're read from the file's metadata (`PhotoExif`), sit on the canvas
+overlay just outside the photograph, and stay on the canvas when it's zoomed past the edges.
+A fitted photograph leaves room for them; a file with no details leaves none.
+
 ## Big film strip
 
 F, or View › Big Film Strip, makes the film strip the main view beside the sidebar. It
