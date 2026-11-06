@@ -382,8 +382,9 @@ photograph writes nothing. A folder that can't be written is passed over silentl
 while ⇧⌘S still reports it.
 
 A photograph opens with its own saved edits. Without any it opens at the defaults, never
-with the last photograph's edits; only Image Size and the output colour space stay, being
-export choices. ⌘D, Set as Default for This Folder, makes the current settings what the
+with the last photograph's edits; only the output colour space stays, being an export
+choice. Image Size is one setting for every photograph: it isn't taken from a photograph's
+saved edits, a folder's default or a preset, and it's remembered between launches. ⌘D, Set as Default for This Folder, makes the current settings what the
 folder's photographs without edits of their own open with, leaving out pins and crop.
 Photographs with saved edits keep them. It's a snapshot, kept per folder, until ⌘D is
 pressed again: Reset All Adjustments then ⌘D puts a folder back on the app's defaults.

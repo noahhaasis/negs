@@ -131,6 +131,10 @@ final class SessionTests: XCTestCase {
 }
 
 @MainActor final class SessionLifecycleTests: XCTestCase {
+    /// Image Size is global, so one test's mustn't reach the next.
+    override func setUp() async throws { UserDefaults.standard.removeObject(forKey: "imageSize") }
+    override func tearDown() async throws { UserDefaults.standard.removeObject(forKey: "imageSize") }
+
     private var paths: EnginePaths {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         return EnginePaths(helper: root.appendingPathComponent("target/release/spektrafilm-native"),

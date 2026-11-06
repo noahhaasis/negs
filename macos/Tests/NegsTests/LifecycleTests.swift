@@ -4,6 +4,10 @@ import XCTest
 @testable import NegsApp
 
 @MainActor final class LifecycleTests: XCTestCase {
+    /// Image Size is global, so one test's mustn't reach the next.
+    override func setUp() async throws { UserDefaults.standard.removeObject(forKey: "imageSize") }
+    override func tearDown() async throws { UserDefaults.standard.removeObject(forKey: "imageSize") }
+
     private func paths() -> EnginePaths {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         return EnginePaths(helper: root.appendingPathComponent("target/release/spektrafilm-native"), exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: root.appendingPathComponent("data"))

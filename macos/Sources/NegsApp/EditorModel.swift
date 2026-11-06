@@ -532,6 +532,7 @@ import UniformTypeIdentifiers
         var next = state
         next.params = defaults
         if rotation != .null { next.params["io.rotate_cw"] = rotation }
+        if let size = Self.savedImageSize { next.params[ImageSize.targetPath] = size }
         if !films.contains(where: { $0.id == next.film }), let first = films.first { next.film = first.id }
         if !papers.contains(where: { $0.id == next.paper }), let first = papers.first { next.paper = first.id }
         PreviewRules.pairFilm(in: &next, stocks: stocks)
@@ -757,6 +758,8 @@ import UniformTypeIdentifiers
         guard !closing else { return }
         let previousAnchors = state.params["post.tone_anchors"]
         let render = next.rendered != state.rendered
+        let size = next.params[ImageSize.targetPath]
+        if size != state.params[ImageSize.targetPath] { Self.savedImageSize = size }
         state = next
         if next.params["post.tone_anchors"] != previousAnchors { cancelResize() }
         if let selectedPin, !pins.indices.contains(selectedPin) { self.selectedPin = nil }
@@ -1318,7 +1321,25 @@ import UniformTypeIdentifiers
         // Saved from before Image Size, it may carry the old working-resolution factor.
         let factor = defaults[ImageSize.factorPath]
         if factor != .null { restored.params[ImageSize.factorPath] = factor }
+        // The export size belongs to no photograph. What's saved with one is
+        // passed over, except to set it for the first time.
+        if let size = Self.savedImageSize {
+            restored.params[ImageSize.targetPath] = size
+        } else {
+            Self.savedImageSize = restored.params[ImageSize.targetPath]
+        }
         return restored
+    }
+
+    /// The Image Size every photograph exports at, or nil before there's been one.
+    private static var savedImageSize: JSONValue? {
+        get {
+            guard let pixels = UserDefaults.standard.object(forKey: "imageSize") as? Double else { return nil }
+            return pixels > 0 ? .number(pixels) : .null
+        }
+        set {
+            UserDefaults.standard.set(newValue.map { if case .number(let pixels) = $0 { pixels } else { 0.0 } }, forKey: "imageSize")
+        }
     }
 
     /// Applies the settings file beside a photograph, if it has one, and returns

@@ -11,6 +11,7 @@ import XCTest
     private var other: URL!
 
     override func setUpWithError() throws {
+        UserDefaults.standard.removeObject(forKey: "imageSize")
         _ = NSApplication.shared
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("negs-zone-\(UUID().uuidString)")
@@ -22,6 +23,7 @@ import XCTest
     }
 
     override func tearDownWithError() throws {
+        UserDefaults.standard.removeObject(forKey: "imageSize")
         if directory != nil { try? FileManager.default.removeItem(at: directory) }
     }
 
@@ -743,6 +745,30 @@ extension ZoneModelTests {
         XCTAssertFalse(model.pinsToShow.isEmpty)
         XCTAssertEqual(window.standardWindowButton(.closeButton)?.isHidden, false)
         XCTAssertEqual(window.titleVisibility, .visible)
+    }
+
+    /// Image Size is one setting for every photograph, whatever's saved with
+    /// each, and it's remembered.
+    func testImageSizeIsGlobal() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        model.set(ImageSize.targetPath, .number(1500))
+        model.set("post.contrast", .number(model.defaultValue("post.contrast").double + 5))
+        model.saveSettings()
+        model.open(other)
+        XCTAssertEqual(model.value(ImageSize.targetPath).double, 1500, "Another photograph has it too")
+        model.set(ImageSize.targetPath, .number(2000))
+        model.open(ramp)
+        XCTAssertEqual(model.value(ImageSize.targetPath).double, 2000, "Not what's saved with this one")
+        model.chooseImageSize(.original)
+        model.open(other)
+        XCTAssertEqual(model.value(ImageSize.targetPath), .null)
+        model.set(ImageSize.targetPath, .number(1800))
+        let reopened = EditorModel(previewCache: RenderedPreviewCache(file: directory.appendingPathComponent("again.cache")))
+        defer { reopened.shutdown() }
+        await reopened.start(paths: try paths())
+        reopened.open(ramp)
+        XCTAssertEqual(reopened.value(ImageSize.targetPath).double, 1800, "A new launch remembers")
     }
 
     /// G swaps the grid in and out, and it stands down while typing or cropping.

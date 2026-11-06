@@ -25,6 +25,9 @@ Photograph       8001 × 5333 · 43 MP
 Resizes before film simulation, including halation and grain.
 ```
 
+- Image Size is one setting for every photograph, remembered between launches.
+  What a photograph's saved edits, a folder's default or a preset carry is passed
+  over; the first file opened after this setting arrived supplies its starting value.
 - **Original** develops the source's own pixels. The crop trims them.
 - **Longest side** (16–65,535 px) sets the *cropped photograph's* longest
   side, before borders, the Instagram extension and any export size. Smaller
