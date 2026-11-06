@@ -219,6 +219,18 @@ scanning follow the profile metadata. Controls and reset participate in Undo.
 
 The photograph's exposure and date sit under its left corner and its camera and lens under its right, on one row where they fit.
 
+The Tone section, on Simple's page and Advanced's Finish tab, has a tone curve box: the whole
+curve in L\* over a faint histogram, with a point for each zone's pins and each point set by
+hand. Filled points are pins, hollow ones plain. Click to add a point, drag to move one, and drag it
+out of the box or press Delete to remove it; points stop at their neighbours. Moving a pin's
+point takes that zone's pins off the photograph and leaves a plain point, as one undo. Copy,
+Paste and Reset sit under it: pasted points arrive plain, and Reset removes every point and
+pin. `ToneCurve` draws what `AnchorCurve` develops, and a test in each holds them to the same
+numbers.
+
+Edit › Copy Edit (⇧⌘C) and Paste Edit (⇧⌘V) carry a whole edit between photographs. A
+photograph keeps its own pins, crop, rotation and file reading, and the export's settings.
+
 F shows only the photograph and its camera details: the zones, pins, film strip, status
 bar, sidebar and window controls all go, and F again brings back what was showing. It's
 one keystroke either way, so the grid and cropping keep their own controls.

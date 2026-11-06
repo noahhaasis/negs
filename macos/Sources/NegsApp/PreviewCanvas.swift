@@ -123,6 +123,13 @@ struct PreviewCanvas: NSViewRepresentable {
         guard let view, let window = view.window, view.magnification > 0 else { return nil }
         return view.magnification * window.backingScaleFactor
     }
+    /// A point in the window, as a point of the canvas from its top left.
+    func canvasPoint(window point: CGPoint) -> CGPoint? {
+        guard let view else { return nil }
+        let inOverlay = view.overlay.convert(point, from: nil)
+        return CGPoint(x: inOverlay.x, y: view.overlay.bounds.height - inOverlay.y)
+    }
+
     /// A point of the canvas, from its top left, as a fraction of the uncropped
     /// photograph. Nil on the border, outside the crop or off the canvas.
     func unitPoint(canvasPoint point: CGPoint) -> CGPoint? {

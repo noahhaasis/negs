@@ -102,6 +102,19 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertTrue(MainMenu.bareKeysAllowed(firstResponder: nil))
     }
 
+    /// The same numbers as the engine's `the_curve_matches_what_the_app_draws`.
+    func testTheCurveMatchesTheEngine() {
+        let curve = ToneCurve(anchors: [(25, 10), (60, 70)])
+        for (input, expected) in [(10.0, 2.01521), (40, 32.81935), (50, 54.01397), (80, 89.084586)] {
+            XCTAssertEqual(curve.map(input), expected, accuracy: 1e-4)
+        }
+        let ends = ToneCurve(anchors: [(20, 0), (45, 50), (90, 100)])
+        for (input, expected) in [(30.0, 14.075524), (60, 72.753173), (85, 99.010523)] {
+            XCTAssertEqual(ends.map(input), expected, accuracy: 1e-4)
+        }
+        XCTAssertEqual(ToneCurve(anchors: []).map(33), 33, "Straight with nothing on it")
+    }
+
     /// Flush against a landscape photograph's top and exactly as wide, or a
     /// portrait one's left and exactly as tall, with each tile facing it.
     func testTheZonePanelFollowsThePhotograph() {

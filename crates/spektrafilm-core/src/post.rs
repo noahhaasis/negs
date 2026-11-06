@@ -495,6 +495,21 @@ pub fn measured_lstar(
 
 #[cfg(test)]
 mod tests {
+    /// The Mac app draws this curve with its own `ToneCurve`, whose test holds
+    /// it to these same numbers: change one and the other has to follow.
+    #[test]
+    fn the_curve_matches_what_the_app_draws() {
+        let anchor = |input, target| ToneAnchor { input, target, source: None };
+        let curve = AnchorCurve::new(&[anchor(25.0, 10.0), anchor(60.0, 70.0)]);
+        for (input, expected) in [(10.0, 2.01521), (40.0, 32.81935), (50.0, 54.01397), (80.0, 89.084586)] {
+            assert!((curve.map(input) - expected).abs() < 1e-4, "{input}: {}", curve.map(input));
+        }
+        let ends = AnchorCurve::new(&[anchor(20.0, 0.0), anchor(45.0, 50.0), anchor(90.0, 100.0)]);
+        for (input, expected) in [(30.0, 14.075524), (60.0, 72.753173), (85.0, 99.010523)] {
+            assert!((ends.map(input) - expected).abs() < 1e-4, "{input}: {}", ends.map(input));
+        }
+    }
+
     use super::*;
 
     fn params(f: impl FnOnce(&mut PostParams)) -> PostParams {

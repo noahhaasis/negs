@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import SwiftUI
 import XCTest
 @testable import NegsApp
 
@@ -707,11 +708,128 @@ extension ZoneModelTests {
         XCTAssertEqual(reopened.value("post.contrast").double, contrast + 40)
     }
 
+    /// Pins are points on the curve. Editing one takes its zone's pins off the
+    /// photograph, in one undo, leaving a plain point; points stop at their neighbours.
+    func testTheToneCurveEditsPinsAsPoints() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let undo = UndoManager()
+        model.undoManager = undo
+        // What a person does comes in separate events, each its own undo.
+        func nextEvent() { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        await model.placeZone(5, at: CGPoint(x: 0.3, y: 0.5))
+        await model.placeZone(5, at: CGPoint(x: 0.7, y: 0.5))
+        await model.placeZone(7, at: CGPoint(x: 0.9, y: 0.5))
+        XCTAssertEqual(model.curvePoints.map(\.target), [50, 70], "A zone's pins are one point")
+        XCTAssertEqual(model.curvePoints[0].anchors.count, 2)
+        XCTAssertTrue(model.curvePoints.allSatisfy(\.pinned))
+        nextEvent()
+        let before = model.state
+        let zone5 = model.curvePoints[0]
+        let upper = model.curvePoints[1]
+        model.beginInteraction()
+        var held = model.moveCurvePoint(zone5.anchors, input: zone5.input, target: 55)
+        held = model.moveCurvePoint(held, input: zone5.input, target: 200)
+        model.endInteraction(action: "Edit Tone Curve")
+        nextEvent()
+        XCTAssertEqual(model.pins.count, 2)
+        XCTAssertEqual(model.pinsToShow.count, 1, "Only zone 7 is left on the photograph")
+        let moved = try XCTUnwrap(model.curvePoints.first)
+        XCTAssertFalse(moved.pinned)
+        XCTAssertEqual(moved.target, upper.target - 0.5, "It stops at its neighbour")
+        undo.undo()
+        XCTAssertEqual(model.state, before, "One undo brings both pins back")
+        // Added and removed.
+        let added = model.addCurvePoint(input: 5, target: 3)
+        XCTAssertEqual(model.curvePoints.first?.input, 5)
+        model.removeCurvePoint(added)
+        XCTAssertEqual(model.state, before)
+        // Copied to another photograph, the points are plain.
+        model.copyToneCurve()
+        XCTAssertTrue(model.canPasteToneCurve)
+        model.open(other)
+        model.pasteToneCurve()
+        XCTAssertEqual(model.curvePoints.map(\.target), [50, 70])
+        XCTAssertFalse(model.curvePoints.contains(where: \.pinned))
+        XCTAssertTrue(model.pinsToShow.isEmpty)
+        // Reset takes it all off, undoably.
+        nextEvent()
+        let pasted = model.state
+        model.resetToneCurve()
+        nextEvent()
+        XCTAssertTrue(model.pins.isEmpty)
+        undo.undo()
+        XCTAssertEqual(model.state, pasted)
+    }
+
+    /// Real mouse events, in the sidebar's Form: a click adds a point and holds
+    /// it for the drag, and letting go outside the box takes it off.
+    func testTheToneCurveBoxTakesTheMouse() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let host = NSHostingView(rootView: Form { Section("Tone") { ToneCurveBox(model: model) } }.formStyle(.grouped))
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 400, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(400))
+        func send(_ type: NSEvent.EventType, _ point: CGPoint) throws {
+            window.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        // About the middle of the box, which is at the top of the page.
+        let start = CGPoint(x: 200, y: 420 - 130)
+        try send(.leftMouseDown, start)
+        XCTAssertEqual(model.curvePoints.count, 1, "The click adds one")
+        let first = try XCTUnwrap(model.curvePoints.first)
+        try send(.leftMouseDragged, CGPoint(x: start.x + 30, y: start.y + 30))
+        try send(.leftMouseUp, CGPoint(x: start.x + 30, y: start.y + 30))
+        let moved = try XCTUnwrap(model.curvePoints.first)
+        XCTAssertEqual(model.curvePoints.count, 1)
+        XCTAssertGreaterThan(moved.input, first.input)
+        XCTAssertGreaterThan(moved.target, first.target)
+        // Grabbed again by its handle, and dragged well out of the box.
+        let handle = CGPoint(x: start.x + 30, y: start.y + 30)
+        try send(.leftMouseDown, handle)
+        XCTAssertEqual(model.curvePoints.count, 1, "It takes hold rather than adding another")
+        try send(.leftMouseDragged, CGPoint(x: handle.x, y: 10))
+        try send(.leftMouseUp, CGPoint(x: handle.x, y: 10))
+        XCTAssertTrue(model.curvePoints.isEmpty)
+    }
+
+    /// A whole edit goes across, except what's particular to the photograph.
+    func testCopyingAnEditLeavesPinsAndCropBehind() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let contrast = model.defaultValue("post.contrast").double
+        model.set("post.contrast", .number(contrast + 30))
+        model.chooseFilm("kodak_ektar_100")
+        await model.placeZone(5, at: CGPoint(x: 0.5, y: 0.5))
+        model.set("io.rotate_cw", .number(1))
+        model.copyEdit()
+        XCTAssertTrue(model.canPasteEdit)
+        model.open(other)
+        await model.placeZone(3, at: CGPoint(x: 0.5, y: 0.5))
+        model.set(ImageSize.targetPath, .number(1234))
+        let pins = model.pins
+        model.pasteEdit()
+        XCTAssertEqual(model.value("post.contrast").double, contrast + 30)
+        XCTAssertEqual(model.film, "kodak_ektar_100")
+        XCTAssertEqual(model.pins, pins, "Its own pins")
+        XCTAssertEqual(model.value("io.rotate_cw").double, 0, "Its own rotation")
+        XCTAssertEqual(model.value(ImageSize.targetPath).double, 1234)
+    }
+
     /// In the window, the panel draws flush along the landscape photograph's top
     /// and exactly as wide, with black at its left.
     func testTheZonePanelSitsOnThePhotograph() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
+        model.set(ImageSize.targetPath, .number(1000))
+        try await waitUntil { model.previewCurrent }
         let (controller, window, _) = try await openRoll(model)
         defer { window.orderOut(nil) }
         _ = controller
@@ -737,6 +855,18 @@ extension ZoneModelTests {
         func at(_ zone: CGFloat) -> CGPoint { CGPoint(x: placement.frame.minX + tile * (zone + 0.15), y: placement.frame.midY) }
         XCTAssertLessThan(try grey(at(0)), 0.15, "Zone 0's tile")
         XCTAssertGreaterThan(try grey(at(10)), 0.85, "Zone 10's tile")
+        // A real drag from a tile onto the photograph places a pin of that zone.
+        let from = canvas.convert(CGPoint(x: at(5).x + tile * 0.35, y: at(5).y), to: nil)
+        let to = canvas.convert(CGPoint(x: rect.midX, y: canvas.overlay.bounds.height - rect.midY), to: nil)
+        try send(.leftMouseDown, from, to: window)
+        try await Task.sleep(for: .milliseconds(50))
+        try send(.leftMouseDragged, CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2), to: window)
+        try await Task.sleep(for: .milliseconds(50))
+        try send(.leftMouseDragged, to, to: window)
+        try await Task.sleep(for: .milliseconds(50))
+        try send(.leftMouseUp, to, to: window)
+        try await waitUntil { !model.pins.isEmpty }
+        XCTAssertEqual(model.pins.first?.zone, 5)
     }
 
     /// F leaves only the photograph, then brings back exactly what was showing.

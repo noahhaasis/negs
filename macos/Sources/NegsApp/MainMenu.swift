@@ -63,6 +63,9 @@ import SwiftUI
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(.separator())
+        command(edit, "Copy Edit", #selector(copyEdit), "c", [.command, .shift])
+        command(edit, "Paste Edit", #selector(pasteEdit), "v", [.command, .shift])
 
         let view = submenu("View")
         command(view, "Hide Film Strip", #selector(toggleFilmstrip), "f", [.command, .option])
@@ -134,6 +137,8 @@ import SwiftUI
     @objc private func newPreset() { model.newPreset() }
     @objc private func importPresets() { model.importPresetsPanel() }
     @objc private func toggleGrid() { model.toggleGrid() }
+    @objc private func copyEdit() { model.copyEdit() }
+    @objc private func pasteEdit() { model.pasteEdit() }
     @objc private func toggleImageOnly() { model.toggleImageOnly() }
     @objc private func setFolderDefault() { model.setFolderDefault() }
     @objc private func toggleInspectorMode() { model.toggleInspectorMode() }
@@ -171,6 +176,8 @@ import SwiftUI
         case #selector(toggleGrid):
             item.state = model.gridVisible ? .on : .off
             return photo && !model.cropping && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
+        case #selector(copyEdit): return photo && model.hasCatalog
+        case #selector(pasteEdit): return photo && model.hasCatalog && !model.cropping && model.canPasteEdit
         case #selector(toggleImageOnly):
             item.state = model.imageOnly ? .on : .off
             return photo && !model.cropping && !model.gridVisible && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)

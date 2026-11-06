@@ -1552,6 +1552,131 @@ import UniformTypeIdentifiers
 
     func clearToneSelection() { selectedPin = nil }
 
+    // MARK: The tone curve
+
+    private static let toneCurvePasteboard = NSPasteboard.PasteboardType("com.negs.tone-curve")
+    private static let editPasteboard = NSPasteboard.PasteboardType("com.negs.edit")
+    /// Counts copies, so what depends on the pasteboard looks again.
+    private var copies = 0
+
+    var toneCurve: ToneCurve { ToneCurve(anchors: pins.map { ($0.input, $0.target) }) }
+
+    /// One point per target, as the engine reads them, left to right.
+    var curvePoints: [CurvePoint] {
+        var zones: [Int: [Int]] = [:]
+        let pins = pins
+        for (index, pin) in pins.enumerated() { zones[Int((min(max(pin.target, 0), 100) * 2).rounded()), default: []].append(index) }
+        return zones.map { key, anchors in
+            CurvePoint(input: anchors.map { pins[$0].input }.reduce(0, +) / Double(anchors.count), target: Double(key) / 2,
+                       anchors: anchors, pinned: anchors.contains { pins[$0].source != nil },
+                       ignored: anchors.allSatisfy(ignoredPins.contains))
+        }.sorted { ($0.input, $0.target) < ($1.input, $1.target) }
+    }
+
+    /// Where a point at `from` may go: it stops at its neighbours, so the curve
+    /// keeps rising and the point stays where it's put.
+    private func curvePosition(input: Double, target: Double, from: Double, excluding anchors: [Int]) -> (input: Double, target: Double) {
+        let others = curvePoints.filter { Set($0.anchors).isDisjoint(with: anchors) }
+        let below = others.last { $0.input < from }, above = others.first { $0.input >= from }
+        let inputs = (low: below.map { $0.input + 0.5 } ?? 0, high: above.map { $0.input - 0.5 } ?? 99.5)
+        let targets = (low: below.map { $0.target + 0.5 } ?? 0, high: above.map { $0.target - 0.5 } ?? 100)
+        return (min(max(input, inputs.low), max(inputs.high, inputs.low)),
+                (min(max(target, targets.low), max(targets.high, targets.low)) * 2).rounded() / 2)
+    }
+
+    private static func plainAnchor(input: Double, target: Double) -> JSONValue {
+        .object(["input": .number(input), "target": .number(target)])
+    }
+
+    /// Adds a point, returning the anchors now behind it.
+    @discardableResult func addCurvePoint(input: Double, target: Double) -> [Int] {
+        let place = curvePosition(input: input, target: target, from: min(max(input, 0), 99.5), excluding: [])
+        var anchors = state.params["post.tone_anchors"].array
+        anchors.append(Self.plainAnchor(input: place.input, target: place.target))
+        setAnchors(anchors, action: "Add Curve Point")
+        selectedPin = anchors.indices.last
+        return [anchors.count - 1]
+    }
+
+    /// Moves a point. Any pins behind it come off the photograph, replaced by
+    /// one plain point here. Returns the anchors now behind it.
+    @discardableResult func moveCurvePoint(_ point: [Int], input: Double, target: Double) -> [Int] {
+        let pins = pins
+        guard !point.isEmpty, point.allSatisfy(pins.indices.contains) else { return point }
+        let from = point.map { pins[$0].input }.reduce(0, +) / Double(point.count)
+        let place = curvePosition(input: input, target: target, from: from, excluding: point)
+        let moving = Set(point)
+        var anchors = state.params["post.tone_anchors"].array.enumerated().filter { !moving.contains($0.offset) }.map(\.element)
+        anchors.append(Self.plainAnchor(input: place.input, target: place.target))
+        setAnchors(anchors, action: "Edit Tone Curve")
+        selectedPin = anchors.indices.last
+        return [anchors.count - 1]
+    }
+
+    func removeCurvePoint(_ point: [Int]) {
+        let removing = Set(point)
+        let anchors = state.params["post.tone_anchors"].array.enumerated().filter { !removing.contains($0.offset) }.map(\.element)
+        setAnchors(anchors, action: "Remove Curve Point")
+        selectedPin = nil
+    }
+
+    /// Takes every point and pin off, as one edit.
+    func resetToneCurve() {
+        setAnchors([], action: "Reset Tone Curve")
+        selectedPin = nil
+    }
+
+    func copyToneCurve() {
+        let points = curvePoints.map { Self.plainAnchor(input: $0.input, target: $0.target) }
+        guard let data = try? JSONEncoder().encode(JSONValue.array(points)) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setData(data, forType: Self.toneCurvePasteboard)
+        copies += 1
+    }
+
+    var canPasteToneCurve: Bool {
+        _ = copies
+        return NSPasteboard.general.availableType(from: [Self.toneCurvePasteboard]) != nil
+    }
+
+    /// Replaces the curve. The points were measured elsewhere, so they arrive
+    /// as plain points, not pins on this photograph.
+    func pasteToneCurve() {
+        guard let data = NSPasteboard.general.data(forType: Self.toneCurvePasteboard),
+              case .array(let points)? = try? JSONDecoder().decode(JSONValue.self, from: data) else { return }
+        setAnchors(points, action: "Paste Tone Curve")
+        selectedPin = nil
+    }
+
+    // MARK: Copying a whole edit
+
+    func copyEdit() {
+        guard let data = try? JSONEncoder().encode(state) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setData(data, forType: Self.editPasteboard)
+        copies += 1
+    }
+
+    var canPasteEdit: Bool {
+        _ = copies
+        return NSPasteboard.general.availableType(from: [Self.editPasteboard]) != nil
+    }
+
+    /// Takes another photograph's edit. What's particular to this one stays: its
+    /// pins, crop, rotation and how its file is read, and the export's settings.
+    func pasteEdit() {
+        guard hasCatalog, source != nil, !cropping, let data = NSPasteboard.general.data(forType: Self.editPasteboard),
+              let copied = try? JSONDecoder().decode(EditState.self, from: data) else { return }
+        var next = merged(copied)
+        next.crop = state.crop
+        next.limitPreview = state.limitPreview
+        for path in ["post.tone_anchors", "io.rotate_cw", "io.input_interpretation", Self.lensCorrectionPath,
+                     ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"] where state.params[path] != .null {
+            next.params[path] = state.params[path]
+        }
+        apply(next, action: "Paste Edit")
+    }
+
     /// The tone of a circle on the current render, as the pins read it: before
     /// the curve they make. Waits out any render. Nil if the photograph
     /// changes first, cropping starts or the render fails.

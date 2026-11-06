@@ -732,6 +732,7 @@ struct AdjustmentInspector: View {
         }
         if model.isRaw { whiteBalanceSection }
         Section("Tone") {
+            ToneCurveBox(model: model)
             ForEach(toneControls) { control($0) }
         }
         Section("Detail") {
@@ -885,6 +886,7 @@ struct AdjustmentInspector: View {
     /// film produced; detail the paper clipped comes back only in Camera.
     @ViewBuilder private var finishTab: some View {
         Section {
+            ToneCurveBox(model: model)
             ForEach(toneControls) { control($0) }
         } header: { Text("Tone") } footer: {
             Text("Adjusts the finished scan. To recover a clipped highlight, use Exposure in Camera.")

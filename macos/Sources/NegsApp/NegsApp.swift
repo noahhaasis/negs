@@ -182,7 +182,6 @@ struct EditorCanvas: View {
                         if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(EdgePrint.amber, lineWidth: 3).allowsHitTesting(false).padding(4) }
                     }
                     .overlay(alignment: .topLeading) { if model.showsZonePanel { PlacedZonePanel(model: model) } }
-                    .coordinateSpace(name: ZonePanel.coordinateSpace)
                 if model.filmstripVisible, !model.imageOnly, let source = model.source {
                     PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
                 }
