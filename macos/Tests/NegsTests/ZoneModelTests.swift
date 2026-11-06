@@ -595,6 +595,37 @@ extension ZoneModelTests {
         XCTAssertEqual(reopened.filmstripHeight, 210)
     }
 
+    /// With RAW only on, the strip holds just the folder's RAW files, and the
+    /// setting is remembered. Its numbers and clicks follow what's shown.
+    func testTheStripCanShowOnlyRawFiles() async throws {
+        let model = try await makeModel()
+        let saved = (model.filmstripVisible, UserDefaults.standard.object(forKey: "filmstripRawOnly"))
+        defer {
+            model.filmstripVisible = saved.0
+            model.shutdown()
+            UserDefaults.standard.set(saved.1, forKey: "filmstripRawOnly")
+        }
+        model.filmstripRawOnly = false
+        // Not real RAW files, which the strip only lists until they scroll into view.
+        for index in 0..<30 { try Data().write(to: directory.appendingPathComponent("r\(index).nef")) }
+        for index in 0..<20 { try Data().write(to: directory.appendingPathComponent("s\(index).DNG")) }
+        let (_, window, roll) = try await openRoll(model, photos: 10)
+        defer { window.orderOut(nil) }
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
+        let document = try XCTUnwrap(roll.documentView)
+        XCTAssertEqual(document.frame.width, 62 * frame, accuracy: 1, "All of them: 50 RAW, 10 copies, ramp and other")
+        model.filmstripRawOnly = true
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(document.frame.width, 50 * frame, accuracy: 1, "Only the RAW files")
+        XCTAssertEqual(UserDefaults.standard.object(forKey: "filmstripRawOnly") as? Bool, true)
+        let reopened = EditorModel()
+        defer { reopened.shutdown() }
+        XCTAssertTrue(reopened.filmstripRawOnly)
+        model.filmstripRawOnly = false
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(document.frame.width, 62 * frame, accuracy: 1)
+    }
+
     /// Nothing but the person moves the film: opening a photograph in view leaves
     /// it, even at the far side, and only a frame wholly out of view brings it round.
     func testTheStripDoesNotCentreTheOpenPhotograph() async throws {

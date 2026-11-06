@@ -27,6 +27,11 @@ enum PhotoFolder {
         try snapshot(in: directory).map(\.url)
     }
 
+    /// The files the film strip shows of a folder's.
+    static func shown(_ files: [PhotoFile], rawOnly: Bool) -> [PhotoFile] {
+        rawOnly ? files.filter { EditorModel.rawExtensions.contains($0.url.pathExtension.lowercased()) } : files
+    }
+
     static func snapshot(in directory: URL) throws -> [PhotoFile] {
         let files = try FileManager.default.contentsOfDirectory(at: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles])
@@ -99,7 +104,7 @@ struct PhotoBrowser: View {
     var body: some View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
-                ForEach(Array(files.enumerated()), id: \.element.url) { index, file in
+                ForEach(Array(shown.enumerated()), id: \.element.url) { index, file in
                     FilmFrame(height: height, file: file, number: index + 1, selected: file.url == model.source, strip: strip, film: model.film) {
                         if file.url != model.source { model.open(file.url) }
                     }
@@ -107,8 +112,8 @@ struct PhotoBrowser: View {
                 }
                 // A short folder's roll still runs the window's width.
                 let frame = frameLength
-                ForEach(0..<FilmRollLayout.blankFrames(photos: files.count, viewport: viewport, frameLength: frame), id: \.self) { index in
-                    BlankFilmFrame(height: height, number: files.count + index + 1, strip: strip, film: model.film)
+                ForEach(0..<FilmRollLayout.blankFrames(photos: shown.count, viewport: viewport, frameLength: frame), id: \.self) { index in
+                    BlankFilmFrame(height: height, number: shown.count + index + 1, strip: strip, film: model.film)
                 }
             }
             .scrollTargetLayout()
@@ -116,21 +121,28 @@ struct PhotoBrowser: View {
         }
         .scrollIndicators(.hidden)
         .onChange(of: model.source) { _, _ in revealOpenPhotograph() }
+        // The film gets a different length: hold it within it, on the open frame if it's there.
+        .onChange(of: model.filmstripRawOnly) { _, _ in
+            DispatchQueue.main.async {
+                scroller.offset = scroller.offset
+                revealOpenPhotograph()
+            }
+        }
         .onDisappear { scroller.stop() }
         .onMoveCommand { direction in
             guard !model.cropping, let source = model.source,
-                  let index = files.firstIndex(where: { $0.url == source }) else { return }
+                  let index = shown.firstIndex(where: { $0.url == source }) else { return }
             let next = direction == .up || direction == .left ? index - 1 : index + 1
-            if files.indices.contains(next) { model.open(files[next].url) }
+            if shown.indices.contains(next) { model.open(shown[next].url) }
         }
         // Over the scroll view, since SwiftUI doesn't pass mouse drags through one.
         .overlay {
             FilmMouseSurface(scroller: scroller, enabled: !model.cropping) { point in
                 let frame = CGSize(width: frameLength, height: height)
                 let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: frame)
-                guard let index = FilmRollLayout.photo(at: point, frame: frame, gate: gate, photos: files.count),
-                      files[index].url != model.source else { return }
-                model.open(files[index].url)
+                guard let index = FilmRollLayout.photo(at: point, frame: frame, gate: gate, photos: shown.count),
+                      shown[index].url != model.source else { return }
+                model.open(shown[index].url)
             }
         }
         // Half over the canvas, so the edge is easy to catch.
@@ -151,7 +163,7 @@ struct PhotoBrowser: View {
             Group {
                 if loading { ProgressView().controlSize(.small) }
                 else if failed { Text("This folder couldn’t be read.") }
-                else if files.isEmpty { Text("No supported photographs in this folder.") }
+                else if shown.isEmpty { Text(model.filmstripRawOnly ? "No RAW files in this folder." : "No supported photographs in this folder.") }
             }
             .foregroundStyle(.white.opacity(0.75))
             .multilineTextAlignment(.center)
@@ -183,6 +195,7 @@ struct PhotoBrowser: View {
     }
 
     private var height: CGFloat { model.filmstripHeight }
+    private var shown: [PhotoFile] { PhotoFolder.shown(files, rawOnly: model.filmstripRawOnly) }
     private var frameLength: CGFloat {
         FilmRollLayout.frameLength(stripHeight: height, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
     }
@@ -190,7 +203,7 @@ struct PhotoBrowser: View {
     /// The open photograph's frame, if it's wholly out of view. Nothing else
     /// moves the film but the person.
     private func revealOpenPhotograph() {
-        guard let source = model.source, let index = files.firstIndex(where: { $0.url == source }) else { return }
+        guard let source = model.source, let index = shown.firstIndex(where: { $0.url == source }) else { return }
         scroller.reveal(frame: index, length: frameLength)
     }
 

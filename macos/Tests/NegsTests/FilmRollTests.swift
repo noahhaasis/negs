@@ -74,6 +74,13 @@ final class FilmRollTests: XCTestCase {
         XCTAssertNil(photo(-20, 60))
     }
 
+    /// RAW only keeps RAW files, however their extensions are written, in order.
+    func testTheRawFilterKeepsOnlyRawFiles() {
+        let files = ["a.NEF", "b.jpg", "c.cr3", "d.tif", "e.png", "f.dng"].map { PhotoFile(url: URL(fileURLWithPath: "/roll/\($0)")) }
+        XCTAssertEqual(PhotoFolder.shown(files, rawOnly: true).map(\.name), ["a.NEF", "c.cr3", "f.dng"])
+        XCTAssertEqual(PhotoFolder.shown(files, rawOnly: false), files)
+    }
+
     /// Still films print frame numbers; cine and print films' edges have their
     /// own text there, which must not be painted over.
     func testOnlyStillFilmsAreRenumbered() {

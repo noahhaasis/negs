@@ -163,6 +163,12 @@ struct UpdateSettings: View {
                 Text("Show each film, paper and preset on your photograph. Turn off to use simple menus and lists on slower computers.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            Section("Film Strip") {
+                Toggle("Show only RAW files", isOn: Binding(
+                    get: { model.filmstripRawOnly }, set: { model.filmstripRawOnly = $0 }))
+                Text("Leaves JPEG, PNG and TIFF files in the folder off the film strip. You can still open them another way.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Section("Presets") {
                 Toggle("Save Finish parameters in presets", isOn: Binding(
                     get: { model.saveFinishInPresets }, set: { model.saveFinishInPresets = $0 }))

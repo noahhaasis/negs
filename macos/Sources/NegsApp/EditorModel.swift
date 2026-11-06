@@ -171,6 +171,10 @@ import UniformTypeIdentifiers
         return SaveSettings(bitDepth: depth, colorSpace: SaveSettings.effectiveSpace(chosen, bitDepth: depth),
                             jpegQuality: exportQuality, dpi: exportDPI)
     }
+    /// Settings › Film Strip: only the folder's RAW files are on the roll.
+    var filmstripRawOnly = UserDefaults.standard.bool(forKey: "filmstripRawOnly") {
+        didSet { UserDefaults.standard.set(filmstripRawOnly, forKey: "filmstripRawOnly") }
+    }
     /// The film strip's height, set by dragging its top edge.
     var filmstripHeight = EditorModel.savedFilmstripHeight {
         didSet {

@@ -293,7 +293,7 @@ the artwork's fixed number; cine and print films keep their own edge text. A sho
 roll carries on with blank, numbered frames to the end of the window.
 
 Dragging the strip's top edge sets its height, from 90 to 300 points and remembered; the
-canvas gives way and the window stays put. The open photograph is at full brightness and the others are dimmed to 50 %. Clicking and
+canvas gives way and the window stays put. Settings › Film Strip can limit it to the folder's RAW files. The open photograph is at full brightness and the others are dimmed to 50 %. Clicking and
 dragging anywhere on the film scrolls it (`FilmRollScroller`), and it coasts on from a
 flick, slowing at macOS's normal rate (0.998 of its speed kept per millisecond), until a
 press or an end of the roll stops it. A trackpad scrolls it natively. Double-clicking a
