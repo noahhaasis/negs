@@ -344,10 +344,10 @@ struct BorderStylePicker: View {
                             .padding(3)
                             .overlay {
                                 RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(selection == style ? Color.accentColor : .clear, lineWidth: 2)
+                                    .strokeBorder(selection == style ? EdgePrint.amber : .clear, lineWidth: 2)
                             }
                         Text(style.title).font(.caption)
-                            .foregroundStyle(selection == style ? Color.accentColor : .secondary)
+                            .foregroundStyle(selection == style ? EdgePrint.amber : .secondary)
                     }
                     .contentShape(Rectangle())
                 }

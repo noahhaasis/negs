@@ -197,7 +197,7 @@ struct UpdateSettings: View {
                     Toggle("Custom background", isOn: $customBackground)
                     Spacer(minLength: 0)
                     ColorPicker("Background colour", selection: Binding(
-                        get: { ViewerBackground.color(hex: backgroundHex) ?? Color(nsColor: .underPageBackgroundColor) },
+                        get: { ViewerBackground.color(hex: backgroundHex) ?? Color.black },
                         set: { backgroundHex = ViewerBackground.hex($0) }
                     ), supportsOpacity: false)
                     .labelsHidden()
@@ -205,7 +205,7 @@ struct UpdateSettings: View {
                     .help("The colour behind the photograph.")
                     .accessibilityLabel("Background colour")
                 }
-                Text("The default background follows the system's light or dark appearance.")
+                Text("The default background is black.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("App Data") {

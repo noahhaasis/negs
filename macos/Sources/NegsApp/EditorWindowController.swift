@@ -65,6 +65,11 @@ import SwiftUI
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: true)
         window.title = "Negs"
         window.toolbarStyle = .unified
+        // Black from edge to edge, the title bar and toolbar too.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = .black
+        window.titlebarAppearsTransparent = true
         window.isRestorable = false
         // Place the window before adding its content, so the first layout is at the final size.
         if !window.setFrameUsingName("editor") { window.center() }
@@ -214,20 +219,20 @@ import SwiftUI
             item.toolTip = model.filmstripVisible ? "Hide film strip (⌥⌘F)" : "Show film strip (⌥⌘F)"
             let icon = symbol("rectangle.bottomthird.inset.filled", "Film Strip")
             item.image = model.filmstripVisible
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour])) : icon
         }
         if let item = items[.zones] {
             item.toolTip = model.pinsVisible ? "Hide the pins and lines (Tab)" : "Show the pins and lines (Tab)"
             let icon = symbol("circle.lefthalf.filled", "Pins")
             item.image = model.pinsVisible
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour])) : icon
         }
         setEnabled(.zones, photo && !model.cropping)
         if let item = items[.proof] {
             item.toolTip = model.proofing ? "Stop proofing (P)" : "Proof at the export size (P)"
             let icon = symbol("photo.artframe", "Proof")
             item.image = model.proofing
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour])) : icon
         }
         setEnabled(.proof, photo && !model.cropping)
         setEnabled(.fit, model.canZoom)
@@ -238,7 +243,7 @@ import SwiftUI
             crop.toolTip = model.cropping ? "Apply the crop (⌘K)" : "Crop the photograph (⌘K)"
             // The accent color marks crop mode as on.
             crop.image = model.cropping
-                ? symbol("crop", "Crop").withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor]))
+                ? symbol("crop", "Crop").withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour]))
                 : symbol("crop", "Crop")
         }
         setEnabled(.export, photo && model.ready && !model.exporting && !model.saving && !model.cropping)
@@ -247,7 +252,7 @@ import SwiftUI
                                         (.presets, .presets, "square.stack", "Presets")] {
             let icon = symbol(name, label)
             items[id]?.image = model.inspectorVisible && model.inspectorPane == pane
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour])) : icon
         }
         // A ratio field being edited keeps its own Return and Escape.
         if let session = model.cropSession {
@@ -324,9 +329,9 @@ import SwiftUI
             // The confirming action is filled with the accent color. The style
             // needs the macOS 26 SDK, which release CI's Xcode 16 lacks.
             #if compiler(>=6.2)
-            if #available(macOS 26, *) { item.style = .prominent } else { doneButton.bezelColor = .controlAccentColor }
+            if #available(macOS 26, *) { item.style = .prominent } else { doneButton.bezelColor = EdgePrint.colour }
             #else
-            doneButton.bezelColor = .controlAccentColor
+            doneButton.bezelColor = EdgePrint.colour
             #endif
         default:
             return nil
@@ -352,8 +357,10 @@ import SwiftUI
         return item
     }
 
+    /// Amber on black, dimmed: a control that's on shows it at full strength.
     private func symbol(_ name: String, _ description: String) -> NSImage {
-        NSImage(systemSymbolName: name, accessibilityDescription: description) ?? NSImage()
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: description) ?? NSImage()
+        return image.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour.withAlphaComponent(0.6)])) ?? image
     }
 
     // MARK: Actions

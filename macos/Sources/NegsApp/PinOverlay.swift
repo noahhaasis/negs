@@ -67,9 +67,9 @@ final class PinOverlayView: NSView {
         }
         casing.strokeColor = NSColor.black.withAlphaComponent(0.6).cgColor
         casing.lineWidth = 4
-        selectedFill.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
+        selectedFill.fillColor = EdgePrint.colour.withAlphaComponent(0.14).cgColor
         normal.strokeColor = NSColor.white.cgColor
-        selected.strokeColor = NSColor.controlAccentColor.cgColor
+        selected.strokeColor = EdgePrint.colour.cgColor
         ignored.strokeColor = NSColor.systemRed.cgColor
         for shape in [normal, selected, ignored] { shape.lineWidth = 1.75 }
         dragChip.isHidden = true
@@ -190,7 +190,7 @@ final class PinOverlayView: NSView {
             }()
             labelFrames[marker.index] = Self.style(
                 chip, zone: marker.zone, at: centre, scale: scale, canvasWidth: bounds.width,
-                edge: marker.ignored ? .systemRed : marker.selected ? .controlAccentColor : .white,
+                edge: marker.ignored ? .systemRed : marker.selected ? EdgePrint.colour : .white,
                 edgeWidth: marker.selected || marker.ignored ? 2 : 1.5
             )
         }

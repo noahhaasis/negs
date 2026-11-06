@@ -181,7 +181,7 @@ struct EditorCanvas: View {
                             model.open(url); return true
                         } isTargeted: { dropTargeted = $0 }
                         .overlay {
-                            if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
+                            if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(EdgePrint.amber, lineWidth: 3).padding(8).allowsHitTesting(false) }
                         }
                 }
                 .coordinateSpace(name: ZonePanel.coordinateSpace)
@@ -190,10 +190,13 @@ struct EditorCanvas: View {
                 }
             }
             if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
-                Divider()
+                EdgeLine(horizontal: true)
                 StatusBar(model: model)
             }
         }
+        // Under the toolbar too, which the content otherwise stops short of.
+        .background(Color.black.ignoresSafeArea())
+        .environment(\.colorScheme, .dark)
         .overlay(alignment: .top) { EdgeLine(horizontal: true) }
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
@@ -208,7 +211,7 @@ struct EdgeLine: View {
 
     var body: some View {
         Rectangle()
-            .fill(Color(nsColor: .separatorColor))
+            .fill(EdgePrint.amber.opacity(0.35))
             .frame(width: horizontal ? nil : 1, height: horizontal ? 1 : nil)
             .accessibilityHidden(true)
             .allowsHitTesting(false)
@@ -229,9 +232,12 @@ struct InspectorPanel: View {
             else { AdjustmentInspector(model: model) }
         }
         .scrollContentBackground(.hidden)
-        // The title bar's colour over the default viewer. Never a custom viewer
-        // colour, which is for the photograph and could hide the controls' text.
-        .background(Color(nsColor: .underPageBackgroundColor))
+        // Black, whatever the viewer's colour, with amber on it throughout.
+        .background(Color.black.ignoresSafeArea())
+        .foregroundStyle(EdgePrint.amber)
+        .tint(EdgePrint.amber)
+        // Amber on black needs dark controls, whatever the system's set to.
+        .environment(\.colorScheme, .dark)
         // The edge the film strip has on top, down the left.
         .overlay(alignment: .leading) { EdgeLine(horizontal: false) }
         // The line under the toolbar, which continues the canvas's.
@@ -356,9 +362,9 @@ struct StatusBar: View {
             }
             if model.source != nil { OriginalButton(model: model) }
         }
-        .font(.caption).foregroundStyle(.secondary)
+        .font(.caption).foregroundStyle(EdgePrint.amber)
         .padding(.horizontal, 14).frame(height: 28)
-        .background(.bar)
+        .background(Color.black)
         .accessibilityElement(children: .contain)
     }
 }
@@ -373,7 +379,7 @@ struct OriginalButton: View {
         let enabled = model.canShowOriginal
         Image(systemName: "square.split.diagonal.fill")
             .font(.system(size: 13))
-            .foregroundStyle(model.original != nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            .foregroundStyle(model.original != nil ? AnyShapeStyle(EdgePrint.amber) : AnyShapeStyle(EdgePrint.amber.opacity(0.6)))
             .frame(width: 24, height: 20)
             .contentShape(Rectangle())
             .opacity(enabled ? 1 : 0.4)

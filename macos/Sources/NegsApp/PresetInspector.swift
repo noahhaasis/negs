@@ -26,7 +26,7 @@ struct PresetInspector: View {
             return !files.isEmpty
         } isTargeted: { dropTargeted = $0 && model.canChangePresets }
         .overlay {
-            if dropTargeted { RoundedRectangle(cornerRadius: 10).strokeBorder(.tint, lineWidth: 3).padding(6).allowsHitTesting(false) }
+            if dropTargeted { RoundedRectangle(cornerRadius: 10).strokeBorder(EdgePrint.amber, lineWidth: 3).padding(6).allowsHitTesting(false) }
         }
         .task { await model.refreshPresets() }
         .disabled(!model.canChangePresets)

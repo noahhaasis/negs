@@ -310,6 +310,13 @@ colour (`EdgePrint`). They're read from the file's metadata (`PhotoExif`), sit o
 overlay just outside the photograph, and stay on the canvas when it's zoomed past the edges.
 A fitted photograph leaves room for them; a file with no details leaves none.
 
+## Amber on black
+
+The window, toolbar, sidebar, status bar and default viewer are black, in dark appearance
+whatever the system's. Amber, the film's edge-print colour (`EdgePrint`), is the accent
+throughout: sidebar text, sliders, selected tiles and pins, hairlines, and toolbar icons,
+dimmed when off and full when on. A custom viewer colour and Proof's white stay as chosen.
+
 ## Moving between photographs
 
 Every settled render is kept: in memory for the last 768 MB of frames, and on disk in

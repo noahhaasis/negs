@@ -1,13 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// The colour behind the photograph in the viewer. By default it follows the
-/// system's under-page background, so it tracks light and dark appearance; a
-/// custom colour is stored in defaults as an sRGB hex string.
+/// The colour behind the photograph in the viewer: black by default, like the
+/// rest of the app. A custom colour is stored in defaults as an sRGB hex string.
 enum ViewerBackground {
     static let customKey = "viewerBackgroundCustom"
     static let colorKey = "viewerBackgroundColor"
-    /// A neutral dark grey, near the default in dark appearance.
+    /// A neutral dark grey, as a starting point for a custom colour.
     static let defaultHex = "#242424"
 
     static func components(hex: String) -> (red: Double, green: Double, blue: Double)? {
@@ -34,9 +33,9 @@ enum ViewerBackground {
         return hex(red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent)
     }
 
-    /// The viewer's backdrop: the system colour unless a custom one is on.
+    /// The viewer's backdrop: black unless a custom one is on.
     static func canvas(custom: Bool, hex: String) -> Color {
-        guard custom, let customColor = color(hex: hex) else { return Color(nsColor: .underPageBackgroundColor) }
+        guard custom, let customColor = color(hex: hex) else { return Color.black }
         return customColor
     }
 }

@@ -311,7 +311,7 @@ private struct StockTileView: View {
                 .frame(maxWidth: .infinity).frame(height: 92)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay {
-                    if selected { RoundedRectangle(cornerRadius: 5).strokeBorder(Color.accentColor, lineWidth: 2) }
+                    if selected { RoundedRectangle(cornerRadius: 5).strokeBorder(EdgePrint.amber, lineWidth: 2) }
                 }
                 Text(stock.name).font(.caption).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(selected ? .primary : .secondary)

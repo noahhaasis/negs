@@ -4,8 +4,7 @@ import XCTest
 @testable import NegsApp
 
 @MainActor final class InspectorLayoutTests: XCTestCase {
-    /// The sidebar is the title bar's colour, the viewer's background showing
-    /// through it, with a 1-point edge on its left like the film strip's on top.
+    /// The sidebar is black, with a 1-point amber edge on its left.
     func testTheSidebarMatchesTheTitleBarAndHasALeftEdge() throws {
         _ = NSApplication.shared
         let defaults = UserDefaults.standard
@@ -25,7 +24,7 @@ import XCTest
             XCTAssertEqual(colour.alphaComponent, 1, accuracy: 0.01, "at \(x)")
             return Int((colour.redComponent * 255).rounded())
         }
-        XCTAssertEqual(try grey(50), 40, accuracy: 2, "The title bar samples at 40 in dark mode")
+        XCTAssertEqual(try grey(50), 0, accuracy: 2, "Black")
         XCTAssertGreaterThan(try grey(0), try grey(50) + 8, "The left edge is lighter")
         XCTAssertEqual(try grey(2), try grey(50), accuracy: 1, "It's only one point wide")
     }
@@ -54,11 +53,11 @@ import XCTest
             return Int((colour.redComponent * 255).rounded())
         }
         model.proofing = false
-        XCTAssertEqual(try background(), 40, accuracy: 2)
+        XCTAssertEqual(try background(), 0, accuracy: 2)
         model.proofing = true
         XCTAssertEqual(try background(), 255)
         model.proofing = false
-        XCTAssertEqual(try background(), 40, accuracy: 2)
+        XCTAssertEqual(try background(), 0, accuracy: 2)
     }
 
     /// A custom viewer colour is for the viewer: the sidebar's light text would
@@ -82,7 +81,7 @@ import XCTest
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
         let colour = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))
-        XCTAssertEqual(colour.redComponent * 255, 40, accuracy: 2)
+        XCTAssertEqual(colour.redComponent * 255, 0, accuracy: 2)
     }
 
     /// The line under the toolbar runs across the canvas and the sidebar, in the
@@ -229,5 +228,32 @@ import XCTest
         let deadline = Date().addingTimeInterval(30)
         while !predicate(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(predicate(), "Timed out waiting for image engine")
+    }
+}
+
+/// Amber on black, from the window's edges in.
+@MainActor final class ThemeTests: XCTestCase {
+    func testTheWindowIsBlackEdgeToEdge() throws {
+        _ = NSApplication.shared
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        XCTAssertEqual(window.backgroundColor, .black)
+        XCTAssertTrue(window.titlebarAppearsTransparent)
+        XCTAssertEqual(window.appearance?.name, .darkAqua)
+    }
+
+    func testTheDefaultViewerIsBlackAndACustomColourStays() {
+        XCTAssertEqual(NSColor(ViewerBackground.canvas(custom: false, hex: "#FFFFFF")).usingColorSpace(.sRGB)?.redComponent, 0)
+        XCTAssertEqual(NSColor(ViewerBackground.canvas(custom: true, hex: "#FFFFFF")).usingColorSpace(.sRGB)?.redComponent, 1)
+    }
+
+    func testSlidersAreAmber() {
+        let view = NSHostingView(rootView: ResettableSlider(title: "T", value: .constant(1), range: 0...2, editing: { _ in }, reset: {}))
+        view.frame = NSRect(x: 0, y: 0, width: 200, height: 30)
+        view.layoutSubtreeIfNeeded()
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        XCTAssertEqual(all(view).compactMap { $0 as? NSSlider }.first?.trackFillColor, EdgePrint.colour)
     }
 }

@@ -349,6 +349,7 @@ struct ResettableSlider: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSSlider {
         let slider = Control()
+        slider.trackFillColor = EdgePrint.colour
         slider.isContinuous = true
         slider.target = context.coordinator
         slider.action = #selector(Coordinator.changed(_:))
@@ -619,7 +620,7 @@ struct InspectorTabBar: View {
             ForEach(InspectorTab.allCases) { tab in
                 let selected = model.inspectorTab == tab
                 let skipped = tab.isSkipped(scanning: scanning)
-                let tint = selected ? Color.primary : Color.secondary
+                let tint = selected ? EdgePrint.amber : EdgePrint.amber.opacity(0.6)
                 Button {
                     model.inspectorTab = tab
                 } label: {

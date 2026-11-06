@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import CoreText
 import ImageIO
 
@@ -78,6 +79,8 @@ private extension String {
 enum EdgePrint {
     static let fontName = "BarlowCondensed-SemiBold"
     static let colour = NSColor(srgbRed: 0.97, green: 0.63, blue: 0.2, alpha: 1)
+    /// The app's accent, everywhere: amber on black.
+    static let amber = Color(nsColor: colour)
 
     /// Makes the bundled font available to this process. Once is enough.
     static func registerFont(data: URL) {

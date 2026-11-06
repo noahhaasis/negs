@@ -563,7 +563,7 @@ private struct StraightenDial: View {
                 }
                 var needle = Path()
                 needle.move(to: CGPoint(x: mid, y: 0)); needle.addLine(to: CGPoint(x: mid, y: size.height))
-                context.stroke(needle, with: .color(.accentColor), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                context.stroke(needle, with: .color(EdgePrint.amber), style: StrokeStyle(lineWidth: 2, lineCap: .round))
             }
             .frame(height: 22)
         }

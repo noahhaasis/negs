@@ -68,13 +68,13 @@ private struct ZoneTile: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if placed {
                 Circle()
-                    .fill(selected ? Color.accentColor : ink)
+                    .fill(selected ? EdgePrint.amber : ink)
                     .frame(width: 6, height: 6)
                     .padding(6)
             }
         }
         .frame(maxHeight: .infinity)
-        .overlay { if selected { Rectangle().strokeBorder(Color.accentColor, lineWidth: 2.5) } }
+        .overlay { if selected { Rectangle().strokeBorder(EdgePrint.amber, lineWidth: 2.5) } }
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 2, coordinateSpace: .named(ZonePanel.coordinateSpace))
