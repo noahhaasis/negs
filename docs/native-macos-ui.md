@@ -336,6 +336,12 @@ photograph and on quitting, the same file is written beside the photograph. Open
 photograph writes nothing. A folder that can't be written is passed over silently here,
 while ⇧⌘S still reports it.
 
+A photograph opens with its own saved edits. Without any it opens at the defaults, never
+with the last photograph's edits; only Image Size and the output colour space stay, being
+export choices. Same look for the whole roll, under the film picker, instead gives a
+folder's unedited photographs one look, without pins or crop, which follows the latest
+edit in that folder. It's remembered per folder.
+
 Opening a photograph loads its settings file, as one undo step. Only a file saved
 for that photograph counts: other photographs' files and other JSON are ignored. A
 damaged file, or one naming a film or paper that isn't available, is reported and

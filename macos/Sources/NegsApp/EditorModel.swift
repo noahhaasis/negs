@@ -857,10 +857,12 @@ import UniformTypeIdentifiers
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         sourceGeneration += 1
         let generation = sourceGeneration
+        sameLookForRoll = Self.rollLooks[url.deletingLastPathComponent().standardizedFileURL.path] != nil
         if let session {
             state = merged(session.state)
             inspectorVisible = session.inspectorVisible
         } else {
+            state = startingState(in: url.deletingLastPathComponent())
             state.params["io.rotate_cw"] = .number(0)
             // How one file's colours are read never carries over to the next.
             let interpretation = defaults["io.input_interpretation"]
@@ -1236,6 +1238,61 @@ import UniformTypeIdentifiers
         guard editedSinceSave, let source else { return }
         editedSinceSave = false
         _ = try? PhotoSettingsFile(image: source.lastPathComponent, state: state).write(beside: source)
+        // With the whole roll on one look, the latest edit is that look.
+        if sameLookForRoll { Self.rememberRollLook(state, in: source.deletingLastPathComponent()) }
+    }
+
+    // MARK: What an unedited photograph opens with
+
+    /// A folder's look, or the defaults: opening a photograph never passes on
+    /// the last one's edits. Image Size and the output colour space are export
+    /// choices, not edits, so they stay as they are.
+    private func startingState(in directory: URL) -> EditState {
+        guard hasCatalog else { return state }
+        var next = Self.rollLooks[directory.standardizedFileURL.path].map(merged) ?? {
+            var fresh = EditState()
+            fresh.params = defaults
+            if !films.contains(where: { $0.id == fresh.film }), let first = films.first { fresh.film = first.id }
+            if !papers.contains(where: { $0.id == fresh.paper }), let first = papers.first { fresh.paper = first.id }
+            PreviewRules.pairFilm(in: &fresh, stocks: stocks)
+            return fresh
+        }()
+        next.limitPreview = state.limitPreview
+        for path in [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"] where state.params[path] != .null {
+            next.params[path] = state.params[path]
+        }
+        return next
+    }
+
+    /// Whether this photograph's folder is on one look.
+    private(set) var sameLookForRoll = false
+
+    /// Puts the folder on the current look, or takes it off.
+    func setSameLookForRoll(_ on: Bool) {
+        guard let source else { return }
+        let directory = source.deletingLastPathComponent()
+        sameLookForRoll = on
+        if on {
+            Self.rememberRollLook(state, in: directory)
+        } else {
+            var looks = Self.rollLooks
+            looks[directory.standardizedFileURL.path] = nil
+            Self.rollLooks = looks
+        }
+    }
+
+    private static func rememberRollLook(_ look: EditState, in directory: URL) {
+        var looks = rollLooks
+        looks[directory.standardizedFileURL.path] = look
+        rollLooks = looks
+    }
+
+    /// The looks of the folders on one, by path.
+    private static var rollLooks: [String: EditState] {
+        get {
+            UserDefaults.standard.data(forKey: "rollLooks").flatMap { try? JSONDecoder().decode([String: EditState].self, from: $0) } ?? [:]
+        }
+        set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: "rollLooks") }
     }
 
     /// Saves the photograph's edit to a JSON file beside it.

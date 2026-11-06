@@ -71,13 +71,14 @@ import XCTest
         ))
         await model.start(paths: try paths())
         XCTAssertTrue(model.ready, model.error ?? "No engine")
+        // What a test sets is for this photograph: another opens at the defaults.
+        model.open(ramp)
         model.chooseFilm("kodak_portra_400")
         model.choosePaper("kodak_portra_endura")
         model.set("film_render.grain.active", .bool(false))
         model.set("camera.auto_exposure", .bool(autoExposure))
         model.set("enlarger.print_exposure_compensation", .bool(compensation))
         if scanFilm { model.set("io.scan_film", .bool(true)) }
-        model.open(ramp)
         try await waitUntil { model.previewCurrent || model.error != nil }
         XCTAssertNil(model.error)
         return model
@@ -631,21 +632,19 @@ extension ZoneModelTests {
     func testEditsSaveThemselvesPerPhotograph() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
-        let settings = directory.appendingPathComponent("ramp.json")
+        model.open(other)
+        let settings = directory.appendingPathComponent("other.json")
         try await Task.sleep(for: .seconds(1.5))
         XCTAssertFalse(FileManager.default.fileExists(atPath: settings.path), "Opening it isn't an edit")
         model.set("post.contrast", .number(40))
         try await waitUntil({ FileManager.default.fileExists(atPath: settings.path) }, timeout: 5)
-        XCTAssertEqual(try PhotoSettingsFile.read(beside: ramp)?.state.params["post.contrast"].double, 40)
+        XCTAssertEqual(try PhotoSettingsFile.read(beside: other)?.state.params["post.contrast"].double, 40)
         // Going to another photograph at once doesn't lose an edit just made.
         model.set("post.contrast", .number(55))
-        model.open(other)
-        XCTAssertEqual(try PhotoSettingsFile.read(beside: ramp)?.state.params["post.contrast"].double, 55)
-        try await waitUntil { model.previewCurrent }
-        try await Task.sleep(for: .seconds(1.5))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("other.json").path), "It wasn't edited")
-        // Coming back, it's as it was left.
         model.open(ramp)
+        XCTAssertEqual(try PhotoSettingsFile.read(beside: other)?.state.params["post.contrast"].double, 55)
+        // Coming back, it's as it was left.
+        model.open(other)
         XCTAssertEqual(model.value("post.contrast").double, 55)
     }
 
@@ -660,6 +659,83 @@ extension ZoneModelTests {
         model.set("post.contrast", .number(40))
         try await Task.sleep(for: .seconds(1.5))
         XCTAssertNil(model.error)
+    }
+
+    /// A photograph with no edits opens at the defaults, whatever the last one
+    /// had. Export choices aren't edits, so they stay.
+    func testAnUneditedPhotographOpensAtTheDefaults() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let contrast = model.defaultValue("post.contrast").double
+        model.set("post.contrast", .number(contrast + 40))
+        model.set(ImageSize.targetPath, .number(1500))
+        model.chooseFilm("kodak_ektar_100")
+        model.open(other)
+        XCTAssertEqual(model.value("post.contrast").double, contrast, "It doesn't inherit the edit")
+        XCTAssertNotEqual(model.film, "kodak_ektar_100", "Nor the film")
+        XCTAssertEqual(model.value(ImageSize.targetPath).double, 1500, "The size is an export choice")
+        // Its own edits come back, without having been passed on.
+        model.open(ramp)
+        XCTAssertEqual(model.value("post.contrast").double, contrast + 40)
+        XCTAssertEqual(model.film, "kodak_ektar_100")
+    }
+
+    /// Same look for the whole roll: unedited photographs in the folder take the
+    /// look, without its pins or crop. Those with edits of their own keep them.
+    /// It belongs to the folder and is remembered.
+    func testSameLookForTheWholeRoll() async throws {
+        let model = try await makeModel()
+        let third = directory.appendingPathComponent("third.png")
+        try FileManager.default.copyItem(at: ramp, to: third)
+        let elsewhere = directory.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        let away = elsewhere.appendingPathComponent("away.png")
+        try FileManager.default.copyItem(at: ramp, to: away)
+        defer {
+            model.setSameLookForRoll(false)
+            model.shutdown()
+        }
+        let contrast = model.defaultValue("post.contrast").double
+        XCTAssertFalse(model.sameLookForRoll)
+        // Edited first, with its own file.
+        model.open(other)
+        model.set("post.contrast", .number(contrast + 10))
+        model.open(ramp)
+        model.set("post.contrast", .number(contrast + 40))
+        model.chooseFilm("kodak_ektar_100")
+        await model.placeZone(5, at: CGPoint(x: 0.5, y: 0.5))
+        model.setSameLookForRoll(true)
+        XCTAssertTrue(model.sameLookForRoll)
+        model.open(third)
+        XCTAssertEqual(model.value("post.contrast").double, contrast + 40, "It takes the look")
+        XCTAssertEqual(model.film, "kodak_ektar_100")
+        XCTAssertTrue(model.pins.isEmpty, "Pins belong to their own photograph")
+        XCTAssertTrue(model.sameLookForRoll)
+        model.open(other)
+        XCTAssertEqual(model.value("post.contrast").double, contrast + 10, "Its own edits win")
+        // A later edit becomes the look.
+        model.open(ramp)
+        model.set("post.contrast", .number(contrast + 25))
+        model.open(third)
+        XCTAssertEqual(model.value("post.contrast").double, contrast + 25)
+        // Another folder is its own roll.
+        model.open(away)
+        XCTAssertFalse(model.sameLookForRoll)
+        XCTAssertEqual(model.value("post.contrast").double, contrast)
+        // A new launch remembers.
+        model.open(third)
+        let reopened = EditorModel(previewCache: RenderedPreviewCache(file: directory.appendingPathComponent("again.cache")))
+        defer { reopened.shutdown() }
+        await reopened.start(paths: try paths())
+        reopened.open(third)
+        XCTAssertTrue(reopened.sameLookForRoll)
+        XCTAssertEqual(reopened.value("post.contrast").double, contrast + 25)
+        // Off, unedited photographs go back to the defaults.
+        model.setSameLookForRoll(false)
+        model.open(away)
+        model.open(third)
+        XCTAssertFalse(model.sameLookForRoll)
+        XCTAssertEqual(model.value("post.contrast").double, contrast)
     }
 
     /// Nothing but the person moves the film: opening a photograph in view leaves
@@ -941,10 +1017,10 @@ extension ZoneModelTests {
     func testAnUnavailableFilmIsReportedAndThePhotographOpens() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
-        let film = model.state.film
         _ = try saved(on: model, film: "no_such_film")
         model.open(other)
-        XCTAssertEqual(model.state.film, film)
+        XCTAssertNotEqual(model.state.film, "no_such_film")
+        XCTAssertTrue(model.films.contains { $0.id == model.state.film }, "It opens at the defaults")
         XCTAssertTrue(model.pins.isEmpty)
         XCTAssertTrue(try XCTUnwrap(model.error).contains("film"))
     }
