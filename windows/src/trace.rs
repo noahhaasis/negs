@@ -156,7 +156,7 @@ fn tick(app: &mut App) {
             return Some(Some(String::new()));
         }
         let frame = app.model.shown_frame;
-        event("bench_idle", || json!({"step": bench.step, "frame": frame_json(frame), "film": app.model.state.film, "status": app.model.status}));
+        event("bench_idle", || json!({"step": bench.step, "frame": frame_json(frame), "film": app.model.state.film, "status": app.model.status, "match_note": app.model.brightness_match_note()}));
         if bench.step >= bench.steps {
             bench.done = true;
             event("bench_done", || json!({"steps": bench.steps}));
