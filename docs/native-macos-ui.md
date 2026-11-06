@@ -218,8 +218,8 @@ management, enlarger, and output options. Default film/paper pairing and direct
 scanning follow the profile metadata. Controls and reset participate in Undo.
 
 Settings › Inspector or F4 chooses Advanced, the six workflow tabs and the default, or
-Simple, which replaces the tabs with one page: film, paper and print exposure; the
-five tone sliders; Midtone Detail and the unsharp mask; Image Size; file format and
+Simple, which replaces the tabs with one page: film, paper and print exposure; a RAW
+file's white balance; the five tone sliders; Midtone Detail and the unsharp mask; Image Size; file format and
 bit depth; and the Export button. Simple reuses Advanced's controls and ranges and
 changes only what shows, so anything set in Advanced still applies, and Reset
 Adjustments still restores it. A film scanned directly has no print, so paper and

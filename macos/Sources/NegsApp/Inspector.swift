@@ -731,6 +731,7 @@ struct AdjustmentInspector: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        if model.isRaw { whiteBalanceSection }
         Section("Tone") {
             ForEach(toneControls) { control($0) }
         }
@@ -744,15 +745,20 @@ struct AdjustmentInspector: View {
 
     // MARK: Camera
 
+    /// A RAW file's white balance, on Simple's page and in Advanced's Camera tab.
+    @ViewBuilder private var whiteBalanceSection: some View {
+        Section("White Balance") {
+            control(.choice("RAW white balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
+            if model.value("io.raw_white_balance.mode").string == "custom" {
+                control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
+                control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
+            }
+        }
+    }
+
     @ViewBuilder private var cameraTab: some View {
         if model.isRaw {
-            Section("White Balance") {
-                control(.choice("RAW white balance", "io.raw_white_balance.mode", ["as_shot", "daylight", "tungsten", "custom"]))
-                if model.value("io.raw_white_balance.mode").string == "custom" {
-                    control(.slider("Temperature (K)", "io.raw_white_balance.temperature", 1667...25000, 1))
-                    control(.slider("Tint", "io.raw_white_balance.tint", 0.01...4, 0.01))
-                }
-            }
+            whiteBalanceSection
         } else {
             Section { inputColour }
         }

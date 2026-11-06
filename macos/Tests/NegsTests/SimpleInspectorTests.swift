@@ -41,6 +41,11 @@ import XCTest
         ])
     }
 
+    /// White balance names its modes plainly.
+    func testDaylightIsJustDaylight() {
+        XCTAssertEqual(optionTitle("daylight"), "Daylight")
+    }
+
     /// Simple shares its ranges with Advanced, so a value is never clamped by
     /// switching modes.
     func testSimpleSlidersKeepAdvancedsRanges() throws {
@@ -111,6 +116,38 @@ import XCTest
         let scanning = try enabled(true)
         XCTAssertFalse(scanning.print, "No print to expose")
         XCTAssertTrue(scanning.tone, "The rest of the page still works")
+    }
+
+    /// A RAW file's white balance is on Simple's page, with Custom's sliders
+    /// when they count, and it isn't there for anything else.
+    func testSimpleHasARawFilesWhiteBalance() async throws {
+        _ = NSApplication.shared
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let paths = EnginePaths(helper: root.appendingPathComponent("target/release/spektrafilm-native"),
+                                exporter: root.appendingPathComponent("target/release/spektrafilm-f64"),
+                                data: root.appendingPathComponent("data"))
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build the release helper first") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("negs-simple-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let raw = directory.appendingPathComponent("photo.dng")
+        try FileManager.default.copyItem(at: root.appendingPathComponent("web/sample/DSC_6028.dng"), to: raw)
+        let model = EditorModel(previewCache: RenderedPreviewCache(file: directory.appendingPathComponent("preview.cache")))
+        defer { model.shutdown() }
+        await model.start(paths: paths)
+        model.inspectorMode = .simple
+        func labels() -> [String] {
+            let (host, window) = render(model)
+            defer { window.orderOut(nil) }
+            return sliders(in: host).map { $0.accessibilityLabel() ?? "" }
+        }
+        XCTAssertFalse(labels().contains("Temperature (K)"), "No photograph, no white balance")
+        model.open(raw)
+        XCTAssertTrue(model.isRaw)
+        model.set("io.raw_white_balance.mode", .string("custom"))
+        let shown = labels()
+        XCTAssertTrue(shown.contains("Temperature (K)"), "\(shown)")
+        XCTAssertTrue(shown.contains("Tint"), "\(shown)")
     }
 
     // MARK: Helpers
