@@ -347,6 +347,9 @@ struct StatusBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if let caption = model.fullScreenCaption {
+                Text(caption).lineLimit(1).truncationMode(.middle).fontWeight(.semibold)
+            }
             Text(model.status).lineLimit(1).textSelection(.enabled)
             Spacer(minLength: 12)
             if let roll = model.rollDeveloper, roll.total > 0, roll.finished < roll.total {

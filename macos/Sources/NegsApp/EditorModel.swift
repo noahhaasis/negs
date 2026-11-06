@@ -89,6 +89,15 @@ import UniformTypeIdentifiers
     /// The panel shows with a photograph, except while cropping.
     var showsZonePanel: Bool { source != nil && !cropping && !gridVisible }
 
+    /// The window is full screen, where the status bar carries its title.
+    var windowFullScreen = false
+    /// What the title bar says, for the status bar in full screen.
+    var fullScreenCaption: String? {
+        guard windowFullScreen, let source else { return nil }
+        let stock = value("io.scan_film").bool ? filmName : "\(filmName) → \(paperName)"
+        return ready ? "\(source.lastPathComponent)   \(stock)" : source.lastPathComponent
+    }
+
     /// The grid is up in place of the photograph. G, or a double-click to leave.
     private(set) var gridVisible = false
     /// Develops the folder's final edits while the grid is up.

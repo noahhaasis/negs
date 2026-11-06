@@ -906,6 +906,18 @@ extension ZoneModelTests {
         XCTAssertTrue(second.showingCachedPreview, "From the disk, not a new develop")
     }
 
+    /// The status bar's caption in full screen names the photograph and its stock.
+    func testTheFullScreenCaption() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        XCTAssertNil(model.fullScreenCaption)
+        model.windowFullScreen = true
+        let caption = try XCTUnwrap(model.fullScreenCaption)
+        XCTAssertTrue(caption.hasPrefix("ramp.png"), caption)
+        XCTAssertTrue(caption.contains(model.filmName), caption)
+        XCTAssertTrue(caption.contains(model.paperName), caption)
+    }
+
     /// Nothing but the person moves the film: opening a photograph in view leaves
     /// it, even at the far side, and only a frame wholly out of view brings it round.
     func testTheStripDoesNotCentreTheOpenPhotograph() async throws {

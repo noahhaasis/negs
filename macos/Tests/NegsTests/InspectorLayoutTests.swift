@@ -244,6 +244,25 @@ import XCTest
         XCTAssertEqual(window.appearance?.name, .darkAqua)
     }
 
+    /// Full screen, the title comes off the black toolbar and the status bar carries it.
+    func testFullScreenMovesTheTitleToTheStatusBar() throws {
+        _ = NSApplication.shared
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        XCTAssertEqual(window.titleVisibility, .visible)
+        XCTAssertNil(model.fullScreenCaption)
+        NotificationCenter.default.post(name: NSWindow.willEnterFullScreenNotification, object: window)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(window.titleVisibility, .hidden)
+        XCTAssertTrue(model.windowFullScreen)
+        NotificationCenter.default.post(name: NSWindow.willExitFullScreenNotification, object: window)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(window.titleVisibility, .visible)
+        XCTAssertFalse(model.windowFullScreen)
+    }
+
     func testTheDefaultViewerIsBlackAndACustomColourStays() {
         XCTAssertEqual(NSColor(ViewerBackground.canvas(custom: false, hex: "#FFFFFF")).usingColorSpace(.sRGB)?.redComponent, 0)
         XCTAssertEqual(NSColor(ViewerBackground.canvas(custom: true, hex: "#FFFFFF")).usingColorSpace(.sRGB)?.redComponent, 1)

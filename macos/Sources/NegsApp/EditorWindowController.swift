@@ -32,6 +32,7 @@ import SwiftUI
     private var appearing: NSObjectProtocol?
     private var resigning: NSObjectProtocol?
     private var keyMonitor: Any?
+    private var fullScreenObservers: [NSObjectProtocol] = []
     /// The key held to show the original, so its release is found even if
     /// a modifier (⌥⇧ on some layouts) was let go first.
     private var originalKey: UInt16?
@@ -109,6 +110,16 @@ import SwiftUI
                 guard let self else { return false }
                 return self.holdOriginal(event) || self.togglePins(event) || self.toggleProofKey(event) || self.toggleGridKey(event)
             } ? nil : event
+        }
+        // In full screen the system backs the title in grey, on the black toolbar,
+        // so it comes off and the status bar carries it instead.
+        fullScreenObservers = [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.willExitFullScreenNotification, false)].map { name, entering in
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.window?.titleVisibility = entering ? .hidden : .visible
+                    self?.model.windowFullScreen = entering
+                }
+            }
         }
         resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {

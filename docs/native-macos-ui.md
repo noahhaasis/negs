@@ -316,6 +316,8 @@ The window, toolbar, sidebar, status bar and default viewer are black, in dark a
 whatever the system's. Amber, the film's edge-print colour (`EdgePrint`), is the accent
 throughout: sidebar text, sliders, selected tiles and pins, hairlines, and toolbar icons,
 dimmed when off and full when on. A custom viewer colour and Proof's white stay as chosen.
+In full screen the system backs the window title in grey, so it comes off there and the
+status bar carries the file name and stock instead.
 
 ## Moving between photographs
 
