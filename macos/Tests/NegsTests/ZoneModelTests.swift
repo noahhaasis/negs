@@ -918,6 +918,42 @@ extension ZoneModelTests {
         XCTAssertTrue(caption.contains(model.paperName), caption)
     }
 
+    /// Moving to a photograph with no frame yet shows nothing in between: the last
+    /// one stays up until the new one's final develop replaces it.
+    func testNoInBetweenImageShowsWhileAPhotographDevelops() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await waitUntil { model.previewCurrent }
+        let leaving = try XCTUnwrap(model.image)
+        model.open(other)
+        let deadline = Date().addingTimeInterval(30)
+        while model.image == nil, Date() < deadline {
+            XCTAssertTrue(model.placeholder === leaving, "Only the last photograph, never a preview")
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(model.image)
+        XCTAssertNil(model.placeholder)
+    }
+
+    /// The grid's reveal waits for the frames around where it opens, then holds.
+    func testTheDeveloperSaysWhenTheFramesNearbyAreReady() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        for index in 0..<30 { try FileManager.default.copyItem(at: ramp, to: directory.appendingPathComponent("z\(index).png")) }
+        let files = try PhotoFolder.snapshot(in: directory).filter { $0.url.pathExtension == "png" }
+        let developer = try RollDeveloper(paths: try paths(), cache: directory.appendingPathComponent("near", isDirectory: true)) { model.frameRequest(for: $0) }
+        defer { developer.stop() }
+        XCTAssertFalse(developer.nearReady)
+        developer.show(files: files, centre: 15)
+        XCTAssertFalse(developer.nearReady, "Nothing's developed yet")
+        XCTAssertEqual(developer.nearTotal, 25)
+        try await waitUntil { developer.nearReady }
+        // All of them, in memory, the moment it says so.
+        for index in 3...27 {
+            XCTAssertNotNil(developer.frames[files[index].url], "\(index)")
+        }
+    }
+
     /// Nothing but the person moves the film: opening a photograph in view leaves
     /// it, even at the far side, and only a frame wholly out of view brings it round.
     func testTheStripDoesNotCentreTheOpenPhotograph() async throws {

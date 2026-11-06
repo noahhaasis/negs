@@ -19,8 +19,16 @@ import UniformTypeIdentifiers
     /// How many had to be developed rather than read from the disk cache.
     @ObservationIgnored private(set) var developedCount = 0
 
+    /// The grid waits for this many frames either side of where it opens, in memory,
+    /// so nothing changes in front of you.
+    static let revealRadius = 12
+    /// Whether the frames around the centre are all done and ready to draw.
+    private(set) var nearReady = false
+    private(set) var nearFinished = 0
+    private(set) var nearTotal = 0
     /// Frames this far from the middle of the screen stay decoded, so scrolling never waits.
     static let keptRadius = 32
+    private static let unavailable = "unavailable"
     nonisolated static let cacheLimit: Int64 = 2 << 30
 
     @ObservationIgnored private let client: EngineClient
@@ -50,8 +58,10 @@ import UniformTypeIdentifiers
         client.stop()
     }
 
-    func show(files: [PhotoFile]) {
-        guard files != self.files else { return }
+    /// The folder's frames, developing out from `centre`.
+    func show(files: [PhotoFile], centre: Int? = nil) {
+        if let centre { self.centre = centre }
+        guard files != self.files else { wake(); return }
         self.files = files
         let present = Set(files.map(\.url))
         completed = completed.filter { present.contains($0.key) }
@@ -95,21 +105,30 @@ import UniformTypeIdentifiers
             .first { self.completed[$0.url] == nil || (near.contains($0.url) && self.frames[$0.url] == nil) }
     }
 
-    private func wake() {
+    private func updateProgress() {
         total = files.count
         finished = completed.count
+        let near = files.indices.filter { abs($0 - centre) <= Self.revealRadius }.map { files[$0].url }
+        nearTotal = near.count
+        // A frame that couldn't be developed has nothing to wait for.
+        nearFinished = near.filter { completed[$0] != nil && (frames[$0] != nil || completed[$0] == Self.unavailable) }.count
+        nearReady = !near.isEmpty && nearFinished == near.count
+    }
+
+    private func wake() {
+        updateProgress()
         guard worker == nil else { return }
         worker = Task { [weak self] in
             while let self, !Task.isCancelled, let file = self.next() {
                 await self.process(file)
-                self.finished = self.completed.count
+                self.updateProgress()
             }
             self?.worker = nil
         }
     }
 
     private func process(_ file: PhotoFile) async {
-        guard let (command, turns) = request(file.url) else { completed[file.url] = "unavailable"; return }
+        guard let (command, turns) = request(file.url) else { completed[file.url] = Self.unavailable; return }
         let key = Self.key(file: file, command: command, helper: client.paths.helper)
         let path = cache.appendingPathComponent(key).appendingPathExtension("jpg")
         var image = await Task.detached(priority: .utility) { Self.read(path) }.value
@@ -120,7 +139,7 @@ import UniformTypeIdentifiers
             try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: path.path)
         }
         guard !Task.isCancelled else { return }
-        completed[file.url] = key
+        completed[file.url] = image == nil ? Self.unavailable : key
         if let image, nearURLs().contains(file.url) { frames[file.url] = image }
     }
 

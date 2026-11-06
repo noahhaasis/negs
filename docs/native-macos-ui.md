@@ -325,9 +325,10 @@ Every settled render is kept: in memory for the last 768 MB of frames, and on di
 `rendered-preview.cache.frames` (4 GB, least recently used goes first), keyed by the file,
 its edit and the helper and data it was developed with. Going back to a photograph with the
 same edit shows its frame in the same instant from memory, or as soon as it's read from the
-disk, with the last photograph holding meanwhile rather than a blank. A photograph with no
-develop yet shows the grid's frame for its edit if there is one, then the embedded preview.
-A render always follows, so anything that changed is corrected.
+disk. A photograph with no develop yet shows nothing in between: the last photograph holds
+until its final develop replaces it. Only with nothing to hold, at launch or across a
+different crop or turn, does the grid's frame or the embedded preview stand in. A render
+always follows, so anything that changed is corrected.
 
 ## Grid view
 
@@ -339,8 +340,9 @@ photograph opens it to edit, and G goes back. It follows the film strip's RAW-on
 Every photograph shows its final edit: its saved edit, or what it would open with.
 `RollDeveloper` develops them in the background with a helper of its own, since the main
 helper holds the open photograph's decoded source, nearest the middle of the screen first
-and through the whole folder. Each shows its embedded preview until it's ready, at 800 px on
-the long side. Finished photographs are kept as JPEGs in the app's caches (`RollFrames`,
+and through the whole folder, at 800 px on the long side. The grid stays hidden behind a
+progress count until the 12 frames either side of the open photograph are ready in memory.
+No embedded previews show there: a cell scrolled to before it's developed stays black. Finished photographs are kept as JPEGs in the app's caches (`RollFrames`,
 2 GB, least recently used goes first), keyed by the file, its edit and the helper build, so
 nothing develops twice. Those within 32 of the middle stay decoded in memory.
 

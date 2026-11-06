@@ -38,6 +38,8 @@ struct PhotoGrid: View {
     @State private var listing = FolderListing()
     /// Not observed: which cells are up only steers the developer.
     @State private var visible = VisibleCells()
+    /// Up for good once the frames around where it opens are ready.
+    @State private var revealed = false
 
     private var shown: [PhotoFile] { PhotoFolder.shown(listing.files, rawOnly: model.filmstripRawOnly) }
 
@@ -59,9 +61,11 @@ struct PhotoGrid: View {
                     }
                     .padding(PhotoGridLayout.margin)
                 }
+                // Nothing shows until what's on screen is ready to draw.
+                .opacity(revealed ? 1 : 0)
                 .task(id: directory) {
                     await listing.watch(directory) {
-                        model.rollDeveloper?.show(files: shown)
+                        model.rollDeveloper?.show(files: shown, centre: shown.firstIndex { $0.url == model.source } ?? 0)
                         // Starts at the open photograph; nothing moves it after that.
                         if let source = model.source {
                             DispatchQueue.main.async { reader.scrollTo(source, anchor: .center) }
@@ -74,6 +78,16 @@ struct PhotoGrid: View {
         .overlay {
             Group {
                 if listing.loading { ProgressView().controlSize(.small) }
+                else if !revealed, let roll = model.rollDeveloper, roll.nearTotal > 0 {
+                    VStack(spacing: 8) {
+                        ProgressView(value: Double(roll.nearFinished), total: Double(roll.nearTotal))
+                            .frame(width: 180)
+                            .tint(EdgePrint.amber)
+                        Text("Developing · \(roll.nearFinished) of \(roll.nearTotal)")
+                            .font(Font(EdgePrint.font(size: 14)))
+                            .monospacedDigit()
+                    }
+                }
                 else if listing.failed { Text("This folder couldn’t be read.") }
                 else if shown.isEmpty { Text(model.filmstripRawOnly ? "No RAW files in this folder." : "No supported photographs in this folder.") }
             }
@@ -81,6 +95,8 @@ struct PhotoGrid: View {
         }
         .accessibilityLabel("Grid")
         .onChange(of: shown) { _, files in model.rollDeveloper?.show(files: files) }
+        .onChange(of: model.rollDeveloper?.nearReady ?? false, initial: true) { _, ready in if ready { revealed = true } }
+        .onChange(of: model.rollDeveloper == nil, initial: true) { _, none in if none { revealed = true } }
         // The open photograph's edit, or the folder's look, once changes pause.
         .onChange(of: model.state) { _, _ in visible.refresh(model) }
         .onChange(of: model.sameLookForRoll) { _, _ in model.rollDeveloper?.invalidateAll() }
@@ -109,19 +125,18 @@ struct PhotoGrid: View {
 private struct PhotoGridCell: View {
     let file: PhotoFile
     let width: CGFloat
-    /// The final edit, where it's been developed; the embedded preview until then.
+    /// The final edit, once it's been developed. Nothing shows before that.
     let developed: CGImage?
     let open: () -> Void
-    @State private var embedded: CGImage?
     @State private var exif: PhotoExif?
     @State private var visible = false
 
     var body: some View {
         let box = CGSize(width: width, height: PhotoGridLayout.boxHeight(cellWidth: width))
-        let image = developed ?? embedded
+        let image = developed
         let rect = PhotoGridLayout.photoRect(image: image.map { CGSize(width: $0.width, height: $0.height) } ?? CGSize(width: 3, height: 2), box: box)
         VStack(alignment: .leading, spacing: PhotoGridLayout.lineGap) {
-            line(exif?.topLine, left: rect.minX, width: width)
+            line(image == nil ? nil : exif?.topLine, left: rect.minX, width: width)
             ZStack(alignment: .topLeading) {
                 if let image {
                     Image(decorative: image, scale: 1)
@@ -134,7 +149,7 @@ private struct PhotoGridCell: View {
                     .offset(x: rect.minX, y: rect.minY)
             }
             .frame(width: box.width, height: box.height, alignment: .topLeading)
-            line(exif?.bottomLine, left: rect.minX, width: width)
+            line(image == nil ? nil : exif?.bottomLine, left: rect.minX, width: width)
         }
         .frame(width: width, height: PhotoGridLayout.cellHeight(cellWidth: width), alignment: .topLeading)
         .accessibilityElement()
@@ -142,15 +157,10 @@ private struct PhotoGridCell: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, open)
         .onAppear { visible = true }
-        .onDisappear { visible = false; embedded = nil }
+        .onDisappear { visible = false }
         .task(id: visible ? file : nil) {
             guard visible else { return }
-            async let details = Task.detached(priority: .utility) { PhotoExif.read(file.url) }.value
-            if developed == nil {
-                let preview = await Task.detached(priority: .utility) { await PhotoThumbnails.shared.image(for: file) }.value
-                if !Task.isCancelled { embedded = preview }
-            }
-            let read = await details
+            let read = await Task.detached(priority: .utility) { PhotoExif.read(file.url) }.value
             if !Task.isCancelled { exif = read }
         }
     }

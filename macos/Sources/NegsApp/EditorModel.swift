@@ -921,7 +921,7 @@ import UniformTypeIdentifiers
         }
         // The photograph being left keeps an edit made just now.
         saveEditsNow()
-        let leaving = image, leavingSize = imageSize, leavingCrop = state.crop
+        let leaving = image, leavingSize = imageSize, leavingCrop = state.crop, leavingRotation = state.params["io.rotate_cw"]
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
@@ -971,11 +971,12 @@ import UniformTypeIdentifiers
         // Already in memory, it shows now and never gaps.
         let recent = session == nil ? recentFrame(url, rendered: snapshot.rendered) : nil
         if let recent { showRecent(recent) }
-        // Otherwise the last photograph holds, rather than a blank, until the
-        // next image is read. A different crop would frame it wrongly.
-        else if session == nil, let leaving, state.crop == leavingCrop {
-            placeholder = leaving; placeholderSize = leavingSize
-        }
+        // Otherwise the last photograph holds until this one's final develop is
+        // ready, so no in-between image shows. A different crop or turn would
+        // frame it wrongly, and with nothing to hold the previews still stand in.
+        let holding = recent == nil && session == nil && leaving != nil
+            && state.crop == leavingCrop && state.params["io.rotate_cw"] == leavingRotation
+        if holding, let leaving { placeholder = leaving; placeholderSize = leavingSize }
         let cachedFrame = recent == nil ? paths.map { paths in
             LaunchFrame {
                 guard let frame = await cache.load(source: url, state: snapshot, paths: paths) else { return nil }
@@ -988,6 +989,7 @@ import UniformTypeIdentifiers
                 guard let self else { return }
                 if self.showCached(cached, generation: generation, rendered: snapshot.rendered) { return }
             }
+            if holding { return }
             // The grid's smaller frame has the final look, unlike the embedded preview.
             if let self, let frame = await self.rollFrame(url, generation: generation) {
                 self.showPlaceholder(frame, size: CGSize(width: frame.width, height: frame.height), generation: generation)
