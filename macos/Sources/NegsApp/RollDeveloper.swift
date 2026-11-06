@@ -5,7 +5,7 @@ import ImageIO
 import Observation
 import UniformTypeIdentifiers
 
-/// Develops a folder's photographs in the background for the big film strip, each
+/// Develops a folder's photographs in the background for the grid view, each
 /// with its own final edit, nearest the centre first, and keeps them in a cache on
 /// disk so they never have to be developed twice. It has a helper of its own: the
 /// main one holds the open photograph's decoded source, which a run through other
@@ -19,8 +19,8 @@ import UniformTypeIdentifiers
     /// How many had to be developed rather than read from the disk cache.
     @ObservationIgnored private(set) var developedCount = 0
 
-    /// Frames this far from the centre stay decoded, so flicking never waits.
-    static let keptRadius = 12
+    /// Frames this far from the middle of the screen stay decoded, so scrolling never waits.
+    static let keptRadius = 32
     nonisolated static let cacheLimit: Int64 = 2 << 30
 
     @ObservationIgnored private let client: EngineClient

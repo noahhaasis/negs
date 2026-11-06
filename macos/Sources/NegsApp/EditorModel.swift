@@ -85,34 +85,34 @@ import UniformTypeIdentifiers
     }
 
     /// The panel shows with a photograph, except while cropping.
-    var showsZonePanel: Bool { source != nil && !cropping && !bigStripVisible }
+    var showsZonePanel: Bool { source != nil && !cropping && !gridVisible }
 
-    /// The film strip is the main view. F, or a double-click on a frame to leave.
-    private(set) var bigStripVisible = false
-    /// Develops the folder's final edits while the big strip is up.
+    /// The grid is up in place of the photograph. G, or a double-click to leave.
+    private(set) var gridVisible = false
+    /// Develops the folder's final edits while the grid is up.
     private(set) var rollDeveloper: RollDeveloper?
 
-    func toggleBigStrip() {
+    func toggleGrid() {
         guard source != nil, !cropping else { return }
-        bigStripVisible ? closeBigStrip() : openBigStrip()
+        gridVisible ? closeGrid() : openGrid()
     }
 
-    private func openBigStrip() {
+    private func openGrid() {
         if rollDeveloper == nil, let paths = engine?.paths {
             rollDeveloper = try? RollDeveloper(paths: paths) { [weak self] url in self?.frameRequest(for: url) }
         }
-        bigStripVisible = true
+        gridVisible = true
     }
 
-    private func closeBigStrip() {
-        bigStripVisible = false
+    private func closeGrid() {
+        gridVisible = false
         rollDeveloper?.stop()
         rollDeveloper = nil
     }
 
     /// Back to the edit view, on `url`.
-    func leaveBigStrip(opening url: URL) {
-        closeBigStrip()
+    func leaveGrid(opening url: URL) {
+        closeGrid()
         if url != source { open(url) }
     }
 
@@ -145,7 +145,7 @@ import UniformTypeIdentifiers
         if let crop = Self.cropJSON(edit.crop) { command["crop"] = crop }
         return (command, Int(edit.params["io.rotate_cw"].double))
     }
-    private static let rollFrameSide = 1280
+    private static let rollFrameSide = 800
 
     /// A zone being dragged from the panel.
     var zoneDrag: ZoneDrag?
@@ -766,7 +766,7 @@ import UniformTypeIdentifiers
     var proofing = UserDefaults.standard.bool(forKey: "proofMode") {
         didSet { UserDefaults.standard.set(proofing, forKey: "proofMode") }
     }
-    var canZoom: Bool { source != nil && !cropping && !proofing && !bigStripVisible }
+    var canZoom: Bool { source != nil && !cropping && !proofing && !gridVisible }
     /// The border to draw around a photograph on the canvas. A proof shows
     /// the photograph alone, on white.
     func canvasBorder(for size: CGSize) -> BorderSettings? { proofing ? nil : border.shown(for: size) }
@@ -853,7 +853,7 @@ import UniformTypeIdentifiers
     /// Shows the whole developed photograph, without the border, to crop it.
     func beginCrop() {
         guard !cropping, image != nil, imageSize != .zero else { return }
-        if bigStripVisible { closeBigStrip() }
+        if gridVisible { closeGrid() }
         holdOriginal(false)
         cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, source: sourceSize)
     }

@@ -738,27 +738,28 @@ extension ZoneModelTests {
         XCTAssertEqual(model.value("post.contrast").double, contrast)
     }
 
-    /// F swaps the big strip in and out, and it stands down while typing or cropping.
-    func testFTogglesTheBigStrip() async throws {
-        let f: UInt16 = 3
-        XCTAssertTrue(EditorWindowController.togglesBigStrip(keyCode: f, modifiers: [], firstResponder: nil))
-        XCTAssertFalse(EditorWindowController.togglesBigStrip(keyCode: f, modifiers: [], firstResponder: NSTextView()))
-        XCTAssertFalse(EditorWindowController.togglesBigStrip(keyCode: f, modifiers: [.command], firstResponder: nil))
+    /// G swaps the grid in and out, and it stands down while typing or cropping.
+    func testGTogglesTheGrid() async throws {
+        let g: UInt16 = 5
+        XCTAssertTrue(EditorWindowController.togglesGrid(keyCode: g, modifiers: [], firstResponder: nil))
+        XCTAssertFalse(EditorWindowController.togglesGrid(keyCode: g, modifiers: [], firstResponder: NSTextView()))
+        XCTAssertFalse(EditorWindowController.togglesGrid(keyCode: g, modifiers: [.command], firstResponder: nil))
+        XCTAssertFalse(EditorWindowController.togglesGrid(keyCode: 3, modifiers: [], firstResponder: nil))
         let model = try await makeModel()
         defer { model.shutdown() }
-        model.toggleBigStrip()
-        XCTAssertTrue(model.bigStripVisible)
+        model.toggleGrid()
+        XCTAssertTrue(model.gridVisible)
         XCTAssertNotNil(model.rollDeveloper)
         XCTAssertFalse(model.showsZonePanel)
         XCTAssertFalse(model.canZoom)
-        model.toggleBigStrip()
-        XCTAssertFalse(model.bigStripVisible)
+        model.toggleGrid()
+        XCTAssertFalse(model.gridVisible)
         XCTAssertNil(model.rollDeveloper, "Its helper goes when it does")
-        model.toggleBigStrip()
+        model.toggleGrid()
         model.beginCrop()
-        XCTAssertFalse(model.bigStripVisible, "Cropping needs the photograph")
-        model.toggleBigStrip()
-        XCTAssertFalse(model.bigStripVisible, "And F waits while cropping")
+        XCTAssertFalse(model.gridVisible, "Cropping needs the photograph")
+        model.toggleGrid()
+        XCTAssertFalse(model.gridVisible, "And G waits while cropping")
         model.endCrop(apply: false)
     }
 
@@ -806,54 +807,49 @@ extension ZoneModelTests {
         XCTAssertEqual(second.developedCount, 1)
     }
 
-    /// Real drags in a real window: the middle frame becomes the open photograph
-    /// once the film stops, and a double-click leaves for the edit view.
-    func testTheBigStripOpensItsCentreFrameWhenItStops() async throws {
+    /// In a real window: four photographs across, each developing with its own
+    /// edit. One click does nothing; a double-click opens that photograph to edit.
+    func testTheGridOpensAPhotographOnADoubleClick() async throws {
         let model = try await makeModel()
         let saved = model.filmstripVisible
         defer { model.filmstripVisible = saved; model.shutdown() }
-        let (_, window, _) = try await openRoll(model, photos: 20)
+        let (_, window, _) = try await openRoll(model, photos: 10)
         defer { window.orderOut(nil) }
         XCTAssertEqual(model.source, ramp)
-        model.toggleBigStrip()
-        try await Task.sleep(for: .milliseconds(900))
+        model.toggleGrid()
+        try await Task.sleep(for: .milliseconds(700))
         func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
         let scrolls = all(try XCTUnwrap(window.contentView)).compactMap { $0 as? NSScrollView }
         XCTAssertFalse(scrolls.contains { $0 is ImageScrollView }, "The photograph has gone")
-        let strip = try XCTUnwrap(scrolls.first { $0.bounds.height > 400 })
-        let bounds = strip.convert(strip.bounds, to: nil)
-        // The scroll view runs under the toolbar; the film stops below it.
-        let height = bounds.height - strip.contentInsets.top
-        let length = FilmRollLayout.frameLength(stripHeight: height, texture: FilmRollLayout.defaultTexture)
-        let lead = FilmRollLayout.leadFrames(viewport: bounds.width, frameLength: length)
-        // It starts with the open photograph in the middle: ramp is second.
-        XCTAssertEqual(strip.contentView.bounds.origin.x, FilmRollLayout.centringOffset(frame: 1, frameLength: length, lead: lead, viewport: bounds.width), accuracy: 2)
-        XCTAssertEqual(model.source, ramp, "Going there opens nothing else")
-        // Drag three frames along and hold still.
-        var clock = ProcessInfo.processInfo.systemUptime
-        let y = bounds.minY + height / 2
-        var x = bounds.maxX - 40
-        try send(.leftMouseDown, CGPoint(x: x, y: y), to: window, time: clock)
-        for _ in 0..<10 {
-            clock += 0.016
-            x -= length * 3 / 10
-            try send(.leftMouseDragged, CGPoint(x: x, y: y), to: window, time: clock)
-        }
-        try send(.leftMouseUp, CGPoint(x: x, y: y), to: window, time: clock + 0.25)
-        // other, ramp, z0, z1, z2: the fourth frame on from ramp's place is z2.
-        let target = directory.appendingPathComponent("z2.png")
-        try await waitUntil({ model.source == target }, timeout: 5)
-        XCTAssertTrue(model.bigStripVisible, "It stays up")
-        // The sidebar's edits are on the photograph in the middle.
-        XCTAssertEqual(model.source, target)
-        // Double-clicking the middle frame goes to the edit view on it.
-        let middle = CGPoint(x: bounds.midX, y: y)
+        let grid = try XCTUnwrap(scrolls.first { $0.bounds.height > 400 })
+        let document = try XCTUnwrap(grid.documentView)
+        let bounds = grid.convert(grid.bounds, to: nil)
+        let width = PhotoGridLayout.cellWidth(available: bounds.width)
+        // 12 photographs make three rows.
+        let cell = PhotoGridLayout.cellHeight(cellWidth: width)
+        XCTAssertEqual(document.frame.height, cell * 3 + PhotoGridLayout.rowGap * 2 + PhotoGridLayout.margin * 2, accuracy: 2)
+        // They all develop, with the final edits.
+        let developer = try XCTUnwrap(model.rollDeveloper)
+        try await waitUntil({ developer.total == 12 && developer.finished == 12 }, timeout: 30)
+        XCTAssertNotNil(developer.frames[ramp])
+        // The third photograph of the first row: other, ramp, z0.
+        let top = document.convert(document.bounds, to: nil).maxY
+        let point = CGPoint(x: bounds.minX + PhotoGridLayout.margin + (width + PhotoGridLayout.columnGap) * 2 + width / 2,
+                            y: top - PhotoGridLayout.margin - PhotoGridLayout.lineHeight - PhotoGridLayout.lineGap - PhotoGridLayout.boxHeight(cellWidth: width) / 2)
+        try send(.leftMouseDown, point, to: window, clicks: 1)
+        try send(.leftMouseUp, point, to: window, clicks: 1)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(model.gridVisible, "One click doesn't")
+        XCTAssertEqual(model.source, ramp)
         for clicks in 1...2 {
-            try send(.leftMouseDown, middle, to: window, clicks: clicks)
-            try send(.leftMouseUp, middle, to: window, clicks: clicks)
+            try send(.leftMouseDown, point, to: window, clicks: clicks)
+            try send(.leftMouseUp, point, to: window, clicks: clicks)
         }
-        try await waitUntil({ !model.bigStripVisible }, timeout: 5)
-        XCTAssertEqual(model.source, target)
+        try await waitUntil({ !model.gridVisible }, timeout: 5)
+        XCTAssertEqual(model.source, directory.appendingPathComponent("z0.png"))
+        try await waitUntil { model.previewCurrent }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(all(try XCTUnwrap(window.contentView)).contains { $0 is ImageScrollView }, "The photograph is back")
         XCTAssertNil(model.rollDeveloper)
     }
 

@@ -170,8 +170,8 @@ struct EditorCanvas: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.bigStripVisible, let source = model.source {
-                BigFilmStrip(model: model, directory: source.deletingLastPathComponent())
+            if model.gridVisible, let source = model.source {
+                PhotoGrid(model: model, directory: source.deletingLastPathComponent())
             } else {
                 HStack(spacing: 0) {
                     if model.showsZonePanel { ZonePanel(model: model) }
@@ -345,7 +345,7 @@ struct StatusBar: View {
             Spacer(minLength: 12)
             if let roll = model.rollDeveloper, roll.total > 0, roll.finished < roll.total {
                 ProgressView().controlSize(.mini)
-                Text("Developing the roll · \(roll.finished) of \(roll.total)").monospacedDigit()
+                Text("Developing · \(roll.finished) of \(roll.total)").monospacedDigit()
             }
             if model.exporting {
                 ProgressView().controlSize(.mini)

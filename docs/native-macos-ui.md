@@ -310,22 +310,20 @@ colour (`EdgePrint`). They're read from the file's metadata (`PhotoExif`), sit o
 overlay just outside the photograph, and stay on the canvas when it's zoomed past the edges.
 A fitted photograph leaves room for them; a file with no details leaves none.
 
-## Big film strip
+## Grid view
 
-F, or View › Big Film Strip, makes the film strip the main view beside the sidebar. It
-fills the column on black and scrolls like the small one, with blank film at each end so
-that every frame can reach the middle. The frame nearest the middle stays bright and the
-others dim, and 250 ms after the film stops it opens as the current photograph, for the
-sidebar. Double-clicking a photograph, or F, returns to the edit view.
+G, or View › Grid View, swaps the zones, photograph and film strip for the folder in four
+columns on black, with each photograph's camera details in amber above and below it, as in
+the edit view. It starts at the open photograph and the sidebar stays. Double-clicking a
+photograph opens it to edit, and G goes back. It follows the film strip's RAW-only setting.
 
-Every frame shows the photograph's final edit: its saved edit, or what it would open with.
+Every photograph shows its final edit: its saved edit, or what it would open with.
 `RollDeveloper` develops them in the background with a helper of its own, since the main
-helper holds the open photograph's decoded source, nearest the middle first and through the
-whole folder. Frames show the embedded preview until theirs is ready, at 1280 px on the
-long side, which is a reduced develop rather than the export. Finished frames are kept as
-JPEGs in the app's caches (`RollFrames`, 2 GB, least recently used goes first), keyed by the
-file, its edit and the helper build, so nothing develops twice. Those within 12 frames of
-the middle stay decoded in memory, so flicking doesn't wait on the disk.
+helper holds the open photograph's decoded source, nearest the middle of the screen first
+and through the whole folder. Each shows its embedded preview until it's ready, at 800 px on
+the long side. Finished photographs are kept as JPEGs in the app's caches (`RollFrames`,
+2 GB, least recently used goes first), keyed by the file, its edit and the helper build, so
+nothing develops twice. Those within 32 of the middle stay decoded in memory.
 
 ## Proof
 

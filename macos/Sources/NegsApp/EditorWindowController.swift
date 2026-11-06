@@ -102,7 +102,7 @@ import SwiftUI
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self else { return false }
-                return self.holdOriginal(event) || self.togglePins(event) || self.toggleProofKey(event) || self.toggleBigStripKey(event)
+                return self.holdOriginal(event) || self.togglePins(event) || self.toggleProofKey(event) || self.toggleGridKey(event)
             } ? nil : event
         }
         resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
@@ -139,16 +139,16 @@ import SwiftUI
         keyCode == 35 && modifiers.isDisjoint(with: [.shift, .control, .option, .command]) && !(firstResponder is NSText)
     }
 
-    /// Whether a key press is the bare F that swaps the big film strip in and out.
-    static func togglesBigStrip(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
-        keyCode == 3 && modifiers.isDisjoint(with: [.shift, .control, .option, .command]) && !(firstResponder is NSText)
+    /// Whether a key press is the bare G that swaps between the grid and the edit view.
+    static func togglesGrid(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
+        keyCode == 5 && modifiers.isDisjoint(with: [.shift, .control, .option, .command]) && !(firstResponder is NSText)
     }
 
-    private func toggleBigStripKey(_ event: NSEvent) -> Bool {
+    private func toggleGridKey(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, event.window === window, model.source != nil, !model.cropping,
-              Self.togglesBigStrip(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
+              Self.togglesGrid(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
         else { return false }
-        if !event.isARepeat { model.toggleBigStrip() }
+        if !event.isARepeat { model.toggleGrid() }
         return true
     }
 

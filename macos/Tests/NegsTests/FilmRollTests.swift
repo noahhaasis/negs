@@ -81,18 +81,27 @@ final class FilmRollTests: XCTestCase {
         XCTAssertEqual(PhotoFolder.shown(files, rawOnly: false), files)
     }
 
-    /// Every frame can reach the middle of the big strip, the first and last too.
-    func testTheBigStripsCentreFrame() {
-        let (length, viewport): (CGFloat, CGFloat) = (500, 1600)
-        let lead = FilmRollLayout.leadFrames(viewport: viewport, frameLength: length)
-        XCTAssertEqual(lead, 2)
-        for index in [0, 3, 9] {
-            let offset = FilmRollLayout.centringOffset(frame: index, frameLength: length, lead: lead, viewport: viewport)
-            XCTAssertGreaterThanOrEqual(offset, 0)
-            XCTAssertEqual(FilmRollLayout.centreFrame(offset: offset, frameLength: length, lead: lead, viewport: viewport, photos: 10), index)
-        }
-        XCTAssertEqual(FilmRollLayout.centreFrame(offset: 0, frameLength: length, lead: lead, viewport: viewport, photos: 10), 0, "Clamped at the start")
-        XCTAssertEqual(FilmRollLayout.centreFrame(offset: 99_999, frameLength: length, lead: lead, viewport: viewport, photos: 10), 9, "And the end")
+    /// Four columns fill the width, with 3:2 boxes and room for two lines.
+    func testTheGridsLayout() {
+        let width = PhotoGridLayout.cellWidth(available: 1000)
+        XCTAssertEqual(width, 220)
+        XCTAssertEqual(width * 4 + PhotoGridLayout.columnGap * 3 + PhotoGridLayout.margin * 2, 1000)
+        XCTAssertEqual(PhotoGridLayout.boxHeight(cellWidth: 220), 147)
+        XCTAssertEqual(PhotoGridLayout.cellHeight(cellWidth: 220), 147 + 40)
+    }
+
+    /// A photograph fits its box, centred, whatever its shape.
+    func testAPhotographFitsItsBox() {
+        let box = CGSize(width: 300, height: 200)
+        XCTAssertEqual(PhotoGridLayout.photoRect(image: CGSize(width: 600, height: 400), box: box), CGRect(x: 0, y: 0, width: 300, height: 200))
+        XCTAssertEqual(PhotoGridLayout.photoRect(image: CGSize(width: 400, height: 600), box: box).size.height, 200, accuracy: 0.01)
+        XCTAssertEqual(PhotoGridLayout.photoRect(image: CGSize(width: 400, height: 600), box: box).minX, (300 - 200 * 400 / 600) / 2, accuracy: 0.01)
+        XCTAssertEqual(PhotoGridLayout.photoRect(image: CGSize(width: 800, height: 200), box: box).minY, (200 - 75) / 2, accuracy: 0.01)
+    }
+
+    func testTheMiddleOfTheCellsOnScreen() {
+        XCTAssertEqual(PhotoGridLayout.middle(of: [4, 2, 3, 8, 5]), 4)
+        XCTAssertNil(PhotoGridLayout.middle(of: []))
     }
 
     /// Frames are turned as their photograph is.
