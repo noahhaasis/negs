@@ -98,6 +98,53 @@ final class PhotoExifTests: XCTestCase {
         XCTAssertEqual(overlay.exifLines?.bottom, "ISO 400")
     }
 
+    /// When the canvas changes size, as when the film strip shows or hides, the
+    /// lines stay against the photograph in that same pass, with nothing else moving.
+    func testTheLinesFollowWhenTheCanvasResizes() throws {
+        let (scroll, photo) = try canvas()
+        scroll.exif = PhotoExif(model: "D750", iso: 400)
+        scroll.overlay.redraw()
+        for height: CGFloat in [420, 600, 300, 600] {
+            scroll.setFrameSize(NSSize(width: 1000, height: height))
+            scroll.layout()
+            let overlay = scroll.overlay
+            let rect = overlay.convert(photo.bounds, from: photo)
+            let lines = try XCTUnwrap(overlay.exifFrames)
+            XCTAssertEqual(overlay.bounds.height, height, accuracy: 0.5)
+            XCTAssertEqual(lines.top.minY, rect.maxY + PinOverlayView.exifGap, accuracy: 0.5, "Above, at \(height)")
+            XCTAssertEqual(lines.bottom.maxY, rect.minY - PinOverlayView.exifGap, accuracy: 0.5, "Below, at \(height)")
+            XCTAssertEqual(lines.top.minX, rect.minX, accuracy: 0.5, "At its left, at \(height)")
+        }
+    }
+
+    /// A photograph held at 1:1 doesn't change zoom as the canvas resizes, and only
+    /// moves. The lines have to move with it, whether it's fitted or set by hand.
+    func testTheLinesFollowAPhotographHeldAtOneToOne() throws {
+        for fitted in [true, false] {
+            _ = NSApplication.shared
+            let scroll = ImageScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+            scroll.contentView = CenteringClipView()
+            scroll.allowsMagnification = true; scroll.minMagnification = 0.005; scroll.maxMagnification = 16
+            let photo = PhotographView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+            scroll.documentView = photo
+            scroll.tile()
+            scroll.applyZoom()
+            scroll.exif = PhotoExif(model: "D750", iso: 400)
+            if !fitted { scroll.setFitting(false); scroll.applyZoom() }
+            scroll.overlay.redraw()
+            for height: CGFloat in [420, 600, 340, 600] {
+                scroll.setFrameSize(NSSize(width: 1000, height: height))
+                scroll.layout()
+                let overlay = scroll.overlay
+                let rect = overlay.convert(photo.bounds, from: photo)
+                let lines = try XCTUnwrap(overlay.exifFrames)
+                XCTAssertEqual(rect.midY, height / 2, accuracy: 1, "Still centred, fitted \(fitted), at \(height)")
+                XCTAssertEqual(lines.top.minY, rect.maxY + PinOverlayView.exifGap, accuracy: 0.5, "Above, fitted \(fitted), at \(height)")
+                XCTAssertEqual(lines.bottom.maxY, rect.minY - PinOverlayView.exifGap, accuracy: 0.5, "Below, fitted \(fitted), at \(height)")
+            }
+        }
+    }
+
     func testZoomedInTheLinesStayOnTheCanvas() throws {
         let (scroll, _) = try canvas()
         scroll.exif = PhotoExif(model: "D750", iso: 400)

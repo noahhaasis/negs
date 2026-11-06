@@ -211,7 +211,16 @@ final class ImageScrollView: NSScrollView {
                 // A new window size doesn't change the zoom, only what's centred.
                 contentView.scroll(to: contentView.bounds.origin)
                 reflectScrolledClipView(contentView)
-            } else if fitting || isProof { applyZoom() }
+            } else if fitting || isProof {
+                applyZoom()
+            } else {
+                // Set by hand, the zoom stays, and a photograph smaller than the canvas stays centred.
+                contentView.scroll(to: contentView.constrainBoundsRect(contentView.bounds).origin)
+                reflectScrolledClipView(contentView)
+            }
+            // The canvas moved under the pins and camera details, whether or not
+            // the view of the photograph did: nothing else tells them.
+            overlay.redraw()
         }
     }
     /// Moved to a screen with another scale, a proof stays one pixel to a pixel.
