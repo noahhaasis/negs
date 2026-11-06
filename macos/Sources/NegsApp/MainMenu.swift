@@ -72,7 +72,7 @@ import SwiftUI
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
         view.addItem(.separator())
-        command(view, "Hide Pins", #selector(togglePins), "\t", [])
+        command(view, "Hide Zones and Pins", #selector(togglePins), "\t", [])
         command(view, "Delete Tone Pin", #selector(deleteTonePin), "\u{8}", [])
         view.addItem(.separator())
         command(view, "Grid View", #selector(toggleGrid), "g", [])
@@ -164,7 +164,7 @@ import SwiftUI
             item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
             return true
         case #selector(togglePins):
-            item.title = model.pinsVisible ? "Hide Pins" : "Show Pins"
+            item.title = model.pinsVisible ? "Hide Zones and Pins" : "Show Zones and Pins"
             return photo && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
         case #selector(deleteTonePin):
             return model.canRemovePin && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)

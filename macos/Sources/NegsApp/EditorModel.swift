@@ -64,6 +64,14 @@ import UniformTypeIdentifiers
         }
     }
 
+    /// The zones with a pin on the photograph. A point set on the curve is on no zone.
+    var placedZones: Set<Int> { Set(pins.filter { $0.source != nil }.map(\.zone)) }
+    /// The zone of the selected pin, if it's a pin.
+    var selectedZone: Int? {
+        guard let selectedPin, pins.indices.contains(selectedPin), pins[selectedPin].source != nil else { return nil }
+        return pins[selectedPin].zone
+    }
+
     /// The pins the canvas draws, with a resize in progress already applied.
     var pinsToShow: [TonePinMarker] {
         guard pinsVisible, !imageOnly, original == nil, !holdingOriginal else { return [] }
@@ -86,8 +94,9 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// The panel shows with a photograph, except while cropping.
-    var showsZonePanel: Bool { source != nil && !cropping && !gridVisible && !imageOnly }
+    /// The panel shows with a photograph and goes with the pins on Tab, and
+    /// isn't there while cropping.
+    var showsZonePanel: Bool { source != nil && pinsVisible && !cropping && !gridVisible && !imageOnly }
 
     /// Where the zone panel sits against the photograph.
     var zonePlacement: ZonePlacement?

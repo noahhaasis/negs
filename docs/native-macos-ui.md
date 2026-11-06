@@ -273,7 +273,7 @@ On the canvas:
 
 Placing, moving, resizing and deleting are each one undo step.
 
-Pins and their lines are drawn by `PinOverlayView`, a subview of the canvas's
+Tab shows and hides the zone panel and the pins together; hidden, the pins still shape the photograph. Pins and their lines are drawn by `PinOverlayView`, a subview of the canvas's
 scroll view above the document. The photograph's zoom, rotation and crop don't
 touch it, so a marker is the same size and upright everywhere. It redraws on every
 change of the clip view's bounds. A pin whose spot is outside the crop is hidden.

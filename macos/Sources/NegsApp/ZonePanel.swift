@@ -31,12 +31,12 @@ struct ZonePanel: View {
     }
 
     var body: some View {
-        let pins = model.pins
-        let selected = model.selectedPin.flatMap { pins.indices.contains($0) ? pins[$0].zone : nil }
+        let placed = model.placedZones
+        let selected = model.selectedZone
         let layout = horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
         layout {
             ForEach(horizontal ? ZoneScale.zones : ZoneScale.zones.reversed()) { zone in
-                ZoneTile(zone: zone, placed: pins.contains { $0.zone == zone.index }, selected: selected == zone.index) { point in
+                ZoneTile(zone: zone, placed: placed.contains(zone.index), selected: selected == zone.index) { point in
                     guard model.canPlaceZones, let point = model.canvasScale.canvasPoint(window: point) else { return }
                     model.zoneDrag = ZoneDrag(zone: zone.index, point: point)
                 } onDrop: { point in

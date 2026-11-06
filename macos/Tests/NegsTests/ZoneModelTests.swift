@@ -307,12 +307,13 @@ extension ZoneModelTests {
         model.pinsVisible = false
         XCTAssertTrue(model.pinsToShow.isEmpty)
         XCTAssertNil(model.selectedPin)
-        XCTAssertTrue(model.showsZonePanel, "The panel stays up")
+        XCTAssertFalse(model.showsZonePanel, "The zones go with them")
         XCTAssertEqual(model.pins.count, 1)
         XCTAssertTrue(model.previewCurrent, "Hiding doesn't develop again")
         XCTAssertEqual(try lstar(model), printed)
         model.pinsVisible = true
         XCTAssertEqual(model.pinsToShow.count, 1)
+        XCTAssertTrue(model.showsZonePanel)
     }
 
     /// A zone dropped while the pins are hidden brings them back, so the new
@@ -734,11 +735,14 @@ extension ZoneModelTests {
         nextEvent()
         XCTAssertEqual(model.pins.count, 2)
         XCTAssertEqual(model.pinsToShow.count, 1, "Only zone 7 is left on the photograph")
+        XCTAssertEqual(model.placedZones, [7], "Zone 5's marker goes with its pins")
+        XCTAssertNil(model.selectedZone, "A curve point selects no zone")
         let moved = try XCTUnwrap(model.curvePoints.first)
         XCTAssertFalse(moved.pinned)
         XCTAssertEqual(moved.target, upper.target - 0.5, "It stops at its neighbour")
         undo.undo()
         XCTAssertEqual(model.state, before, "One undo brings both pins back")
+        XCTAssertEqual(model.placedZones, [5, 7])
         // Added and removed.
         let added = model.addCurvePoint(input: 5, target: 3)
         XCTAssertEqual(model.curvePoints.first?.input, 5)
