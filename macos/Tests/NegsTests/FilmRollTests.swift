@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import XCTest
 @testable import NegsApp
 
@@ -24,14 +25,14 @@ final class FilmRollTests: XCTestCase {
     /// Wholly out of view, the frame comes just far enough in, at the nearer edge.
     func testTheStripMovesOnlyToRevealAFrameOutOfView() {
         func reveal(_ index: Int, offset: CGFloat) -> CGFloat? {
-            FilmRollLayout.revealOffset(frame: index, frameLength: 195, offset: offset, viewport: 1000, maxOffset: 5000)
+            FilmRollLayout.revealOffset(start: CGFloat(index) * 195, end: CGFloat(index + 1) * 195, offset: offset, viewport: 1000, maxOffset: 5000)
         }
         XCTAssertNil(reveal(3, offset: 0), "In view")
         XCTAssertNil(reveal(5, offset: 0), "Partly in view: 975 to 1170")
         XCTAssertNil(reveal(0, offset: 190), "Partly in view at the other end")
         XCTAssertEqual(reveal(10, offset: 0), 1950 + 195 - 1000, "Past the right edge")
         XCTAssertEqual(reveal(2, offset: 2000), 390, "Past the left edge")
-        XCTAssertEqual(FilmRollLayout.revealOffset(frame: 40, frameLength: 195, offset: 0, viewport: 1000, maxOffset: 500), 500, "Within the film")
+        XCTAssertEqual(FilmRollLayout.revealOffset(start: 40 * 195, end: 41 * 195, offset: 0, viewport: 1000, maxOffset: 500), 500, "Within the film")
     }
 
     /// The open photograph stands out by being brighter, not by a mark.
@@ -41,21 +42,49 @@ final class FilmRollTests: XCTestCase {
     }
 
     /// A frame is 38 mm of a 35 mm wide film, in whole points so nothing shows
-    /// A double-click finds the photograph under it, on the strip past any
-    /// scrolling, and only within its gate.
+    /// Each frame is as long as its photograph needs, with only the gap around it.
+    func testAFrameFitsItsPhotographsShape() {
+        let landscape = FilmRollLayout.frameLength(stripHeight: 186, aspect: 3.0 / 2)
+        let portrait = FilmRollLayout.frameLength(stripHeight: 186, aspect: 2.0 / 3)
+        XCTAssertEqual(landscape, 270 + 6)
+        XCTAssertEqual(portrait, 120 + 6)
+        XCTAssertEqual(FilmRollLayout.frameEdges(lengths: [10, 20, 5]), [0, 10, 30, 35])
+    }
+
+    /// A double-click finds the photograph under it, whatever the frames' shapes,
+    /// and only on the photograph.
     func testFindingThePhotographUnderAPoint() {
-        let frame = CGSize(width: 180, height: 120)
-        let gate = FilmRollLayout.gate(frame: frame)
-        func photo(_ x: CGFloat, _ y: CGFloat, photos: Int = 10) -> Int? {
-            FilmRollLayout.photo(at: CGPoint(x: x, y: y), frame: frame, gate: gate, photos: photos)
-        }
+        // Landscape, portrait, landscape.
+        let edges = FilmRollLayout.frameEdges(lengths: [180, 80, 180])
+        func photo(_ x: CGFloat, _ y: CGFloat) -> Int? { FilmRollLayout.photo(at: CGPoint(x: x, y: y), edges: edges, height: 120) }
         XCTAssertEqual(photo(90, 60), 0)
-        XCTAssertEqual(photo(180 * 3 + 90, 60), 3)
+        XCTAssertEqual(photo(220, 60), 1)
+        XCTAssertEqual(photo(350, 60), 2)
         XCTAssertNil(photo(90, 1), "The black above it")
         XCTAssertNil(photo(90, 119), "And below")
         XCTAssertNil(photo(180, 60), "The gap between frames")
-        XCTAssertNil(photo(180 * 3 + 90, 60, photos: 2), "Past the last photograph")
+        XCTAssertNil(photo(441, 60), "Past the last photograph")
         XCTAssertNil(photo(-20, 60))
+    }
+
+    /// A photograph's shape comes from its metadata, turned by its orientation.
+    func testReadingAPhotographsShape() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("negs-aspect-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let context = try XCTUnwrap(CGContext(data: nil, width: 60, height: 40, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        func write(_ name: String, orientation: Int) throws -> URL {
+            let url = directory.appendingPathComponent(name)
+            let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+            XCTAssertTrue(CGImageDestinationFinalize(destination))
+            return url
+        }
+        XCTAssertEqual(try XCTUnwrap(PhotoFolder.aspect(of: try write("up.jpg", orientation: 1))), 1.5, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(PhotoFolder.aspect(of: try write("turned.jpg", orientation: 6))), 2.0 / 3, accuracy: 0.001)
+        XCTAssertNil(PhotoFolder.aspect(of: directory.appendingPathComponent("missing.jpg")))
     }
 
     /// RAW only keeps RAW files, however their extensions are written, in order.
@@ -216,5 +245,22 @@ final class FilmRollTests: XCTestCase {
         XCTAssertTrue(scroller.isCoasting)
         scroller.press()
         XCTAssertFalse(scroller.isCoasting)
+    }
+
+    /// Only the frames near the view are built, whatever their lengths, and any
+    /// frame that could be on screen is among them.
+    func testOnlyFramesNearTheViewAreBuilt() {
+        let lengths = (0..<1000).map { CGFloat($0 % 2 == 0 ? 267 : 124) }
+        let edges = FilmRollLayout.frameEdges(lengths: lengths)
+        XCTAssertEqual(FilmRollLayout.framesInView(edges: [0], band: 0), 0..<0)
+        XCTAssertEqual(FilmRollLayout.framesInView(edges: edges, band: 0).lowerBound, 0)
+        for offset in stride(from: CGFloat(0), to: edges[1000] - 3000, by: 777) {
+            let frames = FilmRollLayout.framesInView(edges: edges, band: FilmRollLayout.band(offset: offset))
+            XCTAssertLessThan(frames.count, 100)
+            XCTAssertLessThanOrEqual(edges[frames.lowerBound], offset)
+            XCTAssertGreaterThanOrEqual(edges[frames.upperBound], offset + 3000, "A wide window stays covered")
+        }
+        let end = FilmRollLayout.framesInView(edges: edges, band: FilmRollLayout.band(offset: edges[1000]))
+        XCTAssertEqual(end.upperBound, 1000)
     }
 }

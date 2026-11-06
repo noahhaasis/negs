@@ -28,6 +28,19 @@ enum PhotoFolder {
         try snapshot(in: directory).map(\.url)
     }
 
+    /// A photograph's width over its height as shown, read from its metadata
+    /// without decoding it; nil if the file doesn't say.
+    static func aspect(of url: URL) -> CGFloat? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width > 0, height > 0 else { return nil }
+        // Orientations 5 to 8 are a quarter turn.
+        let turned = ((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1) >= 5
+        return CGFloat(turned ? height / width : width / height)
+    }
+
     /// The files the film strip shows of a folder's.
     static func shown(_ files: [PhotoFile], rawOnly: Bool) -> [PhotoFile] {
         rawOnly ? files.filter { EditorModel.rawExtensions.contains($0.url.pathExtension.lowercased()) } : files
@@ -94,6 +107,8 @@ actor PhotoThumbnails {
 /// A folder's photographs, kept up to date while `watch` runs.
 @MainActor @Observable final class FolderListing {
     private(set) var files: [PhotoFile] = []
+    /// Each photograph's shape, known before it's shown so frames never change width.
+    private(set) var aspects: [URL: CGFloat] = [:]
     private(set) var loading = true
     private(set) var failed = false
 
@@ -116,12 +131,19 @@ actor PhotoThumbnails {
     }
 
     private func refresh(_ directory: URL) async {
-        let scan = Task.detached(priority: .utility) { try PhotoFolder.snapshot(in: directory) }
+        let known = aspects
+        let scan = Task.detached(priority: .utility) { () -> ([PhotoFile], [URL: CGFloat]) in
+            let files = try PhotoFolder.snapshot(in: directory)
+            var shapes: [URL: CGFloat] = [:]
+            for file in files { shapes[file.url] = known[file.url] ?? PhotoFolder.aspect(of: file.url) }
+            return (files, shapes)
+        }
         do {
-            let result = try await withTaskCancellationHandler {
+            let (result, shapes) = try await withTaskCancellationHandler {
                 try await scan.value
             } onCancel: { scan.cancel() }
             try Task.checkCancellation()
+            if aspects != shapes { aspects = shapes }
             if files != result { files = result }
             failed = false; loading = false
         } catch {
@@ -138,18 +160,26 @@ struct PhotoBrowser: View {
 
     @State private var viewport: CGFloat = 0
     @State private var scroller = FilmRollScroller()
+    /// Which stretch of film is in view, in coarse steps.
+    @State private var band = 0
 
     var body: some View {
         ScrollView(.horizontal) {
-            LazyHStack(spacing: 0) {
-                ForEach(shown, id: \.url) { file in
-                    FilmFrame(height: height, file: file, selected: file.url == model.source) {
+            // Placed by their known edges, so the film is exactly as long as its
+            // frames say: a lazy stack only guesses at frames of different lengths.
+            let edges = edges
+            let shown = shown
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(FilmRollLayout.framesInView(edges: edges, band: band)), id: \.self) { index in
+                    let file = shown[index]
+                    FilmFrame(height: height, length: edges[index + 1] - edges[index], file: file,
+                              selected: file.url == model.source) {
                         if file.url != model.source { model.open(file.url) }
                     }
-                    .id(file.url)
+                    .offset(x: edges[index])
                 }
             }
-            .scrollTargetLayout()
+            .frame(width: edges[edges.count - 1], height: height, alignment: .topLeading)
             .background(EnclosingScrollFinder(scroller: scroller))
         }
         .scrollIndicators(.hidden)
@@ -159,6 +189,12 @@ struct PhotoBrowser: View {
             DispatchQueue.main.async {
                 scroller.offset = scroller.offset
                 revealOpenPhotograph()
+            }
+        }
+        .onAppear {
+            scroller.onScroll = { [scroller] in
+                let next = FilmRollLayout.band(offset: scroller.offset)
+                if next != band { band = next }
             }
         }
         .onDisappear { scroller.stop() }
@@ -171,9 +207,7 @@ struct PhotoBrowser: View {
         // Over the scroll view, since SwiftUI doesn't pass mouse drags through one.
         .overlay {
             FilmMouseSurface(scroller: scroller, enabled: !model.cropping) { point in
-                let frame = CGSize(width: frameLength, height: height)
-                let gate = FilmRollLayout.gate(frame: frame)
-                guard let index = FilmRollLayout.photo(at: point, frame: frame, gate: gate, photos: shown.count),
+                guard let index = FilmRollLayout.photo(at: point, edges: edges, height: height),
                       shown[index].url != model.source else { return }
                 model.open(shown[index].url)
             }
@@ -212,14 +246,17 @@ struct PhotoBrowser: View {
 
     private var height: CGFloat { model.filmstripHeight }
     private var shown: [PhotoFile] { PhotoFolder.shown(listing.files, rawOnly: model.filmstripRawOnly) }
-    private var frameLength: CGFloat {
-        FilmRollLayout.frameLength(stripHeight: height)
+    private func length(of file: PhotoFile) -> CGFloat {
+        FilmRollLayout.frameLength(stripHeight: height, aspect: listing.aspects[file.url] ?? 3.0 / 2)
     }
+    /// Where the frames start and end along the strip.
+    private var edges: [CGFloat] { FilmRollLayout.frameEdges(lengths: shown.map(length)) }
 
     /// The open photograph's frame, if it's wholly out of view. Nothing else
     /// moves the film but the person.
     private func revealOpenPhotograph() {
         guard let source = model.source, let index = shown.firstIndex(where: { $0.url == source }) else { return }
-        scroller.reveal(frame: index, length: frameLength)
+        let edges = edges
+        scroller.reveal(start: edges[index], end: edges[index + 1])
     }
 }

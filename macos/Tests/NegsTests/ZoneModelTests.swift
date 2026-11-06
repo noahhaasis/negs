@@ -487,7 +487,7 @@ extension ZoneModelTests {
         defer { window.orderOut(nil) }
         XCTAssertEqual(model.source, ramp)
         let bounds = roll.convert(roll.bounds, to: nil)
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, aspect: 4.0 / 3)
         // other.png sorts first, so it's the first frame.
         let photo = CGPoint(x: bounds.minX + frame / 2, y: bounds.midY)
         // The gap before the first photograph.
@@ -546,7 +546,7 @@ extension ZoneModelTests {
         XCTAssertEqual(canvas.bounds.height, canvasHeight - 60, accuracy: 1, "The canvas gives way")
         XCTAssertEqual(window.frame, frame, "The window stays put")
         XCTAssertEqual(UserDefaults.standard.double(forKey: "filmstripHeight"), 240, accuracy: 0.5)
-        let frameLength = FilmRollLayout.frameLength(stripHeight: 240)
+        let frameLength = FilmRollLayout.frameLength(stripHeight: 240, aspect: 4.0 / 3)
         XCTAssertGreaterThan(try XCTUnwrap(roll.documentView).frame.width, frameLength * 13, "The frames grow with it")
         try await drag(fromY: top(), by: -100)
         XCTAssertEqual(model.filmstripHeight, 140, accuracy: 0.5, "Down")
@@ -583,19 +583,27 @@ extension ZoneModelTests {
         for index in 0..<20 { try Data().write(to: directory.appendingPathComponent("s\(index).DNG")) }
         let (_, window, roll) = try await openRoll(model, photos: 10)
         defer { window.orderOut(nil) }
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
+        // Each frame fits its own photograph; these empty files are read as 3:2.
+        func film(_ files: [URL]) -> CGFloat {
+            files.reduce(0) { $0 + FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight,
+                                                              aspect: PhotoFolder.aspect(of: $1) ?? 3.0 / 2) }
+        }
+        let all = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { ["png", "nef", "dng"].contains($0.pathExtension.lowercased()) }
+        XCTAssertEqual(all.count, 62)
+        let raws = all.filter { $0.pathExtension.lowercased() != "png" }
         let document = try XCTUnwrap(roll.documentView)
-        XCTAssertEqual(document.frame.width, 62 * frame, accuracy: 1, "All of them: 50 RAW, 10 copies, ramp and other")
+        XCTAssertEqual(document.frame.width, film(all), accuracy: 1, "All of them: 50 RAW, 10 copies, ramp and other")
         model.filmstripRawOnly = true
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(document.frame.width, 50 * frame, accuracy: 1, "Only the RAW files")
+        XCTAssertEqual(document.frame.width, film(raws), accuracy: 1, "Only the RAW files")
         XCTAssertEqual(UserDefaults.standard.object(forKey: "filmstripRawOnly") as? Bool, true)
         let reopened = EditorModel()
         defer { reopened.shutdown() }
         XCTAssertTrue(reopened.filmstripRawOnly)
         model.filmstripRawOnly = false
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(document.frame.width, 62 * frame, accuracy: 1)
+        XCTAssertEqual(document.frame.width, film(all), accuracy: 1)
     }
 
     /// Edits save themselves beside the photograph shortly after they're made, so
@@ -1022,7 +1030,7 @@ extension ZoneModelTests {
         defer { window.orderOut(nil) }
         func offset() -> CGFloat { roll.contentView.bounds.origin.x }
         func file(_ index: Int) -> URL { directory.appendingPathComponent("z\(index).png") }
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, aspect: 4.0 / 3)
         XCTAssertEqual(FilmRollLayout.defaultStripHeight, 180)
         XCTAssertEqual(roll.bounds.height, 180, accuracy: 1)
         let bounds = roll.convert(roll.bounds, to: nil)
@@ -1061,7 +1069,7 @@ extension ZoneModelTests {
         try await waitUntil { model.previewCurrent }
         let (_, window, roll) = try await openRoll(model)
         defer { window.orderOut(nil) }
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, aspect: 4.0 / 3)
         let start = 32 * frame
         let visible = roll.contentView.bounds
         XCTAssertLessThan(visible.minX, start + frame, "\(visible)")

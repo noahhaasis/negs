@@ -9,24 +9,45 @@ enum FilmRollLayout {
     /// Black between the photographs.
     static let frameGap: CGFloat = 6
 
-    /// How long one frame is along the strip: a 3:2 photograph and its gap, in
-    /// whole points so frames never drift.
-    static func frameLength(stripHeight: CGFloat) -> CGFloat {
-        ((stripHeight - frameGap) * 3 / 2).rounded() + frameGap
+    /// How long one frame is along the strip: its photograph at the strip's height,
+    /// with no space but the gap, in whole points so frames never drift.
+    static func frameLength(stripHeight: CGFloat, aspect: CGFloat = 3.0 / 2) -> CGFloat {
+        ((stripHeight - frameGap) * aspect).rounded() + frameGap
     }
+
+    /// Where each frame starts, and where the last one ends.
+    static func frameEdges(lengths: [CGFloat]) -> [CGFloat] {
+        lengths.reduce(into: [0]) { $0.append($0[$0.count - 1] + $1) }
+    }
+
+    /// The film moves through coarse bands, so frames only change as it nears new ones.
+    static func band(offset: CGFloat) -> Int { Int(max(offset, 0) / bandLength) }
+
+    /// The frames to build around a band: wide enough for any window, with
+    /// frames waiting either side.
+    static func framesInView(edges: [CGFloat], band: Int) -> Range<Int> {
+        guard edges.count > 1 else { return 0..<0 }
+        let start = CGFloat(band - 2) * bandLength
+        let end = CGFloat(band + 8) * bandLength
+        let first = (edges.firstIndex { $0 > start } ?? edges.count) - 1
+        let last = edges.firstIndex { $0 >= end } ?? edges.count - 1
+        return max(first, 0)..<max(last, max(first, 0))
+    }
+
+    private static let bandLength: CGFloat = 800
 
     /// Where the photograph shows in a frame of `frame`.
     static func gate(frame: CGSize) -> CGRect {
         CGRect(origin: .zero, size: frame).insetBy(dx: frameGap / 2, dy: frameGap / 2)
     }
 
-    /// The photograph at `point` on the film, from the film's top left. Only
-    /// the gate counts: the film around it opens nothing.
-    static func photo(at point: CGPoint, frame: CGSize, gate: CGRect, photos: Int) -> Int? {
-        guard frame.width > 0, point.x >= 0 else { return nil }
-        let index = Int(point.x / frame.width)
-        let inFrame = CGPoint(x: point.x - CGFloat(index) * frame.width, y: point.y)
-        return index < photos && gate.contains(inFrame) ? index : nil
+    /// The photograph at `point` on the strip, from its top left. Only the
+    /// photograph counts: the black around it opens nothing.
+    static func photo(at point: CGPoint, edges: [CGFloat], height: CGFloat) -> Int? {
+        guard edges.count > 1, point.x >= edges[0], point.x < edges[edges.count - 1],
+              let index = edges.lastIndex(where: { $0 <= point.x }), index < edges.count - 1 else { return nil }
+        let frame = CGSize(width: edges[index + 1] - edges[index], height: height)
+        return gate(frame: frame).contains(CGPoint(x: point.x - edges[index], y: point.y)) ? index : nil
     }
 
     /// The open photograph is at full brightness; the rest dim to half, over black.
@@ -35,8 +56,7 @@ enum FilmRollLayout {
     /// Where the strip has to go to show a frame, or nil if any of it is already
     /// in view: only the person moves the film, unless the open photograph
     /// would otherwise be nowhere to be seen. Then it comes just into view.
-    static func revealOffset(frame index: Int, frameLength: CGFloat, offset: CGFloat, viewport: CGFloat, maxOffset: CGFloat) -> CGFloat? {
-        let start = CGFloat(index) * frameLength, end = start + frameLength
+    static func revealOffset(start: CGFloat, end: CGFloat, offset: CGFloat, viewport: CGFloat, maxOffset: CGFloat) -> CGFloat? {
         if end > offset, start < offset + viewport { return nil }
         return min(max(start < offset ? start : end - viewport, 0), maxOffset)
     }
@@ -56,14 +76,14 @@ enum FilmRollLayout {
                 }
                 onScroll?()
             }
-            if scroll != nil, let pendingReveal { reveal(frame: pendingReveal.index, length: pendingReveal.length) }
+            if scroll != nil, let pendingReveal { reveal(start: pendingReveal.start, end: pendingReveal.end) }
         }
     }
     /// Whenever the film moves, by any means.
     var onScroll: (() -> Void)? { didSet { if scroll != nil { onScroll?() } } }
     private var observing: NSObjectProtocol?
     /// A frame to show once the scroll view has been found.
-    private var pendingReveal: (index: Int, length: CGFloat)?
+    private var pendingReveal: (start: CGFloat, end: CGFloat)?
     /// macOS's normal deceleration: the speed kept after each millisecond.
     static let deceleration = 0.998
     /// Slower than this, in points a second, the strip has stopped.
@@ -94,10 +114,10 @@ enum FilmRollLayout {
     var isCoasting: Bool { velocity != 0 }
 
     /// Brings a frame into view if it's wholly out of it, and otherwise leaves the film alone.
-    func reveal(frame index: Int, length: CGFloat) {
-        guard let scroll else { pendingReveal = (index, length); return }
+    func reveal(start: CGFloat, end: CGFloat) {
+        guard let scroll else { pendingReveal = (start, end); return }
         pendingReveal = nil
-        guard let target = FilmRollLayout.revealOffset(frame: index, frameLength: length, offset: offset,
+        guard let target = FilmRollLayout.revealOffset(start: start, end: end, offset: offset,
                                                        viewport: scroll.contentView.bounds.width, maxOffset: maxOffset) else { return }
         stop()
         offset = target
@@ -262,9 +282,12 @@ struct FilmMouseSurface: NSViewRepresentable {
     }
 }
 
-/// One frame of the strip: the photograph, on black, never turned.
+/// One frame of the strip: the photograph, on black, never turned, with only the
+/// gap around it whatever its shape.
 struct FilmFrame: View {
     let height: CGFloat
+    /// Its length along the strip, from its photograph's shape.
+    let length: CGFloat
     let file: PhotoFile
     let selected: Bool
     let open: () -> Void
@@ -272,7 +295,7 @@ struct FilmFrame: View {
     @State private var visible = false
 
     var body: some View {
-        let frame = CGSize(width: FilmRollLayout.frameLength(stripHeight: height), height: height)
+        let frame = CGSize(width: length, height: height)
         let gate = FilmRollLayout.gate(frame: frame)
         ZStack {
             Color.black

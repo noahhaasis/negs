@@ -285,7 +285,9 @@ starts with none.
 ## Film strip
 
 The film strip shows the photograph's folder as a row of photographs on black, under the
-photograph, never turned: a portrait one stands upright in its 3:2 space. Dragging the
+photograph, never turned. Each frame is as long as its photograph needs at the strip's
+height, with only a small gap, from a shape read from the file's metadata when the folder is
+listed, so frames never change width. Dragging the
 strip's top edge sets its height, from 90 to 300 points and remembered; the canvas gives way
 and the window stays put. Settings › Film Strip can limit it to the folder's RAW files. The open photograph is at full brightness and the others are dimmed to 50 %. Clicking and
 dragging anywhere on it scrolls it (`FilmRollScroller`), and it coasts on from a
