@@ -705,6 +705,46 @@ extension ZoneModelTests {
         XCTAssertEqual(reopened.value("post.contrast").double, contrast + 40)
     }
 
+    /// F leaves only the photograph, then brings back exactly what was showing.
+    func testImageOnlyHidesEverythingAndComesBack() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        await model.placeZone(5, at: CGPoint(x: 0.5, y: 0.5))
+        let (controller, window, roll) = try await openRoll(model)
+        defer { window.orderOut(nil) }
+        _ = controller
+        model.inspectorVisible = true
+        try await Task.sleep(for: .milliseconds(400))
+        let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+        let sidebar = try XCTUnwrap(split.splitViewItems.last)
+        XCTAssertFalse(sidebar.isCollapsed)
+        XCTAssertFalse(model.pinsToShow.isEmpty)
+        XCTAssertNotNil(roll.window)
+        model.toggleImageOnly()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertTrue(model.imageOnly)
+        XCTAssertFalse(model.showsZonePanel)
+        XCTAssertTrue(model.pinsToShow.isEmpty)
+        XCTAssertTrue(sidebar.isCollapsed)
+        XCTAssertTrue(model.inspectorVisible, "Collapsing it for F isn't hiding it")
+        XCTAssertNil(roll.window, "The strip's gone")
+        XCTAssertEqual(window.standardWindowButton(.closeButton)?.isHidden, true)
+        XCTAssertEqual(window.titleVisibility, .hidden)
+        // The grid brings its controls back while it's up, and goes back to F after.
+        model.toggleGrid()
+        XCTAssertFalse(model.imageOnly)
+        model.toggleGrid()
+        XCTAssertTrue(model.imageOnly)
+        model.toggleImageOnly()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertFalse(model.imageOnly)
+        XCTAssertFalse(sidebar.isCollapsed)
+        XCTAssertTrue(model.showsZonePanel)
+        XCTAssertFalse(model.pinsToShow.isEmpty)
+        XCTAssertEqual(window.standardWindowButton(.closeButton)?.isHidden, false)
+        XCTAssertEqual(window.titleVisibility, .visible)
+    }
+
     /// G swaps the grid in and out, and it stands down while typing or cropping.
     func testGTogglesTheGrid() async throws {
         let g: UInt16 = 5

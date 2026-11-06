@@ -73,6 +73,7 @@ import SwiftUI
         command(view, "Delete Tone Pin", #selector(deleteTonePin), "\u{8}", [])
         view.addItem(.separator())
         command(view, "Grid View", #selector(toggleGrid), "g", [])
+        command(view, "Image Only", #selector(toggleImageOnly), "f", [])
         command(view, "Simple Controls", #selector(toggleInspectorMode), String(UnicodeScalar(NSF4FunctionKey)!), [])
         command(view, "Rotate Clockwise", #selector(rotate), "r")
         command(view, "Crop", #selector(crop), "k")
@@ -133,6 +134,7 @@ import SwiftUI
     @objc private func newPreset() { model.newPreset() }
     @objc private func importPresets() { model.importPresetsPanel() }
     @objc private func toggleGrid() { model.toggleGrid() }
+    @objc private func toggleImageOnly() { model.toggleImageOnly() }
     @objc private func setFolderDefault() { model.setFolderDefault() }
     @objc private func toggleInspectorMode() { model.toggleInspectorMode() }
     @objc private func rotate() { model.rotate() }
@@ -169,6 +171,9 @@ import SwiftUI
         case #selector(toggleGrid):
             item.state = model.gridVisible ? .on : .off
             return photo && !model.cropping && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
+        case #selector(toggleImageOnly):
+            item.state = model.imageOnly ? .on : .off
+            return photo && !model.cropping && !model.gridVisible && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
         case #selector(rotate): return photo
         case #selector(crop):
             item.title = model.cropping ? "Done Cropping" : "Crop"

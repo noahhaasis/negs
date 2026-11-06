@@ -119,6 +119,13 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertTrue(MainMenu.bareKeysAllowed(firstResponder: nil))
     }
 
+    @MainActor func testBareFShowsOnlyThePhotograph() {
+        XCTAssertTrue(EditorWindowController.togglesImageOnly(keyCode: 3, modifiers: [], firstResponder: nil))
+        XCTAssertFalse(EditorWindowController.togglesImageOnly(keyCode: 3, modifiers: [.command, .option], firstResponder: nil), "Hide Film Strip")
+        XCTAssertFalse(EditorWindowController.togglesImageOnly(keyCode: 3, modifiers: [], firstResponder: NSText()))
+        XCTAssertFalse(EditorWindowController.togglesImageOnly(keyCode: 5, modifiers: [], firstResponder: nil))
+    }
+
     func testGreysRiseFromBlackToPaperWhite() throws {
         let levels = try ZoneScale.zones.map { zone -> CGFloat in
             try XCTUnwrap(ZoneScale.grey(zone.index).usingColorSpace(.sRGB)).redComponent

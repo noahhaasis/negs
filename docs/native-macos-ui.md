@@ -217,6 +217,10 @@ halation, DIR couplers, lens diffusion, grain, glare, print curves, scanner, col
 management, enlarger, and output options. Default film/paper pairing and direct
 scanning follow the profile metadata. Controls and reset participate in Undo.
 
+F shows only the photograph and its camera details: the zones, pins, film strip, status
+bar, sidebar and window controls all go, and F again brings back what was showing. It's
+one keystroke either way, so the grid and cropping keep their own controls.
+
 Settings › Inspector or F4 chooses Advanced, the six workflow tabs and the default, or
 Simple, which replaces the tabs with one page: film, paper and print exposure; a RAW
 file's white balance; the five tone sliders; Midtone Detail and the unsharp mask; Image Size; file format and

@@ -227,10 +227,15 @@ import XCTest
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertEqual(window.titleVisibility, .hidden)
         XCTAssertTrue(model.windowFullScreen)
+        // No title bar to stay below, so no gap over the sidebar.
+        let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+        let sidebar = try XCTUnwrap(split.splitViewItems.last)
+        XCTAssertTrue(sidebar.allowsFullHeightLayout)
         NotificationCenter.default.post(name: NSWindow.willExitFullScreenNotification, object: window)
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertEqual(window.titleVisibility, .visible)
         XCTAssertFalse(model.windowFullScreen)
+        XCTAssertFalse(sidebar.allowsFullHeightLayout)
     }
 
     func testTheDefaultViewerIsBlackAndACustomColourStays() {

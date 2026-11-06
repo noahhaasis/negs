@@ -33,6 +33,7 @@ import SwiftUI
     /// The key held to show the original, so its release is found even if
     /// a modifier (⌥⇧ on some layouts) was let go first.
     private var originalKey: UInt16?
+    private var wasImageOnly = false
 
     init(model: EditorModel) {
         self.model = model
@@ -89,7 +90,8 @@ import SwiftUI
         // Dragging the inspector closed hides the adjustments, like the menu command.
         collapsing = inspector.observe(\.isCollapsed) { [weak self] item, _ in
             MainActor.assumeIsolated {
-                guard let self, self.model.inspectorVisible == item.isCollapsed else { return }
+                // F collapses it without changing what comes back.
+                guard let self, !self.model.imageOnly, self.model.inspectorVisible == item.isCollapsed else { return }
                 self.model.inspectorVisible = !item.isCollapsed
             }
         }
@@ -99,14 +101,13 @@ import SwiftUI
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self else { return false }
-                return self.holdOriginal(event) || self.togglePins(event) || self.toggleGridKey(event)
+                return self.holdOriginal(event) || self.togglePins(event) || self.toggleGridKey(event) || self.toggleImageOnlyKey(event)
             } ? nil : event
         }
         // The title bar hides in full screen, so the status bar carries the title there.
         fullScreenObservers = [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.willExitFullScreenNotification, false)].map { name, entering in
             NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.window?.titleVisibility = entering ? .hidden : .visible
                     self?.model.windowFullScreen = entering
                 }
             }
@@ -150,6 +151,19 @@ import SwiftUI
               Self.togglesGrid(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
         else { return false }
         if !event.isARepeat { model.toggleGrid() }
+        return true
+    }
+
+    /// Whether a key press is the bare F that shows only the photograph.
+    static func togglesImageOnly(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
+        keyCode == 3 && modifiers.isDisjoint(with: [.shift, .control, .option, .command]) && !(firstResponder is NSText)
+    }
+
+    private func toggleImageOnlyKey(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.window === window, model.source != nil, !model.cropping, !model.gridVisible,
+              Self.togglesImageOnly(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
+        else { return false }
+        if !event.isARepeat { model.toggleImageOnly() }
         return true
     }
 
@@ -202,6 +216,18 @@ import SwiftUI
         let photo = model.source != nil
         window.title = model.source?.lastPathComponent ?? "Negs"
         window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
-        if inspector.isCollapsed == model.inspectorVisible { inspector.animator().isCollapsed = !model.inspectorVisible }
+        let imageOnly = model.imageOnly
+        // Full screen has no title bar to stay below, so the column runs to the top.
+        inspector.allowsFullHeightLayout = model.windowFullScreen
+        window.titleVisibility = model.windowFullScreen || imageOnly ? .hidden : .visible
+        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(button)?.isHidden = imageOnly
+        }
+        let collapsed = !model.inspectorVisible || imageOnly
+        if inspector.isCollapsed != collapsed {
+            // Straight there for F, so the photograph doesn't slide about.
+            if imageOnly != wasImageOnly { inspector.isCollapsed = collapsed } else { inspector.animator().isCollapsed = collapsed }
+        }
+        wasImageOnly = imageOnly
     }
 }

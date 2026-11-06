@@ -66,7 +66,7 @@ import UniformTypeIdentifiers
 
     /// The pins the canvas draws, with a resize in progress already applied.
     var pinsToShow: [TonePinMarker] {
-        guard pinsVisible, original == nil, !holdingOriginal else { return [] }
+        guard pinsVisible, !imageOnly, original == nil, !holdingOriginal else { return [] }
         return pins.enumerated().compactMap { index, pin in
             guard var source = pin.source else { return nil }
             if let pendingResize, pendingResize.index == index { source.radius = pendingResize.radius }
@@ -87,7 +87,17 @@ import UniformTypeIdentifiers
     }
 
     /// The panel shows with a photograph, except while cropping.
-    var showsZonePanel: Bool { source != nil && !cropping && !gridVisible }
+    var showsZonePanel: Bool { source != nil && !cropping && !gridVisible && !imageOnly }
+
+    /// F: nothing in the window but the photograph and its camera details. The
+    /// grid and cropping bring their own controls back while they're up.
+    var imageOnly: Bool { imageOnlyChosen && source != nil && !cropping && !gridVisible }
+    private var imageOnlyChosen = false
+
+    func toggleImageOnly() {
+        guard source != nil, !cropping, !gridVisible else { return }
+        imageOnlyChosen.toggle()
+    }
 
     /// The window is full screen, where the status bar carries its title.
     var windowFullScreen = false

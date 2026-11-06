@@ -185,19 +185,22 @@ struct EditorCanvas: View {
                         }
                 }
                 .coordinateSpace(name: ZonePanel.coordinateSpace)
-                if model.filmstripVisible, let source = model.source {
+                if model.filmstripVisible, !model.imageOnly, let source = model.source {
                     PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
                 }
             }
-            if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
+            if !model.imageOnly, model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
                 EdgeLine(horizontal: true)
                 StatusBar(model: model)
             }
         }
+        // With nothing else showing, the photograph centres in the whole window.
+        .ignoresSafeArea(edges: model.imageOnly ? .top : [])
         // Under the toolbar too, which the content otherwise stops short of.
         .background(Color.black.ignoresSafeArea())
         .environment(\.colorScheme, .dark)
-        .overlay(alignment: .top) { EdgeLine(horizontal: true) }
+        // Only under a title bar, so not in full screen.
+        .overlay(alignment: .top) { if !model.windowFullScreen && !model.imageOnly { EdgeLine(horizontal: true) } }
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
@@ -245,8 +248,8 @@ struct InspectorPanel: View {
         .environment(\.colorScheme, .dark)
         // The edge the film strip has on top, down the left.
         .overlay(alignment: .leading) { EdgeLine(horizontal: false) }
-        // The line under the toolbar, which continues the canvas's.
-        .overlay(alignment: .top) { EdgeLine(horizontal: true) }
+        // The line under the title bar, which continues the canvas's.
+        .overlay(alignment: .top) { if !model.windowFullScreen { EdgeLine(horizontal: true) } }
     }
 }
 
