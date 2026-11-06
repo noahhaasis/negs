@@ -155,7 +155,7 @@ colours 8-bit sRGB `#rrggbb`. Export and Save Preview add them only when
 rotation. Both sides share the same proportional geometry; `BorderTests` pins
 the Swift sizes to the Rust tests' values.
 
-Crop (toolbar crop button, ⌘K) is presentation only as well. Crop mode shows
+Crop (⌘K) is presentation only as well. Crop mode shows
 the whole developed photograph without its border, with a dimmed outside,
 corner and edge handles, a thirds grid while dragging, and an inspector panel
 for Original (the default), Freeform, Square, 16:9, 3:2, 4:3, 5:4, 7:5, and
@@ -277,7 +277,7 @@ preview: the preview already shows the other pins' curve.
 
 Because Post runs on the clipped scan, a pin shapes the tones the film produced
 but cannot recover a highlight that clipped; the exposure controls do that. Tab, or
-the Pins button in the toolbar's view group, hides the pins and lines but keeps their
+hides the pins and lines but keeps their
 effect and the panel, to judge the photograph clean. Dropping a zone shows them again. A preset neither carries nor
 replaces a photograph's pins, a session restores them, and opening another file
 starts with none.
@@ -312,12 +312,13 @@ A fitted photograph leaves room for them; a file with no details leaves none.
 
 ## Amber on black
 
-The window, toolbar, sidebar, status bar and default viewer are black, in dark appearance
+The window, sidebar, status bar and default viewer are black, in dark appearance
 whatever the system's. Amber, the film's edge-print colour (`EdgePrint`), is the accent
-throughout: sidebar text, sliders, selected tiles and pins, hairlines, and toolbar icons,
-dimmed when off and full when on. A custom viewer colour and Proof's white stay as chosen.
-In full screen the system backs the window title in grey, so it comes off there and the
-status bar carries the file name and stock instead.
+throughout: sidebar text, sliders, selected tiles and pins, and hairlines. A custom viewer colour and Proof's white stay as chosen.
+In full screen the title bar hides, so the status bar carries the file name and stock.
+
+There's no toolbar: everything is in the menus with its shortcut. A switch at the top of the
+sidebar swaps Adjustments and Presets, and the crop panel has its own Cancel and Done.
 
 ## Moving between photographs
 
@@ -348,7 +349,7 @@ nothing develops twice. Those within 32 of the middle stay decoded in memory.
 
 ## Proof
 
-P, the Proof button in the toolbar's view group, or Settings › Viewer shows the
+P or Settings › Viewer shows the
 photograph at the size it will export, one export pixel to a screen pixel, on white
 in place of the border. Only the export's settings set that size (`proofPixels`):
 the window's size doesn't, and zooming is off. Proof never changes the window, whose
@@ -486,7 +487,7 @@ automated fixture tests do not establish those qualities or a 60 fps guarantee.
 The film strip below the canvas lists JPEG, PNG, TIFF and supported RAW files
 from the current photograph's folder in Finder-style filename order. Click a
 thumbnail to open it with the current adjustments (crop and rotation reset,
-as with Open). The toolbar's bottom-panel button and View > Show/Hide Film
+as with Open). View > Show/Hide Film
 Strip (⌥⌘F) toggle it; visibility is remembered between launches. During crop
 editing the strip is disabled until Done or Cancel.
 

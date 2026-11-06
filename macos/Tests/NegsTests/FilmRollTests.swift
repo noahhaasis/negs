@@ -43,10 +43,10 @@ final class FilmRollTests: XCTestCase {
         XCTAssertGreaterThan(gate.width, gate.height)
     }
 
-    /// As on a real roll, landscape frames sit upright and portrait ones lie on their side.
-    func testPortraitFramesLieOnTheirSide() {
-        XCTAssertFalse(FilmRollLayout.liesOnItsSide(CGSize(width: 600, height: 400)))
-        XCTAssertTrue(FilmRollLayout.liesOnItsSide(CGSize(width: 400, height: 600)))
+    /// Photographs are never turned: landscape fills the gate, portrait stands in it.
+    func testPortraitFramesStandUpright() {
+        XCTAssertTrue(FilmRollLayout.fillsTheGate(CGSize(width: 600, height: 400)))
+        XCTAssertFalse(FilmRollLayout.fillsTheGate(CGSize(width: 400, height: 600)))
     }
 
     /// Blank frames carry a short roll past the strip's end, and a long one needs none.

@@ -16,18 +16,15 @@ import SwiftUI
     }
 }
 
-/// The editing window: a unified toolbar over the canvas and a trailing
-/// inspector column. The window, toolbar, and columns are AppKit; the canvas
+/// The editing window: the canvas and a trailing inspector column, with no
+/// toolbar: everything's in the menus. The window and columns are AppKit; the canvas
 /// and inspector contents are SwiftUI. They follow the model through
 /// Observation, like the views.
-@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate {
+@MainActor final class EditorWindowController: NSWindowController {
     private let model: EditorModel
     private let inspector: NSSplitViewItem
     private let canvasItem: NSSplitViewItem
     private let panel: NSHostingController<InspectorPanel>
-    private var items: [NSToolbarItem.Identifier: NSToolbarItem] = [:]
-    private lazy var cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelCrop))
-    private lazy var doneButton = NSButton(title: "Done", target: self, action: #selector(applyCrop))
     private var collapsing: NSKeyValueObservation?
     private var appearing: NSObjectProtocol?
     private var resigning: NSObjectProtocol?
@@ -55,7 +52,7 @@ import SwiftUI
         inspector.minimumThickness = 340
         inspector.maximumThickness = 440
         inspector.isCollapsed = !model.inspectorVisible
-        // One toolbar across the window, with the sidebar below it.
+        // Below the title bar, across the window.
         inspector.allowsFullHeightLayout = false
         let split = NSSplitViewController()
         split.addSplitViewItem(canvasItem)
@@ -65,8 +62,7 @@ import SwiftUI
         let window = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: true)
         window.title = "Negs"
-        window.toolbarStyle = .unified
-        // Black from edge to edge, the title bar and toolbar too.
+        // Black from edge to edge, the title bar too.
         NSApp.appearance = NSAppearance(named: .darkAqua)
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = .black
@@ -89,13 +85,8 @@ import SwiftUI
         super.init(window: window)
         shouldCascadeWindows = false
 
-        let toolbar = NSToolbar(identifier: "editor")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        // The view/edit controls lead from the left; the actions group trails.
-        window.toolbar = toolbar
         model.undoManager = window.undoManager
-        // Dragging the inspector closed hides the adjustments, like the toolbar button.
+        // Dragging the inspector closed hides the adjustments, like the menu command.
         collapsing = inspector.observe(\.isCollapsed) { [weak self] item, _ in
             MainActor.assumeIsolated {
                 guard let self, self.model.inspectorVisible == item.isCollapsed else { return }
@@ -111,8 +102,7 @@ import SwiftUI
                 return self.holdOriginal(event) || self.togglePins(event) || self.toggleProofKey(event) || self.toggleGridKey(event)
             } ? nil : event
         }
-        // In full screen the system backs the title in grey, on the black toolbar,
-        // so it comes off and the status bar carries it instead.
+        // The title bar hides in full screen, so the status bar carries the title there.
         fullScreenObservers = [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.willExitFullScreenNotification, false)].map { name, entering in
             NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
@@ -225,175 +215,6 @@ import SwiftUI
         let photo = model.source != nil
         window.title = model.source?.lastPathComponent ?? "Negs"
         window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
-        showCropActions(model.cropping)
-        if let item = items[.filmstrip] {
-            item.toolTip = model.filmstripVisible ? "Hide film strip (⌥⌘F)" : "Show film strip (⌥⌘F)"
-            let icon = symbol("rectangle.bottomthird.inset.filled", "Film Strip")
-            item.image = model.filmstripVisible
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour])) : icon
-        }
-        if let item = items[.zones] {
-            item.toolTip = model.pinsVisible ? "Hide the pins and lines (Tab)" : "Show the pins and lines (Tab)"
-            let icon = symbol("circle.lefthalf.filled", "Pins")
-            item.image = model.pinsVisible
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour])) : icon
-        }
-        setEnabled(.zones, photo && !model.cropping)
-        if let item = items[.proof] {
-            item.toolTip = model.proofing ? "Stop proofing (P)" : "Proof at the export size (P)"
-            let icon = symbol("photo.artframe", "Proof")
-            item.image = model.proofing
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour])) : icon
-        }
-        setEnabled(.proof, photo && !model.cropping)
-        setEnabled(.fit, model.canZoom)
-        setEnabled(.actualSize, model.canZoom)
-        setEnabled(.rotate, photo)
-        setEnabled(.crop, model.image != nil)
-        if let crop = items[.crop] {
-            crop.toolTip = model.cropping ? "Apply the crop (⌘K)" : "Crop the photograph (⌘K)"
-            // The accent color marks crop mode as on.
-            crop.image = model.cropping
-                ? symbol("crop", "Crop").withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour]))
-                : symbol("crop", "Crop")
-        }
-        setEnabled(.export, photo && model.ready && !model.exporting && !model.saving && !model.cropping)
-        // The accent color marks the panel the inspector column shows.
-        for (id, pane, name, label) in [(NSToolbarItem.Identifier.adjustments, InspectorPane.adjustments, "slider.horizontal.3", "Adjustments"),
-                                        (.presets, .presets, "square.stack", "Presets")] {
-            let icon = symbol(name, label)
-            items[id]?.image = model.inspectorVisible && model.inspectorPane == pane
-                ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour])) : icon
-        }
-        // A ratio field being edited keeps its own Return and Escape.
-        if let session = model.cropSession {
-            cancelButton.keyEquivalent = session.typing ? "" : "\u{1b}"
-            doneButton.keyEquivalent = session.typing ? "" : "\r"
-        }
         if inspector.isCollapsed == model.inspectorVisible { inspector.animator().isCollapsed = !model.inspectorVisible }
     }
-
-    private func setEnabled(_ id: NSToolbarItem.Identifier, _ enabled: Bool) {
-        guard let item = items[id] else { return }
-        item.isEnabled = enabled
-        (item as? NSToolbarItemGroup)?.subitems.forEach { $0.isEnabled = enabled }
-    }
-
-    /// While cropping, Cancel and Done sit beside the actions group and Export
-    /// is disabled there; the group itself keeps its rounded capsule.
-    private func showCropActions(_ cropping: Bool) {
-        guard let toolbar = window?.toolbar else { return }
-        let ids = toolbar.items.map(\.itemIdentifier)
-        if cropping, !ids.contains(.doneCrop), let i = ids.firstIndex(of: .actions) {
-            toolbar.insertItem(withItemIdentifier: .doneCrop, at: i + 1)
-            toolbar.insertItem(withItemIdentifier: .cancelCrop, at: i + 1)
-        } else if !cropping, let i = ids.firstIndex(of: .cancelCrop) {
-            toolbar.removeItem(at: i + 1)
-            toolbar.removeItem(at: i)
-        }
-    }
-
-    // MARK: Toolbar
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.controls, .flexibleSpace, .actions]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [.cancelCrop, .doneCrop]
-    }
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        let item: NSToolbarItem
-        switch id {
-        case .controls:
-            // Native rounded toolbar group: open, film strip and the view/edit
-            // controls share one capsule, as in Photos.
-            let group = NSToolbarItemGroup(itemIdentifier: id)
-            group.subitems = [button(.open, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph)),
-                              button(.filmstrip, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip)),
-                              button(.zones, "Pins", "circle.lefthalf.filled", "Show or hide the pins and lines (Tab)", #selector(toggleZones)),
-                              button(.proof, "Proof", "photo.artframe", "Proof at the export size (P)", #selector(toggleProofButton)),
-                              button(.fit, "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
-                              button(.actualSize, "Actual Size", "1.magnifyingglass", "Actual size (⌘1)", #selector(actualSize)),
-                              button(.rotate, "Rotate", "rotate.right", "Rotate clockwise (⌘R)", #selector(rotateClockwise)),
-                              button(.crop, "Crop", "crop", "Crop the photograph (⌘K)", #selector(toggleCrop))]
-            group.label = "View"
-            group.controlRepresentation = .expanded
-            group.selectionMode = .momentary
-            item = group
-        case .actions:
-            let group = NSToolbarItemGroup(itemIdentifier: id)
-            group.subitems = [button(.export, "Export", "square.and.arrow.down", "Export photograph (⇧⌘E)", #selector(export)),
-                              button(.presets, "Presets", "square.stack", "Show or hide presets (⌥⌘P)", #selector(togglePresets)),
-                              button(.adjustments, "Adjustments", "slider.horizontal.3", "Show or hide adjustments (⌥⌘I)", #selector(toggleAdjustments))]
-            group.label = "Actions"
-            group.controlRepresentation = .expanded
-            group.selectionMode = .momentary
-            item = group
-        case .cancelCrop:
-            item = NSToolbarItem(itemIdentifier: id)
-            item.view = cancelButton; item.label = "Cancel"; item.toolTip = "Discard the crop (Esc)"
-        case .doneCrop:
-            item = NSToolbarItem(itemIdentifier: id)
-            item.view = doneButton; item.label = "Done"; item.toolTip = "Apply the crop (Return)"
-            // The confirming action is filled with the accent color. The style
-            // needs the macOS 26 SDK, which release CI's Xcode 16 lacks.
-            #if compiler(>=6.2)
-            if #available(macOS 26, *) { item.style = .prominent } else { doneButton.bezelColor = EdgePrint.colour }
-            #else
-            doneButton.bezelColor = EdgePrint.colour
-            #endif
-        default:
-            return nil
-        }
-        // Enabled from the model's state in update(), not by validation.
-        item.autovalidates = false
-        (item as? NSToolbarItemGroup)?.subitems.forEach { $0.autovalidates = false }
-        items[id] = item
-        return item
-    }
-
-    private func button(_ id: NSToolbarItem.Identifier, _ label: String, _ symbolName: String, _ help: String, _ action: Selector) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: id)
-        item.label = label
-        item.image = symbol(symbolName, label)
-        item.toolTip = help
-        item.isBordered = true
-        item.target = self
-        item.action = action
-        // A group's subitems are not returned to `toolbar(_:itemForItemIdentifier:)`
-        // by identifier, so keep them for enabled-state and icon updates.
-        items[id] = item
-        return item
-    }
-
-    /// Amber on black, dimmed: a control that's on shows it at full strength.
-    private func symbol(_ name: String, _ description: String) -> NSImage {
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: description) ?? NSImage()
-        return image.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [EdgePrint.colour.withAlphaComponent(0.6)])) ?? image
-    }
-
-    // MARK: Actions
-
-    @objc private func openPhotograph() { model.openPanel() }
-    @objc private func fit() { model.zoom(fit: true) }
-    @objc private func actualSize() { model.zoom(fit: false) }
-    @objc private func rotateClockwise() { model.rotate() }
-    @objc private func toggleCrop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
-    @objc private func cancelCrop() { model.endCrop(apply: false) }
-    @objc private func applyCrop() { model.endCrop(apply: true) }
-    @objc private func export() { model.savePanel(export: true) }
-    @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
-    @objc private func toggleZones() { model.pinsVisible.toggle() }
-    @objc private func toggleProofButton() { model.proofing.toggle() }
-    @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
-    @objc private func togglePresets() { model.togglePane(.presets) }
-}
-
-private extension NSToolbarItem.Identifier {
-    static let controls = Self("controls"), actions = Self("actions")
-    static let filmstrip = Self("filmstrip"), open = Self("open"), zones = Self("zones"), proof = Self("proof")
-    static let fit = Self("fit"), actualSize = Self("actualSize"), rotate = Self("rotate"), crop = Self("crop")
-    static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
 }

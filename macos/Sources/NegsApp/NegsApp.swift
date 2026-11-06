@@ -228,8 +228,13 @@ struct InspectorPanel: View {
         Group {
             if !built { Color.clear }
             else if let session = model.cropSession { CropInspector(model: model, session: session) }
-            else if model.inspectorPane == .presets { PresetInspector(model: model) }
-            else { AdjustmentInspector(model: model) }
+            else {
+                VStack(spacing: 0) {
+                    PaneSwitch(model: model)
+                    if model.inspectorPane == .presets { PresetInspector(model: model) }
+                    else { AdjustmentInspector(model: model) }
+                }
+            }
         }
         .scrollContentBackground(.hidden)
         // Black, whatever the viewer's colour, with amber on it throughout.
@@ -242,6 +247,30 @@ struct InspectorPanel: View {
         .overlay(alignment: .leading) { EdgeLine(horizontal: false) }
         // The line under the toolbar, which continues the canvas's.
         .overlay(alignment: .top) { EdgeLine(horizontal: true) }
+    }
+}
+
+/// Swaps the sidebar between the adjustments and the presets.
+struct PaneSwitch: View {
+    let model: EditorModel
+
+    var body: some View {
+        HStack(spacing: 18) {
+            ForEach([(InspectorPane.adjustments, "Adjustments"), (.presets, "Presets")], id: \.1) { pane, title in
+                let selected = model.inspectorPane == pane
+                Button { model.showPane(pane) } label: {
+                    Text(title)
+                        .font(Font(EdgePrint.font(size: 15)))
+                        .foregroundStyle(EdgePrint.amber.opacity(selected ? 1 : 0.5))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
     }
 }
 

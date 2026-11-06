@@ -338,25 +338,6 @@ extension ZoneModelTests {
         XCTAssertFalse(model.canPlaceZones)
     }
 
-    /// The toolbar's Pins button, in the group with zoom and crop, does what Z does.
-    func testTheToolbarButtonTogglesThePins() async throws {
-        let model = try await makeModel()
-        let saved = UserDefaults.standard.object(forKey: "showTonePins")
-        defer {
-            model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "showTonePins")
-        }
-        let controller = EditorWindowController(model: model)
-        let toolbar = try XCTUnwrap(controller.window?.toolbar)
-        let groups = toolbar.items.compactMap { $0 as? NSToolbarItemGroup }
-        let group = try XCTUnwrap(groups.first { $0.subitems.contains { $0.label == "Crop" } })
-        let button = try XCTUnwrap(group.subitems.first { $0.label == "Pins" })
-        let before = model.pinsVisible
-        _ = (button.target as AnyObject).perform(button.action)
-        XCTAssertNotEqual(model.pinsVisible, before)
-        XCTAssertTrue(model.showsZonePanel)
-    }
-
     /// Through a real window: the proof is the export's size whatever happens,
     /// and nothing changes the window's size or position, which stays the user's.
     func testAProofNeverTouchesTheWindowOrResizesThePhotograph() async throws {
@@ -805,6 +786,22 @@ extension ZoneModelTests {
         second.invalidate(ramp)
         try await waitUntil { second.developedCount == 1 && abs(mean(second.frames[ramp]!) - before) > 0.1 }
         XCTAssertEqual(second.developedCount, 1)
+    }
+
+    /// There's no toolbar. The sidebar's switch reaches the presets, and crop has
+    /// its own Done and Cancel.
+    func testTheWindowHasNoToolbar() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let saved = UserDefaults.standard.object(forKey: "inspectorPane")
+        defer { UserDefaults.standard.set(saved, forKey: "inspectorPane") }
+        model.showPane(.adjustments)
+        let (_, window, _) = try await openRoll(model)
+        defer { window.orderOut(nil) }
+        XCTAssertNil(window.toolbar)
+        model.showPane(.presets)
+        XCTAssertEqual(model.inspectorPane, .presets)
+        model.showPane(.adjustments)
     }
 
     /// In a real window: four photographs across, each developing with its own

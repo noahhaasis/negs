@@ -655,6 +655,25 @@ struct CropInspector: View {
     @FocusState private var field: Bool
 
     var body: some View {
+        VStack(spacing: 0) {
+            form
+            // A ratio field being edited keeps its own Return and Escape.
+            HStack(spacing: 10) {
+                Button("Cancel") { model.endCrop(apply: false) }
+                    .keyboardShortcut(session.typing ? nil : .cancelAction)
+                    .frame(maxWidth: .infinity)
+                Button("Done") { model.endCrop(apply: true) }
+                    .keyboardShortcut(session.typing ? nil : .defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+            }
+            .controlSize(.large)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+        }
+    }
+
+    private var form: some View {
         Form {
             Section("Aspect Ratio") {
                 Picker("Aspect ratio", selection: Binding(get: { session.aspect }, set: session.choose)) {

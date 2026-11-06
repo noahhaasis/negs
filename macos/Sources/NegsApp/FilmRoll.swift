@@ -25,9 +25,9 @@ enum FilmRollLayout {
                width: window.width * frame.width, height: window.height * frame.height)
     }
 
-    /// A portrait photograph lies on its side on a roll running across, as on
-    /// real film; a landscape one sits upright.
-    static func liesOnItsSide(_ image: CGSize) -> Bool { image.height > image.width }
+    /// A landscape photograph fills the gate. A portrait one is never turned to
+    /// fit: it stands upright in the middle, on black.
+    static func fillsTheGate(_ image: CGSize) -> Bool { image.width >= image.height }
 
     /// How many blank frames keep the film going to the end of a strip
     /// `viewport` long, after `photos` frames.
@@ -331,13 +331,12 @@ struct FilmFrame: View {
         ZStack {
             Color.black
             if let image = embedded {
-                let sideways = FilmRollLayout.liesOnItsSide(CGSize(width: image.width, height: image.height))
+                let fills = FilmRollLayout.fillsTheGate(CGSize(width: image.width, height: image.height))
                 Image(decorative: image, scale: 1)
                     .resizable()
-                    .scaledToFill()
-                    .frame(width: sideways ? gate.height : gate.width, height: sideways ? gate.width : gate.height)
+                    .aspectRatio(contentMode: fills ? .fill : .fit)
+                    .frame(width: gate.width, height: gate.height)
                     .clipped()
-                    .rotationEffect(.degrees(sideways ? -90 : 0))
                     .opacity(FilmRollLayout.photographOpacity(selected: selected))
             }
         }
