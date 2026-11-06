@@ -66,6 +66,15 @@ enum Commands {
         /// Scan film directly (skip printing stage).
         #[arg(long)]
         scan_film: bool,
+        /// The input is a scan of a real colour negative: measure its dyes
+        /// and print them, instead of filming the input as a scene. `--film`
+        /// names the negative's stock. Also `io.negative_scan` in --params.
+        #[arg(long, conflicts_with = "scan_film")]
+        negative_scan: bool,
+        /// The film base's linear transmittance per channel, `r,g,b` (a scan
+        /// of clear film). Default: estimated from the thinnest film.
+        #[arg(long, requires = "negative_scan", value_parser = parse_rgb)]
+        negative_base: Option<[f32; 3]>,
         /// Print per-stage timing information.
         #[arg(long)]
         timings: bool,
@@ -181,6 +190,8 @@ fn main() -> Result<()> {
             film,
             paper,
             scan_film,
+            negative_scan,
+            negative_base,
             timings,
             params: params_file,
             raw_wb,
@@ -228,6 +239,8 @@ fn main() -> Result<()> {
                 &film,
                 paper.as_deref(),
                 scan_film,
+                negative_scan,
+                negative_base,
                 timings,
                 params_file.as_deref(),
                 raw_wb.as_deref(),
@@ -272,6 +285,15 @@ fn read_params(path: &Path) -> Result<RuntimeParams> {
     Ok(params)
 }
 
+/// `r,g,b`: three finite numbers.
+fn parse_rgb(s: &str) -> Result<[f32; 3], String> {
+    let v: Vec<f32> = s.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+    match v[..] {
+        [r, g, b] if v.iter().all(|x| x.is_finite() && *x > 0.0) => Ok([r, g, b]),
+        _ => Err("expected three positive numbers, r,g,b".into()),
+    }
+}
+
 /// `--input-colour`: auto, manual, or a colour space to assume.
 fn parse_input_colour(spec: &str, linear: bool) -> Result<spektrafilm_io::InputInterpretation> {
     use spektrafilm_io::InputInterpretation;
@@ -301,6 +323,8 @@ fn cmd_process(
     film_name: &str,
     paper_name: Option<&str>,
     scan_film: bool,
+    negative_scan: bool,
+    negative_base: Option<[f32; 3]>,
     show_timings: bool,
     params_file: Option<&Path>,
     raw_wb: Option<&str>,
@@ -343,6 +367,15 @@ fn cmd_process(
         RuntimeParams::default()
     };
     params.io.scan_film = scan_film;
+    if negative_scan {
+        params.io.negative_scan.active = true;
+    }
+    if negative_base.is_some() {
+        params.io.negative_scan.base = negative_base;
+    }
+    if params.io.negative_scan.active && params.io.scan_film {
+        bail!("a negative scan is printed; it can't also scan the film directly");
+    }
     if let Some(interpretation) = input_interpretation {
         params.io.input_interpretation = interpretation;
     }

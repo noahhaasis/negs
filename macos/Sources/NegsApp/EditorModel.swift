@@ -438,6 +438,14 @@ import UniformTypeIdentifiers
         apply(next, action: "Change Adjustment")
     }
     func resetValue(_ path: String) { set(path, defaults[path]) }
+    /// A negative scan is printed, so turning it on also stops scanning the film directly.
+    var negativeScan: Binding<Bool> {
+        Binding(get: { self.value(Self.negativeScanPath).bool }, set: { on in
+            var next = self.state; next.params[Self.negativeScanPath] = .bool(on)
+            if on { next.params["io.scan_film"] = .bool(false) }
+            self.apply(next, action: on ? "Read as Negative Scan" : "Read as Photograph")
+        })
+    }
     func number(_ path: String, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
         Binding(get: { self.value(path).double }, set: { self.set(path, .number(Self.snap($0, to: range, step: step))) })
     }
@@ -569,9 +577,14 @@ import UniformTypeIdentifiers
     }
     /// Keeps the border, crop, and Image Size's Longest side, like the film,
     /// paper, and rotation.
+    /// Read the photograph as a scan of a real negative (`io.negative_scan`).
+    nonisolated static let negativeScanPath = "io.negative_scan.active"
+
     func reset() {
         guard !cropping else { return }
         var next = state; next.params = defaults
+        // How the photograph is read, like the film and paper, isn't an adjustment.
+        next.params[Self.negativeScanPath] = state.params[Self.negativeScanPath]
         next.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
         next.params[ImageSize.targetPath] = state.params[ImageSize.targetPath]
@@ -764,7 +777,8 @@ import UniformTypeIdentifiers
             if freshEditsForNewPhotos {
                 // Film/paper and output preferences belong to the workflow;
                 // the previous photograph's Prep, Lab and Post edits do not.
-                let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"]
+                // A roll of negative scans stays a roll of negative scans.
+                let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding", Self.negativeScanPath]
                 let retained = retainedPaths.map { ($0, state.params[$0]) }
                 state.params = defaults
                 for (path, value) in retained where value != .null { state.params[path] = value }

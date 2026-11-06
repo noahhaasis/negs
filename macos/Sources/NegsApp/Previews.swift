@@ -34,6 +34,8 @@ enum PreviewRules {
     static func pairFilm(in state: inout EditState, stocks: [Stock], paper: Bool = true) {
         guard let film = stocks.first(where: { !$0.paper && $0.id == state.film }) else { return }
         state.params["io.scan_film"] = .bool(film.positive)
+        // A slide is a positive: there's no negative to print.
+        if film.positive { state.params[EditorModel.negativeScanPath] = .bool(false) }
         if paper, stocks.contains(where: { $0.paper && $0.id == film.target }), state.paper != film.target {
             state.paper = film.target; state.params["print_render.development_time"] = .null
         }

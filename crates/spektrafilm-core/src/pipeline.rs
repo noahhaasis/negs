@@ -819,6 +819,9 @@ impl Pipeline {
         image: ImageBuf,
         backend: &'a dyn ComputeBackend,
     ) -> Result<(ImageBuf, &'a str), SizeError> {
+        if self.params.io.negative_scan.active {
+            return self.process_negative_scan(image, backend);
+        }
         let stage_timings = stage_timings_enabled();
         // Working-resolution rescale (Image Size, or the legacy
         // io.upscale_factor) — mirrors Python's ResizingService.crop_and_rescale.
@@ -940,6 +943,77 @@ impl Pipeline {
             result
         };
         Ok((result, backend.name()))
+    }
+
+    /// Negative scan input ([`crate::negative_scan`]): measure the dyes of
+    /// the real negative in `image` and print and scan them, in place of
+    /// filming a scene. The base and the frame's median come from the whole
+    /// photograph's metering frame, so a reduced preview and the export agree.
+    fn process_negative_scan<'a>(
+        &self,
+        image: ImageBuf,
+        backend: &'a dyn ComputeBackend,
+    ) -> Result<(ImageBuf, &'a str), SizeError> {
+        let t = Instant::now();
+        let mut metering = self
+            .metering_preview
+            .clone()
+            .unwrap_or_else(|| stages::filming::metering_preview(&image));
+        stages::filming::decode_input_cctf(&mut metering, &self.params);
+        let model = crate::negative_scan::NegativeModel::measure(&self.film, &self.params.io.negative_scan, &metering);
+        tracing::info!(base = ?model.base, shift = ?model.shift, midgray = ?model.midgray, "pipeline: negative scan measured");
+
+        let mut image = self.rescale_working(image)?;
+        stages::filming::decode_input_cctf(&mut image, &self.params);
+        model.apply(&mut image);
+        print_stage_timing(stage_timings_enabled(), "negative_scan", t);
+
+        static CPU: spektrafilm_gpu::cpu_backend::CpuBackend = spektrafilm_gpu::cpu_backend::CpuBackend;
+        let mut backend = backend;
+        if let Err(reason) = backend.image_capacity(image.width, image.height) {
+            tracing::warn!(%reason, "GPU capacity exceeded; rendering on CPU");
+            backend = &CPU;
+        }
+        Ok((self.print_film_density(image, model.midgray, backend), backend.name()))
+    }
+
+    /// Print and scan dye amounts (`develop`'s output scale), calibrating the
+    /// enlarger on `midgray_cmy` the way [`Self::compute_print_exposure_factor`]
+    /// calibrates on a simulated grey card.
+    fn print_film_density(&self, cmy_film: ImageBuf, midgray_cmy: [f64; 3], backend: &dyn ComputeBackend) -> ImageBuf {
+        let channel_density = &self.film.data.channel_density;
+        let base = crate::bases::film_base_density(&self.film, &self.params);
+        let n_wl = channel_density.len().min(spektrafilm_math::spectral::N_WAVELENGTHS);
+        let density_spectral: Vec<f64> = (0..n_wl)
+            .map(|wl| {
+                let mut d: f64 = (0..3)
+                    .map(|c| channel_density[wl].get(c).copied().filter(|v| v.is_finite()).unwrap_or(0.0) * midgray_cmy[c])
+                    .sum();
+                d += base.get(wl).copied().filter(|v| v.is_finite()).unwrap_or(0.0);
+                d
+            })
+            .collect();
+        let factor = enlarger::compute_exposure_factor(&density_spectral, &self.print_illuminant, &self.print_sensitivity);
+        let color_ref = crate::color_reference::ColorReference::compute(
+            &self.film,
+            &self.print,
+            &self.params,
+            &self.print_illuminant,
+            factor,
+            self.preflash_raw,
+        );
+        let printed = stages::printing::process_with_calibration(
+            cmy_film,
+            &self.film,
+            &self.print,
+            &self.params,
+            backend,
+            &self.print_illuminant,
+            factor,
+            self.preflash_raw,
+            color_ref.printing_exposure_correction,
+        );
+        stages::scanning::process(printed, &self.print, &self.params, backend, &color_ref, &self.output_gamut)
     }
 
     /// The CPU chain on a small image, keeping its taps: the film's log10
@@ -1107,6 +1181,11 @@ impl Pipeline {
         backend: &dyn ComputeBackend,
         run: impl FnOnce(&spektrafilm_gpu::FilmChainParams<'_>) -> Option<T>,
     ) -> Option<T> {
+        // The resident chain starts with the filming stage, which a negative
+        // scan skips; callers fall back to `process_with_backend`.
+        if self.params.io.negative_scan.active {
+            return None;
+        }
         self.tc_lut.as_ref()?;
         let io = &self.params.io;
         if io.photo_long_side_px.is_some() || (io.upscale_factor - 1.0).abs() >= 1e-6 {

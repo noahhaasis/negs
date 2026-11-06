@@ -9,6 +9,7 @@ enum ControlHelp {
     static func group(_ title: String) -> String? { groups[title] }
 
     static let film = "The film the photograph is shot on: its colour response, contrast, grain and halation, from the stock’s measured data."
+    static let negativeScan = "Reads the photograph as a scan of a real colour negative shot on this film (a camera or scanner capture, not yet inverted) and prints it on the paper, instead of filming the photograph as a scene."
     static let paper = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless Settings › Keep paper when changing film is on."
 
     private static let paths: [String: String] = [
@@ -32,6 +33,11 @@ enum ControlHelp {
         "io.input_interpretation.linear": "The file holds linear values, without the colour space’s curve.",
         "io.input_color_space": "The colour space the file’s values are in.",
         "io.input_cctf_decoding": "Decodes the colour space’s curve (its gamma) to linear light. Turn it off for files that are already linear.",
+
+        // Lab: negative scan
+        "io.negative_scan.auto_color": "Balances the negative so the photograph’s median prints neutral, like dialling in a colour filter pack. 0 keeps the colour the film base and stock give.",
+        "io.negative_scan.auto_density": "0 prints the negative as a correctly exposed one: the film’s mid-grey density prints mid-grey, so a dark scene stays dark. 1 prints the photograph’s median as mid-grey. Print exposure adjusts either.",
+        "io.negative_scan.unmix": "Corrects each colour channel’s reading of the other two dyes, from the film’s dye spectra. Lower it if colours look too strong.",
 
         // Lab: camera
         "camera.exposure_compensation_ev": "Over- or underexposes the film. With Enlarger › Exposure compensation on (the default), the print makes up for it: mid-tones keep their brightness while the negative’s density, grain and highlight and shadow detail change. To make the photograph brighter, use Prep › Exposure.",

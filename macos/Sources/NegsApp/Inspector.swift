@@ -29,6 +29,11 @@ enum InspectorTab: String, CaseIterable {
     case prep = "Prep", lab = "Lab", output = "Output"
 }
 
+let negativeScanControls: [Adjustment] = [
+    .slider("Auto colour", "io.negative_scan.auto_color", 0...1, 0.01),
+    .slider("Auto density", "io.negative_scan.auto_density", 0...1, 0.01),
+    .slider("Dye unmixing", "io.negative_scan.unmix", 0...1, 0.01)
+]
 let prepToneControls: [Adjustment] = [
     .slider("Highlights", "prep.highlights", -180...100, 1),
     .slider("Shadows", "prep.shadows", -100...100, 1),
@@ -624,7 +629,14 @@ struct AdjustmentInspector: View {
             Divider()
             Form {
                 switch tab {
-                case .prep: prep
+                case .prep:
+                    if model.value(EditorModel.negativeScanPath).bool {
+                        Section {
+                            Text("Prep shapes the scene before the film. A negative scan is already film, so Prep is skipped; use the Lab’s Negative Scan and Print controls.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    prep.disabled(model.value(EditorModel.negativeScanPath).bool)
                 case .lab: lab
                 case .output: output
                 }
@@ -716,6 +728,9 @@ struct AdjustmentInspector: View {
             }
             developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development",
                             help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
+            Toggle("Negative scan", isOn: model.negativeScan)
+                .disabled(model.films.first { $0.id == model.film }?.positive ?? false)
+                .help(ControlHelp.negativeScan)
             if !scanning {
                 if model.previews.enabled {
                     StockFoldout(model: model, paper: true)
@@ -746,16 +761,27 @@ struct AdjustmentInspector: View {
 
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
+        let negative = model.value(EditorModel.negativeScanPath).bool
+        if negative {
+            Section {
+                ForEach(negativeScanControls) { control($0) }
+            } header: { Text("Negative Scan") } footer: {
+                Text("The photograph is read as a scan of a real \(model.filmName) negative: its base is found from the thinnest film and its dyes are printed on the paper below. Camera and Film are skipped.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
         Section("Camera") {
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
             FilmFormatPicker(model: model)
             if shows("camera.lens_blur_um") { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
             groups(.camera)
         }
+        .disabled(negative)
         Section("Film") { groups(.film) }
+            .disabled(negative)
         Section {
             // Here rather than beside the stocks: few photographs want it.
-            if allControls || scanning {
+            if (allControls || scanning) && !negative {
                 Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
                     .help("Skip printing and scan the developed film, as for slides.")
             }
