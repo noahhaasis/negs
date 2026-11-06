@@ -127,13 +127,6 @@ import UniformTypeIdentifiers
         if url != source { open(url) }
     }
 
-    /// The current film's strip artwork, small enough for frames.
-    func loadRollStrip() async -> FilmStrip? {
-        guard let data = dataDirectory else { return nil }
-        let film = film
-        return await Task.detached(priority: .utility) { FilmStrip.load(data: data, film: film, format: .full, maxPixelSize: 720) }.value
-    }
-
     /// The helper request for a photograph as it would open: the open one as it
     /// is now, or its saved edit, or what an unedited one starts with.
     func frameRequest(for url: URL) -> (command: [String: JSONValue], turns: Int)? {

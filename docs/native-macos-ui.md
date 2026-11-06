@@ -282,19 +282,13 @@ effect and the panel, to judge the photograph clean. Dropping a zone shows them 
 replaces a photograph's pins, a session restores them, and opening another file
 starts with none.
 
-## Film roll
+## Film strip
 
-The film strip shows the photograph's folder as one roll of 35mm film, running across
-under the photograph with nothing around it. Each frame is the current film's strip
-artwork (`data/borders/35mm/full`, loaded small), with frames butted so the perforations
-run on. Landscape photographs sit upright and portrait ones lie on their side, as on real
-film, cropped to fill the gate. Still films' frames carry their place in the folder over
-the artwork's fixed number; cine and print films keep their own edge text. A short folder's
-roll carries on with blank, numbered frames to the end of the window.
-
-Dragging the strip's top edge sets its height, from 90 to 300 points and remembered; the
-canvas gives way and the window stays put. Settings › Film Strip can limit it to the folder's RAW files. The open photograph is at full brightness and the others are dimmed to 50 %. Clicking and
-dragging anywhere on the film scrolls it (`FilmRollScroller`), and it coasts on from a
+The film strip shows the photograph's folder as a row of photographs on black, under the
+photograph, never turned: a portrait one stands upright in its 3:2 space. Dragging the
+strip's top edge sets its height, from 90 to 300 points and remembered; the canvas gives way
+and the window stays put. Settings › Film Strip can limit it to the folder's RAW files. The open photograph is at full brightness and the others are dimmed to 50 %. Clicking and
+dragging anywhere on it scrolls it (`FilmRollScroller`), and it coasts on from a
 flick, slowing at macOS's normal rate (0.998 of its speed kept per millisecond), until a
 press or an end of the roll stops it. A trackpad scrolls it natively. Double-clicking a
 photograph opens it; nothing else on the film does, and it doesn't respond to hovering.

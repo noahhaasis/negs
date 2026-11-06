@@ -1,39 +1,23 @@
 import AppKit
 import SwiftUI
 
-/// The folder as a roll of 35mm film under the photograph, running across as
-/// the strip artwork does.
+/// The folder as a strip under the photograph: its photographs in a row on black.
 enum FilmRollLayout {
-    /// The strip's height, the film and nothing else, until it's dragged.
+    /// The strip's height, until it's dragged.
     static let defaultStripHeight: CGFloat = 180
     static let stripHeightRange: ClosedRange<CGFloat> = 90...300
-    /// The artwork's film base, for frames before it has loaded.
-    static let filmBase = Color(red: 15.0 / 255, green: 13.0 / 255, blue: 12.0 / 255)
-    /// Until the artwork loads: its proportions and gate, from `frames.json`.
-    static let defaultTexture = CGSize(width: 3800, height: 3500)
-    static let defaultWindow = CGRect(x: 0.026316, y: 0.157143, width: 0.947368, height: 0.685714)
+    /// Black between the photographs.
+    static let frameGap: CGFloat = 6
 
-    /// How long one frame is along the roll. Whole points, so nothing shows between frames.
-    static func frameLength(stripHeight: CGFloat, texture: CGSize) -> CGFloat {
-        (stripHeight * texture.width / texture.height).rounded()
+    /// How long one frame is along the strip: a 3:2 photograph and its gap, in
+    /// whole points so frames never drift.
+    static func frameLength(stripHeight: CGFloat) -> CGFloat {
+        ((stripHeight - frameGap) * 3 / 2).rounded() + frameGap
     }
 
-    /// Where the photograph shows, in a frame of `frame`, from the artwork's
-    /// `window` (fractions of it, from its top left).
-    static func gate(window: CGRect, frame: CGSize) -> CGRect {
-        CGRect(x: window.minX * frame.width, y: window.minY * frame.height,
-               width: window.width * frame.width, height: window.height * frame.height)
-    }
-
-    /// A landscape photograph fills the gate. A portrait one is never turned to
-    /// fit: it stands upright in the middle, on black.
-    static func fillsTheGate(_ image: CGSize) -> Bool { image.width >= image.height }
-
-    /// How many blank frames keep the film going to the end of a strip
-    /// `viewport` long, after `photos` frames.
-    static func blankFrames(photos: Int, viewport: CGFloat, frameLength: CGFloat) -> Int {
-        guard frameLength > 0 else { return 0 }
-        return max(0, Int((viewport / frameLength).rounded(.up)) - photos)
+    /// Where the photograph shows in a frame of `frame`.
+    static func gate(frame: CGSize) -> CGRect {
+        CGRect(origin: .zero, size: frame).insetBy(dx: frameGap / 2, dy: frameGap / 2)
     }
 
     /// The photograph at `point` on the film, from the film's top left. Only
@@ -57,11 +41,6 @@ enum FilmRollLayout {
         return min(max(start < offset ? start : end - viewport, 0), maxOffset)
     }
 
-    /// Still films print a frame number, and the artwork's is always the same
-    /// one. Cine and print films have other text in those places.
-    static func printsFrameNumbers(film: String) -> Bool {
-        !(film.hasPrefix("kodak_vision3") || ["kodak_doublex", "kodak_2302", "kodak_2383", "kodak_2393", "kodak_verita_200d"].contains(film))
-    }
 }
 
 /// Moves the strip with a mouse drag, and lets it coast on after a flick, as
@@ -283,37 +262,33 @@ struct FilmMouseSurface: NSViewRepresentable {
     }
 }
 
-/// One frame of the roll: the photograph, with the strip's artwork over it.
+/// One frame of the strip: the photograph, on black, never turned.
 struct FilmFrame: View {
     let height: CGFloat
     let file: PhotoFile
-    /// Its place on the roll, from 1.
-    let number: Int
     let selected: Bool
-    let strip: FilmStrip?
-    let film: String
     let open: () -> Void
     @State private var embedded: CGImage?
     @State private var visible = false
 
     var body: some View {
-        let frame = FilmArtwork.size(strip, height: height)
-        let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: frame)
-        ZStack(alignment: .topLeading) {
-            // Solid film, so nothing behind the roll shows round the gate.
-            FilmRollLayout.filmBase
-            // `FilmMouseSurface` takes the mouse; this is for assistive tools.
-            photograph(in: gate)
-                .offset(x: gate.minX, y: gate.minY)
-                .accessibilityElement()
-                .accessibilityLabel(file.name)
-                .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
-                .accessibilityAction(.default, open)
-            FilmArtwork(height: height, number: number, strip: strip, film: film)
-                .allowsHitTesting(false)
+        let frame = CGSize(width: FilmRollLayout.frameLength(stripHeight: height), height: height)
+        let gate = FilmRollLayout.gate(frame: frame)
+        ZStack {
+            Color.black
+            if let image = embedded {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: gate.width, height: gate.height)
+                    .opacity(FilmRollLayout.photographOpacity(selected: selected))
+            }
         }
-        .frame(width: frame.width, height: frame.height, alignment: .topLeading)
-        .clipped()
+        .frame(width: frame.width, height: frame.height)
+        .accessibilityElement()
+        .accessibilityLabel(file.name)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityAction(.default, open)
         .onAppear { visible = true }
         .onDisappear { visible = false; embedded = nil }
         .task(id: visible ? file : nil) {
@@ -324,110 +299,6 @@ struct FilmFrame: View {
             } onCancel: { request.cancel() }
             guard !Task.isCancelled else { return }
             embedded = result
-        }
-    }
-
-    @ViewBuilder private func photograph(in gate: CGRect) -> some View {
-        ZStack {
-            Color.black
-            if let image = embedded {
-                let fills = FilmRollLayout.fillsTheGate(CGSize(width: image.width, height: image.height))
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .aspectRatio(contentMode: fills ? .fill : .fit)
-                    .frame(width: gate.width, height: gate.height)
-                    .clipped()
-                    .opacity(FilmRollLayout.photographOpacity(selected: selected))
-            }
-        }
-        .frame(width: gate.width, height: gate.height)
-        .clipped()
-    }
-}
-
-/// A frame past the last photograph: the roll carries on, with nothing on it.
-struct BlankFilmFrame: View {
-    var height = FilmRollLayout.defaultStripHeight
-    let number: Int
-    let strip: FilmStrip?
-    let film: String
-
-    var body: some View {
-        let frame = FilmArtwork.size(strip, height: height)
-        let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: frame)
-        ZStack(alignment: .topLeading) {
-            FilmRollLayout.filmBase
-            Color.black
-                .frame(width: gate.width, height: gate.height)
-                .offset(x: gate.minX, y: gate.minY)
-            FilmArtwork(height: height, number: number, strip: strip, film: film)
-                .allowsHitTesting(false)
-        }
-        .frame(width: frame.width, height: frame.height, alignment: .topLeading)
-        .clipped()
-        .accessibilityHidden(true)
-    }
-}
-
-/// The strip's artwork for one frame of the roll.
-private struct FilmArtwork: View {
-    let height: CGFloat
-    let number: Int
-    let strip: FilmStrip?
-    let film: String
-
-    static func size(_ strip: FilmStrip?, height: CGFloat) -> CGSize {
-        CGSize(width: FilmRollLayout.frameLength(stripHeight: height, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture), height: height)
-    }
-
-    var body: some View {
-        let frame = Self.size(strip, height: height)
-        if let strip {
-            ZStack(alignment: .topLeading) {
-                Image(decorative: strip.image, scale: 1)
-                    .resizable()
-                    .frame(width: frame.width, height: frame.height)
-                if FilmRollLayout.printsFrameNumbers(film: film) {
-                    numbers(length: frame.width)
-                }
-            }
-            .frame(width: frame.width, height: frame.height)
-        } else {
-            // Film with its gate cut out, until the artwork loads.
-            let gate = FilmRollLayout.gate(window: FilmRollLayout.defaultWindow, frame: frame)
-            Rectangle()
-                .fill(FilmRollLayout.filmBase)
-                .reverseMask {
-                    Rectangle().frame(width: gate.width, height: gate.height).position(x: gate.midX, y: gate.midY)
-                }
-                .frame(width: frame.width, height: frame.height)
-        }
-    }
-
-    /// This frame's own number over the artwork's: in millimetres along and
-    /// across the 38 × 35 mm strip, where `spektrafilm-io::film35` prints it.
-    @ViewBuilder private func numbers(length: CGFloat) -> some View {
-        let scale = length / 38
-        let label = { (text: String, x: CGFloat, y: CGFloat) in
-            Text(text)
-                .font(Font(EdgePrint.font(size: 1.2 * scale)))
-                .foregroundStyle(Color(nsColor: EdgePrint.colour))
-                .fixedSize()
-                .frame(width: 2.2 * scale, height: 1.4 * scale, alignment: .leading)
-                .background(FilmRollLayout.filmBase)
-                .offset(x: x * scale, y: y * scale - 0.7 * scale)
-        }
-        label("\(number)", 2.3, 1.1)
-        label("\(number)", 2.3, 33.95)
-        label("\(number)A", 21.1, 33.95)
-    }
-}
-
-private extension View {
-    /// Cuts `mask` out of this view.
-    func reverseMask<Mask: View>(@ViewBuilder _ mask: () -> Mask) -> some View {
-        self.mask {
-            Rectangle().overlay { mask().blendMode(.destinationOut) }.compositingGroup()
         }
     }
 }

@@ -136,23 +136,17 @@ struct PhotoBrowser: View {
     let directory: URL
     @State private var listing = FolderListing()
 
-    @State private var strip: FilmStrip?
     @State private var viewport: CGFloat = 0
     @State private var scroller = FilmRollScroller()
 
     var body: some View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
-                ForEach(Array(shown.enumerated()), id: \.element.url) { index, file in
-                    FilmFrame(height: height, file: file, number: index + 1, selected: file.url == model.source, strip: strip, film: model.film) {
+                ForEach(shown, id: \.url) { file in
+                    FilmFrame(height: height, file: file, selected: file.url == model.source) {
                         if file.url != model.source { model.open(file.url) }
                     }
                     .id(file.url)
-                }
-                // A short folder's roll still runs the window's width.
-                let frame = frameLength
-                ForEach(0..<FilmRollLayout.blankFrames(photos: shown.count, viewport: viewport, frameLength: frame), id: \.self) { index in
-                    BlankFilmFrame(height: height, number: shown.count + index + 1, strip: strip, film: model.film)
                 }
             }
             .scrollTargetLayout()
@@ -178,7 +172,7 @@ struct PhotoBrowser: View {
         .overlay {
             FilmMouseSurface(scroller: scroller, enabled: !model.cropping) { point in
                 let frame = CGSize(width: frameLength, height: height)
-                let gate = FilmRollLayout.gate(window: strip?.window ?? FilmRollLayout.defaultWindow, frame: frame)
+                let gate = FilmRollLayout.gate(frame: frame)
                 guard let index = FilmRollLayout.photo(at: point, frame: frame, gate: gate, photos: shown.count),
                       shown[index].url != model.source else { return }
                 model.open(shown[index].url)
@@ -197,7 +191,7 @@ struct PhotoBrowser: View {
             DispatchQueue.main.async { scroller.offset = offset }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewport = $0 }
-        .background(FilmRollLayout.filmBase)
+        .background(Color.black)
         .overlay {
             Group {
                 if listing.loading { ProgressView().controlSize(.small) }
@@ -210,11 +204,8 @@ struct PhotoBrowser: View {
         }
         .disabled(model.cropping)
         .accessibilityLabel("Film Strip")
-        .task(id: "\(model.film) \(model.hasCatalog)") {
-            if let loaded = await model.loadRollStrip() { strip = loaded }
-        }
         .task(id: directory) {
-            // Once the film has its new length.
+            // Once the strip has its new length.
             await listing.watch(directory) { DispatchQueue.main.async { revealOpenPhotograph() } }
         }
     }
@@ -222,7 +213,7 @@ struct PhotoBrowser: View {
     private var height: CGFloat { model.filmstripHeight }
     private var shown: [PhotoFile] { PhotoFolder.shown(listing.files, rawOnly: model.filmstripRawOnly) }
     private var frameLength: CGFloat {
-        FilmRollLayout.frameLength(stripHeight: height, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
+        FilmRollLayout.frameLength(stripHeight: height)
     }
 
     /// The open photograph's frame, if it's wholly out of view. Nothing else

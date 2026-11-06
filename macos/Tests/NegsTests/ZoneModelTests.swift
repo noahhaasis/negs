@@ -466,8 +466,7 @@ extension ZoneModelTests {
             eventNumber: 0, clickCount: clicks, pressure: 1)))
     }
 
-    /// The roll runs across under the photograph, the width of the window, and
-    /// a short folder's film still reaches the end.
+    /// The strip runs across under the photograph, the width of the window.
     func testTheFilmRollSitsUnderThePhotograph() async throws {
         let model = try await makeModel()
         let saved = model.filmstripVisible
@@ -480,7 +479,6 @@ extension ZoneModelTests {
         XCTAssertEqual(inWindow.minX, 0, accuracy: 1)
         XCTAssertLessThanOrEqual(inWindow.maxY, canvas.convert(canvas.bounds, to: nil).minY + 1, "It's under the photograph")
         XCTAssertGreaterThan(inWindow.width, 800)
-        XCTAssertGreaterThanOrEqual(try XCTUnwrap(roll.documentView).frame.width, roll.bounds.width, "With two photographs the film still runs on")
         XCTAssertEqual(canvas.convert(canvas.bounds, to: nil).minX, ZoneGeometry.panelWidth, accuracy: 1)
         let height = canvas.bounds.height
         model.filmstripVisible = false
@@ -498,10 +496,11 @@ extension ZoneModelTests {
         defer { window.orderOut(nil) }
         XCTAssertEqual(model.source, ramp)
         let bounds = roll.convert(roll.bounds, to: nil)
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
         // other.png sorts first, so it's the first frame.
         let photo = CGPoint(x: bounds.minX + frame / 2, y: bounds.midY)
-        let sprockets = CGPoint(x: photo.x, y: bounds.minY + 6)
+        // The gap before the first photograph.
+        let gap = CGPoint(x: bounds.minX + 1, y: bounds.midY)
         func click(_ point: CGPoint, times: Int) async throws {
             for count in 1...times {
                 try send(.leftMouseDown, point, to: window, clicks: count)
@@ -512,8 +511,8 @@ extension ZoneModelTests {
         try await click(photo, times: 1)
         XCTAssertEqual(model.source, ramp, "One click doesn't")
         try await Task.sleep(for: .milliseconds(500))
-        try await click(sprockets, times: 2)
-        XCTAssertEqual(model.source, ramp, "The sprockets don't")
+        try await click(gap, times: 2)
+        XCTAssertEqual(model.source, ramp, "The black around it doesn't")
         try send(.mouseMoved, photo, to: window)
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(model.source, ramp, "Pointing at it doesn't")
@@ -556,7 +555,7 @@ extension ZoneModelTests {
         XCTAssertEqual(canvas.bounds.height, canvasHeight - 60, accuracy: 1, "The canvas gives way")
         XCTAssertEqual(window.frame, frame, "The window stays put")
         XCTAssertEqual(UserDefaults.standard.double(forKey: "filmstripHeight"), 240, accuracy: 0.5)
-        let frameLength = FilmRollLayout.frameLength(stripHeight: 240, texture: FilmRollLayout.defaultTexture)
+        let frameLength = FilmRollLayout.frameLength(stripHeight: 240)
         XCTAssertGreaterThan(try XCTUnwrap(roll.documentView).frame.width, frameLength * 13, "The frames grow with it")
         try await drag(fromY: top(), by: -100)
         XCTAssertEqual(model.filmstripHeight, 140, accuracy: 0.5, "Down")
@@ -593,7 +592,7 @@ extension ZoneModelTests {
         for index in 0..<20 { try Data().write(to: directory.appendingPathComponent("s\(index).DNG")) }
         let (_, window, roll) = try await openRoll(model, photos: 10)
         defer { window.orderOut(nil) }
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
         let document = try XCTUnwrap(roll.documentView)
         XCTAssertEqual(document.frame.width, 62 * frame, accuracy: 1, "All of them: 50 RAW, 10 copies, ramp and other")
         model.filmstripRawOnly = true
@@ -961,7 +960,7 @@ extension ZoneModelTests {
         defer { window.orderOut(nil) }
         func offset() -> CGFloat { roll.contentView.bounds.origin.x }
         func file(_ index: Int) -> URL { directory.appendingPathComponent("z\(index).png") }
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
         XCTAssertEqual(FilmRollLayout.defaultStripHeight, 180)
         XCTAssertEqual(roll.bounds.height, 180, accuracy: 1)
         let bounds = roll.convert(roll.bounds, to: nil)
@@ -1000,7 +999,7 @@ extension ZoneModelTests {
         try await waitUntil { model.previewCurrent }
         let (_, window, roll) = try await openRoll(model)
         defer { window.orderOut(nil) }
-        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
         let start = 32 * frame
         let visible = roll.contentView.bounds
         XCTAssertLessThan(visible.minX, start + frame, "\(visible)")

@@ -224,7 +224,7 @@ final class PhotoBrowserTests: XCTestCase {
                 // The new frame may be out of view: bring it to the strip's left end.
                 func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
                 let roll = try XCTUnwrap(all(canvas).compactMap { $0 as? NSScrollView }.first { abs($0.bounds.height - FilmRollLayout.defaultStripHeight) < 1 })
-                let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight, texture: FilmRollLayout.defaultTexture)
+                let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.defaultStripHeight)
                 roll.contentView.scroll(to: NSPoint(x: 18 * frame, y: 0))
                 roll.reflectScrolledClipView(roll.contentView)
                 let point = NSPoint(x: frame / 2, y: 28 + FilmRollLayout.defaultStripHeight / 2)
