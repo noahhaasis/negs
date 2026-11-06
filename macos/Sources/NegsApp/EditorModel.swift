@@ -446,6 +446,39 @@ import UniformTypeIdentifiers
             self.apply(next, action: on ? "Read as Negative Scan" : "Read as Photograph")
         })
     }
+    /// `io.scan_film`: the simulated film is scanned without printing. A
+    /// negative scan is printed, so turning this on turns it off.
+    var bypassFilmEmulation: Binding<Bool> {
+        Binding(get: { self.value("io.scan_film").bool }, set: { on in
+            var next = self.state; next.params["io.scan_film"] = .bool(on)
+            if on { next.params[Self.negativeScanPath] = .bool(false) }
+            self.apply(next, action: on ? "Bypass Film Emulation" : "Print Film")
+        })
+    }
+
+    nonisolated static let negativeAnalysisAreaPath = "io.negative_scan.analysis_area"
+    /// Where a negative scan is measured. Crop stores the crop's rectangle in
+    /// the params, and `replaceState` keeps it there as the crop changes, so
+    /// the preview and the exporter measure the same area.
+    var negativeAnalysisArea: Binding<NegativeAnalysisArea> {
+        Binding(get: { self.value(Self.negativeAnalysisAreaPath) == .null ? .wholeFrame : .crop }, set: { area in
+            var next = self.state
+            next.params[Self.negativeAnalysisAreaPath] = area == .crop ? Self.analysisRect(next.crop) : .null
+            self.apply(next, action: "Change Analysis Area")
+        })
+    }
+    /// The crop's axis-aligned rectangle as `[x, y, width, height]` fractions.
+    nonisolated static func analysisRect(_ crop: CropSettings) -> JSONValue {
+        let r = crop.rect
+        return .array([r.minX, r.minY, r.width, r.height].map { .number(Double($0)) })
+    }
+    /// A Crop analysis area follows the crop.
+    nonisolated static func followCrop(_ state: EditState) -> EditState {
+        guard state.params[negativeAnalysisAreaPath] != .null else { return state }
+        var state = state
+        state.params[negativeAnalysisAreaPath] = analysisRect(state.crop)
+        return state
+    }
     func number(_ path: String, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
         Binding(get: { self.value(path).double }, set: { self.set(path, .number(Self.snap($0, to: range, step: step))) })
     }
@@ -601,7 +634,7 @@ import UniformTypeIdentifiers
     /// else re-renders.
     private func replaceState(_ next: EditState) {
         guard !closing else { return }
-        let next = withPreferences(next)
+        let next = Self.followCrop(withPreferences(next))
         let render = next.rendered != state.rendered
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
@@ -791,6 +824,8 @@ import UniformTypeIdentifiers
             if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
             state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
             state.crop = CropSettings()
+            // A Crop analysis area follows the new photograph's crop.
+            state = Self.followCrop(state)
             state.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
             if !freshEditsForNewPhotos { state.params["prep.exposure_ev"] = .number(min(3, max(-3, previousOffset))) }
         }

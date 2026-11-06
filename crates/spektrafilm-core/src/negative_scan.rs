@@ -49,11 +49,19 @@ pub struct NegativeScanParams {
     /// Dye unmixing strength: 1 corrects each channel's reading of the other
     /// two dyes, 0 reads each channel as one dye.
     pub unmix: f32,
+    /// The part of the frame the base and the median are measured on, as
+    /// `[x, y, width, height]` fractions of the upright source (the crop's
+    /// coordinates). `None` is the whole frame. Use it to leave out the film
+    /// holder, bare light around the film or a light leak.
+    pub analysis_area: Option<[f32; 4]>,
+    /// Trims this fraction of the analysis area's width and height off each
+    /// side, keeping the measurement off its edges (0 to 0.45).
+    pub analysis_margin: f32,
 }
 
 impl Default for NegativeScanParams {
     fn default() -> Self {
-        Self { active: false, base: None, auto_density: 0.0, auto_color: 1.0, unmix: 1.0 }
+        Self { active: false, base: None, auto_density: 0.0, auto_color: 1.0, unmix: 1.0, analysis_area: None, analysis_margin: 0.1 }
     }
 }
 
@@ -85,11 +93,15 @@ impl NegativeModel {
     /// *linear* frame of the whole photograph (so a zoomed or reduced preview
     /// and the export agree).
     pub fn measure(film: &Profile, params: &NegativeScanParams, metering: &ImageBuf) -> Self {
-        let pixels: Vec<[f64; 3]> = metering
-            .data
-            .chunks_exact(3)
-            .map(|p| [to_f64(p[0]), to_f64(p[1]), to_f64(p[2])])
-            .collect();
+        let (w, h) = (metering.width as usize, metering.height as usize);
+        let (x0, y0, x1, y1) = analysis_window(params, w, h);
+        let mut pixels = Vec::with_capacity((x1 - x0) * (y1 - y0));
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let p = metering.get(x as u32, y as u32);
+                pixels.push([to_f64(p[0]), to_f64(p[1]), to_f64(p[2])]);
+            }
+        }
         let base = match params.base {
             Some(b) => b.map(|v| (v as f64).max(MIN_TRANSMITTANCE)),
             None => estimate_base(&pixels),
@@ -97,15 +109,12 @@ impl NegativeModel {
         let unmix_inverse = invert3(scan_matrix(film, params.unmix as f64));
         let film_mid = film_midgray(film);
 
-        // The frame's median dye amounts, over its central 80%.
-        let (w, h) = (metering.width as usize, metering.height as usize);
+        // The analysed area's median dye amounts.
         let mut columns: [Vec<f64>; 3] = Default::default();
-        for y in h / 10..(h * 9 / 10).max(h / 10 + 1).min(h) {
-            for x in w / 10..(w * 9 / 10).max(w / 10 + 1).min(w) {
-                let dye = to_dye(pixels[y * w + x], &base, &unmix_inverse);
-                for c in 0..3 {
-                    columns[c].push(dye[c]);
-                }
+        for &p in &pixels {
+            let dye = to_dye(p, &base, &unmix_inverse);
+            for c in 0..3 {
+                columns[c].push(dye[c]);
             }
         }
         let median = columns.map(|mut v| median(&mut v));
@@ -132,6 +141,25 @@ impl NegativeModel {
             }
         });
     }
+}
+
+/// The analysed pixels of a `w`×`h` frame, `[x0, x1) × [y0, y1)`: the analysis
+/// area, less its margin, never empty.
+fn analysis_window(params: &NegativeScanParams, w: usize, h: usize) -> (usize, usize, usize, usize) {
+    let clamp01 = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) as f64 } else { 0.0 };
+    let [ax, ay, aw, ah] = params.analysis_area.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    let (left, top) = (clamp01(ax), clamp01(ay));
+    let (right, bottom) = ((left + clamp01(aw)).min(1.0), (top + clamp01(ah)).min(1.0));
+    let margin = if params.analysis_margin.is_finite() { params.analysis_margin.clamp(0.0, 0.45) as f64 } else { 0.0 };
+    let (mx, my) = ((right - left) * margin, (bottom - top) * margin);
+    let span = |a: f64, b: f64, n: usize| {
+        let lo = ((a * n as f64).round() as usize).min(n - 1);
+        let hi = ((b * n as f64).round() as usize).clamp(lo + 1, n);
+        (lo, hi)
+    };
+    let (x0, x1) = span(left + mx, right - mx, w.max(1));
+    let (y0, y1) = span(top + my, bottom - my, h.max(1));
+    (x0, y0, x1, y1)
 }
 
 fn to_dye(t: [f64; 3], base: &[f64; 3], inverse: &[[f64; 3]; 3]) -> [f64; 3] {
@@ -279,10 +307,51 @@ mod tests {
         // A sliver of clear film: more than the brightest 0.2% averaged.
         dyes.extend([[0.0; 3]; 5]);
         let img = scan_of(&dyes, base, &m);
-        let model = NegativeModel::measure(&film, &NegativeScanParams { active: true, ..Default::default() }, &img);
+        let model = NegativeModel::measure(&film, &NegativeScanParams { active: true, analysis_margin: 0.0, ..Default::default() }, &img);
         for c in 0..3 {
             assert!((model.base[c] - base[c]).abs() < 1e-4, "{:?}", model.base);
         }
+    }
+
+    #[test]
+    fn the_analysis_area_leaves_out_bare_light() {
+        let film = film();
+        let m = scan_matrix(&film, 1.0);
+        let base = [0.6, 0.45, 0.3];
+        // A 10×10 frame: its right 3 columns are bare light (brighter than
+        // any film), the rest film with a sliver of clear base.
+        let mut dyes = Vec::new();
+        for y in 0..10 {
+            for x in 0..10 {
+                dyes.push(if x >= 7 { [-1.0; 3] } else if x == 0 && y < 5 { [0.0; 3] } else { [0.5, 0.6, 0.7] });
+            }
+        }
+        let mut img = scan_of(&dyes, base, &m);
+        img.width = 10;
+        img.height = 10;
+        for (i, d) in dyes.iter().enumerate() {
+            if d[0] < 0.0 {
+                for c in 0..3 { img.data[i * 3 + c] = from_f64(0.95); }
+            }
+        }
+        let whole = NegativeModel::measure(&film, &NegativeScanParams { active: true, analysis_margin: 0.0, ..Default::default() }, &img);
+        assert!((whole.base[0] - 0.95).abs() < 1e-6, "the bare light reads as base: {:?}", whole.base);
+        let area = NegativeScanParams { active: true, analysis_area: Some([0.0, 0.0, 0.7, 1.0]), analysis_margin: 0.0, ..Default::default() };
+        let model = NegativeModel::measure(&film, &area, &img);
+        for c in 0..3 {
+            assert!((model.base[c] - base[c]).abs() < 1e-4, "{:?}", model.base);
+        }
+    }
+
+    #[test]
+    fn analysis_windows_stay_inside_the_frame() {
+        let p = |area, margin| NegativeScanParams { analysis_area: area, analysis_margin: margin, ..Default::default() };
+        assert_eq!(analysis_window(&p(None, 0.0), 100, 50), (0, 0, 100, 50));
+        assert_eq!(analysis_window(&p(None, 0.1), 100, 50), (10, 5, 90, 45));
+        assert_eq!(analysis_window(&p(Some([0.5, 0.5, 0.5, 0.5]), 0.0), 100, 50), (50, 25, 100, 50));
+        // Degenerate and out-of-range areas still give at least one pixel.
+        assert_eq!(analysis_window(&p(Some([1.0, 1.0, 0.0, 0.0]), 0.0), 100, 50), (99, 49, 100, 50));
+        assert_eq!(analysis_window(&p(Some([-1.0, 0.0, 9.0, f32::NAN]), 2.0), 100, 50), (45, 0, 55, 1));
     }
 
     #[test]

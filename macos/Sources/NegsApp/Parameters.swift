@@ -210,3 +210,9 @@ struct EditState: Codable, Equatable, Sendable {
         return state
     }
 }
+
+/// Where a negative scan's base and balance are measured
+/// (`io.negative_scan.analysis_area`).
+enum NegativeAnalysisArea: String, CaseIterable {
+    case wholeFrame = "Whole frame", crop = "Crop"
+}

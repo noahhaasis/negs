@@ -728,9 +728,6 @@ struct AdjustmentInspector: View {
             }
             developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development",
                             help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
-            Toggle("Negative scan", isOn: model.negativeScan)
-                .disabled(model.films.first { $0.id == model.film }?.positive ?? false)
-                .help(ControlHelp.negativeScan)
             if !scanning {
                 if model.previews.enabled {
                     StockFoldout(model: model, paper: true)
@@ -754,22 +751,28 @@ struct AdjustmentInspector: View {
                 } label: {
                     Text("Paper").foregroundStyle(.secondary)
                 }
-                .help("Scan film directly is on in the Lab’s Print section.")
+                .help("Bypass film emulation is on in the Lab’s Print section.")
             }
         }
+    }
+
+    /// The negative scan's balance and where it is measured.
+    @ViewBuilder private var negativeScanSettings: some View {
+        ForEach(negativeScanControls) { control($0) }
+        Picker("Analysis area", selection: model.negativeAnalysisArea) {
+            ForEach(NegativeAnalysisArea.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .help(ControlHelp.negativeAnalysisArea)
+        if model.negativeAnalysisArea.wrappedValue == .crop && !model.crop.cropped {
+            Text("Crop the photograph to choose the area: the base and balance are measured inside the crop.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        control(.slider("Analysis margin", "io.negative_scan.analysis_margin", 0...0.45, 0.01))
     }
 
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
         let negative = model.value(EditorModel.negativeScanPath).bool
-        if negative {
-            Section {
-                ForEach(negativeScanControls) { control($0) }
-            } header: { Text("Negative Scan") } footer: {
-                Text("The photograph is read as a scan of a real \(model.filmName) negative: its base is found from the thinnest film and its dyes are printed on the paper below. Camera and Film are skipped.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
         Section("Camera") {
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
             FilmFormatPicker(model: model)
@@ -780,14 +783,24 @@ struct AdjustmentInspector: View {
         Section("Film") { groups(.film) }
             .disabled(negative)
         Section {
-            // Here rather than beside the stocks: few photographs want it.
-            if (allControls || scanning) && !negative {
-                Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
-                    .help("Skip printing and scan the developed film, as for slides.")
+            // How the photograph reaches the paper: a real negative printed,
+            // or the simulated film scanned without printing.
+            Toggle("Negative scan", isOn: model.negativeScan)
+                .disabled(model.films.first { $0.id == model.film }?.positive ?? false)
+                .help(ControlHelp.negativeScan)
+            if negative {
+                negativeScanSettings
             }
+            Toggle("Bypass film emulation", isOn: model.bypassFilmEmulation)
+                .help("Skip printing and scan the developed film, as for slides.")
             groups(.print).disabled(scanning)
         } header: { Text("Print") } footer: {
-            if scanning { Text("Printing and the paper are skipped while scanning film directly.").font(.caption).foregroundStyle(.secondary) }
+            if negative {
+                Text("The photograph is read as a scan of a real \(model.filmName) negative and its dyes are printed on the paper. Camera and Film are skipped.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if scanning {
+                Text("Printing and the paper are skipped while Bypass film emulation is on.").font(.caption).foregroundStyle(.secondary)
+            }
         }
         let outputChanged = model.previewSpace != SaveSettings.colorSpaces[0] || model.isModified("io.output_cctf_encoding")
         if allControls || outputChanged || adjustmentGroups.contains(where: { $0.section == .scan && shows($0) }) {

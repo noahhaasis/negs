@@ -75,6 +75,11 @@ enum Commands {
         /// of clear film). Default: estimated from the thinnest film.
         #[arg(long, requires = "negative_scan", value_parser = parse_rgb)]
         negative_base: Option<[f32; 3]>,
+        /// The part of the frame a negative scan's base and balance are
+        /// measured on, `x,y,width,height` as fractions of the upright input.
+        /// Default: the whole frame.
+        #[arg(long, requires = "negative_scan", value_parser = parse_area)]
+        negative_area: Option<[f32; 4]>,
         /// Print per-stage timing information.
         #[arg(long)]
         timings: bool,
@@ -192,6 +197,7 @@ fn main() -> Result<()> {
             scan_film,
             negative_scan,
             negative_base,
+            negative_area,
             timings,
             params: params_file,
             raw_wb,
@@ -241,6 +247,7 @@ fn main() -> Result<()> {
                 scan_film,
                 negative_scan,
                 negative_base,
+                negative_area,
                 timings,
                 params_file.as_deref(),
                 raw_wb.as_deref(),
@@ -294,6 +301,17 @@ fn parse_rgb(s: &str) -> Result<[f32; 3], String> {
     }
 }
 
+/// `x,y,width,height`: a rectangle of fractions inside the frame.
+fn parse_area(s: &str) -> Result<[f32; 4], String> {
+    let v: Vec<f32> = s.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+    match v[..] {
+        [x, y, w, h] if (0.0..1.0).contains(&x) && (0.0..1.0).contains(&y) && w > 0.0 && h > 0.0 && x + w <= 1.0001 && y + h <= 1.0001 => {
+            Ok([x, y, w, h])
+        }
+        _ => Err("expected x,y,width,height as fractions inside the frame".into()),
+    }
+}
+
 /// `--input-colour`: auto, manual, or a colour space to assume.
 fn parse_input_colour(spec: &str, linear: bool) -> Result<spektrafilm_io::InputInterpretation> {
     use spektrafilm_io::InputInterpretation;
@@ -325,6 +343,7 @@ fn cmd_process(
     scan_film: bool,
     negative_scan: bool,
     negative_base: Option<[f32; 3]>,
+    negative_area: Option<[f32; 4]>,
     show_timings: bool,
     params_file: Option<&Path>,
     raw_wb: Option<&str>,
@@ -372,6 +391,9 @@ fn cmd_process(
     }
     if negative_base.is_some() {
         params.io.negative_scan.base = negative_base;
+    }
+    if negative_area.is_some() {
+        params.io.negative_scan.analysis_area = negative_area;
     }
     if params.io.negative_scan.active && params.io.scan_film {
         bail!("a negative scan is printed; it can't also scan the film directly");

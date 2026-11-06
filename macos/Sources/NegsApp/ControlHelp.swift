@@ -10,6 +10,7 @@ enum ControlHelp {
 
     static let film = "The film the photograph is shot on: its colour response, contrast, grain and halation, from the stock’s measured data."
     static let negativeScan = "Reads the photograph as a scan of a real colour negative shot on this film (a camera or scanner capture, not yet inverted) and prints it on the paper, instead of filming the photograph as a scene."
+    static let negativeAnalysisArea = "Where the film base and the colour balance are measured. Whole frame uses the entire scan; Crop uses the area inside the crop, to leave out the film holder, bare light around the film or a light leak. The crop itself doesn’t change the measurement in Whole frame."
     static let paper = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless Settings › Keep paper when changing film is on."
 
     private static let paths: [String: String] = [
@@ -37,6 +38,7 @@ enum ControlHelp {
         // Lab: negative scan
         "io.negative_scan.auto_color": "Balances the negative so the photograph’s median prints neutral, like dialling in a colour filter pack. 0 keeps the colour the film base and stock give.",
         "io.negative_scan.auto_density": "0 prints the negative as a correctly exposed one: the film’s mid-grey density prints mid-grey, so a dark scene stays dark. 1 prints the photograph’s median as mid-grey. Print exposure adjusts either.",
+        "io.negative_scan.analysis_margin": "Leaves this share of the analysis area’s width and height out on each side, so its edges don’t count. 0.1 measures the central 80%.",
         "io.negative_scan.unmix": "Corrects each colour channel’s reading of the other two dyes, from the film’s dye spectra. Lower it if colours look too strong.",
 
         // Lab: camera
