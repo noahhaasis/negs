@@ -472,7 +472,7 @@ extension ZoneModelTests {
         XCTAssertEqual(inWindow.minX, 0, accuracy: 1)
         XCTAssertLessThanOrEqual(inWindow.maxY, canvas.convert(canvas.bounds, to: nil).minY + 1, "It's under the photograph")
         XCTAssertGreaterThan(inWindow.width, 800)
-        XCTAssertEqual(canvas.convert(canvas.bounds, to: nil).minX, ZoneGeometry.panelWidth, accuracy: 1)
+        XCTAssertEqual(canvas.convert(canvas.bounds, to: nil).minX, 0, accuracy: 1, "The zones sit on the photograph's edge")
         let height = canvas.bounds.height
         model.filmstripVisible = false
         try await Task.sleep(for: .milliseconds(300))
@@ -705,6 +705,38 @@ extension ZoneModelTests {
         await reopened.start(paths: try paths())
         reopened.open(third)
         XCTAssertEqual(reopened.value("post.contrast").double, contrast + 40)
+    }
+
+    /// In the window, the panel draws flush along the landscape photograph's top
+    /// and exactly as wide, with black at its left.
+    func testTheZonePanelSitsOnThePhotograph() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let (controller, window, _) = try await openRoll(model)
+        defer { window.orderOut(nil) }
+        _ = controller
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        let content = try XCTUnwrap(window.contentView)
+        let canvas = try XCTUnwrap(all(content).compactMap { $0 as? ImageScrollView }.first)
+        let photo = try XCTUnwrap(canvas.documentView as? PhotographView)
+        let rect = canvas.overlay.convert(photo.bounds, from: photo)
+        let placement = try XCTUnwrap(model.zonePlacement)
+        XCTAssertTrue(placement.horizontal)
+        XCTAssertEqual(placement.frame.maxY, canvas.overlay.bounds.height - rect.maxY, accuracy: 0.5, "Flush with its top")
+        XCTAssertEqual(placement.frame.minX, max(rect.minX, 0), accuracy: 0.5)
+        XCTAssertEqual(placement.frame.maxX, min(rect.maxX, canvas.bounds.width), accuracy: 0.5, "As wide")
+        let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+        content.cacheDisplay(in: content.bounds, to: bitmap)
+        func grey(_ canvasPoint: CGPoint) throws -> CGFloat {
+            let inWindow = canvas.convert(CGPoint(x: canvasPoint.x, y: canvasPoint.y), to: content)
+            let scale = CGFloat(bitmap.pixelsWide) / content.bounds.width
+            let y = content.isFlipped ? inWindow.y : content.bounds.height - inWindow.y
+            return try XCTUnwrap(bitmap.colorAt(x: Int(inWindow.x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB)).redComponent
+        }
+        let tile = placement.frame.width / 11
+        func at(_ zone: CGFloat) -> CGPoint { CGPoint(x: placement.frame.minX + tile * (zone + 0.15), y: placement.frame.midY) }
+        XCTAssertLessThan(try grey(at(0)), 0.15, "Zone 0's tile")
+        XCTAssertGreaterThan(try grey(at(10)), 0.85, "Zone 10's tile")
     }
 
     /// F leaves only the photograph, then brings back exactly what was showing.

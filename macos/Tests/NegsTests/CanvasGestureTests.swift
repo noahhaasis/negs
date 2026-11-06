@@ -219,7 +219,7 @@ extension CanvasGestureTests {
     }
 
     /// Zone 0's tile is the bottom row and 10's the top; a link starts at its
-    /// tile, on the canvas's left edge.
+    /// tile, on the edge against the photograph.
     func testALinkRunsFromTheTileToThePin() throws {
         XCTAssertEqual(ZoneGeometry.tileCentreY(zone: 10, height: 1100), 50)
         XCTAssertEqual(ZoneGeometry.tileCentreY(zone: 0, height: 1100), 1050)
@@ -227,8 +227,9 @@ extension CanvasGestureTests {
         let unit = CGPoint(x: 0.5, y: 0.5)
         scroll.showPins([marker(zone: 10, at: unit)], dragged: nil)
         let link = try XCTUnwrap(scroll.overlay.links[0])
-        XCTAssertEqual(link.from.x, 0)
-        XCTAssertEqual(link.from.y, scroll.overlay.bounds.height - 600.0 / 22, accuracy: 0.01, "Layers are y-up, so the top row is high")
+        let tile = try XCTUnwrap(scroll.overlay.zonePlacement).tile(zone: 10)
+        XCTAssertEqual(link.from.x, tile.x, accuracy: 0.01)
+        XCTAssertEqual(link.from.y, scroll.overlay.bounds.height - tile.y, accuracy: 0.01, "Layers are y-up, so the top row is high")
         XCTAssertEqual(link.to.x, overlayPoint(unit, scroll, view).x, accuracy: 0.5)
     }
 

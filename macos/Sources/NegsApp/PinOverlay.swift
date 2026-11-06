@@ -1,10 +1,48 @@
 import AppKit
 import QuartzCore
 
-/// Where the zone panel's tiles sit. The panel spans the canvas's height
-/// directly to its left, so a tile's right edge is the canvas's left edge.
+/// Where the zone panel sits on the canvas, from its top left.
+struct ZonePlacement: Equatable {
+    let frame: CGRect
+    /// Dark to light along the top of a landscape photograph; otherwise light
+    /// to dark down the left of a portrait one.
+    let horizontal: Bool
+
+    /// The middle of a zone's tile, on the edge that faces the photograph.
+    func tile(zone: Int) -> CGPoint {
+        horizontal
+            ? CGPoint(x: frame.minX + frame.width * (CGFloat(zone) + 0.5) / CGFloat(ZoneScale.zones.count), y: frame.maxY)
+            : CGPoint(x: frame.maxX, y: frame.minY + ZoneGeometry.tileCentreY(zone: zone, height: frame.height))
+    }
+}
+
+/// Where the zone panel's tiles sit: flush against the photograph.
 enum ZoneGeometry {
-    static let panelWidth: CGFloat = 56
+    /// How far the panel stands off the photograph.
+    static let panelDepth: CGFloat = 56
+
+    /// Against the top of a landscape photograph, or the left of a portrait one,
+    /// and as long as it is. Whatever the photograph runs past the canvas by,
+    /// the panel stops at the canvas's edge, staying within reach.
+    static func placement(photo: CGRect, canvas: CGSize) -> ZonePlacement {
+        let horizontal = photo.width >= photo.height
+        let (minX, maxX) = (max(photo.minX, 0), min(photo.maxX, canvas.width))
+        let (minY, maxY) = (max(photo.minY, 0), min(photo.maxY, canvas.height))
+        return ZonePlacement(
+            frame: horizontal
+                ? CGRect(x: minX, y: max(photo.minY - panelDepth, 0), width: max(maxX - minX, 0), height: panelDepth)
+                : CGRect(x: max(photo.minX - panelDepth, 0), y: minY, width: panelDepth, height: max(maxY - minY, 0)),
+            horizontal: horizontal
+        )
+    }
+
+    /// What the canvas keeps clear around a document of `size`.
+    static func insets(document size: CGSize, zones: Bool) -> NSEdgeInsets {
+        let landscape = size.width >= size.height
+        return NSEdgeInsets(top: zones && landscape ? panelDepth : 0, left: zones && !landscape ? panelDepth : 0,
+                            bottom: PinOverlayView.exifMargin, right: 0)
+    }
+
     /// The dot on the exact spot a pin measures.
     static let markerDiameter: CGFloat = 8
     /// How close a click on the small marker has to be.
@@ -28,14 +66,15 @@ enum ZoneGeometry {
 /// sits above the document, so the photograph's zoom, rotation and crop never
 /// touch it, and it takes no mouse events.
 final class PinOverlayView: NSView {
-    /// The camera details, above and below the photograph.
-    private let exifTop = CATextLayer()
-    private let exifBottom = CATextLayer()
+    /// The camera details, along the bottom of the photograph: the exposure at
+    /// its left and the camera at its right.
+    private let exifCamera = CATextLayer()
+    private let exifExposure = CATextLayer()
     /// The lines' height, and their gap from the photograph.
     static let exifHeight: CGFloat = 18, exifGap: CGFloat = 4
     /// How much room a fitted photograph leaves above and below for them.
     static var exifMargin: CGFloat { exifHeight + exifGap * 2 }
-    private(set) var exifLines: (top: String, bottom: String)?
+    private(set) var exifLines: (camera: String, exposure: String)?
     private let casing = CAShapeLayer()
     private let selectedFill = CAShapeLayer()
     private let normal = CAShapeLayer()
@@ -52,6 +91,9 @@ final class PinOverlayView: NSView {
     private(set) var pins: [TonePinMarker] = []
     private(set) var dragged: ZoneDrag?
     private(set) var links: [Int: (from: CGPoint, to: CGPoint)] = [:]
+    /// Where the zone panel goes against the photograph as it stands.
+    private(set) var zonePlacement: ZonePlacement?
+    var onZonePlacement: ((ZonePlacement) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -74,7 +116,8 @@ final class PinOverlayView: NSView {
         for shape in [normal, selected, ignored] { shape.lineWidth = 1.75 }
         dragChip.isHidden = true
         layer?.addSublayer(dragChip)
-        for line in [exifTop, exifBottom] {
+        exifCamera.alignmentMode = .right
+        for line in [exifCamera, exifExposure] {
             line.actions = none.merging(["string": NSNull(), "contents": NSNull(), "hidden": NSNull()]) { $1 }
             line.foregroundColor = EdgePrint.colour.cgColor
             line.isHidden = true
@@ -103,31 +146,36 @@ final class PinOverlayView: NSView {
     func labelFrame(_ index: Int) -> CGRect? { labelFrames[index] }
 
     func showExif(_ exif: PhotoExif?) {
-        let lines = exif.map { (top: $0.topLine, bottom: $0.bottomLine) }
-        guard lines?.top != exifLines?.top || lines?.bottom != exifLines?.bottom else { return }
+        let lines = exif.map { (camera: $0.cameraLine, exposure: $0.exposureLine) }
+        guard lines?.camera != exifLines?.camera || lines?.exposure != exifLines?.exposure else { return }
         exifLines = lines
         redraw()
     }
 
     /// The two lines' frames, for tests.
-    var exifFrames: (top: CGRect, bottom: CGRect)? { exifLines == nil ? nil : (exifTop.frame, exifBottom.frame) }
+    var exifFrames: (camera: CGRect, exposure: CGRect)? { exifLines == nil ? nil : (exifCamera.frame, exifExposure.frame) }
 
-    /// The lines sit just outside the photograph, at its left, and stay on the
-    /// canvas when it's zoomed past the edges.
+    /// The lines sit just under the photograph, and stay on the canvas when
+    /// it's zoomed past the edges.
     private func layoutExif(photo: PhotographView) {
         let rect = convert(photo.bounds, from: photo)
         let scale = window?.backingScaleFactor ?? 2
         let (height, gap) = (Self.exifHeight, Self.exifGap)
         let font = EdgePrint.font(size: 14)
-        let left = max(rect.minX, gap * 2), width = max(bounds.width - left - gap * 2, 1)
-        for (line, text, y) in [(exifTop, exifLines?.top ?? "", min(rect.maxY + gap, bounds.height - height - gap)),
-                                (exifBottom, exifLines?.bottom ?? "", max(rect.minY - gap - height, gap))] {
+        let left = max(rect.minX, gap * 2), right = max(min(rect.maxX, bounds.width - gap * 2), left + 1)
+        let (camera, exposure) = (exifLines?.camera ?? "", exifLines?.exposure ?? "")
+        func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+        // On one row where they fit, or the camera under the exposure on a narrow photograph.
+        let fits = camera.isEmpty || exposure.isEmpty || width(camera) + width(exposure) + gap * 4 <= right - left
+        let row = max(rect.minY - gap - height, gap)
+        for (line, text, y, x, wide) in [(exifExposure, exposure, row, left, max(bounds.width - left - gap * 2, 1)),
+                                         (exifCamera, camera, fits ? row : max(row - height, gap), min(left, right - 1), right - min(left, right - 1))] {
             line.isHidden = text.isEmpty
             line.string = text
             line.font = font
             line.fontSize = 14
             line.contentsScale = scale
-            line.frame = CGRect(x: left, y: y, width: width, height: height)
+            line.frame = CGRect(x: x, y: y, width: wide, height: height)
         }
     }
 
@@ -150,8 +198,18 @@ final class PinOverlayView: NSView {
         layoutExif(photo: photo)
         let all = CGMutablePath(), plain = CGMutablePath(), accent = CGMutablePath(), red = CGMutablePath(), fill = CGMutablePath()
         let scale = window?.backingScaleFactor ?? 2
+        let rect = convert(photo.bounds, from: photo)
+        let placement = ZoneGeometry.placement(
+            photo: CGRect(x: rect.minX, y: bounds.height - rect.maxY, width: rect.width, height: rect.height),
+            canvas: bounds.size
+        )
+        if placement != zonePlacement {
+            zonePlacement = placement
+            onZonePlacement?(placement)
+        }
         func tile(_ zone: Int) -> CGPoint {
-            CGPoint(x: 0, y: bounds.height - ZoneGeometry.tileCentreY(zone: zone, height: bounds.height))
+            let point = placement.tile(zone: zone)
+            return CGPoint(x: point.x, y: bounds.height - point.y)
         }
         func circle(_ centre: CGPoint, _ radius: CGFloat) -> CGPath {
             CGPath(ellipseIn: CGRect(x: centre.x - radius, y: centre.y - radius, width: radius * 2, height: radius * 2), transform: nil)

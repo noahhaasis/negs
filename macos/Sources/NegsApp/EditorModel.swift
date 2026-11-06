@@ -89,6 +89,9 @@ import UniformTypeIdentifiers
     /// The panel shows with a photograph, except while cropping.
     var showsZonePanel: Bool { source != nil && !cropping && !gridVisible && !imageOnly }
 
+    /// Where the zone panel sits against the photograph.
+    var zonePlacement: ZonePlacement?
+
     /// F: nothing in the window but the photograph and its camera details. The
     /// grid and cropping bring their own controls back while they're up.
     var imageOnly: Bool { imageOnlyChosen && source != nil && !cropping && !gridVisible }

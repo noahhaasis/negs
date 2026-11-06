@@ -173,18 +173,16 @@ struct EditorCanvas: View {
             if model.gridVisible, let source = model.source {
                 PhotoGrid(model: model, directory: source.deletingLastPathComponent())
             } else {
-                HStack(spacing: 0) {
-                    if model.showsZonePanel { ZonePanel(model: model) }
-                    CanvasArea(model: model)
-                        .dropDestination(for: URL.self) { urls, _ in
-                            guard let url = urls.first, url.isFileURL else { return false }
-                            model.open(url); return true
-                        } isTargeted: { dropTargeted = $0 }
-                        .overlay {
-                            if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(EdgePrint.amber, lineWidth: 3).padding(8).allowsHitTesting(false) }
-                        }
-                }
-                .coordinateSpace(name: ZonePanel.coordinateSpace)
+                CanvasArea(model: model)
+                    .dropDestination(for: URL.self) { urls, _ in
+                        guard let url = urls.first, url.isFileURL else { return false }
+                        model.open(url); return true
+                    } isTargeted: { dropTargeted = $0 }
+                    .overlay {
+                        if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(EdgePrint.amber, lineWidth: 3).allowsHitTesting(false).padding(4) }
+                    }
+                    .overlay(alignment: .topLeading) { if model.showsZonePanel { PlacedZonePanel(model: model) } }
+                    .coordinateSpace(name: ZonePanel.coordinateSpace)
                 if model.filmstripVisible, !model.imageOnly, let source = model.source {
                     PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
                 }
@@ -308,6 +306,8 @@ struct CanvasArea: View {
                       draggedRadius: model.sampleRadius,
                       proofPixels: model.exportPixels,
                       exif: model.photoExif,
+                      showsZones: model.showsZonePanel,
+                      onZonePlacement: { model.zonePlacement = $0 },
                       onSelectPin: { model.selectPin($0) },
                       onMovePin: { index, centre in Task { await model.movePin(index, to: centre) } },
                       onScrollPin: { model.resizeSelectedPin(scrollDelta: $0, precise: $1) },

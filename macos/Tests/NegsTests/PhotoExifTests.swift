@@ -10,23 +10,23 @@ final class PhotoExifTests: XCTestCase {
 
     /// The camera and lens above, as film edge print is, without saying the make twice.
     func testTheTopLineNamesTheCameraAndLens() {
-        XCTAssertEqual(sample.topLine, "NIKON D750   50.0 MM F/1.8")
+        XCTAssertEqual(sample.cameraLine, "NIKON D750   50.0 MM F/1.8")
         var canon = sample
         canon.make = "Canon"; canon.model = "EOS R5"; canon.lens = nil
-        XCTAssertEqual(canon.topLine, "CANON EOS R5")
+        XCTAssertEqual(canon.cameraLine, "CANON EOS R5")
     }
 
     /// The exposure and date below.
     func testTheBottomLineGivesTheExposureAndDate() {
-        XCTAssertEqual(sample.bottomLine, "ISO 400   1/125   f/2.8   50 MM   2026-11-04")
+        XCTAssertEqual(sample.exposureLine, "ISO 400   1/125   f/2.8   50 MM   2026-11-04")
         XCTAssertEqual(PhotoExif.shutter(2), "2S")
         XCTAssertEqual(PhotoExif.shutter(0.004), "1/250")
     }
 
     func testMissingDetailsAreLeftOut() {
         var partial = PhotoExif(); partial.iso = 800
-        XCTAssertEqual(partial.bottomLine, "ISO 800")
-        XCTAssertEqual(partial.topLine, "")
+        XCTAssertEqual(partial.exposureLine, "ISO 800")
+        XCTAssertEqual(partial.cameraLine, "")
         XCTAssertTrue(PhotoExif().isEmpty)
     }
 
@@ -52,8 +52,8 @@ final class PhotoExifTests: XCTestCase {
                                              kCGImagePropertyExifDateTimeOriginal: "2026:11:04 09:30:12", kCGImagePropertyExifLensModel: "50.0 mm f/1.8"],
         ])
         let read = try XCTUnwrap(PhotoExif.read(tagged))
-        XCTAssertEqual(read.topLine, "NIKON D750   50.0 MM F/1.8")
-        XCTAssertEqual(read.bottomLine, "ISO 400   1/125   f/2.8   50 MM   2026-11-04")
+        XCTAssertEqual(read.cameraLine, "NIKON D750   50.0 MM F/1.8")
+        XCTAssertEqual(read.exposureLine, "ISO 400   1/125   f/2.8   50 MM   2026-11-04")
         XCTAssertNil(PhotoExif.read(try write("plain.jpg", [:])))
     }
 
@@ -89,13 +89,13 @@ final class PhotoExifTests: XCTestCase {
         overlay.redraw()
         let rect = overlay.convert(photo.bounds, from: photo)
         let lines = try XCTUnwrap(overlay.exifFrames)
-        XCTAssertGreaterThanOrEqual(lines.top.minY, rect.maxY, "Above the photograph")
-        XCTAssertLessThanOrEqual(lines.top.maxY, overlay.bounds.height, "On the canvas")
-        XCTAssertLessThanOrEqual(lines.bottom.maxY, rect.minY, "Below it")
-        XCTAssertGreaterThanOrEqual(lines.bottom.minY, 0, "On the canvas")
-        XCTAssertEqual(lines.top.minX, rect.minX, accuracy: 1, "At its left")
-        XCTAssertEqual(overlay.exifLines?.top, "D750")
-        XCTAssertEqual(overlay.exifLines?.bottom, "ISO 400")
+        XCTAssertLessThanOrEqual(lines.exposure.maxY, rect.minY, "Below it")
+        XCTAssertGreaterThanOrEqual(lines.exposure.minY, 0, "On the canvas")
+        XCTAssertEqual(lines.exposure.minX, rect.minX, accuracy: 1, "The exposure at its left")
+        XCTAssertEqual(lines.camera.minY, lines.exposure.minY, accuracy: 0.5, "The camera on the same row")
+        XCTAssertEqual(lines.camera.maxX, rect.maxX, accuracy: 1, "At its right")
+        XCTAssertEqual(overlay.exifLines?.camera, "D750")
+        XCTAssertEqual(overlay.exifLines?.exposure, "ISO 400")
     }
 
     /// When the canvas changes size, as when the film strip shows or hides, the
@@ -111,9 +111,9 @@ final class PhotoExifTests: XCTestCase {
             let rect = overlay.convert(photo.bounds, from: photo)
             let lines = try XCTUnwrap(overlay.exifFrames)
             XCTAssertEqual(overlay.bounds.height, height, accuracy: 0.5)
-            XCTAssertEqual(lines.top.minY, rect.maxY + PinOverlayView.exifGap, accuracy: 0.5, "Above, at \(height)")
-            XCTAssertEqual(lines.bottom.maxY, rect.minY - PinOverlayView.exifGap, accuracy: 0.5, "Below, at \(height)")
-            XCTAssertEqual(lines.top.minX, rect.minX, accuracy: 0.5, "At its left, at \(height)")
+            XCTAssertEqual(lines.camera.maxY, rect.minY - PinOverlayView.exifGap, accuracy: 0.5, "Camera, at \(height)")
+            XCTAssertEqual(lines.exposure.maxY, rect.minY - PinOverlayView.exifGap, accuracy: 0.5, "Below, at \(height)")
+            XCTAssertEqual(lines.exposure.minX, rect.minX, accuracy: 0.5, "At its left, at \(height)")
         }
     }
 
@@ -139,8 +139,8 @@ final class PhotoExifTests: XCTestCase {
                 let rect = overlay.convert(photo.bounds, from: photo)
                 let lines = try XCTUnwrap(overlay.exifFrames)
                 XCTAssertEqual(rect.midY, height / 2, accuracy: 1, "Still centred, fitted \(fitted), at \(height)")
-                XCTAssertEqual(lines.top.minY, rect.maxY + PinOverlayView.exifGap, accuracy: 0.5, "Above, fitted \(fitted), at \(height)")
-                XCTAssertEqual(lines.bottom.maxY, rect.minY - PinOverlayView.exifGap, accuracy: 0.5, "Below, fitted \(fitted), at \(height)")
+                XCTAssertEqual(lines.camera.maxY, rect.minY - PinOverlayView.exifGap, accuracy: 0.5, "Above, fitted \(fitted), at \(height)")
+                XCTAssertEqual(lines.exposure.maxY, rect.minY - PinOverlayView.exifGap, accuracy: 0.5, "Below, fitted \(fitted), at \(height)")
             }
         }
     }
@@ -152,7 +152,7 @@ final class PhotoExifTests: XCTestCase {
         scroll.magnification = 1
         scroll.overlay.redraw()
         let lines = try XCTUnwrap(scroll.overlay.exifFrames)
-        XCTAssertLessThanOrEqual(lines.top.maxY, scroll.overlay.bounds.height)
-        XCTAssertGreaterThanOrEqual(lines.bottom.minY, 0)
+        XCTAssertLessThanOrEqual(lines.camera.maxY, scroll.overlay.bounds.height)
+        XCTAssertGreaterThanOrEqual(lines.exposure.minY, 0)
     }
 }

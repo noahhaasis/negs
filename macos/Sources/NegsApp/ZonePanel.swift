@@ -1,15 +1,29 @@
 import AppKit
 import SwiftUI
 
-/// Adams' zones, white at the top. Drag one onto the photograph and that spot's
-/// tone becomes that zone. It sits directly left of the canvas, so
-/// `ZoneGeometry` and the overlay's lines line up with its rows.
+/// The panel where `ZoneGeometry` says, reading the placement here so the
+/// photograph's every pan redraws only this.
+struct PlacedZonePanel: View {
+    let model: EditorModel
+
+    var body: some View {
+        if let placement = model.zonePlacement, placement.frame.width > 0, placement.frame.height > 0 {
+            ZonePanel(model: model, horizontal: placement.horizontal)
+                .frame(width: placement.frame.width, height: placement.frame.height)
+                .offset(x: placement.frame.minX, y: placement.frame.minY)
+        }
+    }
+}
+
+/// Adams' zones. Drag one onto the photograph and that spot's tone becomes that
+/// zone. It sits flush against the photograph, so `ZonePlacement` and the
+/// overlay's lines line up with its tiles.
 struct ZonePanel: View {
     let model: EditorModel
+    /// Black at the left, along a landscape photograph; otherwise white at the top.
+    var horizontal = false
     /// The space shared with the canvas, for a drag that crosses into it.
     static let coordinateSpace = "zoneCanvas"
-    /// A faint translucent grey, which shows on a white mat and on dark tiles alike.
-    static let edgeColour = Color(white: 0.5, opacity: 0.3)
 
     static func label(for zone: Zone, placed: Bool) -> String {
         "Zone \(zone.numeral), \(zone.name), \(placed ? "placed" : "not placed")"
@@ -22,29 +36,22 @@ struct ZonePanel: View {
     var body: some View {
         let pins = model.pins
         let selected = model.selectedPin.flatMap { pins.indices.contains($0) ? pins[$0].zone : nil }
-        VStack(spacing: 0) {
-            ForEach(ZoneScale.zones.reversed()) { zone in
+        let layout = horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+        layout {
+            ForEach(horizontal ? ZoneScale.zones : ZoneScale.zones.reversed()) { zone in
                 ZoneTile(zone: zone, placed: pins.contains { $0.zone == zone.index }, selected: selected == zone.index) { point in
-                    model.zoneDrag = ZoneDrag(zone: zone.index, point: canvasPoint(point))
+                    model.zoneDrag = ZoneDrag(zone: zone.index, point: point)
                 } onDrop: { point in
                     model.zoneDrag = nil
-                    guard let unit = model.canvasScale.unitPoint(canvasPoint: canvasPoint(point)) else { return }
+                    guard let unit = model.canvasScale.unitPoint(canvasPoint: point) else { return }
                     Task { await model.placeZone(zone.index, at: unit) }
                 }
             }
         }
-        .frame(width: ZoneGeometry.panelWidth)
         .allowsHitTesting(model.canPlaceZones)
         .opacity(model.canPlaceZones ? 1 : 0.5)
-        .overlay(alignment: .trailing) { Rectangle().fill(Self.edgeColour).frame(width: 1).allowsHitTesting(false) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Zones")
-    }
-
-    /// The panel's own width comes off a drag's position, as the canvas starts
-    /// where the panel ends.
-    private func canvasPoint(_ point: CGPoint) -> CGPoint {
-        CGPoint(x: point.x - ZoneGeometry.panelWidth, y: point.y)
     }
 }
 
@@ -73,7 +80,7 @@ private struct ZoneTile: View {
                     .padding(6)
             }
         }
-        .frame(maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay { if selected { Rectangle().strokeBorder(EdgePrint.amber, lineWidth: 2.5) } }
         .contentShape(Rectangle())
         .gesture(

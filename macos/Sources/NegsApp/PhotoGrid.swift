@@ -142,7 +142,7 @@ private struct PhotoGridCell: View {
         let image = developed
         let rect = PhotoGridLayout.photoRect(image: image.map { CGSize(width: $0.width, height: $0.height) } ?? CGSize(width: 3, height: 2), box: box)
         VStack(alignment: .leading, spacing: PhotoGridLayout.lineGap) {
-            line(image == nil ? nil : exif?.topLine, left: rect.minX, width: width)
+            line(image == nil ? nil : exif?.cameraLine, left: rect.minX, width: width)
             ZStack(alignment: .topLeading) {
                 if let image {
                     Image(decorative: image, scale: 1)
@@ -155,7 +155,7 @@ private struct PhotoGridCell: View {
                     .offset(x: rect.minX, y: rect.minY)
             }
             .frame(width: box.width, height: box.height, alignment: .topLeading)
-            line(image == nil ? nil : exif?.bottomLine, left: rect.minX, width: width)
+            line(image == nil ? nil : exif?.exposureLine, left: rect.minX, width: width)
         }
         .frame(width: width, height: PhotoGridLayout.cellHeight(cellWidth: width), alignment: .topLeading)
         .accessibilityElement()

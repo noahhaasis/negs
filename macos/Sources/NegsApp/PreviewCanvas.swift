@@ -23,8 +23,11 @@ struct PreviewCanvas: NSViewRepresentable {
     var draggedRadius = SampleSize.initial
     /// In a proof, the pixels the export writes: they alone set the photograph's size.
     var proofPixels: CGSize? = nil
-    /// The camera details shown above and below the photograph.
+    /// The camera details shown under the photograph.
     var exif: PhotoExif? = nil
+    /// The zone panel's up, so the photograph needs room beside it.
+    var showsZones = false
+    var onZonePlacement: ((ZonePlacement) -> Void)? = nil
     /// A click on a pin's chip, or nil on empty photograph.
     var onSelectPin: ((Int?) -> Void)? = nil
     /// Called when a placed pin is dragged to a new point.
@@ -63,6 +66,7 @@ struct PreviewCanvas: NSViewRepresentable {
         scroll.onScrollPin = onScrollPin
         scroll.proofPixels = proofPixels
         scroll.exif = exif
+        scroll.overlay.onZonePlacement = onZonePlacement
         // Esc and Delete reach the photograph once a pin is selected.
         let selected = pins.first(where: \.selected)?.index
         if selected != nil, selected != photo.selectedPin { scroll.window?.makeFirstResponder(photo) }
@@ -73,6 +77,14 @@ struct PreviewCanvas: NSViewRepresentable {
             let canvas = border.canvas(for: displaySize, strip: filmStrip)
             return border.instagram ? border.instagramCanvas(for: canvas) : canvas
         } ?? displaySize
+        // Room to pan the photograph clear of the panel and show its details.
+        scroll.automaticallyAdjustsContentInsets = false
+        let insets = ZoneGeometry.insets(document: documentSize, zones: showsZones)
+        if insets.top != scroll.contentInsets.top || insets.left != scroll.contentInsets.left
+            || insets.bottom != scroll.contentInsets.bottom {
+            scroll.contentInsets = insets
+            scroll.overlay.redraw()
+        }
         let oldSize = photo.frame.size, oldPhotoSize = photo.displaySize
         let commanded = scroll.lastCommand != zoomCommand
         // A different crop (such as an undone one) is a new picture: fit it.
@@ -126,9 +138,25 @@ final class CenteringClipView: NSClipView {
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var bounds = super.constrainBoundsRect(proposedBounds)
         guard let documentView else { return bounds }
-        if bounds.width > documentView.frame.width { bounds.origin.x = (documentView.frame.width - bounds.width) / 2 }
-        if bounds.height > documentView.frame.height { bounds.origin.y = (documentView.frame.height - bounds.height) / 2 }
+        let frame = documentView.frame
+        if bounds.width > frame.width {
+            bounds.origin.x = -Self.leadingGap(space: bounds.width - frame.width, leading: contentInsets.left, trailing: contentInsets.right)
+        }
+        if bounds.height > frame.height {
+            let space = bounds.height - frame.height
+            let top = Self.leadingGap(space: space, leading: contentInsets.top, trailing: contentInsets.bottom)
+            bounds.origin.y = isFlipped ? -top : top - space
+        }
         return bounds
+    }
+
+    /// The gap before a document in `space` to spare: centred, unless what's
+    /// kept clear at either end needs it off centre.
+    static func leadingGap(space: CGFloat, leading: CGFloat, trailing: CGFloat) -> CGFloat {
+        var gap = space / 2
+        if gap < leading { gap = min(leading, space) }
+        if space - gap < trailing { gap = max(space - trailing, min(leading, space)) }
+        return gap
     }
 }
 

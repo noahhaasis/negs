@@ -217,6 +217,8 @@ halation, DIR couplers, lens diffusion, grain, glare, print curves, scanner, col
 management, enlarger, and output options. Default film/paper pairing and direct
 scanning follow the profile metadata. Controls and reset participate in Undo.
 
+The photograph's exposure and date sit under its left corner and its camera and lens under its right, on one row where they fit.
+
 F shows only the photograph and its camera details: the zones, pins, film strip, status
 bar, sidebar and window controls all go, and F again brings back what was showing. It's
 one keystroke either way, so the grid and cropping keep their own controls.
@@ -232,7 +234,7 @@ JPEG inputs now use the same shared loader for CLI export as for preview.
 
 ## The zone system
 
-With a photograph open, the zone panel runs down its left edge, with a tile for each of Ansel Adams'
+With a photograph open, the zone panel sits flush against it, along the top and exactly as wide for a landscape photograph, or down the left and exactly as tall for a portrait one, with a tile for each of Ansel Adams'
 eleven zones: 0 at the bottom, 10 at the top. The zones are evenly spaced in L\*, at
 zone × 10, which puts zone 5 at 18 % gray. On the negative a zone is a stop, but
 five stops above 18 % is far past white, so these are the tones a print compresses

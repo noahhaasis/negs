@@ -3,7 +3,7 @@ import SwiftUI
 import CoreText
 import ImageIO
 
-/// A photograph's camera details, for the lines above and below it.
+/// A photograph's camera details, for the lines printed beside it.
 struct PhotoExif: Equatable, Sendable {
     var make: String?
     var model: String?
@@ -16,8 +16,8 @@ struct PhotoExif: Equatable, Sendable {
     /// `yyyy:MM:dd HH:mm:ss`, as EXIF has it.
     var taken: String?
 
-    /// The camera and lens, for the line above the photograph.
-    var topLine: String {
+    /// The camera and lens.
+    var cameraLine: String {
         var camera = model ?? ""
         // "NIKON CORPORATION", "NIKON D750": the model usually says the make already.
         if let make, !make.isEmpty, !camera.localizedCaseInsensitiveContains(make.split(separator: " ").first ?? "") {
@@ -26,8 +26,8 @@ struct PhotoExif: Equatable, Sendable {
         return [camera, lens ?? ""].filter { !$0.isEmpty }.joined(separator: "   ").uppercased()
     }
 
-    /// The exposure and date, for the line below it.
-    var bottomLine: String {
+    /// The exposure and date.
+    var exposureLine: String {
         var parts: [String] = []
         if let iso { parts.append("ISO \(iso)") }
         if let exposure, exposure > 0 { parts.append(Self.shutter(exposure)) }
@@ -37,7 +37,7 @@ struct PhotoExif: Equatable, Sendable {
         return parts.joined(separator: "   ")
     }
 
-    var isEmpty: Bool { topLine.isEmpty && bottomLine.isEmpty }
+    var isEmpty: Bool { cameraLine.isEmpty && exposureLine.isEmpty }
 
     static func shutter(_ seconds: Double) -> String {
         if seconds >= 0.3 { return "\(trimmed(seconds))S" }

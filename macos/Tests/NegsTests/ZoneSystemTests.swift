@@ -57,16 +57,15 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertEqual(ZonePanel.label(for: ZoneScale.zones[0], placed: false), "Zone 0, Pure black, not placed")
     }
 
-    /// The column is one scale, with no lines between its tiles, and a line down
-    /// its right side that shows against a white mat as well as the dark tiles.
-    @MainActor func testTheZoneColumnHasARightEdgeAndNoRowLines() throws {
+    /// The column is one scale, with no lines between its tiles.
+    @MainActor func testTheZoneColumnHasNoRowLines() throws {
         _ = NSApplication.shared
         let model = EditorModel()
         defer { model.shutdown() }
         let height = 550
         let host = NSHostingView(rootView: ZonePanel(model: model).frame(height: CGFloat(height)).background(Color.white))
         host.appearance = NSAppearance(named: .darkAqua)
-        host.frame = NSRect(x: 0, y: 0, width: ZoneGeometry.panelWidth, height: CGFloat(height))
+        host.frame = NSRect(x: 0, y: 0, width: ZoneGeometry.panelDepth, height: CGFloat(height))
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
@@ -82,22 +81,6 @@ final class ZoneSystemTests: XCTestCase {
             XCTAssertLessThanOrEqual(value, previous + 0.5, "A line at row \(y)")
             previous = value
         }
-        // Translucent grey: only slightly darker than the white tile under it.
-        let right = bitmap.pixelsWide - 1
-        let edge = try grey(right, 25)
-        XCTAssertLessThan(edge, try grey(right - 3 * scale, 25) - 20, "It shows on white")
-        XCTAssertGreaterThan(edge, 190, "It's very slight")
-    }
-
-    /// The same line over a dark tile comes out lighter than the tile.
-    @MainActor func testTheZoneEdgeIsLighterThanADarkTone() throws {
-        let host = NSHostingView(rootView: Color.black.overlay { Rectangle().fill(ZonePanel.edgeColour) })
-        host.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
-        host.layoutSubtreeIfNeeded()
-        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: bitmap)
-        let colour = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))
-        XCTAssertGreaterThan(colour.redComponent * 255, 20)
     }
 
     /// Tab shows and hides the pins, and stands down while typing in a field.
@@ -117,6 +100,35 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertFalse(MainMenu.bareKeysAllowed(firstResponder: NSTextView()))
         XCTAssertTrue(MainMenu.bareKeysAllowed(firstResponder: NSView()))
         XCTAssertTrue(MainMenu.bareKeysAllowed(firstResponder: nil))
+    }
+
+    /// Flush against a landscape photograph's top and exactly as wide, or a
+    /// portrait one's left and exactly as tall, with each tile facing it.
+    func testTheZonePanelFollowsThePhotograph() {
+        let canvas = CGSize(width: 1000, height: 800)
+        let landscape = ZoneGeometry.placement(photo: CGRect(x: 100, y: 200, width: 600, height: 400), canvas: canvas)
+        XCTAssertTrue(landscape.horizontal)
+        XCTAssertEqual(landscape.frame, CGRect(x: 100, y: 144, width: 600, height: 56))
+        XCTAssertEqual(landscape.tile(zone: 0).y, 200)
+        XCTAssertEqual(landscape.tile(zone: 0).x, 100 + 600.0 / 22, accuracy: 0.01)
+        XCTAssertEqual(landscape.tile(zone: 10).x, 700 - 600.0 / 22, accuracy: 0.01)
+        let portrait = ZoneGeometry.placement(photo: CGRect(x: 300, y: 100, width: 400, height: 600), canvas: canvas)
+        XCTAssertFalse(portrait.horizontal)
+        XCTAssertEqual(portrait.frame, CGRect(x: 244, y: 100, width: 56, height: 600))
+        XCTAssertEqual(portrait.tile(zone: 10).x, 300)
+        XCTAssertEqual(portrait.tile(zone: 10).y, 100 + 600.0 / 22, accuracy: 0.01, "White at the top")
+        XCTAssertEqual(portrait.tile(zone: 0).y, 700 - 600.0 / 22, accuracy: 0.01)
+        // A photograph past the canvas: the panel stays on it, over what's showing.
+        let large = ZoneGeometry.placement(photo: CGRect(x: -200, y: -100, width: 2000, height: 1000), canvas: canvas)
+        XCTAssertEqual(large.frame, CGRect(x: 0, y: 0, width: 1000, height: 56))
+    }
+
+    /// Centred with room to spare; off centre only to keep what's beside it clear.
+    func testTheCanvasKeepsThePanelClear() {
+        XCTAssertEqual(CenteringClipView.leadingGap(space: 400, leading: 56, trailing: 26), 200)
+        XCTAssertEqual(CenteringClipView.leadingGap(space: 80, leading: 56, trailing: 26), 56)
+        XCTAssertEqual(CenteringClipView.leadingGap(space: 30, leading: 56, trailing: 26), 30, "The panel first")
+        XCTAssertEqual(CenteringClipView.leadingGap(space: 40, leading: 0, trailing: 26), 14, "Room for the details")
     }
 
     @MainActor func testBareFShowsOnlyThePhotograph() {
