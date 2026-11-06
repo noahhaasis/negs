@@ -124,6 +124,10 @@ enum Command {
         params: Box<RuntimeParams>,
         /// The thumbnail's long edge in pixels.
         long_side: u32,
+        /// Read a RAW no larger than this on its long side, where the decoder
+        /// can, for a helper that only makes small frames. 0 reads all of it.
+        #[serde(default)]
+        decode_long_side: u32,
         preview_path: PathBuf,
         /// The photograph's crop. The whole frame is developed, as for the
         /// main preview, then cut, so grain and halation keep their scale.
@@ -234,6 +238,8 @@ fn thumbnail_dimensions((width, height): (u32, u32), long_side: u32, crop: Optio
 /// and a non-RAW file's interpretation each need a new decode.
 struct Source {
     path: PathBuf,
+    /// The limit it was read with, in pixels on the long side; 0 is all of it.
+    decode_limit: u32,
     wb: spektrafilm_io::RawWhiteBalance,
     lens: spektrafilm_io::LensCorrection,
     lens_correction_supported: bool,
@@ -306,9 +312,10 @@ impl Session {
         wb: spektrafilm_io::RawWhiteBalance,
         lens: spektrafilm_io::LensCorrection,
         interpretation: spektrafilm_io::InputInterpretation,
+        decode_limit: u32,
     ) -> Result<()> {
         let reload = self.source_generation != source_generation
-            || self.source.as_ref().is_none_or(|source| !source.current(input, wb, lens, &interpretation));
+            || self.source.as_ref().is_none_or(|source| source.decode_limit != decode_limit || !source.current(input, wb, lens, &interpretation));
         if reload {
             // Release the last source's caches before decoding the next.
             self.source = None;
@@ -319,15 +326,17 @@ impl Session {
             self.metering = None;
             self.thumbnail_source = None;
             self.thumbnail_wb_sources = Vec::new();
-            let loaded = spektrafilm_io::load_image_colour(
+            let loaded = spektrafilm_io::load_image_colour_limited(
                 input,
                 spektrafilm_io::Formats::Any,
                 wb,
                 lens,
                 &interpretation,
+                decode_limit,
             )?;
             self.source = Some(Source {
                 path: input.to_path_buf(),
+                decode_limit,
                 wb,
                 lens,
                 lens_correction_supported: loaded.lens_correction_supported,
@@ -348,6 +357,7 @@ impl Session {
         mut paper: String,
         mut params: Box<RuntimeParams>,
         long_side: u32,
+        decode_long_side: u32,
         preview_path: PathBuf,
         crop: Option<Crop>,
         preset: Option<String>,
@@ -385,7 +395,7 @@ impl Session {
             && self.source_generation == source_generation
             && self.source.as_ref().is_some_and(|s| s.path == input && s.wb.effective() != wb.effective());
         if !own_decode {
-            self.load_source(&input, source_generation, wb, lens, interpretation.clone())?;
+            self.load_source(&input, source_generation, wb, lens, interpretation.clone(), decode_long_side)?;
         }
         let decoded = started.elapsed();
         let source = &self.source.as_ref().unwrap().image;
@@ -542,8 +552,8 @@ impl Session {
                 Ok(json!({"width": width, "height": height, "input_colour": loaded.colour,
                           "display_color_space": DisplaySpace::of(encoding).name()}))
             }
-            Command::Thumbnail { input, source_generation, film, paper, params, long_side, preview_path, crop, preset, include_finish } => {
-                self.thumbnail(input, source_generation, film, paper, params, long_side, preview_path, crop, preset, include_finish, data)
+            Command::Thumbnail { input, source_generation, film, paper, params, long_side, decode_long_side, preview_path, crop, preset, include_finish } => {
+                self.thumbnail(input, source_generation, film, paper, params, long_side, decode_long_side, preview_path, crop, preset, include_finish, data)
             }
             Command::ReleaseThumbnails => {
                 self.thumbnail_source = None;
@@ -669,7 +679,7 @@ impl Session {
                 let lens = params.io.lens_correction;
                 let interpretation = params.io.input_interpretation.clone();
                 interpretation.validate()?;
-                self.load_source(&input, source_generation, wb, lens, interpretation)?;
+                self.load_source(&input, source_generation, wb, lens, interpretation, 0)?;
                 let Source { image: source, colour: input_colour, lens_correction_supported, .. } =
                     self.source.as_ref().unwrap();
                 // RAW and decoded files are the engine's linear sRGB; manual
@@ -960,7 +970,7 @@ mod tests {
             let preview = dir.join(name);
             let response = session.handle(Request { id: 1, command: Command::Thumbnail {
                 input: input.clone(), source_generation: 1, film: film.into(), paper: paper.into(),
-                params: Box::new(params), long_side: 24, preview_path: preview.clone(), crop: None,
+                params: Box::new(params), long_side: 24, decode_long_side: 0, preview_path: preview.clone(), crop: None,
                 preset: preset.map(str::to_string), include_finish: false,
             } }, &data).unwrap();
             (response, std::fs::read(preview).unwrap())

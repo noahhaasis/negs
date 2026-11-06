@@ -26,8 +26,10 @@ static int fail(SFAppleRaw *out, int code, NSString *message) {
 // pixels, including on exceptions. No exception crosses the C ABI.
 // `defer_orientation` leaves a file Apple cannot lens-correct unoriented, so the
 // caller can correct it in sensor coordinates first and orient it afterwards.
+// `max_long_side`, when not 0, has Apple develop no larger than that, through the
+// same processing, which is far quicker for a small copy of a large sensor.
 int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_correction,
-                        int defer_orientation, SFAppleRaw *out) {
+                        int defer_orientation, uint32_t max_long_side, SFAppleRaw *out) {
     @autoreleasepool {
         @try {
             NSURL *url = CFBridgingRelease(CFURLCreateFromFileSystemRepresentation(
@@ -38,6 +40,9 @@ int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_corr
             if (!raw) return fail(out, 1, @"Apple RAW does not support this file on this macOS version");
             raw.draftModeEnabled = NO;
             raw.scaleFactor = 1;
+            CGSize native = raw.nativeSize;
+            CGFloat long_side = MAX(native.width, native.height);
+            if (max_long_side > 0 && long_side > max_long_side) raw.scaleFactor = max_long_side / long_side;
             out->orientation = (uint32_t)raw.orientation;
             if (out->orientation < 1 || out->orientation > 8) out->orientation = 1;
             if (defer_orientation && !raw.isLensCorrectionSupported) orient = 0;
@@ -82,7 +87,8 @@ int sf_apple_raw_decode(const char *path, int orient, int as_shot, int lens_corr
             snprintf(out->version, sizeof(out->version), "%s", raw.decoderVersion.UTF8String);
             CIImage *image = raw.outputImage;
             if (!image) return fail(out, 1, @"Apple RAW produced no image for this file");
-            CGRect bounds = image.extent;
+            // A scaled extent can fall between pixels.
+            CGRect bounds = raw.scaleFactor < 1 ? CGRectIntegral(image.extent) : image.extent;
             // Some valid tiny/custom DNGs initialize a filter but expose no
             // supported sensor image. Let the portable backend handle them.
             if (CGRectIsEmpty(bounds))

@@ -150,12 +150,16 @@ import UniformTypeIdentifiers
         var command: [String: JSONValue] = [
             "command": .string("thumbnail"), "input": .string(url.path),
             "film": .string(edit.film), "paper": .string(edit.paper), "params": edit.params,
-            "long_side": .number(Double(Self.rollFrameSide))
+            "long_side": .number(Double(Self.rollFrameSide)),
+            "decode_long_side": .number(Double(Self.rollReadSide))
         ]
         if let crop = Self.cropJSON(edit.crop) { command["crop"] = crop }
         return (command, Int(edit.params["io.rotate_cw"].double))
     }
     private static let rollFrameSide = 800
+    /// A small frame doesn't need a RAW's whole sensor, and reading less is what
+    /// makes it quicker: the film simulation itself is a few percent of the time.
+    private static let rollReadSide = 1200
 
     /// A zone being dragged from the panel.
     var zoneDrag: ZoneDrag?

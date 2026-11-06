@@ -53,6 +53,10 @@ pub struct RawDecodeOptions {
     pub white_balance: RawWhiteBalance,
     pub apply_orientation: bool,
     pub lens_correction: LensCorrection,
+    /// Develop no larger than this on the long side, where the decoder can do
+    /// that quicker than the whole sensor; 0 is the whole sensor. A decoder that
+    /// can't returns it all, so a caller still reduces what it gets.
+    pub max_long_side: u32,
 }
 
 impl Default for RawDecodeOptions {
@@ -60,6 +64,7 @@ impl Default for RawDecodeOptions {
         Self {
             white_balance: RawWhiteBalance::default(),
             apply_orientation: true,
+            max_long_side: 0,
             lens_correction: LensCorrection::default(),
         }
     }
@@ -316,6 +321,47 @@ mod tests {
         // A fixture with exposure metadata can contain values above 1. Their
         // preservation is also measured by raw_decoder_probe, not asserted for
         // a photograph which may have no saturated scene content.
+        Ok(())
+    }
+
+    /// A read limited in size is a smaller copy of the same picture: the same
+    /// shape, and the same colours region by region.
+    #[cfg(all(target_os = "macos", feature = "apple-raw"))]
+    #[test]
+    #[ignore = "requires a local camera RAW: set SPEKTRAFILM_RAW_TEST_FILE"]
+    fn apple_raw_limited_read_matches_the_full_one() -> Result<()> {
+        let path = std::env::var_os("SPEKTRAFILM_RAW_TEST_FILE")
+            .context("SPEKTRAFILM_RAW_TEST_FILE is required")?;
+        let path = Path::new(&path);
+        let full = AppleRawDecoder.decode(path, RawDecodeOptions::default())?.image;
+        let small = AppleRawDecoder.decode(path, RawDecodeOptions { max_long_side: 1200, ..Default::default() })?.image;
+        assert_eq!(small.width.max(small.height), 1200);
+        let aspect = |w: u32, h: u32| w as f64 / h as f64;
+        assert!((aspect(full.width, full.height) - aspect(small.width, small.height)).abs() < 0.01);
+        let region = |image: &ImageBuf, cx: u32, cy: u32| -> [f64; 3] {
+            let (x0, x1) = (image.width * cx / 8, image.width * (cx + 1) / 8);
+            let (y0, y1) = (image.height * cy / 8, image.height * (cy + 1) / 8);
+            let mut total = [0.0f64; 3];
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let i = (y as usize * image.width as usize + x as usize) * 3;
+                    for c in 0..3 { total[c] += image.data[i + c] as f64; }
+                }
+            }
+            let n = ((x1 - x0) * (y1 - y0)) as f64;
+            total.map(|t| t / n)
+        };
+        for cy in 0..8 {
+            for cx in 0..8 {
+                let (a, b) = (region(&full, cx, cy), region(&small, cx, cy));
+                for c in 0..3 {
+                    assert!((a[c] - b[c]).abs() < 0.01, "region {cx},{cy} channel {c}: {} and {}", a[c], b[c]);
+                }
+            }
+        }
+        // No limit, or one larger than the sensor, is the whole sensor.
+        let wide = AppleRawDecoder.decode(path, RawDecodeOptions { max_long_side: 100_000, ..Default::default() })?.image;
+        assert_eq!((wide.width, wide.height), (full.width, full.height));
         Ok(())
     }
 

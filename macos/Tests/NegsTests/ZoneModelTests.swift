@@ -1013,6 +1013,15 @@ extension ZoneModelTests {
         XCTAssertFalse(model.rollDeveloper === first)
     }
 
+    /// Grid frames read only as much of a RAW as they need; nothing else does.
+    func testGridFramesReadLessOfTheFile() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let request = try XCTUnwrap(model.frameRequest(for: ramp))
+        XCTAssertEqual(request.command["decode_long_side"]?.double, 1200)
+        XCTAssertEqual(request.command["long_side"]?.double, 800)
+    }
+
     /// Nothing but the person moves the film: opening a photograph in view leaves
     /// it, even at the far side, and only a frame wholly out of view brings it round.
     func testTheStripDoesNotCentreTheOpenPhotograph() async throws {

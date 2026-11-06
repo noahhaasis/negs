@@ -131,11 +131,24 @@ pub fn load_image_colour(
     lens: LensCorrection,
     interpretation: &InputInterpretation,
 ) -> Result<LoadedImage> {
+    load_image_colour_limited(path, formats, wb, lens, interpretation, 0)
+}
+
+/// As [`load_image_colour`], with a RAW developed no larger than `max_long_side`
+/// on the long side where the decoder can do that, for small copies. 0 is all of it.
+pub fn load_image_colour_limited(
+    path: &Path,
+    formats: Formats,
+    wb: RawWhiteBalance,
+    lens: LensCorrection,
+    interpretation: &InputInterpretation,
+    max_long_side: u32,
+) -> Result<LoadedImage> {
     let ext = extension(path);
     if is_raw_extension(&ext) {
         let decoded = raw::decode_raw(
             path,
-            raw::RawDecodeOptions { white_balance: wb, apply_orientation: true, lens_correction: lens },
+            raw::RawDecodeOptions { white_balance: wb, apply_orientation: true, max_long_side, lens_correction: lens },
             raw::RawDecoderPreference::Auto,
         )?;
         return Ok(LoadedImage {

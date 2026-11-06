@@ -335,7 +335,9 @@ photograph opens it to edit, and G goes back. It follows the film strip's RAW-on
 Every photograph shows its final edit: its saved edit, or what it would open with.
 `RollDeveloper` develops them in the background with a helper of its own, since the main
 helper holds the open photograph's decoded source, nearest the middle of the screen first
-and through the whole folder, at 800 px on the long side. The grid stays hidden behind a
+and through the whole folder, at 800 px on the long side. It reads a RAW no larger than
+1200 px (`decode_long_side`), through the same Apple processing: on a 45 MP NEF that takes a
+frame from about 380 ms to 215 ms, with the film simulation itself only about 15 ms. The grid stays hidden behind a
 progress count until the 12 frames either side of the open photograph are ready in memory.
 No embedded previews show there: a cell scrolled to before it's developed stays black. Finished photographs are kept as JPEGs in the app's caches (`RollFrames`,
 2 GB, least recently used goes first), keyed by the file, its edit and the helper build, so
