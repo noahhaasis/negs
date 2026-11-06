@@ -75,6 +75,8 @@ import SwiftUI
         command(view, "Hide Zones and Pins", #selector(togglePins), "\t", [])
         command(view, "Delete Tone Pin", #selector(deleteTonePin), "\u{8}", [])
         view.addItem(.separator())
+        command(view, "Previous Photograph", #selector(previousPhotograph), String(UnicodeScalar(NSLeftArrowFunctionKey)!), [])
+        command(view, "Next Photograph", #selector(nextPhotograph), String(UnicodeScalar(NSRightArrowFunctionKey)!), [])
         command(view, "Grid View", #selector(toggleGrid), "g", [])
         command(view, "Image Only", #selector(toggleImageOnly), "f", [])
         command(view, "Simple Controls", #selector(toggleInspectorMode), String(UnicodeScalar(NSF4FunctionKey)!), [])
@@ -137,6 +139,8 @@ import SwiftUI
     @objc private func newPreset() { model.newPreset() }
     @objc private func importPresets() { model.importPresetsPanel() }
     @objc private func toggleGrid() { model.toggleGrid() }
+    @objc private func previousPhotograph() { model.openNeighbour(-1) }
+    @objc private func nextPhotograph() { model.openNeighbour(1) }
     @objc private func copyEdit() { model.copyEdit() }
     @objc private func pasteEdit() { model.pasteEdit() }
     @objc private func toggleImageOnly() { model.toggleImageOnly() }
@@ -176,6 +180,8 @@ import SwiftUI
         case #selector(toggleGrid):
             item.state = model.gridVisible ? .on : .off
             return photo && !model.cropping && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
+        case #selector(previousPhotograph), #selector(nextPhotograph):
+            return photo && !model.cropping && !model.gridVisible && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
         case #selector(copyEdit): return photo && model.hasCatalog
         case #selector(pasteEdit): return photo && model.hasCatalog && !model.cropping && model.canPasteEdit
         case #selector(toggleImageOnly):

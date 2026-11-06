@@ -846,6 +846,28 @@ extension ZoneModelTests {
         try await waitUntil({ developer.finished == developer.total }, timeout: 30)
     }
 
+    /// The arrows go through the folder in the strip's order and stop at its ends.
+    func testSteppingThroughTheFolder() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        // other.png sorts before ramp, and nothing comes after it.
+        model.open(other)
+        model.openNeighbour(-1)
+        XCTAssertEqual(model.source, other, "The first stays")
+        model.openNeighbour(1)
+        XCTAssertEqual(model.source, ramp)
+        model.openNeighbour(1)
+        XCTAssertEqual(model.source, ramp, "The last stays")
+        model.openNeighbour(-1)
+        XCTAssertEqual(model.source, other)
+        // Cropping holds still.
+        try await waitUntil { model.previewCurrent }
+        model.beginCrop()
+        XCTAssertTrue(model.cropping)
+        model.openNeighbour(1)
+        XCTAssertEqual(model.source, other)
+    }
+
     /// In the window, the panel draws flush along the landscape photograph's top
     /// and exactly as wide, with black at its left.
     func testTheZonePanelSitsOnThePhotograph() async throws {

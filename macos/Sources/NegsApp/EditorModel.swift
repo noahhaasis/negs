@@ -160,12 +160,28 @@ import UniformTypeIdentifiers
         folderListing = Task { [weak self] in
             let files = await Task.detached(priority: .utility) { try? PhotoFolder.snapshot(in: directory) }.value
             guard let self, !Task.isCancelled, self.source == url, let files else { return }
+            self.folderFiles = files
             let shown = PhotoFolder.shown(files, rawOnly: rawOnly)
             self.rollDeveloper?.show(files: shown)
             self.rollDeveloper?.setCentre(shown.firstIndex { $0.url == url } ?? 0)
         }
     }
     @ObservationIgnored private var folderListing: Task<Void, Never>?
+    /// The open photograph's folder, as last listed.
+    @ObservationIgnored private var folderFiles: [PhotoFile] = []
+
+    /// Opens the photograph `step` along the folder, as the film strip shows it,
+    /// stopping at either end.
+    func openNeighbour(_ step: Int) {
+        guard let source, !cropping, !gridVisible else { return }
+        // Before the first listing arrives, or from the last folder.
+        if !folderFiles.contains(where: { $0.url == source }) {
+            folderFiles = (try? PhotoFolder.snapshot(in: source.deletingLastPathComponent())) ?? []
+        }
+        let shown = PhotoFolder.shown(folderFiles, rawOnly: filmstripRawOnly)
+        guard let index = shown.firstIndex(where: { $0.url == source }), shown.indices.contains(index + step) else { return }
+        open(shown[index + step].url)
+    }
 
     /// The developer stays, with its frames, carrying on through the folder, so
     /// coming back doesn't start over. Only another folder ends it.

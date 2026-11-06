@@ -144,6 +144,15 @@ final class ZoneSystemTests: XCTestCase {
         XCTAssertEqual(CenteringClipView.leadingGap(space: 40, leading: 0, trailing: 26), 14, "Room for the details")
     }
 
+    @MainActor func testBareArrowsStepThroughTheFolder() {
+        XCTAssertEqual(EditorWindowController.photographStep(keyCode: 123, modifiers: [.numericPad, .function], firstResponder: nil), -1)
+        XCTAssertEqual(EditorWindowController.photographStep(keyCode: 124, modifiers: [.numericPad, .function], firstResponder: nil), 1)
+        XCTAssertNil(EditorWindowController.photographStep(keyCode: 124, modifiers: [.command], firstResponder: nil))
+        XCTAssertNil(EditorWindowController.photographStep(keyCode: 124, modifiers: [], firstResponder: NSText()), "Typing")
+        XCTAssertNil(EditorWindowController.photographStep(keyCode: 124, modifiers: [], firstResponder: NSSlider()), "A slider's own keys")
+        XCTAssertNil(EditorWindowController.photographStep(keyCode: 126, modifiers: [], firstResponder: nil))
+    }
+
     @MainActor func testBareFShowsOnlyThePhotograph() {
         XCTAssertTrue(EditorWindowController.togglesImageOnly(keyCode: 3, modifiers: [], firstResponder: nil))
         XCTAssertFalse(EditorWindowController.togglesImageOnly(keyCode: 3, modifiers: [.command, .option], firstResponder: nil), "Hide Film Strip")

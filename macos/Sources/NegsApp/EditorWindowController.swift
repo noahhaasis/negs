@@ -101,7 +101,7 @@ import SwiftUI
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self else { return false }
-                return self.holdOriginal(event) || self.togglePins(event) || self.toggleGridKey(event) || self.toggleImageOnlyKey(event)
+                return self.holdOriginal(event) || self.togglePins(event) || self.toggleGridKey(event) || self.toggleImageOnlyKey(event) || self.stepPhotographKey(event)
             } ? nil : event
         }
         // The title bar hides in full screen, so the status bar carries the title there.
@@ -151,6 +151,22 @@ import SwiftUI
               Self.togglesGrid(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
         else { return false }
         if !event.isARepeat { model.toggleGrid() }
+        return true
+    }
+
+    /// How far a key press moves through the folder: a bare left or right arrow,
+    /// unless a field or slider has the keyboard and needs it.
+    static func photographStep(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Int? {
+        guard modifiers.isDisjoint(with: [.shift, .control, .option, .command]),
+              !(firstResponder is NSText), !(firstResponder is NSSlider) else { return nil }
+        return keyCode == 123 ? -1 : keyCode == 124 ? 1 : nil
+    }
+
+    private func stepPhotographKey(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.window === window, model.source != nil, !model.cropping, !model.gridVisible,
+              let step = Self.photographStep(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
+        else { return false }
+        model.openNeighbour(step)
         return true
     }
 

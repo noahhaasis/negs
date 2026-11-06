@@ -231,6 +231,8 @@ numbers.
 Edit › Copy Edit (⇧⌘C) and Paste Edit (⇧⌘V) carry a whole edit between photographs. A
 photograph keeps its own pins, crop, rotation and file reading, and the export's settings.
 
+The left and right arrows open the previous and next photograph in the folder, in the film strip's order, from anywhere but a text field or a focused slider, stopping at either end.
+
 F shows only the photograph and its camera details: the zones, pins, film strip, status
 bar, sidebar and window controls all go, and F again brings back what was showing. It's
 one keystroke either way, so the grid and cropping keep their own controls.
