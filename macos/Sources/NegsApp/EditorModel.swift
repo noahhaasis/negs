@@ -112,13 +112,17 @@ import UniformTypeIdentifiers
         if rollDeveloper == nil, let paths = engine?.paths {
             rollDeveloper = try? RollDeveloper(paths: paths) { [weak self] url in self?.frameRequest(for: url) }
         }
+        // Edits made in the edit view since, which it wasn't watching.
+        if let source {
+            if sameLookForRoll { rollDeveloper?.invalidateAll() } else { rollDeveloper?.invalidate(source) }
+        }
         gridVisible = true
     }
 
+    /// The developer stays, with its frames, carrying on through the folder, so
+    /// coming back doesn't start over. Only another folder ends it.
     private func closeGrid() {
         gridVisible = false
-        rollDeveloper?.stop()
-        rollDeveloper = nil
     }
 
     /// Back to the edit view, on `url`.
@@ -141,6 +145,8 @@ import UniformTypeIdentifiers
             edit = uneditedState(in: url.deletingLastPathComponent())
         }
         edit.params["io.output_color_space"] = .string(previewSpace)
+        // The grid's frames have their own size, so a new Image Size is no new frame.
+        edit.params[ImageSize.targetPath] = defaults[ImageSize.targetPath]
         var command: [String: JSONValue] = [
             "command": .string("thumbnail"), "input": .string(url.path),
             "film": .string(edit.film), "paper": .string(edit.paper), "params": edit.params,
@@ -914,6 +920,10 @@ import UniformTypeIdentifiers
         }
         // The photograph being left keeps an edit made just now.
         saveEditsNow()
+        if rollDeveloper != nil, source?.deletingLastPathComponent().standardizedFileURL != url.deletingLastPathComponent().standardizedFileURL {
+            rollDeveloper?.stop()
+            rollDeveloper = nil
+        }
         let leaving = image, leavingSize = imageSize, leavingCrop = state.crop, leavingRotation = state.params["io.rotate_cw"]
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1

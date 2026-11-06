@@ -339,7 +339,10 @@ and through the whole folder, at 800 px on the long side. The grid stays hidden 
 progress count until the 12 frames either side of the open photograph are ready in memory.
 No embedded previews show there: a cell scrolled to before it's developed stays black. Finished photographs are kept as JPEGs in the app's caches (`RollFrames`,
 2 GB, least recently used goes first), keyed by the file, its edit and the helper build, so
-nothing develops twice. Those within 32 of the middle stay decoded in memory.
+nothing develops twice. Those within 32 of the middle stay decoded in memory. The developer stays after
+leaving the grid, with its frames, carrying on through the folder, so coming back needs no
+wait; only opening a photograph in another folder ends it. Image Size isn't part of a
+frame's key, since the grid's frames have their own size.
 
 ## Proof
 

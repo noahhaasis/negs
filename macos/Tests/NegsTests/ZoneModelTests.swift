@@ -734,7 +734,7 @@ extension ZoneModelTests {
         XCTAssertFalse(model.canZoom)
         model.toggleGrid()
         XCTAssertFalse(model.gridVisible)
-        XCTAssertNil(model.rollDeveloper, "Its helper goes when it does")
+        XCTAssertNotNil(model.rollDeveloper, "It stays, so coming back doesn't start over")
         model.toggleGrid()
         model.beginCrop()
         XCTAssertFalse(model.gridVisible, "Cropping needs the photograph")
@@ -846,7 +846,6 @@ extension ZoneModelTests {
         try await waitUntil { model.previewCurrent }
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertTrue(all(try XCTUnwrap(window.contentView)).contains { $0 is ImageScrollView }, "The photograph is back")
-        XCTAssertNil(model.rollDeveloper)
     }
 
     /// Going back to a photograph shows its developed frame at once, with no gap
@@ -948,6 +947,70 @@ extension ZoneModelTests {
         for index in 3...27 {
             XCTAssertNotNil(developer.frames[files[index].url], "\(index)")
         }
+    }
+
+    /// Going in and out of the grid develops nothing again, and has its frames ready
+    /// at once. Nor does a change that doesn't affect them, or moving between photos.
+    func testGoingInAndOutOfTheGridDevelopsNothingAgain() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        let (_, window, _) = try await openRoll(model, photos: 6)
+        defer { window.orderOut(nil) }
+        model.toggleGrid()
+        try await waitUntil({ model.rollDeveloper?.total == 8 && model.rollDeveloper?.finished == 8 }, timeout: 30)
+        let developer = try XCTUnwrap(model.rollDeveloper)
+        let developed = developer.developedCount
+        XCTAssertEqual(developed, 8)
+        XCTAssertFalse(developer.isDeveloping)
+        for _ in 0..<3 {
+            model.toggleGrid()
+            try await Task.sleep(for: .milliseconds(150))
+            model.toggleGrid()
+            XCTAssertTrue(model.rollDeveloper === developer, "The same developer")
+            XCTAssertTrue(developer.nearReady, "Ready the moment it's back")
+            try await Task.sleep(for: .milliseconds(200))
+            XCTAssertFalse(developer.isDeveloping)
+        }
+        // Another photograph, and back.
+        model.toggleGrid()
+        model.open(other)
+        try await waitUntil { model.previewCurrent }
+        model.open(ramp)
+        try await waitUntil { model.previewCurrent }
+        model.toggleGrid()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(developer.developedCount, developed, "The same edits, the same frames")
+        // Image Size is about the export, not these frames.
+        model.toggleGrid()
+        model.set(ImageSize.targetPath, .number(1500))
+        try await waitUntil { model.previewCurrent }
+        model.toggleGrid()
+        developer.invalidateAll()
+        try await waitUntil({ developer.finished == 8 }, timeout: 10)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(developer.developedCount, developed, "Not after a new Image Size either")
+        // A real edit does, of just that photograph.
+        model.set("post.brightness", .number(70))
+        developer.invalidate(ramp)
+        try await waitUntil({ developer.developedCount == developed + 1 }, timeout: 10)
+    }
+
+    /// Another folder is another roll, with a developer of its own.
+    func testAnotherFolderGetsItsOwnDeveloper() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        model.toggleGrid()
+        let first = try XCTUnwrap(model.rollDeveloper)
+        model.toggleGrid()
+        let elsewhere = directory.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        let away = elsewhere.appendingPathComponent("away.png")
+        try FileManager.default.copyItem(at: ramp, to: away)
+        model.open(away)
+        XCTAssertNil(model.rollDeveloper, "The last folder's work stops")
+        model.toggleGrid()
+        XCTAssertFalse(model.rollDeveloper === first)
     }
 
     /// Nothing but the person moves the film: opening a photograph in view leaves

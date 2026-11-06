@@ -381,7 +381,7 @@ struct StatusBar: View {
             }
             Text(model.status).lineLimit(1).textSelection(.enabled)
             Spacer(minLength: 12)
-            if let roll = model.rollDeveloper, roll.total > 0, roll.finished < roll.total {
+            if let roll = model.rollDeveloper, roll.isDeveloping {
                 ProgressView().controlSize(.mini)
                 Text("Developing · \(roll.finished) of \(roll.total)").monospacedDigit()
             }

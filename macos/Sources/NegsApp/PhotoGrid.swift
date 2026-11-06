@@ -38,8 +38,15 @@ struct PhotoGrid: View {
     @State private var listing = FolderListing()
     /// Not observed: which cells are up only steers the developer.
     @State private var visible = VisibleCells()
-    /// Up for good once the frames around where it opens are ready.
-    @State private var revealed = false
+    /// Up for good once the frames around where it opens are ready, which they
+    /// are from the start on coming back.
+    @State private var revealed: Bool
+
+    init(model: EditorModel, directory: URL) {
+        self.model = model
+        self.directory = directory
+        _revealed = State(initialValue: model.rollDeveloper?.nearReady ?? true)
+    }
 
     private var shown: [PhotoFile] { PhotoFolder.shown(listing.files, rawOnly: model.filmstripRawOnly) }
 
@@ -78,12 +85,12 @@ struct PhotoGrid: View {
         .overlay {
             Group {
                 if listing.loading { ProgressView().controlSize(.small) }
-                else if !revealed, let roll = model.rollDeveloper, roll.nearTotal > 0 {
+                else if !revealed, let roll = model.rollDeveloper, roll.nearTotal > 0, roll.isDeveloping || roll.nearFinished < roll.nearTotal {
                     VStack(spacing: 8) {
                         ProgressView(value: Double(roll.nearFinished), total: Double(roll.nearTotal))
                             .frame(width: 180)
                             .tint(EdgePrint.amber)
-                        Text("Developing · \(roll.nearFinished) of \(roll.nearTotal)")
+                        Text(roll.isDeveloping ? "Developing · \(roll.nearFinished) of \(roll.nearTotal)" : " ")
                             .font(Font(EdgePrint.font(size: 14)))
                             .monospacedDigit()
                     }

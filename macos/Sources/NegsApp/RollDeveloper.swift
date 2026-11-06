@@ -16,6 +16,8 @@ import UniformTypeIdentifiers
     /// Frames finished of the folder's, for the status bar.
     private(set) var finished = 0
     private(set) var total = 0
+    /// A frame is going through the film now, rather than being read from the cache.
+    private(set) var isDeveloping = false
     /// How many had to be developed rather than read from the disk cache.
     @ObservationIgnored private(set) var developedCount = 0
 
@@ -111,7 +113,8 @@ import UniformTypeIdentifiers
         let near = files.indices.filter { abs($0 - centre) <= Self.revealRadius }.map { files[$0].url }
         nearTotal = near.count
         // A frame that couldn't be developed has nothing to wait for.
-        nearFinished = near.filter { completed[$0] != nil && (frames[$0] != nil || completed[$0] == Self.unavailable) }.count
+        // A frame being looked at again still has its picture to show meanwhile.
+        nearFinished = near.filter { frames[$0] != nil || completed[$0] == Self.unavailable }.count
         nearReady = !near.isEmpty && nearFinished == near.count
     }
 
@@ -146,6 +149,8 @@ import UniformTypeIdentifiers
     private func develop(_ file: PhotoFile, command: [String: JSONValue], turns: Int, to path: URL) async -> CGImage? {
         developedCount += 1
         generation += 1
+        isDeveloping = true
+        defer { isDeveloping = false }
         let buffer = client.directory.appendingPathComponent("roll-\(UUID().uuidString).rgba")
         var command = command
         command["preview_path"] = .string(buffer.path)
