@@ -13,8 +13,13 @@
 //!   answer (`request` id, `command`, `ms`), in the engine's worker.
 //! - `render_reply`: a render's answer, before the UI thread sees it
 //!   (`elapsed_ms`, `cached_pipeline`, `pipeline_ms`, `backend`, size).
-//! - `render_finished`: the UI thread took it (`shown` or dropped).
+//! - `render_finished`: the UI thread took it: `shown`, `held` for its
+//!   brightness match (`kind`), or dropped (neither).
+//! - `held_shown`, `held_dropped`: a held frame was shown once its match was
+//!   in, or dropped (`why`: an edit, another photograph, closing).
 //! - `match_start`, `match_solved`: a camera brightness solve.
+//! - `output_abandoned`: a waiting Save or Export gave up (nothing will
+//!   finish the match).
 //! - `present`: the canvas drew a frame it hadn't drawn before, after the
 //!   Vulkan present or the software blit (`frame`: the render's request id,
 //!   revision, generation and kind; `canvas` vulkan or software).
