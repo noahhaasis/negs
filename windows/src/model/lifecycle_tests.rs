@@ -343,7 +343,7 @@ lifecycle_test! {
 // MARK: The held frame (B1)
 
 /// Matched at another exposure than Gold 200, on the test photograph
-/// (−0.18 against −0.42 EV) and on the 33 MP ARW (−0.05 against −0.33): a
+/// (−0.18 against −0.46 EV) and on the 33 MP ARW (−0.05 against −0.33): a
 /// film change between them moves the match. The tests check that it does.
 const SUPERIA: &str = "fujifilm_superia_200";
 
@@ -787,7 +787,7 @@ lifecycle_test! {
         let saved = std::env::temp_dir().join(format!("negs-held-failed-{}.tif", std::process::id()));
         h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 }));
         assert!(h.model().waiting_output.is_none() && !saved.exists());
-        assert_eq!(h.errors.last().map(String::as_str), Some("Couldn’t save: the preview with the camera brightness match isn’t ready. Try again once it shows."));
+        assert_eq!(h.errors.last().map(String::as_str), Some("Couldn’t save: the preview didn’t develop, so the camera brightness couldn’t be matched."));
     }
 }
 
@@ -833,3 +833,92 @@ lifecycle_test! {
     }
 }
 
+
+/// Matched far from Gold 200 on the test photograph (−0.07 against −0.46 EV).
+const PHOENIX: &str = "harman_phoenix_200";
+
+/// How the blocked solve is let go: a slider pressed and released without
+/// a change, or Crop entered and cancelled.
+#[derive(Clone, Copy)]
+enum Blocker {
+    Slider,
+    Crop,
+}
+
+/// Review S1 (scenario L1): a film change whose frame is held behind a solve
+/// for an earlier edit; the solve comes back stale while `blocker` keeps the
+/// next one from starting. The frame must stay held (its exposure is the
+/// old one) with a waiting Save, until the blocker lets go: then the solve
+/// runs, only the matched frame shows and the Save writes it.
+fn a_stale_solve_waits_for(blocker: Blocker) {
+    let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+    let photo = h.photo.clone();
+    open_matched(&mut h, &photo);
+    let (gold_ev, previous) = (matched_ev(h.model()), h.model().shown_frame.unwrap());
+    h.clear_logs();
+    // Superia's frame is held and its solve (S1) starts in the same task.
+    h.edit(|m| m.choose_film(SUPERIA));
+    let superia = until_held(&mut h);
+    assert!(h.model().matching_brightness, "S1 runs");
+    // Phoenix during S1: its render reaches the helper before S1's
+    // place_exposure (the reference is still being read), so its frame is
+    // held behind S1. Checked, not assumed: the test stops here otherwise.
+    h.edit(|m| m.choose_film(PHOENIX));
+    let phoenix = until_held(&mut h);
+    assert!(phoenix.revision > superia.revision);
+    assert!(h.model().matching_brightness, "Phoenix's frame was held while S1 still ran");
+    let dir = std::env::temp_dir().join(format!("negs-held-blocked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let saved = dir.join("saved.tif");
+    let save = super::SaveSettings { bit_depth: 16, color_space: 0, jpeg_quality: 95 };
+    h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, save));
+    match blocker {
+        Blocker::Slider => h.edit(|m| m.begin_interaction()),
+        Blocker::Crop => h.edit(|m| m.begin_crop()),
+    }
+    // S1 comes back stale; nothing can start S2 yet.
+    h.idle();
+    let m = h.model();
+    assert_eq!(m.held_frame(), Some(phoenix), "the frame stays held while its match is pending");
+    assert!(m.brightness_match_pending() && !m.matching_brightness);
+    assert_eq!(m.shown_frame, Some(previous), "the old exposure isn't shown");
+    assert!(h.frames.is_empty(), "{:?}", h.frames);
+    assert!(h.model().waiting_output.is_some() && !saved.exists());
+    let solves = h.command_names().iter().filter(|c| *c == "place_exposure").count();
+    assert_eq!(solves, 1, "only S1");
+    match blocker {
+        Blocker::Slider => h.edit(|m| m.end_interaction("Change Adjustment")),
+        Blocker::Crop => h.edit(|m| m.end_crop(false)),
+    }
+    assert!(h.model().matching_brightness, "letting go starts S2");
+    h.idle();
+    let m = h.model();
+    let ev = matched_ev(m);
+    assert!((ev - gold_ev).abs() >= 0.05, "Phoenix moves the match ({gold_ev} to {ev})");
+    assert_eq!(m.revision, phoenix.revision + 1);
+    assert!(m.preview_current && m.held_frame().is_none() && !m.brightness_match_pending());
+    assert_eq!(h.frames.iter().map(|f| f.revision).collect::<Vec<_>>(), [phoenix.revision + 1], "only the matched frame shows");
+    assert_eq!(h.command_names().iter().filter(|c| *c == "place_exposure").count(), 2);
+    assert!(h.model().waiting_output.is_none() && h.model().status == "Saved saved.tif", "{}", h.model().status);
+    let matched_state = h.model().state.clone();
+    assert_eq!(std::fs::read(&saved).unwrap(), fast_render(&h, &matched_state, &dir.join("fast.tif"), save), "the Save wrote the matched frame");
+    assert!(h.errors.is_empty(), "{:?}", h.errors);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+lifecycle_test! {
+    /// Review S1 with a slider pressed and released without a change
+    /// (`end_interaction`'s release, and `release_held`'s pending check).
+    fn a_stale_solve_back_while_a_slider_is_pressed_waits_for_the_release() {
+        a_stale_solve_waits_for(Blocker::Slider);
+    }
+}
+
+lifecycle_test! {
+    /// Review S1 with Crop entered and cancelled (`end_crop`'s release, and
+    /// `release_held`'s pending check).
+    fn a_stale_solve_back_while_cropping_waits_for_the_crop_to_end() {
+        a_stale_solve_waits_for(Blocker::Crop);
+    }
+}

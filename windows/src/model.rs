@@ -2840,11 +2840,13 @@ impl Model {
             let stuck = !self.outputs_progressing() && (self.render_failed || started.elapsed() >= OUTPUT_PATIENCE);
             if stuck {
                 self.waiting_output = None;
-                crate::trace::event("output_abandoned", || json!({"output": output.verb(), "revision": self.revision}));
-                self.report(&anyhow!(
-                    "Couldn’t {}: the preview with the camera brightness match isn’t ready. Try again once it shows.",
-                    output.verb()
-                ));
+                crate::trace::event("output_abandoned", || json!({"output": output.verb(), "revision": self.revision, "render_failed": self.render_failed}));
+                let verb = output.verb();
+                self.report(&if self.render_failed {
+                    anyhow!("Couldn’t {verb}: the preview didn’t develop, so the camera brightness couldn’t be matched.")
+                } else {
+                    anyhow!("Couldn’t {verb}: the preview with the camera brightness match isn’t ready. Try again once it shows.")
+                });
                 self.mark(dirty::CHROME);
             }
             return;
