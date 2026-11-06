@@ -12,8 +12,13 @@ final class ZoneSystemTests: XCTestCase {
         for (index, zone) in zones.enumerated() {
             XCTAssertEqual(zone.index, index)
             XCTAssertEqual(zone.numeral, "\(index)")
-            XCTAssertEqual(zone.target, Double(index) * 10)
+            if (1...9).contains(index) { XCTAssertEqual(zone.target, Double(index) * 10) }
         }
+        // The end zones land in the middle of their bands, like the rest.
+        XCTAssertEqual(zones[0].target, 2.5)
+        XCTAssertEqual(zones[10].target, 97.5)
+        XCTAssertEqual(ZoneScale.zone(forTarget: zones[0].target), 0)
+        XCTAssertEqual(ZoneScale.zone(forTarget: zones[10].target), 10)
         XCTAssertEqual(zones[0].name, "Pure black")
         XCTAssertEqual(zones[5].name, "Middle gray")
         XCTAssertEqual(zones[10].name, "Pure white")
@@ -118,8 +123,8 @@ final class ZoneSystemTests: XCTestCase {
         let levels = try ZoneScale.zones.map { zone -> CGFloat in
             try XCTUnwrap(ZoneScale.grey(zone.index).usingColorSpace(.sRGB)).redComponent
         }
-        XCTAssertEqual(try XCTUnwrap(levels.first), 0, accuracy: 1e-9)
-        XCTAssertEqual(try XCTUnwrap(levels.last), 1, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(levels.first), 0.03, accuracy: 0.02)
+        XCTAssertEqual(try XCTUnwrap(levels.last), 0.97, accuracy: 0.02)
         XCTAssertEqual(levels, levels.sorted())
         XCTAssertEqual(Set(levels).count, 11)
     }

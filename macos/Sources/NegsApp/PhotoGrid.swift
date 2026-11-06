@@ -104,9 +104,8 @@ struct PhotoGrid: View {
         .onChange(of: shown) { _, files in model.rollDeveloper?.show(files: files) }
         .onChange(of: model.rollDeveloper?.nearReady ?? false, initial: true) { _, ready in if ready { revealed = true } }
         .onChange(of: model.rollDeveloper == nil, initial: true) { _, none in if none { revealed = true } }
-        // The open photograph's edit, or the folder's look, once changes pause.
+        // The open photograph's edit, once changes pause.
         .onChange(of: model.state) { _, _ in visible.refresh(model) }
-        .onChange(of: model.sameLookForRoll) { _, _ in model.rollDeveloper?.invalidateAll() }
     }
 
     private func steer() {
@@ -123,7 +122,7 @@ struct PhotoGrid: View {
         refreshing = Task { [weak model] in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled, let model, let source = model.source else { return }
-            if model.sameLookForRoll { model.rollDeveloper?.invalidateAll() } else { model.rollDeveloper?.invalidate(source) }
+            model.rollDeveloper?.invalidate(source)
         }
     }
 }

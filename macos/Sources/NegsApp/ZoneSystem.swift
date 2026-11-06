@@ -8,8 +8,10 @@ struct Zone: Identifiable, Hashable, Sendable {
     let note: String
     var id: Int { index }
     var numeral: String { "\(index)" }
-    /// Where a pin on this zone prints, in L\* 0…100.
-    var target: Double { Double(index) * 10 }
+    /// Where a pin on this zone prints, in L\* 0…100: the middle of its band.
+    /// The two end bands are half as wide, stopping at black and white, so a
+    /// pin on either leaves the ends of the curve alone rather than clipping.
+    var target: Double { min(max(Double(index) * 10, 2.5), 97.5) }
 }
 
 /// The eleven zones, evenly spaced in L\*, which puts zone 5 at 18 % gray

@@ -114,7 +114,7 @@ import UniformTypeIdentifiers
         }
         // Edits made in the edit view since, which it wasn't watching.
         if let source {
-            if sameLookForRoll { rollDeveloper?.invalidateAll() } else { rollDeveloper?.invalidate(source) }
+            rollDeveloper?.invalidate(source)
         }
         gridVisible = true
     }
@@ -927,7 +927,6 @@ import UniformTypeIdentifiers
             let exif = await Task.detached(priority: .userInitiated) { PhotoExif.read(url) }.value
             if let self, self.sourceGeneration == generation { self.photoExif = exif }
         }
-        sameLookForRoll = Self.rollLooks[url.deletingLastPathComponent().standardizedFileURL.path] != nil
         if let session {
             state = merged(session.state)
             inspectorVisible = session.inspectorVisible
@@ -1357,18 +1356,16 @@ import UniformTypeIdentifiers
         guard editedSinceSave, let source else { return }
         editedSinceSave = false
         _ = try? PhotoSettingsFile(image: source.lastPathComponent, state: state).write(beside: source)
-        // With the whole roll on one look, the latest edit is that look.
-        if sameLookForRoll { Self.rememberRollLook(state, in: source.deletingLastPathComponent()) }
     }
 
     // MARK: What an unedited photograph opens with
 
-    /// A folder's look, or the defaults: opening a photograph never passes on
+    /// A folder's default, or the app's: opening a photograph never passes on
     /// the last one's edits. Image Size and the output colour space are export
     /// choices, not edits, so they stay as they are.
     private func startingState(in directory: URL) -> EditState {
         guard hasCatalog else { return state }
-        var next = Self.rollLooks[directory.standardizedFileURL.path].map(merged) ?? {
+        var next = Self.folderDefaults[directory.standardizedFileURL.path].map(merged) ?? {
             var fresh = EditState()
             fresh.params = defaults
             if !films.contains(where: { $0.id == fresh.film }), let first = films.first { fresh.film = first.id }
@@ -1403,31 +1400,28 @@ import UniformTypeIdentifiers
     /// The open photograph's camera details, if it has any.
     private(set) var photoExif: PhotoExif?
 
-    /// Whether this photograph's folder is on one look.
-    private(set) var sameLookForRoll = false
-
-    /// Puts the folder on the current look, or takes it off.
-    func setSameLookForRoll(_ on: Bool) {
-        guard let source else { return }
+    /// ⌘D: what this folder's photographs without edits of their own open with,
+    /// from now on. Those with edits keep them, and pins and crop stay here.
+    func setFolderDefault() {
+        guard let source, !cropping else { return }
         let directory = source.deletingLastPathComponent()
-        sameLookForRoll = on
-        if on {
-            Self.rememberRollLook(state, in: directory)
-        } else {
-            var looks = Self.rollLooks
-            looks[directory.standardizedFileURL.path] = nil
-            Self.rollLooks = looks
-        }
+        var defaults = Self.folderDefaults
+        defaults[directory.standardizedFileURL.path] = state
+        Self.folderDefaults = defaults
+        rollDeveloper?.invalidateAll()
+        status = "Default set for \(directory.lastPathComponent)"
     }
 
-    private static func rememberRollLook(_ look: EditState, in directory: URL) {
-        var looks = rollLooks
-        looks[directory.standardizedFileURL.path] = look
-        rollLooks = looks
+    /// Puts this folder back on the app's defaults.
+    func clearFolderDefault() {
+        guard let source else { return }
+        var defaults = Self.folderDefaults
+        defaults[source.deletingLastPathComponent().standardizedFileURL.path] = nil
+        Self.folderDefaults = defaults
     }
 
-    /// The looks of the folders on one, by path.
-    private static var rollLooks: [String: EditState] {
+    /// The folders' defaults, by path.
+    private static var folderDefaults: [String: EditState] {
         get {
             UserDefaults.standard.data(forKey: "rollLooks").flatMap { try? JSONDecoder().decode([String: EditState].self, from: $0) } ?? [:]
         }

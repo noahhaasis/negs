@@ -235,9 +235,9 @@ five stops above 18 % is far past white, so these are the tones a print compress
 that range onto.
 
 To place a pin, drag a tile onto the photograph and let go. The averaged tone under
-the pin then prints as that zone. Dragging zone 0 onto something lighter raises the
-black point, and zone 10 sets the white point. Each further pin recalculates the
-curve. Dragging a zone again adds another pin, and the average of a zone's readings
+the pin then prints as that zone, at the middle of its band: L\* 2.5 for zone 0 and
+97.5 for zone 10, whose bands stop at black and white, and ten times the zone between.
+Each further pin recalculates the curve. Dragging a zone again adds another pin, and the average of a zone's readings
 is what prints as that zone, which suits a tone that varies across a surface. A drop during a
 render waits for it and then measures.
 
@@ -266,7 +266,7 @@ the same table in the GPU display pass, so the preview and the file agree withou
 a shader change. The pins bend what the Post knobs produced. The curve is a monotone
 cubic in L\* through the pins and an end point for each end: its slope has no corners,
 every zone's reading lands exactly, and it can't overshoot or turn back between pins. It flattens
-into a black or white point a pin sets, for a soft toe and shoulder. A pin it can't
+into a black or white point set by a pin at L\* 0 or 100, as older edits have, for a soft toe and shoulder. A pin it can't
 honour, such as zone 6 on something darker than zone 5's spot, has no effect and is
 never removed: `AnchorCurve` is the one rule for this, the helper reports those pins
 as `ignored_pins` with each render, and their lines turn red.
@@ -379,9 +379,10 @@ while ⇧⌘S still reports it.
 
 A photograph opens with its own saved edits. Without any it opens at the defaults, never
 with the last photograph's edits; only Image Size and the output colour space stay, being
-export choices. Same look for the whole roll, under the film picker, instead gives a
-folder's unedited photographs one look, without pins or crop, which follows the latest
-edit in that folder. It's remembered per folder.
+export choices. ⌘D, Set as Default for This Folder, makes the current settings what the
+folder's photographs without edits of their own open with, leaving out pins and crop.
+Photographs with saved edits keep them. It's a snapshot, kept per folder, until ⌘D is
+pressed again: Reset All Adjustments then ⌘D puts a folder back on the app's defaults.
 
 Opening a photograph loads its settings file, as one undo step. Only a file saved
 for that photograph counts: other photographs' files and other JSON are ignored. A

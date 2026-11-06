@@ -127,16 +127,16 @@ extension ZoneModelTests {
         XCTAssertEqual(model.pinsToShow.first?.zone, 5)
     }
 
-    /// Zone 0 on a lighter tone raises the black point: that tone and
-    /// everything under it print black.
-    func testDraggingZoneZeroRaisesTheBlackPoint() async throws {
+    /// Zone 0 on a lighter tone prints it in the middle of the zone's band, like
+    /// any other, with what's under it still darker rather than clipped.
+    func testZoneZeroPrintsInTheMiddleOfItsBand() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
         let (spot, above) = (try lstar(model), try lstar(model, at: light))
         XCTAssertGreaterThan(spot, 10)
         try await place(0, on: model)
-        XCTAssertEqual(try lstar(model), 0, accuracy: 1.5)
-        XCTAssertEqual(try lstar(model, at: dark), 0, accuracy: 1.5)
+        XCTAssertEqual(try lstar(model), ZoneScale.zones[0].target, accuracy: 1.5)
+        XCTAssertLessThanOrEqual(try lstar(model, at: dark), try lstar(model))
         let raised = try lstar(model, at: light)
         XCTAssertGreaterThan(raised, 1)
         XCTAssertLessThan(raised, above)
@@ -659,10 +659,9 @@ extension ZoneModelTests {
         XCTAssertEqual(model.film, "kodak_ektar_100")
     }
 
-    /// Same look for the whole roll: unedited photographs in the folder take the
-    /// look, without its pins or crop. Those with edits of their own keep them.
-    /// It belongs to the folder and is remembered.
-    func testSameLookForTheWholeRoll() async throws {
+    /// ⌘D makes the current settings what the folder's unedited photographs open
+    /// with, without pins or crop. It's a snapshot, and it's remembered.
+    func testSettingTheFoldersDefault() async throws {
         let model = try await makeModel()
         let third = directory.appendingPathComponent("third.png")
         try FileManager.default.copyItem(at: ramp, to: third)
@@ -671,11 +670,10 @@ extension ZoneModelTests {
         let away = elsewhere.appendingPathComponent("away.png")
         try FileManager.default.copyItem(at: ramp, to: away)
         defer {
-            model.setSameLookForRoll(false)
+            model.clearFolderDefault()
             model.shutdown()
         }
         let contrast = model.defaultValue("post.contrast").double
-        XCTAssertFalse(model.sameLookForRoll)
         // Edited first, with its own file.
         model.open(other)
         model.set("post.contrast", .number(contrast + 10))
@@ -683,23 +681,20 @@ extension ZoneModelTests {
         model.set("post.contrast", .number(contrast + 40))
         model.chooseFilm("kodak_ektar_100")
         await model.placeZone(5, at: CGPoint(x: 0.5, y: 0.5))
-        model.setSameLookForRoll(true)
-        XCTAssertTrue(model.sameLookForRoll)
+        model.setFolderDefault()
         model.open(third)
-        XCTAssertEqual(model.value("post.contrast").double, contrast + 40, "It takes the look")
+        XCTAssertEqual(model.value("post.contrast").double, contrast + 40, "It opens with the default")
         XCTAssertEqual(model.film, "kodak_ektar_100")
         XCTAssertTrue(model.pins.isEmpty, "Pins belong to their own photograph")
-        XCTAssertTrue(model.sameLookForRoll)
         model.open(other)
         XCTAssertEqual(model.value("post.contrast").double, contrast + 10, "Its own edits win")
-        // A later edit becomes the look.
+        // A later edit doesn't move the default, until it's set again.
         model.open(ramp)
         model.set("post.contrast", .number(contrast + 25))
         model.open(third)
-        XCTAssertEqual(model.value("post.contrast").double, contrast + 25)
-        // Another folder is its own roll.
+        XCTAssertEqual(model.value("post.contrast").double, contrast + 40)
+        // Another folder has its own.
         model.open(away)
-        XCTAssertFalse(model.sameLookForRoll)
         XCTAssertEqual(model.value("post.contrast").double, contrast)
         // A new launch remembers.
         model.open(third)
@@ -707,14 +702,7 @@ extension ZoneModelTests {
         defer { reopened.shutdown() }
         await reopened.start(paths: try paths())
         reopened.open(third)
-        XCTAssertTrue(reopened.sameLookForRoll)
-        XCTAssertEqual(reopened.value("post.contrast").double, contrast + 25)
-        // Off, unedited photographs go back to the defaults.
-        model.setSameLookForRoll(false)
-        model.open(away)
-        model.open(third)
-        XCTAssertFalse(model.sameLookForRoll)
-        XCTAssertEqual(model.value("post.contrast").double, contrast)
+        XCTAssertEqual(reopened.value("post.contrast").double, contrast + 40)
     }
 
     /// G swaps the grid in and out, and it stands down while typing or cropping.

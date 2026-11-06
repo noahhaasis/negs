@@ -78,6 +78,7 @@ import SwiftUI
         command(view, "Crop", #selector(crop), "k")
         view.addItem(.separator())
         command(view, "Reset All Adjustments", #selector(resetAdjustments), "r", [.command, .shift])
+        command(view, "Set as Default for This Folder", #selector(setFolderDefault), "d")
         view.addItem(.separator())
 
         let window = submenu("Window")
@@ -132,6 +133,7 @@ import SwiftUI
     @objc private func newPreset() { model.newPreset() }
     @objc private func importPresets() { model.importPresetsPanel() }
     @objc private func toggleGrid() { model.toggleGrid() }
+    @objc private func setFolderDefault() { model.setFolderDefault() }
     @objc private func toggleInspectorMode() { model.toggleInspectorMode() }
     @objc private func rotate() { model.rotate() }
     @objc private func crop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
@@ -172,6 +174,7 @@ import SwiftUI
             item.title = model.cropping ? "Done Cropping" : "Crop"
             return model.cropping || model.image != nil
         case #selector(resetAdjustments): return model.hasCatalog && !model.cropping
+        case #selector(setFolderDefault): return photo && model.hasCatalog && !model.cropping && !model.gridVisible
         default: return true
         }
     }

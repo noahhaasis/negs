@@ -719,7 +719,6 @@ struct AdjustmentInspector: View {
         let scanning = model.value("io.scan_film").bool
         Section("Film & Paper") {
             filmPicker
-            sameLookToggle
             Group {
                 paperPicker
                 ForEach(simplePrintControls) { control($0) }
@@ -786,7 +785,6 @@ struct AdjustmentInspector: View {
         Section("Film Stock") {
             filmPicker
             developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development")
-            sameLookToggle
             Toggle(isOn: model.toggle("io.scan_film")) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Scan film directly")
@@ -803,12 +801,6 @@ struct AdjustmentInspector: View {
             group("Grain")
             group("Film Base")
         }
-    }
-
-    private var sameLookToggle: some View {
-        Toggle("Same look for the whole roll", isOn: Binding(get: { model.sameLookForRoll }, set: model.setSameLookForRoll))
-            .disabled(model.source == nil)
-            .help("Photographs in this folder that haven’t been edited open with these settings, without pins or crop. Photographs with edits of their own keep them.")
     }
 
     @ViewBuilder private var filmPicker: some View {
