@@ -382,7 +382,8 @@ struct StatusBar: View {
             }
             Text(model.status).lineLimit(1).textSelection(.enabled)
             Spacer(minLength: 12)
-            if let roll = model.rollDeveloper, roll.isDeveloping {
+            // Only while the grid's waiting on it: otherwise it's quietly behind the scenes.
+            if model.gridVisible, let roll = model.rollDeveloper, roll.isDeveloping {
                 ProgressView().controlSize(.mini)
                 Text("Developing · \(roll.finished) of \(roll.total)").monospacedDigit()
             }

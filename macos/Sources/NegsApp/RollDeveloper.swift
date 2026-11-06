@@ -5,8 +5,8 @@ import ImageIO
 import Observation
 import UniformTypeIdentifiers
 
-/// Develops a folder's photographs in the background for the grid view, each
-/// with its own final edit, nearest the centre first, and keeps them in a cache on
+/// Develops a folder's photographs behind the scenes from when one opens, for
+/// the grid and for the next to open, each with its own final edit, nearest the centre first, and keeps them in a cache on
 /// disk so they never have to be developed twice. It has a helper of its own: the
 /// main one holds the open photograph's decoded source, which a run through other
 /// files would throw away.
@@ -44,6 +44,8 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var completed: [URL: String] = [:]
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var generation = 1.0
+    /// While true, nothing new starts: something more urgent wants the machine.
+    @ObservationIgnored var waits: () -> Bool = { false }
 
     init(paths: EnginePaths, cache: URL = RollDeveloper.defaultCache,
          request: @escaping (URL) -> (command: [String: JSONValue], turns: Int)?) throws {
@@ -123,6 +125,10 @@ import UniformTypeIdentifiers
         guard worker == nil else { return }
         worker = Task { [weak self] in
             while let self, !Task.isCancelled, let file = self.next() {
+                if self.waits() {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    continue
+                }
                 await self.process(file)
                 self.updateProgress()
             }

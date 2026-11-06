@@ -122,15 +122,41 @@ import UniformTypeIdentifiers
     }
 
     private func openGrid() {
-        if rollDeveloper == nil, let paths = engine?.paths {
-            rollDeveloper = try? RollDeveloper(paths: paths) { [weak self] url in self?.frameRequest(for: url) }
-        }
+        startRollDeveloper()
         // Edits made in the edit view since, which it wasn't watching.
         if let source {
             rollDeveloper?.invalidate(source)
         }
         gridVisible = true
     }
+
+    private func startRollDeveloper() {
+        guard rollDeveloper == nil, let paths = engine?.paths else { return }
+        rollDeveloper = try? RollDeveloper(paths: paths) { [weak self] url in self?.frameRequest(for: url) }
+        // The open photograph comes first: its own develop, an edit in progress, an export.
+        rollDeveloper?.waits = { [weak self] in
+            guard let self, !self.gridVisible, !self.renderFailed else { return false }
+            return self.interacting || self.exporting || self.rendering || !self.previewCurrent
+        }
+    }
+
+    /// Develops the rest of the folder behind the scenes, out from `url`, so the
+    /// grid and the next photograph have their frames waiting.
+    private func developFolder(around url: URL) {
+        guard hasCatalog else { return }
+        startRollDeveloper()
+        let directory = url.deletingLastPathComponent()
+        let rawOnly = filmstripRawOnly
+        folderListing?.cancel()
+        folderListing = Task { [weak self] in
+            let files = await Task.detached(priority: .utility) { try? PhotoFolder.snapshot(in: directory) }.value
+            guard let self, !Task.isCancelled, self.source == url, let files else { return }
+            let shown = PhotoFolder.shown(files, rawOnly: rawOnly)
+            self.rollDeveloper?.show(files: shown)
+            self.rollDeveloper?.setCentre(shown.firstIndex { $0.url == url } ?? 0)
+        }
+    }
+    @ObservationIgnored private var folderListing: Task<Void, Never>?
 
     /// The developer stays, with its frames, carrying on through the folder, so
     /// coming back doesn't start over. Only another folder ends it.
@@ -263,7 +289,10 @@ import UniformTypeIdentifiers
     }
     /// Settings › Film Strip: only the folder's RAW files are on the roll.
     var filmstripRawOnly = UserDefaults.standard.bool(forKey: "filmstripRawOnly") {
-        didSet { UserDefaults.standard.set(filmstripRawOnly, forKey: "filmstripRawOnly") }
+        didSet {
+            UserDefaults.standard.set(filmstripRawOnly, forKey: "filmstripRawOnly")
+            if let source, rollDeveloper != nil { developFolder(around: source) }
+        }
     }
     /// The film strip's height, set by dragging its top edge.
     var filmstripHeight = EditorModel.savedFilmstripHeight {
@@ -518,6 +547,8 @@ import UniformTypeIdentifiers
             }
             guard !closing else { return }
             ready = true
+            // A photograph that arrived before the catalog, or from the last session.
+            if let source { developFolder(around: source) }
             if source == nil, status == "Starting…" { status = "" }
             if source != nil { changed(invalidateCache: false) }
         } catch { if !closing { report(error) } }
@@ -928,6 +959,8 @@ import UniformTypeIdentifiers
             rollDeveloper?.stop()
             rollDeveloper = nil
         }
+        // Its frame may have just gone out of date.
+        if let source { rollDeveloper?.invalidate(source) }
         let leaving = image, leavingSize = imageSize, leavingCrop = state.crop, leavingRotation = state.params["io.rotate_cw"]
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -938,6 +971,7 @@ import UniformTypeIdentifiers
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         sourceGeneration += 1
         let generation = sourceGeneration
+        developFolder(around: url)
         photoExif = nil
         Task { [weak self] in
             let exif = await Task.detached(priority: .userInitiated) { PhotoExif.read(url) }.value

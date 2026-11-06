@@ -353,7 +353,7 @@ the edit view. It starts at the open photograph and the sidebar stays. Double-cl
 photograph opens it to edit, and G goes back. It follows the film strip's RAW-only setting.
 
 Every photograph shows its final edit: its saved edit, or what it would open with.
-`RollDeveloper` develops them in the background with a helper of its own, since the main
+From when a photograph opens, out from it, and starting nothing new while that photograph is developing, being edited or exporting, so the grid and the next photograph have their frames waiting. `RollDeveloper` develops them in the background with a helper of its own, since the main
 helper holds the open photograph's decoded source, nearest the middle of the screen first
 and through the whole folder, at 800 px on the long side. It reads a RAW no larger than
 1200 px (`decode_long_side`), through the same Apple processing: on a 45 MP NEF that takes a

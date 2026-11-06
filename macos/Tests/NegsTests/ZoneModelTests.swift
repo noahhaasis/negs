@@ -823,6 +823,25 @@ extension ZoneModelTests {
         XCTAssertEqual(model.value(ImageSize.targetPath).double, 1234)
     }
 
+    /// Opening a photograph sets the rest of its folder developing, without the
+    /// grid, and nothing new starts while the open photograph is being edited.
+    func testOpeningAPhotographDevelopsItsFolder() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        XCTAssertFalse(model.gridVisible)
+        try await waitUntil { model.previewCurrent }
+        try await waitUntil({ (model.rollDeveloper?.total ?? 0) >= 2 && model.rollDeveloper?.finished == model.rollDeveloper?.total }, timeout: 30)
+        let developer = try XCTUnwrap(model.rollDeveloper)
+        XCTAssertNotNil(developer.frames[other], "The other photograph's frame is waiting")
+        try await waitUntil { !developer.isDeveloping }
+        model.beginInteraction()
+        developer.invalidateAll()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(developer.finished, 0, "It waits for the edit")
+        model.endInteraction()
+        try await waitUntil({ developer.finished == developer.total }, timeout: 30)
+    }
+
     /// In the window, the panel draws flush along the landscape photograph's top
     /// and exactly as wide, with black at its left.
     func testTheZonePanelSitsOnThePhotograph() async throws {
@@ -1222,7 +1241,6 @@ extension ZoneModelTests {
         let away = elsewhere.appendingPathComponent("away.png")
         try FileManager.default.copyItem(at: ramp, to: away)
         model.open(away)
-        XCTAssertNil(model.rollDeveloper, "The last folder's work stops")
         model.toggleGrid()
         XCTAssertFalse(model.rollDeveloper === first)
     }
