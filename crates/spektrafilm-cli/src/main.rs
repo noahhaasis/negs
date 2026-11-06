@@ -56,8 +56,9 @@ enum Commands {
         /// Omit the source photograph's camera metadata.
         #[arg(long)]
         no_metadata: bool,
-        /// Film stock name (e.g. kodak_portra_400).
-        #[arg(long)]
+        /// Film stock name (e.g. kodak_portra_400). With --negative-scan, the
+        /// negative's stock, used with --match-stock; optional otherwise.
+        #[arg(long, required_unless_present = "negative_scan", default_value = "")]
         film: String,
         /// Paper stock name (e.g. fujifilm_crystal_archive_typeii).
         /// If omitted and --scan-film is not set, uses the film's target_print.
@@ -71,6 +72,10 @@ enum Commands {
         /// names the negative's stock. Also `io.negative_scan` in --params.
         #[arg(long, conflicts_with = "scan_film")]
         negative_scan: bool,
+        /// Unmix the negative with --film's dyes instead of the generic C-41
+        /// dye model.
+        #[arg(long, requires_all = ["negative_scan", "film"])]
+        match_stock: bool,
         /// The film base's linear transmittance per channel, `r,g,b` (a scan
         /// of clear film). Default: estimated from the thinnest film.
         #[arg(long, requires = "negative_scan", value_parser = parse_rgb)]
@@ -196,6 +201,7 @@ fn main() -> Result<()> {
             paper,
             scan_film,
             negative_scan,
+            match_stock,
             negative_base,
             negative_area,
             timings,
@@ -246,6 +252,7 @@ fn main() -> Result<()> {
                 paper.as_deref(),
                 scan_film,
                 negative_scan,
+                match_stock,
                 negative_base,
                 negative_area,
                 timings,
@@ -342,6 +349,7 @@ fn cmd_process(
     paper_name: Option<&str>,
     scan_film: bool,
     negative_scan: bool,
+    match_stock: bool,
     negative_base: Option<[f32; 3]>,
     negative_area: Option<[f32; 4]>,
     show_timings: bool,
@@ -359,6 +367,37 @@ fn cmd_process(
     data_dir: &Path,
 ) -> Result<()> {
     let total_start = Instant::now();
+
+    // Load params (defaults + optional overrides) first: a negative scan
+    // chooses which film profile to load.
+    let mut params = if let Some(pf) = params_file {
+        read_params(pf)?
+    } else {
+        RuntimeParams::default()
+    };
+    params.io.scan_film = scan_film;
+    if negative_scan {
+        params.io.negative_scan.active = true;
+    }
+    if match_stock {
+        params.io.negative_scan.match_stock = true;
+    }
+    if negative_base.is_some() {
+        params.io.negative_scan.base = negative_base;
+    }
+    if negative_area.is_some() {
+        params.io.negative_scan.analysis_area = negative_area;
+    }
+    if params.io.negative_scan.active && params.io.scan_film {
+        bail!("a negative scan is printed; it can't also scan the film directly");
+    }
+    // The border's edge print names the roll's own film; the render may use
+    // the generic negative dye model instead.
+    let border_film = film_name;
+    let film_name = spektrafilm_core::negative_scan::film_stock(film_name, &params);
+    if film_name.is_empty() {
+        bail!("--film is required");
+    }
 
     // Load profiles
     let t = Instant::now();
@@ -379,25 +418,6 @@ fn cmd_process(
         .with_context(|| format!("loading print profile: {print_stock}"))?;
     eprintln!("Profiles loaded: {} ms", t.elapsed().as_millis());
 
-    // Load params (defaults + optional overrides)
-    let mut params = if let Some(pf) = params_file {
-        read_params(pf)?
-    } else {
-        RuntimeParams::default()
-    };
-    params.io.scan_film = scan_film;
-    if negative_scan {
-        params.io.negative_scan.active = true;
-    }
-    if negative_base.is_some() {
-        params.io.negative_scan.base = negative_base;
-    }
-    if negative_area.is_some() {
-        params.io.negative_scan.analysis_area = negative_area;
-    }
-    if params.io.negative_scan.active && params.io.scan_film {
-        bail!("a negative scan is printed; it can't also scan the film directly");
-    }
     if let Some(interpretation) = input_interpretation {
         params.io.input_interpretation = interpretation;
     }
@@ -527,7 +547,7 @@ fn cmd_process(
                 &result,
                 style,
                 border_options,
-                film_name,
+                if border_film.is_empty() { film_name } else { border_film },
                 finish,
                 data_dir,
             )?;

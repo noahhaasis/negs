@@ -74,6 +74,8 @@ fn every_shipped_profile_digests_like_python() {
             let path = entry.unwrap().path();
             (path.extension()? == "json").then(|| path.file_stem().unwrap().to_string_lossy().into_owned())
         })
+        // Negs-only: the negative scan's generic dye model, never filmed with.
+        .filter(|stock| stock != spektrafilm_core::negative_scan::GENERIC_STOCK)
         .collect();
     shipped.sort();
     let frozen: Vec<&str> = fixture.profiles.iter().map(|case| case.stock.as_str()).collect();

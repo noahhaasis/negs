@@ -9,7 +9,8 @@ enum ControlHelp {
     static func group(_ title: String) -> String? { groups[title] }
 
     static let film = "The film the photograph is shot on: its colour response, contrast, grain and halation, from the stock’s measured data."
-    static let negativeScan = "Reads the photograph as a scan of a real colour negative shot on this film (a camera or scanner capture, not yet inverted) and prints it on the paper, instead of filming the photograph as a scene."
+    static let negativeScan = "Reads the photograph as a scan of a real colour negative (a camera or scanner capture, not yet inverted) and prints it on the paper, instead of filming the photograph as a scene. No film is simulated: the negative is already film."
+    static let matchStock = "Reads the negative with the dyes of the stock you choose, for a roll whose stock Negs has. Off, a generic C-41 colour negative’s dyes are used, which suits most rolls."
     static let negativeAnalysisArea = "Where the film base and the colour balance are measured. Whole frame uses the entire scan; Crop uses the area inside the crop, to leave out the film holder, bare light around the film or a light leak. The crop itself doesn’t change the measurement in Whole frame."
     static let paper = "The paper the negative is printed on: its contrast, colour and blacks. Changing the film picks the paper it was made for, unless Settings › Keep paper when changing film is on."
 

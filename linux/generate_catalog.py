@@ -22,6 +22,8 @@ stocks = []
 for path in (root / 'data/profiles').glob('*.json'):
     profile = json.loads(path.read_text())
     info = profile['info']
+    if info.get('use') == 'generic':  # the negative scan's dye model, not a film to choose
+        continue
     paper = info['support'] == 'paper' or info['stage'] == 'printing'
     bw = info.get('channel_model') == 'bw'
     cinema = paper and ('Vision' in info['name'] or 'Print Film' in info['name'])

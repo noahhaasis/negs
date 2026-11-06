@@ -13,6 +13,10 @@ pub fn catalog(data: &Path, stocks: impl IntoIterator<Item = String>) -> Result<
     let mut profiles = Vec::new();
     for stock in stocks {
         let p = profile::load_profile_by_name(data, &stock)?;
+        // The generic negative-scan dye model isn't a film to choose.
+        if p.info.usage == "generic" {
+            continue;
+        }
         // The stock's grain preset, resolved: the apps show it while the
         // edit leaves a value unset (null).
         let grain = crate::grain::grain_settings(&p, &Default::default());

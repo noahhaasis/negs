@@ -36,6 +36,10 @@ use crate::profile::Profile;
 pub struct NegativeScanParams {
     /// Treat the input as a negative scan: skip filming, measure the dyes.
     pub active: bool,
+    /// Use the chosen film stock's dyes for the negative. Off, the generic
+    /// C-41 dye model ([`GENERIC_STOCK`]) stands in, so a roll of unknown or
+    /// unprofiled stock needs no film choice.
+    pub match_stock: bool,
     /// The film base's linear transmittance per input channel (the scan of
     /// clear, unexposed film: the rebate). `None` estimates it from the
     /// thinnest part of the frame.
@@ -61,8 +65,20 @@ pub struct NegativeScanParams {
 
 impl Default for NegativeScanParams {
     fn default() -> Self {
-        Self { active: false, base: None, auto_density: 0.0, auto_color: 1.0, unmix: 1.0, analysis_area: None, analysis_margin: 0.1 }
+        Self { active: false, match_stock: false, base: None, auto_density: 0.0, auto_color: 1.0, unmix: 1.0, analysis_area: None, analysis_margin: 0.1 }
     }
+}
+
+/// The profile a negative scan uses unless it matches the film stock: the
+/// mean of the mainstream still C-41 stocks
+/// (`scripts/make_generic_negative_profile.py`). Hidden from the catalog.
+pub const GENERIC_STOCK: &str = "generic_colour_negative";
+
+/// The film profile to load for `requested`: the generic dye model for a
+/// negative scan that doesn't match the stock, else `requested`.
+pub fn film_stock<'a>(requested: &'a str, params: &crate::params::RuntimeParams) -> &'a str {
+    let n = &params.io.negative_scan;
+    if n.active && !n.match_stock { GENERIC_STOCK } else { requested }
 }
 
 /// Scan channel model: Gaussian sensitivities (peak, sigma in nm) for the
@@ -270,6 +286,25 @@ mod tests {
             }
         }
         img
+    }
+
+    #[test]
+    fn the_generic_stock_stands_in_unless_matching() {
+        let mut params = crate::params::RuntimeParams::default();
+        assert_eq!(film_stock("kodak_gold_200", &params), "kodak_gold_200");
+        params.io.negative_scan.active = true;
+        assert_eq!(film_stock("kodak_gold_200", &params), GENERIC_STOCK);
+        params.io.negative_scan.match_stock = true;
+        assert_eq!(film_stock("kodak_gold_200", &params), "kodak_gold_200");
+        // It loads, prints, and has neutral filters for every paper.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let generic = crate::profile::load_profile_by_name(&dir, GENERIC_STOCK).unwrap();
+        assert!(generic.is_negative() && generic.is_color());
+        let filters: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("filters/neutral_print_filters.json")).unwrap()).unwrap();
+        for (paper, lamps) in filters.as_object().unwrap() {
+            assert!(lamps["TH-KG3"].get(GENERIC_STOCK).is_some(), "{paper} has no generic filters");
+        }
     }
 
     #[test]

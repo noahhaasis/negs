@@ -448,13 +448,21 @@ import UniformTypeIdentifiers
     }
     /// `io.scan_film`: the simulated film is scanned without printing. A
     /// negative scan is printed, so turning this on turns it off.
-    var bypassFilmEmulation: Binding<Bool> {
+    var bypassPrint: Binding<Bool> {
         Binding(get: { self.value("io.scan_film").bool }, set: { on in
             var next = self.state; next.params["io.scan_film"] = .bool(on)
             if on { next.params[Self.negativeScanPath] = .bool(false) }
-            self.apply(next, action: on ? "Bypass Film Emulation" : "Print Film")
+            self.apply(next, action: on ? "Bypass Print" : "Print Film")
         })
     }
+    /// `io.negative_scan.match_stock`: the negative is read with the chosen
+    /// stock's dyes. Off, the engine uses its generic colour negative.
+    nonisolated static let matchStockPath = "io.negative_scan.match_stock"
+    nonisolated static let genericNegativeName = "Generic colour negative"
+    /// A negative scan that doesn't match the stock: no film is chosen.
+    var usesGenericNegative: Bool { value(Self.negativeScanPath).bool && !value(Self.matchStockPath).bool }
+    /// The film the photograph renders with, as the window names it.
+    var renderedFilmName: String { usesGenericNegative ? Self.genericNegativeName : filmName }
 
     nonisolated static let negativeAnalysisAreaPath = "io.negative_scan.analysis_area"
     /// Where a negative scan is measured. Crop stores the crop's rectangle in
