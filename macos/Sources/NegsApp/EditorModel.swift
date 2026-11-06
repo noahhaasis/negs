@@ -774,22 +774,9 @@ import UniformTypeIdentifiers
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
-    /// Proof: the photograph is the export's size, one pixel to a screen pixel,
-    /// on white. Nothing zooms it, and it never touches the window, which stays
-    /// the user's to size and place. P, the toolbar, or Settings › Viewer.
-    var proofing = UserDefaults.standard.bool(forKey: "proofMode") {
-        didSet { UserDefaults.standard.set(proofing, forKey: "proofMode") }
-    }
-    var canZoom: Bool { source != nil && !cropping && !proofing && !gridVisible }
-    /// The border to draw around a photograph on the canvas. A proof shows
-    /// the photograph alone, on white.
-    func canvasBorder(for size: CGSize) -> BorderSettings? { proofing ? nil : border.shown(for: size) }
-
-    /// The border's controls: a proof doesn't show the border.
-    var canEditBorder: Bool { !proofing }
-
-    /// The photograph's pixels in an export, which a proof shows. The border
-    /// isn't shown there, so it isn't counted, though
+    /// The photograph's pixels in an export, which set its size on the canvas, one
+    /// to a screen pixel. Nothing else zooms it, and the window stays the user's to
+    /// size and place. A border isn't counted, though
     /// an export limit that fits the framed file still scales the photograph.
     var exportPixels: CGSize {
         let rotated = imageRotation % 2 != 0
@@ -802,9 +789,6 @@ import UniformTypeIdentifiers
             }
         }, fit: exportSize)
     }
-    func zoomIn() { canvasScale.view?.zoom(by: ImageScrollView.zoomStep) }
-    func zoomOut() { canvasScale.view?.zoom(by: 1 / ImageScrollView.zoomStep) }
-
     // MARK: Image Size
 
     /// Original develops the source's own pixels; Longest side resizes the

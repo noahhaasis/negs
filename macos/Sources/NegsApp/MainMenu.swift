@@ -72,18 +72,8 @@ import SwiftUI
         command(view, "Hide Pins", #selector(togglePins), "\t", [])
         command(view, "Delete Tone Pin", #selector(deleteTonePin), "\u{8}", [])
         view.addItem(.separator())
-        command(view, "Fit Photograph", #selector(fitPhotograph), "0")
-        command(view, "Actual Size", #selector(actualSize), "1")
-        command(view, "Proof at Export Size", #selector(toggleProof), "p", [])
         command(view, "Grid View", #selector(toggleGrid), "g", [])
         command(view, "Simple Controls", #selector(toggleInspectorMode), String(UnicodeScalar(NSF4FunctionKey)!), [])
-        command(view, "Zoom In", #selector(zoomIn), "=")
-        command(view, "Zoom Out", #selector(zoomOut), "-")
-        // ⌘+ with Shift held, for keyboards where + needs it. It has no row of its own.
-        let plus = view.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
-        plus.target = self
-        plus.isHidden = true
-        plus.allowsKeyEquivalentWhenHidden = true
         command(view, "Rotate Clockwise", #selector(rotate), "r")
         command(view, "Crop", #selector(crop), "k")
         view.addItem(.separator())
@@ -141,13 +131,8 @@ import SwiftUI
     @objc private func togglePresets() { model.togglePane(.presets) }
     @objc private func newPreset() { model.newPreset() }
     @objc private func importPresets() { model.importPresetsPanel() }
-    @objc private func fitPhotograph() { model.zoom(fit: true) }
-    @objc private func actualSize() { model.zoom(fit: false) }
-    @objc private func toggleProof() { model.proofing.toggle() }
     @objc private func toggleGrid() { model.toggleGrid() }
     @objc private func toggleInspectorMode() { model.toggleInspectorMode() }
-    @objc private func zoomIn() { model.zoomIn() }
-    @objc private func zoomOut() { model.zoomOut() }
     @objc private func rotate() { model.rotate() }
     @objc private func crop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
     @objc private func resetAdjustments() { model.reset() }
@@ -179,15 +164,8 @@ import SwiftUI
         case #selector(togglePresets):
             item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return true
         case #selector(newPreset), #selector(importPresets): return model.canChangePresets
-        case #selector(fitPhotograph), #selector(actualSize), #selector(zoomIn), #selector(zoomOut): return model.canZoom
-        case #selector(toggleInspectorMode):
-            item.state = model.inspectorMode == .simple ? .on : .off
-            return true
         case #selector(toggleGrid):
             item.state = model.gridVisible ? .on : .off
-            return photo && !model.cropping && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
-        case #selector(toggleProof):
-            item.state = model.proofing ? .on : .off
             return photo && !model.cropping && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)
         case #selector(rotate): return photo
         case #selector(crop):

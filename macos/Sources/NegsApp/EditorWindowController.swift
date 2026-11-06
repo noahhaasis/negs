@@ -99,7 +99,7 @@ import SwiftUI
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self else { return false }
-                return self.holdOriginal(event) || self.togglePins(event) || self.toggleProofKey(event) || self.toggleGridKey(event)
+                return self.holdOriginal(event) || self.togglePins(event) || self.toggleGridKey(event)
             } ? nil : event
         }
         // The title bar hides in full screen, so the status bar carries the title there.
@@ -140,11 +140,6 @@ import SwiftUI
 
     /// Holding \ shows the original, as in Lightroom, unless text is being
     /// typed. True if the event was handled.
-    /// Whether a key press is the bare P that turns the proof on or off.
-    static func togglesProof(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
-        keyCode == 35 && modifiers.isDisjoint(with: [.shift, .control, .option, .command]) && !(firstResponder is NSText)
-    }
-
     /// Whether a key press is the bare G that swaps between the grid and the edit view.
     static func togglesGrid(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
         keyCode == 5 && modifiers.isDisjoint(with: [.shift, .control, .option, .command]) && !(firstResponder is NSText)
@@ -155,14 +150,6 @@ import SwiftUI
               Self.togglesGrid(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
         else { return false }
         if !event.isARepeat { model.toggleGrid() }
-        return true
-    }
-
-    private func toggleProofKey(_ event: NSEvent) -> Bool {
-        guard event.type == .keyDown, event.window === window, model.source != nil, !model.cropping,
-              Self.togglesProof(keyCode: event.keyCode, modifiers: event.modifierFlags, firstResponder: window?.firstResponder)
-        else { return false }
-        if !event.isARepeat { model.proofing.toggle() }
         return true
     }
 

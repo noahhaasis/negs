@@ -163,7 +163,10 @@ final class ImageScrollView: NSScrollView {
         guard let proofPixels, max(size.width, size.height) > 0 else { return nil }
         let long = max(proofPixels.width, proofPixels.height)
         guard long > 0 else { return nil }
-        return long / max(size.width, size.height) / (window?.backingScaleFactor ?? 2)
+        // The photograph alone sets the scale: a border only adds to the canvas.
+        let photo = (documentView as? PhotographView)?.displaySize ?? .zero
+        let shown = max(photo.width, photo.height) > 0 ? photo : size
+        return long / max(shown.width, shown.height) / (window?.backingScaleFactor ?? 2)
     }
 
     /// ⌘+ and ⌘−, about the middle of what's on screen.

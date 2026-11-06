@@ -342,16 +342,13 @@ extension ZoneModelTests {
     /// and nothing changes the window's size or position, which stays the user's.
     func testAProofNeverTouchesTheWindowOrResizesThePhotograph() async throws {
         let model = try await makeModel()
-        let saved = UserDefaults.standard.object(forKey: "proofMode")
         defer {
             model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "proofMode")
         }
         let controller = EditorWindowController(model: model)
         let window = try XCTUnwrap(controller.window)
         controller.showWindow(nil)
         defer { window.orderOut(nil) }
-        model.proofing = false
         window.setFrame(NSRect(x: 80, y: 80, width: 1100, height: 640), display: true)
         try await Task.sleep(for: .milliseconds(300))
         func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
@@ -370,10 +367,8 @@ extension ZoneModelTests {
         }
         model.set(ImageSize.targetPath, .number(2000))
         try await settle()
-        model.proofing = true
         try await settle()
         XCTAssertTrue(window.styleMask.contains(.resizable), "The window stays resizable")
-        XCTAssertFalse(model.canZoom)
         try assertProof("Entering")
         model.rotate()
         try await settle()
@@ -396,7 +391,6 @@ extension ZoneModelTests {
         window.setFrame(frame, display: true)
         try await settle()
         try assertProof("The user resizes the window")
-        model.proofing = false
         try await settle()
         XCTAssertEqual(window.frame, frame, "Leaving")
     }
@@ -405,11 +399,9 @@ extension ZoneModelTests {
     /// changes resolution, as it does during a slider drag.
     func testAProofKeepsItsPlaceWhenThePreviewChangesResolution() async throws {
         let model = try await makeModel()
-        let saved = UserDefaults.standard.object(forKey: "proofMode")
         defer {
             model.limitPreview(false)
             model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "proofMode")
         }
         let controller = EditorWindowController(model: model)
         let window = try XCTUnwrap(controller.window)
@@ -421,7 +413,6 @@ extension ZoneModelTests {
         }
         model.limitPreview(false)
         model.set(ImageSize.targetPath, .number(6000))
-        model.proofing = true
         try await settle()
         func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
         let scroll = try XCTUnwrap(all(try XCTUnwrap(window.contentView)).compactMap { $0 as? ImageScrollView }.first)
@@ -731,7 +722,6 @@ extension ZoneModelTests {
         XCTAssertTrue(model.gridVisible)
         XCTAssertNotNil(model.rollDeveloper)
         XCTAssertFalse(model.showsZonePanel)
-        XCTAssertFalse(model.canZoom)
         model.toggleGrid()
         XCTAssertFalse(model.gridVisible)
         XCTAssertNotNil(model.rollDeveloper, "It stays, so coming back doesn't start over")

@@ -283,8 +283,7 @@ struct CanvasArea: View {
 
     var body: some View {
         ZStack {
-            // White in a proof; the saved colour stays saved.
-            model.proofing ? Color.white : ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
+            ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
             if let session = model.cropSession, let image = model.image {
                 CropEditor(session: session, image: image)
             } else if let image = model.image {
@@ -299,12 +298,12 @@ struct CanvasArea: View {
     }
 
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
-        PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.canvasBorder(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
+        PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
                       filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale,
                       pins: model.pinsToShow,
                       dragged: model.zoneDrag,
                       draggedRadius: model.sampleRadius,
-                      proofPixels: model.proofing ? model.exportPixels : nil,
+                      proofPixels: model.exportPixels,
                       exif: model.photoExif,
                       onSelectPin: { model.selectPin($0) },
                       onMovePin: { index, centre in Task { await model.movePin(index, to: centre) } },

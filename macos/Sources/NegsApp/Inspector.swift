@@ -893,12 +893,7 @@ struct AdjustmentInspector: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         Section("Border") {
-            if !model.canEditBorder {
-                Text("Proof shows the photograph on white, without its border. Press P to leave it. Exports still include the border if it’s on.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             Toggle("Add border", isOn: model.border(\.enabled))
-                .disabled(!model.canEditBorder)
             Group {
                 let photo = model.photoSize == .zero ? nil : model.photoSize
                 BorderStylePicker(selection: model.border(\.style), photo: photo, colors: (model.border.color, model.border.lineColor))
@@ -910,7 +905,7 @@ struct AdjustmentInspector: View {
                 Toggle("Extend to 3:4 for Instagram", isOn: model.border(\.instagram))
                     .help("Adds white above and below, or at the sides, so Instagram shows the whole photograph in a 3:4 portrait post.")
             }
-            .disabled(!model.border.enabled || !model.canEditBorder)
+            .disabled(!model.border.enabled)
         }
     }
 
@@ -928,7 +923,7 @@ struct AdjustmentInspector: View {
                 .help("Off writes linear values, for further processing.")
             Toggle("Include border", isOn: model.border(\.export))
                 .help("Adds the border to exported photographs and saved previews.")
-                .disabled(!model.border.enabled || !model.canEditBorder)
+                .disabled(!model.border.enabled)
         }
         Section("Export") {
             Picker("Engine", selection: Binding(get: { model.exportEngine }, set: { model.exportEngine = $0 })) {

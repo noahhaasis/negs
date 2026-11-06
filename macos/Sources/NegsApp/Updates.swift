@@ -189,10 +189,6 @@ struct UpdateSettings: View {
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("Viewer") {
-                Toggle("Proof at the export size (P)", isOn: Binding(
-                    get: { model.proofing }, set: { model.proofing = $0 }))
-                Text("Shows the photograph at the size it will export, one pixel to a screen pixel, on white in place of its border. Resizing the window or changing photographs never changes that size. Larger than the window, it can be panned.")
-                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Toggle("Custom background", isOn: $customBackground)
                     Spacer(minLength: 0)

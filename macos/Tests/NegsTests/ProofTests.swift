@@ -71,6 +71,15 @@ import XCTest
         XCTAssertEqual(scroll.magnification, 1, accuracy: 0.001)
     }
 
+    /// A border adds to the canvas, not to the photograph's size.
+    func testABorderDoesntChangeThePhotographsSize() {
+        let scroll = canvas(photo: CGSize(width: 960, height: 720))
+        let photo = scroll.documentView as! PhotographView
+        photo.show(NSImage(size: CGSize(width: 800, height: 600)), size: CGSize(width: 800, height: 600), rotation: 0)
+        scroll.proofPixels = CGSize(width: 1600, height: 1200)
+        XCTAssertEqual(scroll.magnification, 1, accuracy: 0.001)
+    }
+
     /// It pans only when it's larger than the window, to reach the rest of it.
     func testAProofPansOnlyWhenItOverflows() {
         let small = canvas(viewport: 300)
@@ -142,42 +151,5 @@ import XCTest
     func testAnExportLimitScalesThePhotographInsideTheFrame() {
         let size = ExportPixels.photograph(CGSize(width: 800, height: 400), rotated: false, withBorder: { CGSize(width: $0.width + 200, height: $0.height + 200) }, fit: ExportSize(edge: .long, pixels: 500))
         XCTAssertEqual(size, CGSize(width: 400, height: 200))
-    }
-
-    func testTheCanvasDropsTheBorderInAProof() {
-        let model = EditorModel()
-        let saved = UserDefaults.standard.object(forKey: "proofMode")
-        defer {
-            model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "proofMode")
-        }
-        model.border(\.enabled).wrappedValue = true
-        let photo = CGSize(width: 800, height: 600)
-        model.proofing = false
-        XCTAssertNotNil(model.canvasBorder(for: photo))
-        model.proofing = true
-        XCTAssertNil(model.canvasBorder(for: photo))
-        XCTAssertTrue(model.border.enabled, "The setting stays for when the proof ends")
-    }
-
-    func testTheBorderCantBeEditedInAProof() {
-        let model = EditorModel()
-        let saved = UserDefaults.standard.object(forKey: "proofMode")
-        defer {
-            model.shutdown()
-            UserDefaults.standard.set(saved, forKey: "proofMode")
-        }
-        model.proofing = false
-        XCTAssertTrue(model.canEditBorder)
-        model.proofing = true
-        XCTAssertFalse(model.canEditBorder)
-    }
-
-    func testPTogglesProofOutsideTextFields() {
-        let p: UInt16 = 35
-        XCTAssertTrue(EditorWindowController.togglesProof(keyCode: p, modifiers: [], firstResponder: nil))
-        XCTAssertFalse(EditorWindowController.togglesProof(keyCode: p, modifiers: [], firstResponder: NSTextView()))
-        XCTAssertFalse(EditorWindowController.togglesProof(keyCode: p, modifiers: [.command], firstResponder: nil))
-        XCTAssertFalse(EditorWindowController.togglesProof(keyCode: 48, modifiers: [], firstResponder: nil))
     }
 }

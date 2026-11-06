@@ -308,7 +308,7 @@ A fitted photograph leaves room for them; a file with no details leaves none.
 
 The window, sidebar, status bar and default viewer are black, in dark appearance
 whatever the system's. Amber, the film's edge-print colour (`EdgePrint`), is the accent
-throughout: sidebar text, sliders, selected tiles and pins, and hairlines. A custom viewer colour and Proof's white stay as chosen.
+throughout: sidebar text, sliders, selected tiles and pins, and hairlines. A custom viewer colour stays as chosen.
 In full screen the title bar hides, so the status bar carries the file name and stock.
 
 There's no toolbar: everything is in the menus with its shortcut. A switch at the top of the
@@ -346,18 +346,13 @@ leaving the grid, with its frames, carrying on through the folder, so coming bac
 wait; only opening a photograph in another folder ends it. Image Size isn't part of a
 frame's key, since the grid's frames have their own size.
 
-## Proof
+## Photograph size
 
-P or Settings › Viewer shows the
-photograph at the size it will export, one export pixel to a screen pixel, on white
-in place of the border. Only the export's settings set that size (`proofPixels`):
-the window's size doesn't, and zooming is off. Proof never changes the window, whose
-size and position stay the user's, including when it turns on or off, a photograph
-of another orientation arrives, or the film strip shows or hides. A proof larger than
-the window can be panned. Smaller, it's centred as in the normal view, so turning
-Proof on or off doesn't move it. Exports still include the border if it's on.
-
-Otherwise, ⌘+ and ⌘− zoom in and out by a factor of √2.
+The edit view always shows the photograph at the size it will export, one export pixel to a
+screen pixel. Only the export's settings set that size (`proofPixels`): the window's size
+doesn't, and there's no zoom. The window never changes by itself, and its size and position
+stay the user's. A photograph larger than the canvas can be panned; a smaller one is
+centred. A border shows around it without changing its size.
 
 ## Export DPI
 

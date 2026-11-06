@@ -29,37 +29,6 @@ import XCTest
         XCTAssertEqual(try grey(2), try grey(50), accuracy: 1, "It's only one point wide")
     }
 
-    /// In a proof, the viewer's background is white, and the
-    /// saved colour comes back when it ends.
-    func testTheViewerIsWhiteInAProof() throws {
-        _ = NSApplication.shared
-        let defaults = UserDefaults.standard
-        let saved = (defaults.object(forKey: "proofMode"), defaults.object(forKey: ViewerBackground.customKey))
-        defaults.set(false, forKey: ViewerBackground.customKey)
-        defer {
-            defaults.set(saved.0, forKey: "proofMode")
-            defaults.set(saved.1, forKey: ViewerBackground.customKey)
-        }
-        let model = EditorModel()
-        defer { model.shutdown() }
-        func background() throws -> Int {
-            let host = NSHostingView(rootView: CanvasArea(model: model))
-            host.appearance = NSAppearance(named: .darkAqua)
-            host.frame = NSRect(x: 0, y: 0, width: 800, height: 800)
-            host.layoutSubtreeIfNeeded()
-            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: bitmap)
-            let colour = try XCTUnwrap(bitmap.colorAt(x: 8, y: bitmap.pixelsHigh - 8)?.usingColorSpace(.sRGB))
-            return Int((colour.redComponent * 255).rounded())
-        }
-        model.proofing = false
-        XCTAssertEqual(try background(), 0, accuracy: 2)
-        model.proofing = true
-        XCTAssertEqual(try background(), 255)
-        model.proofing = false
-        XCTAssertEqual(try background(), 0, accuracy: 2)
-    }
-
     /// A custom viewer colour is for the viewer: the sidebar's light text would
     /// vanish on a white one.
     func testACustomViewerColourLeavesTheSidebarAlone() throws {
@@ -195,7 +164,8 @@ import XCTest
 
         model.beginInteraction()
         model.set("enlarger.m_filter_shift", .number(-5))
-        try await waitUntil { model.status.hasPrefix("Preview ·") || model.error != nil }
+        // At the export size a drag develops every pixel, so no reduced frame arrives.
+        try await waitUntil { model.previewCurrent || model.status.hasPrefix("Preview ·") || model.error != nil }
         XCTAssertNil(model.error)
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(model.previewScale, settledScale, "The notice describes the settled preview, independent of drag resolution")
