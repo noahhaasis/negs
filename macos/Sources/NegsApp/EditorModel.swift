@@ -196,6 +196,7 @@ import UniformTypeIdentifiers
     /// changing photos; unlike it, it isn't carried into the next launch.
     var inspectorTab = InspectorTab.camera
     /// Settings › Inspector: every control on its tab, or the everyday ones on one page.
+    func toggleInspectorMode() { inspectorMode = inspectorMode == .simple ? .advanced : .simple }
     var inspectorMode = InspectorMode(rawValue: UserDefaults.standard.string(forKey: "inspectorMode") ?? "") ?? .advanced {
         didSet { UserDefaults.standard.set(inspectorMode.rawValue, forKey: "inspectorMode") }
     }

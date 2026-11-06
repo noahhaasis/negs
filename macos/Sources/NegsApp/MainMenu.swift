@@ -75,6 +75,7 @@ import SwiftUI
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
         command(view, "Actual Size", #selector(actualSize), "1")
         command(view, "Proof at Export Size", #selector(toggleProof), "p", [])
+        command(view, "Simple Controls", #selector(toggleInspectorMode), String(UnicodeScalar(NSF4FunctionKey)!), [])
         command(view, "Zoom In", #selector(zoomIn), "=")
         command(view, "Zoom Out", #selector(zoomOut), "-")
         // ⌘+ with Shift held, for keyboards where + needs it. It has no row of its own.
@@ -142,6 +143,7 @@ import SwiftUI
     @objc private func fitPhotograph() { model.zoom(fit: true) }
     @objc private func actualSize() { model.zoom(fit: false) }
     @objc private func toggleProof() { model.proofing.toggle() }
+    @objc private func toggleInspectorMode() { model.toggleInspectorMode() }
     @objc private func zoomIn() { model.zoomIn() }
     @objc private func zoomOut() { model.zoomOut() }
     @objc private func rotate() { model.rotate() }
@@ -176,6 +178,9 @@ import SwiftUI
             item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return true
         case #selector(newPreset), #selector(importPresets): return model.canChangePresets
         case #selector(fitPhotograph), #selector(actualSize), #selector(zoomIn), #selector(zoomOut): return model.canZoom
+        case #selector(toggleInspectorMode):
+            item.state = model.inspectorMode == .simple ? .on : .off
+            return true
         case #selector(toggleProof):
             item.state = model.proofing ? .on : .off
             return photo && !model.cropping && Self.bareKeysAllowed(firstResponder: NSApp.keyWindow?.firstResponder)

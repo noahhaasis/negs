@@ -143,4 +143,31 @@ import XCTest
         descendants(host).compactMap { $0 as? NSSlider }
             .sorted { host.convert($0.bounds, from: $0).midY * (host.isFlipped ? 1 : -1) < host.convert($1.bounds, from: $1).midY * (host.isFlipped ? 1 : -1) }
     }
+
+    /// F4 swaps between Simple and Advanced, and the choice is remembered.
+    func testF4TogglesTheInspectorMode() {
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: "inspectorMode")
+        defer { defaults.set(saved, forKey: "inspectorMode") }
+        let model = EditorModel()
+        defer { model.shutdown() }
+        model.inspectorMode = .advanced
+        model.toggleInspectorMode()
+        XCTAssertEqual(model.inspectorMode, .simple)
+        XCTAssertEqual(defaults.string(forKey: "inspectorMode"), "simple")
+        model.toggleInspectorMode()
+        XCTAssertEqual(model.inspectorMode, .advanced)
+    }
+
+    /// The View menu carries it, on F4 with no modifiers.
+    func testTheViewMenuHasF4() throws {
+        _ = NSApplication.shared
+        let model = EditorModel()
+        defer { model.shutdown() }
+        let main = MainMenu(model: model, updates: UpdateController(), removeAppData: {})
+        let items = main.menu.items.flatMap { $0.submenu?.items ?? [] }
+        let item = try XCTUnwrap(items.first { $0.title == "Simple Controls" })
+        XCTAssertEqual(item.keyEquivalent, String(UnicodeScalar(NSF4FunctionKey)!))
+        XCTAssertTrue(item.keyEquivalentModifierMask.isDisjoint(with: [.command, .option, .control, .shift]))
+    }
 }

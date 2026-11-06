@@ -217,7 +217,7 @@ halation, DIR couplers, lens diffusion, grain, glare, print curves, scanner, col
 management, enlarger, and output options. Default film/paper pairing and direct
 scanning follow the profile metadata. Controls and reset participate in Undo.
 
-Settings › Inspector chooses Advanced, the six workflow tabs and the default, or
+Settings › Inspector or F4 chooses Advanced, the six workflow tabs and the default, or
 Simple, which replaces the tabs with one page: film, paper and print exposure; the
 five tone sliders; Midtone Detail and the unsharp mask; Image Size; file format and
 bit depth; and the Export button. Simple reuses Advanced's controls and ranges and
