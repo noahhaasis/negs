@@ -170,20 +170,24 @@ struct EditorCanvas: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                if model.showsZonePanel { ZonePanel(model: model) }
-                CanvasArea(model: model)
-                    .dropDestination(for: URL.self) { urls, _ in
-                        guard let url = urls.first, url.isFileURL else { return false }
-                        model.open(url); return true
-                    } isTargeted: { dropTargeted = $0 }
-                    .overlay {
-                        if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
-                    }
-            }
-            .coordinateSpace(name: ZonePanel.coordinateSpace)
-            if model.filmstripVisible, let source = model.source {
-                PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
+            if model.bigStripVisible, let source = model.source {
+                BigFilmStrip(model: model, directory: source.deletingLastPathComponent())
+            } else {
+                HStack(spacing: 0) {
+                    if model.showsZonePanel { ZonePanel(model: model) }
+                    CanvasArea(model: model)
+                        .dropDestination(for: URL.self) { urls, _ in
+                            guard let url = urls.first, url.isFileURL else { return false }
+                            model.open(url); return true
+                        } isTargeted: { dropTargeted = $0 }
+                        .overlay {
+                            if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
+                        }
+                }
+                .coordinateSpace(name: ZonePanel.coordinateSpace)
+                if model.filmstripVisible, let source = model.source {
+                    PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
+                }
             }
             if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
                 Divider()
@@ -338,6 +342,10 @@ struct StatusBar: View {
         HStack(spacing: 8) {
             Text(model.status).lineLimit(1).textSelection(.enabled)
             Spacer(minLength: 12)
+            if let roll = model.rollDeveloper, roll.total > 0, roll.finished < roll.total {
+                ProgressView().controlSize(.mini)
+                Text("Developing the roll · \(roll.finished) of \(roll.total)").monospacedDigit()
+            }
             if model.exporting {
                 ProgressView().controlSize(.mini)
                 TimelineView(.periodic(from: model.exportStarted, by: 1)) { context in

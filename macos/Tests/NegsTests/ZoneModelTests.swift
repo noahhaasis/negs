@@ -738,6 +738,125 @@ extension ZoneModelTests {
         XCTAssertEqual(model.value("post.contrast").double, contrast)
     }
 
+    /// F swaps the big strip in and out, and it stands down while typing or cropping.
+    func testFTogglesTheBigStrip() async throws {
+        let f: UInt16 = 3
+        XCTAssertTrue(EditorWindowController.togglesBigStrip(keyCode: f, modifiers: [], firstResponder: nil))
+        XCTAssertFalse(EditorWindowController.togglesBigStrip(keyCode: f, modifiers: [], firstResponder: NSTextView()))
+        XCTAssertFalse(EditorWindowController.togglesBigStrip(keyCode: f, modifiers: [.command], firstResponder: nil))
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        model.toggleBigStrip()
+        XCTAssertTrue(model.bigStripVisible)
+        XCTAssertNotNil(model.rollDeveloper)
+        XCTAssertFalse(model.showsZonePanel)
+        XCTAssertFalse(model.canZoom)
+        model.toggleBigStrip()
+        XCTAssertFalse(model.bigStripVisible)
+        XCTAssertNil(model.rollDeveloper, "Its helper goes when it does")
+        model.toggleBigStrip()
+        model.beginCrop()
+        XCTAssertFalse(model.bigStripVisible, "Cropping needs the photograph")
+        model.toggleBigStrip()
+        XCTAssertFalse(model.bigStripVisible, "And F waits while cropping")
+        model.endCrop(apply: false)
+    }
+
+    /// Through the real engine: each photograph is developed with its own final
+    /// edit, once. A second run reads the disk cache, and an edit develops again.
+    func testTheDeveloperShowsEachPhotographsFinalEdit() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        // Other is much brighter than the ramp as edited.
+        model.open(other)
+        model.set("post.brightness", .number(90))
+        model.open(ramp)
+        model.set("post.brightness", .number(-90))
+        try await waitUntil { model.previewCurrent }
+        let cache = directory.appendingPathComponent("rollcache", isDirectory: true)
+        let files = try PhotoFolder.snapshot(in: directory)
+        XCTAssertEqual(files.map(\.name), ["other.png", "ramp.png"])
+        func mean(_ image: CGImage) -> CGFloat {
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            var total: CGFloat = 0
+            for x in stride(from: 0, to: bitmap.pixelsWide, by: max(1, bitmap.pixelsWide / 20)) {
+                total += bitmap.colorAt(x: x, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB)?.redComponent ?? 0
+            }
+            return total / CGFloat(bitmap.pixelsWide / max(1, bitmap.pixelsWide / 20))
+        }
+        let paths = try paths()
+        let first = try RollDeveloper(paths: paths, cache: cache) { model.frameRequest(for: $0) }
+        defer { first.stop() }
+        first.show(files: files)
+        try await waitUntil { first.finished == 2 && first.frames.count == 2 }
+        XCTAssertEqual(first.developedCount, 2)
+        XCTAssertGreaterThan(mean(try XCTUnwrap(first.frames[other])), mean(try XCTUnwrap(first.frames[ramp])) + 0.1, "Each with its own edit")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: cache.path).filter { $0.hasSuffix(".jpg") }.count, 2)
+        // A new run never develops them again.
+        let second = try RollDeveloper(paths: paths, cache: cache) { model.frameRequest(for: $0) }
+        defer { second.stop() }
+        second.show(files: files)
+        try await waitUntil { second.frames.count == 2 }
+        XCTAssertEqual(second.developedCount, 0, "From the cache")
+        // An edit to the open photograph develops just that one.
+        let before = mean(try XCTUnwrap(second.frames[ramp]))
+        model.set("post.brightness", .number(90))
+        second.invalidate(ramp)
+        try await waitUntil { second.developedCount == 1 && abs(mean(second.frames[ramp]!) - before) > 0.1 }
+        XCTAssertEqual(second.developedCount, 1)
+    }
+
+    /// Real drags in a real window: the middle frame becomes the open photograph
+    /// once the film stops, and a double-click leaves for the edit view.
+    func testTheBigStripOpensItsCentreFrameWhenItStops() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        let (_, window, _) = try await openRoll(model, photos: 20)
+        defer { window.orderOut(nil) }
+        XCTAssertEqual(model.source, ramp)
+        model.toggleBigStrip()
+        try await Task.sleep(for: .milliseconds(900))
+        func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+        let scrolls = all(try XCTUnwrap(window.contentView)).compactMap { $0 as? NSScrollView }
+        XCTAssertFalse(scrolls.contains { $0 is ImageScrollView }, "The photograph has gone")
+        let strip = try XCTUnwrap(scrolls.first { $0.bounds.height > 400 })
+        let bounds = strip.convert(strip.bounds, to: nil)
+        // The scroll view runs under the toolbar; the film stops below it.
+        let height = bounds.height - strip.contentInsets.top
+        let length = FilmRollLayout.frameLength(stripHeight: height, texture: FilmRollLayout.defaultTexture)
+        let lead = FilmRollLayout.leadFrames(viewport: bounds.width, frameLength: length)
+        // It starts with the open photograph in the middle: ramp is second.
+        XCTAssertEqual(strip.contentView.bounds.origin.x, FilmRollLayout.centringOffset(frame: 1, frameLength: length, lead: lead, viewport: bounds.width), accuracy: 2)
+        XCTAssertEqual(model.source, ramp, "Going there opens nothing else")
+        // Drag three frames along and hold still.
+        var clock = ProcessInfo.processInfo.systemUptime
+        let y = bounds.minY + height / 2
+        var x = bounds.maxX - 40
+        try send(.leftMouseDown, CGPoint(x: x, y: y), to: window, time: clock)
+        for _ in 0..<10 {
+            clock += 0.016
+            x -= length * 3 / 10
+            try send(.leftMouseDragged, CGPoint(x: x, y: y), to: window, time: clock)
+        }
+        try send(.leftMouseUp, CGPoint(x: x, y: y), to: window, time: clock + 0.25)
+        // other, ramp, z0, z1, z2: the fourth frame on from ramp's place is z2.
+        let target = directory.appendingPathComponent("z2.png")
+        try await waitUntil({ model.source == target }, timeout: 5)
+        XCTAssertTrue(model.bigStripVisible, "It stays up")
+        // The sidebar's edits are on the photograph in the middle.
+        XCTAssertEqual(model.source, target)
+        // Double-clicking the middle frame goes to the edit view on it.
+        let middle = CGPoint(x: bounds.midX, y: y)
+        for clicks in 1...2 {
+            try send(.leftMouseDown, middle, to: window, clicks: clicks)
+            try send(.leftMouseUp, middle, to: window, clicks: clicks)
+        }
+        try await waitUntil({ !model.bigStripVisible }, timeout: 5)
+        XCTAssertEqual(model.source, target)
+        XCTAssertNil(model.rollDeveloper)
+    }
+
     /// Nothing but the person moves the film: opening a photograph in view leaves
     /// it, even at the far side, and only a frame wholly out of view brings it round.
     func testTheStripDoesNotCentreTheOpenPhotograph() async throws {

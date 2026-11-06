@@ -302,6 +302,23 @@ The arrow keys step along the roll. Only the person moves the film: opening a ph
 leaves it where it is, unless that frame is wholly out of view, when it comes just far
 enough in. That also shows the open photograph when a folder first appears.
 
+## Big film strip
+
+F, or View › Big Film Strip, makes the film strip the main view beside the sidebar. It
+fills the column on black and scrolls like the small one, with blank film at each end so
+that every frame can reach the middle. The frame nearest the middle stays bright and the
+others dim, and 250 ms after the film stops it opens as the current photograph, for the
+sidebar. Double-clicking a photograph, or F, returns to the edit view.
+
+Every frame shows the photograph's final edit: its saved edit, or what it would open with.
+`RollDeveloper` develops them in the background with a helper of its own, since the main
+helper holds the open photograph's decoded source, nearest the middle first and through the
+whole folder. Frames show the embedded preview until theirs is ready, at 1280 px on the
+long side, which is a reduced develop rather than the export. Finished frames are kept as
+JPEGs in the app's caches (`RollFrames`, 2 GB, least recently used goes first), keyed by the
+file, its edit and the helper build, so nothing develops twice. Those within 12 frames of
+the middle stay decoded in memory, so flicking doesn't wait on the disk.
+
 ## Proof
 
 P, the Proof button in the toolbar's view group, or Settings › Viewer shows the

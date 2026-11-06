@@ -85,7 +85,67 @@ import UniformTypeIdentifiers
     }
 
     /// The panel shows with a photograph, except while cropping.
-    var showsZonePanel: Bool { source != nil && !cropping }
+    var showsZonePanel: Bool { source != nil && !cropping && !bigStripVisible }
+
+    /// The film strip is the main view. F, or a double-click on a frame to leave.
+    private(set) var bigStripVisible = false
+    /// Develops the folder's final edits while the big strip is up.
+    private(set) var rollDeveloper: RollDeveloper?
+
+    func toggleBigStrip() {
+        guard source != nil, !cropping else { return }
+        bigStripVisible ? closeBigStrip() : openBigStrip()
+    }
+
+    private func openBigStrip() {
+        if rollDeveloper == nil, let paths = engine?.paths {
+            rollDeveloper = try? RollDeveloper(paths: paths) { [weak self] url in self?.frameRequest(for: url) }
+        }
+        bigStripVisible = true
+    }
+
+    private func closeBigStrip() {
+        bigStripVisible = false
+        rollDeveloper?.stop()
+        rollDeveloper = nil
+    }
+
+    /// Back to the edit view, on `url`.
+    func leaveBigStrip(opening url: URL) {
+        closeBigStrip()
+        if url != source { open(url) }
+    }
+
+    /// The current film's strip artwork, small enough for frames.
+    func loadRollStrip() async -> FilmStrip? {
+        guard let data = dataDirectory else { return nil }
+        let film = film
+        return await Task.detached(priority: .utility) { FilmStrip.load(data: data, film: film, format: .full, maxPixelSize: 720) }.value
+    }
+
+    /// The helper request for a photograph as it would open: the open one as it
+    /// is now, or its saved edit, or what an unedited one starts with.
+    func frameRequest(for url: URL) -> (command: [String: JSONValue], turns: Int)? {
+        guard hasCatalog else { return nil }
+        var edit: EditState
+        if url == source {
+            edit = state
+        } else if let saved = try? PhotoSettingsFile.read(beside: url),
+                  films.contains(where: { $0.id == saved.state.film }), papers.contains(where: { $0.id == saved.state.paper }) {
+            edit = merged(saved.state)
+        } else {
+            edit = uneditedState(in: url.deletingLastPathComponent())
+        }
+        edit.params["io.output_color_space"] = .string(previewSpace)
+        var command: [String: JSONValue] = [
+            "command": .string("thumbnail"), "input": .string(url.path),
+            "film": .string(edit.film), "paper": .string(edit.paper), "params": edit.params,
+            "long_side": .number(Double(Self.rollFrameSide))
+        ]
+        if let crop = Self.cropJSON(edit.crop) { command["crop"] = crop }
+        return (command, Int(edit.params["io.rotate_cw"].double))
+    }
+    private static let rollFrameSide = 1280
 
     /// A zone being dragged from the panel.
     var zoneDrag: ZoneDrag?
@@ -705,7 +765,7 @@ import UniformTypeIdentifiers
     var proofing = UserDefaults.standard.bool(forKey: "proofMode") {
         didSet { UserDefaults.standard.set(proofing, forKey: "proofMode") }
     }
-    var canZoom: Bool { source != nil && !cropping && !proofing }
+    var canZoom: Bool { source != nil && !cropping && !proofing && !bigStripVisible }
     /// The border to draw around a photograph on the canvas. A proof shows
     /// the photograph alone, on white.
     func canvasBorder(for size: CGSize) -> BorderSettings? { proofing ? nil : border.shown(for: size) }
@@ -792,6 +852,7 @@ import UniformTypeIdentifiers
     /// Shows the whole developed photograph, without the border, to crop it.
     func beginCrop() {
         guard !cropping, image != nil, imageSize != .zero else { return }
+        if bigStripVisible { closeBigStrip() }
         holdOriginal(false)
         cropSession = CropSession(start: state, photo: shownImageSize, rotation: imageRotation, source: sourceSize)
     }
@@ -862,18 +923,7 @@ import UniformTypeIdentifiers
             state = merged(session.state)
             inspectorVisible = session.inspectorVisible
         } else {
-            state = startingState(in: url.deletingLastPathComponent())
-            state.params["io.rotate_cw"] = .number(0)
-            // How one file's colours are read never carries over to the next.
-            let interpretation = defaults["io.input_interpretation"]
-            if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
-            state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
-            // Pins describe the tones of the photograph they were measured on,
-            // so they never carry to another file.
-            if state.params["post.tone_anchors"] != defaults["post.tone_anchors"] {
-                state.params["post.tone_anchors"] = defaults["post.tone_anchors"]
-            }
-            state.crop = CropSettings()
+            state = uneditedState(in: url.deletingLastPathComponent())
             customFilmFormat = false
         }
         // A photograph's own settings file, unless a session restored something newer.
@@ -1261,6 +1311,23 @@ import UniformTypeIdentifiers
         for path in [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"] where state.params[path] != .null {
             next.params[path] = state.params[path]
         }
+        return next
+    }
+
+    /// What a photograph with no edits of its own opens with.
+    private func uneditedState(in directory: URL) -> EditState {
+        var next = startingState(in: directory)
+        next.params["io.rotate_cw"] = .number(0)
+        // How one file's colours are read never carries over to the next.
+        let interpretation = defaults["io.input_interpretation"]
+        if interpretation != .null { next.params["io.input_interpretation"] = interpretation }
+        next.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
+        // Pins describe the tones of the photograph they were measured on,
+        // so they never carry to another file.
+        if next.params["post.tone_anchors"] != defaults["post.tone_anchors"] {
+            next.params["post.tone_anchors"] = defaults["post.tone_anchors"]
+        }
+        next.crop = CropSettings()
         return next
     }
 
@@ -2022,6 +2089,7 @@ import UniformTypeIdentifiers
 
     func shutdown() {
         saveEditsNow()
+        rollDeveloper?.stop()
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
         exportJob?.cancel(); engine?.stop()
     }

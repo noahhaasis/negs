@@ -355,7 +355,7 @@ impl Session {
         data: &Path,
     ) -> Result<Value> {
         let started = Instant::now();
-        ensure!((16..=1024).contains(&long_side), "Invalid thumbnail size");
+        ensure!((16..=THUMBNAIL_FRAME_MAX).contains(&long_side), "Invalid thumbnail size");
         let preset_applied = preset.is_some();
         if let Some(text) = preset {
             let preset = presets::import(&text, data).map_err(anyhow::Error::msg)?;

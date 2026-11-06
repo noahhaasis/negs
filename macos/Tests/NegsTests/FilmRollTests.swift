@@ -81,6 +81,53 @@ final class FilmRollTests: XCTestCase {
         XCTAssertEqual(PhotoFolder.shown(files, rawOnly: false), files)
     }
 
+    /// Every frame can reach the middle of the big strip, the first and last too.
+    func testTheBigStripsCentreFrame() {
+        let (length, viewport): (CGFloat, CGFloat) = (500, 1600)
+        let lead = FilmRollLayout.leadFrames(viewport: viewport, frameLength: length)
+        XCTAssertEqual(lead, 2)
+        for index in [0, 3, 9] {
+            let offset = FilmRollLayout.centringOffset(frame: index, frameLength: length, lead: lead, viewport: viewport)
+            XCTAssertGreaterThanOrEqual(offset, 0)
+            XCTAssertEqual(FilmRollLayout.centreFrame(offset: offset, frameLength: length, lead: lead, viewport: viewport, photos: 10), index)
+        }
+        XCTAssertEqual(FilmRollLayout.centreFrame(offset: 0, frameLength: length, lead: lead, viewport: viewport, photos: 10), 0, "Clamped at the start")
+        XCTAssertEqual(FilmRollLayout.centreFrame(offset: 99_999, frameLength: length, lead: lead, viewport: viewport, photos: 10), 9, "And the end")
+    }
+
+    /// Frames are turned as their photograph is.
+    func testAFrameTurnsWithItsPhotograph() throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        context.setFillColor(CGColor(gray: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 40, height: 20))
+        // White on the left half.
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        let image = try XCTUnwrap(context.makeImage())
+        let turned = try XCTUnwrap(RollDeveloper.turned(image, quarterTurns: 1))
+        XCTAssertEqual(turned.width, 20)
+        XCTAssertEqual(turned.height, 40)
+        let bitmap = NSBitmapImageRep(cgImage: turned)
+        // A quarter clockwise puts the left half on top.
+        XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: 10, y: 5)?.usingColorSpace(.sRGB)).redComponent, 0.9)
+        XCTAssertLessThan(try XCTUnwrap(bitmap.colorAt(x: 10, y: 35)?.usingColorSpace(.sRGB)).redComponent, 0.1)
+        XCTAssertTrue(RollDeveloper.turned(image, quarterTurns: 4) === image)
+    }
+
+    /// Past its limit, the cache gives up its least recently used frames.
+    func testTheFrameCachePrunesTheOldest() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("negs-prune-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for (index, name) in ["old", "middle", "new"].enumerated() {
+            let file = dir.appendingPathComponent(name)
+            try Data(count: 100).write(to: file)
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(1_000_000 + index))], ofItemAtPath: file.path)
+        }
+        RollDeveloper.prune(dir, limit: 250)
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: dir.path)), ["middle", "new"])
+    }
+
     /// Still films print frame numbers; cine and print films' edges have their
     /// own text there, which must not be painted over.
     func testOnlyStillFilmsAreRenumbered() {

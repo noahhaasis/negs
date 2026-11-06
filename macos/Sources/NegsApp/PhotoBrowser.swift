@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import ImageIO
 import SwiftUI
 
@@ -90,12 +91,50 @@ actor PhotoThumbnails {
     }
 }
 
+/// A folder's photographs, kept up to date while `watch` runs.
+@MainActor @Observable final class FolderListing {
+    private(set) var files: [PhotoFile] = []
+    private(set) var loading = true
+    private(set) var failed = false
+
+    /// Lists `directory`, calling `listed` after the first scan, and follows
+    /// its changes until cancelled, which also releases the watch.
+    func watch(_ directory: URL, listed: () -> Void) async {
+        loading = true; failed = false; files = []
+        // Arm before the initial scan so arrivals during enumeration are not missed.
+        let watcher = PhotoFolderWatcher(directory: directory)
+        defer { watcher?.stop() }
+        await refresh(directory)
+        guard !Task.isCancelled else { return }
+        listed()
+        if let watcher {
+            for await _ in watcher.changes {
+                guard !Task.isCancelled else { return }
+                await refresh(directory)
+            }
+        }
+    }
+
+    private func refresh(_ directory: URL) async {
+        let scan = Task.detached(priority: .utility) { try PhotoFolder.snapshot(in: directory) }
+        do {
+            let result = try await withTaskCancellationHandler {
+                try await scan.value
+            } onCancel: { scan.cancel() }
+            try Task.checkCancellation()
+            if files != result { files = result }
+            failed = false; loading = false
+        } catch {
+            guard !Task.isCancelled else { return }
+            failed = true; loading = false
+        }
+    }
+}
+
 struct PhotoBrowser: View {
     let model: EditorModel
     let directory: URL
-    @State private var files: [PhotoFile] = []
-    @State private var loading = true
-    @State private var failed = false
+    @State private var listing = FolderListing()
 
     @State private var strip: FilmStrip?
     @State private var viewport: CGFloat = 0
@@ -161,8 +200,8 @@ struct PhotoBrowser: View {
         .background(FilmRollLayout.filmBase)
         .overlay {
             Group {
-                if loading { ProgressView().controlSize(.small) }
-                else if failed { Text("This folder couldn’t be read.") }
+                if listing.loading { ProgressView().controlSize(.small) }
+                else if listing.failed { Text("This folder couldn’t be read.") }
                 else if shown.isEmpty { Text(model.filmstripRawOnly ? "No RAW files in this folder." : "No supported photographs in this folder.") }
             }
             .foregroundStyle(.white.opacity(0.75))
@@ -172,30 +211,16 @@ struct PhotoBrowser: View {
         .disabled(model.cropping)
         .accessibilityLabel("Film Strip")
         .task(id: "\(model.film) \(model.hasCatalog)") {
-            guard let data = model.dataDirectory else { return }
-            let film = model.film
-            let loaded = await Task.detached(priority: .utility) { FilmStrip.load(data: data, film: film, format: .full, maxPixelSize: 720) }.value
-            guard !Task.isCancelled, let loaded else { return }
-            strip = loaded
+            if let loaded = await model.loadRollStrip() { strip = loaded }
         }
         .task(id: directory) {
-            loading = true; failed = false; files = []
-            // Arm before the initial scan so arrivals during enumeration are
-            // not missed. Cancellation on hide/folder switch releases the watch.
-            let watcher = PhotoFolderWatcher(directory: directory)
-            defer { watcher?.stop() }
-            await refresh(initial: true)
-            if let watcher {
-                for await _ in watcher.changes {
-                    guard !Task.isCancelled else { return }
-                    await refresh(initial: false)
-                }
-            }
+            // Once the film has its new length.
+            await listing.watch(directory) { DispatchQueue.main.async { revealOpenPhotograph() } }
         }
     }
 
     private var height: CGFloat { model.filmstripHeight }
-    private var shown: [PhotoFile] { PhotoFolder.shown(files, rawOnly: model.filmstripRawOnly) }
+    private var shown: [PhotoFile] { PhotoFolder.shown(listing.files, rawOnly: model.filmstripRawOnly) }
     private var frameLength: CGFloat {
         FilmRollLayout.frameLength(stripHeight: height, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture)
     }
@@ -205,22 +230,5 @@ struct PhotoBrowser: View {
     private func revealOpenPhotograph() {
         guard let source = model.source, let index = shown.firstIndex(where: { $0.url == source }) else { return }
         scroller.reveal(frame: index, length: frameLength)
-    }
-
-    private func refresh(initial: Bool) async {
-        let scan = Task.detached(priority: .utility) { try PhotoFolder.snapshot(in: directory) }
-        do {
-            let result = try await withTaskCancellationHandler {
-                try await scan.value
-            } onCancel: { scan.cancel() }
-            try Task.checkCancellation()
-            if files != result { files = result }
-            failed = false; loading = false
-            // Once the film has its new length.
-            if initial { DispatchQueue.main.async { revealOpenPhotograph() } }
-        } catch {
-            guard !Task.isCancelled else { return }
-            failed = true; loading = false
-        }
     }
 }

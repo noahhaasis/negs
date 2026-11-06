@@ -36,6 +36,27 @@ enum FilmRollLayout {
         return max(0, Int((viewport / frameLength).rounded(.up)) - photos)
     }
 
+    /// How long the big strip has to be still before its centre frame opens.
+    static let settleMilliseconds = 250
+
+    /// Blank frames at each end of the big strip, so the first and last can reach the centre.
+    static func leadFrames(viewport: CGFloat, frameLength: CGFloat) -> Int {
+        guard frameLength > 0 else { return 0 }
+        return Int((viewport / 2 / frameLength).rounded(.up))
+    }
+
+    /// The offset that puts a frame in the middle of the strip.
+    static func centringOffset(frame index: Int, frameLength: CGFloat, lead: Int, viewport: CGFloat) -> CGFloat {
+        (CGFloat(lead + index) + 0.5) * frameLength - viewport / 2
+    }
+
+    /// The frame nearest the middle of the strip.
+    static func centreFrame(offset: CGFloat, frameLength: CGFloat, lead: Int, viewport: CGFloat, photos: Int) -> Int {
+        guard frameLength > 0, photos > 0 else { return 0 }
+        let middle = (offset + viewport / 2) / frameLength - CGFloat(lead)
+        return min(max(Int(middle.rounded(.down)), 0), photos - 1)
+    }
+
     /// The photograph at `point` on the film, from the film's top left. Only
     /// the gate counts: the film around it opens nothing.
     static func photo(at point: CGPoint, frame: CGSize, gate: CGRect, photos: Int) -> Int? {
@@ -68,8 +89,21 @@ enum FilmRollLayout {
 /// macOS scrolling does. The strip's scroll view stays its own for the trackpad.
 @MainActor final class FilmRollScroller {
     weak var scroll: NSScrollView? {
-        didSet { if scroll != nil, let pendingReveal { reveal(frame: pendingReveal.index, length: pendingReveal.length) } }
+        didSet {
+            if let observing { NotificationCenter.default.removeObserver(observing); self.observing = nil }
+            if let clip = scroll?.contentView {
+                clip.postsBoundsChangedNotifications = true
+                observing = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.onScroll?() }
+                }
+                onScroll?()
+            }
+            if scroll != nil, let pendingReveal { reveal(frame: pendingReveal.index, length: pendingReveal.length) }
+        }
     }
+    /// Whenever the film moves, by any means.
+    var onScroll: (() -> Void)? { didSet { if scroll != nil { onScroll?() } } }
+    private var observing: NSObjectProtocol?
     /// A frame to show once the scroll view has been found.
     private var pendingReveal: (index: Int, length: CGFloat)?
     /// macOS's normal deceleration: the speed kept after each millisecond.
@@ -279,8 +313,10 @@ struct FilmFrame: View {
     let selected: Bool
     let strip: FilmStrip?
     let film: String
+    /// The final edit, where it's been developed; the embedded preview until then.
+    var developed: CGImage? = nil
     let open: () -> Void
-    @State private var image: CGImage?
+    @State private var embedded: CGImage?
     @State private var visible = false
 
     var body: some View {
@@ -302,7 +338,7 @@ struct FilmFrame: View {
         .frame(width: frame.width, height: frame.height, alignment: .topLeading)
         .clipped()
         .onAppear { visible = true }
-        .onDisappear { visible = false; image = nil }
+        .onDisappear { visible = false; embedded = nil }
         .task(id: visible ? file : nil) {
             guard visible else { return }
             let request = Task.detached(priority: .utility) { await PhotoThumbnails.shared.image(for: file) }
@@ -310,14 +346,14 @@ struct FilmFrame: View {
                 await request.value
             } onCancel: { request.cancel() }
             guard !Task.isCancelled else { return }
-            image = result
+            embedded = result
         }
     }
 
     @ViewBuilder private func photograph(in gate: CGRect) -> some View {
         ZStack {
             Color.black
-            if let image {
+            if let image = developed ?? embedded {
                 let sideways = FilmRollLayout.liesOnItsSide(CGSize(width: image.width, height: image.height))
                 Image(decorative: image, scale: 1)
                     .resizable()
@@ -405,9 +441,10 @@ private struct FilmArtwork: View {
                 .background(FilmRollLayout.filmBase)
                 .offset(x: x * scale, y: y * scale - 0.7 * scale)
         }
-        label("\(number)", 2.3, 1.1)
-        label("\(number)", 2.3, 33.95)
-        label("\(number)A", 21.1, 33.95)
+        // Blank film before the first frame has no number.
+        label(number > 0 ? "\(number)" : "", 2.3, 1.1)
+        label(number > 0 ? "\(number)" : "", 2.3, 33.95)
+        label(number > 0 ? "\(number)A" : "", 21.1, 33.95)
     }
 }
 
