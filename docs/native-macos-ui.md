@@ -331,6 +331,11 @@ photograph's file. If the name holds another photograph's settings, as a RAW and
 JPEG would, or a JSON file that isn't ours, it writes `DSC_0001.NEF.json` instead and
 never overwrites the other file.
 
+Edits also save themselves: 0.8 s after a run of undoable edits pauses, on opening another
+photograph and on quitting, the same file is written beside the photograph. Opening a
+photograph writes nothing. A folder that can't be written is passed over silently here,
+while ⇧⌘S still reports it.
+
 Opening a photograph loads its settings file, as one undo step. Only a file saved
 for that photograph counts: other photographs' files and other JSON are ignored. A
 damaged file, or one naming a film or paper that isn't available, is reported and

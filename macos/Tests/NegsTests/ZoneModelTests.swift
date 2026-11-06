@@ -626,6 +626,42 @@ extension ZoneModelTests {
         XCTAssertEqual(document.frame.width, 62 * frame, accuracy: 1)
     }
 
+    /// Edits save themselves beside the photograph shortly after they're made, so
+    /// every photograph keeps its own. Only looking at one writes nothing.
+    func testEditsSaveThemselvesPerPhotograph() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let settings = directory.appendingPathComponent("ramp.json")
+        try await Task.sleep(for: .seconds(1.5))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: settings.path), "Opening it isn't an edit")
+        model.set("post.contrast", .number(40))
+        try await waitUntil({ FileManager.default.fileExists(atPath: settings.path) }, timeout: 5)
+        XCTAssertEqual(try PhotoSettingsFile.read(beside: ramp)?.state.params["post.contrast"].double, 40)
+        // Going to another photograph at once doesn't lose an edit just made.
+        model.set("post.contrast", .number(55))
+        model.open(other)
+        XCTAssertEqual(try PhotoSettingsFile.read(beside: ramp)?.state.params["post.contrast"].double, 55)
+        try await waitUntil { model.previewCurrent }
+        try await Task.sleep(for: .seconds(1.5))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("other.json").path), "It wasn't edited")
+        // Coming back, it's as it was left.
+        model.open(ramp)
+        XCTAssertEqual(model.value("post.contrast").double, 55)
+    }
+
+    /// A folder that can't be written doesn't interrupt editing with an alert.
+    func testAFailedAutomaticSaveStaysQuiet() async throws {
+        let model = try await makeModel()
+        defer {
+            model.shutdown()
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        model.set("post.contrast", .number(40))
+        try await Task.sleep(for: .seconds(1.5))
+        XCTAssertNil(model.error)
+    }
+
     /// Nothing but the person moves the film: opening a photograph in view leaves
     /// it, even at the far side, and only a frame wholly out of view brings it round.
     func testTheStripDoesNotCentreTheOpenPhotograph() async throws {

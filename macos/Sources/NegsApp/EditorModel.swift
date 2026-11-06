@@ -12,6 +12,9 @@ import UniformTypeIdentifiers
 @MainActor @Observable final class EditorModel {
     /// The whole edit, for rendering, undo, and export. Views read the
     /// per-parameter accessors below, so an edit only invalidates its own row.
+    @ObservationIgnored private var editedSinceSave = false
+    @ObservationIgnored private var autosave: Task<Void, Never>?
+    private static let autosaveDelay = 0.8
     private(set) var state = EditState() {
         didSet { publish() }
     }
@@ -676,6 +679,7 @@ import UniformTypeIdentifiers
         if render { changed() } else { pumpPreviews() }
     }
     private func registerUndo(restoring previous: EditState, action: String) {
+        markEdited()
         undoManager?.registerUndo(withTarget: self) { model in
             guard previous != model.state else { return }
             model.registerUndo(restoring: model.state, action: action)
@@ -842,6 +846,8 @@ import UniformTypeIdentifiers
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
+        // The photograph being left keeps an edit made just now.
+        saveEditsNow()
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
@@ -873,6 +879,9 @@ import UniformTypeIdentifiers
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()
         if let beforeSettings { registerUndo(restoring: beforeSettings, action: "Load Settings") }
+        // Opening it isn't an edit.
+        autosave?.cancel(); autosave = nil
+        editedSinceSave = false
         // Launch fits the restored photograph (never past 1:1). Changing
         // photographs keeps the fit or 1:1 setting the previous one was at.
         zoom(fit: session == nil ? fitImage : true)
@@ -1205,9 +1214,35 @@ import UniformTypeIdentifiers
         return nil
     }
 
+    // MARK: Saving edits automatically
+
+    /// Every undoable edit comes here. Its file is written shortly after, once a
+    /// run of edits has paused, so each photograph keeps what was last done to it.
+    private func markEdited() {
+        guard source != nil else { return }
+        editedSinceSave = true
+        autosave?.cancel()
+        autosave = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.autosaveDelay))
+            guard !Task.isCancelled else { return }
+            self?.saveEditsNow()
+        }
+    }
+
+    /// Writes an edit that hasn't been saved. It's only ever background upkeep,
+    /// so a folder that can't be written doesn't interrupt with an alert.
+    private func saveEditsNow() {
+        autosave?.cancel(); autosave = nil
+        guard editedSinceSave, let source else { return }
+        editedSinceSave = false
+        _ = try? PhotoSettingsFile(image: source.lastPathComponent, state: state).write(beside: source)
+    }
+
     /// Saves the photograph's edit to a JSON file beside it.
     func saveSettings() {
         guard let source else { return }
+        autosave?.cancel(); autosave = nil
+        editedSinceSave = false
         do {
             let url = try PhotoSettingsFile(image: source.lastPathComponent, state: state).write(beside: source)
             status = "Saved \(url.lastPathComponent)"
@@ -1929,6 +1964,7 @@ import UniformTypeIdentifiers
     }
 
     func shutdown() {
+        saveEditsNow()
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
         exportJob?.cancel(); engine?.stop()
     }
