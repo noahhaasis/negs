@@ -31,11 +31,17 @@ final class RenderedPreviewCache: @unchecked Sendable {
     }
 
     let file: URL
+    /// Every settled frame, by its key, so each photograph's last develop can come
+    /// back when it's next opened. `file` stays the one restored at launch.
+    let archive: URL
+    private static let archiveLimit: Int64 = 4 << 30
+    private var savesSincePrune = 0
     private let queue = DispatchQueue(label: "dev.negs.rendered-preview", qos: .userInitiated)
     private static let maxBytes = 8192 * 8192 * 4
 
     init(file: URL = AppDataLocations.cachesDirectory.appendingPathComponent("rendered-preview.cache")) {
         self.file = file
+        archive = URL(fileURLWithPath: file.path + ".frames", isDirectory: true)
     }
 
     /// Canvas-only edits (crop, rotation and border) are reapplied by the
@@ -76,13 +82,17 @@ final class RenderedPreviewCache: @unchecked Sendable {
     func load(source: URL, state: EditState, paths: EnginePaths) async -> Frame? {
         await withCheckedContinuation { continuation in
             queue.async {
-                let frame = Self.key(source: source, state: state, paths: paths).flatMap { self.read(key: $0) }
+                let frame = Self.key(source: source, state: state, paths: paths).flatMap { key in
+                    self.read(key: key, from: self.file) ?? self.read(key: key, from: self.archived(key))
+                }
                 continuation.resume(returning: frame)
             }
         }
     }
 
-    private func read(key: String) -> Frame? {
+    private func archived(_ key: String) -> URL { archive.appendingPathComponent(key).appendingPathExtension("frame") }
+
+    private func read(key: String, from file: URL) -> Frame? {
         guard let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int,
               size <= Self.maxBytes + 65_536,
               let data = try? Data(contentsOf: file, options: .mappedIfSafe), let newline = data.prefix(65_536).firstIndex(of: 10),
@@ -95,6 +105,8 @@ final class RenderedPreviewCache: @unchecked Sendable {
         guard pixels.count == header.width * header.height * 4, Self.digest(pixels) == header.checksum,
               let surface = try? EditorModel.previewSurface(pixels, width: header.width, height: header.height, bgra: true,
                                                             displaySpace: header.displaySpace ?? "sRGB") else { return nil }
+        // Recently used, so pruning takes it last.
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
         return Frame(surface: surface, photoSize: header.photoSize, sourceSize: header.sourceSize, workingSize: header.workingSize, raw: header.raw)
     }
 
@@ -124,6 +136,16 @@ final class RenderedPreviewCache: @unchecked Sendable {
                 try output.write(contentsOf: data); try output.write(contentsOf: pixels)
                 try output.close()
                 guard rename(staging.path, self.file.path) == 0 else { throw EngineError(message: "Could not cache preview") }
+                // The same bytes under the frame's key: a link costs no more disk.
+                try FileManager.default.createDirectory(at: self.archive, withIntermediateDirectories: true)
+                let kept = self.archived(key)
+                try? FileManager.default.removeItem(at: kept)
+                try FileManager.default.linkItem(at: self.file, to: kept)
+                self.savesSincePrune += 1
+                if self.savesSincePrune >= 16 {
+                    self.savesSincePrune = 0
+                    RollDeveloper.prune(self.archive, limit: Self.archiveLimit)
+                }
             } catch { /* A cache failure must never interrupt editing. */ }
         }
     }

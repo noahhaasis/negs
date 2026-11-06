@@ -24,6 +24,7 @@ import UniformTypeIdentifiers
     nonisolated static let cacheLimit: Int64 = 2 << 30
 
     @ObservationIgnored private let client: EngineClient
+    nonisolated static var defaultCache: URL { AppDataLocations.cachesDirectory.appendingPathComponent("RollFrames", isDirectory: true) }
     @ObservationIgnored private let cache: URL
     /// The helper request for a photograph's final edit, and its quarter turns.
     @ObservationIgnored private let request: (URL) -> (command: [String: JSONValue], turns: Int)?
@@ -34,7 +35,7 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var generation = 1.0
 
-    init(paths: EnginePaths, cache: URL = AppDataLocations.cachesDirectory.appendingPathComponent("RollFrames", isDirectory: true),
+    init(paths: EnginePaths, cache: URL = RollDeveloper.defaultCache,
          request: @escaping (URL) -> (command: [String: JSONValue], turns: Int)?) throws {
         client = try EngineClient(paths: paths)
         self.cache = cache
@@ -158,6 +159,11 @@ import UniformTypeIdentifiers
         hash.update(data: Data("\(file.url.path)|\(file.modified?.timeIntervalSince1970 ?? 0)|\(file.size ?? 0)|\(built)|".utf8))
         hash.update(data: edit)
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A frame already developed with this edit, if it's in the cache.
+    nonisolated static func cachedFrame(file: PhotoFile, command: [String: JSONValue], helper: URL, cache: URL = defaultCache) -> CGImage? {
+        read(cache.appendingPathComponent(key(file: file, command: command, helper: helper)).appendingPathExtension("jpg"))
     }
 
     nonisolated static func turned(_ image: CGImage, quarterTurns: Int) -> CGImage? {

@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 @MainActor @Observable final class EditorModel {
     /// The whole edit, for rendering, undo, and export. Views read the
     /// per-parameter accessors below, so an edit only invalidates its own row.
+    @ObservationIgnored private var recentFrames: [RecentFrame] = []
     @ObservationIgnored private var editedSinceSave = false
     @ObservationIgnored private var autosave: Task<Void, Never>?
     private static let autosaveDelay = 0.8
@@ -35,7 +36,8 @@ import UniformTypeIdentifiers
     /// The developed preview. Nil until the first render of `source` completes.
     private(set) var image: IOSurface?
     /// The unprocessed photograph, shown while the first render develops.
-    private(set) var placeholder: CGImage?
+    /// Shown until the developed frame: another frame, or the embedded preview.
+    private(set) var placeholder: AnyObject?
     /// The undeveloped photograph, shown in place of `image` while the
     /// Original button is held.
     private(set) var original: IOSurface?
@@ -318,7 +320,7 @@ import UniformTypeIdentifiers
     /// The shown frame was rendered at canvas size while a slider moved;
     /// letting go renders the photograph at export size.
     @ObservationIgnored private var showingInteractiveFrame = false
-    @ObservationIgnored private var showingCachedPreview = false
+    @ObservationIgnored private(set) var showingCachedPreview = false
     @ObservationIgnored private let previewCache: RenderedPreviewCache
     @ObservationIgnored let canvasScale = CanvasScale()
     @ObservationIgnored private var pendingRender: Task<Void, Never>?
@@ -910,6 +912,7 @@ import UniformTypeIdentifiers
         }
         // The photograph being left keeps an edit made just now.
         saveEditsNow()
+        let leaving = image, leavingSize = imageSize, leavingCrop = state.crop
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
@@ -956,21 +959,34 @@ import UniformTypeIdentifiers
         // main actor stays busy building the window, which takes the frame
         // through `finishLaunching` before it first appears.
         let crop = state.crop
-        let cachedFrame = session != nil ? paths.map { paths in
+        // Already in memory, it shows now and never gaps.
+        let recent = session == nil ? recentFrame(url, rendered: snapshot.rendered) : nil
+        if let recent { showRecent(recent) }
+        // Otherwise the last photograph holds, rather than a blank, until the
+        // next image is read. A different crop would frame it wrongly.
+        else if session == nil, let leaving, state.crop == leavingCrop {
+            placeholder = leaving; placeholderSize = leavingSize
+        }
+        let cachedFrame = recent == nil ? paths.map { paths in
             LaunchFrame {
                 guard let frame = await cache.load(source: url, state: snapshot, paths: paths) else { return nil }
                 return LaunchFrame.Loaded(frame: frame, histogram: Histogram.of(frame.surface, crop: crop), histogramCrop: crop)
             }
         } : nil
         launchFrame = restoringAtLaunch ? cachedFrame.map { ($0, generation, snapshot.rendered) } : nil
-        Task { [weak self] in
+        if recent == nil { Task { [weak self] in
             if let cachedFrame, let cached = await cachedFrame.value {
                 guard let self else { return }
                 if self.showCached(cached, generation: generation, rendered: snapshot.rendered) { return }
             }
+            // The grid's smaller frame has the final look, unlike the embedded preview.
+            if let self, let frame = await self.rollFrame(url, generation: generation) {
+                self.showPlaceholder(frame, size: CGSize(width: frame.width, height: frame.height), generation: generation)
+                return
+            }
             let thumbnail = await Task.detached(priority: .userInitiated) { Self.thumbnail(url) }.value
             if let (thumbnail, size) = thumbnail { self?.showPlaceholder(thumbnail, size: size, generation: generation) }
-        }
+        } }
         changed(invalidateCache: session == nil)
     }
     /// Ends launch, before the window is shown: a restore at launch is no
@@ -1001,7 +1017,51 @@ import UniformTypeIdentifiers
         return true
     }
 
-    private func showPlaceholder(_ thumbnail: CGImage, size: CGSize, generation: Int) {
+    // MARK: Frames kept in memory
+
+    private struct RecentFrame {
+        var url: URL
+        var rendered: EditState
+        var frame: RenderedPreviewCache.Frame
+        var bytes: Int
+    }
+    /// About 90 frames of 2000 px, or 16 of 12 MP.
+    private static let recentFramesLimit = 768 << 20
+
+    private func recentFrame(_ url: URL, rendered: EditState) -> RecentFrame? {
+        recentFrames.last { $0.url == url && $0.rendered == rendered }
+    }
+
+    private func rememberFrame(_ surface: IOSurface, url: URL, rendered: EditState) {
+        recentFrames.removeAll { $0.url == url && $0.rendered == rendered }
+        recentFrames.append(RecentFrame(url: url, rendered: rendered,
+                                        frame: .init(surface: surface, photoSize: imageSize, sourceSize: sourceSize, workingSize: workingSize, raw: isRaw),
+                                        bytes: surface.width * surface.height * 4))
+        while recentFrames.count > 1, recentFrames.reduce(0, { $0 + $1.bytes }) > Self.recentFramesLimit { recentFrames.removeFirst() }
+    }
+
+    private func showRecent(_ recent: RecentFrame) {
+        let frame = recent.frame
+        image = frame.surface; imageSize = frame.photoSize; isRaw = frame.raw
+        sourceSize = frame.sourceSize; workingSize = frame.workingSize
+        previewScale = frame.workingSize.width > 0 ? Double(frame.surface.width) / frame.workingSize.width : 1
+        showingCachedPreview = true; placeholder = nil; hideActivity()
+        updateHistogram()
+        updateFilmStrip()
+    }
+
+    /// The grid's developed frame for this edit, if it has one. It's already cut and
+    /// turned, so only a frame the canvas won't transform again can stand in.
+    private func rollFrame(_ url: URL, generation: Int) async -> CGImage? {
+        guard generation == sourceGeneration, image == nil, !state.crop.cropped, Int(value("io.rotate_cw").double) % 4 == 0,
+              let request = frameRequest(for: url), let helper = engine?.paths.helper else { return nil }
+        let file = PhotoFile(url: url)
+        return await Task.detached(priority: .userInitiated) {
+            RollDeveloper.cachedFrame(file: file, command: request.command, helper: helper)
+        }.value
+    }
+
+    private func showPlaceholder(_ thumbnail: AnyObject, size: CGSize, generation: Int) {
         guard generation == sourceGeneration, image == nil else { return }
         placeholderSize = size; placeholder = thumbnail
         updateFilmStrip()
@@ -1195,6 +1255,7 @@ import UniformTypeIdentifiers
                 showingCachedPreview = false
                 renderAtExportSize = result["export_resolution"].bool
                 renderOnGPU = ExportEngine.ranOnGPU(backend: result["backend"].string)
+                if let source = self.source { rememberFrame(developed, url: source, rendered: snapshot.rendered) }
                 if let cacheKey { previewCache.save(developed, photoSize: imageSize, sourceSize: sourceSize, workingSize: workingSize, raw: isRaw, key: cacheKey) }
             }
             let seconds = result["elapsed_ms"].double / 1000

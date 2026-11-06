@@ -853,6 +853,59 @@ extension ZoneModelTests {
         XCTAssertNil(model.rollDeveloper)
     }
 
+    /// Going back to a photograph shows its developed frame at once, with no gap
+    /// and no embedded preview first.
+    func testGoingBackToAPhotographShowsItAtOnce() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await waitUntil { model.previewCurrent }
+        model.open(other)
+        try await waitUntil { model.previewCurrent }
+        model.open(ramp)
+        XCTAssertNotNil(model.image, "In the same instant")
+        XCTAssertNil(model.placeholder)
+        XCTAssertFalse(model.previewCurrent, "It's confirmed by a render behind it")
+        try await waitUntil { model.previewCurrent }
+    }
+
+    /// An edit means a different frame: going back after one never shows the old look.
+    func testAnEditedPhotographDoesNotShowItsOldFrame() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        try await waitUntil { model.previewCurrent }
+        let old = try XCTUnwrap(model.image)
+        model.set("post.brightness", .number(60))
+        try await waitUntil { model.previewCurrent }
+        model.open(other)
+        try await waitUntil { model.previewCurrent }
+        model.open(ramp)
+        XCTAssertNotNil(model.image)
+        XCTAssertFalse(model.image === old, "The edited frame, not the first one")
+    }
+
+    /// A photograph not in memory comes from the disk, in a new launch too. Until
+    /// it's read the last photograph stays up rather than a blank.
+    func testAFrameComesBackFromTheDiskAfterARestart() async throws {
+        let file = directory.appendingPathComponent("shared.cache")
+        let first = EditorModel(previewCache: RenderedPreviewCache(file: file))
+        await first.start(paths: try paths())
+        first.open(ramp)
+        try await waitUntil { first.previewCurrent }
+        await first.flushPreviewCache()
+        first.shutdown()
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: file.path + ".frames").isEmpty)
+
+        let second = EditorModel(previewCache: RenderedPreviewCache(file: file))
+        defer { second.shutdown() }
+        await second.start(paths: try paths())
+        second.open(other)
+        try await waitUntil { second.previewCurrent }
+        second.open(ramp)
+        XCTAssertTrue(second.image != nil || second.placeholder != nil, "Never blank: the last photograph holds until this one's read")
+        try await waitUntil({ second.image != nil }, timeout: 5)
+        XCTAssertTrue(second.showingCachedPreview, "From the disk, not a new develop")
+    }
+
     /// Nothing but the person moves the film: opening a photograph in view leaves
     /// it, even at the far side, and only a frame wholly out of view brings it round.
     func testTheStripDoesNotCentreTheOpenPhotograph() async throws {

@@ -184,3 +184,19 @@ private func colorSpaceName(_ surface: IOSurface) -> String? {
     IOSurfaceCopyValue(surface, kIOSurfaceColorSpace)
         .flatMap { CGColorSpace(propertyListPlist: $0 as CFPropertyList) }?.name as String?
 }
+
+/// The frames kept per photograph.
+final class PreviewArchiveTests: XCTestCase {
+    func testTheArchiveGivesUpItsOldestPastItsLimit() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("negs-archive-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for (index, name) in ["old", "middle", "new"].enumerated() {
+            let file = dir.appendingPathComponent(name)
+            try Data(count: 100).write(to: file)
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(1_000_000 + index))], ofItemAtPath: file.path)
+        }
+        RollDeveloper.prune(dir, limit: 250)
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: dir.path)), ["middle", "new"])
+    }
+}

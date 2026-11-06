@@ -310,6 +310,16 @@ colour (`EdgePrint`). They're read from the file's metadata (`PhotoExif`), sit o
 overlay just outside the photograph, and stay on the canvas when it's zoomed past the edges.
 A fitted photograph leaves room for them; a file with no details leaves none.
 
+## Moving between photographs
+
+Every settled render is kept: in memory for the last 768 MB of frames, and on disk in
+`rendered-preview.cache.frames` (4 GB, least recently used goes first), keyed by the file,
+its edit and the helper and data it was developed with. Going back to a photograph with the
+same edit shows its frame in the same instant from memory, or as soon as it's read from the
+disk, with the last photograph holding meanwhile rather than a blank. A photograph with no
+develop yet shows the grid's frame for its edit if there is one, then the embedded preview.
+A render always follows, so anything that changed is corrected.
+
 ## Grid view
 
 G, or View › Grid View, swaps the zones, photograph and film strip for the folder in four
