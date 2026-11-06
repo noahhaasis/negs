@@ -539,6 +539,62 @@ extension ZoneModelTests {
         XCTAssertEqual(model.source, other, "A double-click on the photograph does")
     }
 
+    /// Nothing but the person moves the film: opening a photograph in view leaves
+    /// it, even at the far side, and only a frame wholly out of view brings it round.
+    func testTheStripDoesNotCentreTheOpenPhotograph() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        let (_, window, roll) = try await openRoll(model, photos: 40)
+        defer { window.orderOut(nil) }
+        func offset() -> CGFloat { roll.contentView.bounds.origin.x }
+        func file(_ index: Int) -> URL { directory.appendingPathComponent("z\(index).png") }
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture)
+        XCTAssertEqual(FilmRollLayout.stripHeight, 180)
+        XCTAssertEqual(roll.bounds.height, 180, accuracy: 1)
+        let bounds = roll.convert(roll.bounds, to: nil)
+        // Double-clicking a frame at the strip's far side, sorted other, ramp, z0, z1…
+        let left = roll.contentView.bounds.origin.x
+        let index = Int((bounds.width - frame) / frame)
+        let point = CGPoint(x: bounds.minX + (CGFloat(index) + 0.5) * frame - left, y: bounds.midY)
+        for clicks in 1...2 {
+            try send(.leftMouseDown, point, to: window, clicks: clicks)
+            try send(.leftMouseUp, point, to: window, clicks: clicks)
+        }
+        try await waitUntil { model.source == file(index - 2) }
+        try await waitUntil { model.previewCurrent }
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(offset(), left, accuracy: 0.5, "A double-click doesn't move the film")
+        // A photograph further along, as from Open or the arrow keys.
+        model.open(file(30))
+        try await waitUntil { model.previewCurrent }
+        try await Task.sleep(for: .milliseconds(400))
+        let revealed = offset()
+        XCTAssertEqual(revealed, 32 * frame + frame - bounds.width, accuracy: 2, "It comes just into view, at the near edge")
+        // Scrolled away by hand, it stays until something's wholly out of view.
+        model.open(file(29))
+        try await waitUntil { model.previewCurrent }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(offset(), revealed, accuracy: 0.5, "A frame in view doesn't move it")
+    }
+
+    /// Opening the window on a photograph far along the folder shows its frame.
+    func testTheStripOpensWithTheOpenPhotographInView() async throws {
+        let model = try await makeModel()
+        let saved = model.filmstripVisible
+        defer { model.filmstripVisible = saved; model.shutdown() }
+        for index in 0..<40 { try FileManager.default.copyItem(at: ramp, to: directory.appendingPathComponent("z\(index).png")) }
+        model.open(directory.appendingPathComponent("z30.png"))
+        try await waitUntil { model.previewCurrent }
+        let (_, window, roll) = try await openRoll(model)
+        defer { window.orderOut(nil) }
+        let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture)
+        let start = 32 * frame
+        let visible = roll.contentView.bounds
+        XCTAssertLessThan(visible.minX, start + frame, "\(visible)")
+        XCTAssertGreaterThan(visible.maxX, start, "\(visible)")
+    }
+
     /// Real drags: the film follows the mouse, coasts on from a flick, stops, and
     /// opens nothing. Holding still before letting go leaves it where it is.
     func testDraggingTheRollScrollsItWithInertia() async throws {

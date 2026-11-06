@@ -53,7 +53,7 @@ actor PhotoThumbnails {
     }
     private let cache: NSCache<NSURL, Cached> = {
         let cache = NSCache<NSURL, Cached>()
-        cache.totalCostLimit = 48 * 1024 * 1024
+        cache.totalCostLimit = 64 * 1024 * 1024
         cache.countLimit = 160
         return cache
     }()
@@ -71,7 +71,7 @@ actor PhotoThumbnails {
                 [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
             var options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 360,
+                kCGImageSourceThumbnailMaxPixelSize: 480,
                 kCGImageSourceShouldCacheImmediately: true
             ]
             if !EditorModel.rawExtensions.contains(url.pathExtension.lowercased()) {
@@ -91,7 +91,6 @@ struct PhotoBrowser: View {
     @State private var files: [PhotoFile] = []
     @State private var loading = true
     @State private var failed = false
-    @State private var scrollTarget: URL?
 
     @State private var strip: FilmStrip?
     @State private var viewport: CGFloat = 0
@@ -116,11 +115,7 @@ struct PhotoBrowser: View {
             .background(EnclosingScrollFinder(scroller: scroller))
         }
         .scrollIndicators(.hidden)
-        .scrollPosition(id: $scrollTarget, anchor: .center)
-        .onChange(of: model.source) { _, source in
-            scroller.stop()
-            scrollTarget = source
-        }
+        .onChange(of: model.source) { _, _ in revealOpenPhotograph() }
         .onDisappear { scroller.stop() }
         .onMoveCommand { direction in
             guard !model.cropping, let source = model.source,
@@ -156,7 +151,7 @@ struct PhotoBrowser: View {
         .task(id: "\(model.film) \(model.hasCatalog)") {
             guard let data = model.dataDirectory else { return }
             let film = model.film
-            let loaded = await Task.detached(priority: .utility) { FilmStrip.load(data: data, film: film, format: .full, maxPixelSize: 400) }.value
+            let loaded = await Task.detached(priority: .utility) { FilmStrip.load(data: data, film: film, format: .full, maxPixelSize: 480) }.value
             guard !Task.isCancelled, let loaded else { return }
             strip = loaded
         }
@@ -176,6 +171,13 @@ struct PhotoBrowser: View {
         }
     }
 
+    /// The open photograph's frame, if it's wholly out of view. Nothing else
+    /// moves the film but the person.
+    private func revealOpenPhotograph() {
+        guard let source = model.source, let index = files.firstIndex(where: { $0.url == source }) else { return }
+        scroller.reveal(frame: index, length: FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: strip?.pixelSize ?? FilmRollLayout.defaultTexture))
+    }
+
     private func refresh(initial: Bool) async {
         let scan = Task.detached(priority: .utility) { try PhotoFolder.snapshot(in: directory) }
         do {
@@ -185,7 +187,8 @@ struct PhotoBrowser: View {
             try Task.checkCancellation()
             if files != result { files = result }
             failed = false; loading = false
-            if initial { scrollTarget = model.source }
+            // Once the film has its new length.
+            if initial { DispatchQueue.main.async { revealOpenPhotograph() } }
         } catch {
             guard !Task.isCancelled else { return }
             failed = true; loading = false

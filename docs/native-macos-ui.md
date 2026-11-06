@@ -292,12 +292,14 @@ film, cropped to fill the gate. Still films' frames carry their place in the fol
 the artwork's fixed number; cine and print films keep their own edge text. A short folder's
 roll carries on with blank, numbered frames to the end of the window.
 
-The open photograph is at full brightness and the others are dimmed to 30 %. Clicking and
+The open photograph is at full brightness and the others are dimmed to 50 %. Clicking and
 dragging anywhere on the film scrolls it (`FilmRollScroller`), and it coasts on from a
 flick, slowing at macOS's normal rate (0.998 of its speed kept per millisecond), until a
 press or an end of the roll stops it. A trackpad scrolls it natively. Double-clicking a
 photograph opens it; nothing else on the film does, and it doesn't respond to hovering.
-The arrow keys step along the roll.
+The arrow keys step along the roll. Only the person moves the film: opening a photograph
+leaves it where it is, unless that frame is wholly out of view, when it comes just far
+enough in. That also shows the open photograph when a folder first appears.
 
 ## Proof
 

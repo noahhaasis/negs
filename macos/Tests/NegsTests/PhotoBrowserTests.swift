@@ -52,8 +52,8 @@ final class PhotoBrowserTests: XCTestCase {
         let thumbnails = PhotoThumbnails()
         let result = await thumbnails.image(for: url)
         let image = try XCTUnwrap(result)
-        XCTAssertEqual(image.width, 180)
-        XCTAssertEqual(image.height, 360)
+        XCTAssertEqual(image.width, 240)
+        XCTAssertEqual(image.height, 480)
         let cached = await thumbnails.image(for: url)
         XCTAssertTrue(cached === image)
         let missing = await thumbnails.image(for: directory.appendingPathComponent("missing.nef"))
@@ -138,8 +138,8 @@ final class PhotoBrowserTests: XCTestCase {
         let replaced = try XCTUnwrap(PhotoFolder.snapshot(in: directory).first { $0.url == url })
         let updated = await thumbnails.image(for: replaced)
         XCTAssertFalse(updated === image)
-        XCTAssertEqual(updated?.height, 360)
-        XCTAssertEqual(updated?.width, 180)
+        XCTAssertEqual(updated?.height, 400)
+        XCTAssertEqual(updated?.width, 200)
     }
 
     func testFolderScanBenchmark() throws {
@@ -218,10 +218,16 @@ final class PhotoBrowserTests: XCTestCase {
                     to: directory.appendingPathComponent("Photo18a.png"))
                 try await Task.sleep(nanoseconds: 700_000_000)
                 XCTAssertEqual(model.source?.lastPathComponent, "Photo18.png")
-                // The selected frame is centred; double-click the one after it.
+                // Double-click the new frame, which sorts just after the open one.
                 let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
                 let canvas = try XCTUnwrap(split.splitView.subviews.first)
-                let point = NSPoint(x: canvas.frame.width / 2 + FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture), y: 28 + FilmRollLayout.stripHeight / 2)
+                // The new frame may be out of view: bring it to the strip's left end.
+                func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+                let roll = try XCTUnwrap(all(canvas).compactMap { $0 as? NSScrollView }.first { abs($0.bounds.height - FilmRollLayout.stripHeight) < 1 })
+                let frame = FilmRollLayout.frameLength(stripHeight: FilmRollLayout.stripHeight, texture: FilmRollLayout.defaultTexture)
+                roll.contentView.scroll(to: NSPoint(x: 18 * frame, y: 0))
+                roll.reflectScrolledClipView(roll.contentView)
+                let point = NSPoint(x: frame / 2, y: 28 + FilmRollLayout.stripHeight / 2)
                 for clicks in 1...2 {
                     for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                         let event = try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],

@@ -5,7 +5,7 @@ import SwiftUI
 /// the strip artwork does.
 enum FilmRollLayout {
     /// The strip's height: the film and nothing else.
-    static let stripHeight: CGFloat = 120
+    static let stripHeight: CGFloat = 180
     /// The artwork's film base, for frames before it has loaded.
     static let filmBase = Color(red: 15.0 / 255, green: 13.0 / 255, blue: 12.0 / 255)
     /// Until the artwork loads: its proportions and gate, from `frames.json`.
@@ -44,8 +44,17 @@ enum FilmRollLayout {
         return index < photos && gate.contains(inFrame) ? index : nil
     }
 
-    /// The open photograph is at full brightness; the rest dim well down, over black.
-    static func photographOpacity(selected: Bool) -> Double { selected ? 1 : 0.3 }
+    /// The open photograph is at full brightness; the rest dim to half, over black.
+    static func photographOpacity(selected: Bool) -> Double { selected ? 1 : 0.5 }
+
+    /// Where the strip has to go to show a frame, or nil if any of it is already
+    /// in view: only the person moves the film, unless the open photograph
+    /// would otherwise be nowhere to be seen. Then it comes just into view.
+    static func revealOffset(frame index: Int, frameLength: CGFloat, offset: CGFloat, viewport: CGFloat, maxOffset: CGFloat) -> CGFloat? {
+        let start = CGFloat(index) * frameLength, end = start + frameLength
+        if end > offset, start < offset + viewport { return nil }
+        return min(max(start < offset ? start : end - viewport, 0), maxOffset)
+    }
 
     /// Still films print a frame number, and the artwork's is always the same
     /// one. Cine and print films have other text in those places.
@@ -57,7 +66,11 @@ enum FilmRollLayout {
 /// Moves the strip with a mouse drag, and lets it coast on after a flick, as
 /// macOS scrolling does. The strip's scroll view stays its own for the trackpad.
 @MainActor final class FilmRollScroller {
-    weak var scroll: NSScrollView?
+    weak var scroll: NSScrollView? {
+        didSet { if scroll != nil, let pendingReveal { reveal(frame: pendingReveal.index, length: pendingReveal.length) } }
+    }
+    /// A frame to show once the scroll view has been found.
+    private var pendingReveal: (index: Int, length: CGFloat)?
     /// macOS's normal deceleration: the speed kept after each millisecond.
     static let deceleration = 0.998
     /// Slower than this, in points a second, the strip has stopped.
@@ -86,6 +99,16 @@ enum FilmRollLayout {
         return max(0, document.frame.width - scroll.contentView.bounds.width)
     }
     var isCoasting: Bool { velocity != 0 }
+
+    /// Brings a frame into view if it's wholly out of it, and otherwise leaves the film alone.
+    func reveal(frame index: Int, length: CGFloat) {
+        guard let scroll else { pendingReveal = (index, length); return }
+        pendingReveal = nil
+        guard let target = FilmRollLayout.revealOffset(frame: index, frameLength: length, offset: offset,
+                                                       viewport: scroll.contentView.bounds.width, maxOffset: maxOffset) else { return }
+        stop()
+        offset = target
+    }
 
     /// The mouse went down: a coasting strip stops under it.
     func press() {

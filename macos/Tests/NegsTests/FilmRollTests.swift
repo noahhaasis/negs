@@ -7,10 +7,24 @@ final class FilmRollTests: XCTestCase {
     private let texture = CGSize(width: 3800, height: 3500)
     private let window = CGRect(x: 0.026316, y: 0.157143, width: 0.947368, height: 0.685714)
 
+    /// The strip stays where it's been put while the open frame shows at all.
+    /// Wholly out of view, the frame comes just far enough in, at the nearer edge.
+    func testTheStripMovesOnlyToRevealAFrameOutOfView() {
+        func reveal(_ index: Int, offset: CGFloat) -> CGFloat? {
+            FilmRollLayout.revealOffset(frame: index, frameLength: 195, offset: offset, viewport: 1000, maxOffset: 5000)
+        }
+        XCTAssertNil(reveal(3, offset: 0), "In view")
+        XCTAssertNil(reveal(5, offset: 0), "Partly in view: 975 to 1170")
+        XCTAssertNil(reveal(0, offset: 190), "Partly in view at the other end")
+        XCTAssertEqual(reveal(10, offset: 0), 1950 + 195 - 1000, "Past the right edge")
+        XCTAssertEqual(reveal(2, offset: 2000), 390, "Past the left edge")
+        XCTAssertEqual(FilmRollLayout.revealOffset(frame: 40, frameLength: 195, offset: 0, viewport: 1000, maxOffset: 500), 500, "Within the film")
+    }
+
     /// The open photograph stands out by being brighter, not by a mark.
     func testOnlyTheOtherFramesAreDimmed() {
         XCTAssertEqual(FilmRollLayout.photographOpacity(selected: true), 1)
-        XCTAssertEqual(FilmRollLayout.photographOpacity(selected: false), 0.3)
+        XCTAssertEqual(FilmRollLayout.photographOpacity(selected: false), 0.5)
     }
 
     /// A frame is 38 mm of a 35 mm wide film, in whole points so nothing shows
@@ -84,7 +98,7 @@ final class FilmRollTests: XCTestCase {
     @MainActor func testAnEmptySlotIsBlack() throws {
         _ = NSApplication.shared
         let host = NSHostingView(rootView: BlankFilmFrame(number: 3, strip: nil, film: "kodak_portra_400"))
-        host.frame = NSRect(x: 0, y: 0, width: 130, height: 120)
+        host.frame = NSRect(x: 0, y: 0, width: 195, height: 180)
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
