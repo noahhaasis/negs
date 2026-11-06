@@ -247,9 +247,25 @@ Post, Start fresh and the Highlights range.
 (`state::match_inputs`: everything except Prep, print exposure, grain, rotation, crop and
 output encoding). One solve runs at a time, after the settled preview. A reply is applied only
 if its inputs are still current, and it gets no undo step of its own. Opening another
-photograph supersedes a solve. Save and Export wait for a pending match and its preview, at
-most 30 s. Failures read as on the Mac: a problem with the reference holds for the photograph,
-a solve failure holds until the next edit.
+photograph supersedes a solve. Save and Export wait for a pending match and its preview.
+Failures read as on the Mac: a problem with the reference holds for the photograph, a solve
+failure holds until the next edit.
+
+**Held frame** (2026-11-06, as macOS `e4a9f92`). A settled frame that arrives while its match is
+pending is held, not shown (`render_finished` accepts it, then `release_held` or an edit decides):
+the previous frame and the "Updating" badge stay up, the preview isn't current (so thumbnails,
+Save and the tone graph's histogram wait), and the solve starts from it. If the match moves the
+exposure by 0.05 EV or more, that's an edit: the held frame is dropped and the matched one
+renders, so the canvas goes from the previous frame straight to the matched one. If the match
+keeps the exposure, fails, or is turned off, the held frame is shown once the solve is back.
+Any edit, Undo, another photograph or closing drops it; drag frames and frames while cropping
+are never held. A waiting Save or Export keeps waiting while a render or solve is running or due
+(a large RAW on the CPU takes about a minute) and then writes the matched frame. If nothing will
+finish the match (its render failed, or 30 s passed with nothing running) it says it couldn't
+save or export, rather than skipping the save silently or exporting the old exposure. The cost:
+on the 33 MP ARW (Vulkan, medians of 8 steps) a film change whose match stays shows its frame
+2.29 s after the click, after the solve, where it showed at 1.91 s before; one whose match moves
+(Gold 200 and Superia 200) shows only the matched frame, at 4.08 s, two renders and a solve.
 
 The reference (`brightness.rs`) is the RAW's embedded preview through rawler, oriented,
 letterbox bars trimmed when its shape differs, at most 512 px. For JPEG, PNG and TIFF it is
@@ -650,7 +666,8 @@ What a test can use:
 - `fire_timers`: runs `ui::after` tasks early.
 - `model.render_log`: every render request (kind, revision, generation, interactive scale).
 - `commands()`: every helper command, in the order sent.
-- `frames`: every frame shown. `errors`: every error reported.
+- `frames`: every frame shown. `errors`: every error reported. `model.held_frame()`: the frame
+  held for its brightness match, if any.
 - `ui::canvas::set_fixed_scale`: stands in for the canvas. Its value is in physical screen pixels
   per photograph pixel; the app is per-monitor DPI aware, so the same view at 150 % has 1.5 times
   the scale it has at 100 %.
