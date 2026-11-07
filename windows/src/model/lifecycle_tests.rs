@@ -1577,16 +1577,13 @@ lifecycle_test! {
 lifecycle_test! {
     /// Border, crop (Original size) and rotation edits render nothing: the
     /// canvas draws them over the developed frame. With Longest side the
-    /// crop's extent is part of the render (`EditState::rendered`), and the
-    /// whole crop (position and angle too) is part of the request, as on the
-    /// Mac: moving or straightening a crop of the same extent renders
-    /// nothing; a crop of another extent develops another frame, now with a
-    /// quick frame first. Reuse *is* lost after a move or straightening: the
-    /// next post-only edit's request has another crop than the kept settled
-    /// render's, so it gets a quick frame and a full render, although the
-    /// helper, keyed on the resolved working size, would reuse its output.
-    /// That is the Mac's behaviour too; keying on the extent only is Noah's
-    /// call (B2 review S2).
+    /// crop's extent is part of the render (`EditState::rendered`): moving
+    /// or straightening a crop of the same extent renders nothing; a crop of
+    /// another extent develops another frame, with a quick frame first.
+    /// Reuse survives a move, a straightening and a quarter turn: the reuse
+    /// key holds the crop's extent alone and no turns, as the helper's own
+    /// key (the resolved working size) does, so the next post-only edit is
+    /// answered from the kept output with no quick frame. The Mac's too.
     fn border_crop_and_rotation_edits_and_the_longest_side_crop() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
@@ -1625,7 +1622,7 @@ lifecycle_test! {
         assert_eq!(renders, [quick(edited, generation), settled(edited, generation)], "a smaller crop, Longest side");
         let (_, renders, _) = edit_crop(&mut h, crop(0.1, 0.8, 2.0));
         assert!(renders.is_empty(), "a crop straightened, Longest side: {renders:?}");
-        // The post-only edit after it: no reuse, a quick frame and a full render.
+        // The post-only edit after it reuses the kept output.
         let post = |h: &mut Harness, contrast: i64| {
             h.clear_logs();
             h.edit(|m| m.set("post.contrast", serde_json::json!(contrast)));
@@ -1634,22 +1631,22 @@ lifecycle_test! {
             (edited, h.renders().to_vec(), developed_ms(&h.model().status))
         };
         let (edited, renders, straightened_ms) = post(&mut h, 10);
-        assert_eq!(renders, [quick(edited, generation), settled(edited, generation)], "post-only after a straightened crop");
-        let (edited, renders, reused_ms) = post(&mut h, 20);
-        assert_eq!(renders, [settled(edited, generation)], "post-only again: reused");
+        assert_eq!(renders, [settled(edited, generation)], "post-only after a straightened crop: reused");
         let (_, renders, _) = edit_crop(&mut h, crop(0.15, 0.8, 2.0));
         assert!(renders.is_empty(), "a crop moved again: {renders:?}");
-        let (edited, renders, panned_ms) = post(&mut h, 30);
-        assert_eq!(renders, [quick(edited, generation), settled(edited, generation)], "post-only after a crop pan");
-        crate::ui::canvas::set_fixed_scale(Some(0.0));
-        let (_, renders, _) = edit_crop(&mut h, crop(0.1, 0.8, 2.0));
-        assert!(renders.is_empty());
-        let (edited, renders, direct_post_ms) = post(&mut h, 40);
-        assert_eq!(renders, [settled(edited, generation)], "post-only after a crop pan, no canvas: the helper reuses");
+        let (edited, renders, panned_ms) = post(&mut h, 20);
+        assert_eq!(renders, [settled(edited, generation)], "post-only after a crop pan: reused");
+        h.clear_logs();
+        h.edit(|m| m.rotate());
+        h.idle();
+        assert!(h.renders().is_empty(), "rotation, Longest side: {:?}", h.renders());
+        let (edited, renders, turned_ms) = post(&mut h, 30);
+        assert_eq!(renders, [settled(edited, generation)], "post-only after a quarter turn: reused");
         eprintln!(
-            "Longest side, post-only: {straightened_ms:.0} ms after straightening and {panned_ms:.0} ms after a pan (quick + full), \
-             {reused_ms:.0} ms reused, {direct_post_ms:.0} ms after a pan with no canvas (the helper reuses)"
+            "Longest side, post-only, reused: {straightened_ms:.0} ms after straightening, {panned_ms:.0} ms after a pan, \
+             {turned_ms:.0} ms after a quarter turn"
         );
+        crate::ui::canvas::set_fixed_scale(Some(0.0));
         let (edited, renders, direct_ms) = edit_crop(&mut h, crop(0.1, 0.9, 0.0));
         assert_eq!(renders, [settled(edited, generation)], "a larger crop, Longest side, no canvas");
         eprintln!("Longest side, a crop of another extent: settled render {quick_ms:.0} ms after a quick frame, {direct_ms:.0} ms without a canvas");

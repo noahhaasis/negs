@@ -774,12 +774,14 @@ impl Session {
                     None => photo_dimensions,
                 };
                 // The resolved size, not the crop: panning a crop, or any crop
-                // with the same working size, reuses the render.
-                let render_key = json!({
+                // with the same working size, reuses the render. The preview
+                // is never rotated (saving rotates), so a quarter turn does too.
+                let mut render_key = json!({
                     "input": input, "source_generation": source_generation, "film": film,
                     "paper": paper, "params": params, "limit_preview": limit_preview,
                     "interactive_scale": interactive_scale, "working": size.working,
                 });
+                render_key["params"]["io"]["rotate_cw"] = Value::Null;
                 let reused = self.output.take().filter(|last| last.key == render_key);
                 if let Some(last) = reused {
                     write_display(&last.image, last.encoding, &post, &preview_path)?;
@@ -1339,6 +1341,17 @@ mod tests {
         drop(send);
         let retained = session.output.as_ref().unwrap();
         assert_eq!((retained.id, retained.image.data.as_ptr()), (2, image));
+
+        // So does a quarter turn: the preview is never rotated.
+        let mut send = |id, command| session.handle(Request { id, command }, &data);
+        let mut turned = render(&input, &preview, Some(60), Some(panned), None);
+        if let Command::Render { params, .. } = &mut turned {
+            params.io.rotate_cw = 1;
+        }
+        send(7, turned).unwrap();
+        drop(send);
+        let retained = session.output.as_ref().unwrap();
+        assert_eq!((retained.id, retained.image.data.as_ptr()), (7, image));
 
         // Zoomed past fit on a 3x enlargement, a drag frame stays inside the
         // source and is never saved as an export.

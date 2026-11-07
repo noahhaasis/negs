@@ -1015,11 +1015,18 @@ import UniformTypeIdentifiers
               Double(scale * scale) <= quickFrameMaximumPixelFraction else { return .settled }
         return .quick(scale)
     }
-    /// The parts of a render request the helper's reuse depends on.
+    /// The parts of a render request the helper's reuse depends on: all of it
+    /// but the preview's path, the post adjustments (applied to the kept
+    /// output), the quarter turns (only saving applies them) and the crop's
+    /// position and angle (only its extent sets the working size).
     nonisolated static func reuseKey(_ command: [String: JSONValue]) -> [String: JSONValue] {
         var key = command
         key["preview_path"] = nil
         key["params"]?["post"] = .null
+        key["params"]?["io.rotate_cw"] = .null
+        if let crop = key["crop"], case .object = crop {
+            key["crop"] = .object(["width": crop["width"], "height": crop["height"]])
+        }
         return key
     }
 

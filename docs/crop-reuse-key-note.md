@@ -1,7 +1,21 @@
 # Note: a crop move costs the next quick edit its reuse (Longest side)
 
 Noah's to-do, written on 2026-11-07 from the Windows port review. It applies to macOS and Windows
-alike, and probably Linux. Nothing has been changed yet.
+alike, and probably Linux.
+
+**Done on 2026-11-07** (branch `crop-reuse-key`), as the fix idea below says:
+
+- The app's reuse key (Windows `reuse_key`, Mac `reuseKey`) keeps the crop's width and height
+  only, and clears `params.io.rotate_cw`.
+- The helper's `render_key` clears `io.rotate_cw`, because the preview is never rotated, so a quarter
+  turn reuses the render too.
+- Tests: `border_crop_and_rotation_edits_and_the_longest_side_crop` now expects `[Settled]` after
+  a straighten, a pan and a quarter turn (0.21 to 0.26 s on 6 MP, instead of 0.41 s).
+  `the_reuse_key_ignores_what_the_render_does_not_depend_on`, the Mac's
+  `testReuseKeyIgnoresWhatTheRenderDoesNotDependOn` and the helper's
+  `image_size_renders_report_sizes_reuse_pans_and_keep_drags_within_the_source` cover the keys.
+- The Mac side is written but **not built or run**: it was done on Windows. No Mac lifecycle case
+  was added to `QuickFrameLifecycleTests`.
 
 ## What happens
 

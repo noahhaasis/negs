@@ -341,7 +341,9 @@ pub fn render_step(interacting: bool, screen_scale: Option<f64>, frame_pixels: f
 
 /// The parts of a render request the helper's reuse of its kept output
 /// depends on (the Mac's `reuseKey`): all of it but the preview's path and
-/// the post adjustments, which the helper applies to the kept output.
+/// the post adjustments, which the helper applies to the kept output, the
+/// quarter turns, which only saving applies, and the crop's position and
+/// angle: only its extent sets the working size the helper keys on.
 pub fn reuse_key(command: &Value) -> Value {
     let mut key = command.clone();
     if let Some(object) = key.as_object_mut() {
@@ -349,6 +351,10 @@ pub fn reuse_key(command: &Value) -> Value {
     }
     if key["params"].is_object() {
         key["params"]["post"] = Value::Null;
+        json::set(&mut key["params"], "io.rotate_cw", Value::Null);
+    }
+    if let Some(crop) = key.get("crop").filter(|crop| crop.is_object()) {
+        key["crop"] = json!({"width": crop["width"], "height": crop["height"]});
     }
     key
 }
@@ -3877,10 +3883,10 @@ mod tests {
         assert!(matches!(Step { scale: Some(1300.0 * 1.25 / 9504.0), pixels: 9504.0 * 6320.0, ..Step::default() }.step(), RenderStep::Quick(_)));
     }
 
-    /// The Mac's `testReuseKeyIgnoresOnlyPostAndThePreviewPath`, plus: the
-    /// comparison is by value (`json::same`), and the crop is in the key.
+    /// The Mac's `testReuseKeyIgnoresWhatTheRenderDoesNotDependOn`, plus:
+    /// the comparison is by value (`json::same`).
     #[test]
-    fn the_reuse_key_ignores_only_post_and_the_preview_path() {
+    fn the_reuse_key_ignores_what_the_render_does_not_depend_on() {
         let command = json!({
             "command": "render", "film": "a", "preview_path": "C:\\x",
             "params": {"post": {"contrast": 0}, "camera": {"exposure_compensation_ev": 0}},
@@ -3902,11 +3908,22 @@ mod tests {
         float["params"]["camera"]["exposure_compensation_ev"] = json!(0.0);
         assert_ne!(reuse_key(&command), reuse_key(&float));
         assert!(json::same(&reuse_key(&command), &reuse_key(&float)));
-        // A crop (Longest side) is part of the request, so of the key: the
-        // helper itself keys on the resolved working size instead.
+        // A crop's extent (Longest side) sets the working size, so it is in
+        // the key; its position and angle aren't, nor are quarter turns.
         let mut cropped = command.clone();
         cropped["crop"] = json!({"x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5, "angle": 0});
         assert!(!json::same(&reuse_key(&command), &reuse_key(&cropped)));
+        let mut moved = cropped.clone();
+        moved["crop"] = json!({"x": 0.3, "y": 0.2, "width": 0.5, "height": 0.5, "angle": 2.5});
+        assert!(json::same(&reuse_key(&cropped), &reuse_key(&moved)));
+        let mut resized = cropped.clone();
+        resized["crop"]["width"] = json!(0.4);
+        assert!(!json::same(&reuse_key(&cropped), &reuse_key(&resized)));
+        let mut turned = command.clone();
+        turned["params"]["io"] = json!({"rotate_cw": 1});
+        let mut unturned = command.clone();
+        unturned["params"]["io"] = json!({"rotate_cw": 0});
+        assert!(json::same(&reuse_key(&turned), &reuse_key(&unturned)));
     }
 
     /// A quick frame is a preview of the edit, not the edit's frame: Save,

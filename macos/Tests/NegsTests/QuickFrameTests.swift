@@ -31,7 +31,7 @@ final class QuickFrameStepTests: XCTestCase {
         XCTAssertEqual(step(interacting: true, scale: 1), .settled)
     }
 
-    func testReuseKeyIgnoresOnlyPostAndThePreviewPath() {
+    func testReuseKeyIgnoresWhatTheRenderDoesNotDependOn() {
         let command: [String: JSONValue] = [
             "command": .string("render"), "film": .string("a"), "preview_path": .string("/x"),
             "params": .object(["post": .object(["contrast": .number(0)]), "camera": .object(["exposure_compensation_ev": .number(0)])])
@@ -45,6 +45,19 @@ final class QuickFrameStepTests: XCTestCase {
         var scaled = command
         scaled["interactive_scale"] = .number(0.25)
         XCTAssertNotEqual(EditorModel.reuseKey(command), EditorModel.reuseKey(scaled))
+        // A crop's extent (Longest side) sets the working size; its position
+        // and angle don't, nor do quarter turns.
+        let crop = { (x: Double, width: Double, angle: Double) -> JSONValue in
+            .object(["x": .number(x), "y": .number(0.1), "width": .number(width), "height": .number(0.5), "angle": .number(angle)])
+        }
+        var cropped = command; cropped["crop"] = crop(0.1, 0.5, 0)
+        XCTAssertNotEqual(EditorModel.reuseKey(command), EditorModel.reuseKey(cropped))
+        var moved = command; moved["crop"] = crop(0.3, 0.5, 2.5)
+        XCTAssertEqual(EditorModel.reuseKey(cropped), EditorModel.reuseKey(moved))
+        var resized = command; resized["crop"] = crop(0.1, 0.4, 0)
+        XCTAssertNotEqual(EditorModel.reuseKey(cropped), EditorModel.reuseKey(resized))
+        var turned = command; turned["params"]?["io.rotate_cw"] = .number(1)
+        XCTAssertEqual(EditorModel.reuseKey(command), EditorModel.reuseKey(turned))
     }
 }
 
