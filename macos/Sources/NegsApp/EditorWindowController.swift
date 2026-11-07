@@ -166,7 +166,7 @@ import SwiftUI
         guard let window else { return }
         let photo = model.source != nil
         window.title = model.source?.lastPathComponent ?? "Negs"
-        window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
+        window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.renderedFilmName) → \(model.paperName)"
         showCropActions(model.cropping)
         if let item = items[.filmstrip] {
             item.toolTip = model.filmstripVisible ? "Hide film strip (⌥⌘F)" : "Show film strip (⌥⌘F)"

@@ -56,8 +56,9 @@ enum Commands {
         /// Omit the source photograph's camera metadata.
         #[arg(long)]
         no_metadata: bool,
-        /// Film stock name (e.g. kodak_portra_400).
-        #[arg(long)]
+        /// Film stock name (e.g. kodak_portra_400). With --negative-scan, the
+        /// negative's stock, used with --match-stock; optional otherwise.
+        #[arg(long, required_unless_present = "negative_scan", default_value = "")]
         film: String,
         /// Paper stock name (e.g. fujifilm_crystal_archive_typeii).
         /// If omitted and --scan-film is not set, uses the film's target_print.
@@ -66,6 +67,24 @@ enum Commands {
         /// Scan film directly (skip printing stage).
         #[arg(long)]
         scan_film: bool,
+        /// The input is a scan of a real colour negative: measure its dyes
+        /// and print them, instead of filming the input as a scene. `--film`
+        /// names the negative's stock. Also `io.negative_scan` in --params.
+        #[arg(long, conflicts_with = "scan_film")]
+        negative_scan: bool,
+        /// Unmix the negative with --film's dyes instead of the generic C-41
+        /// dye model.
+        #[arg(long, requires_all = ["negative_scan", "film"])]
+        match_stock: bool,
+        /// The film base's linear transmittance per channel, `r,g,b` (a scan
+        /// of clear film). Default: estimated from the thinnest film.
+        #[arg(long, requires = "negative_scan", value_parser = parse_rgb)]
+        negative_base: Option<[f32; 3]>,
+        /// The part of the frame a negative scan's base and balance are
+        /// measured on, `x,y,width,height` as fractions of the upright input.
+        /// Default: the whole frame.
+        #[arg(long, requires = "negative_scan", value_parser = parse_area)]
+        negative_area: Option<[f32; 4]>,
         /// Print per-stage timing information.
         #[arg(long)]
         timings: bool,
@@ -181,6 +200,10 @@ fn main() -> Result<()> {
             film,
             paper,
             scan_film,
+            negative_scan,
+            match_stock,
+            negative_base,
+            negative_area,
             timings,
             params: params_file,
             raw_wb,
@@ -228,6 +251,10 @@ fn main() -> Result<()> {
                 &film,
                 paper.as_deref(),
                 scan_film,
+                negative_scan,
+                match_stock,
+                negative_base,
+                negative_area,
                 timings,
                 params_file.as_deref(),
                 raw_wb.as_deref(),
@@ -272,6 +299,26 @@ fn read_params(path: &Path) -> Result<RuntimeParams> {
     Ok(params)
 }
 
+/// `r,g,b`: three finite numbers.
+fn parse_rgb(s: &str) -> Result<[f32; 3], String> {
+    let v: Vec<f32> = s.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+    match v[..] {
+        [r, g, b] if v.iter().all(|x| x.is_finite() && *x > 0.0) => Ok([r, g, b]),
+        _ => Err("expected three positive numbers, r,g,b".into()),
+    }
+}
+
+/// `x,y,width,height`: a rectangle of fractions inside the frame.
+fn parse_area(s: &str) -> Result<[f32; 4], String> {
+    let v: Vec<f32> = s.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+    match v[..] {
+        [x, y, w, h] if (0.0..1.0).contains(&x) && (0.0..1.0).contains(&y) && w > 0.0 && h > 0.0 && x + w <= 1.0001 && y + h <= 1.0001 => {
+            Ok([x, y, w, h])
+        }
+        _ => Err("expected x,y,width,height as fractions inside the frame".into()),
+    }
+}
+
 /// `--input-colour`: auto, manual, or a colour space to assume.
 fn parse_input_colour(spec: &str, linear: bool) -> Result<spektrafilm_io::InputInterpretation> {
     use spektrafilm_io::InputInterpretation;
@@ -301,6 +348,10 @@ fn cmd_process(
     film_name: &str,
     paper_name: Option<&str>,
     scan_film: bool,
+    negative_scan: bool,
+    match_stock: bool,
+    negative_base: Option<[f32; 3]>,
+    negative_area: Option<[f32; 4]>,
     show_timings: bool,
     params_file: Option<&Path>,
     raw_wb: Option<&str>,
@@ -316,6 +367,37 @@ fn cmd_process(
     data_dir: &Path,
 ) -> Result<()> {
     let total_start = Instant::now();
+
+    // Load params (defaults + optional overrides) first: a negative scan
+    // chooses which film profile to load.
+    let mut params = if let Some(pf) = params_file {
+        read_params(pf)?
+    } else {
+        RuntimeParams::default()
+    };
+    params.io.scan_film = scan_film;
+    if negative_scan {
+        params.io.negative_scan.active = true;
+    }
+    if match_stock {
+        params.io.negative_scan.match_stock = true;
+    }
+    if negative_base.is_some() {
+        params.io.negative_scan.base = negative_base;
+    }
+    if negative_area.is_some() {
+        params.io.negative_scan.analysis_area = negative_area;
+    }
+    if params.io.negative_scan.active && params.io.scan_film {
+        bail!("a negative scan is printed; it can't also scan the film directly");
+    }
+    // The border's edge print names the roll's own film; the render may use
+    // the generic negative dye model instead.
+    let border_film = film_name;
+    let film_name = spektrafilm_core::negative_scan::film_stock(film_name, &params);
+    if film_name.is_empty() {
+        bail!("--film is required");
+    }
 
     // Load profiles
     let t = Instant::now();
@@ -336,13 +418,6 @@ fn cmd_process(
         .with_context(|| format!("loading print profile: {print_stock}"))?;
     eprintln!("Profiles loaded: {} ms", t.elapsed().as_millis());
 
-    // Load params (defaults + optional overrides)
-    let mut params = if let Some(pf) = params_file {
-        read_params(pf)?
-    } else {
-        RuntimeParams::default()
-    };
-    params.io.scan_film = scan_film;
     if let Some(interpretation) = input_interpretation {
         params.io.input_interpretation = interpretation;
     }
@@ -472,7 +547,7 @@ fn cmd_process(
                 &result,
                 style,
                 border_options,
-                film_name,
+                if border_film.is_empty() { film_name } else { border_film },
                 finish,
                 data_dir,
             )?;

@@ -765,8 +765,9 @@ mod tests {
                 continue;
             }
             let stock = path.file_stem().unwrap().to_str().unwrap().to_owned();
-            // Tri-X Reversal 7266 isn't made in 35mm: use the generic strip.
-            if stock == "kodak_trix" {
+            // Tri-X Reversal 7266 isn't made in 35mm, and the negative scan's
+            // generic dye model isn't a real film: both use the generic strip.
+            if stock == "kodak_trix" || stock == "generic_colour_negative" {
                 assert!(STOCKS.iter().all(|(id, ..)| *id != stock));
                 continue;
             }

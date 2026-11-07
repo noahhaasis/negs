@@ -438,6 +438,55 @@ import UniformTypeIdentifiers
         apply(next, action: "Change Adjustment")
     }
     func resetValue(_ path: String) { set(path, defaults[path]) }
+    /// A negative scan is printed, so turning it on also stops scanning the film directly.
+    var negativeScan: Binding<Bool> {
+        Binding(get: { self.value(Self.negativeScanPath).bool }, set: { on in
+            var next = self.state; next.params[Self.negativeScanPath] = .bool(on)
+            if on { next.params["io.scan_film"] = .bool(false) }
+            self.apply(next, action: on ? "Read as Negative Scan" : "Read as Photograph")
+        })
+    }
+    /// `io.scan_film`: the simulated film is scanned without printing. A
+    /// negative scan is printed, so turning this on turns it off.
+    var bypassPrint: Binding<Bool> {
+        Binding(get: { self.value("io.scan_film").bool }, set: { on in
+            var next = self.state; next.params["io.scan_film"] = .bool(on)
+            if on { next.params[Self.negativeScanPath] = .bool(false) }
+            self.apply(next, action: on ? "Bypass Print" : "Print Film")
+        })
+    }
+    /// `io.negative_scan.match_stock`: the negative is read with the chosen
+    /// stock's dyes. Off, the engine uses its generic colour negative.
+    nonisolated static let matchStockPath = "io.negative_scan.match_stock"
+    nonisolated static let genericNegativeName = "Generic colour negative"
+    /// A negative scan that doesn't match the stock: no film is chosen.
+    var usesGenericNegative: Bool { value(Self.negativeScanPath).bool && !value(Self.matchStockPath).bool }
+    /// The film the photograph renders with, as the window names it.
+    var renderedFilmName: String { usesGenericNegative ? Self.genericNegativeName : filmName }
+
+    nonisolated static let negativeAnalysisAreaPath = "io.negative_scan.analysis_area"
+    /// Where a negative scan is measured. Crop stores the crop's rectangle in
+    /// the params, and `replaceState` keeps it there as the crop changes, so
+    /// the preview and the exporter measure the same area.
+    var negativeAnalysisArea: Binding<NegativeAnalysisArea> {
+        Binding(get: { self.value(Self.negativeAnalysisAreaPath) == .null ? .wholeFrame : .crop }, set: { area in
+            var next = self.state
+            next.params[Self.negativeAnalysisAreaPath] = area == .crop ? Self.analysisRect(next.crop) : .null
+            self.apply(next, action: "Change Analysis Area")
+        })
+    }
+    /// The crop's axis-aligned rectangle as `[x, y, width, height]` fractions.
+    nonisolated static func analysisRect(_ crop: CropSettings) -> JSONValue {
+        let r = crop.rect
+        return .array([r.minX, r.minY, r.width, r.height].map { .number(Double($0)) })
+    }
+    /// A Crop analysis area follows the crop.
+    nonisolated static func followCrop(_ state: EditState) -> EditState {
+        guard state.params[negativeAnalysisAreaPath] != .null else { return state }
+        var state = state
+        state.params[negativeAnalysisAreaPath] = analysisRect(state.crop)
+        return state
+    }
     func number(_ path: String, range: ClosedRange<Double>, step: Double) -> Binding<Double> {
         Binding(get: { self.value(path).double }, set: { self.set(path, .number(Self.snap($0, to: range, step: step))) })
     }
@@ -569,9 +618,14 @@ import UniformTypeIdentifiers
     }
     /// Keeps the border, crop, and Image Size's Longest side, like the film,
     /// paper, and rotation.
+    /// Read the photograph as a scan of a real negative (`io.negative_scan`).
+    nonisolated static let negativeScanPath = "io.negative_scan.active"
+
     func reset() {
         guard !cropping else { return }
         var next = state; next.params = defaults
+        // How the photograph is read, like the film and paper, isn't an adjustment.
+        next.params[Self.negativeScanPath] = state.params[Self.negativeScanPath]
         next.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
         next.params["io.rotate_cw"] = state.params["io.rotate_cw"]
         next.params[ImageSize.targetPath] = state.params[ImageSize.targetPath]
@@ -588,7 +642,7 @@ import UniformTypeIdentifiers
     /// else re-renders.
     private func replaceState(_ next: EditState) {
         guard !closing else { return }
-        let next = withPreferences(next)
+        let next = Self.followCrop(withPreferences(next))
         let render = next.rendered != state.rendered
         state = next
         // A crop doesn't re-render the preview, but it changes the thumbnails.
@@ -764,7 +818,8 @@ import UniformTypeIdentifiers
             if freshEditsForNewPhotos {
                 // Film/paper and output preferences belong to the workflow;
                 // the previous photograph's Prep, Lab and Post edits do not.
-                let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"]
+                // A roll of negative scans stays a roll of negative scans.
+                let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding", Self.negativeScanPath]
                 let retained = retainedPaths.map { ($0, state.params[$0]) }
                 state.params = defaults
                 for (path, value) in retained where value != .null { state.params[path] = value }
@@ -777,6 +832,8 @@ import UniformTypeIdentifiers
             if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
             state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
             state.crop = CropSettings()
+            // A Crop analysis area follows the new photograph's crop.
+            state = Self.followCrop(state)
             state.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
             if !freshEditsForNewPhotos { state.params["prep.exposure_ev"] = .number(min(3, max(-3, previousOffset))) }
         }

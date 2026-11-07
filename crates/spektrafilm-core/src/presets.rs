@@ -77,13 +77,14 @@ const FIELDS: [(&str, &str); 17] = [
 const SKIPPED: [&str; 3] = ["grain.micro_sublayers", "camera.diffusion_filter", "input_gamut_compress.active"];
 
 /// What a preset doesn't carry: applying one keeps the photograph's values.
-/// How the source is read, its colour space and size, the output encoding,
+/// How the source is read (including whether it is a negative scan), its colour space and size, the output encoding,
 /// crop and rotation, the speed and memory settings, CAT16 and the colour
 /// management settings (Negs-only switches) and the Prep/Post tabs. Every other params value comes from the preset or, where
 /// Python's GUI has no such setting, Negs's default.
-pub const KEPT: [&str; 25] = [
+pub const KEPT: [&str; 26] = [
     "prep",
     "io.lens_correction",
+    "io.negative_scan",
     "io.input_interpretation",
     "io.input_color_space",
     "io.input_cctf_decoding",

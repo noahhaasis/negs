@@ -687,6 +687,10 @@ pub struct IoParams {
     pub photo_long_side_px: Option<u32>,
     #[serde(default)]
     pub scan_film: bool,
+    /// Read the input as a scan of a real colour negative; see
+    /// [`crate::negative_scan`].
+    #[serde(default)]
+    pub negative_scan: crate::negative_scan::NegativeScanParams,
     #[serde(default)]
     pub output_gamut_compress: OutputGamutCompressParams,
     #[serde(default)]
@@ -715,6 +719,7 @@ impl Default for IoParams {
             upscale_factor: 1.0,
             photo_long_side_px: None,
             scan_film: false,
+            negative_scan: crate::negative_scan::NegativeScanParams::default(),
             output_gamut_compress: OutputGamutCompressParams::default(),
             input_gamut_compress: InputGamutCompressParams::default(),
             rotate_cw: 0,
