@@ -284,6 +284,14 @@ photograph's size, not the frame's.
   the epoch of the helper process that made it: a restarted helper keeps nothing, and one that
   has exited counts as the next epoch already. Border, rotation and crop edits render nothing,
   as before; with Longest side a crop of another extent renders, with a quick frame.
+- **Reuse lost after a crop move (Longest side).** The request carries the whole crop, its
+  position and angle too, as on the Mac, while the helper keys on the resolved working size.
+  After moving or straightening a crop (which renders nothing), the next post-only edit's
+  request no longer matches the kept settled render's, so it gets a quick frame and a full
+  render (0.40 s on 6 MP, about 2 s on the 33 MP ARW) where the helper alone would reuse its
+  output (0.15 s). After a quarter turn the helper doesn't reuse either (`io.rotate_cw` is in
+  its key), so there only the quick frame is added. Keying on the crop's extent alone is open
+  for Noah, for both apps.
 - **Settling.** The step travels with the render to `render_finished`: only a drag re-renders on
   release (a release goes straight to export size), and a quick frame settles only through
   `settle_quick_frame`, once no render, solve, held frame or slider holds it. A failed quick

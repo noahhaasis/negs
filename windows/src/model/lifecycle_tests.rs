@@ -1113,8 +1113,15 @@ lifecycle_test! {
     /// The Mac's `testPostOnlyEditsSkipTheQuickFrame`: post adjustments alone
     /// reuse the helper's kept output, in milliseconds, with no quick frame;
     /// also right after a film change settled (its settled render is the
-    /// kept output again).
+    /// kept output again). The helper answers a reuse with its kept reply,
+    /// so its `pipeline_ms` is the kept render's to the last digit; the
+    /// trace shows it (times alone vary with the machine's load).
     fn post_only_edits_skip_the_quick_frame() {
+        let trace = std::env::temp_dir().join(format!("negs-quick-post-trace-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&trace);
+        // SAFETY: the child process runs this test alone, before any thread
+        // reads the environment.
+        unsafe { std::env::set_var("NEGS_RENDER_TRACE", &trace) };
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
         assert!(!h.model().value("post.contrast").is_null());
@@ -1140,8 +1147,16 @@ lifecycle_test! {
         assert_eq!(h.renders(), [settled(after_film, generation)], "no quick frame right after a film change");
         let after_film_ms = developed_ms(&h.model().status);
         eprintln!("post-only: {reused_ms:.0} ms; film change settled: {film_ms:.0} ms; post-only after it: {after_film_ms:.0} ms");
-        assert!(reused_ms < film_ms / 2.0 && after_film_ms < film_ms / 2.0, "the post-only edits reused the output");
         assert!(h.model().preview_current && h.errors.is_empty(), "{:?}", h.errors);
+        drop(h);
+        let events = trace_events(&trace);
+        let _ = std::fs::remove_file(&trace);
+        let settled_replies: Vec<&serde_json::Value> =
+            events.iter().filter(|e| e["event"] == "render_reply" && e["kind"] == "settled").map(|e| &e["pipeline_ms"]).collect();
+        let [opened, post_only, film_changed, after] = settled_replies[settled_replies.len() - 4..] else { unreachable!() };
+        assert!(post_only.is_number() && post_only == opened, "the first post-only edit reused the open's output: {settled_replies:?}");
+        assert!(film_changed != opened, "the film change rendered: {settled_replies:?}");
+        assert_eq!(after, film_changed, "the post-only edit after the film change reused its output");
     }
 }
 
@@ -1363,6 +1378,97 @@ lifecycle_test! {
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
+/// Fast Export into a fresh folder for the S1 tests: (folder, file).
+fn export_target(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("negs-quick-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("exported.tif");
+    (dir, file)
+}
+
+fn export_now(h: &mut Harness, file: &std::path::Path) {
+    let save = super::SaveSettings { bit_depth: 8, color_space: 0, jpeg_quality: 95 };
+    let file = file.to_path_buf();
+    h.edit(|m| m.export(file, crate::engine::ExportEngine::Fast, super::ExportSize::FULL, save));
+}
+
+lifecycle_test! {
+    /// B2 review S1: Undo while the solve of a held quick frame runs. The
+    /// undone state's match is solved, so its quick frame is shown, not held,
+    /// while the stale solve still runs; only `brightness_solved`'s settle
+    /// settles it. A Fast Export asked for meanwhile finishes.
+    fn undo_during_the_solve_of_a_held_quick_frame_settles_the_undone_state() {
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        open_quick(&mut h, true);
+        let generation = h.model().source_generation;
+        h.edit(|m| m.choose_film(SUPERIA));
+        assert_eq!(until_held(&mut h).kind, FrameKind::Quick);
+        h.run_until("the solve", |m| m.matching_brightness);
+        h.edit(|m| m.perform_undo());
+        let undone = h.model().revision;
+        h.run_until("the undone quick frame", |m| m.shown_frame.is_some_and(|f| f.revision == m.revision));
+        let m = h.model();
+        assert_eq!(m.shown_frame.map(|f| f.kind), Some(FrameKind::Quick));
+        assert!(m.matching_brightness && m.held_frame().is_none(), "shown while the stale solve still runs");
+        let (dir, file) = export_target("undo-solve");
+        export_now(&mut h, &file);
+        assert!(h.model().waiting_output.is_some(), "the Export waits");
+        h.idle();
+        let m = h.model();
+        assert!(m.state.film == GOLD && m.revision == undone);
+        assert!(m.preview_current && !m.matching_brightness, "the undone state's quick frame settles");
+        assert_eq!(h.renders().last(), Some(&settled(undone, generation)));
+        assert!(h.renders().iter().all(|r| r.kind != FrameKind::Settled || r.revision == undone), "{:?}", h.renders());
+        let m = h.model();
+        assert!(m.waiting_output.is_none() && m.status == "Exported exported.tif" && file.exists(), "{}", m.status);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+lifecycle_test! {
+    /// B2 review S1: matching turned on during a quick frame of a photograph
+    /// that can't be matched (a transparent PNG here, the 60 MP DNG's
+    /// refusal in the app). The failure leaves nothing held, so only
+    /// `brightness_solved`'s settle settles the quick frame. A Fast Export
+    /// asked for meanwhile finishes.
+    fn turning_the_match_on_during_a_quick_frame_of_an_unmatchable_photo_settles() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        crate::ui::canvas::set_fixed_scale(Some(SCALE));
+        let transparent = std::env::temp_dir().join(format!("negs-quick-transparent-{}.png", std::process::id()));
+        let (w, h_) = (3072u32, 2048u32);
+        let pixels: Vec<u8> = (0..w * h_).flat_map(|i| {
+            let (x, y) = (i % w, i / w);
+            [(x * 255 / w) as u8, (y * 255 / h_) as u8, 128, 200]
+        }).collect();
+        image::save_buffer(&transparent, &pixels, w, h_, image::ExtendedColorType::Rgba8).unwrap();
+        h.open(&transparent);
+        h.clear_logs();
+        let generation = h.model().source_generation;
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        let edited = h.model().revision;
+        until_quick(&mut h);
+        assert!(h.model().pending_render, "the settled render is scheduled");
+        h.edit(|m| m.set_matches_brightness(true));
+        assert_eq!(h.model().revision, edited, "no edit");
+        assert!(h.model().matching_brightness, "the solve starts from the quick frame");
+        let (dir, file) = export_target("unmatchable");
+        export_now(&mut h, &file);
+        assert!(h.model().waiting_output.is_some(), "the Export waits");
+        h.idle();
+        let _ = std::fs::remove_file(&transparent);
+        let m = h.model();
+        assert_eq!(m.brightness_match_note().as_deref(), Some("Transparent images can’t be matched."));
+        assert!(m.preview_current && m.held_frame().is_none(), "the quick frame settles after the failed match");
+        assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)]);
+        let m = h.model();
+        assert!(m.waiting_output.is_none() && m.status == "Exported exported.tif" && file.exists(), "{}", m.status);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
 /// With the film grid's thumbnails on screen, nothing but the match asks
 /// the helper between a quick frame's reply and its settled render: no
 /// thumbnail, tone curve or preset check. Every helper command is logged,
@@ -1471,11 +1577,16 @@ lifecycle_test! {
 lifecycle_test! {
     /// Border, crop (Original size) and rotation edits render nothing: the
     /// canvas draws them over the developed frame. With Longest side the
-    /// crop's extent is part of the render (`EditState::rendered`) and of the
-    /// request, as on the Mac: moving or straightening a crop of the same
-    /// extent renders nothing; a crop of another extent develops another
-    /// frame, now with a quick frame first. The helper keys on the resolved working size, not
-    /// the crop; `apply` already renders only when the extent changes.
+    /// crop's extent is part of the render (`EditState::rendered`), and the
+    /// whole crop (position and angle too) is part of the request, as on the
+    /// Mac: moving or straightening a crop of the same extent renders
+    /// nothing; a crop of another extent develops another frame, now with a
+    /// quick frame first. Reuse *is* lost after a move or straightening: the
+    /// next post-only edit's request has another crop than the kept settled
+    /// render's, so it gets a quick frame and a full render, although the
+    /// helper, keyed on the resolved working size, would reuse its output.
+    /// That is the Mac's behaviour too; keying on the extent only is Noah's
+    /// call (B2 review S2).
     fn border_crop_and_rotation_edits_and_the_longest_side_crop() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
         open_quick(&mut h, false);
@@ -1514,7 +1625,31 @@ lifecycle_test! {
         assert_eq!(renders, [quick(edited, generation), settled(edited, generation)], "a smaller crop, Longest side");
         let (_, renders, _) = edit_crop(&mut h, crop(0.1, 0.8, 2.0));
         assert!(renders.is_empty(), "a crop straightened, Longest side: {renders:?}");
+        // The post-only edit after it: no reuse, a quick frame and a full render.
+        let post = |h: &mut Harness, contrast: i64| {
+            h.clear_logs();
+            h.edit(|m| m.set("post.contrast", serde_json::json!(contrast)));
+            let edited = h.model().revision;
+            h.idle();
+            (edited, h.renders().to_vec(), developed_ms(&h.model().status))
+        };
+        let (edited, renders, straightened_ms) = post(&mut h, 10);
+        assert_eq!(renders, [quick(edited, generation), settled(edited, generation)], "post-only after a straightened crop");
+        let (edited, renders, reused_ms) = post(&mut h, 20);
+        assert_eq!(renders, [settled(edited, generation)], "post-only again: reused");
+        let (_, renders, _) = edit_crop(&mut h, crop(0.15, 0.8, 2.0));
+        assert!(renders.is_empty(), "a crop moved again: {renders:?}");
+        let (edited, renders, panned_ms) = post(&mut h, 30);
+        assert_eq!(renders, [quick(edited, generation), settled(edited, generation)], "post-only after a crop pan");
         crate::ui::canvas::set_fixed_scale(Some(0.0));
+        let (_, renders, _) = edit_crop(&mut h, crop(0.1, 0.8, 2.0));
+        assert!(renders.is_empty());
+        let (edited, renders, direct_post_ms) = post(&mut h, 40);
+        assert_eq!(renders, [settled(edited, generation)], "post-only after a crop pan, no canvas: the helper reuses");
+        eprintln!(
+            "Longest side, post-only: {straightened_ms:.0} ms after straightening and {panned_ms:.0} ms after a pan (quick + full), \
+             {reused_ms:.0} ms reused, {direct_post_ms:.0} ms after a pan with no canvas (the helper reuses)"
+        );
         let (edited, renders, direct_ms) = edit_crop(&mut h, crop(0.1, 0.9, 0.0));
         assert_eq!(renders, [settled(edited, generation)], "a larger crop, Longest side, no canvas");
         eprintln!("Longest side, a crop of another extent: settled render {quick_ms:.0} ms after a quick frame, {direct_ms:.0} ms without a canvas");
