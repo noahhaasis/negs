@@ -34,7 +34,9 @@
 //! - **Logs.** `model.render_log` lists every render request (kind, revision,
 //!   generation, interactive scale); `commands()` every helper command in the
 //!   order sent; `frames` every change of the shown frame (what the canvas
-//!   would present next), and `errors` every error the model reported.
+//!   would present next), sampled after each task, and `model.frame_log`
+//!   every frame presented, also one replaced within a task; `errors` every
+//!   error the model reported.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -282,6 +284,7 @@ impl Harness {
     /// Forgets the logs, so a test can look at what one step did.
     pub fn clear_logs(&mut self) {
         self.app.model.render_log.clear();
+        self.app.model.frame_log.clear();
         self.frames.clear();
         self.errors.clear();
         if let Some(engine) = &self.app.model.engine {

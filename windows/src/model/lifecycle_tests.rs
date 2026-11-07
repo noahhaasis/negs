@@ -21,12 +21,12 @@ fn other(film: &str) -> &'static str {
 
 lifecycle_test! {
     /// A film change renders the new revision once, at export size, and
-    /// shows it: one settled render, one frame, the preview current. A canvas
-    /// showing the photograph at a quarter of its pixels changes nothing: only
-    /// a drag renders at canvas size.
+    /// shows it: one settled render, one frame, the preview current. With no
+    /// canvas there's no quick frame (B2): `a_film_click_shows_a_quick_frame_
+    /// then_the_same_settled_frame` has one at a quarter of the pixels.
     fn a_film_change_renders_once_and_settles() {
         let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
-        crate::ui::canvas::set_fixed_scale(Some(0.25));
+        crate::ui::canvas::set_fixed_scale(Some(0.0));
         let photo = h.photo.clone();
         h.open(&photo);
         let m = h.model();
@@ -920,5 +920,725 @@ lifecycle_test! {
     /// `release_held`'s pending check).
     fn a_stale_solve_back_while_cropping_waits_for_the_crop_to_end() {
         a_stale_solve_waits_for(Blocker::Crop);
+    }
+}
+
+// MARK: Quick frames (B2, ticket 28)
+
+/// The canvas in these tests: a quarter of the photograph's pixels per side.
+const SCALE: f64 = 0.25;
+
+fn quick(revision: u64, generation: u64) -> RenderRequest {
+    RenderRequest { kind: FrameKind::Quick, revision, generation, interactive_scale: Some(SCALE) }
+}
+
+fn drag(revision: u64, generation: u64) -> RenderRequest {
+    RenderRequest { kind: FrameKind::Drag, revision, generation, interactive_scale: Some(SCALE) }
+}
+
+/// Every frame presented since the logs were cleared, as (revision, kind).
+fn presented(h: &Harness) -> Vec<(u64, FrameKind)> {
+    h.app.model.frame_log.iter().map(|f| (f.revision, f.kind)).collect()
+}
+
+/// Opens the test photograph on a canvas at `SCALE`, matched or not, and
+/// leaves it settled and idle with the logs cleared. The open itself has no
+/// quick frame: there's no frame of the photograph to replace yet.
+fn open_quick(h: &mut Harness, matched: bool) {
+    crate::ui::canvas::set_fixed_scale(Some(SCALE));
+    let photo = h.photo.clone();
+    if matched {
+        open_matched(h, &photo);
+    } else {
+        h.open(&photo);
+    }
+    let m = h.model();
+    assert!(m.preview_current && m.shown_frame.is_some_and(|f| f.kind == FrameKind::Settled));
+    assert!(h.errors.is_empty(), "{:?}", h.errors);
+    h.clear_logs();
+}
+
+/// Waits until the current edit's quick frame is shown, and returns it.
+fn until_quick(h: &mut Harness) -> FrameTag {
+    h.run_until("the quick frame", |m| m.shown_frame.is_some_and(|f| f.kind == FrameKind::Quick && f.revision == m.revision));
+    h.model().shown_frame.unwrap()
+}
+
+fn pixels(m: &super::Model) -> Vec<u8> {
+    m.image.as_ref().unwrap().with_pixels(|p| p.to_vec()).expect("the frame keeps its pixels")
+}
+
+/// The helper's time in the status ("… · developed in 0.25 s …"), in ms.
+fn developed_ms(status: &str) -> f64 {
+    let after = status.split("developed in ").nth(1).unwrap_or_else(|| panic!("{status}"));
+    after.split(" s").next().unwrap().parse::<f64>().unwrap() * 1000.0
+}
+
+/// The films of `candidates` in the catalog, other than the current one.
+fn films_other_than(m: &super::Model, candidates: &[&'static str]) -> Vec<&'static str> {
+    let films = m.films();
+    candidates.iter().copied().filter(|id| *id != m.state.film && films.iter().any(|f| f.id == *id)).collect()
+}
+
+lifecycle_test! {
+    /// The Mac's `testFilmClickShowsAQuickFrameThenTheSameSettledFrame`: a
+    /// film click shows a canvas-size frame marked Preview, then at once the
+    /// export-size frame, byte-identical to one rendered without the quick
+    /// frame. The quick frame isn't the edit's preview: Save waits, the
+    /// render id and the export-size flag stay, the preview cache doesn't
+    /// keep it, and the photograph's size and preview scale (the canvas's
+    /// fit and its 1:1 stop) stay as they were.
+    fn a_film_click_shows_a_quick_frame_then_the_same_settled_frame() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        let cache = crate::session::cache_dir().join("rendered-preview.cache");
+        h.model().preview_cache.flush();
+        assert!(cache.exists(), "the open's settled frame is cached");
+        let m = h.model();
+        let (generation, render_id, image_size, preview_scale) = (m.source_generation, m.render_id, m.image_size, m.preview_scale);
+        let film = other(&m.state.film);
+        h.edit(|m| m.choose_film(film));
+        let edited = h.model().revision;
+        let shown = until_quick(&mut h);
+        assert_eq!((shown.revision, shown.generation), (edited, generation));
+        let m = h.model();
+        let picture = m.image.as_ref().unwrap();
+        eprintln!("quick frame {} × {}: {}", picture.width, picture.height, m.status);
+        assert!(picture.width < 1000, "a canvas-size frame");
+        assert!(!m.preview_current && !m.can_save() && m.showing_interactive_frame);
+        assert!(m.status.starts_with("Preview · ") && m.status.contains("developed in"), "{}", m.status);
+        assert_eq!((m.render_id, m.render_at_export_size), (render_id, true));
+        assert_eq!((m.image_size, m.preview_scale), (image_size, preview_scale));
+        assert!(m.pending_render, "the settled render is due at once, with no delay");
+        m.preview_cache.flush();
+        assert!(!cache.exists(), "the quick frame isn't cached");
+        h.idle();
+        assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)]);
+        assert_eq!(presented(&h), [(edited, FrameKind::Quick), (edited, FrameKind::Settled)]);
+        assert_eq!(h.command_names(), ["render", "render"]);
+        let m = h.model();
+        assert!(m.preview_current && !m.showing_interactive_frame && !m.status.starts_with("Preview"), "{}", m.status);
+        assert_eq!(m.image.as_ref().unwrap().width, 3072);
+        assert!(m.render_id > render_id && m.render_at_export_size);
+        m.preview_cache.flush();
+        assert!(cache.exists(), "the settled frame is cached");
+        let after_quick = pixels(m);
+
+        // The same film again without quick frames (no canvas).
+        crate::ui::canvas::set_fixed_scale(Some(0.0));
+        h.edit(|m| m.choose_film(other(film)));
+        h.idle();
+        h.clear_logs();
+        h.edit(|m| m.choose_film(film));
+        let direct = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [settled(direct, generation)]);
+        assert!(pixels(h.model()) == after_quick, "the settled frame is byte-identical");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `testRapidFilmSwitchingDoesNotPileUpRenders`. Films clicked
+    /// as soon as the previous quick frame shows: a quick frame each, and one
+    /// settled render, of the last. Films clicked while a quick render runs:
+    /// that quick frame still shows although its edit is superseded (as with
+    /// Ctrl+Z held), the edits in between coalesce, the last one settles.
+    fn fast_film_switching_ends_on_the_last_film_settled() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        let generation = h.model().source_generation;
+        let films = films_other_than(h.model(), &[PORTRA, "kodak_ektar_100", SUPERIA, "kodak_ultramax_400", GOLD]);
+        let films = &films[..4];
+        let mut revisions = vec![];
+        for film in films {
+            h.edit(|m| m.choose_film(film));
+            revisions.push(h.model().revision);
+            until_quick(&mut h);
+        }
+        h.idle();
+        let last = *revisions.last().unwrap();
+        let mut expected: Vec<RenderRequest> = revisions.iter().map(|&r| quick(r, generation)).collect();
+        expected.push(settled(last, generation));
+        assert_eq!(h.renders(), expected, "a quick frame per film, one settled render");
+        let mut frames: Vec<(u64, FrameKind)> = revisions.iter().map(|&r| (r, FrameKind::Quick)).collect();
+        frames.push((last, FrameKind::Settled));
+        assert_eq!(presented(&h), frames);
+        let m = h.model();
+        assert!(m.state.film == films[3] && m.preview_current && !m.status.starts_with("Preview"), "{}", m.status);
+
+        h.clear_logs();
+        h.edit(|m| m.choose_film(films[0]));
+        let first = h.model().revision;
+        h.run_until("the quick render", |m| m.rendering);
+        h.edit(|m| m.choose_film(films[1]));
+        h.edit(|m| m.choose_film(films[2]));
+        let last = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [quick(first, generation), quick(last, generation), settled(last, generation)]);
+        assert_eq!(
+            presented(&h),
+            [(first, FrameKind::Quick), (last, FrameKind::Quick), (last, FrameKind::Settled)],
+            "the superseded edit's quick frame shows"
+        );
+        assert!(h.model().state.film == films[2] && h.model().preview_current);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `testUndoBeforeTheSettledFrameSettlesTheRestoredFilm`: Undo
+    /// while a film's quick frame shows settles the restored film, and the
+    /// undone film never renders at export size.
+    fn undo_right_after_a_quick_frame_settles_the_restored_film() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        let (film, generation) = (h.model().state.film.clone(), h.model().source_generation);
+        h.edit(|m| m.choose_film(other(&film)));
+        let edited = h.model().revision;
+        until_quick(&mut h);
+        h.edit(|m| m.perform_undo());
+        assert_eq!(h.model().state.film, film);
+        let undone = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [quick(edited, generation), quick(undone, generation), settled(undone, generation)]);
+        assert_eq!(presented(&h), [(edited, FrameKind::Quick), (undone, FrameKind::Quick), (undone, FrameKind::Settled)]);
+        let m = h.model();
+        assert!(m.preview_current && m.state.film == film && m.revision == undone);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `testPostOnlyEditsSkipTheQuickFrame`: post adjustments alone
+    /// reuse the helper's kept output, in milliseconds, with no quick frame;
+    /// also right after a film change settled (its settled render is the
+    /// kept output again).
+    fn post_only_edits_skip_the_quick_frame() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        assert!(!h.model().value("post.contrast").is_null());
+        let generation = h.model().source_generation;
+        h.edit(|m| m.set("post.contrast", serde_json::json!(20)));
+        let post = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [settled(post, generation)]);
+        let reused_ms = developed_ms(&h.model().status);
+
+        h.clear_logs();
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        let changed = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [quick(changed, generation), settled(changed, generation)]);
+        let film_ms = developed_ms(&h.model().status);
+
+        h.clear_logs();
+        h.edit(|m| m.set("post.contrast", serde_json::json!(-20)));
+        let after_film = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [settled(after_film, generation)], "no quick frame right after a film change");
+        let after_film_ms = developed_ms(&h.model().status);
+        eprintln!("post-only: {reused_ms:.0} ms; film change settled: {film_ms:.0} ms; post-only after it: {after_film_ms:.0} ms");
+        assert!(reused_ms < film_ms / 2.0 && after_film_ms < film_ms / 2.0, "the post-only edits reused the output");
+        assert!(h.model().preview_current && h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `testAFailingEditReportsOnceAndStops`: the helper refuses
+    /// the edit; its quick frame fails silently, the settled render reports
+    /// the error once, and nothing renders again.
+    fn a_failing_edit_reports_once_and_stops() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        assert!(!h.model().value("io.upscale_factor").is_null());
+        let (previous, generation) = (h.model().shown_frame, h.model().source_generation);
+        h.edit(|m| m.set("io.upscale_factor", serde_json::json!(5)));
+        let edited = h.model().revision;
+        h.idle();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+        while std::time::Instant::now() < deadline {
+            h.step();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        h.idle();
+        assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)], "no retry");
+        assert_eq!(h.errors.len(), 1, "one error: {:?}", h.errors);
+        eprintln!("error: {}", h.errors[0]);
+        let m = h.model();
+        assert!(m.render_failed && !m.preview_current);
+        assert!(m.shown_frame == previous, "the quick frame failed, silently");
+        assert!(presented(&h).is_empty());
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `testADragRightAfterAQuickFrameSettlesOnRelease`: a slider
+    /// grabbed while a quick frame shows renders drag frames, and letting go
+    /// renders at export size, with no second quick frame.
+    fn a_drag_right_after_a_quick_frame_settles_on_release() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        let generation = h.model().source_generation;
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        let edited = h.model().revision;
+        until_quick(&mut h);
+        h.edit(|m| m.begin_interaction());
+        h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        let dragged = h.model().revision;
+        h.idle();
+        assert!(!h.model().preview_current);
+        h.edit(|m| m.end_interaction("Change Adjustment"));
+        h.idle();
+        assert_eq!(h.renders(), [quick(edited, generation), drag(dragged, generation), settled(dragged, generation)]);
+        assert!(h.model().preview_current && h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `testADragSettlesWithoutAQuickFrame`: letting go of a
+    /// slider renders at export size at once; the drag frames were
+    /// canvas-size already.
+    fn a_drag_settles_without_a_quick_frame() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        let generation = h.model().source_generation;
+        h.edit(|m| m.begin_interaction());
+        h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        let first = h.model().revision;
+        h.idle();
+        assert!(h.model().status.starts_with("Preview"), "{}", h.model().status);
+        h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.7)));
+        let second = h.model().revision;
+        h.edit(|m| m.end_interaction("Change Adjustment"));
+        h.idle();
+        // The second value coalesces into the release's render.
+        assert_eq!(h.renders(), [drag(first, generation), settled(second, generation)]);
+        assert!(h.model().preview_current && h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `testTheMatchRunsBeforeTheSettledRender`, with the held
+    /// frame: with the match on, a film's quick frame is held while the
+    /// solve runs from it (the helper holds its decode). A match that moves
+    /// is an edit with a quick frame of its own, then the one settled render,
+    /// of the matched exposure; the old exposure never renders at export
+    /// size and never shows. One that doesn't move shows the held quick
+    /// frame, then settles. The trace records the order.
+    fn the_match_runs_on_the_quick_frame_before_the_settled_render() {
+        let trace = std::env::temp_dir().join(format!("negs-quick-trace-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&trace);
+        // SAFETY: the child process runs this test alone, before any thread
+        // reads the environment.
+        unsafe { std::env::set_var("NEGS_RENDER_TRACE", &trace) };
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        open_quick(&mut h, true);
+        let (gold_ev, previous, generation) = (matched_ev(h.model()), h.model().shown_frame, h.model().source_generation);
+
+        h.edit(|m| m.choose_film(SUPERIA));
+        let edited = h.model().revision;
+        let held = until_held(&mut h);
+        assert_eq!((held.revision, held.kind), (edited, FrameKind::Quick));
+        assert!(h.model().matching_brightness, "the solve starts from the held quick frame");
+        assert_eq!(h.model().shown_frame, previous);
+        h.idle();
+        let m = h.model();
+        let ev = matched_ev(m);
+        assert!((ev - gold_ev).abs() >= 0.05, "the film change moves the match ({gold_ev} to {ev})");
+        assert!(m.preview_current && m.held_frame().is_none() && !m.brightness_match_pending() && m.revision == edited + 1);
+        let matched = edited + 1;
+        assert_eq!(h.renders(), [quick(edited, generation), quick(matched, generation), settled(matched, generation)]);
+        assert_eq!(h.command_names(), ["render", "place_exposure", "render", "render"]);
+        assert_eq!(presented(&h), [(matched, FrameKind::Quick), (matched, FrameKind::Settled)], "previous, matched quick, matched settled");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+
+        // Back to Gold, then Portra 400, which Gold matches within 0.05 EV.
+        h.edit(|m| m.choose_film(GOLD));
+        h.idle();
+        h.clear_logs();
+        h.edit(|m| m.choose_film(PORTRA));
+        let unchanged = h.model().revision;
+        let held = until_held(&mut h);
+        assert_eq!((held.revision, held.kind), (unchanged, FrameKind::Quick));
+        h.idle();
+        let m = h.model();
+        assert!(m.preview_current && m.held_frame().is_none() && m.revision == unchanged);
+        assert_eq!(h.renders(), [quick(unchanged, generation), settled(unchanged, generation)]);
+        assert_eq!(h.command_names(), ["render", "place_exposure", "render"]);
+        assert_eq!(presented(&h), [(unchanged, FrameKind::Quick), (unchanged, FrameKind::Settled)], "the held quick frame, then settled");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+
+        drop(h);
+        let events = trace_events(&trace);
+        let _ = std::fs::remove_file(&trace);
+        let from = events.iter().position(|e| e["event"] == "edit" && e["revision"] == edited).expect("the edit is traced");
+        let to = events.iter().position(|e| e["event"] == "edit" && e["revision"] == matched + 1).expect("the next edit is traced");
+        let lifecycle: Vec<String> = events[from..to]
+            .iter()
+            .filter(|e| ["edit", "render_request", "render_finished", "match_start", "match_solved", "held_shown", "held_dropped"].contains(&e["event"].as_str().unwrap()))
+            .map(|e| {
+                let mut line = format!("{} r{}", e["event"].as_str().unwrap(), e["revision"]);
+                if let Some(kind) = e["kind"].as_str() {
+                    line += &format!(" {kind}");
+                }
+                if let Some(why) = e["why"].as_str() {
+                    line += &format!(" {why}");
+                }
+                if e["event"] == "render_finished" {
+                    line += if e["held"] == true { " held" } else if e["shown"] == true { " shown" } else { " dropped" };
+                }
+                line
+            })
+            .collect();
+        eprintln!("trace:\n  {}", lifecycle.join("\n  "));
+        let (old, new) = (edited, matched);
+        assert_eq!(lifecycle, [
+            format!("edit r{old}"),
+            format!("render_request r{old} quick"),
+            format!("render_finished r{old} quick held"),
+            format!("match_start r{old}"),
+            "match_solved rnull".to_owned(),
+            format!("held_dropped r{old} edit"),
+            format!("edit r{new}"),
+            format!("render_request r{new} quick"),
+            format!("render_finished r{new} quick shown"),
+            format!("render_request r{new} settled"),
+            format!("render_finished r{new} settled shown"),
+        ]);
+    }
+}
+
+lifecycle_test! {
+    /// The Mac's `testTurningTheMatchOffReleasesAHeldFrame`: matching turned
+    /// off while a quick frame is held for the solve shows that frame once
+    /// the solve is back, then settles it.
+    fn turning_the_match_off_releases_a_held_quick_frame() {
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        open_quick(&mut h, true);
+        let generation = h.model().source_generation;
+        h.edit(|m| m.choose_film(SUPERIA));
+        let edited = h.model().revision;
+        let held = until_held(&mut h);
+        assert_eq!(held.kind, FrameKind::Quick);
+        h.run_until("the solve", |m| m.matching_brightness);
+        h.edit(|m| m.set_matches_brightness(false));
+        assert_eq!(h.model().revision, edited);
+        h.idle();
+        let m = h.model();
+        assert!(m.preview_current && m.held_frame().is_none() && !m.matches_brightness());
+        assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)]);
+        assert_eq!(presented(&h), [(edited, FrameKind::Quick), (edited, FrameKind::Settled)]);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// Matching turned on while a quick frame shows, at exposure 0 (so no
+    /// edit): the solve starts from the quick frame, and the settled render
+    /// already scheduled waits for it. The match moves the exposure, an edit
+    /// with its own quick frame; the old exposure never renders at export
+    /// size. (The Mac sends that render.)
+    fn turning_the_match_on_during_a_quick_frame_solves_before_settling() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        assert_eq!(crate::json::number(h.model().value(state::PREP_EXPOSURE)), 0.0);
+        let generation = h.model().source_generation;
+        h.edit(|m| m.choose_film(SUPERIA));
+        let edited = h.model().revision;
+        until_quick(&mut h);
+        assert!(h.model().pending_render, "the settled render is scheduled");
+        h.edit(|m| m.set_matches_brightness(true));
+        assert_eq!(h.model().revision, edited, "no edit");
+        assert!(h.model().matching_brightness, "the solve starts from the quick frame");
+        h.idle();
+        let m = h.model();
+        assert!(m.preview_current && !m.brightness_match_pending() && m.revision == edited + 1, "the match moved the exposure");
+        let matched = edited + 1;
+        assert_eq!(h.renders(), [quick(edited, generation), quick(matched, generation), settled(matched, generation)]);
+        assert_eq!(h.command_names(), ["render", "place_exposure", "render", "render"]);
+        assert_eq!(presented(&h), [(edited, FrameKind::Quick), (matched, FrameKind::Quick), (matched, FrameKind::Settled)]);
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+/// With the film grid's thumbnails on screen, nothing but the match asks
+/// the helper between a quick frame's reply and its settled render: no
+/// thumbnail, tone curve or preset check. Every helper command is logged,
+/// and the helper answers one at a time, so a command between the two
+/// renders in the log went out after the quick reply.
+fn nothing_else_runs_between_the_quick_and_settled_frames(matched: bool) {
+    let Some(mut h) = Harness::start(harness::prefs(matched)) else { return };
+    open_quick(&mut h, matched);
+    h.edit(|m| m.set_previews(true));
+    h.edit(|m| m.toggle_foldout(false));
+    h.idle();
+    assert!(h.command_names().iter().any(|c| c == "thumbnail"), "the grid's thumbnails were made");
+    h.clear_logs();
+    // Portra 400: Gold matches it within 0.05 EV, so the match stays.
+    h.edit(|m| m.choose_film(PORTRA));
+    let edited = h.model().revision;
+    h.idle();
+    let generation = h.model().source_generation;
+    assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)]);
+    let names = h.command_names();
+    eprintln!("commands: {names:?}");
+    let renders: Vec<usize> = names.iter().enumerate().filter(|(_, c)| *c == "render").map(|(i, _)| i).collect();
+    let between = &names[renders[0] + 1..renders[1]];
+    let expected: &[&str] = if matched { &["place_exposure"] } else { &[] };
+    assert_eq!(between, expected, "between the quick and the settled render");
+    assert!(names[..renders[0]].iter().all(|c| c == "tone_curve"), "before the quick render: {names:?}");
+    assert!(h.model().preview_current && h.errors.is_empty(), "{:?}", h.errors);
+}
+
+lifecycle_test! {
+    fn nothing_else_runs_between_the_quick_and_settled_frames_with_the_match_off() {
+        nothing_else_runs_between_the_quick_and_settled_frames(false);
+    }
+}
+
+lifecycle_test! {
+    fn nothing_else_runs_between_the_quick_and_settled_frames_with_the_match_on() {
+        nothing_else_runs_between_the_quick_and_settled_frames(true);
+    }
+}
+
+lifecycle_test! {
+    /// No quick frame, as before ticket 28: a photograph's first frame, the
+    /// launch render under the restored frame from the preview cache, a canvas
+    /// past half the photograph's pixels, a photograph under 4.5 MP; and
+    /// holding Original renders nothing.
+    fn first_frames_small_photos_and_close_zooms_settle_directly() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        crate::ui::canvas::set_fixed_scale(Some(SCALE));
+        let photo = h.photo.clone();
+        h.edit(|m| m.open(&photo));
+        let opened = h.model().revision;
+        h.idle();
+        let generation = h.model().source_generation;
+        assert_eq!(h.renders(), [settled(opened, generation)], "the first frame");
+
+        // `finish_start`'s render of a restored session (another film than
+        // the helper rendered last), with its cached frame on screen.
+        h.clear_logs();
+        let film = other(&h.model().state.film);
+        h.edit(|m| {
+            m.state.film = film.to_owned();
+            m.showing_cached_preview = true;
+            m.changed_with_cache(false);
+        });
+        let launch = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [settled(launch, generation)], "the launch render");
+
+        crate::ui::canvas::set_fixed_scale(Some(0.75));
+        h.clear_logs();
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        let zoomed = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [settled(zoomed, generation)], "0.56 of the pixels");
+        crate::ui::canvas::set_fixed_scale(Some(SCALE));
+
+        h.clear_logs();
+        h.edit(|m| m.hold_original(true));
+        h.idle();
+        assert!(h.model().original.is_some());
+        h.edit(|m| m.hold_original(false));
+        h.idle();
+        assert!(h.renders().is_empty() && h.command_names().iter().all(|c| c == "original"), "{:?}", h.command_names());
+
+        // 2400 × 1600: 3.8 MP.
+        let small = std::env::temp_dir().join(format!("negs-harness-small-{}.png", std::process::id()));
+        let (w, h_) = (2400u32, 1600u32);
+        let rgb: Vec<u8> = (0..w * h_).flat_map(|i| [((i % w) * 255 / w) as u8, ((i / w) * 255 / h_) as u8, 96]).collect();
+        image::save_buffer(&small, &rgb, w, h_, image::ExtendedColorType::Rgb8).unwrap();
+        h.open(&small);
+        assert_eq!(h.model().image_size, crate::crop::Size::new(2400.0, 1600.0));
+        let generation = h.model().source_generation;
+        h.clear_logs();
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        let edited = h.model().revision;
+        h.idle();
+        let _ = std::fs::remove_file(&small);
+        assert_eq!(h.renders(), [settled(edited, generation)], "a small photograph");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// Border, crop (Original size) and rotation edits render nothing: the
+    /// canvas draws them over the developed frame. With Longest side the
+    /// crop's extent is part of the render (`EditState::rendered`) and of the
+    /// request, as on the Mac: moving or straightening a crop of the same
+    /// extent renders nothing; a crop of another extent develops another
+    /// frame, now with a quick frame first. The helper keys on the resolved working size, not
+    /// the crop; `apply` already renders only when the extent changes.
+    fn border_crop_and_rotation_edits_and_the_longest_side_crop() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        let generation = h.model().source_generation;
+        h.edit(|m| m.set_border(|b| b.enabled = true, "Border"));
+        h.idle();
+        assert!(h.renders().is_empty(), "border: {:?}", h.renders());
+
+        let crop = |x: f64, side: f64, angle: f64| (crate::crop::Rect { x, y: 0.05, width: side, height: side }, angle);
+        let edit_crop = |h: &mut Harness, (rect, angle): (crate::crop::Rect, f64)| {
+            h.clear_logs();
+            h.edit(|m| {
+                let mut next = m.state.clone();
+                next.crop.rect = rect;
+                next.crop.angle = angle;
+                m.apply(next, "Crop");
+            });
+            let edited = h.model().revision;
+            h.idle();
+            (edited, h.renders().to_vec(), developed_ms(&h.model().status))
+        };
+        let (_, renders, _) = edit_crop(&mut h, crop(0.0, 0.9, 0.0));
+        assert!(renders.is_empty(), "crop, Original size: {renders:?}");
+
+        h.clear_logs();
+        h.edit(|m| m.rotate());
+        h.idle();
+        assert!(h.renders().is_empty(), "rotation: {:?}", h.renders());
+
+        h.edit(|m| m.set(state::SIZE_TARGET, serde_json::json!(3072)));
+        h.idle();
+        assert_eq!(h.model().size_mode(), state::SizeMode::LongestSide);
+        let (_, renders, _) = edit_crop(&mut h, crop(0.1, 0.9, 0.0));
+        assert!(renders.is_empty(), "a crop moved, Longest side: {renders:?}");
+        let (edited, renders, quick_ms) = edit_crop(&mut h, crop(0.1, 0.8, 0.0));
+        assert_eq!(renders, [quick(edited, generation), settled(edited, generation)], "a smaller crop, Longest side");
+        let (_, renders, _) = edit_crop(&mut h, crop(0.1, 0.8, 2.0));
+        assert!(renders.is_empty(), "a crop straightened, Longest side: {renders:?}");
+        crate::ui::canvas::set_fixed_scale(Some(0.0));
+        let (edited, renders, direct_ms) = edit_crop(&mut h, crop(0.1, 0.9, 0.0));
+        assert_eq!(renders, [settled(edited, generation)], "a larger crop, Longest side, no canvas");
+        eprintln!("Longest side, a crop of another extent: settled render {quick_ms:.0} ms after a quick frame, {direct_ms:.0} ms without a canvas");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+lifecycle_test! {
+    /// The helper restarted after a settled render (a crash, here a kill):
+    /// the new helper keeps no output, so the next post-only edit isn't
+    /// taken for a reuse. It gets a quick frame like any other edit; the one
+    /// after reuses the new helper's output.
+    fn a_restarted_helper_is_not_taken_to_keep_its_output() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        let generation = h.model().source_generation;
+        h.edit(|m| m.set("post.contrast", serde_json::json!(10)));
+        let first = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [settled(first, generation)], "reused");
+
+        let engine = h.model().engine.clone().unwrap();
+        let epoch = engine.helper_epoch();
+        engine.kill_helper();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while engine.helper_epoch() == epoch {
+            assert!(std::time::Instant::now() < deadline, "the helper didn't exit");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        h.clear_logs();
+        h.edit(|m| m.set("post.contrast", serde_json::json!(20)));
+        let restarted = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [quick(restarted, generation), settled(restarted, generation)], "no reuse of a dead helper's output");
+        assert_eq!(engine.helper_epoch(), epoch + 1);
+        assert!(h.model().preview_current && h.errors.is_empty(), "{:?}", h.errors);
+
+        h.clear_logs();
+        h.edit(|m| m.set("post.contrast", serde_json::json!(30)));
+        let again = h.model().revision;
+        h.idle();
+        assert_eq!(h.renders(), [settled(again, generation)], "the new helper's output is reused");
+    }
+}
+
+lifecycle_test! {
+    /// Save Preview and Fast Export asked for while a quick frame shows wait
+    /// for its settled frame, then write it: the Fast exporter's bytes of
+    /// the same state. With matching off, so only the quick frame waits.
+    fn save_and_export_after_a_quick_frame_wait_for_the_settled_frame() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        let dir = std::env::temp_dir().join(format!("negs-quick-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save = super::SaveSettings { bit_depth: 16, color_space: 0, jpeg_quality: 95 };
+
+        let film = other(&h.model().state.film);
+        h.edit(|m| m.choose_film(film));
+        until_quick(&mut h);
+        let saved = dir.join("saved.tif");
+        h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, save));
+        assert!(h.model().waiting_output.is_some() && !saved.exists());
+        assert_eq!(h.model().status, "Developing the preview…");
+        h.idle();
+        let m = h.model();
+        assert!(m.waiting_output.is_none() && m.status == "Saved saved.tif", "{}", m.status);
+        let state = m.state.clone();
+        assert_eq!(h.command_names(), ["render", "render", "save"]);
+        assert!(std::fs::read(&saved).unwrap() == fast_render(&h, &state, &dir.join("fast.tif"), save), "the settled frame was saved");
+
+        h.clear_logs();
+        h.edit(|m| m.choose_film(other(film)));
+        until_quick(&mut h);
+        let exported = dir.join("exported.tif");
+        h.edit(|m| m.export(exported.clone(), crate::engine::ExportEngine::Fast, super::ExportSize::FULL, save));
+        assert!(h.model().waiting_output.is_some());
+        h.idle();
+        let m = h.model();
+        assert!(m.waiting_output.is_none() && m.status == "Exported exported.tif", "{}", m.status);
+        let state = m.state.clone();
+        assert_eq!(h.command_names(), ["render", "render", "save"], "the settled preview was saved");
+        assert!(std::fs::read(&exported).unwrap() == fast_render(&h, &state, &dir.join("fast-2.tif"), save));
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+lifecycle_test! {
+    /// The longer wait with the match on: quick frame held, solve, matched
+    /// quick frame, settled frame, then the Save, also past the 30 s check
+    /// (moved clock) at the held and at the matched quick frame. The saved
+    /// bytes are the matched state's.
+    fn a_save_during_a_held_quick_frame_waits_for_the_matched_settled_frame() {
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        open_quick(&mut h, true);
+        let dir = std::env::temp_dir().join(format!("negs-quick-held-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save = super::SaveSettings { bit_depth: 16, color_space: 0, jpeg_quality: 95 };
+        h.edit(|m| m.choose_film(SUPERIA));
+        let edited = h.model().revision;
+        assert_eq!(until_held(&mut h).kind, FrameKind::Quick);
+        let saved = dir.join("saved.tif");
+        h.edit(|m| m.save_preview(saved.clone(), super::ExportSize::FULL, save));
+        assert_eq!(h.model().status, "Matching camera brightness…");
+        let patience = super::OUTPUT_PATIENCE;
+        h.model().waiting_output.as_mut().unwrap().0 -= patience;
+        assert!(h.fire_timers(patience) >= 1);
+        assert!(h.model().waiting_output.is_some() && h.errors.is_empty(), "{:?}", h.errors);
+        // At the matched quick frame the Save still waits for its settled frame.
+        h.run_until("the matched quick frame", |m| m.shown_frame.is_some_and(|f| f.kind == FrameKind::Quick && f.revision == edited + 1));
+        assert!(h.model().waiting_output.is_some());
+        h.model().waiting_output.as_mut().unwrap().0 -= patience;
+        h.fire_timers(patience);
+        assert!(h.model().waiting_output.is_some() && h.errors.is_empty(), "{:?}", h.errors);
+        h.idle();
+        let m = h.model();
+        assert!(m.waiting_output.is_none() && m.status == "Saved saved.tif", "{}", m.status);
+        assert_eq!(m.revision, edited + 1);
+        let state = m.state.clone();
+        assert_eq!(h.command_names(), ["render", "place_exposure", "render", "render", "save"]);
+        assert!(std::fs::read(&saved).unwrap() == fast_render(&h, &state, &dir.join("fast.tif"), save), "the matched settled frame was saved");
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

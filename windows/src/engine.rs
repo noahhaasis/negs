@@ -185,6 +185,10 @@ pub struct EngineClient {
     sender: Sender<Message>,
     child: Arc<Mutex<Option<u32>>>,
     stopped: Arc<AtomicBool>,
+    /// How many helper processes the worker has started. A new helper keeps
+    /// nothing of the last one, such as its last render (`Model::render`'s
+    /// reuse key).
+    epoch: Arc<AtomicU64>,
     /// Tests only: requests whose reply hasn't run yet, and every command
     /// in the order it went to the helper (with its `id`).
     #[cfg(test)]
@@ -199,6 +203,7 @@ impl EngineClient {
         let (sender, receiver) = mpsc::channel::<Message>();
         let child = Arc::new(Mutex::new(None));
         let stopped = Arc::new(AtomicBool::new(false));
+        let epoch = Arc::new(AtomicU64::new(0));
         #[cfg(test)]
         let commands = Arc::new(Mutex::new(Vec::new()));
         let worker = Worker {
@@ -207,6 +212,7 @@ impl EngineClient {
             helper: None,
             sequence: 0,
             pid: child.clone(),
+            epoch: epoch.clone(),
             #[cfg(test)]
             commands: commands.clone(),
         };
@@ -217,6 +223,7 @@ impl EngineClient {
             sender,
             child,
             stopped,
+            epoch,
             #[cfg(test)]
             inflight: Arc::default(),
             #[cfg(test)]
@@ -251,6 +258,27 @@ impl EngineClient {
         &self.scratch.directory
     }
 
+    /// The helper process that answers the next request, counted from 1. The
+    /// worker starts a new one lazily, at the next request after the last
+    /// one exited or was closed (a crash, a timeout), so such a helper counts
+    /// as the next epoch already. A reply callback reads the epoch of the
+    /// helper that answered: the worker sends nothing else between a request
+    /// and its reply.
+    pub fn helper_epoch(&self) -> u64 {
+        let epoch = self.epoch.load(Ordering::SeqCst);
+        let running = (*self.child.lock().unwrap()).is_some_and(pid_running);
+        if running { epoch } else { epoch + 1 }
+    }
+
+    /// Tests: kills the running helper, as a crash would; the next request
+    /// starts another.
+    #[cfg(test)]
+    pub fn kill_helper(&self) {
+        if let Some(pid) = *self.child.lock().unwrap() {
+            kill_pid(pid);
+        }
+    }
+
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
         if let Some(pid) = *self.child.lock().unwrap() {
@@ -270,12 +298,26 @@ fn kill_pid(pid: u32) {
     }
 }
 
+/// The process hasn't exited. The worker keeps its handle until it waits for
+/// it, so the id isn't reused meanwhile.
+fn pid_running(pid: u32) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) else { return false };
+        let running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+        let _ = CloseHandle(process);
+        running
+    }
+}
+
 struct Worker {
     paths: EnginePaths,
     scratch: Arc<ScratchSpace>,
     helper: Option<Helper>,
     sequence: u64,
     pid: Arc<Mutex<Option<u32>>>,
+    epoch: Arc<AtomicU64>,
     #[cfg(test)]
     commands: Arc<Mutex<Vec<Value>>>,
 }
@@ -316,6 +358,7 @@ impl Worker {
             .with_context(|| format!("Could not start the image engine ({})", self.paths.helper.display()))?;
         Job::get().assign(&child);
         *self.pid.lock().unwrap() = Some(child.id());
+        self.epoch.fetch_add(1, Ordering::SeqCst);
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (sender, lines) = mpsc::channel();
