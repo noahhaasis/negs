@@ -342,10 +342,14 @@ struct ResettableSlider: NSViewRepresentable {
         if slider.controlSize != .small { slider.controlSize = .small }
         if slider.minValue != range.lowerBound { slider.minValue = range.lowerBound }
         if slider.maxValue != range.upperBound { slider.maxValue = range.upperBound }
+        // neutralValue needs the macOS 26 SDK, which release CI's Xcode 16
+        // lacks; builds from it fill the track from the minimum, as before.
+        #if compiler(>=6.2)
         if #available(macOS 26, *) {
             let neutral = min(max(neutral ?? range.lowerBound, range.lowerBound), range.upperBound)
             if slider.neutralValue != neutral { slider.neutralValue = neutral }
         }
+        #endif
         slider.wanted = value.wrappedValue
     }
 
