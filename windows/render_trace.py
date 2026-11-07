@@ -93,6 +93,9 @@ def main():
         "meta": meta,
         "completed": done,
         "timeout": any(e["event"] == "bench_timeout" for e in events),
+        # The render error that ended the run.
+        "failed": next((e["error"] for e in reversed(events) if e["event"] == "render_reply" and "error" in e), "unknown")
+        if any(e["event"] == "bench_failed" for e in events) else None,
         "warmup_steps": warmup,
         "measured_steps": len(measured),
         "median_first_ms": median("first_ms"),

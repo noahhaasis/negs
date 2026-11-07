@@ -537,7 +537,11 @@ impl App {
         if flags == 0 {
             return;
         }
-        if flags & dirty::ERROR != 0 {
+        if flags & dirty::ERROR != 0 && crate::trace::bench_running() {
+            let error = self.model.error.take();
+            let notice = self.model.notice.take().map(|(message, _)| message);
+            crate::trace::event("dialog_skipped", || serde_json::json!({"error": error, "notice": notice}));
+        } else if flags & dirty::ERROR != 0 {
             if let Some(error) = self.model.error.take() {
                 // After this handler returns, outside any borrow.
                 let main = self.main.0 as isize;

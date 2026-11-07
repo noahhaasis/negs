@@ -929,3 +929,50 @@ of fixture photographs/exports, including unrelated files in the installation
 and data directories. Run it under a disposable Windows user profile; it refuses
 existing app-data directories or an existing installation. Installer compilation
 and this native uninstall test require Windows and Inno Setup.
+
+### Installer validation (2026-11-07)
+
+Packaged from `1dfc9ee` on `win-nov5` (Windows 10 Pro 22H2 19045, Ryzen 5 3600,
+GTX 1660 SUPER, 16 GB). Inno Setup 6.7.4 (6.7.3 is no longer offered; 6.7.4 is
+the current 6) and Python 3.11.9. The only change since `c4952cd` is the test fix
+below. The run used Noah's own profile, with his permission: the 0.7.0 install
+and its app data were backed up and removed first.
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `Negs-portable.zip` | 164 724 743 | `D596E6DD23FA927532978189C3CAA727561A200BF7830942115BCE6C81E2BF18` |
+| `Negs-Setup.exe` | 142 233 961 | `B29C3843D9AE2D035358788CADAB82E14D2E2116A5C61E42A1F61A38F1FF1B9B` |
+
+- **`verify_package.py`:** passed ("Verified Windows 0.13.0 packages from
+  1dfc9ee…"); workspace, app and installer versions agree at 0.13.0.
+- **`test_uninstall.ps1`:** failed at first, then passed after a fix to the test
+  (`1dfc9ee`, its own commit). With 6.7.4, `unins000.exe` exits when its
+  second phase (`_unins.tmp`) signals completion, about 1.2 s before
+  `usPostUninstall` runs `RemoveAppData`. The test checked the caches too early
+  (`catalog.json` remained) and the next uninstaller collided with the running
+  one (exit 1). The installed behaviour was right once the second phase finished.
+  `Run` now waits for `_unins*` to exit. After that, every check passes: upgrade
+  preservation, the running-app mutex (the uninstaller refuses and Negs.exe
+  stays), Keep settings (settings, session, presets with `.order.json`, and
+  `Updates` kept; caches, capabilities and the uninstall entry removed), silent
+  full cleanup, and the fixture photograph, export and unrelated files.
+- **Associations:** all 35 extensions get an empty REG_SZ `Negs.Photograph` in
+  `OpenWithProgids`, the open command is `"…\Negs.exe" "%1"`, and no `UserChoice`
+  or class default names Negs (`.nef` stays with its existing handler). Full
+  uninstall removes all 35 values, the ProgID, `RegisteredApplications`, the
+  Start Menu shortcut, the app folder and every app-data location.
+- **Installed app:** the Start Menu shortcut launches it, and it responds and
+  closes cleanly. A 4-step `NEGS_RENDER_BENCH` run on the installed `Negs.exe`
+  (DSC_6505.NEF, Gold 200 / Portra 400, matching on) shows, for each film click,
+  the previous frame kept, the quick frame held until `match_solved`,
+  `held_shown`, then the settled frame.
+
+Not run: picking films through "Search films", Save Preview, Fast export, the
+Explorer context menu's Open With click, and the interactive Settings → Apps
+uninstall dialog. No desktop automation was available, so these need a person.
+The silent `/KEEPSETTINGS` modes cover the same cleanup code.
+
+Seen in passing: the 0.7.0 uninstaller left its `data\` folder (17 files), all app
+data and an empty `HKCU\Software\Negs`. That's an older build, not this one. A
+High Efficiency★ NEF (DSC_0262) fails to decode (`NEF compression
+HighEfficencyStar is not supported`), and the bench waits on it until its timeout.
