@@ -2210,7 +2210,7 @@ impl Model {
         // after it was scheduled (matching turned on while the quick frame
         // shows, which is no edit at exposure 0): the old exposure never
         // renders at export size. The solve's end settles it
-        // (`settle_quick_frame`). The Mac sends it.
+        // (`settle_quick_frame`). The Mac does the same.
         if self.quick_step == Some((revision, generation))
             && !self.preview_current
             && !self.interacting()

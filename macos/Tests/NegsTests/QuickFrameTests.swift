@@ -340,4 +340,44 @@ final class QuickFrameStepTests: XCTestCase {
         try await waitUntil(timeout: 30) { model.previewCurrent }
         XCTAssertTrue(model.previewCurrent)
     }
+
+    /// Matching turned on while a quick frame shows, before its settled
+    /// render starts (at exposure 0 that's no new edit): the settled render
+    /// waits for the solve, so the old exposure never renders at export size.
+    func testMatchingTurnedOnBeforeTheSettledRenderWaitsForTheSolve() async throws {
+        let model = try await openModel(scale: 0.25)
+        XCTAssertEqual(model.value("prep.exposure_ev").double, 0)
+        let start = model.renderLog.count
+        var turnedOn = false
+        // The settled render is scheduled and about to start: the window.
+        model.willRender = { [unowned model] in
+            guard !turnedOn, model.status.hasPrefix("Preview") else { return }
+            turnedOn = true
+            model.setMatchesBrightness(true)
+        }
+        model.chooseFilm(otherFilm(model))
+        try await waitUntil { turnedOn }
+        try await settled(model)
+        model.willRender = nil
+        guard model.brightnessMatchActive, abs(model.value("prep.exposure_ev").double) >= 0.05 else {
+            throw XCTSkip("The match doesn't move the test photo's exposure: \(model.brightnessMatchNote ?? "")")
+        }
+        let log = steps(model, after: start)
+        XCTAssertEqual(log.filter { $0 == .settled }.count, 1, "Only the matched exposure renders at export size: \(log)")
+        XCTAssertEqual(log.last, .settled)
+        XCTAssertEqual(model.state.brightnessMatch?.inputs, model.matchInputs(model.state))
+        XCTAssertTrue(model.previewCurrent)
+    }
+
+    /// A relaunched helper keeps no output: a post-only edit after it shows
+    /// a quick frame first, as any edit without kept output does.
+    func testARelaunchedHelperKeepsNoOutput() async throws {
+        let model = try await openModel(scale: 0.25)
+        try await waitUntil { !model.previews.busy }
+        model.killHelperForTesting()
+        let start = model.renderLog.count
+        model.set("post.contrast", .number(20))
+        try await settled(model)
+        XCTAssertEqual(steps(model, after: start), [.quick(0.25), .settled])
+    }
 }

@@ -52,3 +52,13 @@ Clear `helperOutput` whenever the helper is relaunched.
 ## Rules
 
 Follow the repo's usual macOS workflow. Don't push or merge without Noah saying so.
+
+## Status (2026-11-07): fixed on `mac-quick-frame-race`
+
+- `render()` returns early while a solve or a held frame waits on the current edit's quick frame,
+  with the same conditions as Windows. The solve's end settles it.
+- `EngineClient` counts helper launches. `helperOutput` records the launch that kept it and counts
+  only while that launch is still running.
+- Tests: `testMatchingTurnedOnBeforeTheSettledRenderWaitsForTheSolve` (a DEBUG `willRender` hook
+  turns matching on in the one-yield window) and `testARelaunchedHelperKeepsNoOutput`. Both fail
+  with their fix reverted. The race test's log without the fix is `[quick, settled, quick, settled]`.

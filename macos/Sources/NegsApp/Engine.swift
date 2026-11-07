@@ -246,6 +246,8 @@ final class EngineClient: @unchecked Sendable {
     private var log: FileHandle?
     private var pending = Data()
     private var sequence = 0
+    /// Counts helper launches: a relaunched helper keeps nothing of the last one.
+    private var launches = 0
 
     init(paths: EnginePaths) throws {
         self.paths = paths
@@ -253,6 +255,12 @@ final class EngineClient: @unchecked Sendable {
     }
 
     func request(_ command: [String: JSONValue]) async throws -> (Int, JSONValue) {
+        let (id, result, _) = try await requestOnLaunch(command)
+        return (id, result)
+    }
+
+    /// `request`, plus which helper launch answered it.
+    func requestOnLaunch(_ command: [String: JSONValue]) async throws -> (id: Int, result: JSONValue, launch: Int) {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 do { continuation.resume(returning: try self.exchange(command)) }
@@ -261,8 +269,25 @@ final class EngineClient: @unchecked Sendable {
         }
     }
 
-    private func exchange(_ command: [String: JSONValue]) throws -> (Int, JSONValue) {
+    /// The helper running now, nil if none is: a request starts a new one.
+    var runningLaunch: Int? {
+        lock.lock(); defer { lock.unlock() }
+        return process?.isRunning == true ? launches : nil
+    }
+
+    #if DEBUG
+    /// Kills the helper and waits until it's gone; the next request starts another.
+    func killHelperForTesting() {
+        lock.lock(); let child = process; lock.unlock()
+        guard let child, child.isRunning else { return }
+        kill(child.processIdentifier, SIGKILL)
+        while child.isRunning { usleep(1000) }
+    }
+    #endif
+
+    private func exchange(_ command: [String: JSONValue]) throws -> (Int, JSONValue, Int) {
         try startIfNeeded()
+        let launch = launches
         sequence += 1
         let id = sequence
         var body = command; body["id"] = .number(Double(id))
@@ -279,7 +304,7 @@ final class EngineClient: @unchecked Sendable {
             let reply = try JSONDecoder().decode(JSONValue.self, from: line)
             guard reply["id"].double == Double(id) else { throw EngineError(message: "Image engine response is out of sequence.") }
             if !reply["error"].string.isEmpty { throw EngineError(message: reply["error"].string) }
-            return (id, reply["result"])
+            return (id, reply["result"], launch)
         } catch {
             if process?.isRunning != true { closeHandles() }
             throw error
@@ -299,6 +324,7 @@ final class EngineClient: @unchecked Sendable {
         child.arguments = ["--data-dir", paths.data.path]
         child.standardInput = stdin; child.standardOutput = stdout; child.standardError = log
         try child.run()
+        launches += 1
         process = child; input = stdin.fileHandleForWriting; output = stdout.fileHandleForReading
     }
 
