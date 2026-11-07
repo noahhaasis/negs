@@ -102,15 +102,21 @@ import UniformTypeIdentifiers
     var autoPlaceNewImages = UserDefaults.standard.object(forKey: "autoPlaceNewImages") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages") }
     }
-    /// Settings › New photographs: Start fresh (true, the default) or keep the
-    /// previous photograph's edits (false, as earlier versions did). A
-    /// restored session keeps its own edits either way.
-    var freshEditsForNewPhotos = UserDefaults.standard.object(forKey: "freshEditsForNewPhotos") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(freshEditsForNewPhotos, forKey: "freshEditsForNewPhotos") }
+    /// Settings › Save ratings and edits next to photos: each photograph's
+    /// edits in its sidecar (`Sidecar.swift`). Off, nothing is remembered per
+    /// photograph; sidecars already there stay untouched until it's on again.
+    var sidecarsEnabled = UserDefaults.standard.object(forKey: "sidecars") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(sidecarsEnabled, forKey: "sidecars")
+            sidecarWrite?.cancel(); sidecarWrite = nil
+            // The photograph shown is saved from its next edit on.
+            if sidecarsEnabled, let source, let restore = readSidecar(source) {
+                photoSidecar = sidecarContext(for: source, restore: restore)
+            } else if !sidecarsEnabled { photoSidecar = nil }
+        }
     }
     /// Lab › Film format › Custom picked while the value is still a format's,
-    /// so the slider stays. Start fresh and Reset Adjustments clear it, as
-    /// they do the edits.
+    /// so the slider stays. Opening a photograph and Reset Adjustments clear it.
     var customFilmFormat = false
     var error: String?
     var status = "Starting…"
@@ -258,10 +264,42 @@ import UniformTypeIdentifiers
     @ObservationIgnored let presetLibrary: PresetLibrary
     /// Film and paper preview grids (`Previews.swift`).
     @ObservationIgnored let previews = Previews()
+    /// Where photographs' sidecars are read and written; nil, none are.
+    @ObservationIgnored let sidecars: SidecarStore?
+    /// The open photograph's sidecar; nil when it has none and gets none
+    /// (sidecars off, no store).
+    @ObservationIgnored private var photoSidecar: PhotoSidecarContext?
+    /// The write 1 s after the last edit.
+    @ObservationIgnored private var sidecarWrite: Task<Void, Never>?
+    /// Folders whose sidecars couldn't be written, said once each.
+    @ObservationIgnored private var unwritableFolders: Set<URL> = []
 
-    init(previewCache: RenderedPreviewCache = RenderedPreviewCache(), presetLibrary: PresetLibrary = PresetLibrary()) {
+    private struct PhotoSidecarContext {
+        var photo: URL
+        var variant: String
+        var defaultsVersion: Int
+        /// The user's edits as the photograph opened (`userEdits`). One without
+        /// a sidecar gets one only once they change.
+        var opened: EditState
+        var existedAtOpen: Bool
+        var exists: Bool
+        /// The stored edits last read or sent; the same edits aren't written again.
+        var written: JSONValue?
+        /// Why it isn't written: unreadable, from a newer Negs, unwritable.
+        var blocked: String?
+        /// The film and paper it names that this version lacks, with what is
+        /// shown instead; written back while that stays chosen.
+        var missingFilm: (saved: String, shown: String)?
+        var missingPaper: (saved: String, shown: String)?
+        /// A schema 2 session's edits, written once launch has settled.
+        var migrating = false
+    }
+
+    init(previewCache: RenderedPreviewCache = RenderedPreviewCache(), presetLibrary: PresetLibrary = PresetLibrary(),
+         sidecars: SidecarStore? = SidecarStore.forApp) {
         self.previewCache = previewCache
         self.presetLibrary = presetLibrary
+        self.sidecars = sidecars
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
     }
 
@@ -302,6 +340,8 @@ import UniformTypeIdentifiers
     private func discardLaunchRestore() {
         guard let (_, before) = launchRestore else { return }
         launchRestore = nil; launchFrame = nil
+        // Nothing of the undone restore is written to its sidecar.
+        photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
         sourceGeneration += 1
         source = nil; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -336,6 +376,8 @@ import UniformTypeIdentifiers
                 }
                 apply(catalog: catalog)
                 CatalogCache.save(catalog, for: engine.paths)
+                // A photograph opened before this catalog: its edits under it.
+                readoptSidecarEdits()
             }
             // The restore at launch stands: its open skipped the system's
             // recent documents while it could still be undone.
@@ -358,10 +400,15 @@ import UniformTypeIdentifiers
             ready = true
             if source == nil, status == "Starting…" { status = "" }
             if source != nil { changed(invalidateCache: false) }
+            // A schema 2 session's edits move to the photograph's sidecar now,
+            // off the launch path.
+            if photoSidecar?.migrating == true { flushSidecar() }
         } catch { if !closing { report(error) } }
     }
 
     private func apply(catalog: JSONValue) {
+        // The reset below is no edit: a write still waiting must not save it.
+        sidecarWrite?.cancel(); sidecarWrite = nil
         self.catalog = catalog
         stocks = catalog["profiles"].array.map(Stock.init)
         defaults = catalog["defaults"]
@@ -598,6 +645,7 @@ import UniformTypeIdentifiers
         // A crop doesn't re-render the preview, but it changes the thumbnails.
         if render { changed() } else { pumpPreviews() }
         reconcileBrightnessMatch()
+        scheduleSidecarWrite()
     }
     private func registerUndo(restoring previous: EditState, action: String) {
         undoManager?.registerUndo(withTarget: self) { model in
@@ -657,19 +705,19 @@ import UniformTypeIdentifiers
         return nil
     }
 
+    /// The photograph and window to reopen at the next launch; the edits are
+    /// in the photograph's sidecar (`flushSidecars`).
     var session: EditorSession? {
         guard !closing, ready, let source else { return nil }
-        var saved = state
-        // Include a crop being drawn, without forcing the user to press Done.
-        if let cropSession { saved.crop = cropSession.settings }
-        return EditorSession(source: source, state: saved, inspectorVisible: inspectorVisible, fitImage: fitImage)
+        return EditorSession(source: source, inspectorVisible: inspectorVisible, fitImage: fitImage)
     }
 
     private func restore(_ session: EditorSession) throws {
         try session.validate()
-        guard films.contains(where: { $0.id == session.state.film }),
-              papers.contains(where: { $0.id == session.state.paper }) else {
-            throw EngineError(message: "The previous session uses an unavailable film or paper. Open a photograph to continue.")
+        if let state = session.state {
+            guard films.contains(where: { $0.id == state.film }), papers.contains(where: { $0.id == state.paper }) else {
+                throw EngineError(message: "The previous session uses an unavailable film or paper. Open a photograph to continue.")
+            }
         }
         open(session.source, restoring: session)
     }
@@ -733,6 +781,9 @@ import UniformTypeIdentifiers
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
+        // The previous photograph's last edits go to its sidecar first.
+        flushSidecar()
+        let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         sourceSize = .zero; workingSize = .zero; previewScale = 1
@@ -742,48 +793,11 @@ import UniformTypeIdentifiers
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         sourceGeneration += 1
         let generation = sourceGeneration
-        if freshEditsForNewPhotos { customFilmFormat = false }
-        if let session {
-            var restored = session.state
-            let lensCorrection = restored.params[Self.lensCorrectionPath]
-            restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
-            // A session from before lens correction was developed without it.
-            if lensCorrection == .null { restored.params[Self.lensCorrectionPath] = .bool(false) }
-            // Sessions from before Image Size may carry the old working-resolution factor.
-            let factor = defaults[ImageSize.factorPath]
-            if factor != .null { restored.params[ImageSize.factorPath] = factor }
-            // The inspector no longer edits Post tone or colour; an older session's
-            // Post edits would otherwise stay applied with no control to undo them.
-            if defaults["post"] != .null { restored.params["post"] = defaults["post"] }
-            // Sessions from before it was a preference carried it per photograph.
-            if UserDefaults.standard.object(forKey: "limitPreview") == nil, restored.limitPreview {
-                adoptingPreference = true; limitsPreview = true; adoptingPreference = false
-            }
-            state = withPreferences(restored)
-            inspectorVisible = session.inspectorVisible
-        } else {
-            // The exposure the user set above the previous photograph's match
-            // carries with Keep the previous edits; the match is solved anew.
-            let previousOffset = state.params["prep.exposure_ev"].double - (state.brightnessMatch?.ev ?? 0)
-            if freshEditsForNewPhotos {
-                // Film/paper and output preferences belong to the workflow;
-                // the previous photograph's Prep, Lab and Post edits do not.
-                let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"]
-                let retained = retainedPaths.map { ($0, state.params[$0]) }
-                state.params = defaults
-                for (path, value) in retained where value != .null { state.params[path] = value }
-                state.params["io.scan_film"] = .bool(films.first(where: { $0.id == state.film })?.positive ?? false)
-                state.border = BorderSettings()
-            }
-            state.params["io.rotate_cw"] = .number(0)
-            // How one file's colours are read never carries over to the next.
-            let interpretation = defaults["io.input_interpretation"]
-            if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
-            state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
-            state.crop = CropSettings()
-            state.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
-            if !freshEditsForNewPhotos { state.params["prep.exposure_ev"] = .number(min(3, max(-3, previousOffset))) }
-        }
+        customFilmFormat = false
+        // A schema 2 session restores its edits as before; otherwise the
+        // photograph's sidecar has them, read at launch with the session.
+        adoptEdits(for: url, restore: session?.sidecar ?? readSidecar(url), legacy: session?.state, previous: previous)
+        if let session { inspectorVisible = session.inspectorVisible }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         undoManager?.removeAllActions()
         zoom(fit: session?.fitImage ?? true)
@@ -876,6 +890,221 @@ import UniformTypeIdentifiers
             size = turned ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
         }
         return (image, size)
+    }
+
+    // MARK: Edits per photograph
+
+    /// The state a photograph without saved edits opens with. Film, paper,
+    /// Image Size and the output colour follow the previous photograph, as
+    /// a workflow's choices; its Prep, Lab, border, crop, rotation and how
+    /// its file was read do not.
+    private func newPhotoState(after previous: EditState) -> EditState {
+        var next = previous
+        let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"]
+        let retained = retainedPaths.map { ($0, previous.params[$0]) }
+        next.params = defaults
+        for (path, value) in retained where value != .null { next.params[path] = value }
+        next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        next.border = BorderSettings()
+        next.params["io.rotate_cw"] = .number(0)
+        let interpretation = defaults["io.input_interpretation"]
+        if interpretation != .null { next.params["io.input_interpretation"] = interpretation }
+        next.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
+        next.crop = CropSettings()
+        next.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
+        return withPreferences(next)
+    }
+
+    /// Saved edits under the engine's current defaults. `legacy`: a schema 2
+    /// session's, which may predate lens correction and the preview limit.
+    private func restoredState(_ saved: EditState, legacy: Bool, matchSolved: Bool = false) -> EditState {
+        var restored = saved
+        let lensCorrection = restored.params[Self.lensCorrectionPath]
+        restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
+        // A session from before lens correction was developed without it.
+        if legacy, lensCorrection == .null { restored.params[Self.lensCorrectionPath] = .bool(false) }
+        // Sessions from before Image Size may carry the old working-resolution factor.
+        let factor = defaults[ImageSize.factorPath]
+        if factor != .null { restored.params[ImageSize.factorPath] = factor }
+        // The inspector no longer edits Post tone or colour; an older session's
+        // Post edits would otherwise stay applied with no control to undo them.
+        if defaults["post"] != .null { restored.params["post"] = defaults["post"] }
+        // Sessions from before it was a preference carried it per photograph.
+        if legacy, UserDefaults.standard.object(forKey: "limitPreview") == nil, restored.limitPreview {
+            adoptingPreference = true; limitsPreview = true; adoptingPreference = false
+        }
+        restored = withPreferences(restored)
+        // A match stored as solved was solved for these very edits.
+        if matchSolved, restored.brightnessMatch != nil {
+            let inputs = matchInputs(restored)
+            restored.brightnessMatch?.inputs = inputs
+        }
+        return restored
+    }
+
+    /// The user's own edits in `state`: without the brightness match's solved
+    /// exposure, which isn't one, and the preview limit, a preference.
+    nonisolated static func userEdits(_ state: EditState) -> EditState {
+        var edits = state
+        edits.limitPreview = false
+        if let match = edits.brightnessMatch {
+            let offset = edits.params["prep.exposure_ev"].double - (match.ev ?? 0)
+            edits.params["prep.exposure_ev"] = .number((offset * 1e9).rounded() / 1e9)
+            edits.brightnessMatch = BrightnessMatch()
+        }
+        return edits
+    }
+
+    /// `photo`'s sidecar, or nil when sidecars aren't used.
+    private func readSidecar(_ photo: URL) -> SidecarRestore? {
+        guard let sidecarLookup else { return nil }
+        return SidecarRestore.read(photo: photo, store: sidecarLookup.store, data: sidecarLookup.data)
+    }
+    /// Where the launch reads the last photograph's sidecar; nil with sidecars off.
+    var sidecarLookup: SidecarLookup? {
+        guard sidecarsEnabled, let sidecars, let data = engine?.paths.data else { return nil }
+        return SidecarLookup(store: sidecars, data: data)
+    }
+
+    /// Sets the state of the photograph being opened: its saved edits, a
+    /// schema 2 session's, or a new photograph's. Then remembers its sidecar.
+    private func adoptEdits(for url: URL, restore: SidecarRestore?, legacy: EditState?, previous: EditState) {
+        var missingFilm: (saved: String, shown: String)?, missingPaper: (saved: String, shown: String)?
+        if let legacy {
+            state = restoredState(legacy, legacy: true)
+        } else if let saved = restore?.edits, restore?.problem == nil, hasCatalog {
+            var restored = restoredState(saved.state, legacy: false, matchSolved: saved.matchSolved)
+            // A film or paper this version lacks (another fork's, a newer
+            // release's) falls back to the defaults table's; the photograph opens.
+            let table = sidecarLookup.flatMap { try? SidecarDefaults.load(version: restore?.defaultsVersion ?? 1, data: $0.data) }
+            if !films.contains(where: { $0.id == restored.film }), let shown = films.first(where: { $0.id == table?.film })?.id ?? films.first?.id {
+                missingFilm = (restored.film, shown)
+                restored.film = shown
+                restored.params["io.scan_film"] = .bool(films.first { $0.id == shown }?.positive ?? false)
+            }
+            if !papers.contains(where: { $0.id == restored.paper }), let shown = papers.first(where: { $0.id == table?.paper })?.id ?? papers.first?.id {
+                missingPaper = (restored.paper, shown)
+                restored.paper = shown
+            }
+            if missingFilm != nil || missingPaper != nil {
+                let names = [missingFilm.map { "the film “\($0.saved)”" }, missingPaper.map { "the paper “\($0.saved)”" }].compactMap { $0 }
+                error = "\(url.lastPathComponent) was edited with \(names.joined(separator: " and ")), which this version of Negs doesn’t have. It shows \([missingFilm.map { _ in filmName(restored.film) }, missingPaper.map { _ in paperName(restored.paper) }].compactMap { $0 }.joined(separator: " and ")) instead, and keeps the saved choice unless you pick another."
+            }
+            state = restored
+        } else {
+            state = newPhotoState(after: previous)
+        }
+        guard let restore else { photoSidecar = nil; return }
+        var context = sidecarContext(for: url, restore: restore)
+        context.missingFilm = missingFilm; context.missingPaper = missingPaper
+        if legacy != nil {
+            // Written once launch settles, if it holds anything a new
+            // photograph wouldn't have; it wins over a sidecar already there.
+            var plain = state; plain.film = EditState().film; plain.paper = EditState().paper
+            context.opened = Self.userEdits(newPhotoState(after: plain))
+            context.written = nil
+            context.migrating = true
+        }
+        // Before the catalog the edits can't be shown; `readoptSidecarEdits` reads them again.
+        if !hasCatalog, context.blocked == nil { context.blocked = "The image engine hasn’t started." }
+        photoSidecar = context
+        if let problem = restore.problem { error = problem }
+    }
+
+    private func filmName(_ id: String) -> String { films.first { $0.id == id }?.name ?? id }
+    private func paperName(_ id: String) -> String { papers.first { $0.id == id }?.name ?? id }
+
+    /// The open photograph's sidecar as it stands, with its current state as
+    /// the one it opened with.
+    private func sidecarContext(for url: URL, restore: SidecarRestore) -> PhotoSidecarContext {
+        var context = PhotoSidecarContext(photo: url, variant: restore.variant, defaultsVersion: restore.defaultsVersion,
+                                          opened: Self.userEdits(state), existedAtOpen: restore.exists, exists: restore.exists,
+                                          blocked: restore.problem)
+        if restore.edits != nil, context.blocked == nil { context.written = storedEdits(state, context) }
+        return context
+    }
+
+    /// The catalog changed under an open photograph: shows its saved edits
+    /// under the new defaults, or the new photograph state, as opening it does.
+    private func readoptSidecarEdits() {
+        guard let source, let context = photoSidecar, context.photo == source else { return }
+        adoptEdits(for: source, restore: readSidecar(source), legacy: nil, previous: state)
+    }
+
+    /// `state` as its sidecar stores it.
+    private func storedEdits(_ current: EditState, _ context: PhotoSidecarContext) -> JSONValue? {
+        guard let data = sidecarLookup?.data, let table = try? SidecarDefaults.load(version: context.defaultsVersion, data: data) else { return nil }
+        var saved = current
+        if let missing = context.missingFilm, saved.film == missing.shown { saved.film = missing.saved }
+        if let missing = context.missingPaper, saved.paper == missing.shown { saved.paper = missing.saved }
+        let solved = current.brightnessMatch.map { $0.ev != nil && $0.inputs == matchInputs(current) } ?? false
+        return PhotoSidecar.encodeEdits(saved, matchSolved: solved, table: table)
+    }
+
+    /// Writes the open photograph's sidecar 1 s after the last edit.
+    private func scheduleSidecarWrite() {
+        guard photoSidecar != nil, !closing else { return }
+        sidecarWrite?.cancel()
+        sidecarWrite = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.flushSidecar()
+        }
+    }
+
+    /// Sends the open photograph's edits to its sidecar now, if they changed:
+    /// once the user has edited it, or always if it had one. Back where it
+    /// started, a sidecar this visit made is removed again.
+    @discardableResult private func flushSidecar() -> Task<Void, Never>? {
+        sidecarWrite?.cancel(); sidecarWrite = nil
+        guard sidecarsEnabled, let sidecars, sidecars.writes, var context = photoSidecar, context.blocked == nil,
+              context.photo == source, hasCatalog, !closing else { return nil }
+        var current = state
+        // Include a crop being drawn, without forcing the user to press Done.
+        if let cropSession { current.crop = cropSession.settings }
+        let edited = Self.userEdits(current) != context.opened
+        let edits: JSONValue?
+        if edited || context.existedAtOpen {
+            guard let stored = storedEdits(current, context) else { return nil }
+            edits = stored
+        } else {
+            guard context.exists else { return nil }
+            edits = nil
+        }
+        guard edits != context.written else { return nil }
+        let photo = context.photo
+        let known: [String: [JSONValue]]
+        if let data = sidecarLookup?.data, let table = try? SidecarDefaults.load(version: context.defaultsVersion, data: data) {
+            known = ["params": [table.params, defaults], "crop": [table.crop], "border": [table.border]]
+        } else { return nil }
+        sidecars.enqueue(SidecarPatch(variant: context.variant, edits: edits, known: known,
+                                      defaultsVersion: context.defaultsVersion, app: Self.appVersion), for: photo)
+        context.written = edits; context.exists = edits != nil; context.migrating = false
+        photoSidecar = context
+        return Task { [weak self] in
+            let failures = await sidecars.flush()
+            for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+        }
+    }
+
+    /// Writes the open photograph's last edits and everything still waiting,
+    /// at quit.
+    func flushSidecars() async {
+        flushSidecar()
+        if let failures = await sidecars?.flush() {
+            for (failed, reason) in failures { sidecarFailed(failed, reason) }
+        }
+    }
+
+    private func sidecarFailed(_ photo: URL, _ reason: String) {
+        if photoSidecar?.photo.standardizedFileURL == photo.standardizedFileURL { photoSidecar?.blocked = reason }
+        let folder = photo.deletingLastPathComponent().standardizedFileURL
+        guard !closing, unwritableFolders.insert(folder).inserted else { return }
+        error = "Edits to photographs in “\(folder.lastPathComponent)” can’t be saved beside them: \(reason)"
+    }
+
+    nonisolated static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
     // MARK: Original

@@ -1,0 +1,47 @@
+{
+  "app": "0.16.0",
+  "defaultsVersion": 1,
+  "negs": 1,
+  "sync": {
+    "device": "Studio iMac"
+  },
+  "variants": [
+    {
+      "edits": {
+        "crop": {
+          "futureField": true,
+          "rect": [
+            [
+              0,
+              0
+            ],
+            [
+              1,
+              0.8
+            ]
+          ]
+        },
+        "film": "kodak_portra_400",
+        "futureGroup": {
+          "amount": 1
+        },
+        "paper": "kodak_portra_endura",
+        "params": {
+          "future_stage": {
+            "strength": 2
+          },
+          "prep": {
+            "future_knob": 3,
+            "highlights": -20
+          }
+        }
+      },
+      "id": "e5",
+      "label": "red",
+      "tags": [
+        "street",
+        "night"
+      ]
+    }
+  ]
+}

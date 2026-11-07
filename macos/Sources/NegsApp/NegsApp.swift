@@ -47,8 +47,10 @@ import SwiftUI
         }
         #endif
         var restoration: Task<EditorSession?, Error>?
-        if let store, Self.pathArgument != nil || !(Self.readSession(store, timeout: 0.1).map(model.restoreAtLaunch) ?? false) {
-            restoration = Task { try await store.load() }
+        // The last photograph's sidecar is read with the session, a few kilobytes more.
+        let sidecars = model.sidecarLookup
+        if let store, Self.pathArgument != nil || !(Self.readSession(store, sidecars: sidecars, timeout: 0.1).map(model.restoreAtLaunch) ?? false) {
+            restoration = Task { try await store.load(sidecars: sidecars) }
         }
         Task { await model.start(restoration: restoration) }
         menu = MainMenu(model: model, updates: updates) { [weak self] in self?.removeAllAppData() }
@@ -77,11 +79,11 @@ import SwiftUI
     /// The session, read on another thread and waited for at most `timeout`,
     /// so a photograph on an unresponsive volume never holds up launch. Nil
     /// if there's none, it can't be read, or it takes longer.
-    private static func readSession(_ store: SessionStore, timeout: TimeInterval) -> EditorSession? {
+    private static func readSession(_ store: SessionStore, sidecars: SidecarLookup?, timeout: TimeInterval) -> EditorSession? {
         final class Result: @unchecked Sendable { var session: EditorSession? }
         let result = Result(), done = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
-            result.session = try? store.read()
+            result.session = try? store.read(sidecars: sidecars)
             done.signal()
         }
         // The semaphore orders the write before this read.
@@ -108,12 +110,15 @@ import SwiftUI
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
         }
         // Save once at quit/relaunch, not on slider changes or the rendering path.
-        // A failed write cancels termination instead of silently losing the edit.
+        // A failed write cancels termination instead of silently losing the
+        // session. The photograph's edits go to its sidecar first; one that
+        // can't be written was already reported and doesn't keep Negs open.
         guard let session = model.session,
               ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] == nil else { return .terminateNow }
         terminating = true
         Task {
             do {
+                await model.flushSidecars()
                 try await sessions.save(session)
                 await model.flushPreviewCache()
                 sender.reply(toApplicationShouldTerminate: true)

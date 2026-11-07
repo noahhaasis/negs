@@ -99,8 +99,12 @@ final class RenderedPreviewCacheTests: XCTestCase {
     func testStartupUsesExactFinishedFrameAndInterruptedEditFallsBackToRawPreview() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let data = dir.appendingPathComponent("data")
-        try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: data.appendingPathComponent("sidecar-defaults"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
+        // The edits relaunch from the photograph's sidecar, stored against the real defaults table.
+        let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        try FileManager.default.copyItem(at: SidecarDefaults.url(version: 1, data: checkout.appendingPathComponent("data")), to: SidecarDefaults.url(version: 1, data: data))
+        let sidecars = SidecarStore()
         let photo = dir.appendingPathComponent("photo.png")
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 6, bitsPerSample: 8,
                                       samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
@@ -130,7 +134,7 @@ final class RenderedPreviewCacheTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         let paths = EnginePaths(helper: helper, exporter: helper, data: data)
         let cache = RenderedPreviewCache(file: dir.appendingPathComponent("frame.cache"))
-        let first = EditorModel(previewCache: cache)
+        let first = EditorModel(previewCache: cache, sidecars: sidecars)
         defer { first.shutdown() }
         await first.start(paths: paths)
         first.open(photo)
@@ -142,10 +146,11 @@ final class RenderedPreviewCacheTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: cache.file.path), "The superseded render must never publish a cache")
         try await waitUntil { first.previewCurrent }
         first.rotate()
-        let session = try XCTUnwrap(first.session)
+        let sessionRead = await relaunchSession(of: first, store: sidecars, data: data)
+        let session = try XCTUnwrap(sessionRead)
         await first.flushPreviewCache(); first.shutdown()
 
-        let restored = EditorModel(previewCache: cache)
+        let restored = EditorModel(previewCache: cache, sidecars: sidecars)
         defer { restored.shutdown() }
         await restored.start(paths: paths, restoration: Task { session })
         try await waitUntil { restored.image != nil }
@@ -158,11 +163,12 @@ final class RenderedPreviewCacheTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(450))
         XCTAssertFalse(restored.showsActivity, "A matching cache needs no Updating badge")
         restored.set("camera.exposure_compensation_ev", .number(2))
-        let interrupted = try XCTUnwrap(restored.session)
+        let interruptedRead = await relaunchSession(of: restored, store: sidecars, data: data)
+        let interrupted = try XCTUnwrap(interruptedRead)
         restored.shutdown(); await restored.flushPreviewCache()
         XCTAssertFalse(FileManager.default.fileExists(atPath: cache.file.path))
 
-        let unfinished = EditorModel(previewCache: cache)
+        let unfinished = EditorModel(previewCache: cache, sidecars: sidecars)
         defer { unfinished.shutdown() }
         await unfinished.start(paths: paths, restoration: Task { interrupted })
         try await waitUntil { unfinished.placeholder != nil }

@@ -1,0 +1,12 @@
+{
+  "app": "0.15.0",
+  "defaultsVersion": 1,
+  "negs": 1,
+  "variants": [
+    {
+      "flag": "reject",
+      "id": "c07d",
+      "rating": 4
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "app": "0.15.0",
+  "defaultsVersion": 1,
+  "negs": 1,
+  "variants": [
+    {
+      "edits": {
+        "film": "kodak_portra_400",
+        "paper": "kodak_portra_endura"
+      },
+      "id": "3f9c2a1b"
+    }
+  ]
+}
