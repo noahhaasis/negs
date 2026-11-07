@@ -132,6 +132,9 @@ const INSPECTOR_MAXIMUM: f64 = 440.0;
 const SPLITTER: f64 = 5.0;
 const MINIMUM_HEIGHT: f64 = 520.0;
 
+/// A first window's frame height in DIPs, before the user sizes it.
+const DEFAULT_HEIGHT: f64 = 940.0;
+
 /// The window's narrowest client width in DIPs.
 fn minimum_width(inspector_visible: bool) -> f64 {
     if inspector_visible { CANVAS_MINIMUM + SPLITTER + INSPECTOR_MINIMUM } else { CANVAS_MINIMUM }
@@ -1526,13 +1529,13 @@ pub fn run() {
 }
 
 fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
-    let Some([_, x, y, w, h]) = prefs.window else { return };
+    let Some([_, x, y, w, h]) = prefs.window else { return default_height(main, dpi) };
     let s = dpi as f64 / 96.0;
     let rect = RECT { left: x, top: y, right: x + (w as f64 * s) as i32, bottom: y + (h as f64 * s) as i32 };
     unsafe {
         // A monitor that is gone leaves the default placement.
         if MonitorFromRect(&rect, MONITOR_DEFAULTTONULL).is_invalid() {
-            return;
+            return default_height(main, dpi);
         }
         let placement = WINDOWPLACEMENT {
             length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
@@ -1541,6 +1544,21 @@ fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
             ..Default::default()
         };
         let _ = SetWindowPlacement(main, &placement);
+    }
+}
+
+/// Without a saved frame the window gets `DEFAULT_HEIGHT`, so an open Film
+/// grid leaves the tabs below it in view, kept inside the monitor's work area.
+fn default_height(main: HWND, dpi: u32) {
+    unsafe {
+        let mut frame = RECT::default();
+        let _ = GetWindowRect(main, &mut frame);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(MonitorFromWindow(main, MONITOR_DEFAULTTONEAREST), &mut info);
+        let work = info.rcWork;
+        let height = ((DEFAULT_HEIGHT * dpi as f64 / 96.0).round() as i32).min(work.bottom - work.top);
+        let y = frame.top.min(work.bottom - height).max(work.top);
+        let _ = SetWindowPos(main, None, frame.left, y, frame.right - frame.left, height, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
 
