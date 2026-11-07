@@ -28,6 +28,12 @@ function Run([string]$Exe, [string[]]$Arguments, [bool]$ExpectSuccess = $true) {
         $process.Kill()
         throw "Timed out: $Exe"
     }
+    # The uninstaller's first phase can exit before its second phase (_unins.tmp) runs [Code] cleanup.
+    $deadline = [DateTime]::Now.AddSeconds(30)
+    while (Get-Process -Name '_unins*' -ErrorAction SilentlyContinue) {
+        if ([DateTime]::Now -gt $deadline) { throw "Timed out: $Exe second phase" }
+        Start-Sleep -Milliseconds 200
+    }
     if ($ExpectSuccess -and $process.ExitCode -ne 0) { throw "$Exe failed with $($process.ExitCode)" }
     return $process.ExitCode
 }
