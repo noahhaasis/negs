@@ -2811,7 +2811,7 @@ fn sync_film_search(ins: &mut Inspector, model: &Model) -> bool {
 /// Typing in the search field filters the Film grid at once, and never
 /// edits the photograph. Each search starts at the top of its matches;
 /// clearing it goes back to the current film.
-fn film_search_changed(app: &mut App, text: String) {
+pub(crate) fn film_search_changed(app: &mut App, text: String) {
     if app.model.previews.film_query == text {
         return;
     }
@@ -2842,7 +2842,7 @@ fn film_search_changed(app: &mut App, text: String) {
 
 /// Return in the search field chooses the first match, as listed: one
 /// undo step, as clicking its tile makes.
-fn choose_first_match(app: &mut App) {
+pub(crate) fn choose_first_match(app: &mut App) {
     let query = app.model.previews.film_query.clone();
     if query.trim().is_empty() {
         return;

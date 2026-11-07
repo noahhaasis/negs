@@ -1777,3 +1777,159 @@ lifecycle_test! {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+// MARK: Film search with the held and quick frames (chunk C)
+
+/// Searches the Film grid for `query` as typing in the field does
+/// (`inspector::film_search_changed`; the headless app has no grid
+/// windows, so only the model's part runs), then refreshes.
+fn search_films(h: &mut Harness, query: &str) {
+    crate::ui::inspector::film_search_changed(&mut h.app, query.to_owned());
+    h.edit(|_| {});
+}
+
+/// The films the Film grid lists for `query`, in its order.
+fn film_matches(m: &super::Model, query: &str) -> Vec<String> {
+    let (films, papers) = (m.films(), m.papers());
+    state::matching(query, state::film_groups(&films, &papers)).iter().flat_map(|g| g.stocks.iter().map(|s| s.id.clone())).collect()
+}
+
+/// The helper commands since the logs were cleared, with the film of each
+/// thumbnail.
+fn thumbnails_and_renders(h: &Harness) -> Vec<String> {
+    h.commands()
+        .iter()
+        .map(|c| match c["command"].as_str().unwrap() {
+            "thumbnail" => format!("thumbnail {}", c["film"].as_str().unwrap()),
+            other => other.to_owned(),
+        })
+        .collect()
+}
+
+/// Asserts that every thumbnail went out after the last render (if any),
+/// for a film in `matches`, each once, and returns how many there were.
+fn thumbnails_after_the_settled_render(h: &Harness, matches: &[String]) -> usize {
+    let commands = thumbnails_and_renders(h);
+    eprintln!("commands: {commands:?}");
+    let last_render = commands.iter().rposition(|c| c == "render").unwrap_or(0);
+    let thumbnails: Vec<&str> = commands.iter().filter_map(|c| c.strip_prefix("thumbnail ")).collect();
+    assert!(commands[..last_render].iter().all(|c| !c.starts_with("thumbnail ")), "a thumbnail before the settled render: {commands:?}");
+    for film in &thumbnails {
+        assert!(matches.iter().any(|m| m == film), "{film} isn't a match of the search: {commands:?}");
+        assert_eq!(thumbnails.iter().filter(|f| *f == film).count(), 1, "{film} asked for twice");
+    }
+    thumbnails.len()
+}
+
+/// Large photo, match on, Film grid open and searching: Return in the field
+/// (`inspector::choose_first_match`) chooses the first match. The canvas
+/// goes previous → matched quick → settled. The search is widened while
+/// the held quick frame's solve runs, and the new matches' thumbnails are
+/// made only after the settled frame, at the matched exposure: the solve
+/// leaves the helper free, so this is where `previews_may_render`'s
+/// `preview_current` matters.
+lifecycle_test! {
+    fn a_searched_film_chosen_with_the_match_on_shows_the_matched_quick_frame_then_settles() {
+        let Some(mut h) = Harness::start(harness::prefs(true)) else { return };
+        open_quick(&mut h, true);
+        let query = "superia 200";
+        search_films(&mut h, query);
+        h.edit(|m| m.set_previews(true));
+        h.edit(|m| m.toggle_foldout(false));
+        h.idle();
+        let matches = film_matches(h.model(), query);
+        assert_eq!(matches.first().map(String::as_str), Some(SUPERIA), "{matches:?}");
+        assert_eq!(thumbnails_after_the_settled_render(&h, &matches), matches.len(), "only the matches' thumbnails");
+        let (gold_ev, generation) = (matched_ev(h.model()), h.model().source_generation);
+        h.clear_logs();
+
+        crate::ui::inspector::choose_first_match(&mut h.app);
+        h.edit(|_| {});
+        let edited = h.model().revision;
+        assert_eq!(h.model().state.film, SUPERIA);
+        assert_eq!(h.model().undo_title(), Some("Change Film"));
+        assert_eq!(until_held(&mut h).kind, FrameKind::Quick);
+        let wider = "superia";
+        search_films(&mut h, wider);
+        let superias = film_matches(h.model(), wider);
+        assert!(superias.len() > matches.len(), "{superias:?}");
+        assert!(h.model().matching_brightness && h.model().held_frame().is_some(), "the search was typed during the solve");
+        h.idle();
+        let m = h.model();
+        assert!((matched_ev(m) - gold_ev).abs() >= 0.05, "the film change moves the match");
+        assert!(m.preview_current && m.held_frame().is_none() && m.revision == edited + 1);
+        assert_eq!(m.previews.film_query, wider);
+        let matched = edited + 1;
+        assert_eq!(h.renders(), [quick(edited, generation), quick(matched, generation), settled(matched, generation)]);
+        assert_eq!(presented(&h), [(matched, FrameKind::Quick), (matched, FrameKind::Settled)], "previous, matched quick, settled");
+        // The matched exposure makes every match's thumbnail stale.
+        assert_eq!(thumbnails_after_the_settled_render(&h, &superias), superias.len());
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+/// A search typed while a quick frame shows asks for no thumbnail until
+/// the settled frame, and then only for its matches.
+lifecycle_test! {
+    fn searching_while_a_quick_frame_shows_waits_for_the_settled_frame() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        // The search first: it lasts while the foldout is closed, and the
+        // grid then asks only for its matches from the start.
+        search_films(&mut h, "portra");
+        h.edit(|m| m.set_previews(true));
+        h.edit(|m| m.toggle_foldout(false));
+        h.idle();
+        let portras = film_matches(h.model(), "portra");
+        assert!(portras.len() >= 2, "{portras:?}");
+        assert_eq!(thumbnails_after_the_settled_render(&h, &portras), portras.len(), "only the matches' thumbnails");
+        h.clear_logs();
+
+        let generation = h.model().source_generation;
+        h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        let edited = h.model().revision;
+        until_quick(&mut h);
+        search_films(&mut h, "gold");
+        assert!(!h.model().preview_current);
+        h.idle();
+        let golds = film_matches(h.model(), "gold");
+        assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)]);
+        assert_eq!(presented(&h), [(edited, FrameKind::Quick), (edited, FrameKind::Settled)]);
+        assert_eq!(thumbnails_after_the_settled_render(&h, &golds), golds.len(), "the new exposure's thumbnails of the matches only");
+        assert!(h.model().preview_current && h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
+
+/// Starring a match while searching, during the settled render after a
+/// quick frame: the render isn't disturbed, nothing renders again, and the
+/// matches' thumbnails, the starred one included, are made once each after
+/// the settled frame.
+lifecycle_test! {
+    fn starring_a_match_during_the_settled_render_leaves_it_alone() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        // The search first: it lasts while the foldout is closed, and the
+        // grid then asks only for its matches from the start.
+        search_films(&mut h, "portra");
+        h.edit(|m| m.set_previews(true));
+        h.edit(|m| m.toggle_foldout(false));
+        h.idle();
+        let portras = film_matches(h.model(), "portra");
+        let starred = portras.iter().find(|id| !h.app.model.prefs.is_favorite(id, false)).expect("an unstarred Portra").clone();
+        h.clear_logs();
+
+        let generation = h.model().source_generation;
+        h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        let edited = h.model().revision;
+        h.run_until("the settled render", |m| m.rendering && m.render_log.last().is_some_and(|r| r.kind == FrameKind::Settled && r.revision == m.revision));
+        h.edit(|m| m.toggle_favorite(&starred, false));
+        assert!(h.model().prefs.is_favorite(&starred, false));
+        h.idle();
+        let m = h.model();
+        assert!(m.preview_current && m.revision == edited, "starring isn't an edit");
+        assert_eq!(h.renders(), [quick(edited, generation), settled(edited, generation)]);
+        assert_eq!(presented(&h), [(edited, FrameKind::Quick), (edited, FrameKind::Settled)]);
+        assert_eq!(thumbnails_after_the_settled_render(&h, &portras), portras.len());
+        assert!(h.errors.is_empty(), "{:?}", h.errors);
+    }
+}
