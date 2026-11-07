@@ -267,6 +267,65 @@ on the 33 MP ARW (Vulkan, medians of 8 steps) a film change whose match stays sh
 2.29 s after the click, after the solve, where it showed at 1.91 s before; one whose match moves
 (Gold 200 and Superia 200) shows only the matched frame, at 4.08 s, two renders and a solve.
 
+**Quick frame** (ticket 28, 2026-11-07, as macOS `30de494` and `8a73944`). A discrete edit (a
+film or paper pick, a menu, Undo) on a photograph of 4.5 MP or more first renders only as many
+pixels as the canvas shows, then the settled frame at once, with no delay. The quick frame's
+status reads "Preview · W × H · developed in …" (with " on the CPU" when it is), the preview
+isn't current (Save, thumbnails and the preset check wait), and it isn't saved to the
+rendered-preview cache. The canvas keeps its fit, zoom and 1:1 stop: they follow the
+photograph's size, not the frame's.
+- **When.** `render_step` decides when a render starts: a drag while a slider moves; otherwise a
+  quick frame if the canvas shows under half the pixels (scale² ≤ 0.5, in physical pixels, so
+  DPI counts), the photograph is 4.5 MP or more, a frame this helper developed of it is on
+  screen (not the first frame, not the restored launch frame), the edit hasn't had its quick
+  frame yet, and the helper can't answer from its kept output. That last one covers post-only
+  edits (about 90 ms on 6 MP instead of a full render). The app keeps the key of the helper's
+  last settled render (the request without `preview_path` and `post`, compared by value) with
+  the epoch of the helper process that made it: a restarted helper keeps nothing, and one that
+  has exited counts as the next epoch already. Border, rotation and crop edits render nothing,
+  as before; with Longest side a crop of another extent renders, with a quick frame.
+- **Settling.** The step travels with the render to `render_finished`: only a drag re-renders on
+  release (a release goes straight to export size), and a quick frame settles only through
+  `settle_quick_frame`, once no render, solve, held frame or slider holds it. A failed quick
+  frame is silent; the settled render reports its error once and nothing retries. A quick frame
+  of an edit already superseded still shows (fast clicks, Ctrl+Z held); the latest edit renders
+  next.
+- **With the match.** A quick frame whose match is pending is held like a settled one, and the
+  solve starts from it (the helper holds its decode). If the match moves the exposure, that edit
+  gets its own quick frame, then the one settled render of the matched exposure; the old
+  exposure never renders at export size. Previous frame → matched quick frame → settled.
+- **Save and Export** asked for while a quick frame shows wait for its settled frame
+  ("Developing the preview…"), then write it.
+- **Where Windows differs from the Mac.** Save and Export wait for the settled frame (the Mac's
+  Save is disabled during a quick frame and skips silently otherwise). A settled render already
+  scheduled waits for a solve that started after it (matching turned on while a quick frame
+  shows, at exposure 0, which is no edit); the Mac sends it at the old exposure. The kept-output
+  key includes the helper's epoch; the Mac's doesn't.
+
+Timings, Gold 200 and Portra 400 alternated, medians from the click (the protocol of "Render
+lifecycle tests and timing" below; Vulkan 8 changes, CPU 4; ms):
+
+| Photograph, matching | Vulkan first change, before → after | Vulkan settled, before → after | CPU first change, before → after | CPU settled, before → after |
+|---|---|---|---|---|
+| 60 MP DNG, off | 3717 → **175** | 3717 → 3474 | 96 922 → **2110** | 96 922 → 97 467 |
+| 33 MP ARW, off | 1873 → **192** | 1873 → 2228 | 51 984 → **2105** | 51 984 → 54 988 |
+| 33 MP ARW, on | 2289 → **570** | 2289 → 2640 | 52 056 → **3496** | 52 056 → 54 671 |
+| 12 MP JPEG, off | 695 → **104** | 695 → 845 | 19 733 → **1254** | 19 733 → 23 919 |
+| 12 MP JPEG, on | 734 → **464** | 734 → 1263 | 19 040 → **3220** | 19 040 → 25 862 |
+
+- **"Before"** is the baseline below, from before the held frame, except the ARW with matching on
+  on Vulkan, which is the held frame's 2289 ms. The held frame was not measured on the CPU or on
+  the JPEG.
+- **With matching on** the first change includes the solve (about 0.29 s on Vulkan, 1.3–1.8 s
+  on the CPU), because the quick frame is held for it.
+- **The quick render** itself takes 80–165 ms on Vulkan and 1.2–2.1 s on the CPU.
+- **The settled frame comes later, as expected:** by the quick render plus 150–400 ms on Vulkan
+  (the 60 MP DNG varies more than that from run to run), and by 0.5–4 s on the CPU. The 12 MP
+  CPU settled render was itself 15 % slower in this run (22.6 against 19.7 s).
+- **Memory.** The helper's working set grew by 1–27 MB idle and by up to 56 MB at its peak
+  (60 MP DNG on Vulkan: 1631 / 2357 MB against 1606 / 2301 MB). The Mac reported 211 MB on
+  60 MP.
+
 The reference (`brightness.rs`) is the RAW's embedded preview through rawler, oriented,
 letterbox bars trimmed when its shape differs, at most 512 px. For JPEG, PNG and TIFF it is
 the file itself through WIC with its profile; transparent and floating-point files are
@@ -666,8 +725,9 @@ What a test can use:
 - `fire_timers`: runs `ui::after` tasks early.
 - `model.render_log`: every render request (kind, revision, generation, interactive scale).
 - `commands()`: every helper command, in the order sent.
-- `frames`: every frame shown. `errors`: every error reported. `model.held_frame()`: the frame
-  held for its brightness match, if any.
+- `frames`: every frame shown, sampled after each task; `model.frame_log`: every frame
+  presented, also one replaced within a task. `errors`: every error reported.
+  `model.held_frame()`: the frame held for its brightness match, if any.
 - `ui::canvas::set_fixed_scale`: stands in for the canvas. Its value is in physical screen pixels
   per photograph pixel; the app is per-monitor DPI aware, so the same view at 150 % has 1.5 times
   the scale it has at 100 %.
