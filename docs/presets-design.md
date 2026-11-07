@@ -123,6 +123,9 @@ points. Applying replaces the photograph's plain points and keeps its pins. An e
 plain points, so a Negs preset looks the same whatever was applied before it; a file without
 the key leaves them alone.
 
+Midtone Detail works the same way, as `negs_midtone_detail`: the only Prep setting with a
+control. The rest of Prep is left out.
+
 Applying is deterministic: the Lab settings come from the (normalized) file, and nothing else
 from the previous state survives except the excluded settings above.
 

@@ -152,6 +152,7 @@ import XCTest
         let points = try XCTUnwrap(file?["negs_tone_curve"] as? [[String: Any]])
         XCTAssertEqual(points.count, 2)
         XCTAssertTrue(points.allSatisfy { $0["source"] == nil || $0["source"] is NSNull }, "\(points)")
+        XCTAssertEqual(file?["negs_midtone_detail"] as? Double, 0)
 
         // On another photograph, as plain points.
         model.open(other)
@@ -176,6 +177,73 @@ import XCTest
         model.open(third)
         XCTAssertEqual(model.pins.count, 2)
         XCTAssertTrue(model.pins.allSatisfy { $0.source == nil })
+    }
+
+    /// On a real RAW: saved, applied to another photograph, and opened with as
+    /// the default, and the developed picture changes with it.
+    func testAPresetCarriesWhiteBalanceOnARaw() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let samples = root.appendingPathComponent("web/sample")
+        let names = ["DSC_6028.dng", "DSC_6377.dng", "DSC_2498.dng"]
+        guard names.allSatisfy({ FileManager.default.fileExists(atPath: samples.appendingPathComponent($0).path) }) else { throw XCTSkip("No sample RAWs") }
+        var raws: [URL] = []
+        for name in names {
+            let copy = directory.appendingPathComponent(name)
+            try FileManager.default.copyItem(at: samples.appendingPathComponent(name), to: copy)
+            raws.append(copy)
+        }
+        let model = EditorModel(previewCache: RenderedPreviewCache(file: directory.appendingPathComponent("wb.cache")), presetLibrary: PresetLibrary(folder: directory.appendingPathComponent("presets", isDirectory: true)))
+        defer { model.shutdown() }
+        await model.start(paths: try paths())
+        func waitUntil(_ condition: () -> Bool) async throws {
+            for _ in 0..<3000 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertTrue(condition(), "Timed out: \(model.error ?? model.status)")
+        }
+        // The histogram arrives just after the render it counts.
+        func developed() async throws -> Histogram {
+            try await waitUntil { model.previewCurrent && !model.rendering && model.histogram != nil }
+            return try XCTUnwrap(model.histogram)
+        }
+        model.open(raws[0])
+        _ = try await developed()
+        XCTAssertTrue(model.isRaw)
+        model.set("io.raw_white_balance.mode", .string("custom"))
+        model.set("io.raw_white_balance.temperature", .number(3000))
+        model.set("io.raw_white_balance.tint", .number(1.5))
+        _ = try await developed()
+        model.newPreset()
+        try await waitUntil { model.renamingPreset != nil }
+        let preset = try XCTUnwrap(model.presets.first)
+        model.renamePreset(preset, to: "Warm")
+        try await waitUntil { model.presets.first?.name == "Warm" && model.renamingPreset == nil }
+        let saved = try XCTUnwrap(model.presets.first)
+        let file = try JSONSerialization.jsonObject(with: Data(contentsOf: saved.url)) as? [String: Any]
+        let load = file?["load_raw"] as? [String: Any]
+        XCTAssertEqual(load?["white_balance"] as? String, "custom")
+        XCTAssertEqual(load?["temperature"] as? Double, 3000)
+
+        // Another photograph, at its own white balance, then with the preset.
+        model.open(raws[1])
+        XCTAssertNotEqual(model.value("io.raw_white_balance.mode").string, "custom")
+        let before = try await developed()
+        model.applyPreset(saved)
+        try await waitUntil { model.value("io.raw_white_balance.mode").string == "custom" }
+        XCTAssertEqual(model.value("io.raw_white_balance.temperature").double, 3000)
+        XCTAssertEqual(model.value("io.raw_white_balance.tint").double, 1.5)
+        try await waitUntil { model.previewCurrent && model.histogram != before }
+        XCTAssertNotEqual(model.histogram, before, "The picture develops with the preset's white balance")
+
+        // A photograph opened with it as the default.
+        model.setDefaultPreset(saved)
+        try await waitUntil { model.defaultPresetFile != nil }
+        model.open(raws[2])
+        XCTAssertEqual(model.value("io.raw_white_balance.mode").string, "custom")
+        XCTAssertEqual(model.value("io.raw_white_balance.temperature").double, 3000)
+        // And it's still there on coming back to it.
+        model.open(raws[1])
+        XCTAssertEqual(model.value("io.raw_white_balance.mode").string, "custom")
+        model.open(raws[2])
+        XCTAssertEqual(model.value("io.raw_white_balance.mode").string, "custom")
     }
 
     /// A horizontal grey ramp in sRGB, the tones a pick can read.
@@ -977,8 +1045,8 @@ extension ZoneModelTests {
         XCTAssertEqual(model.value(ImageSize.targetPath).double, 1234)
     }
 
-    /// Opening a photograph sets the rest of its folder developing, without the
-    /// grid, and nothing new starts while the open photograph is being edited.
+    /// Opening a photograph sets its neighbours developing, without the grid,
+    /// and nothing new starts while the open photograph is being edited.
     func testOpeningAPhotographDevelopsItsFolder() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
@@ -1339,23 +1407,63 @@ extension ZoneModelTests {
         XCTAssertNil(model.placeholder)
     }
 
-    /// The grid's reveal waits for the frames around where it opens, then holds.
-    func testTheDeveloperSaysWhenTheFramesNearbyAreReady() async throws {
+    /// Only what's within reach develops, nearest first, however large the folder.
+    func testOnlyTheFramesWithinReachDevelop() async throws {
         let model = try await makeModel()
         defer { model.shutdown() }
         for index in 0..<30 { try FileManager.default.copyItem(at: ramp, to: directory.appendingPathComponent("z\(index).png")) }
         let files = try PhotoFolder.snapshot(in: directory).filter { $0.url.pathExtension == "png" }
         let developer = try RollDeveloper(paths: try paths(), cache: directory.appendingPathComponent("near", isDirectory: true)) { model.frameRequest(for: $0) }
         defer { developer.stop() }
-        XCTAssertFalse(developer.nearReady)
         developer.show(files: files, centre: 15)
-        XCTAssertFalse(developer.nearReady, "Nothing's developed yet")
-        XCTAssertEqual(developer.nearTotal, 25)
-        try await waitUntil { developer.nearReady }
-        // All of them, in memory, the moment it says so.
-        for index in 3...27 {
-            XCTAssertNotNil(developer.frames[files[index].url], "\(index)")
-        }
+        XCTAssertEqual(developer.total, RollDeveloper.openReach * 2 + 1)
+        try await waitUntil({ developer.finished == developer.total && !developer.isDeveloping }, timeout: 30)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(developer.developedCount, RollDeveloper.openReach * 2 + 1, "Not the rest of the folder")
+        for index in 11...19 { XCTAssertNotNil(developer.frames[files[index].url], "\(index)") }
+        XCTAssertNil(developer.frames[files[0].url])
+        // The grid looks further, and only that much further.
+        developer.reach = 6
+        try await waitUntil({ developer.developedCount == 13 && !developer.isDeveloping }, timeout: 30)
+    }
+
+    /// A file that can't develop is tried once, not over and over.
+    func testAFrameThatCantDevelopIsntTriedAgain() async throws {
+        let model = try await makeModel()
+        defer { model.shutdown() }
+        let broken = directory.appendingPathComponent("broken.png")
+        try Data("not a photograph".utf8).write(to: broken)
+        let files = try PhotoFolder.snapshot(in: directory).filter { $0.url.pathExtension == "png" }
+        XCTAssertTrue(files.contains { $0.url.lastPathComponent == "broken.png" })
+        let developer = try RollDeveloper(paths: try paths(), cache: directory.appendingPathComponent("broken", isDirectory: true)) { model.frameRequest(for: $0) }
+        defer { developer.stop() }
+        developer.show(files: files, centre: 0)
+        try await waitUntil({ developer.finished == developer.total && !developer.isDeveloping }, timeout: 30)
+        let tried = developer.developedCount
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(developer.developedCount, tried)
+    }
+
+    /// An install rewrites the helper without changing it: its frames still hold.
+    func testAFramesKeyFollowsTheHelpersContentsNotItsDate() throws {
+        let helper = directory.appendingPathComponent("helper")
+        try Data("engine".utf8).write(to: helper)
+        let file = PhotoFile(url: ramp)
+        let key = RollDeveloper.key(file: file, command: [:], helper: helper)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000)], ofItemAtPath: helper.path)
+        XCTAssertEqual(RollDeveloper.key(file: file, command: [:], helper: helper), key)
+        try Data("engin2".utf8).write(to: helper)
+        XCTAssertNotEqual(RollDeveloper.key(file: file, command: [:], helper: helper), key)
+    }
+
+    /// The grid's listing opens no files: their shapes are what took so long.
+    func testTheGridsListingReadsNoShapes() async throws {
+        let listing = FolderListing(readsShapes: false)
+        let done = Task { await listing.watch(directory) {} }
+        defer { done.cancel() }
+        try await waitUntil { !listing.loading }
+        XCTAssertFalse(listing.files.isEmpty)
+        XCTAssertTrue(listing.aspects.isEmpty)
     }
 
     /// Going in and out of the grid develops nothing again, and has its frames ready
@@ -1377,7 +1485,7 @@ extension ZoneModelTests {
             try await Task.sleep(for: .milliseconds(150))
             model.toggleGrid()
             XCTAssertTrue(model.rollDeveloper === developer, "The same developer")
-            XCTAssertTrue(developer.nearReady, "Ready the moment it's back")
+            XCTAssertNotNil(developer.frames[ramp], "Ready the moment it's back")
             try await Task.sleep(for: .milliseconds(200))
             XCTAssertFalse(developer.isDeveloping)
         }

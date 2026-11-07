@@ -111,6 +111,10 @@ actor PhotoThumbnails {
     private(set) var aspects: [URL: CGFloat] = [:]
     private(set) var loading = true
     private(set) var failed = false
+    /// Reading a shape opens the file, which in a large folder takes a while.
+    @ObservationIgnored private let readsShapes: Bool
+
+    init(readsShapes: Bool = true) { self.readsShapes = readsShapes }
 
     /// Lists `directory`, calling `listed` after the first scan, and follows
     /// its changes until cancelled, which also releases the watch.
@@ -131,11 +135,13 @@ actor PhotoThumbnails {
     }
 
     private func refresh(_ directory: URL) async {
-        let known = aspects
+        let known = aspects, readsShapes = readsShapes
         let scan = Task.detached(priority: .utility) { () -> ([PhotoFile], [URL: CGFloat]) in
             let files = try PhotoFolder.snapshot(in: directory)
             var shapes: [URL: CGFloat] = [:]
-            for file in files { shapes[file.url] = known[file.url] ?? PhotoFolder.aspect(of: file.url) }
+            if readsShapes {
+                for file in files { shapes[file.url] = known[file.url] ?? PhotoFolder.aspect(of: file.url) }
+            }
             return (files, shapes)
         }
         do {

@@ -123,6 +123,9 @@ pub struct Preset {
     /// The tone curve written by Negs, as plain points. A file from before
     /// there was one, or from Python, has none and leaves the photograph's alone.
     pub tone_curve: Option<Vec<crate::post::ToneAnchor>>,
+    /// Midtone Detail, the one Prep setting with a control. A file without it
+    /// leaves the photograph's alone.
+    pub midtone_detail: Option<f32>,
 }
 
 /// Read a preset file. Errors name the reason, for the user.
@@ -143,6 +146,15 @@ pub fn import(text: &str, data_dir: &Path) -> Result<Preset, String> {
                 .map_err(|error| format!("Invalid tone curve: {error}"))
         })
         .transpose()?;
+    let midtone_detail = file
+        .get("negs_midtone_detail")
+        .map(|value| {
+            serde_json::from_value::<f32>(value.clone())
+                .ok()
+                .filter(|detail| (-100.0..=100.0).contains(detail))
+                .ok_or_else(|| "Invalid midtone detail: it must be a number from -100 to 100.".to_string())
+        })
+        .transpose()?;
     let state = gui_state(&file)?;
     let (film, paper) = (stock(&state, "simulation.film_stock")?, stock(&state, "simulation.print_paper")?);
     let film_stock = load_stock(data_dir, &film, false)?;
@@ -151,7 +163,7 @@ pub fn import(text: &str, data_dir: &Path) -> Result<Preset, String> {
     check(&state, &params)?;
     params.film_render.development_time = listed_time(&film_stock, params.film_render.development_time);
     params.print_render.development_time = listed_time(&paper_stock, params.print_render.development_time);
-    Ok(Preset { film, paper, params, finish, tone_curve })
+    Ok(Preset { film, paper, params, finish, tone_curve, midtone_detail })
 }
 
 /// A development time as the stock's family lists it: the entry the engine
@@ -200,6 +212,9 @@ pub fn apply_with_finish(preset: &Preset, current: &RuntimeParams, include_finis
     if let Some(curve) = &preset.tone_curve {
         let pins = current.post.tone_anchors.iter().filter(|anchor| anchor.source.is_some());
         applied.post.tone_anchors = pins.chain(curve).copied().collect();
+    }
+    if let Some(detail) = preset.midtone_detail {
+        applied.prep.midtone_detail = detail;
     }
     applied
 }
@@ -281,6 +296,11 @@ pub fn export_with_finish(film_id: &str, paper_id: &str, params: &RuntimeParams,
         .as_object_mut()
         .expect("the preset state is an object")
         .insert("negs_tone_curve".into(), serde_json::from_str(&curve).expect("serde_json reads its own output"));
+    let detail = serde_json::to_string(&params.prep.midtone_detail).expect("numbers serialize");
+    state
+        .as_object_mut()
+        .expect("the preset state is an object")
+        .insert("negs_midtone_detail".into(), serde_json::from_str(&detail).expect("serde_json reads its own output"));
     let text = serde_json::to_string_pretty(&state).expect("JSON values serialize");
     let marker = serde_json::to_string(INFINITY).expect("strings serialize");
     Ok(text.replace(&marker, "Infinity") + "\n")
@@ -858,6 +878,56 @@ mod tests {
         assert_eq!(apply_with_finish(&old, &current, false).post.tone_anchors, current.post.tone_anchors);
 
         assert!(import(&text.replacen("\"negs_tone_curve\": [", "\"negs_tone_curve\": [\"no\",", 1), &data).unwrap_err().contains("tone curve"));
+    }
+
+    #[test]
+    fn midtone_detail_is_saved_and_replaces_the_photograph_s() {
+        let data = data_dir();
+        let mut saved = RuntimeParams::default();
+        saved.prep.midtone_detail = 35.0;
+        saved.prep.highlights = 20.0;
+        let text = export("kodak_portra_400", "kodak_supra_endura", &saved, &data).unwrap();
+        let preset = import(&text, &data).unwrap();
+        assert_eq!(preset.midtone_detail, Some(35.0));
+
+        let mut current = RuntimeParams::default();
+        current.prep.midtone_detail = -10.0;
+        current.prep.highlights = 5.0;
+        let applied = apply_with_finish(&preset, &current, false);
+        assert_eq!(applied.prep.midtone_detail, 35.0);
+        assert_eq!(applied.prep.highlights, 5.0, "the rest of Prep stays with the photograph");
+
+        // Zero is saved too, so it doesn't depend on what came before.
+        let zero = import(&export("kodak_portra_400", "kodak_supra_endura", &RuntimeParams::default(), &data).unwrap(), &data).unwrap();
+        assert_eq!(apply_with_finish(&zero, &current, false).prep.midtone_detail, 0.0);
+
+        let old = import(DEFAULT_GUI_STATE, &data).unwrap();
+        assert_eq!(old.midtone_detail, None);
+        assert_eq!(apply_with_finish(&old, &current, false).prep.midtone_detail, -10.0);
+
+        let refused = text.replace("\"negs_midtone_detail\": 35.0", "\"negs_midtone_detail\": 500.0");
+        assert!(import(&refused, &data).unwrap_err().contains("midtone detail"));
+    }
+
+    #[test]
+    fn white_balance_is_saved_in_every_mode() {
+        use spektrafilm_io::RawWhiteBalanceMode::{AsShot, Custom, Daylight, Tungsten};
+        let data = data_dir();
+        for mode in [AsShot, Daylight, Tungsten, Custom] {
+            let mut saved = RuntimeParams::default();
+            saved.io.raw_white_balance.mode = mode;
+            saved.io.raw_white_balance.temperature = 4200.0;
+            saved.io.raw_white_balance.tint = 1.3;
+            let text = export("kodak_portra_400", "kodak_supra_endura", &saved, &data).unwrap();
+            let preset = import(&text, &data).unwrap();
+            let mut current = RuntimeParams::default();
+            current.io.raw_white_balance.mode = if mode == Tungsten { Daylight } else { Tungsten };
+            let wb = apply_with_finish(&preset, &current, false).io.raw_white_balance;
+            assert_eq!(wb.mode, mode, "{text}");
+            if mode == Custom {
+                assert_eq!((wb.temperature, wb.tint), (4200.0, 1.3));
+            }
+        }
     }
 
     #[test]

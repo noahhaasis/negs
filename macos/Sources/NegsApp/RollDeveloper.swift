@@ -3,17 +3,20 @@ import CryptoKit
 import Foundation
 import ImageIO
 import Observation
+import os
 import UniformTypeIdentifiers
 
-/// Develops a folder's photographs behind the scenes from when one opens, for
-/// the grid and for the next to open, each with its own final edit, nearest the centre first, and keeps them in a cache on
-/// disk so they never have to be developed twice. It has a helper of its own: the
+/// Develops the photographs near the view behind the scenes, for the grid and for
+/// the next to open, each with its own final edit, nearest the centre first, and
+/// keeps them in a cache on disk so they never have to be developed twice. Only
+/// those within `reach` of the centre: never a whole folder for its own sake. It
+/// has a helper of its own: the
 /// main one holds the open photograph's decoded source, which a run through other
 /// files would throw away.
 @MainActor @Observable final class RollDeveloper {
     /// The developed frames near the centre, ready to draw at once.
     private(set) var frames: [URL: CGImage] = [:]
-    /// Frames finished of the folder's, for the status bar.
+    /// Frames finished of those within reach, for the status bar.
     private(set) var finished = 0
     private(set) var total = 0
     /// A frame is going through the film now, rather than being read from the cache.
@@ -21,13 +24,13 @@ import UniformTypeIdentifiers
     /// How many had to be developed rather than read from the disk cache.
     @ObservationIgnored private(set) var developedCount = 0
 
-    /// The grid waits for this many frames either side of where it opens, in memory,
-    /// so nothing changes in front of you.
-    static let revealRadius = 12
-    /// Whether the frames around the centre are all done and ready to draw.
-    private(set) var nearReady = false
-    private(set) var nearFinished = 0
-    private(set) var nearTotal = 0
+    /// How far either side of the centre to develop: the neighbours the arrow keys
+    /// reach next, or what the grid has on screen and just beyond it.
+    nonisolated static let openReach = 4
+    nonisolated static let gridReach = 32
+    var reach = RollDeveloper.openReach {
+        didSet { if reach != oldValue { wake() } }
+    }
     /// Frames this far from the middle of the screen stay decoded, so scrolling never waits.
     static let keptRadius = 32
     private static let unavailable = "unavailable"
@@ -100,24 +103,23 @@ import UniformTypeIdentifiers
         return Set(files[low...high].map(\.url))
     }
 
-    /// The next frame to look at, nearest the centre.
+    /// The next frame to look at within reach, nearest the centre. One that couldn't
+    /// be developed isn't tried again until its edit or the file changes.
     private func next() -> PhotoFile? {
-        let near = nearURLs()
-        return files.indices
-            .sorted { abs($0 - centre) < abs($1 - centre) }
-            .lazy.map { self.files[$0] }
-            .first { self.completed[$0.url] == nil || (near.contains($0.url) && self.frames[$0.url] == nil) }
+        for distance in 0...max(reach, 0) {
+            for index in distance == 0 ? [centre] : [centre - distance, centre + distance] where files.indices.contains(index) {
+                let url = files[index].url
+                let done = completed[url]
+                if done == nil || (done != Self.unavailable && frames[url] == nil) { return files[index] }
+            }
+        }
+        return nil
     }
 
     private func updateProgress() {
-        total = files.count
-        finished = completed.count
-        let near = files.indices.filter { abs($0 - centre) <= Self.revealRadius }.map { files[$0].url }
-        nearTotal = near.count
-        // A frame that couldn't be developed has nothing to wait for.
-        // A frame being looked at again still has its picture to show meanwhile.
-        nearFinished = near.filter { frames[$0] != nil || completed[$0] == Self.unavailable }.count
-        nearReady = !near.isEmpty && nearFinished == near.count
+        let reachable = files.indices.filter { abs($0 - centre) <= reach }
+        total = reachable.count
+        finished = reachable.filter { completed[files[$0].url] != nil }.count
     }
 
     private func wake() {
@@ -184,12 +186,26 @@ import UniformTypeIdentifiers
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let edit = (try? encoder.encode(JSONValue.object(command))) ?? Data()
-        let built = (try? helper.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?.timeIntervalSince1970 ?? 0
         var hash = SHA256()
-        hash.update(data: Data("\(file.url.path)|\(file.modified?.timeIntervalSince1970 ?? 0)|\(file.size ?? 0)|\(built)|".utf8))
+        hash.update(data: Data("\(file.url.path)|\(file.modified?.timeIntervalSince1970 ?? 0)|\(file.size ?? 0)|\(contentsDigest(of: helper))|".utf8))
         hash.update(data: edit)
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
+
+    /// The helper's contents rather than its date, which every install changes:
+    /// frames only go stale when the engine itself is different. Read once per build.
+    nonisolated private static func contentsDigest(of helper: URL) -> String {
+        // Not resourceValues, which a URL keeps for a while once it's read them.
+        let attributes = try? FileManager.default.attributesOfItem(atPath: helper.path)
+        let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let stamp = "\(helper.path)|\(modified)|\(attributes?[.size] ?? 0)"
+        if let known = helperDigests.withLock({ $0[stamp] }) { return known }
+        guard let data = try? Data(contentsOf: helper, options: .mappedIfSafe) else { return "" }
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        helperDigests.withLock { $0[stamp] = digest }
+        return digest
+    }
+    nonisolated private static let helperDigests = OSAllocatedUnfairLock(initialState: [String: String]())
 
     /// A frame already developed with this edit, if it's in the cache.
     nonisolated static func cachedFrame(file: PhotoFile, command: [String: JSONValue], helper: URL, cache: URL = defaultCache) -> CGImage? {

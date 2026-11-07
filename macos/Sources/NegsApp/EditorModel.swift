@@ -122,7 +122,7 @@ import UniformTypeIdentifiers
 
     /// The grid is up in place of the photograph. G, or a double-click to leave.
     private(set) var gridVisible = false
-    /// Develops the folder's final edits while the grid is up.
+    /// Develops the final edits of the photographs near the view.
     private(set) var rollDeveloper: RollDeveloper?
 
     func toggleGrid() {
@@ -136,6 +136,7 @@ import UniformTypeIdentifiers
         if let source {
             rollDeveloper?.invalidate(source)
         }
+        rollDeveloper?.reach = RollDeveloper.gridReach
         gridVisible = true
     }
 
@@ -149,8 +150,8 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// Develops the rest of the folder behind the scenes, out from `url`, so the
-    /// grid and the next photograph have their frames waiting.
+    /// Develops the photographs either side of `url` behind the scenes, so the
+    /// next one has its frame waiting.
     private func developFolder(around url: URL) {
         guard hasCatalog else { return }
         startRollDeveloper()
@@ -183,10 +184,11 @@ import UniformTypeIdentifiers
         open(shown[index + step].url)
     }
 
-    /// The developer stays, with its frames, carrying on through the folder, so
-    /// coming back doesn't start over. Only another folder ends it.
+    /// The developer stays, with its frames, so coming back doesn't start over.
+    /// Only another folder ends it.
     private func closeGrid() {
         gridVisible = false
+        rollDeveloper?.reach = RollDeveloper.openReach
     }
 
     /// Back to the edit view, on `url`.

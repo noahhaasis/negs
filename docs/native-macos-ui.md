@@ -355,18 +355,21 @@ columns on black, with each photograph's camera details in amber above and below
 the edit view. It starts at the open photograph and the sidebar stays. Double-clicking a
 photograph opens it to edit, and G goes back. It follows the film strip's RAW-only setting.
 
-Every photograph shows its final edit: its saved edit, or what it would open with.
-From when a photograph opens, out from it, and starting nothing new while that photograph is developing, being edited or exporting, so the grid and the next photograph have their frames waiting. `RollDeveloper` develops them in the background with a helper of its own, since the main
-helper holds the open photograph's decoded source, nearest the middle of the screen first
-and through the whole folder, at 800 px on the long side. It reads a RAW no larger than
+The grid shows at once, with no file opened for its shape: each photograph starts as its
+embedded preview (`PhotoThumbnails`) and becomes its final edit, its saved edit or what it would
+open with, as that develops. `RollDeveloper` develops them in the background with a helper of its
+own, since the main helper holds the open photograph's decoded source, nearest the middle of
+the screen first and at 800 px on the long side. It only develops what's near the view: the 32
+either side of the middle of the grid, or the 4 either side of the open photograph otherwise,
+starting nothing new while that photograph is developing, being edited or exporting. A frame
+that can't develop isn't tried again until its edit or file changes. It reads a RAW no larger than
 1200 px (`decode_long_side`), through the same Apple processing: on a 45 MP NEF that takes a
-frame from about 380 ms to 215 ms, with the film simulation itself only about 15 ms. The grid stays hidden behind a
-progress count until the 12 frames either side of the open photograph are ready in memory.
-No embedded previews show there: a cell scrolled to before it's developed stays black. Finished photographs are kept as JPEGs in the app's caches (`RollFrames`,
-2 GB, least recently used goes first), keyed by the file, its edit and the helper build, so
-nothing develops twice. Those within 32 of the middle stay decoded in memory. The developer stays after
-leaving the grid, with its frames, carrying on through the folder, so coming back needs no
-wait; only opening a photograph in another folder ends it. Image Size isn't part of a
+frame from about 380 ms to 215 ms, with the film simulation itself only about 15 ms. Finished
+photographs are kept as JPEGs in the app's caches (`RollFrames`, 2 GB, least recently used goes
+first), keyed by the file, its edit and the contents of the helper, so nothing develops twice and
+an install that doesn't change the engine costs nothing. Those within 32 of the middle stay
+decoded in memory. The developer stays after leaving the grid, with its frames, so coming back
+needs no wait; only opening a photograph in another folder ends it. Image Size isn't part of a
 frame's key, since the grid's frames have their own size.
 
 ## Photograph size
