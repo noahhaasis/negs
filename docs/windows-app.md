@@ -138,6 +138,20 @@ screenshots: [the handoff's Windows results](handoff-stock-previews-windows.md#w
 Settings also has "Keep paper when changing film" (`keep_paper`, off by default; see
 [handoff-keep-paper.md](handoff-keep-paper.md)).
 
+### Film search
+
+The Mac's `b8ad592` (2026-11-05). A "Search films" field sits over the Film grid, outside
+its scrolling; Paper has none. Every word typed must be in the film's name, its id with `_`
+read as spaces, or its group title, ignoring case and accents (`state::matching`, through
+`FindNLSStringEx` in the invariant locale). While searching, the favourites hide and each
+match shows once under its group, in catalog order; groups without matches drop out, and
+with none the grid says `No films match “…”`. The grid keeps its height. Return chooses the
+first match (one "Change Film" undo step, as a click on its tile), Escape clears the field.
+A new search scrolls to the top; clearing it goes back to the current film. A search hides
+tiles and lays the rest out again, so tiles and thumbnails stay, and thumbnails are made
+only for the matches, in the order shown. The search lasts for the session (closing and
+opening the foldout keeps it) and isn't a preference; turning previews off clears it.
+
 ## Lens corrections
 
 A RAW whose decode finds the camera's lens data (DNG opcodes; Sony, Fujifilm, OM/Olympus

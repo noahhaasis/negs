@@ -290,6 +290,10 @@ pub struct Previews {
     /// Collapsed at every launch.
     pub film_open: bool,
     pub paper_open: bool,
+    /// The Film grid's search field, as typed: for this session, kept while
+    /// the foldout closes and opens again, as the Mac's `StockFoldout` keeps
+    /// its query. Not a preference.
+    pub film_query: String,
     thumbs: HashMap<Target, Thumb>,
     /// A thumbnail request is with the helper.
     pub busy: bool,
