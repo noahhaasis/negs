@@ -23,6 +23,8 @@ struct PreviewCanvas: NSViewRepresentable {
     var draggedRadius = SampleSize.initial
     /// In a proof, the pixels the export writes: they alone set the photograph's size.
     var proofPixels: CGSize? = nil
+    /// Steps of ⌘+ and ⌘− away from that size.
+    var zoomSteps = 0
     /// The camera details shown under the photograph.
     var exif: PhotoExif? = nil
     /// The zone panel's up, so the photograph needs room beside it.
@@ -65,6 +67,7 @@ struct PreviewCanvas: NSViewRepresentable {
         photo.draggedRadius = draggedRadius
         scroll.onScrollPin = onScrollPin
         scroll.proofPixels = proofPixels
+        scroll.zoomSteps = zoomSteps
         scroll.exif = exif
         scroll.overlay.onZonePlacement = onZonePlacement
         // Esc and Delete reach the photograph once a pin is selected.
@@ -175,7 +178,7 @@ final class ImageScrollView: NSScrollView {
     /// One step of ⌘+ or ⌘−.
     static let zoomStep: CGFloat = 2.0.squareRoot()
     /// In a proof, the pixels the export writes, shown one to a screen pixel.
-    /// Only they set the zoom: the window's size doesn't, and nothing else can.
+    /// Only they and ⌘+ and ⌘− set the zoom: the window's size doesn't.
     var proofPixels: CGSize? {
         didSet {
             guard proofPixels != oldValue else { return }
@@ -201,15 +204,21 @@ final class ImageScrollView: NSScrollView {
         // The photograph alone sets the scale: a border only adds to the canvas.
         let photo = (documentView as? PhotographView)?.displaySize ?? .zero
         let shown = max(photo.width, photo.height) > 0 ? photo : size
-        return long / max(shown.width, shown.height) / (window?.backingScaleFactor ?? 2)
+        return long / max(shown.width, shown.height) / (window?.backingScaleFactor ?? 2) * pow(Self.zoomStep, CGFloat(zoomSteps))
     }
 
-    /// ⌘+ and ⌘−, about the middle of what's on screen.
-    func zoom(by factor: CGFloat) {
-        guard !isProof, documentView != nil else { return }
-        setFitting(false)
-        let visible = contentView.bounds
-        setMagnification(min(max(magnification * factor, minMagnification), maxMagnification), centeredAt: NSPoint(x: visible.midX, y: visible.midY))
+    /// ⌘+ and ⌘− from the export's size, about the middle of what's on screen.
+    /// Counted in whole steps, so stepping back lands exactly on one to one.
+    var zoomSteps = 0 {
+        didSet {
+            guard zoomSteps != oldValue, let documentView,
+                  let wanted = proofMagnification(document: documentView.frame.size) else { return }
+            let visible = contentView.bounds
+            setMagnification(min(max(wanted, minMagnification), maxMagnification), centeredAt: NSPoint(x: visible.midX, y: visible.midY))
+            // Constraining again centres whatever is smaller than the window.
+            contentView.scroll(to: contentView.bounds.origin)
+            reflectScrolledClipView(contentView)
+        }
     }
     /// The pins and their lines, above the document.
     let overlay = PinOverlayView(frame: .zero)

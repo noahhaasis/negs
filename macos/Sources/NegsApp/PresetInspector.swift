@@ -94,6 +94,11 @@ struct PresetInspector: View {
         .contextMenu(forSelectionType: URL.self) { urls in
             if let preset = preset(urls.first) {
                 Button("Apply") { model.applyPreset(preset) }.disabled(!valid(preset))
+                if model.isDefaultPreset(preset) {
+                    Button("Remove as Default", action: model.clearDefaultPreset)
+                } else {
+                    Button("Set as Default") { model.setDefaultPreset(preset) }.disabled(!valid(preset))
+                }
                 Button("Rename") { model.renamingPreset = preset.url }
                 Button("Export…") { model.exportPresetPanel(preset) }
                 Divider()
@@ -146,7 +151,12 @@ private struct PresetRow: View {
                 if model.renamingPreset == preset.url {
                     NameField(name: preset.name) { model.renamePreset(preset, to: $0) } cancel: { model.cancelRename(preset) }
                 } else {
-                    Text(preset.name).lineLimit(1).foregroundStyle(invalid == nil ? .primary : .secondary)
+                    HStack(spacing: 6) {
+                        Text(preset.name).lineLimit(1).foregroundStyle(invalid == nil ? .primary : .secondary)
+                        if model.isDefaultPreset(preset) {
+                            Text("Default").font(.caption).foregroundStyle(.secondary).fixedSize()
+                        }
+                    }
                 }
                 Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(invalid == nil ? (tile == nil ? 1 : 2) : 3)
             }

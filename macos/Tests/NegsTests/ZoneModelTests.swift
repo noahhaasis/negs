@@ -13,6 +13,7 @@ import XCTest
 
     override func setUpWithError() throws {
         UserDefaults.standard.removeObject(forKey: "imageSize")
+        UserDefaults.standard.removeObject(forKey: EditorModel.defaultPresetKey)
         _ = NSApplication.shared
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("negs-zone-\(UUID().uuidString)")
@@ -25,7 +26,104 @@ import XCTest
 
     override func tearDownWithError() throws {
         UserDefaults.standard.removeObject(forKey: "imageSize")
+        UserDefaults.standard.removeObject(forKey: EditorModel.defaultPresetKey)
         if directory != nil { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    /// The keys themselves, through the menu: ⌘=, ⌘+ with Shift for keyboards
+    /// that need it, and ⌘−.
+    func testCommandPlusAndMinusZoomAndTheZoomStaysAcrossPhotographs() async throws {
+        let model = EditorModel(previewCache: RenderedPreviewCache(file: directory.appendingPathComponent("zoom.cache")))
+        defer { model.shutdown() }
+        await model.start(paths: try paths())
+        let main = MainMenu(model: model, updates: UpdateController(), removeAppData: {})
+        func press(_ key: String, _ modifiers: NSEvent.ModifierFlags = .command) throws {
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0))
+            XCTAssertTrue(main.menu.performKeyEquivalent(with: event), key)
+        }
+        model.open(ramp)
+        XCTAssertEqual(model.canvasZoomSteps, 0)
+        try press("=")
+        XCTAssertEqual(model.canvasZoomSteps, 1)
+        try press("+", [.command, .shift])
+        XCTAssertEqual(model.canvasZoomSteps, 2)
+        model.open(other)
+        XCTAssertEqual(model.canvasZoomSteps, 2)
+        try press("-")
+        XCTAssertEqual(model.canvasZoomSteps, 1)
+        for _ in 0..<40 { model.zoomOut() }
+        XCTAssertEqual(model.canvasZoomSteps, -EditorModel.canvasZoomLimit)
+    }
+
+    func testADefaultPresetOpensPhotographsWithoutEditsOfTheirOwn() async throws {
+        let cache = { [directory] (name: String) in RenderedPreviewCache(file: directory!.appendingPathComponent(name)) }
+        let folder = directory.appendingPathComponent("presets", isDirectory: true)
+        let library = PresetLibrary(folder: folder)
+        let model = EditorModel(previewCache: cache("preset.cache"), presetLibrary: library)
+        defer { model.shutdown() }
+        await model.start(paths: try paths())
+        let unset = model.state.film
+        XCTAssertNotEqual(unset, "kodak_doublex")
+        let third = directory.appendingPathComponent("third.png"), fourth = directory.appendingPathComponent("fourth.png")
+        try writeGradient(to: third); try writeGradient(to: fourth)
+        let elsewhere = directory.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        let (away, awayToo) = (elsewhere.appendingPathComponent("a.png"), elsewhere.appendingPathComponent("b.png"))
+        try writeGradient(to: away); try writeGradient(to: awayToo)
+
+        let text = #"{"simulation": {"film_stock": "kodak_doublex", "print_paper": "kodak_2302"}}"#
+        _ = try await library.add(Data(text.utf8), name: "Double-X")
+        await model.refreshPresets()
+        let preset = try XCTUnwrap(model.presets.first)
+
+        // A photograph with edits of its own, made before there was a default.
+        model.open(other)
+        model.chooseFilm("kodak_ektar_100")
+        model.open(ramp)
+        let opened = model.film
+
+        model.setDefaultPreset(preset)
+        for _ in 0..<500 where model.defaultPresetFile == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(model.isDefaultPreset(preset))
+        XCTAssertEqual(model.film, opened, "The open photograph stays as it is")
+
+        model.open(third)
+        XCTAssertEqual(model.film, "kodak_doublex")
+        XCTAssertEqual(model.paper, "kodak_2302")
+        model.open(other)
+        XCTAssertEqual(model.film, "kodak_ektar_100", "Its own edits win")
+
+        // A folder's own default wins over it.
+        model.open(away)
+        XCTAssertEqual(model.film, "kodak_doublex")
+        model.chooseFilm("kodak_ektar_100")
+        model.setFolderDefault()
+        model.open(awayToo)
+        XCTAssertEqual(model.film, "kodak_ektar_100")
+
+        // A new launch remembers, before the presets are listed.
+        let reopened = EditorModel(previewCache: cache("again.cache"), presetLibrary: library)
+        defer { reopened.shutdown() }
+        await reopened.start(paths: try paths())
+        reopened.open(fourth)
+        XCTAssertEqual(reopened.film, "kodak_doublex")
+
+        // Renaming keeps it the default; deleting the file ends it.
+        model.renamePreset(preset, to: "Mine")
+        for _ in 0..<500 where !model.presets.contains(where: { $0.name == "Mine" }) { try await Task.sleep(for: .milliseconds(10)) }
+        let renamed = try XCTUnwrap(model.presets.first)
+        XCTAssertTrue(model.isDefaultPreset(renamed))
+        model.clearDefaultPreset()
+        XCTAssertNil(model.defaultPresetFile)
+        model.setDefaultPreset(renamed)
+        for _ in 0..<500 where model.defaultPresetFile == nil { try await Task.sleep(for: .milliseconds(10)) }
+        try FileManager.default.removeItem(at: renamed.url)
+        await model.refreshPresets()
+        XCTAssertNil(model.defaultPresetFile)
+        let fifth = directory.appendingPathComponent("fifth.png")
+        try writeGradient(to: fifth)
+        model.open(fifth)
+        XCTAssertNotEqual(model.film, "kodak_doublex")
     }
 
     /// A horizontal grey ramp in sRGB, the tones a pick can read.

@@ -13,21 +13,54 @@ import XCTest
         return scroll
     }
 
-    func testZoomingInAndOutStepsAndStopsFitting() {
+    /// ⌘+ and ⌘− step from the export's size, and stepping back lands on it exactly.
+    func testZoomStepsAwayFromTheExportSizeAndBack() {
         let scroll = canvas()
-        scroll.magnification = 1
-        scroll.zoom(by: ImageScrollView.zoomStep)
+        scroll.proofPixels = CGSize(width: 1600, height: 1200)
+        XCTAssertEqual(scroll.magnification, 1, accuracy: 0.001)
+        scroll.zoomSteps = 2
+        XCTAssertEqual(scroll.magnification, 2, accuracy: 0.001)
+        scroll.zoomSteps = 1
         XCTAssertEqual(scroll.magnification, ImageScrollView.zoomStep, accuracy: 0.001)
-        XCTAssertFalse(scroll.fitting)
-        scroll.zoom(by: 1 / ImageScrollView.zoomStep)
+        scroll.zoomSteps = -2
+        XCTAssertEqual(scroll.magnification, 0.5, accuracy: 0.001)
+        scroll.zoomSteps = 0
         XCTAssertEqual(scroll.magnification, 1, accuracy: 0.001)
     }
 
     func testZoomStaysWithinItsLimits() {
         let scroll = canvas()
-        scroll.magnification = 15
-        scroll.zoom(by: ImageScrollView.zoomStep)
+        scroll.proofPixels = CGSize(width: 1600, height: 1200)
+        scroll.zoomSteps = 40
         XCTAssertEqual(scroll.magnification, 16, accuracy: 0.001)
+    }
+
+    /// The window's size and the export's still act on the zoomed view, which stays zoomed.
+    func testAZoomSurvivesTheWindowAndTheExportSize() {
+        let scroll = canvas(viewport: 1000)
+        scroll.proofPixels = CGSize(width: 1600, height: 1200)
+        scroll.zoomSteps = 2
+        scroll.setFrameSize(NSSize(width: 350, height: 700))
+        scroll.layout()
+        XCTAssertEqual(scroll.magnification, 2, accuracy: 0.001)
+        scroll.proofPixels = CGSize(width: 800, height: 600)
+        XCTAssertEqual(scroll.magnification, 1, accuracy: 0.001)
+    }
+
+    /// The part of the photograph in the middle of the window stays there.
+    func testZoomingKeepsTheMiddleOfWhatsOnScreen() throws {
+        let scroll = canvas(viewport: 400, photo: CGSize(width: 800, height: 600))
+        scroll.proofPixels = CGSize(width: 1600, height: 1200)
+        let photo = try XCTUnwrap(scroll.documentView)
+        scroll.contentView.scroll(to: CGPoint(x: 100, y: 50))
+        let visible = scroll.contentView.bounds
+        let middle = CGPoint(x: visible.midX, y: visible.midY)
+        let before = photo.convert(middle, from: scroll.contentView)
+        scroll.zoomSteps = 2
+        let after = scroll.contentView.bounds
+        let now = photo.convert(CGPoint(x: after.midX, y: after.midY), from: scroll.contentView)
+        XCTAssertEqual(now.x, before.x, accuracy: 1)
+        XCTAssertEqual(now.y, before.y, accuracy: 1)
     }
 
     /// One export pixel to one screen pixel, whatever resolution the preview
@@ -62,11 +95,9 @@ import XCTest
         XCTAssertEqual(scroll.magnification, 1, accuracy: 0.001)
     }
 
-    func testNothingZoomsAProof() {
+    func testADoubleClickDoesntZoomAProof() {
         let scroll = canvas()
         scroll.proofPixels = CGSize(width: 1600, height: 1200)
-        scroll.zoom(by: 2)
-        XCTAssertEqual(scroll.magnification, 1, accuracy: 0.001)
         scroll.toggleZoom(about: .zero)
         XCTAssertEqual(scroll.magnification, 1, accuracy: 0.001)
     }

@@ -372,7 +372,9 @@ frame's key, since the grid's frames have their own size.
 
 The edit view always shows the photograph at the size it will export, one export pixel to a
 screen pixel. Only the export's settings set that size (`proofPixels`): the window's size
-doesn't, and there's no zoom. The window never changes by itself, and its size and position
+doesn't. ⌘+ and ⌘− look closer or further from there, each step doubling or halving the area, about
+the middle of what's on screen, and the zoom stays from photograph to photograph; stepping back lands on
+one to one again. The window never changes by itself, and its size and position
 stay the user's. A photograph larger than the canvas can be panned; a smaller one is
 centred. A border shows around it without changing its size.
 
@@ -404,6 +406,12 @@ saved edits, a folder's default or a preset, and it's remembered between launche
 folder's photographs without edits of their own open with, leaving out pins and crop.
 Photographs with saved edits keep them. It's a snapshot, kept per folder, until ⌘D is
 pressed again: Reset All Adjustments then ⌘D puts a folder back on the app's defaults.
+
+Set as Default, on a preset's context menu in the Presets panel, does the same for every
+folder without a default of its own: photographs without edits open with that preset over
+the app's defaults, and its row says Default. The preset's settings are kept as they read
+when it was chosen, so a photograph opened at launch gets them at once. Renaming it keeps it
+the default; deleting it, or Remove as Default, ends that.
 
 Opening a photograph loads its settings file, as one undo step. Only a file saved
 for that photograph counts: other photographs' files and other JSON are ignored. A

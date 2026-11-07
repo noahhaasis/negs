@@ -846,6 +846,14 @@ import UniformTypeIdentifiers
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
+    /// Steps of ⌘+ and ⌘− away from the export's size, kept from photograph to photograph.
+    var canvasZoomSteps = 0
+    /// As far as 16 times either way.
+    static let canvasZoomLimit = 8
+    var canZoom: Bool { source != nil && !cropping && !gridVisible }
+    func zoomIn() { canvasZoomSteps = min(canvasZoomSteps + 1, Self.canvasZoomLimit) }
+    func zoomOut() { canvasZoomSteps = max(canvasZoomSteps - 1, -Self.canvasZoomLimit) }
+
     /// The photograph's pixels in an export, which set its size on the canvas, one
     /// to a screen pixel. Nothing else zooms it, and the window stays the user's to
     /// size and place. A border isn't counted, though
@@ -1458,7 +1466,7 @@ import UniformTypeIdentifiers
     /// choices, not edits, so they stay as they are.
     private func startingState(in directory: URL) -> EditState {
         guard hasCatalog else { return state }
-        var next = Self.folderDefaults[directory.standardizedFileURL.path].map(merged) ?? {
+        var next = Self.folderDefaults[directory.standardizedFileURL.path].map(merged) ?? presetDefaultState() ?? {
             var fresh = EditState()
             fresh.params = defaults
             if !films.contains(where: { $0.id == fresh.film }), let first = films.first { fresh.film = first.id }
@@ -1519,6 +1527,61 @@ import UniformTypeIdentifiers
             UserDefaults.standard.data(forKey: "rollLooks").flatMap { try? JSONDecoder().decode([String: EditState].self, from: $0) } ?? [:]
         }
         set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: "rollLooks") }
+    }
+
+    /// The default preset, as it read when it was chosen: the settings are kept
+    /// so a photograph opened at launch needn't wait for the presets to be listed.
+    private struct DefaultPreset: Codable {
+        var file: String
+        var state: EditState
+    }
+    private static var savedDefaultPreset: DefaultPreset? {
+        get { UserDefaults.standard.data(forKey: defaultPresetKey).flatMap { try? JSONDecoder().decode(DefaultPreset.self, from: $0) } }
+        set { UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: defaultPresetKey) }
+    }
+    static let defaultPresetKey = "defaultPreset"
+
+    /// The file name of the preset unedited photographs open with, for its row's mark.
+    private(set) var defaultPresetFile = EditorModel.savedDefaultPreset?.file
+
+    /// What the default preset opens a photograph with, unless this version
+    /// of Negs no longer has its film or paper.
+    private func presetDefaultState() -> EditState? {
+        guard let saved = Self.savedDefaultPreset, films.contains(where: { $0.id == saved.state.film }),
+              papers.contains(where: { $0.id == saved.state.paper }) else { return nil }
+        return merged(saved.state)
+    }
+
+    func isDefaultPreset(_ preset: PresetFile) -> Bool { defaultPresetFile == preset.url.lastPathComponent }
+
+    /// Makes a preset what photographs without edits of their own open with, in
+    /// any folder without a default of its own. Those with edits keep them, and
+    /// so does the one that's open.
+    func setDefaultPreset(_ preset: PresetFile) {
+        guard canChangePresets else { return }
+        Task {
+            do {
+                let text = try Self.presetText(try await presetLibrary.read(preset))
+                let imported = try await importedPreset(text: text, over: defaults)
+                var state = EditState()
+                state.film = imported.film; state.paper = imported.paper; state.params = imported.params
+                Self.savedDefaultPreset = DefaultPreset(file: preset.url.lastPathComponent, state: state)
+                defaultPresetFile = preset.url.lastPathComponent
+                rollDeveloper?.invalidateAll()
+                status = "“\(preset.name)” is the default preset"
+            } catch {
+                report(error)
+                await refreshPresets()
+            }
+        }
+    }
+
+    /// Back to the app's own defaults.
+    func clearDefaultPreset() {
+        guard defaultPresetFile != nil else { return }
+        Self.savedDefaultPreset = nil
+        defaultPresetFile = nil
+        rollDeveloper?.invalidateAll()
     }
 
     /// Saves the photograph's edit to a JSON file beside it.
@@ -2164,7 +2227,11 @@ import UniformTypeIdentifiers
     /// Lists the folder again, so files copied in by hand appear, and asks
     /// the engine about files it hasn't seen.
     func refreshPresets() async {
-        do { presets = try await presetLibrary.list() } catch { presets = []; report(error) }
+        do {
+            presets = try await presetLibrary.list()
+            // Deleted here or by hand, it can't stay the default.
+            if defaultPresetFile != nil, !presets.contains(where: isDefaultPreset) { clearDefaultPreset() }
+        } catch { presets = []; report(error) }
         presetStatus = presetStatus.filter { presets.contains($0.key) }
         presetTexts = presetTexts.filter { presets.contains($0.key) }
         presetWhiteBalances = presetWhiteBalances.filter { presets.contains($0.key) }
@@ -2198,16 +2265,10 @@ import UniformTypeIdentifiers
                 // it's given; ask again if they changed while it answered.
                 for _ in 0..<3 {
                     let snapshot = state
-                    let (_, result) = try await engine.request(["command": .string("preset_import"), "text": .string(text),
-                                                                "params": snapshot.params,
-                                                                "include_finish": .bool(saveFinishInPresets)])
+                    let imported = try await importedPreset(text: text, over: snapshot.params)
                     guard state == snapshot else { continue }
-                    let (film, paper) = (result["film"].string, result["paper"].string)
-                    guard films.contains(where: { $0.id == film }), papers.contains(where: { $0.id == paper }) else {
-                        throw EngineError(message: "This version of Negs doesn’t have the preset’s film or paper.")
-                    }
                     var next = state
-                    next.film = film; next.paper = paper; next.params = result["params"]
+                    next.film = imported.film; next.paper = imported.paper; next.params = imported.params
                     apply(next, action: "Apply Preset “\(preset.name)”")
                     status = "Applied preset “\(preset.name)”"
                     return
@@ -2217,6 +2278,20 @@ import UniformTypeIdentifiers
                 await refreshPresets()
             }
         }
+    }
+
+    /// A preset's film, paper and settings, laid over `params`, whose own
+    /// settings the engine keeps.
+    private func importedPreset(text: String, over params: JSONValue) async throws -> (film: String, paper: String, params: JSONValue) {
+        guard let engine else { throw EngineError(message: "The engine isn’t running.") }
+        let (_, result) = try await engine.request(["command": .string("preset_import"), "text": .string(text),
+                                                    "params": params,
+                                                    "include_finish": .bool(saveFinishInPresets)])
+        let (film, paper) = (result["film"].string, result["paper"].string)
+        guard films.contains(where: { $0.id == film }), papers.contains(where: { $0.id == paper }) else {
+            throw EngineError(message: "This version of Negs doesn’t have the preset’s film or paper.")
+        }
+        return (film, paper, result["params"])
     }
 
     /// Saves the film, paper and Lab settings as a new preset, named after
@@ -2320,6 +2395,11 @@ import UniformTypeIdentifiers
                 let renamed = try await presetLibrary.rename(preset, to: name)
                 // Same file, same thumbnail: no blank tile while it's renamed.
                 previews.moveTile(preset: preset.url, to: renamed.url)
+                if isDefaultPreset(preset), var saved = Self.savedDefaultPreset {
+                    saved.file = renamed.url.lastPathComponent
+                    Self.savedDefaultPreset = saved
+                    defaultPresetFile = saved.file
+                }
             } catch { report(error) }
             await refreshPresets()
         }

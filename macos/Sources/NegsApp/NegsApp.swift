@@ -304,6 +304,7 @@ struct CanvasArea: View {
                       dragged: model.zoneDrag,
                       draggedRadius: model.sampleRadius,
                       proofPixels: model.exportPixels,
+                      zoomSteps: model.canvasZoomSteps,
                       exif: model.photoExif,
                       showsZones: model.showsZonePanel,
                       onZonePlacement: { model.zonePlacement = $0 },
