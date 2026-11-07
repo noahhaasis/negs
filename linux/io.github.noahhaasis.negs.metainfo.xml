@@ -57,6 +57,11 @@
     <binary>negs</binary>
   </provides>
   <releases>
+    <release version="0.14.0" date="2026-11-07">
+      <description>
+        <p>A new Prep tab with tone, colour and detail controls and camera brightness matching, 29 new film stocks, a Print Curves graph, film search and favourites, and quicker previews when changing film or paper.</p>
+      </description>
+    </release>
     <release version="0.13.0" date="2026-11-02">
       <description>
         <p>Film, paper and preset previews show each choice on your photograph, and supported RAW photographs get lens corrections. Sliders reset on double-click, and a new setting keeps the paper when you change film.</p>
