@@ -27,7 +27,7 @@ Negs is built on two open-source projects: Andrea Volpato's [spektrafilm](https:
 
 ## A darkroom in a window
 
-![The Negs window: a photo of the Colosseum in a 35mm Kodak Ektar 100 frame, with film, camera and print controls on the right](docs/readme/app-window.webp)
+![The Negs window: a photo of the Dolomites at dusk in a 35mm Fujifilm Superia 200 frame, with film, paper and exposure controls on the right](docs/readme/app-window.webp)
 
 In your browser, or as a native app on Mac, Windows and Linux. Pick a film, pick a paper, drag a slider, and watch the picture change as you move.
 
