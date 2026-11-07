@@ -33,7 +33,10 @@
 //! in the list (as a click on its tile does), and repeats
 //! `NEGS_RENDER_BENCH_STEPS` times (default 10). Then it closes the window.
 //! A step that doesn't settle in `NEGS_RENDER_BENCH_TIMEOUT_S` (default 900)
-//! ends the run with `bench_timeout`. `windows/measure_render.ps1` runs it
+//! ends the run with `bench_timeout`, and a render that fails (the preview
+//! idle with no frame to show) ends it with `bench_failed`. While it runs,
+//! error and notice dialogs are skipped and logged as `dialog_skipped`.
+//! `windows/measure_render.ps1` runs it
 //! and `windows/render_trace.py` summarises the trace.
 
 use std::cell::RefCell;
@@ -106,6 +109,12 @@ thread_local! {
 
 const TICK: Duration = Duration::from_millis(20);
 
+/// The benchmark is driving the app. Its error and notice dialogs would stop
+/// it (the tick doesn't run under a modal), so they go to the trace instead.
+pub fn bench_running() -> bool {
+    BENCH.with(|b| b.borrow().as_ref().is_some_and(|bench| !bench.done))
+}
+
 /// Starts the benchmark when `NEGS_RENDER_BENCH` is set.
 pub fn start_bench() {
     let Some(films) = std::env::var("NEGS_RENDER_BENCH").ok() else { return };
@@ -147,6 +156,13 @@ fn tick(app: &mut App) {
             return None;
         }
         let now = Instant::now();
+        // Nothing will settle: the photograph or the film can't be developed.
+        if app.model.render_failed && app.model.render_idle() {
+            bench.done = true;
+            // The error is in the last `render_reply` (and `dialog_skipped`).
+            event("bench_failed", || json!({"step": bench.step, "film": app.model.state.film}));
+            return Some(None);
+        }
         if !settled(app) {
             bench.idle_since = None;
             if now.duration_since(bench.step_started) > bench.timeout {
