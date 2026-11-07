@@ -151,6 +151,10 @@ A new search scrolls to the top; clearing it goes back to the current film. A se
 tiles and lays the rest out again, so tiles and thumbnails stay, and thumbnails are made
 only for the matches, in the order shown. The search lasts for the session (closing and
 opening the foldout keeps it) and isn't a preference; turning previews off clears it.
+Thumbnails still wait for the settled frame (`previews_may_render`), so a search typed while a
+quick frame shows, or while a held frame's match solves, asks for nothing until the settled
+frame is on screen; Return chooses the film exactly as a tile click does, with the quick frame
+and the match (`lifecycle_tests.rs`, "Film search with the held and quick frames").
 
 ## Lens corrections
 
@@ -347,6 +351,30 @@ lifecycle tests and timing" below; Vulkan 8 changes, CPU 4; ms):
 - **Memory.** The helper's working set grew by 1–27 MB idle and by up to 56 MB at its peak
   (60 MP DNG on Vulkan: 1631 / 2357 MB against 1606 / 2301 MB). The Mac reported 211 MB on
   60 MP.
+
+**Integrated build** (2026-11-07, branch `win-nov5`: film search, the held frame and quick
+frames together, app and helper built from `c953839`; the helper's source is unchanged from
+`3c9e166`). The same protocol, machine (Ryzen 5 3600, GTX 1660 SUPER, Windows 10 19045, one
+monitor at 125 %, mains power) and files, rerun with nothing else running; medians in ms:
+
+| Photograph, matching | Vulkan first change | Vulkan settled | CPU first change | CPU settled | Helper working set idle / peak MB (Vulkan; CPU) |
+|---|---|---|---|---|---|
+| 60 MP DNG, off | 232 | 3568 | 2134 | 96 539 | 1606 / 2331; 1416 / 6248 |
+| 33 MP ARW, off | 181 | 2045 | 2115 | 53 658 | 978 / 1389; 788 / 3413 |
+| 33 MP ARW, on | 553 | 2476 | 3642 | 55 066 | 978 / 1388; 789 / 3413 |
+| 12 MP JPEG, off | 81 | 763 | 1095 | 20 350 | 629 / 771; 303 / 1282 |
+| 12 MP JPEG, on | 409 | 1082 | 2664 | 21 474 | 624 / 772; 304 / 1282 |
+
+Every measured step made one quick and one settled render and presented `quick, settled`. The
+numbers are within run-to-run noise of the quick-frame table above: settled −183 to +94 ms
+on Vulkan (the 60 MP DNG the slower one) and −4.4 to +0.4 s on the CPU, following the
+helper's own render times (the 12 MP CPU settled render took 19.2 s this run against 22.6 s
+then); first change −56 to +57 ms on Vulkan. The benchmark runs
+with previews off; with previews on and a search active, a Return on the 33 MP ARW with the
+match on presented the matched quick frame at 818 ms and the settled frame at 2574 ms, and the
+first thumbnail went out after the settled render, so the search adds nothing before the
+settled frame. With the crop overlay up, a film change's quick and settled frames leave the
+overlay, its handles and the straighten dial where they were.
 
 The reference (`brightness.rs`) is the RAW's embedded preview through rawler, oriented,
 letterbox bars trimmed when its shape differs, at most 512 px. For JPEG, PNG and TIFF it is

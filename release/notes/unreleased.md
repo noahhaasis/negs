@@ -8,6 +8,13 @@
   matching holds the previous frame until the exposure is resolved. Quick frames
   stay outside Save Preview and the launch cache. The shared gamut-coordinate
   and pipeline caches are included, and new profiles start with four favourite films.
+- The Windows Film grid now has a search field: every word must match a film's
+  name, id or group, ignoring case and accents; Return chooses the first match
+  and Escape clears it. Large-photo edits (a film, paper, menu or Undo) show a
+  quick canvas-size preview before the full-size one. With camera brightness
+  matching on, the previous frame stays until the matched exposure is ready, so
+  the old exposure is never shown, and Save and Export wait for the matched,
+  full-size preview.
 - Linux now has Prep, live camera/original brightness matching, resizable RGB
   scopes, the interactive Print Curves graph, favourite films/papers and help
   for inspector controls and groups. Prep / Lab / Output and the related
