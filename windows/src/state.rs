@@ -309,6 +309,40 @@ pub fn paper_groups<'a>(papers: &[&'a Stock]) -> Vec<StockGroup<'a>> {
     })
 }
 
+/// The stocks matching every word of `query` in their name, id or group
+/// title, ignoring case and accents ("portra 160", "kodak slide"); groups
+/// left empty drop out (`StockGroup.matching`). An empty query keeps them all.
+pub fn matching<'a>(query: &str, groups: Vec<StockGroup<'a>>) -> Vec<StockGroup<'a>> {
+    let words: Vec<&str> = query.split_whitespace().collect();
+    if words.is_empty() {
+        return groups;
+    }
+    groups
+        .into_iter()
+        .filter_map(|group| {
+            let stocks: Vec<&Stock> = group
+                .stocks
+                .into_iter()
+                .filter(|s| {
+                    let text = format!("{} {} {}", s.name, s.id.replace('_', " "), group.title);
+                    words.iter().all(|word| contains_folded(&text, word))
+                })
+                .collect();
+            (!stocks.is_empty()).then_some(StockGroup { title: group.title, stocks })
+        })
+        .collect()
+}
+
+/// Whether `text` contains `word`, ignoring case and diacritics, as
+/// `localizedStandardContains` compares. The invariant locale keeps the
+/// result the same on every machine; the catalog's names are English.
+fn contains_folded(text: &str, word: &str) -> bool {
+    use windows::Win32::Globalization::{FIND_FROMSTART, FindNLSStringEx, LINGUISTIC_IGNORECASE, LINGUISTIC_IGNOREDIACRITIC, LOCALE_NAME_INVARIANT};
+    let (text, word): (Vec<u16>, Vec<u16>) = (text.encode_utf16().collect(), word.encode_utf16().collect());
+    let flags = FIND_FROMSTART | LINGUISTIC_IGNORECASE.0 | LINGUISTIC_IGNOREDIACRITIC.0;
+    unsafe { FindNLSStringEx(LOCALE_NAME_INVARIANT, flags, &text, &word, None, None, None, windows::Win32::Foundation::LPARAM(0)) >= 0 }
+}
+
 fn group<'a>(stocks: &[&'a Stock], order: &[&'static str], kind: impl Fn(&Stock) -> &'static str) -> Vec<StockGroup<'a>> {
     order
         .iter()
@@ -832,5 +866,90 @@ mod tests {
         assert_eq!(option_title("some_new_option"), "Some New Option");
         assert_eq!(ratio_name(1920.0, 1080.0), "16:9");
         assert_eq!(ratio_name(1000.0, 1300.0), "1.30:1");
+    }
+
+    /// `testFilmSearchMatchesEveryWordInNameIdOrGroup`, one case for one,
+    /// then accents, ids and the order of the matches.
+    #[test]
+    fn film_search_matches_every_word_in_name_id_or_group() {
+        let stock = |id: &str, name: &str, paper: bool, positive: bool, bw: bool| Stock {
+            id: id.into(), name: name.into(), paper, positive, bw, target: String::new(), times: vec![], grain: Value::Null,
+        };
+        // The Mac's fixture: Gold 200, Velvia 50 and Tri-X 400.
+        let films = [stock("gold", "Gold 200", false, false, false), stock("velvia", "Velvia 50", false, true, false), stock("trix", "Tri-X 400", false, false, true)];
+        let f: Vec<&Stock> = films.iter().collect();
+        let groups = || film_groups(&f, &[]);
+        let ids = |query: &str| -> Vec<String> { matching(query, groups()).iter().flat_map(|g| g.stocks.iter().map(|s| s.id.clone())).collect() };
+        assert_eq!(ids(""), ["gold", "velvia", "trix"]);
+        assert_eq!(ids("  "), ["gold", "velvia", "trix"]);
+        assert_eq!(ids("tri-x"), ["trix"]);
+        assert_eq!(ids("GOLD 200"), ["gold"]);
+        assert_eq!(ids("slide"), ["velvia"]);
+        assert_eq!(ids("black 400"), ["trix"]);
+        assert!(ids("gold 400").is_empty());
+        assert_eq!(matching("velvia", groups()).iter().map(|g| g.title).collect::<Vec<_>>(), ["Color Slide"]);
+
+        // Accents and case in the query or the name; any whitespace splits words.
+        let more = [
+            stock("kodak_portra_400", "Portra 400", false, false, false),
+            stock("kodak_portra_160", "Portra 160", false, false, false),
+            stock("fujifilm_velvia_100", "Velvia 100", false, true, false),
+            stock("lomography_lomochrome_metropolis", "LomoChrome Métropolis", false, false, false),
+            stock("kodak_trix400_d76_8min", "Tri-X 400 (D-76, 8 min)", false, false, true),
+        ];
+        let m: Vec<&Stock> = more.iter().collect();
+        let ids = |query: &str| -> Vec<String> { matching(query, film_groups(&m, &[])).iter().flat_map(|g| g.stocks.iter().map(|s| s.id.clone())).collect() };
+        assert_eq!(ids("PÓRTRÄ 400"), ["kodak_portra_400"]);
+        assert_eq!(ids("metropolis"), ["lomography_lomochrome_metropolis"]);
+        assert_eq!(ids("MÉTROPOLIS"), ["lomography_lomochrome_metropolis"]);
+        assert_eq!(ids("portra\t160"), ["kodak_portra_160"]);
+        // Words in either order; the matches keep the catalog's order.
+        assert_eq!(ids("400 portra"), ids("portra 400"));
+        assert_eq!(ids("portra"), ["kodak_portra_400", "kodak_portra_160"]);
+        // The id with `_` read as spaces: "kodak" is only in the ids.
+        assert_eq!(ids("kodak"), ["kodak_portra_400", "kodak_portra_160", "kodak_trix400_d76_8min"]);
+        assert_eq!(ids("fujifilm velvia"), ["fujifilm_velvia_100"]);
+        assert_eq!(ids("trix400 d76"), ["kodak_trix400_d76_8min"]);
+        // An underscore in the query isn't a space, as on the Mac.
+        assert!(ids("portra_400").is_empty());
+        // Punctuation counts: "tri-x" isn't "trix", and a lone symbol matches only itself.
+        assert_eq!(ids("tri-x"), ["kodak_trix400_d76_8min"]);
+        assert!(ids("-x400").is_empty());
+        // The group titles: Black & White, Color Slide, Color Negative.
+        assert_eq!(ids("&"), ["kodak_trix400_d76_8min"]);
+        assert_eq!(ids("color negative 400"), ["kodak_portra_400"]);
+        assert!(ids("not-a-film").is_empty());
+    }
+
+    /// The helper's own catalog: every film finds itself. Skipped without a
+    /// release helper.
+    #[test]
+    fn film_search_finds_the_live_catalog_films() {
+        let Ok(paths) = crate::engine::EnginePaths::locate() else {
+            eprintln!("skipped: build the release helper first");
+            return;
+        };
+        let engine = crate::engine::EngineClient::start(paths).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        engine.request(json!({"command": "catalog"}), crate::engine::timeout_for("catalog"), move |result| {
+            let _ = sender.send(result);
+        });
+        let catalog = receiver.recv().unwrap().unwrap().1;
+        engine.stop();
+        let stocks: Vec<Stock> = catalog["profiles"].as_array().map(|a| a.iter().map(Stock::new).collect()).unwrap_or_default();
+        let films: Vec<&Stock> = stocks.iter().filter(|s| !s.paper).collect();
+        let papers: Vec<&Stock> = stocks.iter().filter(|s| s.paper).collect();
+        let ids = |query: &str| -> Vec<String> { matching(query, film_groups(&films, &papers)).iter().flat_map(|g| g.stocks.iter().map(|s| s.id.clone())).collect() };
+        eprintln!("{} films in the live catalog", films.len());
+        assert_eq!(ids("").len(), films.len());
+        // Every film finds itself by its whole name, and by its id.
+        for film in &films {
+            assert!(ids(&film.name).contains(&film.id), "{}", film.name);
+            assert!(ids(&film.id.replace('_', " ")).contains(&film.id), "{}", film.id);
+        }
+        let portra = ids("portra");
+        assert!(!portra.is_empty() && portra.iter().all(|id| id.contains("portra")), "{portra:?}");
+        assert!(ids("gold 400").is_empty());
+        assert!(ids("slide").iter().all(|id| stocks.iter().any(|s| &s.id == id && s.positive)));
     }
 }

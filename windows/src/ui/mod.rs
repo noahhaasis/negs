@@ -132,6 +132,9 @@ const INSPECTOR_MAXIMUM: f64 = 440.0;
 const SPLITTER: f64 = 5.0;
 const MINIMUM_HEIGHT: f64 = 520.0;
 
+/// A first window's frame height in DIPs, before the user sizes it.
+const DEFAULT_HEIGHT: f64 = 940.0;
+
 /// The window's narrowest client width in DIPs.
 fn minimum_width(inspector_visible: bool) -> f64 {
     if inspector_visible { CANVAS_MINIMUM + SPLITTER + INSPECTOR_MINIMUM } else { CANVAS_MINIMUM }
@@ -222,6 +225,119 @@ fn drain() {
                 let _ = KillTimer(main_hwnd(), TIMER_RUN);
             }
             None => {}
+        }
+    }
+}
+
+/// Tests: `drain` without a window. The lifecycle harness
+/// (`model::harness`) runs posted and timed tasks with a headless `App`,
+/// one at a time, as the message loop would. The queue is process-wide, so
+/// the harness runs each of its tests in a process of its own.
+#[cfg(test)]
+pub mod testing {
+    use super::*;
+
+    /// Runs the oldest posted task with `app`. False when none was waiting.
+    pub fn run_posted(app: &mut App) -> bool {
+        let task = QUEUE.lock().unwrap().pop_front();
+        match task {
+            Some(task) => {
+                task(app);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn posted() -> usize {
+        QUEUE.lock().unwrap().len()
+    }
+
+    /// Runs the earliest `ui::after` task due by `horizon` (on this thread).
+    /// False when none is.
+    pub fn run_timer(app: &mut App, horizon: Instant) -> bool {
+        let task = TIMED_TASKS.with(|t| {
+            let mut t = t.borrow_mut();
+            let earliest = t.iter().enumerate().filter(|(_, (at, _))| *at <= horizon).min_by_key(|(_, (at, _))| *at).map(|(i, _)| i);
+            earliest.map(|i| t.remove(i).1)
+        });
+        match task {
+            Some(task) => {
+                task(app);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// When the earliest `ui::after` task on this thread is due.
+    pub fn next_timer() -> Option<Instant> {
+        TIMED_TASKS.with(|t| t.borrow().iter().map(|(at, _)| *at).min())
+    }
+
+    static BACKGROUND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// Work on another thread that will post a task: the harness isn't idle
+    /// while one is held. Model code holds one where no model flag (such as
+    /// `rendering`) already says so.
+    pub struct Background(());
+
+    pub fn background() -> Background {
+        BACKGROUND.fetch_add(1, Ordering::SeqCst);
+        Background(())
+    }
+
+    impl Drop for Background {
+        fn drop(&mut self) {
+            BACKGROUND.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    pub fn background_running() -> usize {
+        BACKGROUND.load(Ordering::SeqCst)
+    }
+    /// Drops whatever earlier code on this thread or process left queued.
+    pub fn clear() {
+        QUEUE.lock().unwrap().clear();
+        TIMED_TASKS.with(|t| t.borrow_mut().clear());
+    }
+
+    impl App {
+        /// An app with no windows around `model`, for the tasks the model posts.
+        pub fn headless(model: Model) -> App {
+            let none = HWND::default();
+            let font = HFONT::default();
+            App {
+                model,
+                main: none,
+                tools: none,
+                actions: none,
+                menubar: none,
+                status: none,
+                progress: none,
+                cancel: none,
+                canvas: none,
+                empty: none,
+                strip: none,
+                panes: none,
+                inspector: inspector::Inspector::headless(),
+                presets_view: None,
+                fonts: Fonts { ui: font, bold: font, section: font, small: font, title: font, glyph: font, glyph_small: font, line: 16 },
+                dpi: 96,
+                menu: HMENU::default(),
+                accelerators: HACCEL::default(),
+                report: Report { file: None, seen: vec![] },
+                splitter_drag: None,
+                full_screen: None,
+                strip_view: strip::Strip::default(),
+                empty_view: empty::Empty::default(),
+                taskbar: None,
+                original_key: None,
+                drop_target_active: false,
+                started: Instant::now(),
+                quitting: false,
+                preview_monitor: 0,
+            }
         }
     }
 }
@@ -985,6 +1101,10 @@ pub fn copy_text(owner: HWND, text: &str) {
 
 /// Adds a photograph to Windows' recent documents (the taskbar Jump List).
 pub fn note_recent_document(path: &Path) {
+    // Tests open scratch files: keep them out of the user's Recent items.
+    if cfg!(test) {
+        return;
+    }
     let w = wide(path);
     unsafe { SHAddToRecentDocs(SHARD_PATHW.0 as u32, Some(w.as_ptr() as *const _)) };
 }
@@ -1385,6 +1505,7 @@ pub fn run() {
         with_app(|app| app.report.stamp(if composited { "first_window_composited" } else { "first_window_flush_failed" }));
         // The adjustments, the GPU and the rest wait for the first frame.
         let _ = PostMessageW(main, WM_APP_BUILD, WPARAM(0), LPARAM(0));
+        crate::trace::start_bench();
         if let Some(path) = path {
             with_app(|app| app.model.open(&path));
         }
@@ -1408,13 +1529,13 @@ pub fn run() {
 }
 
 fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
-    let Some([_, x, y, w, h]) = prefs.window else { return };
+    let Some([_, x, y, w, h]) = prefs.window else { return default_height(main, dpi) };
     let s = dpi as f64 / 96.0;
     let rect = RECT { left: x, top: y, right: x + (w as f64 * s) as i32, bottom: y + (h as f64 * s) as i32 };
     unsafe {
         // A monitor that is gone leaves the default placement.
         if MonitorFromRect(&rect, MONITOR_DEFAULTTONULL).is_invalid() {
-            return;
+            return default_height(main, dpi);
         }
         let placement = WINDOWPLACEMENT {
             length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
@@ -1423,6 +1544,21 @@ fn restore_placement(main: HWND, prefs: &Preferences, dpi: u32) {
             ..Default::default()
         };
         let _ = SetWindowPlacement(main, &placement);
+    }
+}
+
+/// Without a saved frame the window gets `DEFAULT_HEIGHT`, so an open Film
+/// grid leaves the tabs below it in view, kept inside the monitor's work area.
+fn default_height(main: HWND, dpi: u32) {
+    unsafe {
+        let mut frame = RECT::default();
+        let _ = GetWindowRect(main, &mut frame);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(MonitorFromWindow(main, MONITOR_DEFAULTTONEAREST), &mut info);
+        let work = info.rcWork;
+        let height = ((DEFAULT_HEIGHT * dpi as f64 / 96.0).round() as i32).min(work.bottom - work.top);
+        let y = frame.top.min(work.bottom - height).max(work.top);
+        let _ = SetWindowPos(main, None, frame.left, y, frame.right - frame.left, height, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
 

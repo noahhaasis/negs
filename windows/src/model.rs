@@ -252,6 +252,159 @@ pub struct Rendered {
     pub cached: Option<(String, Frame)>,
 }
 
+/// What kind of frame the canvas shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameKind {
+    /// A render of the photograph at its preview size (export size unless limited).
+    Settled,
+    /// A canvas-size render while a slider or handle moves.
+    Drag,
+    /// A canvas-size render of a discrete edit, ahead of its settled frame
+    /// (ticket 28, `RenderStep::Quick`).
+    Quick,
+    /// The previous launch's frame from the rendered-preview cache.
+    Cached,
+}
+
+impl FrameKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            FrameKind::Settled => "settled",
+            FrameKind::Drag => "drag",
+            FrameKind::Quick => "quick",
+            FrameKind::Cached => "cached",
+        }
+    }
+}
+
+/// What a render develops (the Mac's `RenderStep`): the settled frame (export
+/// size, or the 12 MP limit), or as many pixels as the canvas shows (its
+/// screen pixels per photo pixel), while a slider moves (`Drag`) or ahead of
+/// the settled frame of a discrete edit (`Quick`). Decided when the render
+/// starts (`render_step`) and carried to `render_finished`: only a drag
+/// frame re-renders on release, and a quick frame settles only through
+/// `settle_quick_frame`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RenderStep {
+    Settled,
+    Drag(f64),
+    Quick(f64),
+}
+
+impl RenderStep {
+    pub fn kind(self) -> FrameKind {
+        match self {
+            RenderStep::Settled => FrameKind::Settled,
+            RenderStep::Drag(_) => FrameKind::Drag,
+            RenderStep::Quick(_) => FrameKind::Quick,
+        }
+    }
+    pub fn interactive_scale(self) -> Option<f64> {
+        match self {
+            RenderStep::Settled => None,
+            RenderStep::Drag(scale) | RenderStep::Quick(scale) => Some(scale),
+        }
+    }
+}
+
+/// A quick frame only pays when the settled render takes a while (about
+/// 50 ms per megapixel on the GPU here, so ~230 ms at the minimum) and the
+/// canvas shows at most half of its pixels.
+pub const QUICK_FRAME_MIN_PIXELS: f64 = 4.5e6;
+pub const QUICK_FRAME_MAX_PIXEL_FRACTION: f64 = 0.5;
+
+/// The render step (the Mac's `renderStep`). `screen_scale` is the canvas's
+/// physical screen pixels per photo pixel (`screen_pixels_per_photo_pixel`),
+/// `frame_pixels` the photo frame (`image_size`), `has_frame` a developed
+/// frame of this photograph on screen (not the restored launch frame, not
+/// the placeholder), `quick_done` this edit's quick frame done (or a slider
+/// let go), `reuses_output` the helper can answer from its kept output (a
+/// post-only edit, which a quick frame would make a full render).
+pub fn render_step(interacting: bool, screen_scale: Option<f64>, frame_pixels: f64, has_frame: bool, quick_done: bool, reuses_output: bool) -> RenderStep {
+    let scale = screen_scale.filter(|&s| s > 0.0 && s < 1.0);
+    if interacting {
+        return scale.map_or(RenderStep::Settled, RenderStep::Drag);
+    }
+    match scale {
+        Some(scale)
+            if has_frame
+                && !quick_done
+                && !reuses_output
+                && frame_pixels >= QUICK_FRAME_MIN_PIXELS
+                && scale * scale <= QUICK_FRAME_MAX_PIXEL_FRACTION =>
+        {
+            RenderStep::Quick(scale)
+        }
+        _ => RenderStep::Settled,
+    }
+}
+
+/// The parts of a render request the helper's reuse of its kept output
+/// depends on (the Mac's `reuseKey`): all of it but the preview's path and
+/// the post adjustments, which the helper applies to the kept output.
+pub fn reuse_key(command: &Value) -> Value {
+    let mut key = command.clone();
+    if let Some(object) = key.as_object_mut() {
+        object.remove("preview_path");
+    }
+    if key["params"].is_object() {
+        key["params"]["post"] = Value::Null;
+    }
+    key
+}
+
+/// A frame that `render_finished` accepted but doesn't show yet: its
+/// brightness match is pending, so it may be at the old exposure. Shown once
+/// the match leaves the render as it is (`release_held`); any edit drops it.
+/// Any kind of frame but a drag frame can be held.
+pub struct Held {
+    pub revision: u64,
+    pub generation: u64,
+    pub kind: FrameKind,
+    pub rendered: Rendered,
+}
+
+/// What waits for a pending brightness match (`Model::settle_outputs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Output {
+    Save,
+    Export,
+}
+
+impl Output {
+    fn verb(self) -> &'static str {
+        match self {
+            Output::Save => "save",
+            Output::Export => "export",
+        }
+    }
+}
+
+/// How long a waiting Save or Export gives a match with nothing running
+/// before it gives up, and how often it looks again meanwhile.
+const OUTPUT_PATIENCE: Duration = Duration::from_secs(30);
+
+/// Which render the shown image came from: the helper's request id, the
+/// edit and photograph it was asked for, and its kind. Only the timing trace
+/// (`crate::trace`) and the tests read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameTag {
+    pub request: u64,
+    pub revision: u64,
+    pub generation: u64,
+    pub kind: FrameKind,
+}
+
+/// A render request as the model sent it, for the lifecycle tests.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderRequest {
+    pub kind: FrameKind,
+    pub revision: u64,
+    pub generation: u64,
+    pub interactive_scale: Option<f64>,
+}
+
 pub struct Model {
     pub state: EditState,
     pub defaults: Value,
@@ -381,8 +534,37 @@ pub struct Model {
     /// inputs, with the source generation and the note.
     brightness_failure: Option<(u64, Option<Value>, String)>,
     /// Save or Export waiting for a pending brightness match and its preview,
-    /// so they write what the inspector shows (at most 30 s).
-    waiting_output: Option<(Instant, Box<dyn FnOnce(&mut Model)>)>,
+    /// so they write what the inspector shows: what it is, when it was asked
+    /// for, and the action (see `settle_outputs`).
+    waiting_output: Option<(Instant, Output, Box<dyn FnOnce(&mut Model)>)>,
+    /// A settled frame of the current edit, held while its brightness match
+    /// is pending: the canvas goes from the previous frame straight to the
+    /// matched one (see `render_finished`).
+    held: Option<Held>,
+    /// The edit (revision, generation) whose quick frame is done: shown, held
+    /// for the brightness match, or failed. Its next render settles. Set by a
+    /// quick render of the current edit and by letting go of a slider;
+    /// cleared once a settled render of the current edit ran, failed or not,
+    /// so a failure doesn't retry (ticket 28).
+    quick_step: Option<(u64, u64)>,
+    /// The shown frame is the quick frame of this edit.
+    quick_frame: Option<(u64, u64)>,
+    /// The helper's kept output when it is a settled render: the epoch of the
+    /// helper that made it (`EngineClient::helper_epoch`) and the request's
+    /// `reuse_key`. A request with the same key is a post-only edit, which the
+    /// helper answers from it in milliseconds, so it gets no quick frame.
+    /// Cleared before any render is sent: the helper replaces its output
+    /// with each render and keeps none after a failure.
+    helper_output: Option<(u64, Value)>,
+    /// The render `image` came from; None for no image.
+    pub shown_frame: Option<FrameTag>,
+    /// Every render request sent, in order (tests only).
+    #[cfg(test)]
+    pub render_log: Vec<RenderRequest>,
+    /// Every frame presented, in order (tests only): each `present`, so a
+    /// frame replaced within one task is still seen.
+    #[cfg(test)]
+    pub frame_log: Vec<FrameTag>,
 }
 
 /// What the adjustments column shows.
@@ -487,6 +669,15 @@ impl Model {
             match_request: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             brightness_failure: None,
             waiting_output: None,
+            held: None,
+            quick_step: None,
+            quick_frame: None,
+            helper_output: None,
+            shown_frame: None,
+            #[cfg(test)]
+            render_log: vec![],
+            #[cfg(test)]
+            frame_log: vec![],
         }
     }
 
@@ -772,12 +963,20 @@ impl Model {
         if start != self.state {
             self.register_undo(start, action);
         }
+        // The drag frames were canvas-size already: letting go settles,
+        // without a quick frame.
+        self.quick_step = Some((self.revision, self.source_generation));
         if self.showing_interactive_frame && self.ready && self.source.is_some() && !self.closing {
             self.schedule_render();
         }
         if !self.preview_current {
             self.schedule_activity();
         }
+        // A press without a change kept a held frame's solve from starting,
+        // and a quick frame from settling.
+        self.release_held();
+        self.settle_quick_frame();
+        self.settle_outputs();
         self.mark(dirty::CHROME);
     }
 
@@ -993,6 +1192,7 @@ impl Model {
             self.changed();
         }
         self.reconcile_brightness_match();
+        self.release_held();
         self.settle_outputs();
     }
 
@@ -1448,6 +1648,9 @@ impl Model {
             json::set(&mut next.params, "io.rotate_cw", rotation);
             self.replace_state(next);
         }
+        // Cropping kept a held frame's solve from starting.
+        self.release_held();
+        self.settle_outputs();
         self.mark(dirty::CROP | dirty::CANVAS | dirty::CHROME | dirty::LAYOUT | dirty::STRIP);
         self.zoom(true);
     }
@@ -1473,6 +1676,7 @@ impl Model {
         }
         self.source = Some(path.to_path_buf());
         self.image = None;
+        self.shown_frame = None;
         self.placeholder = None;
         self.source_size = (0, 0);
         self.working_size = Size::ZERO;
@@ -1492,6 +1696,7 @@ impl Model {
         self.original_loading = false;
         self.holding_original = false;
         self.cancel_brightness_match();
+        self.drop_held("open");
         self.brightness_failure = None;
         self.source_generation += 1;
         let generation = self.source_generation;
@@ -1572,7 +1777,11 @@ impl Model {
         let state = self.render_state();
         self.input_colour = Value::Null;
         self.lens_supported = false;
+        #[cfg(test)]
+        let background = ui::testing::background();
         let fallback = move || {
+            #[cfg(test)]
+            let _background = background;
             if let Some((picture, size)) = crate::thumbnail::placeholder(&path) {
                 ui::post(move |app: &mut App| app.model.show_placeholder(picture, size, generation));
             }
@@ -1594,6 +1803,9 @@ impl Model {
                         model.image = Some(picture); model.image_size = size; model.is_raw = raw; model.lens_supported = lens_supported;
                         model.source_size = source_size; model.working_size = working; model.preview_scale = scale;
                         model.showing_cached_preview = true; model.placeholder = None; model.hide_activity();
+                        model.shown_frame = Some(FrameTag { request: 0, revision: model.revision, generation, kind: FrameKind::Cached });
+                        #[cfg(test)]
+                        model.frame_log.extend(model.shown_frame);
                         model.update_histogram();
                         model.mark(dirty::CANVAS | dirty::STATUS | dirty::INSPECTOR);
                     });
@@ -1737,6 +1949,10 @@ impl Model {
         }
         self.prefs.previews = on;
         self.prefs.save();
+        // The grid goes, and its search with it, as the Mac's foldout does.
+        if !on {
+            self.previews.film_query.clear();
+        }
         if !on && self.previews.clear() {
             if let Some(engine) = &self.engine {
                 engine.request(json!({"command": "release_thumbnails"}), engine::timeout_for("release_thumbnails"), |_| {});
@@ -1806,9 +2022,12 @@ impl Model {
                 continue;
             }
             let (films, papers) = (self.films(), self.papers());
-            let groups = if paper { state::paper_groups(&papers) } else { state::film_groups(&films, &papers) };
-            // The favourites first, so their thumbnails come first.
-            let favorites = self.favorite_stocks(paper);
+            // While the Film grid searches, only its matches, as listed.
+            let query = if paper { "" } else { self.previews.film_query.as_str() };
+            let searching = !query.trim().is_empty();
+            let groups = if paper { state::paper_groups(&papers) } else { state::matching(query, state::film_groups(&films, &papers)) };
+            // The favourites first, so their thumbnails come first; a search hides them.
+            let favorites = if searching { vec![] } else { self.favorite_stocks(paper) };
             let rest = groups.iter().flat_map(|g| g.stocks.iter().copied()).filter(|s| !favorites.iter().any(|f| f.id == s.id));
             for stock in favorites.iter().copied().chain(rest) {
                 let command = previews::stock_command(&state, stock, &self.stocks, self.prefs.keep_paper, source, generation);
@@ -1947,12 +2166,16 @@ impl Model {
     }
 
     fn changed_with_cache(&mut self, invalidate: bool) {
+        // Every edit, undo, redo and new photograph comes here: a held frame
+        // is of an older state, and the render scheduled below replaces it.
+        self.drop_held("edit");
         self.schedule_tone_curve();
         if invalidate {
             self.preview_cache.invalidate();
             self.showing_cached_preview = false;
         }
         self.revision += 1;
+        crate::trace::event("edit", || json!({"revision": self.revision, "generation": self.source_generation, "interacting": self.interacting()}));
         self.preview_current = false;
         if self.render_failed {
             self.render_failed = false;
@@ -1983,15 +2206,18 @@ impl Model {
         }
         let (Some(source), Some(engine)) = (self.source.clone(), self.engine.clone()) else { return };
         let (revision, generation) = (self.revision, self.source_generation);
-        // While a slider moves, render only as many pixels as the canvas
-        // shows; the frame on release is the export-size one.
-        let interactive_scale = if self.interacting() {
-            crate::ui::canvas::screen_pixels_per_photo_pixel().filter(|&s| s < 1.0)
-        } else {
-            None
-        };
-        self.rendering = true;
-        self.mark(dirty::CHROME);
+        // A quick frame's settled render waits for a solve that started
+        // after it was scheduled (matching turned on while the quick frame
+        // shows, which is no edit at exposure 0): the old exposure never
+        // renders at export size. The solve's end settles it
+        // (`settle_quick_frame`). The Mac sends it.
+        if self.quick_step == Some((revision, generation))
+            && !self.preview_current
+            && !self.interacting()
+            && (self.matching_brightness || self.held.is_some())
+        {
+            return;
+        }
         let buffer = engine.directory().join("preview.rgba");
         let state = self.render_state();
         let mut command = json!({
@@ -1999,19 +2225,55 @@ impl Model {
             "film": state.film, "paper": state.paper, "params": state.params,
             "limit_preview": self.state.limit_preview, "preview_path": buffer,
         });
-        if let Some(scale) = interactive_scale {
-            command["interactive_scale"] = json!(scale);
-        }
         // The target describes the cropped photograph; the helper sizes the frame from the crop.
         if self.size_mode() == state::SizeMode::LongestSide && self.state.crop.cropped() {
             let r = self.state.crop.rect;
             command["crop"] = json!({"x": r.x, "y": r.y, "width": r.width, "height": r.height, "angle": self.state.crop.angle});
         }
+        // While a slider moves, render only as many pixels as the canvas
+        // shows; the frame on release is the export-size one. A discrete
+        // edit shows such a frame first, unless the helper can answer
+        // quickly anyway: a small photograph, or post adjustments alone.
+        let key = reuse_key(&command);
+        let epoch = engine.helper_epoch();
+        let reuses_output = self.helper_output.as_ref().is_some_and(|(kept, output)| *kept == epoch && json::same(output, &key));
+        let frame = (revision, generation);
+        let step = render_step(
+            self.interacting(),
+            crate::ui::canvas::screen_pixels_per_photo_pixel(),
+            self.image_size.width * self.image_size.height,
+            self.has_developed_frame(),
+            self.quick_step == Some(frame),
+            reuses_output,
+        );
+        let (kind, interactive_scale) = (step.kind(), step.interactive_scale());
+        if let Some(scale) = interactive_scale {
+            command["interactive_scale"] = json!(scale);
+        }
+        self.rendering = true;
+        self.mark(dirty::CHROME);
+        // The helper replaces its kept output with this render (and keeps
+        // none if it fails): forget it now, on this thread, before the
+        // request can reach the helper.
+        self.helper_output = None;
+        #[cfg(test)]
+        self.render_log.push(RenderRequest { kind, revision, generation, interactive_scale });
+        crate::trace::event("render_request", || json!({"kind": kind.name(), "revision": revision, "generation": generation, "interactive_scale": interactive_scale, "reuses_output": reuses_output}));
         let started = Instant::now();
         let paths = self.paths.clone();
         std::thread::spawn(move || {
             let cache_key = if interactive_scale.is_none() { paths.and_then(|paths| rendered_preview::key(&source, &state, &paths)) } else { None };
+            let client = engine.clone();
             engine.request(command, engine::timeout_for("render"), move |result| {
+                // The worker sends nothing between this request and its
+                // reply, so this is the epoch of the helper that kept it.
+                let kept = (kind == FrameKind::Settled && result.is_ok()).then(|| (client.helper_epoch(), key));
+                crate::trace::event("render_reply", || match &result {
+                    Ok((id, r)) => json!({"kind": kind.name(), "revision": revision, "generation": generation, "request": id,
+                        "elapsed_ms": r["elapsed_ms"], "cached_pipeline": r["cached_pipeline"], "pipeline_ms": r["pipeline_ms"],
+                        "backend": r["backend"], "width": r["width"], "height": r["height"], "round_trip_ms": engine::elapsed_ms(started)}),
+                    Err(error) => json!({"kind": kind.name(), "revision": revision, "generation": generation, "error": format!("{error:#}")}),
+                });
                 // Read the buffer off the UI thread, before the next render can
                 // overwrite it.
                 let rendered = result.and_then(|(id, result)| {
@@ -2037,84 +2299,245 @@ impl Model {
                     }
                     Ok(Rendered { id, revision, generation, interactive: interactive_scale.is_some(), result, picture, cached })
                 });
-                ui::post(move |app: &mut App| app.model.render_finished(rendered, revision, generation, interactive_scale.is_some()));
+                ui::post(move |app: &mut App| {
+                    // Renders run one at a time: nothing replaced it since.
+                    if kept.is_some() {
+                        app.model.helper_output = kept;
+                    }
+                    app.model.render_finished(rendered, revision, generation, kind);
+                });
             });
         });
     }
 
-    fn render_finished(&mut self, rendered: Result<Rendered>, revision: u64, generation: u64, interactive: bool) {
+    /// A render is back. Acceptance: a frame of the current photograph and
+    /// edit (or any frame while a slider moves) is taken, and the match reads
+    /// its `source_size` and `is_raw` at once. A settled frame whose
+    /// brightness match is pending would show the old exposure for as long as
+    /// the solve and the next render take: it is held instead, with the
+    /// previous frame and the activity badge left up, and the solve starts
+    /// from it (the helper holds its decode). `release_held` shows it if the
+    /// match leaves the render as it is; an edit drops it. Anything else is
+    /// presented now.
+    ///
+    /// A quick frame (ticket 28) is accepted whenever its photograph is still
+    /// open, so a quick frame of an earlier edit shows while edits keep coming
+    /// (Ctrl+Z held, fast clicks); the current edit renders next. It is held
+    /// like a settled frame, and the match can start from it. It settles only
+    /// through `settle_quick_frame`. A failed quick frame is silent: the
+    /// settled render that follows reports the error once.
+    fn render_finished(&mut self, rendered: Result<Rendered>, revision: u64, generation: u64, kind: FrameKind) {
         self.rendering = false;
         self.mark(dirty::CHROME);
-        match rendered {
-            Ok(rendered) if self.should_show(revision, generation) => {
-                let result = &rendered.result;
-                self.image_size = Size::new(json::number(&result["photo_width"]), json::number(&result["photo_height"]));
-                self.source_size = (json::number(&result["source_width"]) as u32, json::number(&result["source_height"]) as u32);
-                self.working_size = Size::new(json::number(&result["working_width"]), json::number(&result["working_height"]));
-                if !rendered.interactive {
-                    self.preview_scale = if self.working_size.width > 0.0 { (json::number(&result["width"]) / self.working_size.width).min(1.0) } else { 1.0 };
-                }
-                self.showing_interactive_frame = rendered.interactive;
-                self.image = Some(rendered.picture);
-                self.placeholder = None;
-                self.update_histogram();
-                let film = FilmHistogram::parse(&result["film_histogram"]);
-                if film != self.film_histogram {
-                    self.film_histogram = film;
-                    self.mark(dirty::TONE_GRAPH);
-                }
-                let (shown, rotation) = (self.shown_image_size(), self.rotation());
-                if let Some(session) = &mut self.crop_session {
-                    session.update(shown, rotation);
-                }
-                self.is_raw = json::boolean(&result["raw"]);
-                self.lens_supported = json::boolean(&result["lens_correction_supported"]);
-                self.rendered_space = json::string(&result["output_color_space"]).to_string();
-                if self.input_colour != result["input_colour"] {
-                    self.input_colour = result["input_colour"].clone();
-                }
-                if self.revision == revision && !rendered.interactive {
-                    self.render_id = rendered.id;
-                    self.preview_current = true;
-                    self.hide_activity();
-                    self.render_at_export_size = json::boolean(&result["export_resolution"]);
-                    self.render_on_gpu = ExportEngine::ran_on_gpu(json::string(&result["backend"]));
-                    self.showing_cached_preview = false;
-                    if let Some((key, frame)) = rendered.cached { self.preview_cache.save(key, frame); }
-                    self.reconcile_brightness_match();
-                }
-                let seconds = json::number(&result["elapsed_ms"]) / 1000.0;
-                let time = format!("developed in {seconds:.*} s", if seconds < 10.0 { 2 } else { 1 });
-                let backend = if ExportEngine::ran_on_gpu(json::string(&result["backend"])) { "" } else { " on the CPU" };
-                self.status = if rendered.interactive {
-                    format!(
-                        "Preview · {} × {} · {time}{backend}",
-                        json::number(&result["output_width"]) as u64,
-                        json::number(&result["output_height"]) as u64
-                    )
-                } else {
-                    // The photograph as exported, and whether the shown texture
-                    // has fewer pixels: inspect grain in an export when it does.
-                    let photograph = self.state.crop.size_of(self.working_size);
-                    let shown = if self.preview_scale < 1.0 { format!(" · shown at {}", percent(self.preview_scale)) } else { String::new() };
-                    format!("{} × {}{shown} · {time}{backend}", photograph.width as u64, photograph.height as u64)
-                };
-                self.mark(dirty::CANVAS | dirty::STATUS | dirty::INSPECTOR | dirty::CROP);
-                self.check_presets();
+        // The quick frame is done: the next render settles. Once that ran,
+        // failed or not, nothing waits to settle (no retries).
+        if (revision, generation) == (self.revision, self.source_generation) {
+            match kind {
+                FrameKind::Quick => self.quick_step = Some((revision, generation)),
+                FrameKind::Settled => self.quick_step = None,
+                _ => {}
             }
-            Ok(_) => {}
-            Err(error) => {
-                if revision == self.revision && generation == self.source_generation && !self.closing {
+        }
+        let showable = match kind {
+            FrameKind::Quick => !self.closing && generation == self.source_generation,
+            _ => self.should_show(revision, generation),
+        };
+        let accepted = rendered.is_ok() && showable;
+        match rendered {
+            Ok(rendered) if accepted => {
+                let result = &rendered.result;
+                self.source_size = (json::number(&result["source_width"]) as u32, json::number(&result["source_height"]) as u32);
+                self.is_raw = json::boolean(&result["raw"]);
+                let hold = kind != FrameKind::Drag
+                    && self.revision == revision
+                    && !self.interacting()
+                    && !self.cropping()
+                    && self.brightness_match_pending();
+                crate::trace::event("render_finished", || json!({
+                    "revision": revision, "generation": generation, "kind": kind.name(), "ok": true,
+                    "shown": !hold, "held": hold, "current_revision": self.revision,
+                }));
+                if hold {
+                    // Replaces a frame held for the same edit (a slider
+                    // pressed and let go without a change renders it again).
+                    self.held = Some(Held { revision, generation, kind, rendered });
+                    self.mark(dirty::STATUS);
+                } else {
+                    self.drop_held("superseded");
+                    self.present(rendered, kind);
+                }
+            }
+            rendered => {
+                crate::trace::event("render_finished", || json!({
+                    "revision": revision, "generation": generation, "kind": kind.name(), "ok": rendered.is_ok(),
+                    "shown": false, "held": false, "current_revision": self.revision,
+                }));
+                if let Err(error) = rendered
+                    && kind != FrameKind::Quick
+                    && revision == self.revision
+                    && generation == self.source_generation
+                    && !self.closing
+                {
                     self.render_failed = true;
                     self.hide_activity();
                     self.report(&error);
                 }
             }
         }
-        if (self.revision != revision || (interactive && !self.interacting())) && !self.closing {
+        if (self.revision != revision || (kind == FrameKind::Drag && !self.interacting())) && !self.closing {
             self.schedule_render();
         }
+        // Starts the solve from a frame just held (a quick one too: the
+        // helper then holds the decode); shows a held frame whose match is no
+        // longer pending.
+        self.release_held();
+        self.settle_quick_frame();
         self.settle_outputs();
+    }
+
+    /// After a quick frame of the current edit, renders it at its settled
+    /// size once nothing holds it: no render running or due, no brightness
+    /// solve running and no frame held for one (a match that changes the
+    /// exposure is a new edit, with its own quick frame), no slider held.
+    /// Called wherever one of these can clear: a render's or a solve's end,
+    /// a held frame shown, and the end of an interaction. Does nothing until
+    /// all hold. No delay: a 400 ms debounce was tried on the Mac and dropped.
+    fn settle_quick_frame(&mut self) {
+        if self.quick_step != Some((self.revision, self.source_generation))
+            || self.preview_current
+            || self.render_failed
+            || self.interacting()
+            || self.rendering
+            || self.pending_render
+            || self.matching_brightness
+            || self.held.is_some()
+            || !self.ready
+            || self.source.is_none()
+            || self.closing
+        {
+            return;
+        }
+        self.schedule_render();
+    }
+
+    /// A frame this helper developed of the open photograph is on screen: not
+    /// the placeholder (`placeholder`), not the restored launch frame from the
+    /// preview cache. A quick frame replaces only such a frame.
+    fn has_developed_frame(&self) -> bool {
+        self.image.is_some() && !self.showing_cached_preview
+    }
+
+    /// The shown frame is the current edit's quick frame: the helper holds
+    /// its decode.
+    fn shows_quick_frame(&self) -> bool {
+        self.quick_frame == Some((self.revision, self.source_generation))
+    }
+
+    /// Shows an accepted frame: everything `render_finished` did before the
+    /// held frame, in the same order.
+    fn present(&mut self, rendered: Rendered, kind: FrameKind) {
+        let (revision, generation) = (rendered.revision, rendered.generation);
+        self.shown_frame = Some(FrameTag { request: rendered.id, revision, generation, kind });
+        #[cfg(test)]
+        self.frame_log.extend(self.shown_frame);
+        self.quick_frame = (kind == FrameKind::Quick).then_some((revision, generation));
+        let result = &rendered.result;
+        self.image_size = Size::new(json::number(&result["photo_width"]), json::number(&result["photo_height"]));
+        self.working_size = Size::new(json::number(&result["working_width"]), json::number(&result["working_height"]));
+        if !rendered.interactive {
+            self.preview_scale = if self.working_size.width > 0.0 { (json::number(&result["width"]) / self.working_size.width).min(1.0) } else { 1.0 };
+        }
+        self.showing_interactive_frame = rendered.interactive;
+        self.image = Some(rendered.picture);
+        self.placeholder = None;
+        self.update_histogram();
+        let film = FilmHistogram::parse(&result["film_histogram"]);
+        if film != self.film_histogram {
+            self.film_histogram = film;
+            self.mark(dirty::TONE_GRAPH);
+        }
+        let (shown, rotation) = (self.shown_image_size(), self.rotation());
+        if let Some(session) = &mut self.crop_session {
+            session.update(shown, rotation);
+        }
+        self.lens_supported = json::boolean(&result["lens_correction_supported"]);
+        self.rendered_space = json::string(&result["output_color_space"]).to_string();
+        if self.input_colour != result["input_colour"] {
+            self.input_colour = result["input_colour"].clone();
+        }
+        if self.revision == revision && !rendered.interactive {
+            self.render_id = rendered.id;
+            self.preview_current = true;
+            self.hide_activity();
+            self.render_at_export_size = json::boolean(&result["export_resolution"]);
+            self.render_on_gpu = ExportEngine::ran_on_gpu(json::string(&result["backend"]));
+            self.showing_cached_preview = false;
+            if let Some((key, frame)) = rendered.cached {
+                self.preview_cache.save(key, frame);
+            }
+            self.reconcile_brightness_match();
+        }
+        let seconds = json::number(&result["elapsed_ms"]) / 1000.0;
+        let time = format!("developed in {seconds:.*} s", if seconds < 10.0 { 2 } else { 1 });
+        let backend = if ExportEngine::ran_on_gpu(json::string(&result["backend"])) { "" } else { " on the CPU" };
+        self.status = if rendered.interactive {
+            format!(
+                "Preview · {} × {} · {time}{backend}",
+                json::number(&result["output_width"]) as u64,
+                json::number(&result["output_height"]) as u64
+            )
+        } else {
+            // The photograph as exported, and whether the shown texture
+            // has fewer pixels: inspect grain in an export when it does.
+            let photograph = self.state.crop.size_of(self.working_size);
+            let shown = if self.preview_scale < 1.0 { format!(" · shown at {}", percent(self.preview_scale)) } else { String::new() };
+            format!("{} × {}{shown} · {time}{backend}", photograph.width as u64, photograph.height as u64)
+        };
+        self.mark(dirty::CANVAS | dirty::STATUS | dirty::INSPECTOR | dirty::CROP);
+        // Between a quick frame and its settled render the helper has nothing
+        // else to do (ticket 28): the presets are checked after the latter.
+        if kind != FrameKind::Quick {
+            self.check_presets();
+        }
+    }
+
+    /// Resolves a held frame wherever its match can stop being pending
+    /// without an edit: the solve answered (unchanged, or failed), matching
+    /// was turned off, or what kept the solve from starting (a slider held,
+    /// cropping, a render running) let go. Starts the solve if it can, then
+    /// shows the frame once nothing about the match is pending or running.
+    /// A changed exposure is an edit, which dropped the frame already.
+    fn release_held(&mut self) {
+        let Some(held) = &self.held else { return };
+        if held.revision != self.revision || held.generation != self.source_generation || self.closing {
+            return self.drop_held("stale");
+        }
+        self.reconcile_brightness_match();
+        if self.matching_brightness || self.brightness_match_pending() {
+            return;
+        }
+        let Some(held) = self.held.take() else { return };
+        crate::trace::event("held_shown", || json!({"revision": held.revision, "generation": held.generation, "kind": held.kind.name()}));
+        self.present(held.rendered, held.kind);
+        // Thumbnails wait for the current preview (`App::refresh` pumps and
+        // redraws them), and so do Save and Export. A quick frame settles now.
+        self.mark(dirty::PREVIEWS);
+        self.settle_quick_frame();
+        self.settle_outputs();
+    }
+
+    /// Forgets a held frame without showing it.
+    fn drop_held(&mut self, why: &'static str) {
+        if let Some(held) = self.held.take() {
+            crate::trace::event("held_dropped", || json!({"revision": held.revision, "generation": held.generation, "why": why}));
+        }
+    }
+
+    /// The frame waiting for its brightness match, tagged as `shown_frame`
+    /// would tag it (tests).
+    #[cfg(test)]
+    pub fn held_frame(&self) -> Option<FrameTag> {
+        self.held.as_ref().map(|h| FrameTag { request: h.rendered.id, revision: h.revision, generation: h.generation, kind: h.kind })
     }
 
     /// While a slider moves, show each finished frame. Otherwise only the
@@ -2134,7 +2557,11 @@ impl Model {
             return;
         };
         let (request, crop, rotation) = (self.histogram_request, self.state.crop, self.rotation());
+        #[cfg(test)]
+        let background = ui::testing::background();
         std::thread::spawn(move || {
+            #[cfg(test)]
+            let _background = background;
             let scopes = image.scopes(&crop, rotation);
             ui::post(move |app: &mut App| {
                 let model = &mut app.model;
@@ -2460,17 +2887,18 @@ impl Model {
     }
 
     /// Solves the match when it's on and stale, once the preview of the
-    /// current settings is shown (the helper then holds their decode). One
+    /// current settings is shown or held, its quick frame included (the
+    /// helper then holds their decode), so before their settled render. One
     /// solve at a time; its answer looks again, so edits made meanwhile
-    /// coalesce. A result is applied only if the inputs it was solved for are
-    /// still current, without an undo step of its own: Undo restores a state
-    /// together with the match solved for it, and a restored state whose
-    /// match is stale is solved again.
+    /// coalesce. A result is applied only if the inputs it was
+    /// solved for are still current, without an undo step of its own: Undo
+    /// restores a state together with the match solved for it, and a
+    /// restored state whose match is stale is solved again.
     fn reconcile_brightness_match(&mut self) {
         // Cheap checks first: this runs on every edit, drag frames included.
         if self.matching_brightness
             || self.interacting()
-            || !self.preview_current
+            || !(self.preview_current || self.held.is_some() || self.shows_quick_frame())
             || self.rendering
             || !self.ready
             || self.cropping()
@@ -2490,6 +2918,7 @@ impl Model {
         json::set(&mut request.params, "prep", json::get(&self.defaults, "prep").clone());
         json::set(&mut request.params, "enlarger.print_exposure", json::get(&self.defaults, "enlarger.print_exposure").clone());
         let reference = engine.directory().join(format!("camera-brightness-{id}.png"));
+        crate::trace::event("match_start", || json!({"match": id, "revision": self.revision, "generation": generation}));
         self.matching_brightness = true;
         self.mark(dirty::INSPECTOR);
         std::thread::spawn(move || {
@@ -2516,6 +2945,10 @@ impl Model {
     }
 
     fn brightness_solved(&mut self, id: u64, generation: u64, inputs: Value, result: Result<Value>) {
+        crate::trace::event("match_solved", || match &result {
+            Ok(r) => json!({"match": id, "generation": generation, "exposure_ev": r["exposure_ev"], "elapsed_ms": r["elapsed_ms"]}),
+            Err(error) => json!({"match": id, "generation": generation, "error": format!("{error:#}")}),
+        });
         // Opening another photograph or shutting down superseded this one.
         if id != self.match_request.load(std::sync::atomic::Ordering::Relaxed) {
             return;
@@ -2541,7 +2974,24 @@ impl Model {
             }
         }
         self.reconcile_brightness_match();
+        // An unchanged answer or a failure leaves the held frame current:
+        // shown, unless another solve started. A changed exposure was an
+        // edit, which dropped it and renders the matched one. A quick frame
+        // then settles (at the matched exposure).
+        self.release_held();
+        self.settle_quick_frame();
         self.settle_outputs();
+    }
+
+    /// Nothing for the preview to do: no render running or scheduled, no
+    /// solve running or due, and the shown preview is the current edit's (or
+    /// it failed). The render benchmark (`crate::trace`) waits for this.
+    pub fn render_idle(&self) -> bool {
+        !self.rendering
+            && !self.pending_render
+            && !self.matching_brightness
+            && !self.brightness_match_pending()
+            && (self.preview_current || self.render_failed)
     }
 
     /// Moves the total with the match, keeping the user's exposure above it.
@@ -2565,31 +3015,84 @@ impl Model {
         self.replace_state(next);
     }
 
-    /// Save and Export wait for a pending match and its preview.
+    /// Save and Export wait for a pending match and its preview, and for the
+    /// settled frame after a quick one.
     fn outputs_wait(&self) -> bool {
-        self.brightness_match_pending() || self.matching_brightness || (!self.preview_current && !self.render_failed && self.brightness_match_active())
+        self.brightness_match_pending()
+            || self.matching_brightness
+            || (!self.preview_current && !self.render_failed && self.brightness_match_active())
+            || self.quick_frame_unsettled()
     }
 
-    fn after_brightness(&mut self, action: impl FnOnce(&mut Model) + 'static) {
+    /// Something running or due will end the wait: a render, a solve, a held
+    /// frame (its solve, or what keeps it from starting), a slider held, or
+    /// a quick frame whose settled render `settle_quick_frame` starts.
+    fn outputs_progressing(&self) -> bool {
+        self.rendering || self.pending_render || self.matching_brightness || self.held.is_some() || self.interacting() || self.quick_frame_unsettled()
+    }
+
+    /// The current edit's quick frame is done and its settled frame isn't
+    /// (ticket 28).
+    fn quick_frame_unsettled(&self) -> bool {
+        self.quick_step == Some((self.revision, self.source_generation)) && !self.preview_current && !self.render_failed
+    }
+
+    fn after_brightness(&mut self, output: Output, action: impl FnOnce(&mut Model) + 'static) {
         if !self.outputs_wait() {
             return action(self);
         }
-        self.waiting_output = Some((Instant::now(), Box::new(action)));
-        self.status = "Matching camera brightness…".into();
+        self.waiting_output = Some((Instant::now(), output, Box::new(action)));
+        self.status = if self.quick_frame_unsettled() && !self.brightness_match_pending() && !self.matching_brightness {
+            "Developing the preview…".into()
+        } else {
+            "Matching camera brightness…".into()
+        };
         self.mark(dirty::STATUS | dirty::CHROME);
-        ui::after(Duration::from_secs(30), |app: &mut App| app.model.settle_outputs());
+        self.check_outputs_later();
+        // A failed render won't finish the wait.
+        self.settle_outputs();
     }
 
-    /// Runs a waiting Save or Export once nothing is pending, or after 30 s.
+    /// Looks again every `OUTPUT_PATIENCE` while Save or Export waits.
+    fn check_outputs_later(&mut self) {
+        ui::after(OUTPUT_PATIENCE, |app: &mut App| {
+            let model = &mut app.model;
+            model.settle_outputs();
+            if model.waiting_output.is_some() {
+                model.check_outputs_later();
+            }
+        });
+    }
+
+    /// Runs a waiting Save or Export once nothing is pending, so it writes the
+    /// matched frame. It never runs on another frame: while a render or solve
+    /// is running or due it keeps waiting (a large RAW on the CPU takes about
+    /// a minute); once nothing is, after `OUTPUT_PATIENCE`, or at once when
+    /// the render failed, it gives up and says so.
     fn settle_outputs(&mut self) {
-        let Some((started, _)) = &self.waiting_output else { return };
-        if !self.closing && self.outputs_wait() && started.elapsed() < Duration::from_secs(30) {
+        let Some((started, output, _)) = &self.waiting_output else { return };
+        let (started, output) = (*started, *output);
+        if self.closing {
+            self.waiting_output = None;
             return;
         }
-        let Some((_, action)) = self.waiting_output.take() else { return };
-        if !self.closing {
-            action(self);
+        if self.outputs_wait() {
+            let stuck = !self.outputs_progressing() && (self.render_failed || started.elapsed() >= OUTPUT_PATIENCE);
+            if stuck {
+                self.waiting_output = None;
+                crate::trace::event("output_abandoned", || json!({"output": output.verb(), "revision": self.revision, "render_failed": self.render_failed}));
+                let verb = output.verb();
+                self.report(&if self.render_failed {
+                    anyhow!("Couldn’t {verb}: the preview didn’t develop, so the camera brightness couldn’t be matched.")
+                } else {
+                    anyhow!("Couldn’t {verb}: the preview with the camera brightness match isn’t ready. Try again once it shows.")
+                });
+                self.mark(dirty::CHROME);
+            }
+            return;
         }
+        let Some((_, _, action)) = self.waiting_output.take() else { return };
+        action(self);
     }
 
     /// Solves the enlarger's magenta and yellow shifts so a mid-grey prints
@@ -2654,7 +3157,7 @@ impl Model {
     /// Saves once a pending brightness match and its preview are done; the
     /// preview then develops in the save's colour space.
     pub fn save_preview(&mut self, destination: PathBuf, size: ExportSize, save: SaveSettings) {
-        self.after_brightness(move |model| {
+        self.after_brightness(Output::Save, move |model| {
             model.save_preview_now(destination, size, save);
             model.follow_preview_space();
         });
@@ -2687,7 +3190,7 @@ impl Model {
     /// meanwhile), the exporter runs. An export in another colour space than
     /// the preview's always develops again in it.
     pub fn export(&mut self, destination: PathBuf, engine_choice: ExportEngine, size: ExportSize, save: SaveSettings) {
-        self.after_brightness(move |model| {
+        self.after_brightness(Output::Export, move |model| {
             model.export_now(destination, engine_choice, size, save);
             model.follow_preview_space();
         });
@@ -2794,6 +3297,7 @@ impl Model {
     pub fn shutdown(&mut self) {
         self.closing = true;
         self.cancel_brightness_match();
+        self.drop_held("close");
         self.waiting_output = None;
         self.cancel_export();
         if let Some(engine) = &self.engine {
@@ -2905,6 +3409,41 @@ mod tests {
         }
     }
 
+    /// The Film grid's search: thumbnails only for its matches, in the order
+    /// the grid lists them, without the favourites; cleared, every film
+    /// again with the favourites first. Searching never edits.
+    #[test]
+    fn a_film_search_asks_only_for_its_matching_thumbnails() {
+        let prefs = Preferences { previews: true, inspector_pane: "Adjustments".into(), favorite_films: vec!["gold".into()], ..Preferences::default() };
+        let mut model = catalog_model(prefs);
+        model.source = Some(PathBuf::from("photo.png"));
+        model.previews.film_open = true;
+        model.previews.paper_open = true;
+        let wanted = |model: &Model, paper: bool| -> Vec<String> {
+            model.wanted_previews().into_iter().filter_map(|(target, ..)| match target { Target::Stock { id, paper: p } if p == paper => Some(id), _ => None }).collect()
+        };
+        assert_eq!(wanted(&model, false), ["gold", "portra"]);
+        let (edit, undo) = (model.state.clone(), model.undo_title().map(str::to_owned));
+        model.previews.film_query = "PORTRA".into();
+        assert_eq!(wanted(&model, false), ["portra"]);
+        // A favourite that matches is asked for once, under its group.
+        model.previews.film_query = "gold color negative".into();
+        assert_eq!(wanted(&model, false), ["gold"]);
+        // Both, in catalog order: the favourite no longer leads.
+        model.previews.film_query = "color".into();
+        assert_eq!(wanted(&model, false), ["portra", "gold"]);
+        model.previews.film_query = "nothing like it".into();
+        assert!(wanted(&model, false).is_empty());
+        // Papers have no search.
+        assert_eq!(wanted(&model, true), ["endura", "crystal"]);
+        // Only spaces, or cleared: everything, favourites first.
+        for query in ["   ", ""] {
+            model.previews.film_query = query.into();
+            assert_eq!(wanted(&model, false), ["gold", "portra"]);
+        }
+        assert_eq!((model.state.clone(), model.undo_title().map(str::to_owned)), (edit, undo));
+    }
+
     /// Lens corrections: on for every new edit and after Reset, though the
     /// engine's default is off; the switch shows only for a supported RAW.
     #[test]
@@ -2920,7 +3459,13 @@ mod tests {
         let mut frame = rendered(&model, 1200, false);
         frame.result["raw"] = json!(true);
         frame.result["lens_correction_supported"] = json!(true);
-        model.render_finished(Ok(frame), revision, generation, false);
+        model.render_finished(Ok(frame), revision, generation, FrameKind::Settled);
+        // Reset started a new match (Settings matches new photographs), so
+        // the frame is held: the match reads `is_raw` at once, the switch
+        // follows the frame once it shows.
+        assert!(model.is_raw && !model.lens_supported && model.held_frame().is_some());
+        model.set_matches_brightness(false);
+        assert!(model.held_frame().is_none() && model.preview_current);
         assert!(model.is_raw && model.lens_supported);
     }
 
@@ -2931,17 +3476,17 @@ mod tests {
         for settled in [2400, 1200] {
             let mut model = Model::new(Preferences::default());
             let (revision, generation) = (model.revision, model.source_generation);
-            model.render_finished(Ok(rendered(&model, settled, false)), revision, generation, false);
+            model.render_finished(Ok(rendered(&model, settled, false)), revision, generation, FrameKind::Settled);
             let scale = model.preview_scale;
             assert_eq!(scale, settled as f64 / 2400.0);
 
             model.begin_interaction();
-            model.render_finished(Ok(rendered(&model, 600, true)), revision, generation, true);
+            model.render_finished(Ok(rendered(&model, 600, true)), revision, generation, FrameKind::Drag);
             assert!(model.showing_interactive_frame);
             assert_eq!(model.preview_scale, scale, "A drag frame must not change the Image Size notice");
 
             model.end_interaction("Adjust");
-            model.render_finished(Ok(rendered(&model, settled, false)), revision, generation, false);
+            model.render_finished(Ok(rendered(&model, settled, false)), revision, generation, FrameKind::Settled);
             assert_eq!(model.preview_scale, scale);
         }
     }
@@ -2954,7 +3499,7 @@ mod tests {
         let (revision, generation) = (model.revision, model.source_generation);
         let mut frame = rendered(&model, 1200, false);
         frame.result["film_histogram"] = json!({"stops": [-8, 8], "ev": 0, "counts": [[1, 2], [3, 4], [5, 6]]});
-        model.render_finished(Ok(frame), revision, generation, false);
+        model.render_finished(Ok(frame), revision, generation, FrameKind::Settled);
         assert_eq!(model.film_histogram.as_ref().map(|h| h.bins(None)), Some(vec![3.0, 4.0]));
         // A render for the previous photograph is dropped with its histogram.
         let file = std::env::temp_dir().join(format!("negs-film-histogram-{}.png", std::process::id()));
@@ -2966,7 +3511,7 @@ mod tests {
         assert_ne!(model.dirty & dirty::TONE_GRAPH, 0);
         let mut old = rendered(&model, 1200, false);
         old.result["film_histogram"] = json!({"stops": [-8, 8], "ev": 0, "counts": [[9, 9], [9, 9], [9, 9]]});
-        model.render_finished(Ok(old), model.revision, generation, false);
+        model.render_finished(Ok(old), model.revision, generation, FrameKind::Settled);
         assert!(model.film_histogram.is_none());
     }
 
@@ -3228,7 +3773,7 @@ mod tests {
         model.set_matches_brightness(true);
         let ran = std::rc::Rc::new(std::cell::Cell::new(0));
         let counter = ran.clone();
-        model.after_brightness(move |_| counter.set(counter.get() + 1));
+        model.after_brightness(Output::Save, move |_| counter.set(counter.get() + 1));
         assert_eq!(ran.get(), 0);
         assert_eq!(model.status, "Matching camera brightness…");
         model.preview_current = true;
@@ -3241,7 +3786,7 @@ mod tests {
         model.preview_current = true;
         model.settle_outputs();
         assert_eq!(ran.get(), 1);
-        model.after_brightness(move |_| ran.set(ran.get() + 10));
+        model.after_brightness(Output::Save, move |_| ran.set(ran.get() + 10));
     }
 
     /// Favourites lead the film tiles' thumbnails, in the order starred.
@@ -3254,7 +3799,142 @@ mod tests {
         assert_eq!(model.favorite_stocks(false).iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["gold"]);
         assert_eq!(model.favorite_stocks(true).iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["crystal"]);
     }
+
+    /// `render_step`'s inputs, as the Mac's `QuickFrameStepTests` sets them:
+    /// a 24 MP photograph on a canvas at a quarter of its pixels per side.
+    #[derive(Clone, Copy)]
+    struct Step {
+        interacting: bool,
+        scale: Option<f64>,
+        pixels: f64,
+        has_frame: bool,
+        done: bool,
+        reuses: bool,
+    }
+
+    impl Default for Step {
+        fn default() -> Self {
+            Step { interacting: false, scale: Some(0.25), pixels: 24e6, has_frame: true, done: false, reuses: false }
+        }
+    }
+
+    impl Step {
+        fn step(self) -> RenderStep {
+            render_step(self.interacting, self.scale, self.pixels, self.has_frame, self.done, self.reuses)
+        }
+    }
+
+    /// The Mac's `testDiscreteEditsOfLargePhotosRenderAQuickFrameFirst`.
+    #[test]
+    fn discrete_edits_of_large_photos_render_a_quick_frame_first() {
+        let s = Step::default();
+        assert_eq!(s.step(), RenderStep::Quick(0.25));
+        assert_eq!(Step { done: true, ..s }.step(), RenderStep::Settled, "its quick frame is done: settle");
+        assert_eq!(Step { has_frame: false, ..s }.step(), RenderStep::Settled, "a new photograph has no frame to replace yet");
+        assert_eq!(Step { reuses: true, ..s }.step(), RenderStep::Settled, "post-only edits reuse the helper's output");
+        assert_eq!(Step { pixels: 4e6, ..s }.step(), RenderStep::Settled, "small photographs render fast enough");
+        assert_eq!(Step { scale: Some(0.8), ..s }.step(), RenderStep::Settled, "the canvas shows most pixels anyway");
+        assert_eq!(Step { scale: Some(1.0), ..s }.step(), RenderStep::Settled, "zoomed in");
+        assert_eq!(Step { scale: None, ..s }.step(), RenderStep::Settled, "no canvas");
+        // The limits themselves: 4.5 MP and half the pixels are in.
+        assert_eq!(Step { pixels: QUICK_FRAME_MIN_PIXELS, ..s }.step(), RenderStep::Quick(0.25));
+        assert_eq!(Step { pixels: QUICK_FRAME_MIN_PIXELS - 1.0, ..s }.step(), RenderStep::Settled);
+        let half = QUICK_FRAME_MAX_PIXEL_FRACTION.sqrt();
+        assert_eq!(Step { scale: Some(half - 1e-9), ..s }.step(), RenderStep::Quick(half - 1e-9));
+        assert_eq!(Step { scale: Some(half + 1e-9), ..s }.step(), RenderStep::Settled);
+        assert_eq!(Step { scale: Some(0.0), ..s }.step(), RenderStep::Settled, "no canvas (`set_fixed_scale(Some(0.0))`)");
+    }
+
+    /// The Mac's `testDragsAreUnchanged`.
+    #[test]
+    fn drags_are_unchanged() {
+        let s = Step { interacting: true, ..Step::default() };
+        assert_eq!(s.step(), RenderStep::Drag(0.25));
+        assert_eq!(Step { pixels: 1e6, has_frame: false, done: true, reuses: true, ..s }.step(), RenderStep::Drag(0.25));
+        assert_eq!(Step { scale: Some(1.0), ..s }.step(), RenderStep::Settled);
+        assert_eq!(Step { scale: None, ..s }.step(), RenderStep::Settled);
+        assert_eq!(RenderStep::Drag(0.25).kind(), FrameKind::Drag);
+        assert_eq!(RenderStep::Quick(0.25).kind(), FrameKind::Quick);
+        assert_eq!((RenderStep::Quick(0.3).interactive_scale(), RenderStep::Settled.interactive_scale()), (Some(0.3), None));
+    }
+
+    /// The canvas scale is in physical pixels (`view.zoom`, PerMonitorV2):
+    /// the same window in DIPs shows 1.5 times the pixels at 150 %. A
+    /// 1300 DIP wide view of the 3072 px test photograph gets a quick frame
+    /// at 100 % and 150 %; a 2000 DIP one only at 100 %.
+    #[test]
+    fn the_quick_frame_limit_counts_physical_pixels() {
+        let photo = (3072.0, 2048.0);
+        let step = |view_dips: f64, dpi_scale: f64| {
+            let screen_scale = view_dips * dpi_scale / photo.0;
+            Step { scale: Some(screen_scale), pixels: photo.0 * photo.1, ..Step::default() }.step()
+        };
+        assert!(matches!(step(1300.0, 1.0), RenderStep::Quick(s) if (s - 0.4232).abs() < 1e-3));
+        assert!(matches!(step(1300.0, 1.5), RenderStep::Quick(s) if (s - 0.6348).abs() < 1e-3));
+        assert!(matches!(step(2000.0, 1.0), RenderStep::Quick(_)));
+        assert_eq!(step(2000.0, 1.5), RenderStep::Settled, "0.98 of the pixels per side");
+        // The measurements' window: 1600 × 1000 DIP at 125 % on the 60 MP DNG.
+        assert!(matches!(Step { scale: Some(1300.0 * 1.25 / 9504.0), pixels: 9504.0 * 6320.0, ..Step::default() }.step(), RenderStep::Quick(_)));
+    }
+
+    /// The Mac's `testReuseKeyIgnoresOnlyPostAndThePreviewPath`, plus: the
+    /// comparison is by value (`json::same`), and the crop is in the key.
+    #[test]
+    fn the_reuse_key_ignores_only_post_and_the_preview_path() {
+        let command = json!({
+            "command": "render", "film": "a", "preview_path": "C:\\x",
+            "params": {"post": {"contrast": 0}, "camera": {"exposure_compensation_ev": 0}},
+        });
+        let mut post = command.clone();
+        post["params"]["post"]["contrast"] = json!(20);
+        post["preview_path"] = json!("C:\\y");
+        assert!(json::same(&reuse_key(&command), &reuse_key(&post)));
+        assert!(reuse_key(&post).get("preview_path").is_none());
+        assert_eq!(reuse_key(&post)["params"]["post"], Value::Null);
+        let mut camera = command.clone();
+        camera["params"]["camera"]["exposure_compensation_ev"] = json!(1);
+        assert!(!json::same(&reuse_key(&command), &reuse_key(&camera)));
+        let mut scaled = command.clone();
+        scaled["interactive_scale"] = json!(0.25);
+        assert!(!json::same(&reuse_key(&command), &reuse_key(&scaled)));
+        // 0 and 0.0 are the same value.
+        let mut float = command.clone();
+        float["params"]["camera"]["exposure_compensation_ev"] = json!(0.0);
+        assert_ne!(reuse_key(&command), reuse_key(&float));
+        assert!(json::same(&reuse_key(&command), &reuse_key(&float)));
+        // A crop (Longest side) is part of the request, so of the key: the
+        // helper itself keys on the resolved working size instead.
+        let mut cropped = command.clone();
+        cropped["crop"] = json!({"x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5, "angle": 0});
+        assert!(!json::same(&reuse_key(&command), &reuse_key(&cropped)));
+    }
+
+    /// A quick frame is a preview of the edit, not the edit's frame: Save,
+    /// the export-size flag and the render id stay as they were; the status
+    /// says "Preview", with the backend. (The preview cache: lifecycle test.)
+    #[test]
+    fn a_quick_frame_is_not_the_current_preview() {
+        let mut model = Model::new(Preferences::default());
+        model.render_id = 7;
+        model.render_at_export_size = true;
+        let mut quick = rendered(&model, 600, true);
+        quick.result["backend"] = json!("cpu");
+        model.present(quick, FrameKind::Quick);
+        assert!(!model.preview_current && !model.can_save() && model.showing_interactive_frame);
+        assert_eq!((model.render_id, model.render_at_export_size), (7, true));
+        assert_eq!(model.status, "Preview · 600 × 400 · developed in 0.01 s on the CPU");
+        assert!(model.shows_quick_frame());
+        assert_eq!(model.shown_frame.map(|f| f.kind), Some(FrameKind::Quick));
+        // A settled frame of the same edit replaces it.
+        model.present(rendered(&model, 2400, false), FrameKind::Settled);
+        assert!(model.preview_current && !model.shows_quick_frame() && model.render_id == 1);
+    }
 }
+
+#[cfg(test)]
+pub mod harness;
+#[cfg(test)]
+mod lifecycle_tests;
 
 /// Presets through the real helper (`target\release`, built from this
 /// checkout); skipped without it. `NEGS_PRESETS_TEST_DIR` (or
@@ -3289,6 +3969,7 @@ mod preset_tests {
     /// own requests go nowhere (no window); tests ask the helper themselves.
     fn live(test: &str) -> Option<Live> {
         let Ok(paths) = EnginePaths::locate() else {
+            assert!(std::env::var_os("NEGS_REQUIRE_HELPER").is_none(), "NEGS_REQUIRE_HELPER is set and the release helper isn't built");
             eprintln!("skipped: build the release helper first");
             return None;
         };

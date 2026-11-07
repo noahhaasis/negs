@@ -503,7 +503,8 @@ mod tests {
 
     #[test]
     fn favourites_keep_the_order_starred() {
-        let mut prefs = Preferences::default();
+        // A user who cleared the defaults; new users start with four (below).
+        let mut prefs = Preferences { favorite_films: vec![], ..Preferences::default() };
         prefs.toggle_favorite("portra", false);
         prefs.toggle_favorite("gold", false);
         prefs.toggle_favorite("endura", true);
@@ -512,5 +513,35 @@ mod tests {
         prefs.toggle_favorite("portra", false);
         prefs.toggle_favorite("portra", false);
         assert_eq!(prefs.favorites(false), ["gold", "portra"]);
+    }
+
+    /// New users start with the four films, and papers with none (`f182c00`).
+    #[test]
+    fn new_users_start_with_four_favourite_films() {
+        let fresh = Preferences::default();
+        assert_eq!(fresh.favorites(false), ["kodak_gold_200", "kodak_portra_400", "kodak_ektar_100", "fujifilm_c200"]);
+        assert!(fresh.favorites(true).is_empty());
+    }
+
+    /// The saved list is the user's, as on the Mac and Linux: a file without
+    /// it (from before favourites) gets the four, an empty one stays empty,
+    /// and a custom one is kept in its order, with ids the catalog lacks.
+    #[test]
+    fn saved_favourites_are_kept_as_saved() {
+        let defaults: Vec<String> = DEFAULT_FAVORITE_FILMS.iter().map(|s| s.to_string()).collect();
+        let empty_file: Preferences = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty_file.favorite_films, defaults);
+        let older: Preferences = serde_json::from_str(r#"{"recentFiles": [], "previews": true}"#).unwrap();
+        assert_eq!((older.favorite_films, older.favorite_papers), (defaults, vec![]));
+        let cleared: Preferences = serde_json::from_str(r#"{"favoriteFilms": [], "favoritePapers": []}"#).unwrap();
+        assert!(cleared.favorite_films.is_empty() && cleared.favorite_papers.is_empty(), "an emptied list stays empty");
+        let custom: Preferences = serde_json::from_str(r#"{"favoriteFilms": ["kodak_vision3_250d", "a_film_from_a_later_catalog"], "favoritePapers": ["kodak_endura_premier"]}"#).unwrap();
+        assert_eq!(custom.favorite_films, ["kodak_vision3_250d", "a_film_from_a_later_catalog"]);
+        assert_eq!(custom.favorite_papers, ["kodak_endura_premier"]);
+        // Saved again, all of it comes back, including the empty list.
+        for prefs in [cleared, custom] {
+            let again: Preferences = serde_json::from_str(&serde_json::to_string(&prefs).unwrap()).unwrap();
+            assert_eq!((again.favorite_films, again.favorite_papers), (prefs.favorite_films, prefs.favorite_papers));
+        }
     }
 }

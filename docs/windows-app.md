@@ -138,6 +138,24 @@ screenshots: [the handoff's Windows results](handoff-stock-previews-windows.md#w
 Settings also has "Keep paper when changing film" (`keep_paper`, off by default; see
 [handoff-keep-paper.md](handoff-keep-paper.md)).
 
+### Film search
+
+The Mac's `b8ad592` (2026-11-05). A "Search films" field sits over the Film grid, outside
+its scrolling; Paper has none. Every word typed must be in the film's name, its id with `_`
+read as spaces, or its group title, ignoring case and accents (`state::matching`, through
+`FindNLSStringEx` in the invariant locale). While searching, the favourites hide and each
+match shows once under its group, in catalog order; groups without matches drop out, and
+with none the grid says `No films match “…”`. The grid keeps its height. Return chooses the
+first match (one "Change Film" undo step, as a click on its tile), Escape clears the field.
+A new search scrolls to the top; clearing it goes back to the current film. A search hides
+tiles and lays the rest out again, so tiles and thumbnails stay, and thumbnails are made
+only for the matches, in the order shown. The search lasts for the session (closing and
+opening the foldout keeps it) and isn't a preference; turning previews off clears it.
+Thumbnails still wait for the settled frame (`previews_may_render`), so a search typed while a
+quick frame shows, or while a held frame's match solves, asks for nothing until the settled
+frame is on screen; Return chooses the film exactly as a tile click does, with the quick frame
+and the match (`lifecycle_tests.rs`, "Film search with the held and quick frames").
+
 ## Lens corrections
 
 A RAW whose decode finds the camera's lens data (DNG opcodes; Sony, Fujifilm, OM/Olympus
@@ -247,9 +265,116 @@ Post, Start fresh and the Highlights range.
 (`state::match_inputs`: everything except Prep, print exposure, grain, rotation, crop and
 output encoding). One solve runs at a time, after the settled preview. A reply is applied only
 if its inputs are still current, and it gets no undo step of its own. Opening another
-photograph supersedes a solve. Save and Export wait for a pending match and its preview, at
-most 30 s. Failures read as on the Mac: a problem with the reference holds for the photograph,
-a solve failure holds until the next edit.
+photograph supersedes a solve. Save and Export wait for a pending match and its preview.
+Failures read as on the Mac: a problem with the reference holds for the photograph, a solve
+failure holds until the next edit.
+
+**Held frame** (2026-11-06, as macOS `e4a9f92`). A settled frame that arrives while its match is
+pending is held, not shown (`render_finished` accepts it, then `release_held` or an edit decides):
+the previous frame and the "Updating" badge stay up, the preview isn't current (so thumbnails,
+Save and the tone graph's histogram wait), and the solve starts from it. If the match moves the
+exposure by 0.05 EV or more, that's an edit: the held frame is dropped and the matched one
+renders, so the canvas goes from the previous frame straight to the matched one. If the match
+keeps the exposure, fails, or is turned off, the held frame is shown once the solve is back.
+Any edit, Undo, another photograph or closing drops it; drag frames and frames while cropping
+are never held. A waiting Save or Export keeps waiting while a render or solve is running or due
+(a large RAW on the CPU takes about a minute) and then writes the matched frame. If nothing will
+finish the match (its render failed, or 30 s passed with nothing running) it says it couldn't
+save or export, rather than skipping the save silently or exporting the old exposure. The cost:
+on the 33 MP ARW (Vulkan, medians of 8 steps) a film change whose match stays shows its frame
+2.29 s after the click, after the solve, where it showed at 1.91 s before; one whose match moves
+(Gold 200 and Superia 200) shows only the matched frame, at 4.08 s, two renders and a solve.
+
+**Quick frame** (ticket 28, 2026-11-07, as macOS `30de494` and `8a73944`). A discrete edit (a
+film or paper pick, a menu, Undo) on a photograph of 4.5 MP or more first renders only as many
+pixels as the canvas shows, then the settled frame at once, with no delay. The quick frame's
+status reads "Preview · W × H · developed in …" (with " on the CPU" when it is), the preview
+isn't current (Save, thumbnails and the preset check wait), and it isn't saved to the
+rendered-preview cache. The canvas keeps its fit, zoom and 1:1 stop: they follow the
+photograph's size, not the frame's.
+- **When.** `render_step` decides when a render starts: a drag while a slider moves; otherwise a
+  quick frame if the canvas shows under half the pixels (scale² ≤ 0.5, in physical pixels, so
+  DPI counts), the photograph is 4.5 MP or more, a frame this helper developed of it is on
+  screen (not the first frame, not the restored launch frame), the edit hasn't had its quick
+  frame yet, and the helper can't answer from its kept output. That last one covers post-only
+  edits (about 90 ms on 6 MP instead of a full render). The app keeps the key of the helper's
+  last settled render (the request without `preview_path` and `post`, compared by value) with
+  the epoch of the helper process that made it: a restarted helper keeps nothing, and one that
+  has exited counts as the next epoch already. Border, rotation and crop edits render nothing,
+  as before; with Longest side a crop of another extent renders, with a quick frame.
+- **Reuse lost after a crop move (Longest side).** The request carries the whole crop, its
+  position and angle too, as on the Mac, while the helper keys on the resolved working size.
+  After moving or straightening a crop (which renders nothing), the next post-only edit's
+  request no longer matches the kept settled render's, so it gets a quick frame and a full
+  render (0.40 s on 6 MP, about 2 s on the 33 MP ARW) where the helper alone would reuse its
+  output (0.15 s). After a quarter turn the helper doesn't reuse either (`io.rotate_cw` is in
+  its key), so there only the quick frame is added. Keying on the crop's extent alone is open
+  for Noah, for both apps.
+- **Settling.** The step travels with the render to `render_finished`: only a drag re-renders on
+  release (a release goes straight to export size), and a quick frame settles only through
+  `settle_quick_frame`, once no render, solve, held frame or slider holds it. A failed quick
+  frame is silent; the settled render reports its error once and nothing retries. A quick frame
+  of an edit already superseded still shows (fast clicks, Ctrl+Z held); the latest edit renders
+  next.
+- **With the match.** A quick frame whose match is pending is held like a settled one, and the
+  solve starts from it (the helper holds its decode). If the match moves the exposure, that edit
+  gets its own quick frame, then the one settled render of the matched exposure; the old
+  exposure never renders at export size. Previous frame → matched quick frame → settled.
+- **Save and Export** asked for while a quick frame shows wait for its settled frame
+  ("Developing the preview…"), then write it.
+- **Where Windows differs from the Mac.** Save and Export wait for the settled frame (the Mac's
+  Save is disabled during a quick frame and skips silently otherwise). A settled render already
+  scheduled waits for a solve that started after it (matching turned on while a quick frame
+  shows, at exposure 0, which is no edit); the Mac sends it at the old exposure. The kept-output
+  key includes the helper's epoch; the Mac's doesn't.
+
+Timings, Gold 200 and Portra 400 alternated, medians from the click (the protocol of "Render
+lifecycle tests and timing" below; Vulkan 8 changes, CPU 4; ms):
+
+| Photograph, matching | Vulkan first change, before → after | Vulkan settled, before → after | CPU first change, before → after | CPU settled, before → after |
+|---|---|---|---|---|
+| 60 MP DNG, off | 3717 → **175** | 3717 → 3474 | 96 922 → **2110** | 96 922 → 97 467 |
+| 33 MP ARW, off | 1873 → **192** | 1873 → 2228 | 51 984 → **2105** | 51 984 → 54 988 |
+| 33 MP ARW, on | 2289 → **570** | 2289 → 2640 | 52 056 → **3496** | 52 056 → 54 671 |
+| 12 MP JPEG, off | 695 → **104** | 695 → 845 | 19 733 → **1254** | 19 733 → 23 919 |
+| 12 MP JPEG, on | 734 → **464** | 734 → 1263 | 19 040 → **3220** | 19 040 → 25 862 |
+
+- **"Before"** is the baseline below, from before the held frame, except the ARW with matching on
+  on Vulkan, which is the held frame's 2289 ms. The held frame was not measured on the CPU or on
+  the JPEG.
+- **With matching on** the first change includes the solve (about 0.29 s on Vulkan, 1.3–1.8 s
+  on the CPU), because the quick frame is held for it.
+- **The quick render** itself takes 80–165 ms on Vulkan and 1.2–2.1 s on the CPU.
+- **The settled frame comes later, as expected:** by the quick render plus 150–400 ms on Vulkan
+  (the 60 MP DNG varies more than that from run to run), and by 0.5–4 s on the CPU. The 12 MP
+  CPU settled render was itself 15 % slower in this run (22.6 against 19.7 s).
+- **Memory.** The helper's working set grew by 1–27 MB idle and by up to 56 MB at its peak
+  (60 MP DNG on Vulkan: 1631 / 2357 MB against 1606 / 2301 MB). The Mac reported 211 MB on
+  60 MP.
+
+**Integrated build** (2026-11-07, branch `win-nov5`: film search, the held frame and quick
+frames together, app and helper built from `c953839`; the helper's source is unchanged from
+`3c9e166`). The same protocol, machine (Ryzen 5 3600, GTX 1660 SUPER, Windows 10 19045, one
+monitor at 125 %, mains power) and files, rerun with nothing else running; medians in ms:
+
+| Photograph, matching | Vulkan first change | Vulkan settled | CPU first change | CPU settled | Helper working set idle / peak MB (Vulkan; CPU) |
+|---|---|---|---|---|---|
+| 60 MP DNG, off | 232 | 3568 | 2134 | 96 539 | 1606 / 2331; 1416 / 6248 |
+| 33 MP ARW, off | 181 | 2045 | 2115 | 53 658 | 978 / 1389; 788 / 3413 |
+| 33 MP ARW, on | 553 | 2476 | 3642 | 55 066 | 978 / 1388; 789 / 3413 |
+| 12 MP JPEG, off | 81 | 763 | 1095 | 20 350 | 629 / 771; 303 / 1282 |
+| 12 MP JPEG, on | 409 | 1082 | 2664 | 21 474 | 624 / 772; 304 / 1282 |
+
+Every measured step made one quick and one settled render and presented `quick, settled`. The
+numbers are within run-to-run noise of the quick-frame table above: settled −183 to +94 ms
+on Vulkan (the 60 MP DNG the slower one) and −4.4 to +0.4 s on the CPU, following the
+helper's own render times (the 12 MP CPU settled render took 19.2 s this run against 22.6 s
+then); first change −56 to +57 ms on Vulkan. The benchmark runs
+with previews off; with previews on and a search active, a Return on the 33 MP ARW with the
+match on presented the matched quick frame at 818 ms and the settled frame at 2574 ms, and the
+first thumbnail went out after the settled render, so the search adds nothing before the
+settled frame. With the crop overlay up, a film change's quick and settled frames leave the
+overlay, its handles and the straighten dial where they were.
 
 The reference (`brightness.rs`) is the RAW's embedded preview through rawler, oriented,
 letterbox bars trimmed when its shape differs, at most 512 px. For JPEG, PNG and TIFF it is
@@ -622,6 +747,112 @@ grey again.
 test only), a monitor smaller than the minimum, other scaling than 100 %, light theme and
 high contrast with a custom background.
 
+## Render lifecycle tests and timing (2026-11-06)
+
+Groundwork for the held frame and quick frames (`docs/windows-nov5-port`, chunk 0).
+
+**Lifecycle harness** (`windows/src/model/harness.rs`). It drives the model's real lifecycle
+against the release helper: `render`, then `render_finished`, `reconcile_brightness_match`,
+`brightness_solved` and `render` again, as the app runs it. The model finishes every request by
+posting a task to the UI thread (`ui::post`, and `ui::after` for timers).
+- **Headless app.** The harness wraps the model in an `App` with no windows and runs those tasks
+  unchanged, one at a time, as the message loop's `drain` does.
+- **After each task**, it does what `App::refresh` does with the model: it takes the dirty marks,
+  collects a reported error and pumps the thumbnails.
+- **Isolation.** The task queue is process-wide, and other unit tests post to it. So each
+  lifecycle test re-runs itself alone in a child process with a scratch `NEGS_PROFILE_DIR`, one
+  child at a time.
+
+Run the lifecycle tests with
+`cargo test --release --locked --manifest-path windows/Cargo.toml lifecycle`. They need the
+release helper built from the same checkout. Without it they print "skipped" and pass. With
+`NEGS_REQUIRE_HELPER=1`, a missing helper fails these tests and the other live tests instead.
+
+What a test can use:
+- `lifecycle_test!`, which runs the test in its own child process.
+- `Harness::start`, `open`, `edit` (a click or key followed by a refresh), `idle` and
+  `run_until`.
+- `fire_timers`: runs `ui::after` tasks early.
+- `model.render_log`: every render request (kind, revision, generation, interactive scale).
+- `commands()`: every helper command, in the order sent.
+- `frames`: every frame shown, sampled after each task; `model.frame_log`: every frame
+  presented, also one replaced within a task. `errors`: every error reported.
+  `model.held_frame()`: the frame held for its brightness match, if any.
+- `ui::canvas::set_fixed_scale`: stands in for the canvas. Its value is in physical screen pixels
+  per photograph pixel; the app is per-monitor DPI aware, so the same view at 150 % has 1.5 times
+  the scale it has at 100 %.
+- A deterministic 3072 × 2048 test photograph (6.3 MP).
+
+**Trace and benchmark** (`windows/src/trace.rs`). Both are off unless their environment variable
+is set.
+- `NEGS_RENDER_TRACE=<file>` writes JSON lines with QPC times: each edit, each render request and
+  reply (`elapsed_ms`, `cached_pipeline`, `pipeline_ms`), every helper command, each brightness
+  solve (with the Exposure note when idle), and the canvas's first present of each frame (after
+  the Vulkan present or the software blit) with DWM's composition after it.
+- `NEGS_RENDER_BENCH=<film>,<film>` alternates the films once the preview is idle and shown.
+- `windows/measure_render.ps1 -Photo … -Match on|off -Backend vulkan|cpu` runs one benchmark with
+  a fresh profile, with previews off and the window at 1600 × 1000 DIP. It samples the helper's
+  working set, and `windows/render_trace.py` summarises the run. Steps 1–2 are warm-up; the
+  medians are over the rest.
+
+**Baseline**, before the held frame and quick frames, on this machine:
+- **Machine and build:** Ryzen 5 3600, GTX 1660 SUPER, Windows 10 19045, one 3440 × 1440 monitor
+  at 125 %, mains power, nothing else running. Helper and app built from `3c9e166` (the crates
+  are unchanged on this branch); the CPU fallback used `RAYON_NUM_THREADS=6`.
+- **Photographs:** a 60 MP Leica M11 DNG (9504 × 6320, from Lightroom), a 33 MP Sony ARW
+  (7008 × 4672) and a 12.2 MP iPhone JPEG (4032 × 3024).
+- **Edits:** Gold 200 and Portra 400 alternated, warm, 8 measured changes on Vulkan and 4 on the
+  CPU.
+
+All times are from the edit to the frame presented, median ms. With matching on, these two films
+match within 0.05 EV of each other, so the solve doesn't render again, and the settled frame is
+the first frame.
+
+| Photograph | Matching | Vulkan first = settled | Vulkan solve | CPU first = settled | CPU solve | Helper working set, idle / peak (Vulkan; CPU) |
+|---|---|---|---|---|---|---|
+| 60 MP DNG | off (on: refused, see below) | 3717 (3308–5933) | – | 96 922 | – | 1606 / 2301 MB; 1401 / 6233 MB |
+| 33 MP ARW | off | 1873 | – | 51 984 | – | 961 / 1340 MB; 772 / 3397 MB |
+| 33 MP ARW | on | 1913 | 212 | 52 056 | 1452 | 970 / 1349 MB; 774 / 3398 MB |
+| 12 MP JPEG | off | 695 | – | 19 733 | – | 622 / 764 MB; 295 / 1274 MB |
+| 12 MP JPEG | on | 734 | 209 | 19 040 | 1570 | 623 / 765 MB; 295 / 1274 MB |
+
+Notes on the table:
+- **Where the time goes.** Nearly all of it is the helper's render: medians of 3363, 1585 and
+  632 ms on Vulkan, and 96 818, 51 868 and 19 928 ms on the CPU. On Vulkan the rest (sending,
+  reading the buffer back, uploading and presenting) is about 60 ms at 12 MP and 290–350 ms at
+  33–60 MP. DWM composes 3–13 ms after the present.
+- **The solve's place.** It runs after the settled frame is on screen, so it isn't in the first or
+  settled times above.
+- **The 60 MP DNG on Vulkan varies run to run** (3.0–5.7 s in the helper). On Vulkan the
+  33 MP times spread by at most 10 %, and the 12 MP ones ran 611–746 ms with matching off and
+  700–1006 ms with it on. On the CPU every photograph spread by under 5 %.
+- **The `pipeline_ms` field.** With the pipeline cached it is about 1 ms; building one takes
+  30–70 ms.
+- **The 60 MP DNG refuses matching** with "The camera preview is framed differently from the
+  photo.", so it measures matching off only. Its Lightroom preview has another shape.
+
+**Shared changes checked on Windows.** Tests in `session.rs` and `model/lifecycle_tests.rs`:
+- **Favourites:** a new profile has the four films. An emptied or custom list is kept. In the
+  release app a new profile shows Gold 200, Portra 400, Ektar 100 and C200 starred, before the
+  groups.
+- **Fotufilm:** 52 films and 10 papers, each film in exactly one group, the new films with their
+  own 35mm strips (Tri-X 400 keeps the generic one). A catalog cache from before Fotufilm (23
+  films) is replaced at launch, both under the current helper's key and as an older helper's
+  file. In the release app the grid scrolls through all 52 tiles. With previews on, the 52
+  thumbnails of the 12 MP JPEG took 3.5 s (49 ms each in the helper). CineStill 800T shows its
+  own 35mm strip on the canvas.
+- **Pipeline cache:** a thumbnail's pipeline is reused by the main render. The main render's
+  last films stay cached through 49 more thumbnails and `release_thumbnails`. Turning previews
+  off sends `release_thumbnails` and still renders.
+- **Brightness colour rule:** these files match in the release app:
+  - a Lightroom 6.8 DNG of a Leica M10, at −0.23 EV
+  - a Leica Q DNG, at +0.45 EV
+  - the ARW, at −0.33 EV
+
+  All their previews declare sRGB. No ProPhoto or gray-gamma preview was available, so "The
+  camera preview's colour space isn't supported." wasn't seen end to end. The note shows other
+  refusals, such as the M11's, the same way.
+
 ## Packaging
 
 `windows/package.ps1` builds the three engine tools separately and the app,
@@ -642,7 +873,8 @@ installer versions must match.
 
 The portable packaging smoke test passes, including ZIP CRCs and presence of
 the app, three helpers, data, license and source archive. The output is
-`target/windows-dist/Negs-portable.zip` (approximately 104 MB).
+`target/windows-dist/Negs-portable.zip`, about 165 MB (157 MiB) on 2026-11-07, up from about
+104 MB: the data grew with the Fotufilm profiles, and `source.zip` carries a second copy of it.
 The PowerShell script handles compiler warnings on stderr and normalises the
 per-command Git ownership exception. The final portable and Inno installer
 payloads passed archive, executable-hash and install/uninstall checks on

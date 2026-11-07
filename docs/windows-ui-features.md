@@ -327,6 +327,12 @@ parameters reject fractions). Ranges and steps (`Inspector.swift` and
 *Film & Paper*
 - Film (grouped list: Color Negative, Color Slide, Motion Picture, Black &
   White) → `film`
+- Film search (the Film grid only, with previews on): a "Search films" field
+  over the tiles. Every word must match the name, the id with `_` as spaces,
+  or the group, ignoring case and accents. Matches show once under their
+  groups, without the favourites; none says `No films match “…”`. Return
+  chooses the first match, Escape clears. A search scrolls to the top;
+  clearing it scrolls back to the current film. Not saved.
 - Development (only if the film has more than one time): "Profile default"
   or each time in minutes → `film_render.development_time` (null = default)
 - Scan film directly (checkbox) → `io.scan_film`

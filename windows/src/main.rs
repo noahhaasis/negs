@@ -24,6 +24,7 @@ mod state;
 mod text;
 mod thumbnail;
 mod tone_graph;
+mod trace;
 mod ui;
 mod updates;
 
