@@ -35,6 +35,9 @@ import SwiftUI
         // if the session isn't read within 0.1 s, it restores once the helper
         // answers and reports any error then. Benchmarks and explicit
         // launches must not reopen a previous photograph.
+        #if SPEKTRAFILM_BENCHMARK
+        LaunchBenchmark.begin(model)
+        #endif
         model.launch()
         let benchmark = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] != nil
         var store: SessionStore? = benchmark ? nil : sessions
@@ -60,6 +63,9 @@ import SwiftUI
         model.finishLaunching(waitingUpTo: 0.15)
         editor?.refresh()
         editor?.showWindow(nil)
+        #if SPEKTRAFILM_BENCHMARK
+        LaunchBenchmark.windowShown()
+        #endif
         NSApp.activate(ignoringOtherApps: true)
         // Finder opens arrive through application(_:open:); a path argument is for `swift run`.
         if let path = Self.pathArgument { model.open(URL(fileURLWithPath: path)) }

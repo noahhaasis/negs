@@ -10,7 +10,7 @@ import AppKit
 @MainActor enum InteractionBenchmark {
     static func start(_ model: EditorModel) {
         let environment = ProcessInfo.processInfo.environment
-        guard let photo = environment["SPEKTRAFILM_BENCHMARK_PHOTO"] else { return }
+        guard !LaunchBenchmark.enabled, let photo = environment["SPEKTRAFILM_BENCHMARK_PHOTO"] else { return }
         let exposure = environment["SPEKTRAFILM_BENCHMARK_PARAM"] == "camera.exposure_compensation_ev"
         let shots = environment["SPEKTRAFILM_BENCHMARK_SHOTS"].map { URL(fileURLWithPath: $0) }
         let launched = Date()
@@ -75,6 +75,66 @@ import AppKit
 
     private static func report(_ line: String) {
         FileHandle.standardError.write(Data("benchmark: \(line)\n".utf8))
+    }
+}
+
+/// SPEKTRAFILM_BENCHMARK_LAUNCH: times launch from the process's exec, then
+/// quits. Window: the commit after the window is shown. Photo: the same, if
+/// the photograph was in that first frame, else the first timer tick with it
+/// on the canvas. Preview: the first current render. Settled: the end of the
+/// last main run-loop pass busy for more than 4 ms before the main thread
+/// stays quiet for a second.
+@MainActor enum LaunchBenchmark {
+    static var enabled: Bool { ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_LAUNCH"] != nil }
+    private static var started = 0.0, window = 0.0, photo = 0.0, preview = 0.0, lastBusy = 0.0
+    private static weak var model: EditorModel?
+
+    /// Seconds since 1970 when this process was exec'd.
+    private static func processStart() -> Double {
+        var info = kinfo_proc(), size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return Date().timeIntervalSince1970 }
+        let time = info.kp_proc.p_un.__p_starttime
+        return Double(time.tv_sec) + Double(time.tv_usec) / 1e6
+    }
+    private static func now() -> Double { (Date().timeIntervalSince1970 - started) * 1000 }
+
+    /// Call first thing in applicationWillFinishLaunching.
+    static func begin(_ model: EditorModel) {
+        guard enabled else { return }
+        self.model = model
+        started = processStart()
+        var awake = now()
+        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeWaiting.rawValue, true, 0) { _, activity in
+            let time = now()
+            if activity == .afterWaiting { awake = time } else if time - awake > 4 { lastBusy = time }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                let time = now()
+                if photo == 0, window > 0, model.image != nil || model.placeholder != nil { photo = time }
+                if preview == 0, model.previewCurrent { preview = time }
+                guard window > 0, preview > 0 || time > 8000, time - lastBusy > 1000 else { return }
+                timer.invalidate()
+                FileHandle.standardError.write(Data(String(format: "benchmark: launch window %.0f ms, photo %.0f ms, preview %.0f ms, settled %.0f ms from exec · %@%@\n",
+                                                           window, photo, preview, lastBusy, model.status, model.error.map { " · error: \($0)" } ?? "").utf8))
+                NSApp.terminate(nil)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// Call right after the window is shown.
+    static func windowShown() {
+        guard enabled else { return }
+        let inFirstFrame = model?.image != nil || model?.placeholder != nil
+        CATransaction.setCompletionBlock {
+            MainActor.assumeIsolated {
+                window = now()
+                if inFirstFrame { photo = window }
+            }
+        }
     }
 }
 #endif
