@@ -873,7 +873,8 @@ installer versions must match.
 
 The portable packaging smoke test passes, including ZIP CRCs and presence of
 the app, three helpers, data, license and source archive. The output is
-`target/windows-dist/Negs-portable.zip` (approximately 104 MB).
+`target/windows-dist/Negs-portable.zip`, about 165 MB (157 MiB) on 2026-11-07, up from about
+104 MB: the data grew with the Fotufilm profiles, and `source.zip` carries a second copy of it.
 The PowerShell script handles compiler warnings on stderr and normalises the
 per-command Git ownership exception. The final portable and Inno installer
 payloads passed archive, executable-hash and install/uninstall checks on

@@ -1933,3 +1933,33 @@ lifecycle_test! {
         assert!(h.errors.is_empty(), "{:?}", h.errors);
     }
 }
+
+/// Clearing a search once idle asks for the other films' thumbnails at the
+/// current state: an edit made while searching re-made only the matches,
+/// so without the field's `dirty::PREVIEWS` mark the rest would keep the old
+/// exposure until something unrelated refreshed the grid.
+lifecycle_test! {
+    fn clearing_a_search_remakes_the_other_films_thumbnails_at_the_new_state() {
+        let Some(mut h) = Harness::start(harness::prefs(false)) else { return };
+        open_quick(&mut h, false);
+        search_films(&mut h, "portra");
+        h.edit(|m| m.set_previews(true));
+        h.edit(|m| m.toggle_foldout(false));
+        h.idle();
+        let portras = film_matches(h.model(), "portra");
+        h.clear_logs();
+        h.edit(|m| m.set("camera.exposure_compensation_ev", serde_json::json!(0.5)));
+        h.idle();
+        assert_eq!(thumbnails_after_the_settled_render(&h, &portras), portras.len(), "the edit re-made the matches only");
+        h.clear_logs();
+
+        search_films(&mut h, "");
+        h.idle();
+        let others: Vec<String> = film_matches(h.model(), "").into_iter().filter(|id| !portras.contains(id)).collect();
+        assert_eq!(thumbnails_after_the_settled_render(&h, &others), others.len(), "every other film's thumbnail, once");
+        for command in h.commands().iter().filter(|c| c["command"] == "thumbnail") {
+            assert_eq!(command["params"]["camera"]["exposure_compensation_ev"], serde_json::json!(0.5), "{}", command["film"]);
+        }
+        assert!(h.renders().is_empty() && h.errors.is_empty(), "{:?}", h.errors);
+    }
+}

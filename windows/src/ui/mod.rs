@@ -1501,7 +1501,8 @@ pub fn run() {
         let composited = DwmFlush().is_ok();
         with_app(|app| app.report.stamp(if composited { "first_window_composited" } else { "first_window_flush_failed" }));
         // The adjustments, the GPU and the rest wait for the first frame.
-        let _ = PostMessageW(main, WM_APP_BUILD, WPARAM(0), LPARAM(0));        crate::trace::start_bench();
+        let _ = PostMessageW(main, WM_APP_BUILD, WPARAM(0), LPARAM(0));
+        crate::trace::start_bench();
         if let Some(path) = path {
             with_app(|app| app.model.open(&path));
         }
