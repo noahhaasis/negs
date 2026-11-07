@@ -126,6 +126,58 @@ import XCTest
         XCTAssertNotEqual(model.film, "kodak_doublex")
     }
 
+    /// Saved with its pins as plain points, it comes back on any photograph,
+    /// beside that photograph's own pins, and with the default preset too.
+    func testAPresetSavesTheToneCurve() async throws {
+        let folder = directory.appendingPathComponent("presets", isDirectory: true)
+        let model = EditorModel(previewCache: RenderedPreviewCache(file: directory.appendingPathComponent("curve.cache")), presetLibrary: PresetLibrary(folder: folder))
+        defer { model.shutdown() }
+        await model.start(paths: try paths())
+        func waitUntil(_ condition: () -> Bool) async throws {
+            for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertTrue(condition(), "Timed out")
+        }
+        model.open(ramp)
+        await model.placeZone(5, at: CGPoint(x: 0.5, y: 0.5))
+        XCTAssertEqual(model.pins.filter { $0.source != nil }.count, 1)
+        model.addCurvePoint(input: 80, target: 90)
+        XCTAssertEqual(model.pins.count, 2)
+        model.newPreset()
+        try await waitUntil { model.renamingPreset != nil }
+        let preset = try XCTUnwrap(model.presets.first)
+        model.renamePreset(preset, to: "Curve")
+        try await waitUntil { model.presets.first?.name == "Curve" && model.renamingPreset == nil }
+        let saved = try XCTUnwrap(model.presets.first)
+        let file = try JSONSerialization.jsonObject(with: Data(contentsOf: saved.url)) as? [String: Any]
+        let points = try XCTUnwrap(file?["negs_tone_curve"] as? [[String: Any]])
+        XCTAssertEqual(points.count, 2)
+        XCTAssertTrue(points.allSatisfy { $0["source"] == nil || $0["source"] is NSNull }, "\(points)")
+
+        // On another photograph, as plain points.
+        model.open(other)
+        XCTAssertTrue(model.pins.isEmpty)
+        model.applyPreset(saved)
+        try await waitUntil { model.pins.count == 2 }
+        XCTAssertTrue(model.pins.allSatisfy { $0.source == nil })
+        // Its own pin stays when a preset is applied again.
+        await model.placeZone(3, at: CGPoint(x: 0.2, y: 0.5))
+        XCTAssertEqual(model.pins.count, 3)
+        model.addCurvePoint(input: 95, target: 98)
+        XCTAssertEqual(model.pins.count, 4)
+        model.applyPreset(saved)
+        try await waitUntil { model.pins.count == 3 }
+        XCTAssertEqual(model.pins.filter { $0.source != nil }.count, 1)
+
+        // Opening with the default preset brings the curve, not the pin.
+        model.setDefaultPreset(saved)
+        try await waitUntil { model.defaultPresetFile != nil }
+        let third = directory.appendingPathComponent("third.png")
+        try writeGradient(to: third)
+        model.open(third)
+        XCTAssertEqual(model.pins.count, 2)
+        XCTAssertTrue(model.pins.allSatisfy { $0.source == nil })
+    }
+
     /// A horizontal grey ramp in sRGB, the tones a pick can read.
     private func writeGradient(to url: URL, mirrored: Bool = false) throws {
         let (width, height) = (64, 48)

@@ -1489,10 +1489,11 @@ import UniformTypeIdentifiers
         let interpretation = defaults["io.input_interpretation"]
         if interpretation != .null { next.params["io.input_interpretation"] = interpretation }
         next.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
-        // Pins describe the tones of the photograph they were measured on,
-        // so they never carry to another file.
-        if next.params["post.tone_anchors"] != defaults["post.tone_anchors"] {
-            next.params["post.tone_anchors"] = defaults["post.tone_anchors"]
+        // Pins describe the tones of the photograph they were measured on, so
+        // they never carry to another file. Plain curve points are settings.
+        let anchors = next.params["post.tone_anchors"].array
+        if anchors.contains(where: { $0["source"] != .null }) {
+            next.params["post.tone_anchors"] = .array(anchors.filter { $0["source"] == .null })
         }
         next.crop = CropSettings()
         return next
@@ -2253,9 +2254,9 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// The film, paper and Lab settings of a preset, as one undo step. The
-    /// photograph's own settings stay: Image Size, rotation, crop, border,
-    /// output encoding, the preview limit and the Post tab.
+    /// The film, paper, Lab settings and tone curve of a preset, as one undo
+    /// step. The photograph's own settings stay: Image Size, rotation, crop,
+    /// border, output encoding, the preview limit, its pins and the Post tab.
     func applyPreset(_ preset: PresetFile) {
         guard canChangePresets, let engine else { return }
         Task {
@@ -2269,6 +2270,8 @@ import UniformTypeIdentifiers
                     guard state == snapshot else { continue }
                     var next = state
                     next.film = imported.film; next.paper = imported.paper; next.params = imported.params
+                    // Its curve may have moved the photograph's points along.
+                    if next.params["post.tone_anchors"] != state.params["post.tone_anchors"] { selectedPin = nil }
                     apply(next, action: "Apply Preset “\(preset.name)”")
                     status = "Applied preset “\(preset.name)”"
                     return
@@ -2294,8 +2297,8 @@ import UniformTypeIdentifiers
         return (film, paper, result["params"])
     }
 
-    /// Saves the film, paper and Lab settings as a new preset, named after
-    /// the film, and starts renaming it.
+    /// Saves the film, paper, Lab settings and tone curve as a new preset, named
+    /// after the film, and starts renaming it. Pins go in as plain points.
     func newPreset() {
         guard canChangePresets, let engine else { return }
         showPane(.presets)

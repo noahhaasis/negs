@@ -117,6 +117,12 @@ Left out, and kept as they were when applying: Image Size, the 12 MP preview lim
 encoding, low-memory export, rotation, crop, border, Post, and the CAT16 toggle (a Negs-only
 switch back to 0.3.2 behaviour; upstream always uses CAT16, Negs's default).
 
+The tone curve is the exception within Post. Negs always writes it as `negs_tone_curve`, a
+top-level key Python ignores: the points the curve uses, with any pins converted to plain
+points. Applying replaces the photograph's plain points and keeps its pins. An empty list clears
+plain points, so a Negs preset looks the same whatever was applied before it; a file without
+the key leaves them alone.
+
 Applying is deterministic: the Lab settings come from the (normalized) file, and nothing else
 from the previous state survives except the excluded settings above.
 

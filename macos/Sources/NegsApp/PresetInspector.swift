@@ -40,7 +40,7 @@ struct PresetInspector: View {
             Button(action: model.newPreset) { Image(systemName: "plus") }
                 .buttonStyle(.borderless)
                 .foregroundStyle(model.canChangePresets ? .primary : .tertiary)
-                .help("Save the film, paper and Lab settings as a preset (⌥⌘S)")
+                .help("Save the film, paper, Lab settings and tone curve as a preset (⌥⌘S)")
                 .accessibilityLabel("New Preset")
             Menu {
                 Button("Import Presets…", action: model.importPresetsPanel)
@@ -58,7 +58,7 @@ struct PresetInspector: View {
             Spacer()
             Image(systemName: "square.stack").font(.system(size: 36, weight: .light)).foregroundStyle(.secondary)
             Text("No Presets").font(.title3.weight(.semibold))
-            Text("Save the film, paper and Lab settings with +, or import presets made in Negs or spektrafilm. You can also drop them here.")
+            Text("Save the film, paper, Lab settings and tone curve with +, or import presets made in Negs or spektrafilm. You can also drop them here.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button("Import Presets…", action: model.importPresetsPanel).padding(.top, 4)
             Spacer()

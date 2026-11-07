@@ -298,9 +298,10 @@ preview: the preview already shows the other pins' curve.
 Because Post runs on the clipped scan, a pin shapes the tones the film produced
 but cannot recover a highlight that clipped; the exposure controls do that. Tab, or
 hides the pins and lines but keeps their
-effect and the panel, to judge the photograph clean. Dropping a zone shows them again. A preset neither carries nor
-replaces a photograph's pins, a session restores them, and opening another file
-starts with none.
+effect and the panel, to judge the photograph clean. Dropping a zone shows them again. A preset saves the
+tone curve with the pins converted to plain points, and applying one replaces the photograph's
+plain points but never its pins. A session restores pins, and opening another file starts with
+none, though a folder's default or the default preset can bring plain points.
 
 ## Film strip
 
@@ -403,7 +404,7 @@ A photograph opens with its own saved edits. Without any it opens at the default
 with the last photograph's edits; only the output colour space stays, being an export
 choice. Image Size is one setting for every photograph: it isn't taken from a photograph's
 saved edits, a folder's default or a preset, and it's remembered between launches. ⌘D, Set as Default for This Folder, makes the current settings what the
-folder's photographs without edits of their own open with, leaving out pins and crop.
+folder's photographs without edits of their own open with, leaving out pins and crop, though not plain curve points.
 Photographs with saved edits keep them. It's a snapshot, kept per folder, until ⌘D is
 pressed again: Reset All Adjustments then ⌘D puts a folder back on the app's defaults.
 
