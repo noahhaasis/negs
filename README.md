@@ -128,6 +128,8 @@ Negs updates itself: use **Negs → Check for Updates…**, or turn automatic ch
 
 Native Windows app with the same film engine as the Mac app: GPU previews, crop and straighten tools, borders, and Fast or Reference exports.
 
+![The Negs Windows app: a photo of Rome at dusk on Kodak Portra 800, with the film strip below and film and paper controls on the right](docs/readme/windows-app.webp)
+
 1. **Download** [`Negs-0.13.0-windows-x64-Setup.exe`](https://github.com/noahhaasis/negs/releases/download/v0.13.0/Negs-0.13.0-windows-x64-Setup.exe) and run it. It installs for your Windows account and adds Negs to **Open with**, without changing your default photo app.
 2. **If Windows SmartScreen warns you**, click **More info → Run anyway**. Negs isn't code-signed, which needs a paid certificate.
 
@@ -138,6 +140,8 @@ Windows doesn't update itself yet: download the newer installer from the [releas
 Windows packages can be built from source with [`windows/package.ps1`](windows/package.ps1); see the [Windows build instructions](docs/windows-app.md) and the [validation status](docs/windows-ui-validation.md).
 
 ### Linux
+
+![The Negs Linux app: a photo of Rome at dusk on Kodak Ektar 100, with the film strip below and film and paper controls on the right](docs/readme/linux-app.webp)
 
 Native GTK4 app on the same film engine, for x86_64. There are three ways to install it; each needs a Vulkan driver for GPU acceleration (the engine falls back to the CPU without one).
 
