@@ -164,12 +164,16 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var quickFrame: FrameID?
     /// The helper's last output, when it's a settled render: the request
     /// without its post adjustments, which the helper applies to the kept
-    /// output instead of rendering again. A quick frame would replace it.
-    @ObservationIgnored private var helperOutput: [String: JSONValue]?
+    /// output instead of rendering again. A quick frame would replace it,
+    /// and a relaunched helper (`launch`) keeps none.
+    @ObservationIgnored private var helperOutput: (key: [String: JSONValue], launch: Int)?
     struct FrameID: Equatable { var revision: Int, generation: Int }
     #if DEBUG
     /// Each render sent to the helper, for tests.
     @ObservationIgnored private(set) var renderLog: [RenderStep] = []
+    /// Runs as each render starts, before it looks at anything, for tests.
+    @ObservationIgnored var willRender: (() -> Void)?
+    func killHelperForTesting() { engine?.killHelperForTesting() }
     var holdingFrameForMatch: Bool { heldPreview != nil }
     #endif
     @ObservationIgnored private var renderID = 0
@@ -1020,9 +1024,17 @@ import UniformTypeIdentifiers
     }
 
     private func render() async {
+        #if DEBUG
+        willRender?()
+        #endif
         guard !rendering, !closing, let source, let engine else { return }
         let currentRevision = revision, snapshot = renderState, generation = sourceGeneration
         let frame = FrameID(revision: currentRevision, generation: generation)
+        // A quick frame's settled render waits for a solve that started after
+        // it was scheduled (matching turned on while the quick frame shows,
+        // which at exposure 0 is no new edit): the old exposure never renders
+        // at export size. The solve's end settles it (`settleQuickFrame`).
+        if quickStep == frame, !previewCurrent, !interacting, matchTask != nil || heldPreview != nil { return }
         let buffer = engine.directory.appendingPathComponent("preview.rgba")
         var command: [String: JSONValue] = [
             "command": .string("render"), "input": .string(source.path),
@@ -1041,7 +1053,7 @@ import UniformTypeIdentifiers
             interacting: interacting, screenScale: canvasScale.screenPixelsPerPhotoPixel,
             framePixels: Double(imageSize.width * imageSize.height),
             hasFrame: image != nil && !showingCachedPreview, quickFrameDone: quickStep == frame,
-            reusesHelperOutput: helperOutput == reuseKey)
+            reusesHelperOutput: helperOutput.map { $0.key == reuseKey && $0.launch == engine.runningLaunch } ?? false)
         let interactiveScale = step.interactiveScale
         if let interactiveScale { command["interactive_scale"] = .number(Double(interactiveScale)) }
         rendering = true
@@ -1070,8 +1082,8 @@ import UniformTypeIdentifiers
             #if DEBUG
             renderLog.append(step)
             #endif
-            let (id, result) = try await engine.request(command)
-            if step == .settled { helperOutput = reuseKey }
+            let (id, result, launch) = try await engine.requestOnLaunch(command)
+            if step == .settled { helperOutput = (reuseKey, launch) }
             // A quick frame of an earlier edit still shows while edits keep
             // coming (Undo held down); the current one renders next.
             let quick = step.isQuick
