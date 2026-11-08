@@ -187,9 +187,10 @@ struct EditorCanvas: View {
                 .overlay {
                     if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
                 }
-            if model.filmstripVisible, let source = model.source {
+                .overlay { LibraryNoteView(model: model) }
+            if model.filmstripVisible, model.source != nil {
                 Divider()
-                PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
+                PhotoBrowser(model: model)
             }
             if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
                 Divider()
@@ -199,6 +200,40 @@ struct EditorCanvas: View {
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        // The open photograph's folder is the library, listed once the
+        // window is up and kept current while it stays open.
+        .task(id: model.source?.deletingLastPathComponent()) {
+            guard let folder = model.source?.deletingLastPathComponent() else { return }
+            await model.library.watch(folder)
+        }
+    }
+}
+
+/// What a rating or flag key did ("★★★", "Rejected"), briefly over the
+/// canvas. There is no permanent rating widget, so the canvas stays clean.
+struct LibraryNoteView: View {
+    let model: EditorModel
+
+    var body: some View {
+        ZStack {
+            if let note = model.libraryNote {
+                VStack(spacing: 4) {
+                    Text(note.text).font(.title2.weight(.semibold))
+                    if let detail = note.detail { Text(detail).font(.callout).foregroundStyle(.secondary) }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 14)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .transition(.opacity)
+                .task(id: note.serial) {
+                    try? await Task.sleep(for: .seconds(note.detail == nil ? 1 : 2.5))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: 0.25)) { model.hideLibraryNote(note.serial) }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

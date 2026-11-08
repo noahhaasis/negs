@@ -187,7 +187,12 @@ final class PhotoBrowserTests: XCTestCase {
             CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
             XCTAssertTrue(CGImageDestinationFinalize(destination))
         }
-        let model = EditorModel()
+        // Ratings and flags around the selection: badges, and a greyed reject.
+        for (index, fields) in [(16, #""rating": 3, "flag": "pick""#), (17, #""rating": 2, "flag": "reject""#), (19, #""rating": 5"#)] {
+            try Data(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "s\#(index)", \#(fields)}]}"#.utf8)
+                .write(to: directory.appendingPathComponent("Photo\(index).png.negs"))
+        }
+        let model = EditorModel(sidecars: SidecarStore())
         let previousVisibility = model.filmstripVisible
         defer { model.filmstripVisible = previousVisibility; model.shutdown() }
         model.filmstripVisible = true

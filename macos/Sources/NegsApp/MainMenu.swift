@@ -76,6 +76,30 @@ import SwiftUI
         command(view, "Reset All Adjustments", #selector(resetAdjustments), "r", [.command, .shift])
         view.addItem(.separator())
 
+        // Plain keys, as in Lightroom and Capture One. Disabled while text is
+        // typed, so a number typed into a field never rates the photograph.
+        let photo = submenu("Photo")
+        let rating = NSMenu(title: "Rating")
+        photo.addItem(withTitle: "Rating", action: nil, keyEquivalent: "").submenu = rating
+        for stars in 0...5 {
+            let item = rating.addItem(withTitle: stars == 0 ? "None" : String(repeating: "★", count: stars),
+                                      action: #selector(rate(_:)), keyEquivalent: "\(stars)")
+            item.keyEquivalentModifierMask = []; item.tag = stars; item.target = self
+            if stars == 0 { rating.addItem(.separator()) }
+        }
+        rating.addItem(.separator())
+        command(rating, "Raise Rating", #selector(raiseRating), "]", [])
+        command(rating, "Lower Rating", #selector(lowerRating), "[", [])
+        let flag = NSMenu(title: "Flag")
+        photo.addItem(withTitle: "Flag", action: nil, keyEquivalent: "").submenu = flag
+        command(flag, "Pick", #selector(pick), "p", [])
+        command(flag, "Reject", #selector(reject), "x", [])
+        command(flag, "Unflagged", #selector(unflag), "u", [])
+        photo.addItem(.separator())
+        command(photo, "Advance After Rating", #selector(toggleAdvance), "")
+        photo.addItem(.separator())
+        command(photo, "Clear Filter", #selector(clearFilter), "l", [.command, .option])
+
         let window = submenu("Window")
         window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         window.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
@@ -129,6 +153,23 @@ import SwiftUI
     @objc private func rotate() { model.rotate() }
     @objc private func crop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
     @objc private func resetAdjustments() { model.reset() }
+    @objc private func rate(_ item: NSMenuItem) { model.setRating(item.tag) }
+    @objc private func raiseRating() { model.changeRating(by: 1) }
+    @objc private func lowerRating() { model.changeRating(by: -1) }
+    @objc private func pick() { model.setFlag(.pick) }
+    @objc private func reject() { model.setFlag(.reject) }
+    @objc private func unflag() { model.setFlag(nil) }
+    @objc private func toggleAdvance() { model.advanceAfterRating.toggle() }
+    @objc private func clearFilter() { model.library.filter = LibraryFilter() }
+
+    /// Rating and flag keys act on the photograph in the editing window,
+    /// and not while a text field there (or any other window) has the keys.
+    private var rating: Bool { model.source != nil && Self.takesRatingKeys(NSApp.keyWindow) }
+    /// The same check as holding \ for the original.
+    static func takesRatingKeys(_ window: NSWindow?) -> Bool {
+        guard let window, window is EditorWindow else { return false }
+        return !(window.firstResponder is NSText)
+    }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if removingAppData { return false }
@@ -153,6 +194,14 @@ import SwiftUI
             item.title = model.cropping ? "Done Cropping" : "Crop"
             return model.cropping || model.image != nil
         case #selector(resetAdjustments): return model.hasCatalog && !model.cropping
+        case #selector(rate(_:)):
+            item.state = model.currentSummary?.rating == item.tag ? .on : .off; return rating
+        case #selector(raiseRating), #selector(lowerRating): return rating
+        case #selector(pick): item.state = model.currentSummary?.flag == .pick ? .on : .off; return rating
+        case #selector(reject): item.state = model.currentSummary?.flag == .reject ? .on : .off; return rating
+        case #selector(unflag): item.state = model.currentSummary.map { $0.flag == nil } == true ? .on : .off; return rating
+        case #selector(toggleAdvance): item.state = model.advanceAfterRating ? .on : .off; return true
+        case #selector(clearFilter): return model.library.filter.active
         default: return true
         }
     }

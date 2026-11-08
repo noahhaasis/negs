@@ -23,10 +23,12 @@ final class PhotoFolderWatcher {
                 | kFSEventStreamEventFlagRootChanged | kFSEventStreamEventFlagUnmount)
             for index in 0..<count {
                 let url = URL(fileURLWithPath: String(cString: paths[index])).standardizedFileURL
+                let ext = url.pathExtension.lowercased()
                 // Events may spell /var as /private/var even within one batch.
                 // Resolve the parent: a removed file itself no longer resolves.
+                // Sidecars count; their hidden temporary files (`.tmp`) don't.
                 if flags[index] & rescan != 0 || url.resolvingSymlinksInPath().path == directory.path
-                    || (PhotoFolder.extensions.contains(url.pathExtension.lowercased())
+                    || ((PhotoFolder.extensions.contains(ext) || ext == PhotoSidecar.fileExtension)
                         && url.deletingLastPathComponent().resolvingSymlinksInPath().path == directory.path) {
                     continuation.yield(())
                     return

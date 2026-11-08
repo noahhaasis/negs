@@ -235,7 +235,7 @@ final class SidecarFormatTests: XCTestCase {
         let bytes = try Data(contentsOf: PhotoSidecar.url(for: photo))
         XCTAssertEqual(try PhotoSidecar.encode(written.raw), bytes)
         // Removing the only variant's edits leaves nothing: the file goes.
-        store.enqueue(SidecarPatch(variant: "v1", edits: nil, known: known, defaultsVersion: 1, app: "test"), for: photo)
+        store.enqueue(SidecarPatch(variant: "v1", edits: .some(nil), known: known, defaultsVersion: 1, app: "test"), for: photo)
         await store.flush()
         XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: photo).path))
         XCTAssertNil(try store.read(photo: photo))

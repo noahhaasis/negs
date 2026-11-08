@@ -265,18 +265,30 @@ struct PhotoSidecar: Equatable, Sendable {
 
 /// A change to one variant of a sidecar, applied to the file as it is on
 /// disk when written, so a rating set by another app or Mac meanwhile stays.
+/// Only the fields it sets change.
 struct SidecarPatch: Equatable, Sendable {
     var variant: String
-    /// The variant's new stored edits; nil removes them.
-    var edits: JSONValue?
+    /// The file's first variant, whatever its id, and a new one with
+    /// `variant`'s id only if it has none: for a photograph that had no
+    /// sidecar when it opened, whose file another app may have made since.
+    var primary = false
+    /// The variant's new stored edits (`.some(nil)` removes them); nil leaves them.
+    var edits: JSONValue?? = nil
+    /// The new rating, 0 to 5; nil leaves it.
+    var rating: Int? = nil
+    /// The new flag (`.some(nil)` unflags); nil leaves it.
+    var flag: PhotoSidecar.Flag?? = nil
     /// What the writer's own version knows of each stored group (`params`,
     /// `crop`, `border`): the defaults table, and for the parameters also the
     /// engine's defaults. Stored values outside them are a newer version's
     /// and stay.
-    var known: [String: [JSONValue]]
+    var known: [String: [JSONValue]] = [:]
     /// The table `edits` is stored against; a new file gets it.
     var defaultsVersion: Int
     var app: String
+
+    /// Whether the change gives a variant something to hold.
+    private var adds: Bool { (edits ?? nil) != nil || (rating ?? 0) > 0 || (flag ?? nil) != nil }
 
     /// The file after this change, or nil to remove it: a single variant with
     /// nothing in it and nothing else in the file means the photo has no
@@ -286,27 +298,34 @@ struct SidecarPatch: Equatable, Sendable {
         if raw != nil {
             // Decoding checks the schema and versions: a newer file is never written over.
             let sidecar = try PhotoSidecar(raw: .object(top))
-            guard sidecar.defaultsVersion == defaultsVersion else { throw PhotoSidecar.Problem.unreadable("its defaults version changed while it was open") }
+            // Ratings and flags don't depend on the table; edits are stored against it.
+            if edits != nil, sidecar.defaultsVersion != defaultsVersion {
+                throw PhotoSidecar.Problem.unreadable("its defaults version changed while it was open")
+            }
         }
-        top["app"] = .string(app)
         var variants = top["variants"]?.array ?? []
-        var index = variants.firstIndex { $0["id"] == .string(variant) }
+        var index = primary && !variants.isEmpty ? 0 : variants.firstIndex { $0["id"] == .string(variant) }
         if index == nil {
-            guard edits != nil else { return raw }
+            guard adds else { return raw }
             variants.append(.object(["id": .string(variant)]))
             index = variants.count - 1
         }
+        top["app"] = .string(app)
         var fields = variants[index!].object ?? [:]
-        let previous = fields["edits"]?.object ?? [:]
-        // Keep what this version doesn't know, then lay what it does over it.
-        var stored = previous.filter { !PhotoSidecar.editKeys.contains($0.key) }
-        for (group, known) in known {
-            if let unknown = previous[group]?.unknown(to: known) { stored[group] = unknown }
+        if let edits {
+            let previous = fields["edits"]?.object ?? [:]
+            // Keep what this version doesn't know, then lay what it does over it.
+            var stored = previous.filter { !PhotoSidecar.editKeys.contains($0.key) }
+            for (group, known) in known {
+                if let unknown = previous[group]?.unknown(to: known) { stored[group] = unknown }
+            }
+            for (key, value) in edits?.object ?? [:] {
+                stored[key] = stored[key].map { $0.overlaid(with: value) } ?? value
+            }
+            fields["edits"] = stored.isEmpty ? nil : .object(stored)
         }
-        for (key, value) in edits?.object ?? [:] {
-            stored[key] = stored[key].map { $0.overlaid(with: value) } ?? value
-        }
-        fields["edits"] = stored.isEmpty ? nil : .object(stored)
+        if let rating { fields["rating"] = rating > 0 ? .number(Double(min(rating, 5))) : nil }
+        if let flag { fields["flag"] = flag.map { .string($0.rawValue) } }
         variants[index!] = .object(fields)
         top["variants"] = .array(variants)
         let plain = variants.count == 1 && Set(fields.keys) == ["id"] && Set(top.keys).isSubset(of: ["negs", "app", "defaultsVersion", "variants"])

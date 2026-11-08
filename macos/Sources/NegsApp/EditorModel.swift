@@ -109,6 +109,7 @@ import UniformTypeIdentifiers
         didSet {
             UserDefaults.standard.set(sidecarsEnabled, forKey: "sidecars")
             sidecarWrite?.cancel(); sidecarWrite = nil
+            library.store = sidecarsEnabled ? sidecars : nil
             // The photograph shown is saved from its next edit on.
             if sidecarsEnabled, let source, let restore = readSidecar(source) {
                 photoSidecar = sidecarContext(for: source, restore: restore)
@@ -123,6 +124,13 @@ import UniformTypeIdentifiers
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
     }
+    /// Photo › Advance After Rating: a rating or flag key moves on to the
+    /// next photograph, as in Lightroom. Off until chosen.
+    var advanceAfterRating = UserDefaults.standard.bool(forKey: "advanceAfterRating") {
+        didSet { UserDefaults.standard.set(advanceAfterRating, forKey: "advanceAfterRating") }
+    }
+    /// The brief note over the canvas after a rating or flag key.
+    private(set) var libraryNote: LibraryNote?
     var inspectorVisible = true
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
@@ -266,6 +274,8 @@ import UniformTypeIdentifiers
     @ObservationIgnored let previews = Previews()
     /// Where photographs' sidecars are read and written; nil, none are.
     @ObservationIgnored let sidecars: SidecarStore?
+    /// The open photograph's folder, with its photographs' ratings.
+    @ObservationIgnored let library: PhotoLibrary
     /// The open photograph's sidecar; nil when it has none and gets none
     /// (sidecars off, no store).
     @ObservationIgnored private var photoSidecar: PhotoSidecarContext?
@@ -278,15 +288,21 @@ import UniformTypeIdentifiers
         var photo: URL
         var variant: String
         var defaultsVersion: Int
+        /// `variant` was made up when it opened: the file's first variant
+        /// is written, should another app have made one since.
+        var variantIsNew: Bool
         /// The user's edits as the photograph opened (`userEdits`). One without
-        /// a sidecar gets one only once they change.
+        /// saved edits gets them only once they change.
         var opened: EditState
-        var existedAtOpen: Bool
+        var editedAtOpen: Bool
         var exists: Bool
         /// The stored edits last read or sent; the same edits aren't written again.
         var written: JSONValue?
         /// Why it isn't written: unreadable, from a newer Negs, unwritable.
         var blocked: String?
+        /// Its edits are read again once the catalog arrives; until then
+        /// they aren't written. Ratings and flags are.
+        var awaitingCatalog = false
         /// The film and paper it names that this version lacks, with what is
         /// shown instead; written back while that stays chosen.
         var missingFilm: (saved: String, shown: String)?
@@ -300,7 +316,10 @@ import UniformTypeIdentifiers
         self.previewCache = previewCache
         self.presetLibrary = presetLibrary
         self.sidecars = sidecars
+        let enabled = UserDefaults.standard.object(forKey: "sidecars") as? Bool ?? true
+        library = PhotoLibrary(store: enabled ? sidecars : nil)
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
+        library.sidecarChanged = { [weak self] photo in self?.sidecarChangedOnDisk(photo) }
     }
 
     /// Starts the helper and asks for its catalog at once, so both load while
@@ -995,6 +1014,7 @@ import UniformTypeIdentifiers
             state = newPhotoState(after: previous)
         }
         guard let restore else { photoSidecar = nil; return }
+        library.opened(url, summary: LibrarySummary(rating: restore.rating, flag: restore.flag, edited: restore.edits != nil, problem: restore.problem))
         var context = sidecarContext(for: url, restore: restore)
         context.missingFilm = missingFilm; context.missingPaper = missingPaper
         if legacy != nil {
@@ -1006,7 +1026,7 @@ import UniformTypeIdentifiers
             context.migrating = true
         }
         // Before the catalog the edits can't be shown; `readoptSidecarEdits` reads them again.
-        if !hasCatalog, context.blocked == nil { context.blocked = "The image engine hasn’t started." }
+        if !hasCatalog { context.awaitingCatalog = true }
         photoSidecar = context
         if let problem = restore.problem { error = problem }
     }
@@ -1018,8 +1038,8 @@ import UniformTypeIdentifiers
     /// the one it opened with.
     private func sidecarContext(for url: URL, restore: SidecarRestore) -> PhotoSidecarContext {
         var context = PhotoSidecarContext(photo: url, variant: restore.variant, defaultsVersion: restore.defaultsVersion,
-                                          opened: Self.userEdits(state), existedAtOpen: restore.exists, exists: restore.exists,
-                                          blocked: restore.problem)
+                                          variantIsNew: restore.newVariant, opened: Self.userEdits(state),
+                                          editedAtOpen: restore.edits != nil, exists: restore.exists, blocked: restore.problem)
         if restore.edits != nil, context.blocked == nil { context.written = storedEdits(state, context) }
         return context
     }
@@ -1052,34 +1072,42 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// Sends the open photograph's edits to its sidecar now, if they changed:
-    /// once the user has edited it, or always if it had one. Back where it
-    /// started, a sidecar this visit made is removed again.
-    @discardableResult private func flushSidecar() -> Task<Void, Never>? {
-        sidecarWrite?.cancel(); sidecarWrite = nil
-        guard sidecarsEnabled, let sidecars, sidecars.writes, var context = photoSidecar, context.blocked == nil,
-              context.photo == source, hasCatalog, !closing else { return nil }
+    /// The edits the open photograph's sidecar would be sent now: once the
+    /// user has edited it, or always if it had edits (nil inside removes
+    /// them). Nil when nothing changed.
+    private func sidecarEditsToSend(_ context: PhotoSidecarContext) -> JSONValue?? {
         var current = state
         // Include a crop being drawn, without forcing the user to press Done.
         if let cropSession { current.crop = cropSession.settings }
         let edited = Self.userEdits(current) != context.opened
         let edits: JSONValue?
-        if edited || context.existedAtOpen {
+        if edited || context.editedAtOpen {
             guard let stored = storedEdits(current, context) else { return nil }
             edits = stored
         } else {
-            guard context.exists else { return nil }
             edits = nil
         }
-        guard edits != context.written else { return nil }
+        return edits == context.written ? nil : .some(edits)
+    }
+
+    /// Sends the open photograph's edits to its sidecar now, if they changed.
+    /// Back where it started, edits this visit saved are removed again.
+    @discardableResult private func flushSidecar() -> Task<Void, Never>? {
+        sidecarWrite?.cancel(); sidecarWrite = nil
+        guard sidecarsEnabled, let sidecars, sidecars.writes, var context = photoSidecar, context.blocked == nil, !context.awaitingCatalog,
+              context.photo == source, hasCatalog, !closing, let edits = sidecarEditsToSend(context) else { return nil }
         let photo = context.photo
         let known: [String: [JSONValue]]
         if let data = sidecarLookup?.data, let table = try? SidecarDefaults.load(version: context.defaultsVersion, data: data) {
             known = ["params": [table.params, defaults], "crop": [table.crop], "border": [table.border]]
         } else { return nil }
-        sidecars.enqueue(SidecarPatch(variant: context.variant, edits: edits, known: known,
+        sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, edits: edits, known: known,
                                       defaultsVersion: context.defaultsVersion, app: Self.appVersion), for: photo)
-        context.written = edits; context.exists = edits != nil; context.migrating = false
+        var summary = library.summary(for: photo)
+        summary.edited = edits != nil
+        library.set(summary, for: photo)
+        context.written = edits; context.migrating = false
+        context.exists = edits != nil || summary.rating > 0 || summary.flag != nil
         photoSidecar = context
         return Task { [weak self] in
             let failures = await sidecars.flush()
@@ -1105,6 +1133,110 @@ import UniformTypeIdentifiers
 
     nonisolated static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+
+    /// Another app or Mac changed `photo`'s sidecar. For the open photograph
+    /// a newer rating or flag shows at once (the library read it); newer
+    /// edits replace these only if they're all saved, and otherwise these
+    /// are written over them.
+    func sidecarChangedOnDisk(_ photo: URL) {
+        guard photo == source, !closing, var context = photoSidecar, context.photo == photo, context.blocked == nil,
+              let lookup = sidecarLookup else { return }
+        let restore = SidecarRestore.read(photo: photo, store: lookup.store, data: lookup.data)
+        if let problem = restore.problem {
+            // Never written over now; it opens with its edits shown as they are.
+            photoSidecar?.blocked = problem
+            return
+        }
+        context.exists = restore.exists
+        if !restore.newVariant, context.variantIsNew { context.variant = restore.variant; context.variantIsNew = false }
+        let table = try? SidecarDefaults.load(version: context.defaultsVersion, data: lookup.data)
+        let ours = context.written.flatMap { written in table.flatMap { try? PhotoSidecar.decodeEdits(written, table: $0) } }
+        guard restore.edits != ours || restore.defaultsVersion != context.defaultsVersion, !context.awaitingCatalog, hasCatalog,
+              sidecarWrite == nil, !interacting, !cropping, sidecarEditsToSend(context) == nil else {
+            photoSidecar = context
+            return
+        }
+        cancelBrightnessMatch(); brightnessMatchFailure = nil
+        customFilmFormat = false
+        adoptEdits(for: photo, restore: restore, legacy: nil, previous: state)
+        undoManager?.removeAllActions()
+        changed()
+    }
+
+    // MARK: Ratings and flags
+
+    /// What a rating or flag key did, shown briefly over the canvas.
+    struct LibraryNote: Equatable {
+        var text: String
+        /// Why it wasn't saved, if it wasn't.
+        var detail: String?
+        var serial: Int
+    }
+
+    /// The open photograph's rating and flag.
+    var currentSummary: LibrarySummary? { source.map { library.summary(for: $0) } }
+
+    /// Rates the open photograph, 0 (none) to 5 stars.
+    func setRating(_ stars: Int) {
+        changeLibrary { $0.rating = max(0, min(5, stars)) } note: { Self.ratingText($0.rating) }
+    }
+    func changeRating(by offset: Int) {
+        changeLibrary { $0.rating = max(0, min(5, $0.rating + offset)) } note: { Self.ratingText($0.rating) }
+    }
+    func setFlag(_ flag: PhotoSidecar.Flag?) {
+        changeLibrary { $0.flag = flag } note: { Self.flagText($0.flag) }
+    }
+
+    func hideLibraryNote(_ serial: Int) { if libraryNote?.serial == serial { libraryNote = nil } }
+
+    nonisolated static func ratingText(_ stars: Int) -> String { stars == 0 ? "No Rating" : String(repeating: "★", count: stars) }
+    nonisolated static func flagText(_ flag: PhotoSidecar.Flag?) -> String {
+        switch flag { case .pick: "Pick"; case .reject: "Rejected"; case nil: "Unflagged" }
+    }
+
+    private func changeLibrary(_ change: (inout LibrarySummary) -> Void, note: (LibrarySummary) -> String) {
+        guard let source, !closing else { return }
+        let before = library.summary(for: source)
+        var after = before
+        change(&after)
+        var unsaved: String?
+        if after != before {
+            unsaved = saveLibraryChange(from: before, to: after, photo: source)
+            library.set(after, for: source)
+        }
+        libraryNote = LibraryNote(text: note(after), detail: unsaved, serial: (libraryNote?.serial ?? 0) + 1)
+        if advanceAfterRating { step(by: 1) }
+    }
+
+    /// Writes a rating or flag change to `photo`'s sidecar; why it can't, if it can't.
+    private func saveLibraryChange(from before: LibrarySummary, to after: LibrarySummary, photo: URL) -> String? {
+        guard sidecarsEnabled else { return "Not saved: Settings › Save ratings and edits is off" }
+        guard let sidecars else { return "Not saved" }
+        guard sidecars.writes else { return nil }
+        guard var context = photoSidecar, context.photo == photo else { return "Not saved" }
+        guard context.blocked == nil else { return "Not saved: its .negs file can’t be changed" }
+        guard PhotoLibrary.canWrite(beside: photo) else { return "Not saved: the folder is read-only" }
+        sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew,
+                                      rating: after.rating != before.rating ? after.rating : nil,
+                                      flag: after.flag != before.flag ? .some(after.flag) : nil,
+                                      defaultsVersion: context.defaultsVersion, app: Self.appVersion), for: photo)
+        context.exists = context.written != nil || after.rating > 0 || after.flag != nil
+        photoSidecar = context
+        Task { [weak self] in
+            let failures = await sidecars.flush()
+            for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+        }
+        return nil
+    }
+
+    /// Opens the photograph `offset` places on in the film strip, as it's
+    /// filtered.
+    func step(by offset: Int) {
+        guard !cropping, let source else { return }
+        let shown = library.shown(current: source)
+        guard let index = shown.firstIndex(where: { $0.url == source }), shown.indices.contains(index + offset) else { return }
+        open(shown[index + offset].url)
     }
 
     // MARK: Original

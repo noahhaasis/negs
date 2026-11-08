@@ -20,7 +20,7 @@ import SwiftUI
 /// inspector column. The window, toolbar, and columns are AppKit; the canvas
 /// and inspector contents are SwiftUI. They follow the model through
 /// Observation, like the views.
-@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate {
+@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuDelegate {
     private let model: EditorModel
     private let inspector: NSSplitViewItem
     private let panel: NSHostingController<InspectorPanel>
@@ -30,6 +30,7 @@ import SwiftUI
     private var collapsing: NSKeyValueObservation?
     private var appearing: NSObjectProtocol?
     private var resigning: NSObjectProtocol?
+    private var becomingKey: NSObjectProtocol?
     private var keyMonitor: Any?
     /// The narrowest canvas, and the narrowest the content can be with the
     /// inspector shown beside it. The split view can't keep both columns at
@@ -111,6 +112,11 @@ import SwiftUI
                 self.originalKey = nil; self.model.holdOriginal(false)
             }
         }
+        // File events on network shares get lost, so the folder is listed
+        // again whenever the window comes back.
+        becomingKey = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.model.library.refreshNow() }
+        }
         observe()
     }
 
@@ -173,6 +179,13 @@ import SwiftUI
             let icon = symbol("rectangle.bottomthird.inset.filled", "Film Strip")
             item.image = model.filmstripVisible
                 ? icon.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])) : icon
+        }
+        if let item = items[.filter] {
+            // Filled while a filter is on, so a half-empty strip is never a mystery.
+            let on = model.library.filter.active
+            item.image = symbol(on ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle", "Filter")
+            item.toolTip = on ? "Filter: \(Self.describe(model.library.filter))" : "Filter photographs by rating and flag"
+            item.isEnabled = photo
         }
         setEnabled(.zoom, photo && !model.cropping)
         if let edit = items[.edit] as? NSToolbarItemGroup {
@@ -251,7 +264,7 @@ import SwiftUI
     // MARK: Toolbar
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.open, .filmstrip, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .export, .presets, .adjustments]
+        [.open, .filmstrip, .filter, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .export, .presets, .adjustments]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -266,6 +279,16 @@ import SwiftUI
             item.isNavigational = true
         case .filmstrip:
             item = button(id, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip))
+        case .filter:
+            let menuItem = NSMenuToolbarItem(itemIdentifier: id)
+            menuItem.label = "Filter"
+            menuItem.image = symbol("line.3.horizontal.decrease.circle", "Filter")
+            menuItem.showsIndicator = false
+            // Filled in when it opens, from the filter as it is then.
+            let menu = NSMenu(title: "Filter")
+            menu.delegate = self
+            menuItem.menu = menu
+            item = menuItem
         case .zoom:
             let group = NSToolbarItemGroup(itemIdentifier: id)
             group.subitems = [button(.init("fit"), "Fit", "arrow.down.right.and.arrow.up.left", "Fit photograph (⌘0)", #selector(fit)),
@@ -323,6 +346,60 @@ import SwiftUI
         NSImage(systemSymbolName: name, accessibilityDescription: description) ?? NSImage()
     }
 
+    // MARK: Filter
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let filter = model.library.filter
+        func add(_ title: String, _ action: Selector, on: Bool, tag: Int = 0) {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self; item.tag = tag; item.state = on ? .on : .off
+        }
+        // A pull-down toolbar menu takes its first item as the button's title
+        // and doesn't list it.
+        menu.addItem(withTitle: "Filter", action: nil, keyEquivalent: "")
+        menu.addItem(.sectionHeader(title: "Rating"))
+        add("Any Rating", #selector(filterRating(_:)), on: filter.rating == .any, tag: -1)
+        for stars in 1...5 {
+            add(stars == 5 ? "★★★★★" : "≥ " + String(repeating: "★", count: stars), #selector(filterRating(_:)), on: filter.rating == .atLeast(stars), tag: stars)
+        }
+        add("Unrated Only", #selector(filterRating(_:)), on: filter.rating == .unrated, tag: 0)
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "Flags"))
+        for (index, (flag, title)) in Self.flagChoices.enumerated() {
+            add(title, #selector(filterFlag(_:)), on: filter.flags.contains(flag), tag: index)
+        }
+        menu.addItem(.separator())
+        add("Edited Only", #selector(filterEdited), on: filter.editedOnly)
+        menu.addItem(.separator())
+        let clear = menu.addItem(withTitle: "Clear Filter", action: filter.active ? #selector(clearFilter) : nil, keyEquivalent: "l")
+        clear.keyEquivalentModifierMask = [.command, .option]; clear.target = self
+    }
+
+    @objc private func filterRating(_ item: NSMenuItem) {
+        model.library.filter.rating = switch item.tag { case -1: .any; case 0: .unrated; default: .atLeast(item.tag) }
+    }
+    @objc private func filterFlag(_ item: NSMenuItem) {
+        let flag = Self.flagChoices[item.tag].flag
+        if model.library.filter.flags.contains(flag) { model.library.filter.flags.remove(flag) } else { model.library.filter.flags.insert(flag) }
+    }
+    private static let flagChoices: [(flag: LibraryFilter.Flag, title: String)] = [(.pick, "Picks"), (.unflagged, "Unflagged"), (.reject, "Rejected")]
+    @objc private func filterEdited() { model.library.filter.editedOnly.toggle() }
+    @objc private func clearFilter() { model.library.filter = LibraryFilter() }
+
+    static func describe(_ filter: LibraryFilter) -> String {
+        var parts: [String] = []
+        switch filter.rating {
+        case .any: break
+        case .atLeast(let stars): parts.append(stars == 5 ? "★★★★★" : "≥ " + String(repeating: "★", count: stars))
+        case .unrated: parts.append("unrated")
+        }
+        let names = flagChoices.filter { filter.flags.contains($0.flag) }.map { $0.title.lowercased() }
+        if !names.isEmpty { parts.append(names.joined(separator: " or ")) }
+        if filter.editedOnly { parts.append("edited") }
+        return parts.joined(separator: ", ")
+    }
+
     // MARK: Actions
 
     @objc private func openPhotograph() { model.openPanel() }
@@ -339,7 +416,7 @@ import SwiftUI
 }
 
 private extension NSToolbarItem.Identifier {
-    static let filmstrip = Self("filmstrip")
+    static let filmstrip = Self("filmstrip"), filter = Self("filter")
     static let open = Self("open"), zoom = Self("zoom"), edit = Self("edit")
     static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
 }

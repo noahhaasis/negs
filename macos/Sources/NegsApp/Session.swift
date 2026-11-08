@@ -66,7 +66,12 @@ struct SidecarRestore: Equatable, Sendable {
     var exists = false
     /// The variant shown (the first), and the defaults table its edits use.
     var variant = SidecarRestore.newVariantID()
+    /// `variant` is made up: the file has none, or there's no file.
+    var newVariant = true
     var defaultsVersion = SidecarDefaults.latest
+    /// The variant's rating and flag.
+    var rating = 0
+    var flag: PhotoSidecar.Flag?
     /// Nil when it stores no edits: the photograph opens as a new one.
     var edits: SavedEdits?
     /// Why the sidecar isn't used; it is then never written over.
@@ -81,7 +86,8 @@ struct SidecarRestore: Equatable, Sendable {
             guard let sidecar = try store.read(photo: photo) else { return SidecarRestore() }
             var restore = SidecarRestore(exists: true, defaultsVersion: sidecar.defaultsVersion)
             guard let variant = sidecar.variants.first else { return restore }
-            restore.variant = variant.id
+            restore.variant = variant.id; restore.newVariant = false
+            restore.rating = variant.rating; restore.flag = variant.flag
             if let edits = variant.edits {
                 let table = try SidecarDefaults.load(version: sidecar.defaultsVersion, data: data)
                 restore.edits = try PhotoSidecar.decodeEdits(edits, table: table)

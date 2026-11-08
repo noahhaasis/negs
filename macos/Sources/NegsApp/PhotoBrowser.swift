@@ -28,17 +28,28 @@ enum PhotoFolder {
     }
 
     static func snapshot(in directory: URL) throws -> [PhotoFile] {
+        try listing(in: directory).photos
+    }
+
+    /// The folder's photographs in name order, and the sidecars beside them
+    /// (by the photograph's file name), from one directory listing.
+    static func listing(in directory: URL) throws -> (photos: [PhotoFile], sidecars: [String: PhotoFile]) {
         let files = try FileManager.default.contentsOfDirectory(at: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles])
-        return try files.compactMap { url -> PhotoFile? in
+        var photos: [PhotoFile] = [], sidecars: [String: PhotoFile] = [:]
+        for url in files {
             try Task.checkCancellation()
-            guard extensions.contains(url.pathExtension.lowercased()),
+            let ext = url.pathExtension.lowercased()
+            let sidecar = ext == PhotoSidecar.fileExtension
+            guard sidecar || extensions.contains(ext),
                   let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]),
-                  values.isRegularFile == true else { return nil }
+                  values.isRegularFile == true else { continue }
             // Preserve the opened folder's spelling through symlinks.
-            return PhotoFile(url: directory.appendingPathComponent(url.lastPathComponent), values: values)
+            let file = PhotoFile(url: directory.appendingPathComponent(url.lastPathComponent), values: values)
+            if sidecar { sidecars[url.deletingPathExtension().lastPathComponent] = file } else { photos.append(file) }
         }
-        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        photos.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return (photos, sidecars)
     }
 }
 
@@ -85,19 +96,21 @@ actor PhotoThumbnails {
     }
 }
 
+/// The film strip: the library's photographs, as filtered. The library
+/// lists the folder (`EditorCanvas` keeps it current); thumbnails never wait
+/// for the ratings.
 struct PhotoBrowser: View {
     let model: EditorModel
-    let directory: URL
-    @State private var files: [PhotoFile] = []
-    @State private var loading = true
-    @State private var failed = false
     @State private var scrollTarget: URL?
 
     var body: some View {
+        let library = model.library
+        let shown = library.filtering ? [] : library.shown(current: model.source)
         ScrollView(.horizontal) {
             LazyHStack(spacing: 8) {
-                ForEach(files, id: \.url) { file in
-                    PhotoThumbnail(file: file, selected: file.url == model.source) {
+                ForEach(shown, id: \.url) { file in
+                    PhotoThumbnail(file: file, selected: file.url == model.source, summary: library.summary(for: file.url),
+                                   readOnly: library.readOnly) {
                         if file.url != model.source { model.open(file.url) }
                     }
                     .id(file.url)
@@ -110,51 +123,22 @@ struct PhotoBrowser: View {
         .scrollIndicators(.automatic)
         .scrollPosition(id: $scrollTarget, anchor: .center)
         .onChange(of: model.source) { _, source in scrollTarget = source }
+        .onChange(of: library.loading) { _, loading in if !loading { scrollTarget = model.source } }
+        .onChange(of: library.filtering) { _, filtering in if !filtering { scrollTarget = model.source } }
+        .onAppear { scrollTarget = model.source }
         .onMoveCommand { direction in
-            guard !model.cropping, let source = model.source,
-                  let index = files.firstIndex(where: { $0.url == source }) else { return }
-            let next = direction == .left ? index - 1 : direction == .right ? index + 1 : index
-            if next != index, files.indices.contains(next) { model.open(files[next].url) }
+            if direction == .left { model.step(by: -1) } else if direction == .right { model.step(by: 1) }
         }
         .frame(height: 112)
         .background(Color(nsColor: .controlBackgroundColor))
         .overlay {
-            if loading { ProgressView().controlSize(.small) }
-            else if failed { Text("This folder couldn’t be read.").foregroundStyle(.secondary) }
-            else if files.isEmpty { Text("No supported photographs in this folder.").foregroundStyle(.secondary) }
+            // Only an active filter waits for the ratings.
+            if library.loading || library.filtering { ProgressView().controlSize(.small) }
+            else if library.failed { Text("This folder couldn’t be read.").foregroundStyle(.secondary) }
+            else if library.files.isEmpty { Text("No supported photographs in this folder.").foregroundStyle(.secondary) }
         }
         .disabled(model.cropping)
         .accessibilityLabel("Film Strip")
-        .task(id: directory) {
-            loading = true; failed = false; files = []
-            // Arm before the initial scan so arrivals during enumeration are
-            // not missed. Cancellation on hide/folder switch releases the watch.
-            let watcher = PhotoFolderWatcher(directory: directory)
-            defer { watcher?.stop() }
-            await refresh(initial: true)
-            if let watcher {
-                for await _ in watcher.changes {
-                    guard !Task.isCancelled else { return }
-                    await refresh(initial: false)
-                }
-            }
-        }
-    }
-
-    private func refresh(initial: Bool) async {
-        let scan = Task.detached(priority: .utility) { try PhotoFolder.snapshot(in: directory) }
-        do {
-            let result = try await withTaskCancellationHandler {
-                try await scan.value
-            } onCancel: { scan.cancel() }
-            try Task.checkCancellation()
-            if files != result { files = result }
-            failed = false; loading = false
-            if initial { scrollTarget = model.source }
-        } catch {
-            guard !Task.isCancelled else { return }
-            failed = true; loading = false
-        }
     }
 }
 
@@ -162,22 +146,32 @@ private struct PhotoThumbnail: View {
     let file: PhotoFile
     private var url: URL { file.url }
     let selected: Bool
+    let summary: LibrarySummary
+    let readOnly: Bool
     let open: () -> Void
     @State private var image: CGImage?
     @State private var visible = false
+
+    private var rejected: Bool { summary.flag == .reject }
 
     var body: some View {
         Button(action: open) {
             VStack(spacing: 5) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.04))
-                    if let image {
-                        Image(decorative: image, scale: 2).resizable().scaledToFit().padding(3)
-                    } else {
-                        Image(systemName: "photo").foregroundStyle(.tertiary)
+                    Group {
+                        if let image {
+                            Image(decorative: image, scale: 2).resizable().scaledToFit().padding(3)
+                        } else {
+                            Image(systemName: "photo").foregroundStyle(.tertiary)
+                        }
                     }
+                    // Rejects are greyed; their name stays readable.
+                    .opacity(rejected ? 0.4 : 1)
                 }
                 .frame(width: 96, height: 68)
+                .overlay(alignment: .topLeading) { flagBadge }
+                .overlay(alignment: .bottom) { stars }
                 .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2) }
                 Text(file.name)
                     .font(.caption2)
@@ -189,8 +183,8 @@ private struct PhotoThumbnail: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(url.lastPathComponent)
-        .accessibilityLabel(url.lastPathComponent)
+        .help(help)
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
         .onAppear { visible = true }
         .onDisappear { visible = false; image = nil }
@@ -203,5 +197,48 @@ private struct PhotoThumbnail: View {
             guard !Task.isCancelled else { return }
             image = result
         }
+    }
+
+    /// Unflagged photographs show none.
+    @ViewBuilder private var flagBadge: some View {
+        if let flag = summary.flag {
+            Image(systemName: flag == .pick ? "flag.fill" : "xmark")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 15, height: 15)
+                .background(Circle().fill(.black.opacity(0.55)))
+                .padding(4)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// Unrated photographs show none.
+    @ViewBuilder private var stars: some View {
+        if summary.rating > 0 {
+            HStack(spacing: 1) {
+                ForEach(0..<summary.rating, id: \.self) { _ in Image(systemName: "star.fill") }
+            }
+            .font(.system(size: 7))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(.black.opacity(0.55)))
+            .padding(.bottom, 4)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private var help: String {
+        var lines = [url.lastPathComponent]
+        if let problem = summary.problem { lines.append(problem) }
+        if readOnly { lines.append("Ratings and edits can’t be saved in this folder: it’s read-only.") }
+        return lines.joined(separator: "\n")
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [url.lastPathComponent]
+        if summary.rating > 0 { parts.append(summary.rating == 1 ? "1 star" : "\(summary.rating) stars") }
+        if let flag = summary.flag { parts.append(flag == .pick ? "Pick" : "Rejected") }
+        return parts.joined(separator: ", ")
     }
 }

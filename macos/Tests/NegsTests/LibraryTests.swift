@@ -1,0 +1,387 @@
+import AppKit
+import XCTest
+@testable import NegsApp
+
+private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+private let data = root.appendingPathComponent("data")
+
+private func folder() throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("negs-library-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}
+
+private func json(_ text: String) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)) }
+
+private func write(_ text: String, sidecarOf photo: URL) throws {
+    try Data(text.utf8).write(to: PhotoSidecar.url(for: photo))
+}
+
+/// Ratings and flags in the sidecar format, and the filter's rules.
+final class LibraryFormatTests: XCTestCase {
+    private func patch(rating: Int? = nil, flag: PhotoSidecar.Flag?? = nil, variant: String = "v1", primary: Bool = false) -> SidecarPatch {
+        SidecarPatch(variant: variant, primary: primary, rating: rating, flag: flag, defaultsVersion: 1, app: "test")
+    }
+
+    func testRatingsAndFlagsChangeOnlyTheirOwnFields() throws {
+        let file = try json(#"{"negs": 1, "defaultsVersion": 1, "app": "old", "future": {"x": 1}, "variants": [{"id": "v1", "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "newer": true}, "tags": ["a"]}]}"#)
+        let rated = try XCTUnwrap(patch(rating: 3).applied(to: file))
+        XCTAssertEqual(rated["variants"].array.first?["rating"], .number(3))
+        XCTAssertEqual(rated["variants"].array.first?["edits"], file["variants"].array.first?["edits"], "edits, unknown keys included, are untouched")
+        XCTAssertEqual(rated["variants"].array.first?["tags"], file["variants"].array.first?["tags"])
+        XCTAssertEqual(rated["future"], file["future"])
+        XCTAssertEqual(rated["app"], .string("test"))
+        let flagged = try XCTUnwrap(patch(flag: .some(.reject)).applied(to: rated))
+        XCTAssertEqual(flagged["variants"].array.first?["flag"], .string("reject"))
+        XCTAssertEqual(flagged["variants"].array.first?["rating"], .number(3), "a 3-star reject: stars and flags are independent")
+        let cleared = try XCTUnwrap(patch(rating: 0, flag: .some(nil)).applied(to: flagged))
+        XCTAssertNil(cleared["variants"].array.first?.object?["rating"])
+        XCTAssertNil(cleared["variants"].array.first?.object?["flag"])
+        XCTAssertNotNil(cleared["variants"].array.first?.object?["edits"])
+        // Read back as the library sees it.
+        XCTAssertEqual(try PhotoSidecar(raw: flagged).summary, LibrarySummary(rating: 3, flag: .reject, edited: true))
+    }
+
+    func testARatingAloneMakesAFileAndClearingItRemovesIt() throws {
+        XCTAssertNil(try patch(rating: 0).applied(to: nil), "nothing to hold, no file")
+        XCTAssertNil(try patch(flag: .some(nil)).applied(to: nil))
+        let made = try XCTUnwrap(patch(rating: 2).applied(to: nil))
+        XCTAssertEqual(made["negs"], .number(1))
+        XCTAssertEqual(made["defaultsVersion"], .number(1))
+        XCTAssertEqual(made["variants"], .array([.object(["id": .string("v1"), "rating": .number(2)])]))
+        XCTAssertNil(try patch(rating: 0).applied(to: made), "the last rating gone, the file goes")
+    }
+
+    /// An edit written after another app rated the photograph keeps the
+    /// rating; a rating written over a file from another table version keeps
+    /// its edits, which don't depend on it.
+    func testEditsAndRatingsMergeWithTheFileAsItIsNow() throws {
+        let rated = try json(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "v1", "rating": 4, "flag": "pick"}]}"#)
+        let edits = SidecarPatch(variant: "v1", edits: try json(#"{"film": "kodak_gold_200", "paper": "kodak_portra_endura"}"#),
+                                 known: [:], defaultsVersion: 1, app: "test")
+        let both = try XCTUnwrap(edits.applied(to: rated))
+        XCTAssertEqual(try PhotoSidecar(raw: both).summary, LibrarySummary(rating: 4, flag: .pick, edited: true))
+        let removed = try XCTUnwrap(SidecarPatch(variant: "v1", edits: .some(nil), defaultsVersion: 1, app: "test").applied(to: both))
+        XCTAssertEqual(try PhotoSidecar(raw: removed).summary, LibrarySummary(rating: 4, flag: .pick, edited: false), "edits removed, the rating stays")
+    }
+
+    func testANewPhotographsPatchesGoToTheFirstVariantAnotherAppMade() throws {
+        let other = try json(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "abc", "edits": {"film": "kodak_gold_200"}}]}"#)
+        let rated = try XCTUnwrap(patch(rating: 5, variant: "new00001", primary: true).applied(to: other))
+        XCTAssertEqual(rated["variants"].array.count, 1)
+        XCTAssertEqual(rated["variants"].array.first?["id"], .string("abc"))
+        XCTAssertEqual(rated["variants"].array.first?["rating"], .number(5))
+        let fresh = try XCTUnwrap(patch(rating: 1, variant: "new00001", primary: true).applied(to: nil))
+        XCTAssertEqual(fresh["variants"].array.first?["id"], .string("new00001"))
+    }
+
+    func testARatingNeverWritesOverANewerFile() throws {
+        let newer = try json(#"{"negs": 2, "defaultsVersion": 1, "variants": []}"#)
+        XCTAssertThrowsError(try patch(rating: 3).applied(to: newer))
+        let unknownTable = try json(#"{"negs": 1, "defaultsVersion": 99, "variants": []}"#)
+        XCTAssertThrowsError(try patch(rating: 3).applied(to: unknownTable))
+    }
+
+    func testFilterRules() {
+        let unrated = LibrarySummary(), three = LibrarySummary(rating: 3), fivePick = LibrarySummary(rating: 5, flag: .pick)
+        let reject = LibrarySummary(rating: 4, flag: .reject), edited = LibrarySummary(edited: true)
+        var filter = LibraryFilter()
+        XCTAssertFalse(filter.active)
+        XCTAssertTrue([unrated, three, fivePick, reject, edited].allSatisfy(filter.includes), "everything shows by default, rejects too")
+        filter.rating = .atLeast(3)
+        XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [false, true, true, true, false])
+        filter.rating = .atLeast(5)
+        XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [false, false, true, false, false])
+        filter.rating = .unrated
+        XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [true, false, false, false, true])
+        filter = LibraryFilter(flags: [.pick, .unflagged])
+        XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [true, true, true, false, true])
+        filter = LibraryFilter(editedOnly: true)
+        XCTAssertEqual([unrated, three, fivePick, reject, edited].map(filter.includes), [false, false, false, false, true])
+    }
+
+    func testTheFilterIsRememberedForTheApp() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "negs-library-tests-\(UUID().uuidString)"))
+        XCTAssertEqual(LibraryFilter.load(defaults), LibraryFilter())
+        let filter = LibraryFilter(rating: .atLeast(2), flags: [.reject], editedOnly: true)
+        filter.save(defaults)
+        XCTAssertEqual(LibraryFilter.load(defaults), filter)
+        LibraryFilter().save(defaults)
+        XCTAssertNil(defaults.object(forKey: LibraryFilter.defaultsKey))
+    }
+
+    func testTheListingFindsSidecarsButNotTheirTemporaryFiles() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for name in ["b.jpg", "a10.png", "a2.png", "notes.txt", "a2.png.negs", "B.JPG.NEGS", ".a10.png.negs.tmp", "orphan.cr3.negs"] {
+            try Data("x".utf8).write(to: dir.appendingPathComponent(name))
+        }
+        let listing = try PhotoFolder.listing(in: dir)
+        XCTAssertEqual(listing.photos.map(\.name), ["a2.png", "a10.png", "b.jpg"])
+        XCTAssertEqual(Set(listing.sidecars.keys), ["a2.png", "B.JPG", "orphan.cr3"])
+        XCTAssertEqual(try PhotoFolder.snapshot(in: dir).map(\.name), ["a2.png", "a10.png", "b.jpg"])
+    }
+
+    @MainActor func testRatingKeysAreIgnoredWhileTyping() {
+        let window = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 200, height: 24))
+        window.contentView?.addSubview(field)
+        XCTAssertTrue(MainMenu.takesRatingKeys(window))
+        XCTAssertTrue(window.makeFirstResponder(field))
+        XCTAssertTrue(window.firstResponder is NSText, "the field editor has the keys")
+        XCTAssertFalse(MainMenu.takesRatingKeys(window))
+        window.makeFirstResponder(nil)
+        XCTAssertTrue(MainMenu.takesRatingKeys(window))
+        XCTAssertFalse(MainMenu.takesRatingKeys(NSWindow()), "only the editing window's photograph is rated")
+        XCTAssertFalse(MainMenu.takesRatingKeys(nil))
+    }
+}
+
+/// The folder as the library: listing, reading sidecars, outside changes.
+@MainActor final class PhotoLibraryTests: XCTestCase {
+    private func waitUntil(_ message: String = "", _ predicate: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(20)
+        while !predicate() && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(predicate(), message)
+    }
+
+    private func library() throws -> PhotoLibrary {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "negs-library-tests-\(UUID().uuidString)"))
+        return PhotoLibrary(store: SidecarStore(), defaults: defaults)
+    }
+
+    func testRatingsArriveAfterTheListingAndFollowOutsideChanges() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = dir.appendingPathComponent("a.png"), b = dir.appendingPathComponent("b.png"), c = dir.appendingPathComponent("c.png")
+        for photo in [a, b, c] { try Data("x".utf8).write(to: photo) }
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "1", "rating": 4, "flag": "pick"}]}"#, sidecarOf: a)
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "2", "flag": "reject", "edits": {"film": "kodak_gold_200"}}]}"#, sidecarOf: b)
+        try write(#"{"negs": 9}"#, sidecarOf: c)
+        let library = try library()
+        var changed: [URL] = []
+        library.sidecarChanged = { changed.append($0) }
+        let watching = Task { await library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { library.summariesLoaded && !library.loading }
+        XCTAssertEqual(library.files.map(\.name), ["a.png", "b.png", "c.png"])
+        XCTAssertEqual(library.summary(for: a), LibrarySummary(rating: 4, flag: .pick))
+        XCTAssertEqual(library.summary(for: b), LibrarySummary(flag: .reject, edited: true))
+        XCTAssertNotNil(library.summary(for: c).problem, "a newer file is reported, not read")
+        XCTAssertFalse(library.readOnly)
+        XCTAssertTrue(changed.isEmpty, "the first read is no change")
+
+        // Another app rates b and clears a.
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "2", "rating": 2, "flag": "reject", "edits": {"film": "kodak_gold_200"}}]}"#, sidecarOf: b)
+        try FileManager.default.removeItem(at: PhotoSidecar.url(for: a))
+        try await waitUntil("the watcher sees sidecar writes") { library.summary(for: b).rating == 2 && library.summary(for: a) == LibrarySummary() }
+        XCTAssertEqual(Set(changed), [a, b])
+
+        // Listing again on request (window became key) reads nothing unchanged.
+        changed = []
+        library.refreshNow()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(changed.isEmpty)
+    }
+
+    func testAFilterHidesPhotographsButNeverTheCurrentOne() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let photos = ["a.png", "b.png", "c.png"].map { dir.appendingPathComponent($0) }
+        for photo in photos { try Data("x".utf8).write(to: photo) }
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "1", "flag": "pick"}]}"#, sidecarOf: photos[1])
+        let library = try library()
+        library.filter = LibraryFilter(flags: [.pick])
+        let watching = Task { await library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { !library.filtering }
+        XCTAssertEqual(library.shown(current: nil).map(\.name), ["b.png"])
+        XCTAssertEqual(library.shown(current: photos[0]).map(\.name), ["a.png", "b.png"], "the photograph under the cursor stays")
+        // Rejecting the pick it's on keeps it until another is opened.
+        library.set(LibrarySummary(flag: .reject), for: photos[1])
+        XCTAssertEqual(library.shown(current: photos[1]).map(\.name), ["b.png"])
+        XCTAssertEqual(library.shown(current: photos[2]).map(\.name), ["c.png"])
+    }
+
+    func testAReadOnlyFolderIsReported() async throws {
+        let dir = try folder()
+        try Data("x".utf8).write(to: dir.appendingPathComponent("a.png"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        let library = try library()
+        let watching = Task { await library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { library.summariesLoaded }
+        XCTAssertTrue(library.readOnly)
+        XCTAssertFalse(PhotoLibrary.canWrite(beside: dir.appendingPathComponent("a.png")))
+    }
+}
+
+/// Rating and flagging the open photograph.
+@MainActor final class LibraryModelTests: XCTestCase {
+    private var paths: EnginePaths {
+        EnginePaths(helper: root.appendingPathComponent("target/release/spektrafilm-native"),
+                    exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: data)
+    }
+
+    private func fixture(in dir: URL, _ name: String) throws -> URL {
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false,
+                                      isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 96 * 3, bitsPerPixel: 24)!
+        for i in 0..<(96 * 64 * 3) { bitmap.bitmapData![i] = UInt8(i % 251) }
+        let url = dir.appendingPathComponent(name)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: url)
+        return url
+    }
+
+    private func waitUntil(_ predicate: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(30)
+        while !predicate() && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(predicate())
+    }
+
+    private func model(store: SidecarStore) async throws -> EditorModel {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build the release helper first") }
+        let defaults = UserDefaults.standard
+        let saved = ["autoPlaceNewImages", "sidecars", "advanceAfterRating", LibraryFilter.defaultsKey].map { ($0, defaults.object(forKey: $0)) }
+        addTeardownBlock { for (key, value) in saved { defaults.set(value, forKey: key) } }
+        defaults.set(false, forKey: "autoPlaceNewImages")
+        defaults.set(true, forKey: "sidecars")
+        defaults.removeObject(forKey: "advanceAfterRating")
+        defaults.removeObject(forKey: LibraryFilter.defaultsKey)
+        let model = EditorModel(sidecars: store)
+        addTeardownBlock { @MainActor in model.shutdown() }
+        await model.start(paths: paths, restoration: Task { nil })
+        return model
+    }
+
+    func testRatingsAndFlagsAreSavedBesideThePhotograph() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let photo = try fixture(in: dir, "photo.png"), other = try fixture(in: dir, "other.png")
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.open(photo)
+        model.setRating(3)
+        XCTAssertEqual(model.libraryNote?.text, "★★★")
+        XCTAssertNil(model.libraryNote?.detail)
+        model.setFlag(.reject)
+        XCTAssertEqual(model.libraryNote?.text, "Rejected")
+        model.changeRating(by: 1)
+        await store.flush()
+        let saved = try XCTUnwrap(try store.read(photo: photo))
+        XCTAssertEqual(saved.summary, LibrarySummary(rating: 4, flag: .reject))
+        XCTAssertNil(saved.variants.first?.edits, "rating isn't editing")
+        // Edits join the same variant; the rating stays.
+        model.set("prep.lift", .number(7))
+        model.open(other)
+        await store.flush()
+        let both = try XCTUnwrap(try store.read(photo: photo))
+        XCTAssertEqual(both.variants.count, 1)
+        XCTAssertEqual(both.summary, LibrarySummary(rating: 4, flag: .reject, edited: true))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: other).path))
+
+        // Another launch reads them back when the photograph opens.
+        let relaunched = try await self.model(store: store)
+        relaunched.open(photo)
+        XCTAssertEqual(relaunched.currentSummary, LibrarySummary(rating: 4, flag: .reject, edited: true))
+        XCTAssertEqual(relaunched.value("prep.lift"), .number(7))
+        relaunched.changeRating(by: 5)
+        XCTAssertEqual(relaunched.currentSummary?.rating, 5, "at most five stars")
+        relaunched.setRating(0); relaunched.setFlag(nil)
+        XCTAssertEqual(relaunched.libraryNote?.text, "Unflagged")
+        await relaunched.flushSidecars()
+        XCTAssertEqual(try store.read(photo: photo)?.summary, LibrarySummary(edited: true))
+        // A flag alone makes a file, and goes with it.
+        relaunched.open(other)
+        relaunched.setFlag(.pick)
+        await relaunched.flushSidecars()
+        XCTAssertEqual(try store.read(photo: other)?.summary, LibrarySummary(flag: .pick))
+        relaunched.setFlag(nil)
+        await relaunched.flushSidecars()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: other).path), "nothing left, no file")
+    }
+
+    func testAReadOnlyFolderKeepsRatingsForTheSessionAndSaysSo() async throws {
+        let dir = try folder()
+        let photo = try fixture(in: dir, "photo.png"), other = try fixture(in: dir, "other.png")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.open(photo)
+        model.setRating(2)
+        XCTAssertEqual(model.libraryNote?.detail, "Not saved: the folder is read-only")
+        model.open(other)
+        model.open(photo)
+        XCTAssertEqual(model.currentSummary?.rating, 2, "kept for this session")
+        await model.flushSidecars()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: photo).path))
+    }
+
+    /// Another app or Mac changed the open photograph's sidecar: with no
+    /// unsaved edits the newer file wins; with some, ours are written over it.
+    func testOutsideChangesToTheOpenPhotograph() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let photo = try fixture(in: dir, "photo.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "d1", "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}}}]}"#, sidecarOf: photo)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        model.open(photo)
+        XCTAssertEqual(model.value("prep.lift"), .number(5))
+        // Our own edit, written: the file read back is ours, nothing reloads.
+        undo.beginUndoGrouping(); model.set("prep.lift", .number(6)); undo.endUndoGrouping()
+        await model.flushSidecars()
+        model.sidecarChangedOnDisk(photo)
+        XCTAssertEqual(model.value("prep.lift"), .number(6))
+        XCTAssertTrue(undo.canUndo)
+
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "d1", "rating": 1, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 12}}}}]}"#, sidecarOf: photo)
+        model.sidecarChangedOnDisk(photo)
+        XCTAssertEqual(model.value("prep.lift"), .number(12), "no unsaved edits: the newer file wins")
+        XCTAssertFalse(undo.canUndo, "its history is of edits that are gone")
+
+        // Unsaved edits win, and are written over the newer file.
+        undo.beginUndoGrouping(); model.set("prep.lift", .number(20)); undo.endUndoGrouping()
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "d1", "rating": 3, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 30}}}}]}"#, sidecarOf: photo)
+        model.sidecarChangedOnDisk(photo)
+        XCTAssertEqual(model.value("prep.lift"), .number(20))
+        await model.flushSidecars()
+        let saved = try XCTUnwrap(try store.read(photo: photo)?.variants.first)
+        XCTAssertEqual(saved.edits?["params.prep.lift"], .number(20))
+        XCTAssertEqual(saved.rating, 3, "the newer rating stays")
+    }
+
+    func testAdvanceAfterRatingFollowsTheFilteredStrip() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "1", "rating": 1}]}"#, sidecarOf: b)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
+        model.step(by: 1)
+        XCTAssertEqual(model.source, b)
+        model.step(by: -1)
+        XCTAssertEqual(model.source, a)
+        model.advanceAfterRating = true
+        model.library.filter = LibraryFilter(rating: .unrated)
+        model.setRating(2)
+        XCTAssertEqual(model.source, c, "b is rated, so the unrated strip skips it")
+        XCTAssertEqual(model.library.shown(current: c).map(\.name), ["c.png"], "a, rated now, is gone once left")
+        model.step(by: -1)
+        XCTAssertEqual(model.source, c)
+        await model.flushSidecars()
+        XCTAssertEqual(try store.read(photo: a)?.summary.rating, 2)
+    }
+}
