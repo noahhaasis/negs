@@ -178,8 +178,14 @@ struct EditorCanvas: View {
     @State private var dropTargeted = false
 
     var body: some View {
+        let grid = model.mode == .grid
         VStack(spacing: 0) {
-            CanvasArea(model: model)
+            ZStack {
+                // The canvas stays under the grid, so coming back to the
+                // same photograph is instant and keeps its zoom.
+                CanvasArea(model: model).accessibilityHidden(grid)
+                if grid { LibraryGrid(model: model) }
+            }
                 .dropDestination(for: URL.self) { urls, _ in
                     guard let url = urls.first, url.isFileURL else { return false }
                     model.open(url); return true
@@ -188,7 +194,8 @@ struct EditorCanvas: View {
                     if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
                 }
                 .overlay { LibraryNoteView(model: model) }
-            if model.filmstripVisible, model.source != nil {
+            // The grid takes the strip's place; it comes back as it was.
+            if model.filmstripVisible, model.source != nil, !grid {
                 Divider()
                 PhotoBrowser(model: model)
             }
@@ -219,6 +226,7 @@ struct LibraryNoteView: View {
             if let note = model.libraryNote {
                 VStack(spacing: 4) {
                     Text(note.text).font(.title2.weight(.semibold))
+                    if note.count > 1 { Text("\(note.count) photographs").font(.callout) }
                     if let detail = note.detail { Text(detail).font(.callout).foregroundStyle(.secondary) }
                 }
                 .padding(.horizontal, 22)
@@ -350,7 +358,7 @@ struct StatusBar: View {
                 }
                 Button("Cancel", action: model.cancelExport).controlSize(.small)
             }
-            if model.source != nil { OriginalButton(model: model) }
+            if model.source != nil, model.mode == .photo { OriginalButton(model: model) }
         }
         .font(.caption).foregroundStyle(.secondary)
         .padding(.horizontal, 14).frame(height: 28)

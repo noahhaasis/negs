@@ -20,7 +20,7 @@ import SwiftUI
 /// inspector column. The window, toolbar, and columns are AppKit; the canvas
 /// and inspector contents are SwiftUI. They follow the model through
 /// Observation, like the views.
-@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuDelegate {
+@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuDelegate, NSMenuItemValidation {
     private let model: EditorModel
     private let inspector: NSSplitViewItem
     private let panel: NSHostingController<InspectorPanel>
@@ -41,6 +41,15 @@ import SwiftUI
     /// The key held to show the original, so its release is found even if
     /// a modifier (⌥⇧ on some layouts) was let go first.
     private var originalKey: UInt16?
+    /// The mode the toolbar's items are laid out for.
+    private var toolbarMode = LibraryMode.photo
+    private lazy var sizeSlider: NSSlider = {
+        let slider = NSSlider(value: GridMetrics.defaultSize, minValue: GridMetrics.sizes.lowerBound, maxValue: GridMetrics.sizes.upperBound,
+                              target: self, action: #selector(resizeGrid(_:)))
+        slider.controlSize = .small
+        slider.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        return slider
+    }()
 
     init(model: EditorModel) {
         self.model = model
@@ -85,7 +94,7 @@ import SwiftUI
         let toolbar = NSToolbar(identifier: "editor")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
-        toolbar.centeredItemIdentifiers = [.zoom, .edit]
+        toolbar.centeredItemIdentifiers = [.zoom, .edit, .gridSize]
         window.toolbar = toolbar
         model.undoManager = window.undoManager
         // Dragging the inspector closed hides the adjustments, like the toolbar button.
@@ -96,7 +105,8 @@ import SwiftUI
                 if let window = self.window {
                     Self.fitMinimum(of: window, width: item.isCollapsed ? self.canvasMinimum : self.columnsMinimum)
                 }
-                guard self.model.inspectorVisible == item.isCollapsed else { return }
+                // The grid collapses it without hiding the adjustments.
+                guard self.model.mode == .photo, self.model.inspectorVisible == item.isCollapsed else { return }
                 self.model.inspectorVisible = !item.isCollapsed
             }
         }
@@ -104,7 +114,7 @@ import SwiftUI
             MainActor.assumeIsolated { self?.windowChangedOcclusion() }
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            MainActor.assumeIsolated { self?.holdOriginal(event) ?? false } ? nil : event
+            MainActor.assumeIsolated { self?.holdOriginal(event) == true || self?.escapeToGrid(event) == true } ? nil : event
         }
         resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -146,10 +156,21 @@ import SwiftUI
             originalKey = nil; model.holdOriginal(false)
             return true
         }
-        guard event.window === window, event.characters == "\\",
+        guard event.window === window, model.mode == .photo, event.characters == "\\",
               event.modifierFlags.isDisjoint(with: [.command, .control]),
               !(window?.firstResponder is NSText) else { return false }
         if !event.isARepeat { originalKey = event.keyCode; model.holdOriginal(true) }
+        return true
+    }
+
+    /// Esc shows the grid, as in Lightroom, unless text is being typed or a
+    /// crop drawn (whose Cancel takes it). The canvas's hosting view claims
+    /// Escape before the menu would see it, so it's caught here.
+    private func escapeToGrid(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.keyCode == 53, event.window === window,
+              event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
+              model.mode == .photo, model.source != nil, !model.cropping, MainMenu.takesRatingKeys(window) else { return false }
+        model.showGrid()
         return true
     }
 
@@ -171,9 +192,23 @@ import SwiftUI
     private func update() {
         guard let window else { return }
         let photo = model.source != nil
-        window.title = model.source?.lastPathComponent ?? "Negs"
-        window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
+        let grid = model.mode == .grid
+        if grid, let folder = model.library.directory ?? model.source?.deletingLastPathComponent() {
+            window.title = folder.lastPathComponent
+            let shown = model.shownPhotos.count, selected = model.ratingTargets.count
+            window.subtitle = selected > 1 ? "\(selected) of \(shown) selected" : shown == 1 ? "1 photograph" : "\(shown) photographs"
+        } else {
+            window.title = model.source?.lastPathComponent ?? "Negs"
+            window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
+        }
+        showItems(for: model.mode)
         showCropActions(model.cropping)
+        if let item = items[.mode] as? NSToolbarItemGroup {
+            item.selectedIndex = grid ? 1 : 0
+            item.isEnabled = photo && !model.cropping
+            item.subitems.forEach { $0.isEnabled = photo && !model.cropping }
+        }
+        if sizeSlider.doubleValue != model.gridCellSize { sizeSlider.doubleValue = model.gridCellSize }
         if let item = items[.filmstrip] {
             item.toolTip = model.filmstripVisible ? "Hide film strip (⌥⌘F)" : "Show film strip (⌥⌘F)"
             let icon = symbol("rectangle.bottomthird.inset.filled", "Film Strip")
@@ -199,7 +234,7 @@ import SwiftUI
                 ? symbol("crop", "Crop").withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor]))
                 : symbol("crop", "Crop")
         }
-        setEnabled(.export, photo && model.ready && !model.exporting && !model.saving)
+        setEnabled(.export, photo && model.ready && !model.exporting && !model.saving && model.canExportFromGrid)
         // The accent color marks the panel the inspector column shows.
         for (id, pane, name, label) in [(NSToolbarItem.Identifier.adjustments, InspectorPane.adjustments, "slider.horizontal.3", "Adjustments"),
                                         (.presets, .presets, "square.stack", "Presets")] {
@@ -212,11 +247,13 @@ import SwiftUI
             cancelButton.keyEquivalent = session.typing ? "" : "\u{1b}"
             doneButton.keyEquivalent = session.typing ? "" : "\r"
         }
-        if inspector.isCollapsed == model.inspectorVisible {
+        // The grid takes the whole window; the inspector comes back as it was.
+        let inspectorShown = model.inspectorVisible && !grid
+        if inspector.isCollapsed == inspectorShown {
             // Make room before the inspector slides in, so neither column is
             // squeezed below its minimum.
-            if model.inspectorVisible { Self.fitMinimum(of: window, width: columnsMinimum) }
-            inspector.animator().isCollapsed = !model.inspectorVisible
+            if inspectorShown { Self.fitMinimum(of: window, width: columnsMinimum) }
+            inspector.animator().isCollapsed = !inspectorShown
         }
     }
 
@@ -246,6 +283,25 @@ import SwiftUI
         (item as? NSToolbarItemGroup)?.subitems.forEach { $0.isEnabled = enabled }
     }
 
+    /// The edit view's tools leave the toolbar in the grid, and the size
+    /// slider takes their place. Open, the switch and Filter stay put.
+    private func showItems(for mode: LibraryMode) {
+        guard mode != toolbarMode, let toolbar = window?.toolbar else { return }
+        toolbarMode = mode
+        let ids = Self.itemIdentifiers(for: mode)
+        let kept = 3
+        while toolbar.items.count > kept { toolbar.removeItem(at: kept) }
+        for (index, id) in ids.enumerated().dropFirst(kept) { toolbar.insertItem(withItemIdentifier: id, at: index) }
+    }
+
+    static func itemIdentifiers(for mode: LibraryMode) -> [NSToolbarItem.Identifier] {
+        switch mode {
+        case .photo: [.open, .mode, .filter, .filmstrip, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator,
+                      .flexibleSpace, .export, .presets, .adjustments]
+        case .grid: [.open, .mode, .filter, .flexibleSpace, .gridSize, .flexibleSpace, .export]
+        }
+    }
+
     /// While cropping, Cancel and Done take the place of Export.
     private func showCropActions(_ cropping: Bool) {
         guard let toolbar = window?.toolbar else { return }
@@ -263,12 +319,10 @@ import SwiftUI
 
     // MARK: Toolbar
 
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.open, .filmstrip, .filter, .flexibleSpace, .zoom, .edit, .flexibleSpace, .inspectorTrackingSeparator, .flexibleSpace, .export, .presets, .adjustments]
-    }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Self.itemIdentifiers(for: .photo) }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [.cancelCrop, .doneCrop]
+        toolbarDefaultItemIdentifiers(toolbar) + [.gridSize, .cancelCrop, .doneCrop]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -277,6 +331,20 @@ import SwiftUI
         case .open:
             item = button(id, "Open", "folder", "Open photograph (⌘O)", #selector(openPhotograph))
             item.isNavigational = true
+        case .mode:
+            // A segmented switch shows which mode the window is in.
+            let group = NSToolbarItemGroup(itemIdentifier: id, images: [symbol("photo", "Photo"), symbol("square.grid.2x2", "Grid")],
+                                           selectionMode: .selectOne, labels: ["Photo", "Grid"], target: self, action: #selector(switchMode(_:)))
+            group.label = "View"
+            group.subitems[0].toolTip = "Edit the photograph (E)"
+            group.subitems[1].toolTip = "Show all photographs in the folder (G)"
+            group.selectedIndex = model.mode == .grid ? 1 : 0
+            group.controlRepresentation = .expanded
+            item = group
+        case .gridSize:
+            item = NSToolbarItem(itemIdentifier: id)
+            sizeSlider.doubleValue = model.gridCellSize
+            item.view = sizeSlider; item.label = "Size"; item.toolTip = "Thumbnail size (⌘+, ⌘−)"
         case .filmstrip:
             item = button(id, "Film Strip", "rectangle.bottomthird.inset.filled", "Show or hide film strip (⌥⌘F)", #selector(toggleFilmstrip))
         case .filter:
@@ -403,6 +471,8 @@ import SwiftUI
     // MARK: Actions
 
     @objc private func openPhotograph() { model.openPanel() }
+    @objc private func switchMode(_ sender: NSToolbarItemGroup) { sender.selectedIndex == 1 ? model.showGrid() : model.editCurrent() }
+    @objc private func resizeGrid(_ sender: NSSlider) { model.gridCellSize = sender.doubleValue.rounded() }
     @objc private func fit() { model.zoom(fit: true) }
     @objc private func actualSize() { model.zoom(fit: false) }
     @objc private func rotateClockwise() { model.rotate() }
@@ -413,10 +483,29 @@ import SwiftUI
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
     @objc private func togglePresets() { model.togglePane(.presets) }
+
+    // MARK: Selection
+
+    // Edit › Select All and Deselect All reach here through the responder
+    // chain only when no text field takes them first.
+    override func selectAll(_ sender: Any?) { model.selectAll() }
+    @objc func deselectAll(_ sender: Any?) { model.deselectAll() }
+
+    /// The photographs are selected where they're shown: the grid, or the strip.
+    private var selecting: Bool {
+        model.source != nil && !model.cropping && (model.mode == .grid || model.filmstripVisible)
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(selectAll(_:)), #selector(deselectAll(_:)): selecting
+        default: true
+        }
+    }
 }
 
-private extension NSToolbarItem.Identifier {
-    static let filmstrip = Self("filmstrip"), filter = Self("filter")
+extension NSToolbarItem.Identifier {
+    static let filmstrip = Self("filmstrip"), filter = Self("filter"), mode = Self("mode"), gridSize = Self("gridSize")
     static let open = Self("open"), zoom = Self("zoom"), edit = Self("edit")
     static let export = Self("export"), adjustments = Self("adjustments"), presets = Self("presets"), cancelCrop = Self("cancelCrop"), doneCrop = Self("doneCrop")
 }

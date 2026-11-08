@@ -1,0 +1,72 @@
+# Rating, filtering and the grid (macOS)
+
+The folder of the photograph you open is your library: there is nothing to
+import. Each photograph remembers its own rating, flag and edits in a small
+file beside it, `IMG_0412.CR3.negs`, written only once you rate, flag or edit
+it ([format](sidecar-format.md)). Turn this off in Settings with *Save ratings
+and edits next to photos*.
+
+## Rating and flagging
+
+Stars (0–5) and flags (pick, reject) are independent: a photograph can be a
+four-star reject. The keys work as in Lightroom and Capture One, and never
+while you're typing in a field.
+
+| Action | Key | Menu |
+| --- | --- | --- |
+| Rate 1–5 stars | 1–5 | Photo › Rating |
+| Clear the rating | 0 | Photo › Rating › None |
+| Raise / lower the rating | ] / [ | Photo › Rating |
+| Pick | P | Photo › Flag › Pick |
+| Reject | X | Photo › Flag › Reject |
+| Unflag | U | Photo › Flag › Unflagged |
+
+In the edit view a key rates the photograph you're editing, and a brief note
+over it says what changed. In the grid it rates every selected photograph.
+Photo › Advance After Rating moves on to the next photograph after each key.
+
+Thumbnails show the stars at the bottom, a flag or ✕ at the top left, and a
+sliders mark at the top right once a photograph has edits. Rejects are greyed.
+
+## Filtering
+
+The Filter button in the toolbar shows only some photographs, in the film strip
+and the grid alike: by rating (at least so many stars, or unrated only), by
+flag (picks, unflagged, rejected; several at once) and edited only. Its icon is
+filled while a filter is on. Clear it from the same menu or with ⌥⌘L.
+
+A photograph you rate out of the filter stays until you move on, so rating a
+run of photographs never makes the selection jump.
+
+## The grid
+
+The Photo | Grid switch in the toolbar, or these keys, change between editing
+one photograph and seeing the whole folder:
+
+| Action | Key |
+| --- | --- |
+| Show the grid | G or Esc (not while cropping) |
+| Edit the current photograph | E, Return, or double-click it |
+| Larger / smaller thumbnails | ⌘+ / ⌘−, or the Size slider |
+| Move | Arrow keys |
+
+The grid opens on the photograph you were editing. Moving around it never
+develops a RAW; only leaving it opens the current photograph.
+
+## Selecting
+
+There is always one current photograph (the one the edit view shows, outlined
+thickly) and any number of other selected ones (outlined thinly).
+
+| Action | Shortcut |
+| --- | --- |
+| Select one, make it current | Click |
+| Add or remove one | ⌘-click |
+| Select a range from the last click | ⇧-click, ⇧← / ⇧→ (⇧↑ / ⇧↓ in the grid) |
+| Select all shown | ⌘A |
+| Select only the current photograph | ⌥⌘A |
+| Rubber-band select | Drag in empty grid space (⌘ or ⇧ adds) |
+
+In the film strip, ← and → open the previous and next photograph once you have
+clicked a thumbnail. ⌘- and ⇧-clicks only select, so they never develop each
+photograph on the way.

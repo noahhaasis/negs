@@ -79,7 +79,9 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// Ratings and edits can't be saved in the folder (a locked card, a
     /// read-only share).
     private(set) var readOnly = false
-    var filter: LibraryFilter { didSet { if filter != oldValue { filter.save(defaults) } } }
+    var filter: LibraryFilter {
+        didSet { if filter != oldValue { filter.save(defaults); filterChanged?() } }
+    }
 
     /// Where sidecars are read, pending writes included; nil with sidecars off.
     var store: SidecarStore? {
@@ -92,6 +94,8 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// Told of each photograph whose sidecar changed on disk since it was
     /// last read here.
     @ObservationIgnored var sidecarChanged: ((URL) -> Void)?
+    /// Told when the filter changes, so the selection can follow it.
+    @ObservationIgnored var filterChanged: (() -> Void)?
 
     @ObservationIgnored private let defaults: UserDefaults
     /// Each photograph's sidecar file as last read; nil, it had none.
@@ -123,9 +127,13 @@ struct LibraryFilter: Codable, Equatable, Sendable {
 
     /// The photographs the strip shows: those the filter lets through, and
     /// always `current`, which never vanishes under the cursor.
-    func shown(current: URL?) -> [PhotoFile] {
+    func shown(current: URL?) -> [PhotoFile] { shown(keeping: current.map { [$0] } ?? []) }
+
+    /// The photographs the strip and grid show: those the filter lets
+    /// through, and always `kept` (the current photograph, those just rated).
+    func shown(keeping kept: Set<URL>) -> [PhotoFile] {
         guard filter.active else { return files }
-        return files.filter { $0.url == current || filter.includes(summary(for: $0.url)) }
+        return files.filter { kept.contains($0.url) || filter.includes(summary(for: $0.url)) }
     }
 
     /// An active filter is waiting for sidecars still being read.

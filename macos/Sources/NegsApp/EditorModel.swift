@@ -131,6 +131,21 @@ import UniformTypeIdentifiers
     }
     /// The brief note over the canvas after a rating or flag key.
     private(set) var libraryNote: LibraryNote?
+    /// The edit view or the grid. Every launch starts in the edit view.
+    private(set) var mode = LibraryMode.photo
+    /// The selected photographs and the current one, which in the edit view
+    /// is `source`. In the grid it moves without developing anything.
+    private(set) var selection = LibrarySelection()
+    /// The width of the grid's photographs, in points.
+    var gridCellSize = UserDefaults.standard.object(forKey: "gridThumbnailSize") as? Double ?? GridMetrics.defaultSize {
+        didSet {
+            let clamped = min(max(gridCellSize, GridMetrics.sizes.lowerBound), GridMetrics.sizes.upperBound)
+            if clamped != gridCellSize { gridCellSize = clamped; return }
+            UserDefaults.standard.set(gridCellSize, forKey: "gridThumbnailSize")
+        }
+    }
+    /// How many columns the grid shows now, for moving up and down a row.
+    @ObservationIgnored var gridColumns = 1
     var inspectorVisible = true
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
@@ -320,6 +335,7 @@ import UniformTypeIdentifiers
         library = PhotoLibrary(store: enabled ? sidecars : nil)
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
         library.sidecarChanged = { [weak self] photo in self?.sidecarChangedOnDisk(photo) }
+        library.filterChanged = { [weak self] in self?.filterChanged() }
     }
 
     /// Starts the helper and asks for its catalog at once, so both load while
@@ -788,6 +804,7 @@ import UniformTypeIdentifiers
 
     func open(_ url: URL) {
         explicitOpenRequested = true
+        mode = .photo
         // During launch it undoes a restore at launch; later it supersedes it.
         if launching { discardLaunchRestore() } else { launchRestore = nil }
         open(url, restoring: nil)
@@ -805,6 +822,8 @@ import UniformTypeIdentifiers
         let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
         source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        // Leaving the grid opens its current photograph and keeps the selection.
+        if selection.current != url { selection.select(url) }
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
         updateHistogram()
@@ -1171,18 +1190,30 @@ import UniformTypeIdentifiers
         var text: String
         /// Why it wasn't saved, if it wasn't.
         var detail: String?
+        /// How many photographs it changed: several in the grid.
+        var count = 1
         var serial: Int
     }
 
     /// The open photograph's rating and flag.
     var currentSummary: LibrarySummary? { source.map { library.summary(for: $0) } }
 
-    /// Rates the open photograph, 0 (none) to 5 stars.
+    /// What rating and flag commands act on: in the grid, every selected
+    /// photograph it shows; in the edit view the current one only, so a
+    /// forgotten selection in the strip never rates twenty photographs.
+    var ratingTargets: [URL] {
+        guard mode == .grid else { return source.map { [$0] } ?? [] }
+        return selection.ordered(shownPhotos.map(\.url))
+    }
+
+    /// Rates what rating commands act on, 0 (none) to 5 stars.
     func setRating(_ stars: Int) {
         changeLibrary { $0.rating = max(0, min(5, stars)) } note: { Self.ratingText($0.rating) }
     }
     func changeRating(by offset: Int) {
-        changeLibrary { $0.rating = max(0, min(5, $0.rating + offset)) } note: { Self.ratingText($0.rating) }
+        changeLibrary(many: offset > 0 ? "Rating Raised" : "Rating Lowered") {
+            $0.rating = max(0, min(5, $0.rating + offset))
+        } note: { Self.ratingText($0.rating) }
     }
     func setFlag(_ flag: PhotoSidecar.Flag?) {
         changeLibrary { $0.flag = flag } note: { Self.flagText($0.flag) }
@@ -1195,37 +1226,59 @@ import UniformTypeIdentifiers
         switch flag { case .pick: "Pick"; case .reject: "Rejected"; case nil: "Unflagged" }
     }
 
-    private func changeLibrary(_ change: (inout LibrarySummary) -> Void, note: (LibrarySummary) -> String) {
-        guard let source, !closing else { return }
-        let before = library.summary(for: source)
-        var after = before
-        change(&after)
-        var unsaved: String?
-        if after != before {
-            unsaved = saveLibraryChange(from: before, to: after, photo: source)
-            library.set(after, for: source)
+    /// `many` is the note for several photographs, when `note` would differ
+    /// between them.
+    private func changeLibrary(many: String? = nil, _ change: (inout LibrarySummary) -> Void, note: (LibrarySummary) -> String) {
+        let targets = ratingTargets
+        guard !targets.isEmpty, !closing else { return }
+        var unsaved: String?, last = LibrarySummary(), queued = false
+        for photo in targets {
+            let before = library.summary(for: photo)
+            var after = before
+            change(&after)
+            last = after
+            guard after != before else { continue }
+            let reason = saveLibraryChange(from: before, to: after, photo: photo)
+            if reason == nil { queued = true } else if unsaved == nil { unsaved = reason }
+            library.set(after, for: photo)
         }
-        libraryNote = LibraryNote(text: note(after), detail: unsaved, serial: (libraryNote?.serial ?? 0) + 1)
-        if advanceAfterRating { step(by: 1) }
+        if queued, let sidecars {
+            Task { [weak self] in
+                let failures = await sidecars.flush()
+                for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+            }
+        }
+        // They stay shown until the selection moves, whatever the filter.
+        selection.keep(targets)
+        let text = targets.count == 1 ? note(last) : many ?? note(last)
+        libraryNote = LibraryNote(text: text, detail: unsaved, count: targets.count, serial: (libraryNote?.serial ?? 0) + 1)
+        guard advanceAfterRating else { return }
+        if mode == .photo { step(by: 1) } else if targets.count == 1 { move(by: 1, extending: false) }
     }
 
-    /// Writes a rating or flag change to `photo`'s sidecar; why it can't, if it can't.
+    /// Queues a rating or flag change to `photo`'s sidecar; why it can't, if
+    /// it can't. The open photograph's goes to its variant; another's to its
+    /// file's first variant, or a new one if it has no file.
     private func saveLibraryChange(from before: LibrarySummary, to after: LibrarySummary, photo: URL) -> String? {
         guard sidecarsEnabled else { return "Not saved: Settings › Save ratings and edits is off" }
         guard let sidecars else { return "Not saved" }
+        // Benchmarks keep ratings for the session without a note.
         guard sidecars.writes else { return nil }
-        guard var context = photoSidecar, context.photo == photo else { return "Not saved" }
-        guard context.blocked == nil else { return "Not saved: its .negs file can’t be changed" }
-        guard PhotoLibrary.canWrite(beside: photo) else { return "Not saved: the folder is read-only" }
-        sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew,
-                                      rating: after.rating != before.rating ? after.rating : nil,
-                                      flag: after.flag != before.flag ? .some(after.flag) : nil,
-                                      defaultsVersion: context.defaultsVersion, app: Self.appVersion), for: photo)
-        context.exists = context.written != nil || after.rating > 0 || after.flag != nil
-        photoSidecar = context
-        Task { [weak self] in
-            let failures = await sidecars.flush()
-            for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+        let rating = after.rating != before.rating ? after.rating : nil
+        let flag: PhotoSidecar.Flag?? = after.flag != before.flag ? .some(after.flag) : nil
+        if photo == source {
+            guard var context = photoSidecar, context.photo == photo else { return "Not saved" }
+            guard context.blocked == nil else { return "Not saved: its .negs file can’t be changed" }
+            guard PhotoLibrary.canWrite(beside: photo) else { return "Not saved: the folder is read-only" }
+            sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, rating: rating, flag: flag,
+                                          defaultsVersion: context.defaultsVersion, app: Self.appVersion), for: photo)
+            context.exists = context.written != nil || after.rating > 0 || after.flag != nil
+            photoSidecar = context
+        } else {
+            guard before.problem == nil else { return "Not saved: its .negs file can’t be changed" }
+            guard PhotoLibrary.canWrite(beside: photo) else { return "Not saved: the folder is read-only" }
+            sidecars.enqueue(SidecarPatch(variant: SidecarRestore.newVariantID(), primary: true, rating: rating, flag: flag,
+                                          defaultsVersion: SidecarDefaults.latest, app: Self.appVersion), for: photo)
         }
         return nil
     }
@@ -1234,9 +1287,77 @@ import UniformTypeIdentifiers
     /// filtered.
     func step(by offset: Int) {
         guard !cropping, let source else { return }
-        let shown = library.shown(current: source)
+        let shown = shownPhotos
         guard let index = shown.firstIndex(where: { $0.url == source }), shown.indices.contains(index + offset) else { return }
         open(shown[index + offset].url)
+    }
+
+    // MARK: Selection and grid
+
+    /// The photographs the strip and grid show: those the filter lets
+    /// through, the current one, and those just rated.
+    var shownPhotos: [PhotoFile] { library.shown(keeping: selection.visible) }
+
+    /// A click on a photograph in the strip or the grid. ⌘ adds or removes
+    /// it and ⇧ selects a range, changing only the selection; a plain click
+    /// makes it current, which in the edit view opens it.
+    func click(_ photo: URL, command: Bool = false, shift: Bool = false) {
+        guard !cropping else { return }
+        if command { selection.toggle(photo) }
+        else if shift { selection.extend(to: photo, in: shownPhotos.map(\.url)) }
+        else if mode == .photo, photo != source { open(photo) }
+        else { selection.select(photo) }
+    }
+
+    /// The arrow keys. In the edit view ← and → open the next photograph; in
+    /// the grid the current photograph moves without developing, a row at a
+    /// time up and down (`offset` ± `gridColumns`). With ⇧ the selection
+    /// grows or shrinks instead and the current photograph stays.
+    func move(by offset: Int, extending: Bool) {
+        guard !cropping else { return }
+        let order = shownPhotos.map(\.url)
+        if extending { return selection.extend(by: offset, in: order) }
+        guard mode == .grid else { return step(by: offset) }
+        guard let current = selection.current, let index = order.firstIndex(of: current) else {
+            if let first = order.first { selection.select(first) }
+            return
+        }
+        var to = index + offset
+        // Down from the row above a short last row lands on its last photograph, as in Finder.
+        if to >= order.count, offset > 1, index / offset < (order.count - 1) / offset { to = order.count - 1 }
+        guard order.indices.contains(to) else { return }
+        selection.select(order[to])
+    }
+
+    /// ⌘A: every photograph shown.
+    func selectAll() { selection.selectAll(shownPhotos.map(\.url)) }
+    /// ⌥⌘A: all but the current photograph.
+    func deselectAll() { selection.deselectAll() }
+    /// The grid's rubber band: `photos` inside it, added to `base`.
+    func band(_ photos: [URL], adding base: Set<URL>) { selection.band(photos, adding: base) }
+
+    func showGrid() {
+        guard let source, !cropping, mode != .grid else { return }
+        holdOriginal(false)
+        if selection.current == nil { selection.select(source) }
+        mode = .grid
+    }
+
+    /// Back to the edit view, on the grid's current photograph.
+    func editCurrent() {
+        guard mode == .grid else { return }
+        if let current = selection.current, current != source { open(current) } else { mode = .photo }
+    }
+
+    func changeGridCellSize(larger: Bool) { gridCellSize += larger ? 40 : -40 }
+
+    /// Exporting from the grid exports the open photograph, if it's the one
+    /// selected; batches come later.
+    var canExportFromGrid: Bool { mode == .photo || (source != nil && selection.selected == [source!]) }
+
+    private func filterChanged() {
+        guard !library.filtering else { return }
+        selection.prune(to: Set(library.shown(current: selection.current).map(\.url)))
     }
 
     // MARK: Original

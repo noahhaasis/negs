@@ -62,27 +62,37 @@ actor PhotoThumbnails {
         let image: CGImage
         init(file: PhotoFile, image: CGImage) { self.file = file; self.image = image }
     }
-    private let cache: NSCache<NSURL, Cached> = {
-        let cache = NSCache<NSURL, Cached>()
-        cache.totalCostLimit = 16 * 1024 * 1024
-        cache.countLimit = 160
-        return cache
+    /// The film strip's size, and the grid's two (for cells up to about 190
+    /// and 380 points on a Retina screen).
+    enum Size: Int, CaseIterable, Sendable {
+        case strip = 192, medium = 384, large = 768
+        static func grid(points: CGFloat, scale: CGFloat) -> Size { points * scale <= 384 ? .medium : .large }
+    }
+    private let caches: [Size: NSCache<NSURL, Cached>] = {
+        var caches: [Size: NSCache<NSURL, Cached>] = [:]
+        for (size, megabytes, count) in [(Size.strip, 16, 160), (.medium, 48, 400), (.large, 96, 200)] {
+            let cache = NSCache<NSURL, Cached>()
+            cache.totalCostLimit = megabytes * 1024 * 1024
+            cache.countLimit = count
+            caches[size] = cache
+        }
+        return caches
     }()
 
     func image(for url: URL) -> CGImage? {
         image(for: PhotoFile(url: url))
     }
 
-    func image(for file: PhotoFile) -> CGImage? {
+    func image(for file: PhotoFile, size: Size = .strip) -> CGImage? {
         let url = file.url
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled, let cache = caches[size] else { return nil }
         if let cached = cache.object(forKey: url as NSURL), cached.file == file { return cached.image }
         let image: CGImage? = autoreleasepool {
             guard let source = CGImageSourceCreateWithURL(url as CFURL,
                 [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
             var options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 192,
+                kCGImageSourceThumbnailMaxPixelSize: size.rawValue,
                 kCGImageSourceShouldCacheImmediately: true
             ]
             if !EditorModel.rawExtensions.contains(url.pathExtension.lowercased()) {
@@ -102,16 +112,21 @@ actor PhotoThumbnails {
 struct PhotoBrowser: View {
     let model: EditorModel
     @State private var scrollTarget: URL?
+    /// A click takes the keys, so ← and → move on from there.
+    @FocusState private var focused: Bool
 
     var body: some View {
         let library = model.library
-        let shown = library.filtering ? [] : library.shown(current: model.source)
+        let shown = library.filtering ? [] : model.shownPhotos
+        let selected = model.selection.selected
         ScrollView(.horizontal) {
             LazyHStack(spacing: 8) {
                 ForEach(shown, id: \.url) { file in
-                    PhotoThumbnail(file: file, selected: file.url == model.source, summary: library.summary(for: file.url),
-                                   readOnly: library.readOnly) {
-                        if file.url != model.source { model.open(file.url) }
+                    PhotoThumbnail(file: file, current: file.url == model.source, selected: selected.contains(file.url),
+                                   summary: library.summary(for: file.url), readOnly: library.readOnly) {
+                        let modifiers = NSEvent.modifierFlags
+                        focused = true
+                        model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
                     }
                     .id(file.url)
                 }
@@ -126,8 +141,16 @@ struct PhotoBrowser: View {
         .onChange(of: library.loading) { _, loading in if !loading { scrollTarget = model.source } }
         .onChange(of: library.filtering) { _, filtering in if !filtering { scrollTarget = model.source } }
         .onAppear { scrollTarget = model.source }
-        .onMoveCommand { direction in
-            if direction == .left { model.step(by: -1) } else if direction == .right { model.step(by: 1) }
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        // ← and → open the previous and next photograph; with ⇧ they select
+        // a range and the current photograph stays.
+        .onKeyPress(keys: [.leftArrow, .rightArrow], phases: [.down, .repeat]) { press in
+            // Arrow keys also carry the numeric pad and function flags.
+            guard press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
+            model.move(by: press.key == .leftArrow ? -1 : 1, extending: press.modifiers.contains(.shift))
+            return .handled
         }
         .frame(height: 112)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -145,6 +168,8 @@ struct PhotoBrowser: View {
 private struct PhotoThumbnail: View {
     let file: PhotoFile
     private var url: URL { file.url }
+    /// The open photograph, outlined thickly; others selected, thinly.
+    let current: Bool
     let selected: Bool
     let summary: LibrarySummary
     let readOnly: Bool
@@ -170,22 +195,24 @@ private struct PhotoThumbnail: View {
                     .opacity(rejected ? 0.4 : 1)
                 }
                 .frame(width: 96, height: 68)
-                .overlay(alignment: .topLeading) { flagBadge }
-                .overlay(alignment: .bottom) { stars }
-                .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2) }
+                .overlay { PhotoBadges(summary: summary) }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(current || selected ? Color.accentColor : .clear, lineWidth: current ? 2 : 1)
+                }
                 Text(file.name)
                     .font(.caption2)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .foregroundStyle(selected ? .primary : .secondary)
+                    .foregroundStyle(current || selected ? .primary : .secondary)
             }
             .frame(width: 96)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .help(PhotoBadges.help(url, summary: summary, readOnly: readOnly))
+        .accessibilityLabel(PhotoBadges.accessibilityLabel(url, summary: summary))
+        .accessibilityAddTraits(current || selected ? [.isSelected] : [])
         .onAppear { visible = true }
         .onDisappear { visible = false; image = nil }
         .task(id: visible ? file : nil) {
@@ -198,47 +225,59 @@ private struct PhotoThumbnail: View {
             image = result
         }
     }
+}
 
-    /// Unflagged photographs show none.
-    @ViewBuilder private var flagBadge: some View {
-        if let flag = summary.flag {
-            Image(systemName: flag == .pick ? "flag.fill" : "xmark")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 15, height: 15)
-                .background(Circle().fill(.black.opacity(0.55)))
-                .padding(4)
-                .accessibilityHidden(true)
-        }
-    }
+/// A thumbnail's flag (top left), edited mark (top right) and stars
+/// (bottom). Unrated, unflagged, unedited photographs show none of them.
+struct PhotoBadges: View {
+    let summary: LibrarySummary
 
-    /// Unrated photographs show none.
-    @ViewBuilder private var stars: some View {
-        if summary.rating > 0 {
-            HStack(spacing: 1) {
-                ForEach(0..<summary.rating, id: \.self) { _ in Image(systemName: "star.fill") }
+    var body: some View {
+        ZStack {
+            if let flag = summary.flag {
+                badge(flag == .pick ? "flag.fill" : "xmark").frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .font(.system(size: 7))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(.black.opacity(0.55)))
-            .padding(.bottom, 4)
-            .accessibilityHidden(true)
+            if summary.edited {
+                badge("slider.horizontal.3").frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
+            if summary.rating > 0 {
+                HStack(spacing: 1) {
+                    ForEach(0..<summary.rating, id: \.self) { _ in Image(systemName: "star.fill") }
+                }
+                .font(.system(size: 7))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(.black.opacity(0.55)))
+                .padding(.bottom, 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
         }
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
 
-    private var help: String {
+    private func badge(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 15, height: 15)
+            .background(Circle().fill(.black.opacity(0.55)))
+            .padding(4)
+    }
+
+    static func help(_ url: URL, summary: LibrarySummary, readOnly: Bool) -> String {
         var lines = [url.lastPathComponent]
         if let problem = summary.problem { lines.append(problem) }
         if readOnly { lines.append("Ratings and edits can’t be saved in this folder: it’s read-only.") }
         return lines.joined(separator: "\n")
     }
 
-    private var accessibilityLabel: String {
+    static func accessibilityLabel(_ url: URL, summary: LibrarySummary) -> String {
         var parts = [url.lastPathComponent]
         if summary.rating > 0 { parts.append(summary.rating == 1 ? "1 star" : "\(summary.rating) stars") }
         if let flag = summary.flag { parts.append(flag == .pick ? "Pick" : "Rejected") }
+        if summary.edited { parts.append("Edited") }
         return parts.joined(separator: ", ")
     }
 }

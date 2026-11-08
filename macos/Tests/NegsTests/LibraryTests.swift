@@ -384,4 +384,84 @@ final class LibraryFormatTests: XCTestCase {
         await model.flushSidecars()
         XCTAssertEqual(try store.read(photo: a)?.summary.rating, 2)
     }
+
+    /// In the grid clicks and keys move the current photograph without
+    /// opening it, ratings apply to the whole selection, and leaving opens
+    /// the current one. In the edit view ratings stay on the open photograph.
+    func testTheGridSelectsWithoutDevelopingAndRatesTheSelection() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "rating": 1}]}"#, sidecarOf: b)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
+
+        model.showGrid()
+        XCTAssertEqual(model.mode, .grid)
+        model.click(b)
+        XCTAssertEqual(model.selection.current, b)
+        XCTAssertEqual(model.source, a, "nothing develops in the grid")
+        model.click(c, shift: true)
+        XCTAssertEqual(model.ratingTargets, [b, c])
+        model.setRating(3)
+        XCTAssertEqual(model.libraryNote?.text, "★★★")
+        XCTAssertEqual(model.libraryNote?.count, 2)
+        model.changeRating(by: 1)
+        XCTAssertEqual(model.libraryNote?.text, "Rating Raised")
+        await store.flush()
+        XCTAssertEqual(try store.read(photo: b)?.variants.map(\.id), ["b1"], "its own variant")
+        XCTAssertEqual(try store.read(photo: b)?.summary.rating, 4)
+        XCTAssertEqual(try store.read(photo: c)?.summary.rating, 4, "a new file")
+        XCTAssertNil(try store.read(photo: a), "the open photograph wasn't selected")
+
+        // Rated out of the filter, they stay until the selection moves.
+        model.library.filter = LibraryFilter(rating: .atLeast(4))
+        XCTAssertEqual(model.selection.selected, [b, c])
+        model.setRating(0)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [b, c])
+        model.click(b)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [b])
+        model.library.filter = LibraryFilter()
+
+        // Arrows: a row is two columns here; down onto a short row lands on its end.
+        model.gridColumns = 2
+        model.click(a)
+        model.move(by: 2, extending: false)
+        XCTAssertEqual(model.selection.current, c)
+        model.move(by: -2, extending: false)
+        XCTAssertEqual(model.selection.current, a)
+        model.move(by: 1, extending: false)
+        model.move(by: 2, extending: false)
+        XCTAssertEqual(model.selection.current, c)
+        model.move(by: -1, extending: true)
+        XCTAssertEqual(model.selection.selected, [b, c])
+        XCTAssertEqual(model.source, a)
+        model.selectAll()
+        XCTAssertEqual(model.ratingTargets, [a, b, c])
+        model.deselectAll()
+        XCTAssertEqual(model.ratingTargets, [c])
+
+        // Leaving opens the current photograph and keeps the selection.
+        model.click(b, command: true)
+        model.editCurrent()
+        XCTAssertEqual(model.mode, .photo)
+        XCTAssertEqual(model.source, c)
+        XCTAssertEqual(model.selection.selected, [b, c])
+        // In the edit view a rating is the open photograph's alone.
+        model.setRating(5)
+        XCTAssertEqual(model.libraryNote?.count, 1)
+        XCTAssertEqual(model.library.summary(for: c).rating, 5)
+        XCTAssertEqual(model.library.summary(for: b).rating, 0)
+        // Opening another photograph selects it alone; ⌘ and ⇧ never open.
+        model.click(a, command: true)
+        XCTAssertEqual(model.source, c)
+        model.click(a)
+        XCTAssertEqual(model.source, a)
+        XCTAssertEqual(model.selection.selected, [a])
+        await model.flushSidecars()
+    }
 }

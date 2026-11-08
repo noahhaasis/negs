@@ -62,8 +62,20 @@ import SwiftUI
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        // The window selects photographs when no text field takes it.
+        edit.addItem(withTitle: "Deselect All", action: #selector(EditorWindowController.deselectAll(_:)), keyEquivalent: "a")
+            .keyEquivalentModifierMask = [.command, .option]
 
         let view = submenu("View")
+        // Plain keys, as in Lightroom, behind the same check as the rating keys.
+        command(view, "Edit Photograph", #selector(editPhotograph), "e", [])
+        hidden(view, #selector(editPhotograph), "\r")
+        command(view, "Show Grid", #selector(showGrid), "g", [])
+        // Esc shows the grid too: `EditorWindowController.escapeToGrid`.
+        command(view, "Larger Thumbnails", #selector(largerThumbnails), "+")
+        hidden(view, #selector(largerThumbnails), "=", .command)
+        command(view, "Smaller Thumbnails", #selector(smallerThumbnails), "-")
+        view.addItem(.separator())
         command(view, "Hide Film Strip", #selector(toggleFilmstrip), "f", [.command, .option])
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
@@ -122,6 +134,15 @@ import SwiftUI
         item.target = self
     }
 
+    /// A second key for the command above it, not listed in the menu.
+    private func hidden(_ menu: NSMenu, _ action: Selector, _ key: String, _ modifiers: NSEvent.ModifierFlags = []) {
+        let item = menu.addItem(withTitle: "", action: action, keyEquivalent: key)
+        item.keyEquivalentModifierMask = modifiers
+        item.target = self
+        item.isHidden = true
+        item.allowsKeyEquivalentWhenHidden = true
+    }
+
     // MARK: Commands
 
     @objc private func checkForUpdates() { updates.check() }
@@ -161,10 +182,21 @@ import SwiftUI
     @objc private func unflag() { model.setFlag(nil) }
     @objc private func toggleAdvance() { model.advanceAfterRating.toggle() }
     @objc private func clearFilter() { model.library.filter = LibraryFilter() }
+    @objc private func editPhotograph() { model.editCurrent() }
+    @objc private func showGrid() { model.showGrid() }
+    @objc private func largerThumbnails() { model.changeGridCellSize(larger: true) }
+    @objc private func smallerThumbnails() { model.changeGridCellSize(larger: false) }
 
     /// Rating and flag keys act on the photograph in the editing window,
     /// and not while a text field there (or any other window) has the keys.
-    private var rating: Bool { model.source != nil && Self.takesRatingKeys(NSApp.keyWindow) }
+    private var rating: Bool { !model.ratingTargets.isEmpty && Self.takesRatingKeys(NSApp.keyWindow) }
+    /// On when every photograph a rating command acts on passes `test`,
+    /// mixed when some do.
+    private func state(_ test: (LibrarySummary) -> Bool) -> NSControl.StateValue {
+        let summaries = model.ratingTargets.map { model.library.summary(for: $0) }
+        let passing = summaries.filter(test).count
+        return passing == 0 ? .off : passing == summaries.count ? .on : .mixed
+    }
     /// The same check as holding \ for the original.
     static func takesRatingKeys(_ window: NSWindow?) -> Bool {
         guard let window, window is EditorWindow else { return false }
@@ -174,32 +206,40 @@ import SwiftUI
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if removingAppData { return false }
         let photo = model.source != nil
+        // The grid shows no photograph to adjust, zoom or crop.
+        let editing = photo && model.mode == .photo
         switch item.action {
         case #selector(checkForUpdates): return updates.configured && updates.canCheck
         case #selector(showRecent): return !model.recentFiles.isEmpty
-        case #selector(savePreview): return model.canSave
-        case #selector(exportPhotograph): return photo && model.ready && !model.exporting && !model.saving && !model.cropping
-        case #selector(exportLUT): return model.canExportLUT
+        case #selector(savePreview): return model.canSave && model.mode == .photo
+        case #selector(exportPhotograph):
+            return photo && model.ready && !model.exporting && !model.saving && !model.cropping && model.canExportFromGrid
+        case #selector(exportLUT): return model.canExportLUT && model.mode == .photo
         case #selector(toggleFilmstrip):
             item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"
-            return true
+            return model.mode == .photo
         case #selector(toggleAdjustments):
-            item.state = model.inspectorVisible && model.inspectorPane == .adjustments ? .on : .off; return true
+            item.state = model.inspectorVisible && model.inspectorPane == .adjustments ? .on : .off; return model.mode == .photo
         case #selector(togglePresets):
-            item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return true
-        case #selector(newPreset), #selector(importPresets): return model.canChangePresets
-        case #selector(fitPhotograph), #selector(actualSize): return photo && !model.cropping
-        case #selector(rotate): return photo
+            item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return model.mode == .photo
+        case #selector(newPreset): return model.canChangePresets && model.mode == .photo
+        case #selector(importPresets): return model.canChangePresets
+        case #selector(fitPhotograph), #selector(actualSize): return editing && !model.cropping
+        case #selector(rotate): return editing
         case #selector(crop):
             item.title = model.cropping ? "Done Cropping" : "Crop"
-            return model.cropping || model.image != nil
-        case #selector(resetAdjustments): return model.hasCatalog && !model.cropping
+            return model.cropping || (model.image != nil && model.mode == .photo)
+        case #selector(resetAdjustments): return model.hasCatalog && !model.cropping && model.mode == .photo
+        case #selector(editPhotograph): return model.mode == .grid && model.selection.current != nil && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(showGrid): return editing && !model.cropping && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(largerThumbnails): return model.mode == .grid && model.gridCellSize < GridMetrics.sizes.upperBound
+        case #selector(smallerThumbnails): return model.mode == .grid && model.gridCellSize > GridMetrics.sizes.lowerBound
         case #selector(rate(_:)):
-            item.state = model.currentSummary?.rating == item.tag ? .on : .off; return rating
+            item.state = state { $0.rating == item.tag }; return rating
         case #selector(raiseRating), #selector(lowerRating): return rating
-        case #selector(pick): item.state = model.currentSummary?.flag == .pick ? .on : .off; return rating
-        case #selector(reject): item.state = model.currentSummary?.flag == .reject ? .on : .off; return rating
-        case #selector(unflag): item.state = model.currentSummary.map { $0.flag == nil } == true ? .on : .off; return rating
+        case #selector(pick): item.state = state { $0.flag == .pick }; return rating
+        case #selector(reject): item.state = state { $0.flag == .reject }; return rating
+        case #selector(unflag): item.state = state { $0.flag == nil }; return rating
         case #selector(toggleAdvance): item.state = model.advanceAfterRating ? .on : .off; return true
         case #selector(clearFilter): return model.library.filter.active
         default: return true

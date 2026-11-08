@@ -317,18 +317,23 @@ wide-gamut display matching, and large camera RAWs interactively on target Macs;
 automated fixture tests do not establish those qualities or a 60 fps guarantee.
 
 The film strip below the canvas lists JPEG, PNG, TIFF and supported RAW files
-from the current photograph's folder in Finder-style filename order. Click a
-thumbnail to open it with the current adjustments (crop and rotation reset,
-as with Open). The toolbar's bottom-panel button and View > Show/Hide Film
-Strip (⌥⌘F) toggle it; visibility is remembered between launches. During crop
-editing the strip is disabled until Done or Cancel.
+from the current photograph's folder in Finder-style filename order, as the
+filter lets through. Click a thumbnail to open it with its own edits (from its
+sidecar, see [sidecar-format.md](sidecar-format.md)); ⌘- and ⇧-clicks only
+select. The toolbar's bottom-panel button and View > Show/Hide Film Strip (⌥⌘F)
+toggle it; visibility is remembered between launches. During crop editing the
+strip is disabled until Done or Cancel. The grid (G) shows the same photographs
+in place of the canvas. Ratings, flags, the filter, the grid and selection are
+described for users in [library.md](library.md).
 
 Folder enumeration runs off the main thread when the strip appears, the
 folder changes, or FSEvents reports external additions, removals, renames or
 writes. Notifications are batched with 200 ms latency and a one-event buffer;
 there is no idle polling. The watch stops when the strip disappears. Live
 refreshes preserve the selection and scroll position. A lazy horizontal row requests 192-pixel thumbnails only as
-cells appear, through a serial background decoder and a 16 MiB cache. RAW
+cells appear, through a serial background decoder and a 16 MiB cache. The grid
+asks the same decoder for 384- or 768-pixel thumbnails by cell size, cached
+separately (48 and 96 MiB). RAW
 files use embedded previews only, with a generic photo icon when unavailable.
 Offscreen cells release their images; hiding the strip cancels queued work.
 File size and modification time invalidate only changed thumbnails, allowing
