@@ -187,4 +187,67 @@ final class SelectionTests: XCTestCase {
         let rated = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "a", "rating": 1}, {"id": "b"}]}"#.utf8))
         XCTAssertEqual(try PhotoSidecar.removing(variant: "b", from: rated)?["variants"].array.count, 1)
     }
+
+    /// Edited thumbnails are drawn like the canvas: cropped, turned, inside
+    /// the border, 512 px on the long side.
+    @MainActor func testThumbnailComposer() throws {
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let context = try XCTUnwrap(CGContext(data: nil, width: 200, height: 100, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                               bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue))
+        context.setFillColor(CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 200, height: 100))
+        let red = try XCTUnwrap(context.makeImage())
+        let plain = try XCTUnwrap(ThumbnailComposer.compose(red, size: CGSize(width: 2000, height: 1000), crop: CropSettings(), cut: false,
+                                                            rotation: 0, border: nil, texture: nil, strip: nil, space: space))
+        XCTAssertEqual([plain.width, plain.height], [512, 256])
+        let turned = try XCTUnwrap(ThumbnailComposer.compose(red, size: CGSize(width: 2000, height: 1000), crop: CropSettings(), cut: false,
+                                                             rotation: 1, border: nil, texture: nil, strip: nil, space: space))
+        XCTAssertEqual([turned.width, turned.height], [256, 512])
+        var border = BorderSettings(); border.enabled = true; border.style = .solid; border.width = 0.1; border.color = .white
+        let framed = try XCTUnwrap(ThumbnailComposer.compose(red, size: CGSize(width: 2000, height: 1000), crop: CropSettings(), cut: false,
+                                                             rotation: 0, border: border, texture: nil, strip: nil, space: space))
+        XCTAssertEqual(max(framed.width, framed.height), 512)
+        func pixel(_ image: CGImage, _ x: Int, _ y: Int) -> [UInt8] {
+            let data = CFDataGetBytePtr(image.dataProvider!.data!)!
+            let at = y * image.bytesPerRow + x * 4
+            return [data[at + 2], data[at + 1], data[at]]
+        }
+        XCTAssertEqual(pixel(framed, 2, 2), [255, 255, 255], "the mat")
+        XCTAssertEqual(pixel(framed, framed.width / 2, framed.height / 2), [255, 0, 0], "the photograph")
+    }
+
+    func testEditedThumbnailNames() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("negs-thumbs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = EditedThumbnailStore(directory: dir)
+        let photo = PhotoFile(url: URL(fileURLWithPath: "/photos/a.CR3"), values: nil)
+        XCTAssertNil(store.key(for: photo, look: "x"), "not before the engine is known")
+        store.engineStamp = "engine"
+        let dated = try XCTUnwrap({ () -> PhotoFile? in
+            let url = dir.appendingPathComponent("a.png")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: url.path, contents: Data([1]))
+            return PhotoFile(url: url)
+        }())
+        let key = try XCTUnwrap(store.key(for: dated, look: "x"))
+        XCTAssertNotEqual(store.key(for: dated, look: "y"), key)
+        XCTAssertNotEqual(store.key(for: dated.duplicate("d", number: 2), look: "x"), key, "a duplicate has its own")
+        store.engineStamp = "other"
+        XCTAssertNotEqual(store.key(for: dated, look: "x"), key, "a new engine draws them again")
+        XCTAssertEqual(PhotoSidecar.look(of: nil, defaultsVersion: 1), nil)
+        let edits = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"film": "a", "params": {"prep": {"lift": 1, "gain": 2}}}"#.utf8))
+        let reordered = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"params": {"prep": {"gain": 2, "lift": 1}}, "film": "a"}"#.utf8))
+        XCTAssertEqual(PhotoSidecar.look(of: edits, defaultsVersion: 1), PhotoSidecar.look(of: reordered, defaultsVersion: 1))
+        XCTAssertNotEqual(PhotoSidecar.look(of: edits, defaultsVersion: 1), PhotoSidecar.look(of: edits, defaultsVersion: 2))
+    }
+
+    /// A match solved in the background lands only on the edits it was solved for.
+    func testPatchOnlyIfEdits() throws {
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "a", "edits": {"film": "x"}}]}"#.utf8))
+        let old = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"film": "x"}"#.utf8))
+        let new = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"film": "y"}"#.utf8))
+        let stale = SidecarPatch(variant: "a", edits: .some(new), onlyIfEdits: .some(new), defaultsVersion: 1, app: "t")
+        XCTAssertEqual(try stale.applied(to: raw), raw)
+        let current = SidecarPatch(variant: "a", edits: .some(new), onlyIfEdits: .some(old), defaultsVersion: 1, app: "t")
+        XCTAssertEqual(try current.applied(to: raw)?["variants"].array.first?["edits.film"], .string("y"))
+    }
 }

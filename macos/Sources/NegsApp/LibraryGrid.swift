@@ -39,7 +39,9 @@ struct LibraryGrid: View {
                                     ForEach(shown[row * metrics.columns..<min((row + 1) * metrics.columns, shown.count)], id: \.url) { file in
                                         GridCell(file: file, metrics: metrics, size: size, current: file.url == selection.current,
                                                  selected: selection.selected.contains(file.url), summary: library.summary(for: file.url),
-                                                 readOnly: library.readOnly) {
+                                                 readOnly: library.readOnly, edited: model.editedThumbnail(for: file.url)) { visible in
+                                            model.thumbnailShown(file, visible)
+                                        } click: {
                                             focused = true
                                             let modifiers = NSEvent.modifierFlags
                                             model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
@@ -134,12 +136,15 @@ private struct GridCell: View {
     let selected: Bool
     let summary: LibrarySummary
     let readOnly: Bool
+    let edited: EditedThumbnail?
+    /// On and off screen: what's shown is developed first.
+    let shown: (Bool) -> Void
     let click: () -> Void
     let edit: () -> Void
     @State private var image: CGImage?
     @State private var visible = false
 
-    private struct Load: Hashable { let file: PhotoFile; let size: PhotoThumbnails.Size }
+    private struct Load: Hashable { let file: PhotoFile; let size: PhotoThumbnails.Size; let edited: EditedThumbnail? }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -178,12 +183,14 @@ private struct GridCell: View {
         .accessibilityAddTraits(current || selected ? [.isButton, .isSelected] : [.isButton])
         .accessibilityAction(named: "Edit", edit)
         .accessibilityAction { click() }
-        .onAppear { visible = true }
-        .onDisappear { visible = false; image = nil }
-        .task(id: visible ? Load(file: file, size: size) : nil) {
+        .onAppear { visible = true; shown(true) }
+        .onDisappear { visible = false; image = nil; shown(false) }
+        .task(id: visible ? Load(file: file, size: size, edited: edited) : nil) {
             guard visible else { return }
-            let file = file, size = size
-            let request = Task.detached(priority: .utility) { await PhotoThumbnails.shared.image(for: file, size: size) }
+            let file = file, size = size, edited = edited
+            let request = Task.detached(priority: .utility) {
+                await PhotoThumbnails.shared.image(for: file, size: size, look: edited?.look, edited: edited?.store)
+            }
             let result = await withTaskCancellationHandler {
                 await request.value
             } onCancel: { request.cancel() }

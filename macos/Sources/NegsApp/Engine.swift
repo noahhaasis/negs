@@ -249,8 +249,12 @@ final class EngineClient: @unchecked Sendable {
     /// Counts helper launches: a relaunched helper keeps nothing of the last one.
     private var launches = 0
 
-    init(paths: EnginePaths) throws {
+    /// The helper's priority; nil leaves the system's default.
+    private let quality: QualityOfService?
+
+    init(paths: EnginePaths, quality: QualityOfService? = nil) throws {
         self.paths = paths
+        self.quality = quality
         scratch = try ScratchSpace()
     }
 
@@ -323,6 +327,7 @@ final class EngineClient: @unchecked Sendable {
         child.executableURL = paths.helper
         child.arguments = ["--data-dir", paths.data.path]
         child.standardInput = stdin; child.standardOutput = stdout; child.standardError = log
+        if let quality { child.qualityOfService = quality }
         try child.run()
         launches += 1
         process = child; input = stdin.fileHandleForWriting; output = stdout.fileHandleForReading

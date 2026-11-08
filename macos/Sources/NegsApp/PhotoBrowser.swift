@@ -71,8 +71,10 @@ actor PhotoThumbnails {
     static let shared = PhotoThumbnails()
     private final class Cached {
         let file: PhotoFile
+        /// The edited thumbnail's name, or nil for the embedded preview.
+        let look: String?
         let image: CGImage
-        init(file: PhotoFile, image: CGImage) { self.file = file; self.image = image }
+        init(file: PhotoFile, look: String?, image: CGImage) { self.file = file; self.look = look; self.image = image }
     }
     /// The film strip's size, and the grid's two (for cells up to about 190
     /// and 380 points on a Retina screen).
@@ -95,12 +97,21 @@ actor PhotoThumbnails {
         image(for: PhotoFile(url: url))
     }
 
-    func image(for file: PhotoFile, size: Size = .strip) -> CGImage? {
-        // A duplicate shows its photograph's embedded preview.
-        let file = file.photo
-        let url = file.url
+    /// An edited photograph's thumbnail when `edited` has one for `look`
+    /// (its stored edits), else the embedded preview.
+    func image(for item: PhotoFile, size: Size = .strip, look: String? = nil, edited: EditedThumbnailStore? = nil) -> CGImage? {
         guard !Task.isCancelled, let cache = caches[size] else { return nil }
-        if let cached = cache.object(forKey: url as NSURL), cached.file == file { return cached.image }
+        if let look, let edited, let key = edited.key(for: item, look: look) {
+            if let cached = cache.object(forKey: item.url as NSURL), cached.file == item, cached.look == key { return cached.image }
+            if let image = edited.image(key, maxPixels: size.rawValue) {
+                cache.setObject(Cached(file: item, look: key, image: image), forKey: item.url as NSURL, cost: image.bytesPerRow * image.height)
+                return image
+            }
+        }
+        // A duplicate shows its photograph's embedded preview.
+        let file = item.photo
+        let url = file.url
+        if let cached = cache.object(forKey: url as NSURL), cached.file == file, cached.look == nil { return cached.image }
         let image: CGImage? = autoreleasepool {
             guard let source = CGImageSourceCreateWithURL(url as CFURL,
                 [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
@@ -115,7 +126,7 @@ actor PhotoThumbnails {
             return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
         }
         guard !Task.isCancelled else { return nil }
-        if let image { cache.setObject(Cached(file: file, image: image), forKey: url as NSURL, cost: image.bytesPerRow * image.height) }
+        if let image { cache.setObject(Cached(file: file, look: nil, image: image), forKey: url as NSURL, cost: image.bytesPerRow * image.height) }
         return image
     }
 }
@@ -137,7 +148,10 @@ struct PhotoBrowser: View {
             LazyHStack(spacing: 8) {
                 ForEach(shown, id: \.url) { file in
                     PhotoThumbnail(file: file, current: file.url == model.sourceItem, selected: selected.contains(file.url),
-                                   summary: library.summary(for: file.url), readOnly: library.readOnly) {
+                                   summary: library.summary(for: file.url), readOnly: library.readOnly,
+                                   edited: model.editedThumbnail(for: file.url)) { visible in
+                        model.thumbnailShown(file, visible)
+                    } open: {
                         let modifiers = NSEvent.modifierFlags
                         focused = true
                         model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
@@ -188,9 +202,14 @@ private struct PhotoThumbnail: View {
     let selected: Bool
     let summary: LibrarySummary
     let readOnly: Bool
+    let edited: EditedThumbnail?
+    /// On and off screen: what's shown is developed first.
+    let shown: (Bool) -> Void
     let open: () -> Void
     @State private var image: CGImage?
     @State private var visible = false
+
+    private struct Load: Hashable { let file: PhotoFile; let edited: EditedThumbnail? }
 
     private var rejected: Bool { summary.flag == .reject }
 
@@ -228,16 +247,20 @@ private struct PhotoThumbnail: View {
         .help(PhotoBadges.help(file.name, summary: summary, readOnly: readOnly))
         .accessibilityLabel(PhotoBadges.accessibilityLabel(file.name, summary: summary))
         .accessibilityAddTraits(current || selected ? [.isSelected] : [])
-        .onAppear { visible = true }
-        .onDisappear { visible = false; image = nil }
-        .task(id: visible ? file : nil) {
+        .onAppear { visible = true; shown(true) }
+        .onDisappear { visible = false; image = nil; shown(false) }
+        .task(id: visible ? Load(file: file, edited: edited) : nil) {
             guard visible else { return }
-            let request = Task.detached(priority: .utility) { await PhotoThumbnails.shared.image(for: file) }
+            let file = file, edited = edited
+            let request = Task.detached(priority: .utility) {
+                await PhotoThumbnails.shared.image(for: file, look: edited?.look, edited: edited?.store)
+            }
             let result = await withTaskCancellationHandler {
                 await request.value
             } onCancel: { request.cancel() }
             guard !Task.isCancelled else { return }
-            image = result
+            // An edited thumbnail on its way keeps the last one shown.
+            if let result { image = result }
         }
     }
 }

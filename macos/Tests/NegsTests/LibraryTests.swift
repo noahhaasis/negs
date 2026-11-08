@@ -637,4 +637,49 @@ final class LibraryFormatTests: XCTestCase {
         try await waitUntil { [a, b, d].allSatisfy(exists) && model.source != nil }
         await model.flushSidecars()
     }
+
+    /// Edited photographs get thumbnails developed with their edits: the
+    /// open one from its preview on leaving it, the others in a background
+    /// helper, which also solves a pasted match and stores it.
+    func testEditedThumbnailsOnLeavingAndInTheBackground() async throws {
+        let dir = try folder(), thumbnails = try folder()
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: thumbnails) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        // b as a paste leaves it: the match on, not solved for these edits.
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}, "brightnessMatch": {"highlightLimited": false}}}]}"#, sidecarOf: b)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let edited = EditedThumbnailStore(directory: thumbnails)
+        model.editedThumbnails = edited
+        func file(_ url: URL) -> PhotoFile? { model.library.items.first { $0.url == url } }
+        func made(_ url: URL) -> Bool {
+            guard let file = file(url), let look = model.library.looks[url], let key = edited.key(for: file, look: look) else { return false }
+            return edited.contains(key)
+        }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 && model.previewCurrent }
+        XCTAssertNil(model.library.looks[a], "unedited: the embedded preview")
+        XCTAssertNotNil(model.library.looks[b])
+
+        // b in the background, its match solved and stored first.
+        try await waitUntil { made(b) }
+        let match = try store.read(photo: b)?.variants.first?.edits?["brightnessMatch"]
+        XCTAssertEqual(match?["ev"].double.isFinite, true, "solved: \(String(describing: match))")
+        XCTAssertEqual(match?["solved"], .null, "stored as solved")
+        XCTAssertEqual(try store.read(photo: b)?.variants.first?.edits?["params.prep.lift"], .number(5), "the edits stay")
+        let key = try XCTUnwrap(file(b).flatMap { edited.key(for: $0, look: model.library.looks[b]!) })
+        let image = try XCTUnwrap(edited.image(key, maxPixels: 1024))
+        XCTAssertEqual(max(image.width, image.height), 512)
+        XCTAssertNotNil(model.editedThumbnail(for: b))
+
+        // a from its preview, once edited and left.
+        model.set("prep.lift", .number(20))
+        try await waitUntil { model.previewCurrent }
+        model.open(c)
+        try await waitUntil { made(a) }
+        XCTAssertGreaterThan(model.thumbnailVersions[a] ?? 0, 0)
+        await model.flushSidecars()
+    }
 }

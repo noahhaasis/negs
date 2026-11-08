@@ -349,6 +349,7 @@ import UniformTypeIdentifiers
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
         library.sidecarChanged = { [weak self] photo in self?.sidecarChangedOnDisk(photo) }
         library.filterChanged = { [weak self] in self?.filterChanged() }
+        library.looksChanged = { [weak self] in self?.pumpThumbnails() }
     }
 
     /// Starts the helper and asks for its catalog at once, so both load while
@@ -840,8 +841,10 @@ import UniformTypeIdentifiers
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
-        // The previous photograph's last edits go to its sidecar first.
+        // The previous photograph's last edits go to its sidecar first, and
+        // the preview on screen becomes its edited thumbnail.
         flushSidecar()
+        saveOpenThumbnail()
         // Paste from Previous: the last photograph left with edits.
         if photoSidecar?.written != nil, photoSidecar?.photo == source { previousEdits = Self.userEdits(state) }
         let previous = state
@@ -982,7 +985,7 @@ import UniformTypeIdentifiers
 
     /// Saved edits under the engine's current defaults. `legacy`: a schema 2
     /// session's, which may predate lens correction and the preview limit.
-    private func restoredState(_ saved: EditState, legacy: Bool, matchSolved: Bool = false) -> EditState {
+    func restoredState(_ saved: EditState, legacy: Bool, matchSolved: Bool = false) -> EditState {
         var restored = saved
         let lensCorrection = restored.params[Self.lensCorrectionPath]
         restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
@@ -1152,6 +1155,8 @@ import UniformTypeIdentifiers
         var summary = library.summary(for: photo)
         summary.edited = edits != nil
         library.set(summary, for: photo)
+        // Its look too, which names its edited thumbnail.
+        library.reload(photo)
         context.written = edits; context.migrating = false
         context.exists = edits != nil || summary.rating > 0 || summary.flag != nil
         photoSidecar = context
@@ -1368,6 +1373,9 @@ import UniformTypeIdentifiers
     func showGrid() {
         guard let source = sourceItem, !cropping, mode != .grid else { return }
         holdOriginal(false)
+        // The grid shows the open photograph as edited.
+        flushSidecar()
+        saveOpenThumbnail()
         if selection.current == nil { selection.select(source) }
         mode = .grid
     }
@@ -1589,6 +1597,240 @@ import UniformTypeIdentifiers
         }
         libraryNote = LibraryNote(text: made.isEmpty ? "Not Duplicated" : "Duplicated", detail: unsaved, count: max(made.count, 1),
                                   serial: (libraryNote?.serial ?? 0) + 1)
+    }
+
+    // MARK: Edited thumbnails
+
+    /// Where edited thumbnails are kept; tests use their own.
+    @ObservationIgnored var editedThumbnails = EditedThumbnailStore.shared
+    /// The engine's identity, once read: until then only embedded previews show.
+    private(set) var thumbnailStamp: String?
+    /// Moves when an item's edited thumbnail is made, so its cells read it.
+    private(set) var thumbnailVersions: [URL: Int] = [:]
+    /// Edited items in the strip or grid now: developed first.
+    @ObservationIgnored private var thumbnailsOnScreen: Set<URL> = []
+    /// Each item's look last checked for a thumbnail, and whether it had one.
+    @ObservationIgnored private var thumbnailsChecked: [URL: (look: String, present: Bool)] = [:]
+    /// Looks that failed to develop this session, not tried again.
+    @ObservationIgnored private var thumbnailFailures: [URL: String] = [:]
+    /// The background helper, started while there's work, and its job.
+    @ObservationIgnored private var thumbnailEngine: EngineClient?
+    @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
+    @ObservationIgnored private var thumbnailIdle: Task<Void, Never>?
+    @ObservationIgnored private var thumbnailGeneration = 0
+    @ObservationIgnored private var readingThumbnailStamp = false
+
+    func editedThumbnail(for item: URL) -> EditedThumbnail? {
+        guard let stamp = thumbnailStamp, let look = library.looks[item] else { return nil }
+        return EditedThumbnail(look: look, version: thumbnailVersions[item] ?? 0, stamp: stamp, store: editedThumbnails)
+    }
+
+    /// A strip or grid cell came on screen or left it.
+    func thumbnailShown(_ file: PhotoFile, _ visible: Bool) {
+        guard visible else { thumbnailsOnScreen.remove(file.url); return }
+        thumbnailsOnScreen.insert(file.url)
+        if library.looks[file.url] != nil { pumpThumbnails() }
+    }
+
+    /// Reads the engine's identity once, off the main actor, after launch.
+    private func readThumbnailStamp() {
+        guard thumbnailStamp == nil, !readingThumbnailStamp, let paths = engine?.paths else { return }
+        readingThumbnailStamp = true
+        let store = editedThumbnails
+        Task { [weak self] in
+            let stamp = await Task.detached(priority: .utility) { () -> String? in
+                let stamp = EditedThumbnailStore.stamp(paths)
+                store.engineStamp = stamp
+                // The oldest go once a session.
+                store.prune()
+                return stamp
+            }.value
+            guard let self, !self.closing else { return }
+            self.thumbnailStamp = stamp
+            self.pumpThumbnails()
+        }
+    }
+
+    private func thumbnailMade(_ item: URL, look: String) {
+        thumbnailsChecked[item] = (look, true)
+        thumbnailVersions[item, default: 0] += 1
+    }
+
+    /// The open photograph's edited thumbnail, made from the preview on
+    /// screen, so it costs no render: on leaving it for another photograph
+    /// or the grid.
+    private func saveOpenThumbnail() {
+        guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
+              !brightnessMatchPending, let look = library.looks[item], thumbnailsChecked[item].map({ $0.look != look || !$0.present }) ?? true,
+              let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
+        let size = imageSize, crop = crop, rotation = imageRotation, border = state.border, texture = filmTexture, strip = filmStrip
+        let store = editedThumbnails
+        let shown = surface
+        Task { [weak self] in
+            guard let photo = await Task.detached(priority: .utility, operation: { ThumbnailComposer.image(of: shown) }).value,
+                  let composed = ThumbnailComposer.compose(photo, size: size, crop: crop, cut: false, rotation: rotation, border: border, texture: texture,
+                                                           strip: strip, space: photo.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) else { return }
+            let saved = await Task.detached(priority: .utility) { (try? store.save(composed, as: key)) != nil }.value
+            if saved { self?.thumbnailMade(item, look: look) }
+        }
+    }
+
+    /// The background renderer can use the machine: nothing is being edited,
+    /// developed, exported or saved in the window.
+    private var thumbnailsMayRun: Bool {
+        !closing && !interacting && !rendering && pendingRender == nil && !exporting && !saving && !cropping && matchTask == nil
+            && (mode == .grid || source == nil || previewCurrent || renderFailed)
+    }
+
+    /// Develops the next edited item without a current thumbnail in a helper
+    /// of its own, at utility priority: those on screen first, then the
+    /// folder in order. One at a time, waiting while the open photograph is
+    /// edited or developed. The helper quits when there's nothing left.
+    func pumpThumbnails() {
+        guard thumbnailTask == nil, !closing, hasCatalog, let paths = engine?.paths, let lookup = sidecarLookup else { return }
+        if thumbnailStamp == nil { return readThumbnailStamp() }
+        let store = editedThumbnails
+        let items = library.items, looks = library.looks, open = sourceItem
+        let onScreen = thumbnailsOnScreen
+        // Each edited item but the open one, whose thumbnail comes from its preview.
+        var wanted: [(file: PhotoFile, look: String)] = []
+        for file in items where file.url != open {
+            guard let look = looks[file.url], thumbnailFailures[file.url] != look else { continue }
+            if let checked = thumbnailsChecked[file.url], checked.look == look, checked.present { continue }
+            wanted.append((file, look))
+        }
+        guard !wanted.isEmpty else { return stopThumbnailEngineSoon() }
+        wanted = wanted.filter { onScreen.contains($0.file.url) } + wanted.filter { !onScreen.contains($0.file.url) }
+        thumbnailIdle?.cancel(); thumbnailIdle = nil
+        thumbnailTask = Task { [weak self] in
+            // The first without a thumbnail on disk; those with one are noted.
+            let found = await Task.detached(priority: .utility) { () -> (present: [(URL, String)], next: (file: PhotoFile, look: String)?) in
+                var present: [(URL, String)] = []
+                for (file, look) in wanted {
+                    guard let key = store.key(for: file, look: look) else { continue }
+                    if store.contains(key) { present.append((file.url, look)) } else { return (present, (file, look)) }
+                }
+                return (present, nil)
+            }.value
+            guard let self, !self.closing else { return }
+            for (item, look) in found.present { self.thumbnailsChecked[item] = (look, true) }
+            if let (file, look) = found.next {
+                self.thumbnailsChecked[file.url] = (look, false)
+                if await !self.developThumbnail(file, look: look, lookup: lookup, paths: paths) { self.thumbnailFailures[file.url] = look }
+            }
+            self.thumbnailTask = nil
+            if found.next != nil { self.pumpThumbnails() } else { self.stopThumbnailEngineSoon() }
+        }
+    }
+
+    /// Quits the background helper after a while without work, so its memory goes.
+    private func stopThumbnailEngineSoon() {
+        guard thumbnailEngine != nil, thumbnailIdle == nil else { return }
+        thumbnailIdle = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            guard let self, !Task.isCancelled, self.thumbnailTask == nil, let engine = self.thumbnailEngine else { return }
+            self.thumbnailEngine = nil; self.thumbnailIdle = nil
+            await Task.detached(priority: .utility) { engine.stop() }.value
+        }
+    }
+
+    /// Waits until the background renderer may use the machine.
+    private func waitForThumbnailTurn() async -> Bool {
+        while !thumbnailsMayRun {
+            guard !closing, !Task.isCancelled else { return false }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return !closing
+    }
+
+    /// Develops `file`'s thumbnail with its stored edits, as opening it
+    /// would. A match not yet solved for them is solved first and stored,
+    /// unless its edits changed meanwhile. False when it can't be made.
+    private func developThumbnail(_ file: PhotoFile, look: String, lookup: SidecarLookup, paths: EnginePaths) async -> Bool {
+        let item = file.url, photo = item.photoFile
+        guard let sidecar = try? lookup.store.read(photo: photo),
+              let variant = item.variantID.map({ id in sidecar.variants.first { $0.id == id } }) ?? sidecar.variants.first,
+              let stored = variant.edits, PhotoSidecar.look(of: stored, defaultsVersion: sidecar.defaultsVersion) == look,
+              let table = try? SidecarDefaults.load(version: sidecar.defaultsVersion, data: lookup.data),
+              let saved = try? PhotoSidecar.decodeEdits(stored, table: table) else { return false }
+        var state = restoredState(saved.state, legacy: false, matchSolved: saved.matchSolved)
+        let raw = Self.rawExtensions.contains(photo.pathExtension.lowercased())
+        let engine: EngineClient
+        do {
+            if let running = thumbnailEngine { engine = running } else {
+                engine = try EngineClient(paths: paths, quality: .utility); thumbnailEngine = engine
+            }
+        } catch { return false }
+        thumbnailGeneration += 1
+        let generation = thumbnailGeneration, space = previewSpace
+        let buffer = engine.directory.appendingPathComponent("library-thumbnail.rgba")
+        defer { try? FileManager.default.removeItem(at: buffer) }
+        func command(_ state: EditState, longSide: Int) -> [String: JSONValue] {
+            var params = state.params
+            params["io.output_color_space"] = .string(space)
+            var command: [String: JSONValue] = [
+                "command": .string("thumbnail"), "input": .string(photo.path), "source_generation": .number(Double(generation)),
+                "film": .string(state.film), "paper": .string(state.paper), "params": params,
+                "long_side": .number(Double(longSide)), "preview_path": .string(buffer.path),
+            ]
+            if let crop = Self.cropJSON(state.crop) { command["crop"] = crop }
+            return command
+        }
+        var finalLook = look
+        do {
+            let matchable = raw || state.params["io.input_interpretation.mode"].string == "auto"
+            if state.brightnessMatch != nil, !saved.matchSolved, matchable {
+                // The decode first, which the match is solved on.
+                guard await waitForThumbnailTurn() else { return false }
+                let (_, decoded) = try await engine.request(command(state, longSide: 16))
+                let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
+                guard await waitForThumbnailTurn() else { return false }
+                let reference = engine.directory.appendingPathComponent("library-brightness.png")
+                defer { try? FileManager.default.removeItem(at: reference) }
+                if let solved = try? await Self.solveBrightnessMatch(engine: engine, source: photo, generation: generation, size: size, raw: raw,
+                                                                    request: matchSolveState(state), reference: reference),
+                   let matched = Self.matching(state, ev: solved.exposure, limited: solved.limited, inputs: matchInputs(state)) {
+                    state = matched
+                    finalLook = storeSolvedMatch(state, item: item, variant: variant.id, stored: stored, sidecar: sidecar, table: table) ?? look
+                }
+            }
+            guard await waitForThumbnailTurn() else { return false }
+            let (_, result) = try await engine.request(command(state, longSide: Int(EditedThumbnailStore.longSide)))
+            let (width, height) = (Int(result["width"].double), Int(result["height"].double))
+            let display = result["display_color_space"].string
+            let size = CGSize(width: result["source_width"].double, height: result["source_height"].double)
+            let developed = try await Task.detached(priority: .utility) {
+                try Self.thumbnailImage(Data(contentsOf: buffer), width: width, height: height, displaySpace: display)
+            }.value
+            guard !closing else { return false }
+            let strip = state.border.style == .film35 ? FilmFormat(state.crop.size(of: size)).flatMap { FilmStrip.load(data: paths.data, film: state.film, format: $0) } : nil
+            guard let composed = ThumbnailComposer.compose(developed, size: size, crop: state.crop, cut: true, rotation: Int(state.params["io.rotate_cw"].double),
+                                                           border: state.border, texture: filmTexture, strip: strip,
+                                                           space: developed.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!),
+                  let key = editedThumbnails.key(for: file, look: finalLook) else { return false }
+            let store = editedThumbnails
+            try await Task.detached(priority: .utility) { try store.save(composed, as: key) }.value
+            thumbnailMade(item, look: finalLook)
+            if finalLook != look { library.reload(photo) }
+            return true
+        } catch {
+            FileHandle.standardError.write(Data("library thumbnail \(file.name): \(error.localizedDescription)\n".utf8))
+            return false
+        }
+    }
+
+    /// Stores a match solved in the background, unless the item's edits
+    /// changed since they were read. Its new look, or nil if not stored.
+    private func storeSolvedMatch(_ state: EditState, item: URL, variant: String, stored: JSONValue, sidecar: PhotoSidecar, table: SidecarDefaults) -> String? {
+        let photo = item.photoFile
+        guard sidecarsEnabled, let sidecars, sidecars.writes, PhotoLibrary.canWrite(beside: photo) else { return nil }
+        let edits = PhotoSidecar.encodeEdits(state, matchSolved: true, table: table)
+        sidecars.enqueue(SidecarPatch(variant: variant, edits: .some(edits), known: known(table), onlyIfEdits: .some(stored),
+                                      defaultsVersion: sidecar.defaultsVersion, app: Self.appVersion), for: photo)
+        writeSidecars()
+        guard let now = try? sidecars.read(photo: photo), let written = now.variants.first(where: { $0.id == variant }),
+              written.edits != stored else { return nil }
+        return PhotoSidecar.look(of: written.edits, defaultsVersion: now.defaultsVersion)
     }
 
     // MARK: Delete
@@ -1944,6 +2186,7 @@ import UniformTypeIdentifiers
             await self.render()
             // The main preview goes first; thumbnails follow once it's current.
             self.pumpPreviews()
+            self.pumpThumbnails()
         }
     }
     /// What a render develops: the export-size frame, or as many pixels as
@@ -2438,9 +2681,7 @@ import UniformTypeIdentifiers
               let engine, let source, brightnessMatchPending else { return }
         let inputs = matchInputs(state)
         let id = UUID(), generation = sourceGeneration, size = sourceSize, raw = isRaw
-        var request = renderState
-        request.params["prep"] = defaults["prep"]
-        request.params["enlarger.print_exposure"] = defaults["enlarger.print_exposure"]
+        let request = matchSolveState(renderState)
         let reference = engine.directory.appendingPathComponent("camera-brightness-\(id.uuidString).png")
         matchRequest = id; matchingBrightness = true
         matchTask = Task { [weak self] in
@@ -2453,31 +2694,12 @@ import UniformTypeIdentifiers
                 }
             }
             do {
-                // What the RAW says its preview is in, read by the engine as
-                // on the web and Windows.
-                let declared = raw ? PreviewColourSpace(rawValue: try await engine.request([
-                    "command": .string("preview_colour_space"), "input": .string(source.path)
-                ]).1["colour_space"].string) : nil
-                try Task.checkCancellation()
-                let data = try await Task.detached(priority: .userInitiated) {
-                    raw ? try CameraBrightnessReference.png(from: source, expectedSize: size, declared: declared)
-                        : try CameraBrightnessReference.filePNG(from: source, expectedSize: size)
-                }.value
-                try Task.checkCancellation()
-                guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
-                try data.write(to: reference, options: .atomic)
-                let (_, result) = try await engine.request([
-                    "command": .string("place_exposure"), "input": .string(source.path),
-                    "source_generation": .number(Double(generation)), "film": .string(request.film),
-                    "paper": .string(request.paper), "params": request.params,
-                    "reference_path": .string(reference.path)
-                ])
-                try Task.checkCancellation()
-                guard !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
-                guard case .number(let exposure) = result["exposure_ev"], exposure.isFinite, (-3...3).contains(exposure) else {
-                    throw EngineError(message: "No reliable brightness match with these settings.")
+                let solved = try await Self.solveBrightnessMatch(engine: engine, source: source, generation: generation, size: size, raw: raw,
+                                                                 request: request, reference: reference) {
+                    guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { throw CancellationError() }
                 }
-                self.applyBrightnessMatch(exposure, limited: result["highlight_limited"].bool, inputs: inputs)
+                guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
+                self.applyBrightnessMatch(solved.exposure, limited: solved.limited, inputs: inputs)
             } catch is CancellationError {
                 // A different photograph or shutdown supersedes this request.
             } catch {
@@ -2487,6 +2709,48 @@ import UniformTypeIdentifiers
                 self.brightnessMatchFailure = (generation, failure.forPhoto ? nil : inputs, failure.message)
             }
         }
+    }
+
+    /// What the match is solved with: `state` as rendered, without the
+    /// brightness edits that are the user's own.
+    func matchSolveState(_ state: EditState) -> EditState {
+        var request = state
+        request.params["prep"] = defaults["prep"]
+        request.params["enlarger.print_exposure"] = defaults["enlarger.print_exposure"]
+        return request
+    }
+
+    /// Solves Match camera brightness for `source`, which `engine` holds
+    /// decoded as `generation` (`size` pixels): the exposure that develops it
+    /// as bright as the camera's preview, and whether highlights limited it.
+    /// `stillWanted` throws to stop before the helper is asked.
+    nonisolated static func solveBrightnessMatch(engine: EngineClient, source: URL, generation: Int, size: CGSize, raw: Bool, request: EditState,
+                                                 reference: URL, stillWanted: @MainActor () throws -> Void = {}) async throws -> (exposure: Double, limited: Bool) {
+        // What the RAW says its preview is in, read by the engine as on the
+        // web and Windows.
+        let declared = raw ? PreviewColourSpace(rawValue: try await engine.request([
+            "command": .string("preview_colour_space"), "input": .string(source.path)
+        ]).1["colour_space"].string) : nil
+        try Task.checkCancellation()
+        let data = try await Task.detached(priority: .userInitiated) {
+            raw ? try CameraBrightnessReference.png(from: source, expectedSize: size, declared: declared)
+                : try CameraBrightnessReference.filePNG(from: source, expectedSize: size)
+        }.value
+        try Task.checkCancellation()
+        try await stillWanted()
+        try data.write(to: reference, options: .atomic)
+        let (_, result) = try await engine.request([
+            "command": .string("place_exposure"), "input": .string(source.path),
+            "source_generation": .number(Double(generation)), "film": .string(request.film),
+            "paper": .string(request.paper), "params": request.params,
+            "reference_path": .string(reference.path)
+        ])
+        try Task.checkCancellation()
+        try await stillWanted()
+        guard case .number(let exposure) = result["exposure_ev"], exposure.isFinite, (-3...3).contains(exposure) else {
+            throw EngineError(message: "No reliable brightness match with these settings.")
+        }
+        return (exposure, result["highlight_limited"].bool)
     }
 
     /// The match is in, or failed, without changing the render: the held
@@ -2505,7 +2769,13 @@ import UniformTypeIdentifiers
     /// Moves the total with the match, keeping the user's exposure above it.
     /// A change under 0.05 EV keeps the values and only marks them current.
     private func applyBrightnessMatch(_ ev: Double, limited: Bool, inputs: JSONValue) {
-        guard var match = state.brightnessMatch, matchInputs(state) == inputs else { return }
+        guard matchInputs(state) == inputs, let next = Self.matching(state, ev: ev, limited: limited, inputs: inputs) else { return }
+        replaceState(next)
+    }
+
+    /// `state` with its match solved as `ev`, for `inputs`.
+    nonisolated static func matching(_ state: EditState, ev: Double, limited: Bool, inputs: JSONValue) -> EditState? {
+        guard var match = state.brightnessMatch else { return nil }
         var next = state
         let offset = next.params["prep.exposure_ev"].double - (match.ev ?? 0)
         if match.ev.map({ abs(ev - $0) >= 0.05 }) ?? true {
@@ -2514,7 +2784,7 @@ import UniformTypeIdentifiers
         }
         match.inputs = inputs; match.highlightLimited = limited
         next.brightnessMatch = match
-        replaceState(next)
+        return next
     }
 
     // MARK: Print balance
@@ -2960,6 +3230,7 @@ import UniformTypeIdentifiers
         cancelBrightnessMatch()
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
+        thumbnailTask?.cancel(); thumbnailIdle?.cancel(); thumbnailEngine?.stop()
         exportJob?.cancel(); engine?.stop()
     }
     private func report(_ error: Error) { self.error = error.localizedDescription; status = "Could not complete the operation" }

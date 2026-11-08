@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 
@@ -49,12 +50,30 @@ extension PhotoSidecar {
     }
 
     /// Each library item of the photograph: itself (the first variant) and its duplicates.
-    func items(of photo: URL) -> [(item: URL, summary: LibrarySummary)] {
-        guard !variants.isEmpty else { return [(photo, LibrarySummary())] }
+    func items(of photo: URL) -> [LibraryItemRead] {
+        guard !variants.isEmpty else { return [LibraryItemRead(item: photo)] }
         return variants.enumerated().map { index, variant in
-            (index == 0 ? photo : photo.variant(variant.id), Self.summary(of: variant))
+            LibraryItemRead(item: index == 0 ? photo : photo.variant(variant.id), summary: Self.summary(of: variant),
+                            look: Self.look(of: variant.edits, defaultsVersion: defaultsVersion))
         }
     }
+
+    /// Identifies how stored edits develop: a hash of them and the table
+    /// they're stored against. Nil without edits.
+    static func look(of edits: JSONValue?, defaultsVersion: Int) -> String? {
+        guard let edits else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(JSONValue.object(["edits": edits, "defaultsVersion": .number(Double(defaultsVersion))])) else { return nil }
+        return SHA256.hash(data: data).prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// One library item as its sidecar was read.
+struct LibraryItemRead: Sendable {
+    var item: URL
+    var summary = LibrarySummary()
+    var look: String?
 }
 
 /// Which photographs the film strip shows. Remembered for the app, not per
@@ -114,6 +133,9 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// Every sidecar of the listing has been read.
     private(set) var summariesLoaded = false
     private(set) var summaries: [URL: LibrarySummary] = [:]
+    /// Each edited item's look (`PhotoSidecar.look`), which names its
+    /// edited thumbnail.
+    private(set) var looks: [URL: String] = [:]
     /// Ratings and edits can't be saved in the folder (a locked card, a
     /// read-only share).
     private(set) var readOnly = false
@@ -125,7 +147,7 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     var store: SidecarStore? {
         didSet {
             guard store !== oldValue else { return }
-            summaries = [:]; sidecarFiles = [:]; summariesLoaded = false
+            summaries = [:]; looks = [:]; sidecarFiles = [:]; summariesLoaded = false
             refreshNow()
         }
     }
@@ -134,6 +156,8 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     @ObservationIgnored var sidecarChanged: ((URL) -> Void)?
     /// Told when the filter changes, so the selection can follow it.
     @ObservationIgnored var filterChanged: (() -> Void)?
+    /// Told when items' stored edits changed, so their thumbnails follow.
+    @ObservationIgnored var looksChanged: (() -> Void)?
 
     @ObservationIgnored private let defaults: UserDefaults
     /// Each photograph's sidecar file as last read; nil, it had none.
@@ -177,22 +201,30 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// app changed it in ways the summaries can't follow (duplicates, edits).
     func reload(_ photo: URL) {
         guard let store else { return }
-        let read: [(item: URL, summary: LibrarySummary)]
-        do { read = try store.read(photo: photo)?.items(of: photo) ?? [(photo, LibrarySummary())] }
-        catch let problem as PhotoSidecar.Problem { read = [(photo, LibrarySummary(problem: problem.message(for: photo)))] }
-        catch { read = [(photo, LibrarySummary(problem: error.localizedDescription))] }
+        let read: [LibraryItemRead]
+        do { read = try store.read(photo: photo)?.items(of: photo) ?? [LibraryItemRead(item: photo)] }
+        catch let problem as PhotoSidecar.Problem { read = [LibraryItemRead(item: photo, summary: LibrarySummary(problem: problem.message(for: photo)))] }
+        catch { read = [LibraryItemRead(item: photo, summary: LibrarySummary(problem: error.localizedDescription))] }
         var updated = summaries
+        let before = looks
         apply(read, for: photo, to: &updated)
         for item in read.map(\.item) { revisions[item, default: 0] += 1 }
         if updated != summaries { summaries = updated }
+        if looks != before { looksChanged?() }
     }
 
     /// Sets the summaries and duplicates of `photo` from its sidecar as read.
-    private func apply(_ read: [(item: URL, summary: LibrarySummary)], for photo: URL, to summaries: inout [URL: LibrarySummary]) {
+    private func apply(_ read: [LibraryItemRead], for photo: URL, to summaries: inout [URL: LibrarySummary]) {
         let ids = read.compactMap { $0.item.variantID }
-        for gone in duplicates[photo] ?? [] where !ids.contains(gone) { summaries[photo.variant(gone)] = nil }
+        for gone in duplicates[photo] ?? [] where !ids.contains(gone) {
+            summaries[photo.variant(gone)] = nil
+            if looks[photo.variant(gone)] != nil { looks[photo.variant(gone)] = nil }
+        }
         if (duplicates[photo] ?? []) != ids { duplicates[photo] = ids.isEmpty ? nil : ids }
-        for (item, summary) in read { summaries[item] = summary }
+        for read in read {
+            summaries[read.item] = read.summary
+            if looks[read.item] != read.look { looks[read.item] = read.look }
+        }
     }
 
     /// The app's own change, shown at once; the sidecar is written separately.
@@ -214,8 +246,8 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         let gone = Set(photos)
         files.removeAll { gone.contains($0.url) }
         for photo in photos {
-            for id in duplicates[photo] ?? [] { summaries[photo.variant(id)] = nil }
-            duplicates[photo] = nil; summaries[photo] = nil; sidecarFiles[photo] = nil
+            for id in duplicates[photo] ?? [] { summaries[photo.variant(id)] = nil; looks[photo.variant(id)] = nil }
+            duplicates[photo] = nil; summaries[photo] = nil; looks[photo] = nil; sidecarFiles[photo] = nil
         }
     }
 
@@ -255,6 +287,7 @@ struct LibraryFilter: Codable, Equatable, Sendable {
             duplicates = [:]
             // The open photograph's summary stays.
             summaries = summaries.filter { $0.key.photoFile.deletingLastPathComponent().path == directory.path }
+            looks = looks.filter { $0.key.photoFile.deletingLastPathComponent().path == directory.path }
         }
         loading = files.isEmpty
         let id = UUID()
@@ -305,18 +338,19 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         guard !changed.isEmpty else { summariesLoaded = true; return }
         let started = revisions
         let urls = Array(changed.keys)
-        let read = await Task.detached(priority: .utility) { () -> [URL: [(item: URL, summary: LibrarySummary)]] in
-            var read: [URL: [(item: URL, summary: LibrarySummary)]] = [:]
+        let read = await Task.detached(priority: .utility) { () -> [URL: [LibraryItemRead]] in
+            var read: [URL: [LibraryItemRead]] = [:]
             for photo in urls {
                 guard !Task.isCancelled else { break }
-                do { read[photo] = try store.read(photo: photo)?.items(of: photo) ?? [(photo, LibrarySummary())] }
-                catch let problem as PhotoSidecar.Problem { read[photo] = [(photo, LibrarySummary(problem: problem.message(for: photo)))] }
-                catch { read[photo] = [(photo, LibrarySummary(problem: error.localizedDescription))] }
+                do { read[photo] = try store.read(photo: photo)?.items(of: photo) ?? [LibraryItemRead(item: photo)] }
+                catch let problem as PhotoSidecar.Problem { read[photo] = [LibraryItemRead(item: photo, summary: LibrarySummary(problem: problem.message(for: photo)))] }
+                catch { read[photo] = [LibraryItemRead(item: photo, summary: LibrarySummary(problem: error.localizedDescription))] }
             }
             return read
         }.value
         guard self.directory == directory, self.store === store, !Task.isCancelled else { return }
         var updated = summaries
+        let before = looks
         var notify: [URL] = []
         for (photo, items) in read {
             let known = sidecarFiles.keys.contains(photo)
@@ -329,6 +363,7 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         if updated != summaries { summaries = updated }
         summariesLoaded = true
         for photo in notify { sidecarChanged?(photo) }
+        if looks != before { looksChanged?() }
     }
 
     /// Whether sidecars can be written beside `photo`.

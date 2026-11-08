@@ -286,6 +286,9 @@ struct SidecarPatch: Equatable, Sendable {
     /// The whole file instead (`.some(nil)` removes it): undoing a change to
     /// several photographs puts their files back as they were.
     var replacement: JSONValue?? = nil
+    /// Changes nothing unless the variant's stored edits are still these: a
+    /// match solved in the background never lands on edits made since.
+    var onlyIfEdits: JSONValue?? = nil
     /// The table `edits` is stored against; a new file gets it.
     var defaultsVersion: Int
     var app: String
@@ -316,6 +319,7 @@ struct SidecarPatch: Equatable, Sendable {
         }
         top["app"] = .string(app)
         var fields = variants[index!].object ?? [:]
+        if let expected = onlyIfEdits, fields["edits"] != expected { return raw }
         if let edits {
             let previous = fields["edits"]?.object ?? [:]
             // Keep what this version doesn't know, then lay what it does over it.

@@ -28,6 +28,16 @@ Photo › Advance After Rating moves on to the next photograph after each key.
 Thumbnails show the stars at the bottom, a flag or ✕ at the top left, and a
 sliders mark at the top right once a photograph has edits. Rejects are greyed.
 
+A photograph you've edited shows as developed: cropped, turned and inside its
+border, as in the edit view. Its thumbnail is made from the preview on screen
+when you leave it for another photograph or the grid, so it costs no extra
+render. Other edited photographs, such as after a paste or with edits from
+another Mac, are developed in the background one at a time, and Negs waits
+while you edit. A pasted Match camera brightness is solved then too, as
+opening the photograph would. Until a thumbnail is ready the camera's preview
+shows. Thumbnails are kept in `~/Library/Caches` (up to about 500 MB, the
+least recently used go first) and are safe to delete.
+
 ## Edits per photograph
 
 Opening a photograph shows its own edits. One you have never edited starts from
