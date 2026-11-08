@@ -4,8 +4,35 @@ import Observation
 // The opened photograph's folder is the library: its photographs, and the
 // ratings and flags in their sidecars (`Sidecar.swift`). There is no catalog.
 
-/// What the film strip shows of a photograph: its first variant's rating and
-/// flag, and whether it has edits.
+/// A duplicate (a sidecar's second or later variant) is a library item of its
+/// own, addressed as its photograph's URL with the variant in the fragment:
+/// `IMG_0412.CR3#variant=a1b2c3d4`. The first variant is the plain URL.
+/// File access always goes through `photoFile`.
+extension URL {
+    private static let variantPrefix = "variant="
+
+    func variant(_ id: String) -> URL {
+        var components = URLComponents(url: photoFile, resolvingAgainstBaseURL: false)
+        components?.fragment = Self.variantPrefix + id
+        return components?.url ?? self
+    }
+
+    /// The duplicate's variant id; nil for a photograph itself.
+    var variantID: String? {
+        guard let fragment, fragment.hasPrefix(Self.variantPrefix) else { return nil }
+        return String(fragment.dropFirst(Self.variantPrefix.count))
+    }
+
+    /// The photograph's own file.
+    var photoFile: URL {
+        guard fragment != nil, var components = URLComponents(url: self, resolvingAgainstBaseURL: false) else { return self }
+        components.fragment = nil
+        return components.url ?? self
+    }
+}
+
+/// What the film strip shows of a photograph or duplicate: its variant's
+/// rating and flag, and whether it has edits.
 struct LibrarySummary: Equatable, Sendable {
     var rating = 0
     var flag: PhotoSidecar.Flag?
@@ -15,9 +42,18 @@ struct LibrarySummary: Equatable, Sendable {
 }
 
 extension PhotoSidecar {
-    var summary: LibrarySummary {
-        guard let first = variants.first else { return LibrarySummary() }
-        return LibrarySummary(rating: first.rating, flag: first.flag, edited: first.edits != nil)
+    var summary: LibrarySummary { variants.first.map(Self.summary(of:)) ?? LibrarySummary() }
+
+    static func summary(of variant: Variant) -> LibrarySummary {
+        LibrarySummary(rating: variant.rating, flag: variant.flag, edited: variant.edits != nil)
+    }
+
+    /// Each library item of the photograph: itself (the first variant) and its duplicates.
+    func items(of photo: URL) -> [(item: URL, summary: LibrarySummary)] {
+        guard !variants.isEmpty else { return [(photo, LibrarySummary())] }
+        return variants.enumerated().map { index, variant in
+            (index == 0 ? photo : photo.variant(variant.id), Self.summary(of: variant))
+        }
     }
 }
 
@@ -71,6 +107,8 @@ struct LibraryFilter: Codable, Equatable, Sendable {
 @MainActor @Observable final class PhotoLibrary {
     private(set) var directory: URL?
     private(set) var files: [PhotoFile] = []
+    /// Each photograph's duplicates, by variant id, in the sidecar's order.
+    private(set) var duplicates: [URL: [String]] = [:]
     private(set) var loading = false
     private(set) var failed = false
     /// Every sidecar of the listing has been read.
@@ -113,6 +151,47 @@ struct LibraryFilter: Codable, Equatable, Sendable {
 
     func summary(for photo: URL) -> LibrarySummary { summaries[photo] ?? LibrarySummary() }
 
+    /// The photographs, each followed by its duplicates.
+    var items: [PhotoFile] {
+        guard !duplicates.isEmpty else { return files }
+        var items: [PhotoFile] = []
+        items.reserveCapacity(files.count + duplicates.count)
+        for file in files {
+            items.append(file)
+            for (index, id) in (duplicates[file.url] ?? []).enumerated() { items.append(file.duplicate(id, number: index + 2)) }
+        }
+        return items
+    }
+
+    /// The item's name: `IMG_0412.CR3`, or `IMG_0412.CR3 (2)` for its first duplicate.
+    func name(of item: URL) -> String {
+        let name = item.lastPathComponent
+        guard let id = item.variantID, let index = duplicates[item.photoFile]?.firstIndex(of: id) else { return name }
+        return "\(name) (\(index + 2))"
+    }
+
+    /// Reads `photo`'s sidecar again now, pending writes included: after the
+    /// app changed it in ways the summaries can't follow (duplicates, edits).
+    func reload(_ photo: URL) {
+        guard let store else { return }
+        let read: [(item: URL, summary: LibrarySummary)]
+        do { read = try store.read(photo: photo)?.items(of: photo) ?? [(photo, LibrarySummary())] }
+        catch let problem as PhotoSidecar.Problem { read = [(photo, LibrarySummary(problem: problem.message(for: photo)))] }
+        catch { read = [(photo, LibrarySummary(problem: error.localizedDescription))] }
+        var updated = summaries
+        apply(read, for: photo, to: &updated)
+        for item in read.map(\.item) { revisions[item, default: 0] += 1 }
+        if updated != summaries { summaries = updated }
+    }
+
+    /// Sets the summaries and duplicates of `photo` from its sidecar as read.
+    private func apply(_ read: [(item: URL, summary: LibrarySummary)], for photo: URL, to summaries: inout [URL: LibrarySummary]) {
+        let ids = read.compactMap { $0.item.variantID }
+        for gone in duplicates[photo] ?? [] where !ids.contains(gone) { summaries[photo.variant(gone)] = nil }
+        if (duplicates[photo] ?? []) != ids { duplicates[photo] = ids.isEmpty ? nil : ids }
+        for (item, summary) in read { summaries[item] = summary }
+    }
+
     /// The app's own change, shown at once; the sidecar is written separately.
     func set(_ summary: LibrarySummary, for photo: URL) {
         revisions[photo, default: 0] += 1
@@ -132,8 +211,9 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// The photographs the strip and grid show: those the filter lets
     /// through, and always `kept` (the current photograph, those just rated).
     func shown(keeping kept: Set<URL>) -> [PhotoFile] {
-        guard filter.active else { return files }
-        return files.filter { kept.contains($0.url) || filter.includes(summary(for: $0.url)) }
+        let items = items
+        guard filter.active else { return items }
+        return items.filter { kept.contains($0.url) || filter.includes(summary(for: $0.url)) }
     }
 
     /// An active filter is waiting for sidecars still being read.
@@ -150,8 +230,9 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         if self.directory != directory {
             self.directory = directory
             files = []; sidecarFiles = [:]; summariesLoaded = false; failed = false
+            duplicates = [:]
             // The open photograph's summary stays.
-            summaries = summaries.filter { $0.key.deletingLastPathComponent().path == directory.path }
+            summaries = summaries.filter { $0.key.photoFile.deletingLastPathComponent().path == directory.path }
         }
         loading = files.isEmpty
         let id = UUID()
@@ -197,29 +278,30 @@ struct LibraryFilter: Codable, Equatable, Sendable {
         }
         let present = Set(listing.photos.map(\.url))
         for gone in sidecarFiles.keys where !present.contains(gone) { sidecarFiles[gone] = nil }
+        for gone in duplicates.keys where !present.contains(gone) { duplicates[gone] = nil }
         guard !changed.isEmpty else { summariesLoaded = true; return }
         let started = revisions
         let urls = Array(changed.keys)
-        let read = await Task.detached(priority: .utility) { () -> [URL: LibrarySummary] in
-            var read: [URL: LibrarySummary] = [:]
+        let read = await Task.detached(priority: .utility) { () -> [URL: [(item: URL, summary: LibrarySummary)]] in
+            var read: [URL: [(item: URL, summary: LibrarySummary)]] = [:]
             for photo in urls {
                 guard !Task.isCancelled else { break }
-                do { read[photo] = try store.read(photo: photo)?.summary ?? LibrarySummary() }
-                catch let problem as PhotoSidecar.Problem { read[photo] = LibrarySummary(problem: problem.message(for: photo)) }
-                catch { read[photo] = LibrarySummary(problem: error.localizedDescription) }
+                do { read[photo] = try store.read(photo: photo)?.items(of: photo) ?? [(photo, LibrarySummary())] }
+                catch let problem as PhotoSidecar.Problem { read[photo] = [(photo, LibrarySummary(problem: problem.message(for: photo)))] }
+                catch { read[photo] = [(photo, LibrarySummary(problem: error.localizedDescription))] }
             }
             return read
         }.value
         guard self.directory == directory, self.store === store, !Task.isCancelled else { return }
         var updated = summaries
         var notify: [URL] = []
-        for (photo, summary) in read {
+        for (photo, items) in read {
             let known = sidecarFiles.keys.contains(photo)
             sidecarFiles[photo] = .some(changed[photo] ?? nil)
             if known { notify.append(photo) }
             // The app changed it meanwhile; its own write brings the file back here.
-            guard revisions[photo] == started[photo] else { continue }
-            updated[photo] = summary
+            guard items.allSatisfy({ revisions[$0.item] == started[$0.item] }), revisions[photo] == started[photo] else { continue }
+            apply(items, for: photo, to: &updated)
         }
         if updated != summaries { summaries = updated }
         summariesLoaded = true

@@ -283,6 +283,9 @@ struct SidecarPatch: Equatable, Sendable {
     /// engine's defaults. Stored values outside them are a newer version's
     /// and stay.
     var known: [String: [JSONValue]] = [:]
+    /// The whole file instead (`.some(nil)` removes it): undoing a change to
+    /// several photographs puts their files back as they were.
+    var replacement: JSONValue?? = nil
     /// The table `edits` is stored against; a new file gets it.
     var defaultsVersion: Int
     var app: String
@@ -294,6 +297,7 @@ struct SidecarPatch: Equatable, Sendable {
     /// nothing in it and nothing else in the file means the photo has no
     /// rating, flag or edits left.
     func applied(to raw: JSONValue?) throws -> JSONValue? {
+        if let replacement { return replacement }
         var top = raw?.object ?? ["negs": .number(Double(PhotoSidecar.schema)), "defaultsVersion": .number(Double(defaultsVersion))]
         if raw != nil {
             // Decoding checks the schema and versions: a newer file is never written over.
@@ -379,11 +383,17 @@ final class SidecarStore: Sendable {
     /// The sidecar as it will be once queued changes are written. Nil when
     /// the photo has none. Small enough to read on the main actor.
     func read(photo: URL) throws -> PhotoSidecar? {
+        guard let raw = try readPending(photo: photo) else { return nil }
+        return try PhotoSidecar(raw: raw)
+    }
+
+    /// The file's JSON as it will be once queued changes are written; nil if
+    /// there'll be none.
+    func readPending(photo: URL) throws -> JSONValue? {
         let patches = queue.patches(for: photo.standardizedFileURL)
         var raw = try Self.readRaw(photo: photo)
         for patch in patches { raw = try patch.applied(to: raw) }
-        guard let raw else { return nil }
-        return try PhotoSidecar(raw: raw)
+        return raw
     }
 
     /// The file's JSON, or nil if there's none.

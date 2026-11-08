@@ -28,6 +28,37 @@ Photo › Advance After Rating moves on to the next photograph after each key.
 Thumbnails show the stars at the bottom, a flag or ✕ at the top left, and a
 sliders mark at the top right once a photograph has edits. Rejects are greyed.
 
+## Edits per photograph
+
+Opening a photograph shows its own edits. One you have never edited starts from
+the defaults, with the film, paper, Image Size and output colour of the
+photograph before it.
+
+| Command | Shortcut | Does |
+| --- | --- | --- |
+| Copy Edits | ⇧⌘C | Copies the photograph's edits |
+| Copy Edits… | ⌥⇧⌘C | The same, after choosing which; the choice is remembered |
+| Paste Edits | ⇧⌘V | Applies them to the selected photographs |
+| Paste from Previous | ⌥⇧⌘V | Applies the edits of the last photograph you left edited |
+| Duplicate | ⌘D | A copy with its own rating, flag and edits, `IMG_0412.CR3 (2)` |
+| Reset Edits | ⇧⌘R | Back to how an unedited photograph opens; rating and flag stay |
+
+These are in the Photo menu and in the context menu of the film strip and the
+grid. A plain Copy Edits takes the film and paper, Prep, Lab, the border, Image
+Size and output colour; not the crop and rotation, nor lens correction and
+input interpretation, which belong to each file. Match camera brightness is
+solved again for each photograph it's pasted onto, when that photograph opens.
+
+In the grid these act on every selected photograph, and so do they in the edit
+view while the film strip shows; with the strip hidden, on the open photograph.
+The context menu acts on the selected photographs if you click one of them,
+otherwise on the one you clicked. A paste, reset or duplicate of several
+photographs is one step to undo (⌘Z), even after you've moved on to another
+photograph.
+
+A duplicate copies no file: it lives in the photograph's `.negs` file, so it
+shows the same photograph developed its own way.
+
 ## Filtering
 
 The Filter button in the toolbar shows only some photographs, in the film strip

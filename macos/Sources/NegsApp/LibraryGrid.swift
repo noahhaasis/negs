@@ -47,6 +47,7 @@ struct LibraryGrid: View {
                                             model.click(file.url)
                                             model.editCurrent()
                                         }
+                                        .contextMenu { LibraryContextMenu(model: model, item: file.url) }
                                     }
                                 }
                                 .id(row)
@@ -171,9 +172,9 @@ private struct GridCell: View {
         .contentShape(Rectangle())
         .onTapGesture(count: 2, perform: edit)
         .simultaneousGesture(TapGesture().onEnded(click))
-        .help(PhotoBadges.help(file.url, summary: summary, readOnly: readOnly))
+        .help(PhotoBadges.help(file.name, summary: summary, readOnly: readOnly))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PhotoBadges.accessibilityLabel(file.url, summary: summary))
+        .accessibilityLabel(PhotoBadges.accessibilityLabel(file.name, summary: summary))
         .accessibilityAddTraits(current || selected ? [.isButton, .isSelected] : [.isButton])
         .accessibilityAction(named: "Edit", edit)
         .accessibilityAction { click() }

@@ -198,7 +198,7 @@ import SwiftUI
             let shown = model.shownPhotos.count, selected = model.ratingTargets.count
             window.subtitle = selected > 1 ? "\(selected) of \(shown) selected" : shown == 1 ? "1 photograph" : "\(shown) photographs"
         } else {
-            window.title = model.source?.lastPathComponent ?? "Negs"
+            window.title = model.sourceItem.map { model.library.name(of: $0) } ?? "Negs"
             window.subtitle = !photo || !model.ready ? "" : model.value("io.scan_film").bool ? model.filmName : "\(model.filmName) → \(model.paperName)"
         }
         showItems(for: model.mode)

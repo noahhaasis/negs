@@ -464,4 +464,100 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.selection.selected, [a])
         await model.flushSidecars()
     }
+
+    /// Paste, Reset and Duplicate change several photographs' sidecars as
+    /// one undo step each, which survives opening another photograph.
+    func testPasteResetAndDuplicateAreOneUndoStepEach() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "rating": 2, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}}}]}"#, sidecarOf: b)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let strip = UserDefaults.standard.object(forKey: "filmstripVisible")
+        addTeardownBlock { UserDefaults.standard.set(strip, forKey: "filmstripVisible") }
+        model.filmstripVisible = true
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        func step(_ body: () -> Void) { undo.beginUndoGrouping(); body(); undo.endUndoGrouping() }
+        func variants(_ photo: URL) throws -> [PhotoSidecar.Variant] { try store.read(photo: photo)?.variants ?? [] }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
+
+        step { model.set("prep.lift", .number(30)) }
+        model.copyEdits()
+        XCTAssertEqual(model.copiedEdits?.state.params["prep.lift"], .number(30))
+        XCTAssertEqual(model.copiedEdits?.groups, EditGroup.standard)
+        model.showGrid()
+        model.click(b); model.click(c, shift: true)
+        step { model.pasteEdits() }
+        XCTAssertEqual(model.libraryNote?.count, 2)
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(b).map(\.id), ["b1"])
+        XCTAssertEqual(try variants(b).first?.rating, 2, "the rating stays")
+        XCTAssertEqual(try variants(b).first?.edits?["params.prep.lift"], .number(30))
+        XCTAssertEqual(try variants(b).first?.edits?["film"], .string(EditState().film), "film and paper are copied")
+        XCTAssertEqual(try variants(c).first?.edits?["params.prep.lift"], .number(30))
+        XCTAssertTrue(model.library.summary(for: c).edited)
+
+        // One undo puts both back, the photograph without a file without one.
+        undo.undo()
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(b).first?.edits?["params.prep.lift"], .number(5))
+        XCTAssertEqual(try variants(b).first?.edits?["film"], .string("kodak_portra_400"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: c).path))
+        XCTAssertFalse(model.library.summary(for: c).edited)
+        undo.redo()
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(c).first?.edits?["params.prep.lift"], .number(30))
+
+        // Reset removes the edits and keeps the rating.
+        step { model.resetEdits(of: [b]) }
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(b).first?.rating, 2)
+        XCTAssertNil(try variants(b).first?.edits)
+        XCTAssertEqual(model.library.summary(for: b), LibrarySummary(rating: 2))
+
+        // A duplicate is a second variant with the same edits, listed and selected after its photograph.
+        step { model.duplicate([c]) }
+        await model.flushSidecars()
+        let copy = try XCTUnwrap(model.selection.current)
+        XCTAssertEqual(copy.photoFile, c)
+        XCTAssertEqual(copy.variantID, try variants(c).last?.id)
+        XCTAssertEqual(try variants(c).count, 2)
+        XCTAssertEqual(try variants(c)[1].edits, try variants(c)[0].edits)
+        XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "c.png", "c.png (2)"])
+        model.setRating(4)
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(c).map(\.rating), [0, 4], "only the duplicate is rated")
+
+        // Opening it develops c with the duplicate's own edits.
+        model.editCurrent()
+        XCTAssertEqual(model.source, c)
+        XCTAssertEqual(model.sourceItem, copy)
+        XCTAssertEqual(model.value("prep.lift"), .number(30))
+        step { model.set("prep.lift", .number(-10)) }
+        model.open(a)
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(c).map { $0.edits?["params.prep.lift"] }, [.number(30), .number(-10)])
+        XCTAssertEqual(model.previousEdits?.params["prep.lift"], .number(-10), "the last photograph left with edits")
+
+        // Paste from Previous onto the open photograph, then undo it and the duplicate.
+        step { model.pasteFromPrevious() }
+        XCTAssertEqual(model.value("prep.lift"), .number(-10))
+        undo.undo()
+        XCTAssertEqual(model.value("prep.lift"), .number(30))
+        undo.undo()
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(c).count, 1, "the duplicate is gone")
+        XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "c.png"])
+
+        // Resetting the open photograph keeps its film and removes its stored edits.
+        step { model.set("film", .string("kodak_portra_400")) }
+        step { model.resetEdits(of: [a]) }
+        await model.flushSidecars()
+        XCTAssertEqual(model.value("prep.lift"), .number(0))
+        XCTAssertNil(try variants(a).first?.edits)
+    }
 }

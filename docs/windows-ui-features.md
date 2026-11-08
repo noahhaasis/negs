@@ -79,7 +79,7 @@ Suggested Windows menu bar (with `&` access keys):
 | Edit | Undo *action* | ⌘Z | Ctrl+Z | something to undo |
 | Edit | Redo *action* | ⇧⌘Z | Ctrl+Y (also Ctrl+Shift+Z) | something to redo |
 | Edit | Cut / Copy / Paste / Delete / Select All | ⌘X… | Ctrl+X… | forwarded to the focused edit control |
-| Edit | Reset All Adjustments (Mac: View menu) | ⇧⌘R | Ctrl+Shift+R | catalog known, not cropping |
+| Edit | Reset All Adjustments (Mac: View menu) | — (⇧⌘R is Photo › Reset Edits) | Ctrl+Shift+R | catalog known, not cropping |
 | View | Film Strip (check) | ⌥⌘F | F6 | always |
 | View | Adjustments (check) | ⌥⌘I | F7 | always |
 | View | Fit Photograph | ⌘0 | Ctrl+0 | photo open, not cropping |

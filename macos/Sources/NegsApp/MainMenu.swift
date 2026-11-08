@@ -85,7 +85,8 @@ import SwiftUI
         command(view, "Rotate Clockwise", #selector(rotate), "r")
         command(view, "Crop", #selector(crop), "k")
         view.addItem(.separator())
-        command(view, "Reset All Adjustments", #selector(resetAdjustments), "r", [.command, .shift])
+        // ⇧⌘R is Photo › Reset Edits.
+        command(view, "Reset All Adjustments", #selector(resetAdjustments), "")
         view.addItem(.separator())
 
         // Plain keys, as in Lightroom and Capture One. Disabled while text is
@@ -107,6 +108,14 @@ import SwiftUI
         command(flag, "Pick", #selector(pick), "p", [])
         command(flag, "Reject", #selector(reject), "x", [])
         command(flag, "Unflagged", #selector(unflag), "u", [])
+        photo.addItem(.separator())
+        command(photo, "Copy Edits", #selector(copyEdits), "c", [.command, .shift])
+        command(photo, "Copy Edits…", #selector(copyEditsChoosing), "c", [.command, .shift, .option])
+        command(photo, "Paste Edits", #selector(pasteEdits), "v", [.command, .shift])
+        command(photo, "Paste from Previous", #selector(pasteFromPrevious), "v", [.command, .shift, .option])
+        photo.addItem(.separator())
+        command(photo, "Duplicate", #selector(duplicate), "d")
+        command(photo, "Reset Edits", #selector(resetEdits), "r", [.command, .shift])
         photo.addItem(.separator())
         command(photo, "Advance After Rating", #selector(toggleAdvance), "")
         photo.addItem(.separator())
@@ -183,6 +192,39 @@ import SwiftUI
     @objc private func toggleAdvance() { model.advanceAfterRating.toggle() }
     @objc private func clearFilter() { model.library.filter = LibraryFilter() }
     @objc private func editPhotograph() { model.editCurrent() }
+    @objc private func copyEdits() { model.copyEdits() }
+    @objc private func pasteEdits() { model.pasteEdits() }
+    @objc private func pasteFromPrevious() { model.pasteFromPrevious() }
+    @objc private func duplicate() { model.duplicate() }
+    @objc private func resetEdits() { model.resetEdits() }
+
+    /// Copy Edits…: the groups to copy, in a sheet; the choice is remembered.
+    @objc private func copyEditsChoosing() {
+        guard let window = NSApp.keyWindow as? EditorWindow else { return }
+        let alert = NSAlert()
+        alert.messageText = "Copy Edits"
+        alert.informativeText = "Choose the edits Paste Edits applies."
+        let chosen = model.copyGroups
+        let boxes = EditGroup.allCases.map { group in
+            let box = NSButton(checkboxWithTitle: group.title, target: nil, action: nil)
+            box.state = chosen.contains(group) ? .on : .off
+            return box
+        }
+        let stack = NSStackView(views: boxes)
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 6
+        stack.frame.size = stack.fittingSize
+        alert.accessoryView = stack
+        alert.addButton(withTitle: "Copy")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [model] response in
+            MainActor.assumeIsolated {
+                guard response == .alertFirstButtonReturn else { return }
+                let groups = Set(zip(EditGroup.allCases, boxes).filter { $0.1.state == .on }.map(\.0))
+                model.copyGroups = groups
+                model.copyEdits(groups: groups)
+            }
+        }
+    }
     @objc private func showGrid() { model.showGrid() }
     @objc private func largerThumbnails() { model.changeGridCellSize(larger: true) }
     @objc private func smallerThumbnails() { model.changeGridCellSize(larger: false) }
@@ -234,6 +276,14 @@ import SwiftUI
         case #selector(showGrid): return editing && !model.cropping && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(largerThumbnails): return model.mode == .grid && model.gridCellSize < GridMetrics.sizes.upperBound
         case #selector(smallerThumbnails): return model.mode == .grid && model.gridCellSize > GridMetrics.sizes.lowerBound
+        case #selector(copyEdits), #selector(copyEditsChoosing):
+            return model.canChangeEdits && model.copySource != nil && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(pasteEdits):
+            return model.copiedEdits != nil && model.canChangeEdits && !model.editTargets.isEmpty && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(pasteFromPrevious):
+            return model.previousEdits != nil && model.canChangeEdits && !model.editTargets.isEmpty && Self.takesRatingKeys(NSApp.keyWindow)
+        case #selector(duplicate), #selector(resetEdits):
+            return model.canChangeEdits && !model.editTargets.isEmpty && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(rate(_:)):
             item.state = state { $0.rating == item.tag }; return rating
         case #selector(raiseRating), #selector(lowerRating): return rating

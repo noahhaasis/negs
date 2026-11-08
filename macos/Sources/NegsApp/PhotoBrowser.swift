@@ -17,6 +17,18 @@ struct PhotoFile: Hashable, Sendable {
         modified = values?.contentModificationDate
         size = values?.fileSize
     }
+
+    private init(url: URL, name: String, modified: Date?, size: Int?) {
+        self.url = url; self.name = name; self.modified = modified; self.size = size
+    }
+
+    /// The photograph's `number`th variant, a duplicate: `IMG_0412.CR3 (2)`.
+    func duplicate(_ id: String, number: Int) -> PhotoFile {
+        PhotoFile(url: url.variant(id), name: "\(name) (\(number))", modified: modified, size: size)
+    }
+
+    /// The photograph a duplicate shows.
+    var photo: PhotoFile { url.variantID == nil ? self : PhotoFile(url: url.photoFile, name: url.lastPathComponent, modified: modified, size: size) }
 }
 
 /// Folder browsing stays separate from the renderer.
@@ -84,6 +96,8 @@ actor PhotoThumbnails {
     }
 
     func image(for file: PhotoFile, size: Size = .strip) -> CGImage? {
+        // A duplicate shows its photograph's embedded preview.
+        let file = file.photo
         let url = file.url
         guard !Task.isCancelled, let cache = caches[size] else { return nil }
         if let cached = cache.object(forKey: url as NSURL), cached.file == file { return cached.image }
@@ -122,12 +136,13 @@ struct PhotoBrowser: View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 8) {
                 ForEach(shown, id: \.url) { file in
-                    PhotoThumbnail(file: file, current: file.url == model.source, selected: selected.contains(file.url),
+                    PhotoThumbnail(file: file, current: file.url == model.sourceItem, selected: selected.contains(file.url),
                                    summary: library.summary(for: file.url), readOnly: library.readOnly) {
                         let modifiers = NSEvent.modifierFlags
                         focused = true
                         model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
                     }
+                    .contextMenu { LibraryContextMenu(model: model, item: file.url) }
                     .id(file.url)
                 }
             }
@@ -137,10 +152,10 @@ struct PhotoBrowser: View {
         }
         .scrollIndicators(.automatic)
         .scrollPosition(id: $scrollTarget, anchor: .center)
-        .onChange(of: model.source) { _, source in scrollTarget = source }
-        .onChange(of: library.loading) { _, loading in if !loading { scrollTarget = model.source } }
-        .onChange(of: library.filtering) { _, filtering in if !filtering { scrollTarget = model.source } }
-        .onAppear { scrollTarget = model.source }
+        .onChange(of: model.sourceItem) { _, source in scrollTarget = source }
+        .onChange(of: library.loading) { _, loading in if !loading { scrollTarget = model.sourceItem } }
+        .onChange(of: library.filtering) { _, filtering in if !filtering { scrollTarget = model.sourceItem } }
+        .onAppear { scrollTarget = model.sourceItem }
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
@@ -210,8 +225,8 @@ private struct PhotoThumbnail: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(PhotoBadges.help(url, summary: summary, readOnly: readOnly))
-        .accessibilityLabel(PhotoBadges.accessibilityLabel(url, summary: summary))
+        .help(PhotoBadges.help(file.name, summary: summary, readOnly: readOnly))
+        .accessibilityLabel(PhotoBadges.accessibilityLabel(file.name, summary: summary))
         .accessibilityAddTraits(current || selected ? [.isSelected] : [])
         .onAppear { visible = true }
         .onDisappear { visible = false; image = nil }
@@ -266,18 +281,55 @@ struct PhotoBadges: View {
             .padding(4)
     }
 
-    static func help(_ url: URL, summary: LibrarySummary, readOnly: Bool) -> String {
-        var lines = [url.lastPathComponent]
+    static func help(_ name: String, summary: LibrarySummary, readOnly: Bool) -> String {
+        var lines = [name]
         if let problem = summary.problem { lines.append(problem) }
         if readOnly { lines.append("Ratings and edits can’t be saved in this folder: it’s read-only.") }
         return lines.joined(separator: "\n")
     }
 
-    static func accessibilityLabel(_ url: URL, summary: LibrarySummary) -> String {
-        var parts = [url.lastPathComponent]
+    static func accessibilityLabel(_ name: String, summary: LibrarySummary) -> String {
+        var parts = [name]
         if summary.rating > 0 { parts.append(summary.rating == 1 ? "1 star" : "\(summary.rating) stars") }
         if let flag = summary.flag { parts.append(flag == .pick ? "Pick" : "Rejected") }
         if summary.edited { parts.append("Edited") }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The film strip's and grid's context menu. It acts on the selection if the
+/// clicked photograph is in it, otherwise on that photograph alone, as in
+/// Finder.
+struct LibraryContextMenu: View {
+    let model: EditorModel
+    let item: URL
+
+    var body: some View {
+        let targets = model.contextTargets(item)
+        let several = targets.count > 1 ? " to \(targets.count) Photographs" : ""
+        let editing = model.canChangeEdits
+        if model.mode == .grid {
+            Button("Edit Photograph") { model.click(item); model.editCurrent() }
+            Divider()
+        }
+        Menu("Rating") {
+            ForEach(0...5, id: \.self) { stars in
+                Button(stars == 0 ? "None" : String(repeating: "★", count: stars)) { model.setRating(stars, targets: targets) }
+            }
+        }
+        Menu("Flag") {
+            Button("Pick") { model.setFlag(.pick, targets: targets) }
+            Button("Reject") { model.setFlag(.reject, targets: targets) }
+            Button("Unflagged") { model.setFlag(nil, targets: targets) }
+        }
+        Divider()
+        Button("Copy Edits") { model.copyEdits(from: item) }.disabled(!editing)
+        Button("Paste Edits" + several) { model.pasteEdits(onto: targets) }.disabled(!editing || model.copiedEdits == nil)
+        Button("Paste from Previous" + several) { model.pasteFromPrevious(onto: targets) }.disabled(!editing || model.previousEdits == nil)
+        Divider()
+        Button(targets.count > 1 ? "Duplicate \(targets.count) Photographs" : "Duplicate") { model.duplicate(targets) }.disabled(!editing)
+        Button(targets.count > 1 ? "Reset Edits of \(targets.count) Photographs" : "Reset Edits") { model.resetEdits(of: targets) }.disabled(!editing)
+        Divider()
+        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(Array(Set(targets.map(\.photoFile)))) }
     }
 }

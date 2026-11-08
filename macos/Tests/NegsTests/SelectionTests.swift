@@ -96,4 +96,58 @@ final class SelectionTests: XCTestCase {
         XCTAssertTrue(grid.contains(.gridSize) && grid.contains(.export))
         for id in [NSToolbarItem.Identifier.filmstrip, .zoom, .edit, .presets, .adjustments] { XCTAssertFalse(grid.contains(id)) }
     }
+
+    /// Copy Edits' groups: the standard ones leave crop, rotation and how
+    /// the file was read; a group not chosen leaves the target as it was.
+    func testCopyGroupsMerge() {
+        var source = EditState()
+        source.film = "kodak_portra_400"; source.paper = "fujifilm_crystal_archive_typeii"
+        source.params = .object([
+            "prep": .object(["lift": .number(9)]),
+            "io": .object(["raw_white_balance": .object(["mode": .string("daylight")]), "rotate_cw": .number(1),
+                           "photo_long_side_px": .number(2000), "lens_correction": .object(["enabled": .bool(false)])]),
+            "film_render": .object(["grain": .object(["active": .bool(false)])]),
+        ])
+        source.crop.angle = 3
+        source.brightnessMatch = BrightnessMatch(ev: 1.2)
+        var target = EditState()
+        target.params = .object([
+            "prep": .object(["lift": .number(1), "gain": .number(4)]),
+            "io": .object(["rotate_cw": .number(2), "lens_correction": .object(["enabled": .bool(true)])]),
+        ])
+        let merged = EditGroup.merge(EditGroup.standard, from: source, into: target)
+        XCTAssertEqual(merged.film, "kodak_portra_400")
+        XCTAssertEqual(merged.params["prep.lift"], .number(9))
+        XCTAssertEqual(merged.params["prep.gain"], .number(4))
+        XCTAssertEqual(merged.params["io.raw_white_balance.mode"], .string("daylight"))
+        XCTAssertEqual(merged.params["io.photo_long_side_px"], .number(2000))
+        XCTAssertEqual(merged.params["film_render.grain.active"], .bool(false))
+        XCTAssertEqual(merged.params["io.rotate_cw"], .number(2), "crop and rotation aren't copied by default")
+        XCTAssertEqual(merged.params["io.lens_correction.enabled"], .bool(true), "nor the file's lens correction")
+        XCTAssertEqual(merged.crop, target.crop)
+        XCTAssertEqual(merged.brightnessMatch, BrightnessMatch(), "on, and solved again for the photograph")
+
+        let everything = EditGroup.merge(Set(EditGroup.allCases), from: source, into: target)
+        XCTAssertEqual(everything.params["io.rotate_cw"], .number(1))
+        XCTAssertEqual(everything.params["io.lens_correction.enabled"], .bool(false))
+        XCTAssertEqual(everything.crop, source.crop)
+
+        let film = EditGroup.merge([.filmAndPaper], from: source, into: target)
+        XCTAssertEqual(film.paper, source.paper)
+        XCTAssertEqual(film.params, target.params)
+        XCTAssertNil(film.brightnessMatch)
+    }
+
+    func testDuplicateURLs() {
+        let photo = URL(fileURLWithPath: "/photos/IMG_0412.CR3")
+        let copy = photo.variant("a1b2c3d4")
+        XCTAssertEqual(copy.variantID, "a1b2c3d4")
+        XCTAssertNil(photo.variantID)
+        XCTAssertEqual(copy.photoFile, photo)
+        XCTAssertEqual(copy.path, photo.path)
+        XCTAssertEqual(copy.lastPathComponent, "IMG_0412.CR3")
+        XCTAssertNotEqual(copy, photo)
+        XCTAssertEqual(PhotoSidecar.url(for: copy.photoFile).lastPathComponent, "IMG_0412.CR3.negs")
+        XCTAssertEqual(copy.variant("ff").variantID, "ff")
+    }
 }

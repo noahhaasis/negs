@@ -30,6 +30,13 @@ struct LibrarySelection: Equatable, Sendable {
         current = photo; selected = [photo]; anchor = photo; lead = photo; base = [photo]; kept = []
     }
 
+    /// `photos` alone, the first current: new duplicates.
+    mutating func select(_ photos: [URL]) {
+        guard let first = photos.first else { return }
+        select(first)
+        selected = Set(photos); base = selected
+    }
+
     /// ⌘-click: adds or removes `photo`. The current photograph stays.
     mutating func toggle(_ photo: URL) {
         guard current != nil else { return select(photo) }

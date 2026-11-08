@@ -36,6 +36,8 @@ which every reader is tested against: [sidecar-fixtures/](sidecar-fixtures/).
   with the defaults, say why, and leave the file alone.
 - **Remove the file** when a write leaves one variant with nothing in it
   (no rating, flag or edits) and no other keys in the file.
+  A duplicate may hold nothing but its `id` (a copy of an unedited photo);
+  it still counts, so a file with two variants stays.
 - Keys are written sorted, two-space indented, with a final newline, so the
   same content gives the same bytes.
 - At most 1 MB; a larger file isn't Negs's and is left alone.

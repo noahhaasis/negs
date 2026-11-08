@@ -18,6 +18,8 @@ struct EditorSession: Codable, Equatable, Sendable {
         schema = 2
     }
     var source: URL
+    /// The duplicate open, if one was; nil for the photograph itself.
+    var variant: String?
     var bookmark: Data?
     /// The edits of a schema 2 session, restored as they were and then
     /// written to the photograph's sidecar. Nil from schema 3 on.
@@ -27,7 +29,7 @@ struct EditorSession: Codable, Equatable, Sendable {
     /// Not saved: the photograph's sidecar, read with the session at launch.
     var sidecar: SidecarRestore?
 
-    private enum CodingKeys: String, CodingKey { case schema, source, bookmark, state, inspectorVisible, fitImage }
+    private enum CodingKeys: String, CodingKey { case schema, source, variant, bookmark, state, inspectorVisible, fitImage }
 
     /// With `state`, a schema 2 session, as earlier versions saved.
     init(source: URL, state: EditState? = nil, inspectorVisible: Bool = true, fitImage: Bool = true) {
@@ -80,12 +82,13 @@ struct SidecarRestore: Equatable, Sendable {
     static func newVariantID() -> String { String(UUID().uuidString.lowercased().prefix(8)) }
 
     /// Reads `photo`'s sidecar through `store`, merged over its defaults
-    /// table in `data`. Small: a few kilobytes, as at launch.
-    static func read(photo: URL, store: SidecarStore, data: URL) -> SidecarRestore {
+    /// table in `data`. Small: a few kilobytes, as at launch. `variant`
+    /// picks a duplicate; without it, or if it's gone, the first variant.
+    static func read(photo: URL, variant id: String? = nil, store: SidecarStore, data: URL) -> SidecarRestore {
         do {
             guard let sidecar = try store.read(photo: photo) else { return SidecarRestore() }
             var restore = SidecarRestore(exists: true, defaultsVersion: sidecar.defaultsVersion)
-            guard let variant = sidecar.variants.first else { return restore }
+            guard let variant = sidecar.variants.first(where: { $0.id == id }) ?? sidecar.variants.first else { return restore }
             restore.variant = variant.id; restore.newVariant = false
             restore.rating = variant.rating; restore.flag = variant.flag
             if let edits = variant.edits {
@@ -143,7 +146,7 @@ actor SessionStore {
             throw EngineError(message: "The previous photograph is unavailable. Open a photograph to continue.")
         }
         if session.state == nil, let sidecars {
-            session.sidecar = SidecarRestore.read(photo: session.source, store: sidecars.store, data: sidecars.data)
+            session.sidecar = SidecarRestore.read(photo: session.source, variant: session.variant, store: sidecars.store, data: sidecars.data)
         }
         return session
     }
