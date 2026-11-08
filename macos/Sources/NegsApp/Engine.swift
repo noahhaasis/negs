@@ -361,9 +361,10 @@ final class EngineClient: @unchecked Sendable {
 
     /// Develops `source` at full resolution with `state`, cropping and
     /// straightening to `crop`, adding `border`, fitting to `size`, and
-    /// encoding with `save`, with `engine`.
+    /// encoding with `save`, with `engine`. A `rating` is embedded as
+    /// `xmp:Rating` afterwards, leaving the pixels as the exporter wrote them.
     @discardableResult
-    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderSettings?, size: ExportSize = .full, save: SaveSettings = SaveSettings(), engine: ExportEngine = .reference) async throws -> ExportOutcome {
+    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderSettings?, size: ExportSize = .full, save: SaveSettings = SaveSettings(), engine: ExportEngine = .reference, rating: Int? = nil) async throws -> ExportOutcome {
         let fm = FileManager.default
         let executable = try engine.executable(in: paths)
         let work = scratch.directory.appendingPathComponent("export-\(UUID().uuidString)")
@@ -407,6 +408,7 @@ final class EngineClient: @unchecked Sendable {
             let hint = engine == .fast ? " If the GPU ran out of memory, export with Reference (CPU, 64-bit) instead." : ""
             throw EngineError(message: "Export failed.\(hint)\n\(diagnostic.isEmpty ? "Unknown exporter error" : String(diagnostic.suffix(4000)))")
         }
+        if let rating { try ExportRating.embed(rating, in: staging) }
         guard rename(staging.path, destination.path) == 0 else { throw EngineError(message: "Could not move the completed export to \(destination.path): \(String(cString: strerror(errno)))") }
         return ExportOutcome(fellBackToCPU: engine == .fast && !ExportEngine.ranOnGPU(log: diagnostic))
     }

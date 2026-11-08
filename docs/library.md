@@ -88,6 +88,45 @@ Undo (⌘Z) puts everything back, files and `.negs` files from the Trash. On a
 volume without a Trash, such as some network shares, Negs always asks first,
 because the files are deleted for good.
 
+## Exporting several photographs
+
+In the grid, Export (⇧⌘E, or the toolbar's Export) acts on the selection: the
+menu reads *Export 12 Photographs…*. Choose a folder, the format, engine, size,
+colour space and quality as for a single export, and two more rows:
+
+| Row | Choices |
+| --- | --- |
+| File Name | Name_Film (`IMG_0412_kodak_gold_200.jpeg`, as a single export suggests), Name, or your own text with `{name}` and `{film}` |
+| If a File Exists | Add a Number (`IMG_0412_kodak_gold_200 2.jpeg`), Replace, Skip |
+
+A duplicate's number follows the name: `IMG_0412 (2)_kodak_gold_200.jpeg`. Two
+photographs of the batch that would get the same name, such as a RAW+JPEG pair,
+are numbered too. One photograph selected exports alone: the open one exactly
+as from the edit view, another through the same Save dialog.
+
+Each photograph exports with its own edits as they were when you chose Export,
+so editing meanwhile changes nothing queued, and each file is the same, byte for
+byte, as exporting that photograph alone. A photograph you never edited
+exports as opening it would show it: the defaults, with the open photograph's
+film, paper, image size and output colour. If that includes *Match camera
+brightness*, it's solved just before the photograph exports. Photographs are
+exported one at a time, in the background, while you keep working, and the Mac
+doesn't sleep while idle meanwhile.
+
+While a batch runs, the Export button shows a ring that fills as it goes. Click
+it for the progress, any failures with their reason, and Cancel, Retry Failed
+and Show in Finder. A photograph that fails doesn't stop the others; a batch
+that ended with failures shows a warning on the button until you've looked. A
+notification says when a batch finishes while Negs is in the background.
+
+Quitting during a batch asks first. The next time Negs opens, it offers to
+export the rest.
+
+Every export, single or batch, carries the photograph's rating as `xmp:Rating`
+(1 to 5 stars, or −1 for a reject, as Lightroom writes it), which Bridge, Photo
+Mechanic, digiKam and Windows Explorer read. An unrated photograph's file gets
+none. Picks have no standard field. Adding it never changes the pixels.
+
 ## Filtering
 
 The Filter button in the toolbar shows only some photographs, in the film strip

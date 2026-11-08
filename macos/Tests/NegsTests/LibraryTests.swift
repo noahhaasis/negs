@@ -682,4 +682,98 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertGreaterThan(model.thumbnailVersions[a] ?? 0, 0)
         await model.flushSidecars()
     }
+
+    func testBatchExportsEachPhotographWithItsOwnEdits() async throws {
+        let dir = try folder(), out = try folder(), alone = try folder()
+        defer { for url in [dir, out, alone] { try? FileManager.default.removeItem(at: url) } }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        // b edited and rated, its match on but not solved for these edits; c never edited.
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "rating": 4, "edits": {"film": "kodak_portra_400", "paper": "kodak_portra_endura", "params": {"prep": {"lift": 5}}, "brightnessMatch": {"highlightLimited": false}}}]}"#, sidecarOf: b)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let journal = FileManager.default.temporaryDirectory.appendingPathComponent("negs-batch-\(UUID().uuidString)/active-export.json")
+        defer { try? FileManager.default.removeItem(at: journal.deletingLastPathComponent()) }
+        model.batchJournalURL = journal
+        model.autoPlaceNewImages = true
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 && model.previewCurrent && !model.brightnessMatchPending }
+        // a: another film than the default, and 3 stars.
+        let film = try XCTUnwrap(model.films.first { $0.id != model.state.film && !$0.positive }?.id)
+        model.chooseFilm(film)
+        try await waitUntil { model.previewCurrent && !model.brightnessMatchPending && !model.matchingBrightness }
+        model.setRating(3)
+
+        model.showGrid()
+        model.selectAll()
+        XCTAssertEqual(model.exportTitle, "Export 3 Photographs…")
+        XCTAssertTrue(model.canExport)
+        var options = BatchOptions()
+        options.format = OutputFormat.png.rawValue
+        let started = await model.exportBatch(model.exportTargets, to: out, options: options)
+        let run = try XCTUnwrap(started)
+        XCTAssertEqual(run.items.map(\.fileName), ["a_\(film).png", "b_kodak_portra_400.png", "c_\(film).png"], "c follows the open photograph's film")
+        XCTAssertEqual(run.items.map(\.needsMatch), [false, true, true])
+        XCTAssertTrue(model.batchRunning)
+        XCTAssertFalse(model.canExport, "one batch at a time")
+        try await waitUntil { FileManager.default.fileExists(atPath: journal.path) }
+        await run.task?.value
+        XCTAssertEqual(run.items.map(\.status), [.done, .done, .done], "\(run.items.map { $0.reason ?? "" })")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path), "the journal goes when the batch ends")
+        XCTAssertNil(model.batch, "a batch without failures is forgotten")
+
+        let files = ["a_\(film).png", "b_kodak_portra_400.png", "c_\(film).png"].map { out.appendingPathComponent($0) }
+        XCTAssertEqual(files.map(ExportRating.read), [3, 4, nil])
+        // b's match solved and stored with its edits; c gets no sidecar.
+        let match = try store.read(photo: b)?.variants.first?.edits?["brightnessMatch"]
+        XCTAssertEqual(match?["ev"].double.isFinite, true, "solved: \(String(describing: match))")
+        XCTAssertEqual(try store.read(photo: b)?.variants.first?.edits?["params.prep.lift"], .number(5))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: c).path))
+        // Each exported alone, as today, gives the same bytes: a open as it
+        // was, and c opened after it, so with a's film and its match solved.
+        // (Not c against a: a kept an exposure solved before its film
+        // changed, as a change under 0.05 EV does.)
+        for (photo, file) in [(a, files[0]), (c, files[2])] {
+            model.open(photo)
+            try await waitUntil { model.previewCurrent && !model.brightnessMatchPending && !model.matchingBrightness }
+            XCTAssertEqual(model.state.film, film)
+            let single = alone.appendingPathComponent(file.lastPathComponent)
+            await model.export(to: single, engine: .reference, size: options.size, save: options.save)
+            XCTAssertEqual(try Data(contentsOf: single), try Data(contentsOf: file), file.lastPathComponent)
+        }
+
+        // Again into the same folder: Add a Number, then Skip.
+        model.showGrid()
+        model.selectAll()
+        let numbered = await model.exportBatch([b], to: out, options: options)
+        let again = try XCTUnwrap(numbered)
+        await again.task?.value
+        XCTAssertEqual(again.items.first?.written?.lastPathComponent, "b_kodak_portra_400 2.png")
+        options.existing = .skip
+        let skipping = await model.exportBatch([b], to: out, options: options)
+        let skipped = try XCTUnwrap(skipping)
+        await skipped.task?.value
+        XCTAssertEqual(skipped.items.first?.status, .skipped)
+        await model.flushSidecars()
+    }
+
+    func testBatchJournalRoundTrip() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("j/active-export.json")
+        var state = EditState(params: .object(["prep": .object(["lift": .number(5)])]))
+        state.brightnessMatch = BrightnessMatch()
+        let photo = dir.appendingPathComponent("IMG.CR3")
+        let journal = BatchJournal(destination: dir, bookmark: try dir.bookmarkData(), options: BatchOptions(),
+                                   items: [BatchItem(item: photo.variant("v2"), title: "IMG.CR3 (2)", state: state, needsMatch: true, storesMatch: true,
+                                                     rating: -1, fileName: "IMG (2)_kodak_gold_200.jpeg", size: CGSize(width: 6000, height: 4000), look: "abc")])
+        try journal.write(to: url)
+        XCTAssertEqual(BatchJournal.read(from: url), journal)
+        XCTAssertEqual(journal.remaining, 1)
+        XCTAssertEqual(EditorModel.batchName(photo.variant("v2"), title: "IMG.CR3 (2)"), "IMG (2)")
+        BatchJournal.remove(at: url)
+        XCTAssertNil(BatchJournal.read(from: url))
+    }
+
 }

@@ -75,6 +75,23 @@ import SwiftUI
         InteractionBenchmark.start(model)
         #endif
         updates.schedule(afterStartupOf: model)
+        offerBatchResume()
+    }
+
+    /// An export the last session didn't finish is offered once launch has
+    /// settled, as updates are: never on the launch path.
+    private func offerBatchResume() {
+        guard ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] == nil else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            while let self, !Task.isCancelled {
+                let model = self.model
+                if model.ready && (model.source == nil || model.previewCurrent || model.renderFailed) || model.error != nil {
+                    return model.offerBatchResume(in: self.editor?.window)
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
     }
     /// The session, read on another thread and waited for at most `timeout`,
     /// so a photograph on an unresponsive volume never holds up launch. Nil
@@ -101,6 +118,15 @@ import SwiftUI
         if removingAppData { return appDataRemovalFinished ? .terminateNow : .terminateCancel }
         guard !terminating else { return .terminateLater }
         if model.saving || (updates.installing && model.exporting) { return .terminateCancel }
+        if model.batchRunning, let remaining = model.batch?.journal.remaining, !updates.installing {
+            // Kept in the journal: the next launch offers to resume.
+            let alert = NSAlert()
+            alert.messageText = "Export \(remaining == 1 ? "the remaining photograph" : "\(remaining) remaining photographs") next time?"
+            alert.informativeText = "Quitting stops the export. Files already exported stay; Negs offers to export the rest when it opens again."
+            alert.addButton(withTitle: "Quit")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+        }
         if model.exporting {
             let alert = NSAlert()
             alert.messageText = "An export is still in progress."
@@ -132,7 +158,7 @@ import SwiftUI
     }
 
     private func removeAllAppData() {
-        guard !removingAppData, !terminating, !model.saving, !model.exporting, !updates.installing, !updates.sessionInProgress else { return }
+        guard !removingAppData, !terminating, !model.saving, !model.exporting, !model.batchRunning, !updates.installing, !updates.sessionInProgress else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Remove all Negs app data and quit?"

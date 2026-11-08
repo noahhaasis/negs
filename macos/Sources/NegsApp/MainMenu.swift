@@ -177,7 +177,7 @@ import SwiftUI
     @objc private func showRecent() {}
     @objc private func openRecent(_ item: NSMenuItem) { if let url = item.representedObject as? URL { model.open(url) } }
     @objc private func savePreview() { model.savePanel(export: false) }
-    @objc private func exportPhotograph() { model.savePanel(export: true) }
+    @objc private func exportPhotograph() { model.exportPanel() }
     @objc private func exportLUT() { model.exportLUTPanel() }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
@@ -274,7 +274,8 @@ import SwiftUI
         case #selector(showRecent): return !model.recentFiles.isEmpty
         case #selector(savePreview): return model.canSave && model.mode == .photo
         case #selector(exportPhotograph):
-            return photo && model.ready && !model.exporting && !model.saving && !model.cropping && model.canExportFromGrid
+            item.title = model.exportTitle
+            return model.canExport && !model.cropping
         case #selector(exportLUT): return model.canExportLUT && model.mode == .photo
         case #selector(toggleFilmstrip):
             item.title = model.filmstripVisible ? "Hide Film Strip" : "Show Film Strip"

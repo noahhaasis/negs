@@ -20,7 +20,7 @@ import SwiftUI
 /// inspector column. The window, toolbar, and columns are AppKit; the canvas
 /// and inspector contents are SwiftUI. They follow the model through
 /// Observation, like the views.
-@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuDelegate, NSMenuItemValidation {
+@MainActor final class EditorWindowController: NSWindowController, NSToolbarDelegate, NSMenuDelegate, NSMenuItemValidation, NSPopoverDelegate {
     private let model: EditorModel
     private let inspector: NSSplitViewItem
     private let panel: NSHostingController<InspectorPanel>
@@ -43,6 +43,9 @@ import SwiftUI
     private var originalKey: UInt16?
     /// The mode the toolbar's items are laid out for.
     private var toolbarMode = LibraryMode.photo
+    /// The batch export popover, and what the Export item shows now.
+    private var batchPopover: NSPopover?
+    private var exportIcon = ""
     private lazy var sizeSlider: NSSlider = {
         let slider = NSSlider(value: GridMetrics.defaultSize, minValue: GridMetrics.sizes.lowerBound, maxValue: GridMetrics.sizes.upperBound,
                               target: self, action: #selector(resizeGrid(_:)))
@@ -234,7 +237,8 @@ import SwiftUI
                 ? symbol("crop", "Crop").withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor]))
                 : symbol("crop", "Crop")
         }
-        setEnabled(.export, photo && model.ready && !model.exporting && !model.saving && model.canExportFromGrid)
+        setEnabled(.export, model.batch != nil || model.canExport)
+        updateExportItem()
         // The accent color marks the panel the inspector column shows.
         for (id, pane, name, label) in [(NSToolbarItem.Identifier.adjustments, InspectorPane.adjustments, "slider.horizontal.3", "Adjustments"),
                                         (.presets, .presets, "square.stack", "Presets")] {
@@ -479,7 +483,55 @@ import SwiftUI
     @objc private func toggleCrop() { model.cropping ? model.endCrop(apply: true) : model.beginCrop() }
     @objc private func cancelCrop() { model.endCrop(apply: false) }
     @objc private func applyCrop() { model.endCrop(apply: true) }
-    @objc private func export() { model.savePanel(export: true) }
+    @objc private func export() {
+        if let run = model.batch { return toggleBatchPopover(run) }
+        model.exportPanel()
+    }
+
+    /// A batch replaces the icon with its ring; one that ended with failures
+    /// shows a warning until its popover has been seen.
+    private func updateExportItem() {
+        guard let item = items[.export] else { return }
+        let icon: String, help: String
+        if let run = model.batch, run.running {
+            icon = "ring \(run.finished)/\(run.total)"
+            help = "\(run.title). Click for details."
+        } else if let run = model.batch, !run.failures.isEmpty {
+            icon = "failed"
+            help = "\(run.title), \(run.failures.count) failed. Click for details."
+        } else {
+            icon = "export"
+            help = model.exportTitle == "Export Photograph…" ? "Export photograph (⇧⌘E)" : "Export the selected photographs (⇧⌘E)"
+        }
+        item.toolTip = help
+        guard icon != exportIcon else { return }
+        exportIcon = icon
+        if let run = model.batch, run.running { item.image = BatchRing.image(run.fraction) }
+        else if icon == "failed" { item.image = symbol("exclamationmark.triangle", "Export finished with failures") }
+        else { item.image = symbol("square.and.arrow.down", "Export") }
+    }
+
+    private func toggleBatchPopover(_ run: BatchRun) {
+        if let batchPopover, batchPopover.isShown { return batchPopover.performClose(nil) }
+        guard let item = items[.export] else { return }
+        let content = NSHostingController(rootView: BatchProgressView(run: run, retry: { [weak self] in self?.model.retryBatch() },
+                                                                      showInFinder: { [weak self] in self?.model.showBatchInFinder() }))
+        content.sizingOptions = .preferredContentSize
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = content
+        popover.delegate = self
+        batchPopover = popover
+        model.batchPopoverShown = true
+        popover.show(relativeTo: item)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        guard (notification.object as? NSPopover) === batchPopover else { return }
+        batchPopover = nil
+        model.batchPopoverShown = false
+        model.clearBatch()
+    }
     @objc private func toggleFilmstrip() { model.filmstripVisible.toggle() }
     @objc private func toggleAdjustments() { model.togglePane(.adjustments) }
     @objc private func togglePresets() { model.togglePane(.presets) }
