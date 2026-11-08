@@ -150,4 +150,41 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(PhotoSidecar.url(for: copy.photoFile).lastPathComponent, "IMG_0412.CR3.negs")
         XCTAssertEqual(copy.variant("ff").variantID, "ff")
     }
+
+    /// What a delete does, and the alert before it.
+    func testDeletePlanAndQuestion() throws {
+        let a = URL(fileURLWithPath: "/photos/a.CR3"), b = URL(fileURLWithPath: "/photos/b.CR3")
+        let duplicates = { (photo: URL) in photo == a ? ["a2", "a3"] : ["b2"] }
+        let name = { (item: URL) in item.variantID.map { "\(item.lastPathComponent) (\($0))" } ?? item.lastPathComponent }
+        let one = DeletePlan([a], duplicates: duplicates)
+        XCTAssertEqual(one.files, [a])
+        XCTAssertEqual(one.following, 2)
+        XCTAssertEqual(one.question(name: name, permanent: false), .init(
+            message: "Move “a.CR3” to the Trash?",
+            information: "The photograph’s file and its Negs rating and edits are moved to the Trash, with its 2 duplicates. You can put it back with Undo or from the Trash.",
+            button: "Move to Trash"))
+        // A chosen duplicate of a photograph that goes is counted with it.
+        let both = DeletePlan([a, a.variant("a2"), b], duplicates: duplicates)
+        XCTAssertEqual(both.items, [a, b])
+        XCTAssertEqual(both.duplicates, [])
+        XCTAssertEqual(both.following, 2)
+        XCTAssertEqual(both.question(name: name, permanent: false).message, "Move 2 photographs to the Trash?")
+        let copy = DeletePlan([b.variant("b2")], duplicates: duplicates)
+        XCTAssertEqual(copy.question(name: name, permanent: false).message, "Remove the duplicate “b.CR3 (b2)”?")
+        XCTAssertEqual(copy.actionName, "Remove Duplicate")
+        let mixed = DeletePlan([a, b.variant("b2")], duplicates: duplicates)
+        XCTAssertEqual(mixed.question(name: name, permanent: false).message, "Move 1 photograph to the Trash and remove 1 duplicate?")
+        XCTAssertEqual(mixed.question(name: name, permanent: true).message, "Delete 1 photograph permanently and remove 1 duplicate?")
+        XCTAssertEqual(mixed.withoutFiles.items, [b.variant("b2")])
+        XCTAssertEqual(EditorModel.next(after: photos[2], in: photos, skipping: [photos[2], photos[3]]), photos[4])
+        XCTAssertEqual(EditorModel.next(after: photos[5], in: photos, skipping: [photos[4], photos[5]]), photos[3], "the last goes back")
+        XCTAssertNil(EditorModel.next(after: photos[0], in: [photos[0]], skipping: [photos[0]]))
+    }
+
+    func testRemovingADuplicate() throws {
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "a"}, {"id": "b", "rating": 2}]}"#.utf8))
+        XCTAssertNil(try PhotoSidecar.removing(variant: "b", from: raw), "nothing left: the file goes")
+        let rated = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "a", "rating": 1}, {"id": "b"}]}"#.utf8))
+        XCTAssertEqual(try PhotoSidecar.removing(variant: "b", from: rated)?["variants"].array.count, 1)
+    }
 }

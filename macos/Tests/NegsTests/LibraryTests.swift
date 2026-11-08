@@ -519,7 +519,8 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertNil(try variants(b).first?.edits)
         XCTAssertEqual(model.library.summary(for: b), LibrarySummary(rating: 2))
 
-        // A duplicate is a second variant with the same edits, listed and selected after its photograph.
+        // A duplicate is a second variant with the same edits, rating and flag, listed and selected after its photograph.
+        model.setFlag(.pick, targets: [c])
         step { model.duplicate([c]) }
         await model.flushSidecars()
         let copy = try XCTUnwrap(model.selection.current)
@@ -527,6 +528,7 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(copy.variantID, try variants(c).last?.id)
         XCTAssertEqual(try variants(c).count, 2)
         XCTAssertEqual(try variants(c)[1].edits, try variants(c)[0].edits)
+        XCTAssertEqual(try variants(c).map(\.flag), [.pick, .pick])
         XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "c.png", "c.png (2)"])
         model.setRating(4)
         await model.flushSidecars()
@@ -559,5 +561,80 @@ final class LibraryFormatTests: XCTestCase {
         await model.flushSidecars()
         XCTAssertEqual(model.value("prep.lift"), .number(0))
         XCTAssertNil(try variants(a).first?.edits)
+    }
+
+    /// Delete moves the photograph and its sidecar to the Trash, a duplicate
+    /// leaves its sidecar, and one undo step puts either back.
+    func testDeleteMovesToTheTrashAndUndoPutsItBack() async throws {
+        let dir = try folder(), bin = try folder()
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: bin) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png"), d = try fixture(in: dir, "d.png")
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "b1", "rating": 3}, {"id": "b2", "rating": 1}]}"#, sidecarOf: b)
+        try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "c1", "flag": "reject"}, {"id": "c2", "rating": 2}]}"#, sidecarOf: c)
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        // Never the user's own Trash.
+        model.trash = PhotoTrash(available: { _ in true }, trash: { file in
+            let landed = bin.appendingPathComponent(file.lastPathComponent)
+            try FileManager.default.moveItem(at: file, to: landed)
+            return landed
+        }, remove: { try FileManager.default.removeItem(at: $0) })
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        func step(_ body: () -> Void) { undo.beginUndoGrouping(); body(); undo.endUndoGrouping() }
+        func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
+        func variants(_ photo: URL) throws -> [PhotoSidecar.Variant] { try store.read(photo: photo)?.variants ?? [] }
+        model.open(b)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.items.count == 6 }
+
+        // In the edit view it's the open photograph alone, with its duplicate; the next one opens.
+        XCTAssertEqual(model.deleteTargets, [b])
+        let plan = model.deletePlan(model.deleteTargets)
+        XCTAssertEqual(plan.following, 1)
+        step { model.delete(plan) }
+        XCTAssertEqual(model.source, c)
+        XCTAssertEqual(model.library.items.map(\.name), ["a.png", "c.png", "c.png (2)", "d.png"], "gone at once")
+        try await waitUntil { !exists(b) && exists(bin.appendingPathComponent("b.png")) && exists(bin.appendingPathComponent("b.png.negs")) }
+        XCTAssertEqual(undo.undoActionName, "Move to Trash")
+
+        undo.undo()
+        try await waitUntil { exists(b) && model.source == b && model.library.items.count == 6 }
+        XCTAssertEqual(try variants(b).map(\.rating), [3, 1], "its sidecar is back with it")
+        XCTAssertFalse(exists(bin.appendingPathComponent("b.png")))
+        undo.redo()
+        try await waitUntil { !exists(b) && model.library.items.count == 4 }
+        undo.undo()
+        try await waitUntil { exists(b) && model.library.items.count == 6 }
+
+        // A duplicate alone leaves its sidecar; the photograph stays.
+        model.showGrid()
+        model.click(c.variant("c2"))
+        step { model.requestDelete(asking: false) }
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(c).map(\.id), ["c1"])
+        XCTAssertTrue(exists(c))
+        XCTAssertEqual(model.selection.current, d, "the next photograph is current")
+        XCTAssertEqual(undo.undoActionName, "Remove Duplicate")
+        undo.undo()
+        try await waitUntil { model.selection.selected == [c.variant("c2")] }
+        await model.flushSidecars()
+        XCTAssertEqual(try variants(c).map(\.id), ["c1", "c2"])
+
+        // Delete Rejected Photographs: c, and its duplicate goes with it.
+        XCTAssertEqual(model.rejected, [c])
+        step { model.delete(model.deletePlan(model.rejected)) }
+        try await waitUntil { !exists(c) && !exists(PhotoSidecar.url(for: c)) }
+        XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "b.png (2)", "d.png"])
+
+        // With everything gone there's no photograph; undo opens one again.
+        model.selectAll()
+        step { model.delete(model.deletePlan(model.deleteTargets)) }
+        XCTAssertNil(model.source)
+        XCTAssertEqual(model.mode, .photo)
+        try await waitUntil { [a, b, d].allSatisfy { !exists($0) } }
+        undo.undo()
+        try await waitUntil { [a, b, d].allSatisfy(exists) && model.source != nil }
+        await model.flushSidecars()
     }
 }

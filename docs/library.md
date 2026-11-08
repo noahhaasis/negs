@@ -40,7 +40,7 @@ photograph before it.
 | Copy Edits… | ⌥⇧⌘C | The same, after choosing which; the choice is remembered |
 | Paste Edits | ⇧⌘V | Applies them to the selected photographs |
 | Paste from Previous | ⌥⇧⌘V | Applies the edits of the last photograph you left edited |
-| Duplicate | ⌘D | A copy with its own rating, flag and edits, `IMG_0412.CR3 (2)` |
+| Duplicate | ⌘D | A copy, `IMG_0412.CR3 (2)`, that starts with the photograph's rating, flag and edits and then keeps its own |
 | Reset Edits | ⇧⌘R | Back to how an unedited photograph opens; rating and flag stay |
 
 These are in the Photo menu and in the context menu of the film strip and the
@@ -58,6 +58,25 @@ photograph.
 
 A duplicate copies no file: it lives in the photograph's `.negs` file, so it
 shows the same photograph developed its own way.
+
+## Deleting
+
+| Action | Key | Menu |
+| --- | --- | --- |
+| Move to the Trash, after asking | ⌫ | Photo › Move to Trash… |
+| Move to the Trash at once | ⌘⌫ | Photo › Move to Trash (hold ⌘) |
+| Delete every rejected photograph, after asking | | Photo › Delete Rejected Photographs… |
+
+In the grid these act on every selected photograph; in the edit view on the
+open one only, as the rating keys do. The photograph's file goes to the Trash
+with its `.negs` file, and so with its duplicates. A duplicate on its own is
+removed from the `.negs` file, and the photograph stays. Deleting
+`IMG_0412.JPG` leaves `IMG_0412.CR3` alone. The next photograph becomes
+current.
+
+Undo (⌘Z) puts everything back, files and `.negs` files from the Trash. On a
+volume without a Trash, such as some network shares, Negs always asks first,
+because the files are deleted for good.
 
 ## Filtering
 

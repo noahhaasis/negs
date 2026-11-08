@@ -142,6 +142,9 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// before one doesn't undo it.
     @ObservationIgnored private var revisions: [URL: Int] = [:]
     @ObservationIgnored private var rescans: [UUID: AsyncStream<Void>.Continuation] = [:]
+    /// Photographs being deleted: never listed, even while their files are
+    /// still on their way to the Trash.
+    @ObservationIgnored private var hidden: Set<URL> = []
 
     init(store: SidecarStore? = nil, defaults: UserDefaults = .standard) {
         self.store = store
@@ -202,6 +205,25 @@ struct LibraryFilter: Codable, Equatable, Sendable {
     /// already (one that couldn't be saved, say).
     func opened(_ photo: URL, summary: LibrarySummary) {
         if summaries[photo] == nil { summaries[photo] = summary }
+    }
+
+    /// Stops listing `photos`, with their duplicates, before their files go.
+    func remove(_ photos: [URL]) {
+        guard !photos.isEmpty else { return }
+        hidden.formUnion(photos)
+        let gone = Set(photos)
+        files.removeAll { gone.contains($0.url) }
+        for photo in photos {
+            for id in duplicates[photo] ?? [] { summaries[photo.variant(id)] = nil }
+            duplicates[photo] = nil; summaries[photo] = nil; sidecarFiles[photo] = nil
+        }
+    }
+
+    /// Lists `photos` again if they're there: once their files have gone,
+    /// or come back.
+    func unhide(_ photos: [URL]) {
+        hidden.subtract(photos)
+        refreshNow()
     }
 
     /// The photographs the strip shows: those the filter lets through, and
@@ -266,17 +288,18 @@ struct LibraryFilter: Codable, Equatable, Sendable {
             return
         }
         guard self.directory == directory else { return }
-        if files != listing.photos { files = listing.photos }
+        let photos = hidden.isEmpty ? listing.photos : listing.photos.filter { !hidden.contains($0.url) }
+        if files != photos { files = photos }
         if self.readOnly != readOnly { self.readOnly = readOnly }
         failed = false; loading = false
         guard let store else { summariesLoaded = true; return }
         // The sidecars that are new, changed or gone since last read.
         var changed: [URL: PhotoFile?] = [:]
-        for photo in listing.photos {
+        for photo in photos {
             let sidecar = listing.sidecars[photo.name]
             if sidecarFiles[photo.url] != .some(sidecar) { changed[photo.url] = sidecar }
         }
-        let present = Set(listing.photos.map(\.url))
+        let present = Set(photos.map(\.url))
         for gone in sidecarFiles.keys where !present.contains(gone) { sidecarFiles[gone] = nil }
         for gone in duplicates.keys where !present.contains(gone) { duplicates[gone] = nil }
         guard !changed.isEmpty else { summariesLoaded = true; return }

@@ -389,19 +389,24 @@ import UniformTypeIdentifiers
         guard let (_, before) = launchRestore else { return }
         launchRestore = nil; launchFrame = nil
         // Nothing of the undone restore is written to its sidecar.
+        // A different catalog can arrive once the window is shown and the
+        // restored photograph is being cropped, compared or edited.
+        forgetPhotograph()
+        state = withPreferences(before.state); inspectorVisible = before.inspectorVisible; fitImage = before.fitImage; status = before.status
+        if recentFiles != before.recentFiles { recentFiles = before.recentFiles; saveRecents() }
+        updateHistogram()
+    }
+
+    /// No photograph open, and nothing of the last one written to its sidecar.
+    private func forgetPhotograph() {
         photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
         sourceGeneration += 1
         source = nil; sourceVariant = nil; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
-        // A different catalog can arrive once the window is shown and the
-        // restored photograph is being cropped, compared or edited.
         interactionStart = nil; cropSession = nil
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         undoManager?.removeAllActions(withTarget: self)
-        state = withPreferences(before.state); inspectorVisible = before.inspectorVisible; fitImage = before.fitImage; status = before.status
-        if recentFiles != before.recentFiles { recentFiles = before.recentFiles; saveRecents() }
-        updateHistogram()
     }
 
     func start(paths: EnginePaths? = nil, restoration: Task<EditorSession?, Error>? = nil) async {
@@ -841,6 +846,7 @@ import UniformTypeIdentifiers
         if photoSidecar?.written != nil, photoSidecar?.photo == source { previousEdits = Self.userEdits(state) }
         let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
+        sourceDeleted = false
         source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
         // Leaving the grid opens its current photograph and keeps the selection.
         if selection.current != item { selection.select(item) }
@@ -1369,7 +1375,7 @@ import UniformTypeIdentifiers
     /// Back to the edit view, on the grid's current photograph.
     func editCurrent() {
         guard mode == .grid else { return }
-        if let current = selection.current, current != sourceItem { open(current) } else { mode = .photo }
+        if let current = selection.current, current != sourceItem || sourceDeleted { open(current) } else { mode = .photo }
     }
 
     func changeGridCellSize(larger: Bool) { gridCellSize += larger ? 40 : -40 }
@@ -1535,7 +1541,7 @@ import UniformTypeIdentifiers
     }
 
     /// Duplicate: a virtual copy of each item, a new variant in its sidecar
-    /// with the same edits and no rating or flag, listed after the others.
+    /// with the same edits, rating and flag, listed after the others.
     /// The grid selects the copies; the edit view opens the first.
     func duplicate(_ items: [URL]? = nil) {
         let items = items ?? editTargets
@@ -1565,7 +1571,8 @@ import UniformTypeIdentifiers
                 let original = item.variantID.flatMap { id in variants.firstIndex { $0["id"] == .string(id) } } ?? 0
                 let id = SidecarRestore.newVariantID()
                 var copy: [String: JSONValue] = ["id": .string(id)]
-                if let edits = variants[original].object?["edits"] { copy["edits"] = edits }
+                // Edits, rating and flag, as Lightroom's virtual copies; from here on its own.
+                for key in ["edits", "rating", "flag"] { if let value = variants[original].object?[key] { copy[key] = value } }
                 variants.append(.object(copy))
                 top["variants"] = .array(variants)
                 top["app"] = .string(Self.appVersion)
@@ -1582,6 +1589,191 @@ import UniformTypeIdentifiers
         }
         libraryNote = LibraryNote(text: made.isEmpty ? "Not Duplicated" : "Duplicated", detail: unsaved, count: max(made.count, 1),
                                   serial: (libraryNote?.serial ?? 0) + 1)
+    }
+
+    // MARK: Delete
+
+    /// Where deleted photographs go.
+    @ObservationIgnored var trash = PhotoTrash.system
+    /// The open photograph was deleted while the grid showed. Leaving the
+    /// grid opens its current photograph again, even if Undo put it back.
+    private var sourceDeleted = false
+
+    /// What Delete acts on: as the rating keys, the grid's selection, or in
+    /// the edit view the open photograph only.
+    var deleteTargets: [URL] { ratingTargets }
+
+    /// Nothing is cropped, exported or saved from a file that might go.
+    var canDelete: Bool { !closing && !cropping && !exporting && !saving }
+
+    /// The folder's rejected photographs and duplicates, filtered out or not.
+    var rejected: [URL] { library.items.map(\.url).filter { library.summary(for: $0).flag == .reject } }
+
+    func deletePlan(_ items: [URL]) -> DeletePlan { DeletePlan(items) { library.duplicates[$0] ?? [] } }
+
+    /// ⌫ asks first and ⌘⌫ doesn't. Without a Trash it always asks, as
+    /// nothing could be put back.
+    func requestDelete(_ items: [URL]? = nil, asking: Bool) {
+        let plan = deletePlan(items ?? deleteTargets)
+        guard canDelete, let first = plan.items.first else { return }
+        let folder = first.photoFile.deletingLastPathComponent()
+        guard PhotoLibrary.canWrite(in: folder) else {
+            error = "Nothing was deleted: the folder “\(folder.lastPathComponent)” is read-only."
+            return
+        }
+        let permanent = !plan.files.isEmpty && !trash.available(folder)
+        guard asking || permanent else { return delete(plan) }
+        let question = plan.question(name: library.name(of:), permanent: permanent)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = question.message
+        alert.informativeText = question.information
+        alert.addButton(withTitle: question.button).hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        let answered = { [weak self] (response: NSApplication.ModalResponse) in
+            if response == .alertFirstButtonReturn { self?.delete(plan, permanent: permanent) }
+        }
+        if let window = NSApp.keyWindow as? EditorWindow {
+            alert.beginSheetModal(for: window) { response in MainActor.assumeIsolated { answered(response) } }
+        } else {
+            answered(alert.runModal())
+        }
+    }
+
+    /// Moves `plan`'s photographs to the Trash with their sidecars, and
+    /// removes its duplicates from theirs, as one undo step. If what was
+    /// current goes, the next photograph shown becomes current.
+    func delete(_ plan: DeletePlan, permanent: Bool = false) {
+        guard canDelete, !plan.isEmpty else { return }
+        // The open photograph's last edits go to its sidecar first, and so
+        // to the Trash with it, or into the snapshot Undo puts back.
+        flushSidecar()
+        var gone = Set(plan.items)
+        for file in plan.files { for id in library.duplicates[file] ?? [] { gone.insert(file.variant(id)) } }
+        let current = mode == .grid ? selection.current : sourceItem
+        let next = current.flatMap { current -> URL?? in
+            guard gone.contains(current) else { return nil }
+            return .some(Self.next(after: current, in: shownPhotos.map(\.url), skipping: gone)
+                ?? Self.next(after: current, in: library.items.map(\.url), skipping: gone))
+        }
+        let open = sourceItem, openGone = sourceItem.map(gone.contains) ?? false
+        // Nothing more is written for it.
+        if openGone { sidecarWrite?.cancel(); sidecarWrite = nil; photoSidecar = nil }
+
+        // A duplicate of a photograph that stays leaves its sidecar.
+        var before: [URL: JSONValue?] = [:], failure: String?
+        if let sidecars, sidecars.writes {
+            for item in plan.duplicates {
+                guard let id = item.variantID else { continue }
+                let photo = item.photoFile
+                do {
+                    guard let raw = try sidecars.readPending(photo: photo) else { continue }
+                    let removed = try PhotoSidecar.removing(variant: id, from: raw)
+                    if before[photo] == nil { before[photo] = .some(raw) }
+                    sidecars.enqueue(SidecarPatch(variant: id, replacement: .some(removed), defaultsVersion: SidecarDefaults.latest,
+                                                  app: Self.appVersion), for: photo)
+                } catch {
+                    failure = failure ?? "“\(library.name(of: item))” couldn’t be removed: its .negs file can’t be changed."
+                }
+            }
+            for photo in before.keys { library.reload(photo) }
+        }
+        library.remove(plan.files)
+
+        // The selection moves on.
+        switch next {
+        case .some(.some(let next)):
+            if mode == .grid { selection.select(next) } else { self.open(next, restoring: nil) }
+        case .some(.none):
+            // Nothing is left to show.
+            forgetPhotograph()
+            selection = LibrarySelection(); mode = .photo
+        case .none:
+            selection.prune(to: Set(library.items.map(\.url)))
+        }
+        if openGone, mode == .grid { sourceDeleted = true }
+
+        let record = TrashRecord()
+        if !permanent || !before.isEmpty {
+            let reopen = openGone ? open : nil
+            undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in
+                MainActor.assumeIsolated { self?.undoDelete(permanent ? plan.withoutFiles : plan, record: record, sidecars: before, reopen: reopen) }
+            }
+            undoManager?.setActionName(plan.actionName)
+        }
+        let files = plan.files, trash = self.trash, sidecars = self.sidecars, removing = failure
+        record.task = Task { [weak self] in
+            // Everything queued is written first, so nothing writes a sidecar
+            // beside a photograph that's gone.
+            if let failures = await sidecars?.flush() { for (failed, reason) in failures { self?.sidecarFailed(failed, reason) } }
+            let moved = await Task.detached(priority: .userInitiated) { () -> (moves: [(original: URL, trashed: URL)], failure: String?) in
+                var moves: [(original: URL, trashed: URL)] = [], failure: String?
+                for file in files {
+                    let sidecar = PhotoSidecar.url(for: file)
+                    for item in [file, sidecar] where item == file || FileManager.default.fileExists(atPath: item.path) {
+                        do {
+                            if permanent { try trash.remove(item) } else { moves.append((item, try trash.trash(item))) }
+                        } catch {
+                            failure = failure ?? "“\(file.lastPathComponent)” couldn’t be deleted. \(error.localizedDescription)"
+                            break
+                        }
+                    }
+                }
+                return (moves, failure)
+            }.value
+            record.moves = moved.moves
+            guard let self else { return }
+            if let reason = moved.failure ?? removing { self.error = reason }
+            self.library.unhide(files)
+        }
+        if files.isEmpty, let failure { error = failure }
+    }
+
+    /// The first photograph after `item` in `order` that isn't `gone`, or
+    /// else the last one before it.
+    nonisolated static func next(after item: URL, in order: [URL], skipping gone: Set<URL>) -> URL? {
+        guard let index = order.firstIndex(of: item) else { return order.first { !gone.contains($0) } }
+        return order[index...].first { !gone.contains($0) } ?? order[..<index].last { !gone.contains($0) }
+    }
+
+    /// Puts back what `plan` deleted: the files from the Trash and the
+    /// duplicates' sidecars as they were. What comes back is selected; the
+    /// edit view opens the photograph it showed.
+    private func undoDelete(_ plan: DeletePlan, record: TrashRecord, sidecars before: [URL: JSONValue?], reopen: URL?) {
+        guard !closing else { return }
+        // Redo deletes them again, without asking.
+        undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in MainActor.assumeIsolated { self?.delete(plan) } }
+        undoManager?.setActionName(plan.actionName)
+        let sidecars = self.sidecars
+        for (photo, raw) in before {
+            sidecars?.enqueue(SidecarPatch(variant: "", replacement: .some(raw), defaultsVersion: SidecarDefaults.latest, app: Self.appVersion), for: photo)
+            library.reload(photo)
+        }
+        Task { [weak self] in
+            await record.task?.value
+            let moves = record.moves
+            record.moves = []
+            let failure = await Task.detached(priority: .userInitiated) { () -> String? in
+                var failure: String?
+                for move in moves.reversed() {
+                    do { try FileManager.default.moveItem(at: move.trashed, to: move.original) } catch {
+                        failure = failure ?? "“\(move.original.lastPathComponent)” couldn’t be put back. \(error.localizedDescription)"
+                    }
+                }
+                return failure
+            }.value
+            if let failures = await sidecars?.flush() { for (failed, reason) in failures { self?.sidecarFailed(failed, reason) } }
+            guard let self, !self.closing else { return }
+            if let failure { self.error = failure }
+            self.library.unhide(plan.files)
+            let restored = plan.items.filter { FileManager.default.fileExists(atPath: $0.photoFile.path) }
+            if self.mode == .photo, let reopen, restored.contains(reopen) || restored.contains(reopen.photoFile) {
+                self.open(reopen, restoring: nil)
+            } else if self.source == nil, let first = restored.first {
+                self.open(first, restoring: nil)
+            }
+            if self.mode == .grid, !restored.isEmpty { self.selection.select(restored) }
+        }
     }
 
     /// After changing several sidecars: the library shows them, one undo
