@@ -57,7 +57,9 @@ window.NEGS_I18N.dict = {
   "Lab": "暗房",
   "Output": "输出",
   "Scan": "扫描",
-  "Stock": "胶片",
+  // The phone's sheet tab for the pickers; not "胶片", which is the Film
+  // picker's own label and the Lab's Film section.
+  "Stock": "胶片与相纸",
   "Inspector": "检查器",
   "Film": "胶片",
   "Development": "显影",
