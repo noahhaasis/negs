@@ -18,6 +18,7 @@ import { DEFAULT_SAMPLE, createSamplePicker } from "./samples.js";
 import { createPresets } from "./preset-ui.js";
 import { RAW_WB_PATH, createSourceQueue, isRawColour, sameWb } from "./raw-wb.js";
 import { createTutorial } from "./tutorial.js";
+import { tr, lang } from "./i18n.mjs";
 
 let tutorial = null, tutorialPresentation = false, tutorialRestoring = false;
 
@@ -75,13 +76,13 @@ function startHost(engineKind) {
     if (!pending.has(id)) return;
     if (crashed) {
       // The panic's message follows on the channel; wait for it briefly.
-      return setTimeout(() => fail(Object.assign(new Error(`the engine crashed (${error})`), { crashed: true })), 200);
+      return setTimeout(() => fail(Object.assign(new Error(tr("the engine crashed ({error})", { error })), { crashed: true })), 200);
     }
     const [resolve, reject] = pending.get(id);
     pending.delete(id);
     error ? reject(Object.assign(new Error(error), { code })) : resolve(result);
   };
-  worker.onerror = (ev) => fail(Object.assign(new Error(ev.message || "the engine stopped"), { crashed: true }));
+  worker.onerror = (ev) => fail(Object.assign(new Error(ev.message || tr("the engine stopped")), { crashed: true }));
   // A panic on one of rayon's threads leaves the engine waiting forever;
   // the engine reports every panic here.
   const panics = new BroadcastChannel("negs-engine-panic");
@@ -89,7 +90,7 @@ function startHost(engineKind) {
     if (data.instance !== instance) return;
     worker.terminate();
     panics.close();
-    fail(Object.assign(new Error(`the engine crashed: ${data.message}`), { crashed: true }));
+    fail(Object.assign(new Error(tr("the engine crashed: {message}", { message: data.message })), { crashed: true }));
   };
   const call = (method, ...args) => dead ? Promise.reject(dead) : new Promise((resolve, reject) => {
     pending.set(++next, [resolve, reject]);
@@ -122,13 +123,13 @@ async function startEngine(engineKind) {
   forgetOriginal();
   kind = engineKind;
   $("engine").value = kind;
-  $("engine-info").textContent = "Starting…";
+  $("engine-info").textContent = tr("Starting…");
   host = startHost(kind);
   try {
     const info = await host.ready;
     minScale = kind === "gpu" ? 0.25 : 0.15;
     interactiveScale = Math.max(interactiveScale, minScale);
-    $("engine-info").textContent = `${info.backend}${info.threads > 1 ? ` · ${info.threads} threads` : " · 1 thread"}`;
+    $("engine-info").textContent = tr(info.threads > 1 ? "{backend} · {n} threads" : "{backend} · 1 thread", { backend: info.backend, n: info.threads });
     const [side, pixels] = await host.call("limits");
     limits = side ? { side, pixels } : null;
     if (side && DIFFUSION_GRID_BUDGET) await host.call("setDiffusionGridBudget", DIFFUSION_GRID_BUDGET);
@@ -141,7 +142,7 @@ async function startEngine(engineKind) {
     // rayon's threads not starting (web/pool.js) isn't WebGPU's doing, and
     // the CPU engine would start them the same way.
     if (kind === "gpu" && e.code !== "pool") {
-      showMessage(`WebGPU isn't available here (${e.message}); using the CPU engine.`);
+      showMessage(tr("WebGPU isn't available here ({message}); using the CPU engine.", { message: e.message }));
       return startEngine("cpu");
     }
     throw e;
@@ -318,7 +319,7 @@ const el = (tag, props = {}, ...children) => {
 // A reset button, shown while the control is off its default.
 function resetButton(title, b, after) {
   const button = el("button", { type: "button", className: "reset", textContent: "↺", hidden: true });
-  button.setAttribute("aria-label", `Reset ${title}`);
+  button.setAttribute("aria-label", tr("Reset {title}", { title: tr(title) }));
   button.addEventListener("click", () => { b.set(b.initial()); after(); });
   return button;
 }
@@ -353,7 +354,7 @@ function closeTip() {
 // `text`: a string, or a function for one that depends on the edit.
 function info(label, text) {
   const button = el("button", { type: "button", className: "info" });
-  button.setAttribute("aria-label", `About ${label}`);
+  button.setAttribute("aria-label", tr("About {label}", { label: tr(label) }));
   button.setAttribute("aria-expanded", "false");
   // Light dismiss closes it on the press, before the click: a click on the
   // (i) that was open only closes it.
@@ -366,7 +367,7 @@ function info(label, text) {
     tipWasOpen = false;
     closeTip();
     if (open) return;
-    tip.textContent = typeof text === "function" ? text() : text;
+    tip.textContent = tr(typeof text === "function" ? text() : text);
     tipFor = button;
     button.setAttribute("aria-expanded", "true");
     tip.showPopover();
@@ -382,7 +383,7 @@ function info(label, text) {
 function labelInfo(label, text) {
   const node = [...label.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
   const title = node.textContent.trim();
-  node.replaceWith(el("span", { className: "label-line" }, el("span", { textContent: title }), info(title, text)));
+  node.replaceWith(el("span", { className: "label-line" }, el("span", { textContent: tr(title) }), info(title, text)));
   label.removeAttribute("title");
 }
 
@@ -429,18 +430,18 @@ function buildRow(c) {
   if (c.kind === "styles") return buildStyles(c);
   if (c.kind === "action") {
     const a = actions[c.action];
-    const button = el("button", { type: "button", className: "btn", textContent: c.label });
+    const button = el("button", { type: "button", className: "btn", textContent: tr(c.label) });
     button.addEventListener("click", () => a.run());
     syncs.push(() => {
       button.disabled = !a.enabled();
-      button.textContent = a.busy() ? a.busyLabel : c.label;
+      button.textContent = a.busy() ? tr(a.busyLabel) : tr(c.label);
     });
     return el("div", { className: "ctl action" }, button);
   }
   if (c.kind === "match") {
     const sw = el("input", { type: "checkbox", className: "switch" });
     sw.addEventListener("change", () => setMatch(sw.checked));
-    const row = el("div", { className: "ctl row" }, el("label", {}, el("span", { textContent: c.label }), sw));
+    const row = el("div", { className: "ctl row" }, el("label", {}, el("span", { textContent: tr(c.label) }), sw));
     // Camera RAWs only, for now: a JPEG's own pixels as the reference isn't
     // in the browser yet.
     syncs.push(() => { sw.checked = !!state.match; row.hidden = !photo?.raw; });
@@ -457,10 +458,10 @@ function buildRow(c) {
   const changed = c.border ? () => borderChanged() : (mode) => { sync(); schedule(mode); };
   if (c.kind === "color") {
     const input = el("input", { type: "color" });
-    input.setAttribute("aria-label", c.label);
+    input.setAttribute("aria-label", tr(c.label));
     const reset = resetButton(c.label, b, () => changed("settled"));
     input.addEventListener("input", () => { b.set(input.value); changed("settled"); });
-    const row = el("div", { className: "ctl row color" }, el("label", {}, el("span", { textContent: c.label }), reset, input));
+    const row = el("div", { className: "ctl row color" }, el("label", {}, el("span", { textContent: tr(c.label) }), reset, input));
     syncs.push(() => { input.value = b.get(); reset.hidden = !b.modified(); row.classList.toggle("changed", b.modified()); });
     return row;
   }
@@ -468,15 +469,15 @@ function buildRow(c) {
     const sw = el("input", { type: "checkbox", className: "switch" });
     const reset = resetButton(c.label, b, () => changed("settled"));
     sw.addEventListener("change", () => { b.set(sw.checked); changed("settled"); });
-    const row = el("div", { className: "ctl row" }, el("label", {}, el("span", { textContent: c.label }), reset, sw));
+    const row = el("div", { className: "ctl row" }, el("label", {}, el("span", { textContent: tr(c.label) }), reset, sw));
     syncs.push(() => { sw.checked = b.get(); reset.hidden = !b.modified(); row.classList.toggle("changed", b.modified()); });
     return row;
   }
   if (c.kind === "choice") {
-    const select = el("select", {}, ...c.options.map((o) => new Option(optionTitle(o), o)));
+    const select = el("select", {}, ...c.options.map((o) => new Option(tr(optionTitle(o)), o)));
     const reset = resetButton(c.label, b, () => changed("settled"));
     select.addEventListener("change", () => { b.set(select.value); changed("settled"); });
-    const row = el("div", { className: "ctl choice" }, el("label", {}, el("span", { textContent: c.label }), reset, select));
+    const row = el("div", { className: "ctl choice" }, el("label", {}, el("span", { textContent: tr(c.label) }), reset, select));
     syncs.push(() => {
       select.value = b.get();
       reset.hidden = !b.modified();
@@ -488,13 +489,13 @@ function buildRow(c) {
   // A slider under its title and value. Clicking the value types one; off
   // its default, a button resets it (macOS LabeledSlider).
   const title = el("span", { className: "label" });
-  const value = el("button", { type: "button", className: "value", title: "Click to type a value" });
+  const value = el("button", { type: "button", className: "value", title: tr("Click to type a value") });
   const reset = resetButton(c.label, b, () => changed("settled"));
   const range = el("input", { type: "range", min: c.min, max: c.max, step: c.step });
   const track = el("div", { className: "track" }, range);
   touchSlider(track, range);
   const row = el("div", { className: "ctl slider" }, el("div", { className: "head" }, title, reset, value), track);
-  range.setAttribute("aria-label", c.label);
+  range.setAttribute("aria-label", tr(c.label));
   range.addEventListener("input", () => { b.set(snap(Number(range.value), c)); changed("interactive"); });
   range.addEventListener("change", () => { b.set(snap(Number(range.value), c)); changed("settled"); });
   const resetToInitial = () => { b.set(b.initial()); changed("settled"); };
@@ -514,7 +515,7 @@ function buildRow(c) {
   }
   value.addEventListener("click", () => {
     const field = el("input", { className: "value-field", inputMode: "decimal", value: formatValue(b.get(), c.step) });
-    field.setAttribute("aria-label", c.label);
+    field.setAttribute("aria-label", tr(c.label));
     // Return, Tab and clicking elsewhere commit; Escape discards the typing.
     // Not through blur alone: removing a focused field doesn't fire it.
     let done = false;
@@ -537,13 +538,13 @@ function buildRow(c) {
   syncs.push(() => {
     const bw = c.kind === "stock" && filmIsBW();
     row.hidden = (bw && !c.bw) || !shownWhen(c.when);
-    title.textContent = bw ? c.bw : c.label;
+    title.textContent = tr(bw ? c.bw : c.label);
     // Sync never writes back: a value outside the slider's window stays.
     range.value = b.get();
     range.style.setProperty("--f", (Number(range.value) - c.min) / (c.max - c.min));
     value.textContent = formatValue(b.get(), c.step);
     reset.hidden = !b.modified();
-    reset.title = `Reset to ${formatValue(b.initial(), c.step)}`;
+    reset.title = tr("Reset to {value}", { value: formatValue(b.initial(), c.step) });
     row.classList.toggle("changed", b.modified());
   });
   return row;
@@ -555,15 +556,15 @@ function buildRow(c) {
 function buildStyles(c) {
   const buttons = Border.STYLES.map((style) => {
     const swatch = el("span", { className: "swatch" });
-    const button = el("button", { type: "button", className: "style", title: style.help }, swatch, el("span", { textContent: style.title }));
+    const button = el("button", { type: "button", className: "style", title: tr(style.help) }, swatch, el("span", { textContent: tr(style.title) }));
     button.dataset.style = style.id;
-    button.setAttribute("aria-label", `${style.title} border`);
+    button.setAttribute("aria-label", tr("{title} border", { title: tr(style.title) }));
     button.addEventListener("click", () => { border.style = style.id; borderChanged(); });
     return { style, button, swatch };
   });
   const note = el("p", { className: "hint note", hidden: true });
   const row = el("div", { className: "ctl styles" }, el("div", { className: "picker", role: "group" }, ...buttons.map((b) => b.button)), note);
-  row.querySelector(".picker").setAttribute("aria-label", c.label);
+  row.querySelector(".picker").setAttribute("aria-label", tr(c.label));
   let colours = "";
   syncs.push(() => {
     const size = photoSize() ?? early;
@@ -573,7 +574,7 @@ function buildStyles(c) {
     }
     const fits35 = !size || Border.fits("35mm", size.width, size.height);
     note.hidden = fits35;
-    if (!fits35) note.textContent = `35mm needs a 3:2 or 3:4 photograph. This one is ${Border.ratioName(size.width, size.height)}.`;
+    if (!fits35) note.textContent = tr("35mm needs a 3:2 or 3:4 photograph. This one is {ratio}.", { ratio: Border.ratioName(size.width, size.height) });
     if (colours !== border.color + border.lineColor) {
       colours = border.color + border.lineColor;
       for (const { style, swatch } of buttons) swatch.innerHTML = swatchSvg(style.id, border.color, border.lineColor);
@@ -683,9 +684,9 @@ function forgetRevealed() {
 // The Lab's note that Advanced controls hides some: at the end of every
 // Lab tab on the sheet, once at the Lab's end in the sidebar.
 function advancedHint(tab) {
-  const open = el("button", { type: "button", className: "link", textContent: "Settings › Advanced controls" });
+  const open = el("button", { type: "button", className: "link", textContent: tr("Settings › Advanced controls") });
   open.addEventListener("click", () => openSettings());
-  const hint = el("p", { className: `hint advanced-hint ${tab ? "per-tab" : "lab-end"}` }, "Some settings are hidden. ", open, " shows them all.");
+  const hint = el("p", { className: `hint advanced-hint ${tab ? "per-tab" : "lab-end"}` }, tr("Some settings are hidden. "), open, tr(" shows them all."));
   if (tab) hint.dataset.tab = tab;
   hint.dataset.pane = "lab";
   syncs.push(() => { hint.hidden = advanced; });
@@ -699,7 +700,7 @@ function buildControls() {
   const sections = [...PREP_SECTIONS.map((s) => [s, "prep"]), ...SECTIONS.map((s) => [s, "lab"]), ...OUTPUT_SECTIONS.map((s) => [s, "output"])];
   for (const [section, pane] of sections) {
     // A fieldset, so a section or group that is off disables its controls.
-    const body = el("fieldset", { className: "section" }, el("h2", { textContent: section.title }));
+    const body = el("fieldset", { className: "section" }, el("h2", { textContent: tr(section.title) }));
     body.dataset.tab = sectionId(section);
     body.dataset.pane = pane;
     // A phone tab with several sections keeps their titles.
@@ -720,7 +721,7 @@ function buildControls() {
       const details = el("details", { open: opened[key] ?? group.open ?? false });
       details.dataset.tutorialGroup = key;
       details.addEventListener("toggle", () => remember("groups", { ...remembered("groups", {}), [key]: details.open }));
-      const summary = el("summary", {}, el("span", { textContent: group.title }));
+      const summary = el("summary", {}, el("span", { textContent: tr(group.title) }));
       if (Help.GROUPS[group.title]) summary.append(info(group.title, Help.GROUPS[group.title]));
       const controls = el("fieldset", { className: "controls" });
       // Past the basics, each control shows with Advanced controls or once changed.
@@ -733,8 +734,8 @@ function buildControls() {
         changed.push(tuck(row, () => changedShows(id, b.modified())));
       });
       if (group.enable) {
-        const sw = el("input", { type: "checkbox", className: "switch", title: `${group.title} on or off` });
-        sw.setAttribute("aria-label", group.title);
+        const sw = el("input", { type: "checkbox", className: "switch", title: tr("{title} on or off", { title: tr(group.title) }) });
+        sw.setAttribute("aria-label", tr(group.title));
         sw.addEventListener("click", (ev) => ev.stopPropagation());
         sw.addEventListener("change", () => { set(group.enable, sw.checked); sync(); schedule("settled"); });
         syncs.push(() => {
@@ -756,14 +757,14 @@ function buildControls() {
       }
     }
     if (section.print) {
-      const footer = el("p", { className: "hint footer", textContent: section.footer });
+      const footer = el("p", { className: "hint footer", textContent: tr(section.footer) });
       body.append(footer);
       syncs.push(() => {
         body.disabled = get("io.scan_film");
         footer.hidden = !body.disabled;
       });
     } else if (section.footer) {
-      body.append(el("p", { className: "hint footer", textContent: section.footer }));
+      body.append(el("p", { className: "hint footer", textContent: tr(section.footer) }));
     }
     $(pane === "lab" ? "sections" : `${pane}-sections`).append(body);
     if (lab) {
@@ -828,7 +829,7 @@ function fillFavorites(which) {
   select.querySelector("optgroup.favorites")?.remove();
   const ids = favorites(which).filter((id) => stock(id)?.paper === (which === "paper"));
   if (!ids.length) return;
-  const og = Object.assign(document.createElement("optgroup"), { label: "Favorites", className: "favorites" });
+  const og = Object.assign(document.createElement("optgroup"), { label: tr("Favorites"), className: "favorites" });
   for (const id of ids) og.append(new Option(`★ ${stock(id).name}`, FAVORITE + id));
   select.prepend(og);
   select.value = which === "film" ? state.film : state.paper;
@@ -837,7 +838,7 @@ function fillFavorites(which) {
 function fillStocks() {
   const fill = (select, groups) => {
     for (const g of groups) {
-      const og = Object.assign(document.createElement("optgroup"), { label: g.title });
+      const og = Object.assign(document.createElement("optgroup"), { label: tr(g.title) });
       for (const s of g.stocks) og.append(new Option(s.name, s.id));
       select.append(og);
     }
@@ -869,7 +870,7 @@ function fillStocks() {
 // A stock's development time picker (macOS Inspector developmentTime): the
 // times its family lists, shown when there's a choice. Profile default is
 // null; a stock change unsets it (chooseFilm, choosePaper).
-const minutes = (t) => `${Number(t.toFixed(4))} min`;
+const minutes = (t) => tr("{n} min", { n: Number(t.toFixed(4)) });
 function developmentTime(which, path, id) {
   const row = $(`${which}-time-row`), select = $(`${which}-time`);
   let listed = null;
@@ -884,7 +885,7 @@ function developmentTime(which, path, id) {
     const key = times.join();
     if (key !== listed) {
       listed = key;
-      select.replaceChildren(new Option("Profile default", ""), ...times.map((t) => new Option(minutes(t), String(t))));
+      select.replaceChildren(new Option(tr("Profile default"), ""), ...times.map((t) => new Option(minutes(t), String(t))));
     }
     const time = get(path);
     // An imported time is one the family lists; match it as a number.
@@ -939,7 +940,7 @@ function setSheet(snap) {
 
 function buildSheet() {
   for (const t of TABS) {
-    const button = el("button", { type: "button", textContent: t.title, role: "tab" });
+    const button = el("button", { type: "button", textContent: tr(t.title), role: "tab" });
     button.dataset.tab = t.id;
     button.addEventListener("click", () => {
       showTab(t.id);
@@ -1059,7 +1060,7 @@ async function pump() {
       hideMessage();
     } catch (e) {
       renderFailures++;
-      await failed(e, "Render failed");
+      await failed(e, tr("Render failed"));
     }
   }
   running = false;
@@ -1323,7 +1324,7 @@ function fetchBorderTexture() {
   const key = photo && !cropSession && textureFor(size.width, size.height);
   if (!key || textures.has(key)) return;
   const style = Border.STYLES.find((s) => s.id === border.style).title;
-  const progress = (f) => showMessage(`Downloading the ${style} border… ${Math.floor(f * 100)}%`);
+  const progress = (f) => showMessage(tr("Downloading the {style} border… {percent}", { style: tr(style), percent: `${Math.floor(f * 100)}%` }));
   const get = (path) => download(`data/${path}`, undefined, progress).then((bytes) => ({ path, bytes }));
   const load = get(key)
     .catch((e) => {
@@ -1341,7 +1342,7 @@ function fetchBorderTexture() {
       view.refresh();
     }, (e) => {
       textures.delete(key);
-      showMessage(`The border couldn't be downloaded: ${e.message}`, true, 4000);
+      showMessage(tr("The border couldn't be downloaded: {message}", { message: e.message }), true, 4000);
     });
   textures.set(key, load);
 }
@@ -1427,7 +1428,7 @@ function setBadge(text) {
 function showBadge() {
   const text = originalBadge ?? activity;
   $("badge").hidden = !text;
-  if (text) $("badge-text").textContent = text;
+  if (text) $("badge-text").textContent = tr(text);
 }
 
 // ---- Show Original -----------------------------------------------------------
@@ -1468,7 +1469,7 @@ function prepareOriginal() {
   }, (e) => {
     if (made !== originals) return;
     holding = false;
-    showMessage(`The original couldn't be shown: ${e.message}`, true, 4000);
+    showMessage(tr("The original couldn't be shown: {message}", { message: e.message }), true, 4000);
   }).finally(() => {
     if (made !== originals) return;
     originalLoad = null;
@@ -1534,12 +1535,12 @@ function hud(r, interactive) {
   const ms = `${r.elapsedMs.toFixed(0)} ms`;
   const shown = Math.max(r.width, r.height) / Math.max(photo.width, photo.height);
   const parts = interactive
-    ? ["Preview", `${r.width} × ${r.height}`, ms]
-    : [`${size.width} × ${size.height}`, ...(shown < 1 ? [`shown at ${percent(shown)}`] : []), ms, `${r.memoryMiB} MiB`];
+    ? [tr("Preview"), `${r.width} × ${r.height}`, ms]
+    : [`${size.width} × ${size.height}`, ...(shown < 1 ? [tr("shown at {percent}", { percent: percent(shown) })] : []), ms, `${r.memoryMiB} MiB`];
   // Each part on one line; the line breaks between them.
   el.textContent = parts.map((p) => p.replaceAll(" ", "\u00a0")).join("\u00a0· ");
   el.title = shown < 1 && !interactive
-    ? `The preview shows ${percent(shown)} of these pixels. ${exportNote()}; inspect grain in an exported file.\n${r.stages}`
+    ? tr("The preview shows {percent} of these pixels. {note}; inspect grain in an exported file.\n{stages}", { percent: percent(shown), note: exportNote(), stages: r.stages })
     : r.stages;
 }
 
@@ -1632,13 +1633,13 @@ async function redevelop() {
         if (photo === target && sameWb(wantedWb(), wb)) set(RAW_WB_PATH, structuredClone(target.wb));
         sync();
         setBadge(null);
-        const what = "The RAW white balance couldn't be applied";
+        const what = tr("The RAW white balance couldn't be applied");
         // Shown for a while: the frames that follow (of the development
         // restored) leave it up. A crash restarts the engine, as for a render.
         if (e.crashed) await failed(e, what);
         else {
           console.error(e);
-          showMessage(`${what}: ${e.message}`, true, 10_000);
+          showMessage(tr("{what}: {message}", { what, message: e.message }), true, 10_000);
         }
       }
     }
@@ -1706,11 +1707,11 @@ function matchNote() {
   if (!state.match || !photo?.raw) return null;
   if (matchUnavailable()) return matchUnavailable();
   if (matchFailedHere()) return matchFailure.message;
-  if (matchPending() || matching) return "Matching…";
+  if (matchPending() || matching) return tr("Matching…");
   const ev = state.match.ev;
   if (ev === null) return null;
   const value = `${ev >= 0 ? "+" : "−"}${Math.abs(ev).toFixed(2)}`;
-  return state.match.limited ? `Starts at ${value} EV to match the camera, held back to protect highlights.` : `Starts at ${value} EV to match the camera.`;
+  return state.match.limited ? tr("Starts at {value} EV to match the camera, held back to protect highlights.", { value }) : tr("Starts at {value} EV to match the camera.", { value });
 }
 
 // Turns matching on (from the match, Exposure back to 0) or off (the
@@ -1762,7 +1763,7 @@ async function reconcileMatch({ force = false } = {}) {
       reference = await cameraReference(target);
     } catch (e) {
       const unusable = /^UNUSABLE: /.test(e.message);
-      throw Object.assign(new Error(unusable ? e.message.slice(10) : "The camera preview couldn’t be read."), { photograph: true, cause: e });
+      throw Object.assign(new Error(unusable ? e.message.slice(10) : tr("The camera preview couldn’t be read.")), { photograph: true, cause: e });
     }
     if (stale() || running) return;
     matching.engine = true;
@@ -1770,13 +1771,13 @@ async function reconcileMatch({ force = false } = {}) {
     lastSolve = { solveMs: Math.round(result.elapsed_ms), totalMs: Math.round(performance.now() - t), ev: result.exposure_ev };
     console.log(`matched camera brightness: ${result.exposure_ev.toFixed(3)} EV${result.highlight_limited ? " (highlight-limited)" : ""} in ${result.elapsed_ms.toFixed(0)} ms (${(performance.now() - t).toFixed(0)} ms with the reference)`);
     if (stale() || !state.match || matchInputs() !== inputs) return;
-    if (!Number.isFinite(result.exposure_ev) || Math.abs(result.exposure_ev) > 3) throw new Error("No reliable brightness match with these settings.");
+    if (!Number.isFinite(result.exposure_ev) || Math.abs(result.exposure_ev) > 3) throw new Error(tr("No reliable brightness match with these settings."));
     applyMatch(result.exposure_ev, !!result.highlight_limited, inputs);
   } catch (e) {
     if (stale() || e.restarted || matchInputs() !== inputs) return;
     console.warn(`no camera brightness match: ${e.cause?.message ?? e.message}`);
     let message = e.message, photograph = !!e.photograph;
-    if (!photograph) [message, photograph] = await engine.call("brightnessFailure", e.message).then(([m, scope]) => [m, scope === "photograph"]).catch(() => ["No reliable brightness match with these settings.", false]);
+    if (!photograph) [message, photograph] = await engine.call("brightnessFailure", e.message).then(([m, scope]) => [m, scope === "photograph"]).catch(() => [tr("No reliable brightness match with these settings."), false]);
     matchFailure = { photo: target, inputs: photograph ? null : inputs, message, reason: e.cause?.message ?? e.message };
     sync();
     schedule("settled");
@@ -1905,8 +1906,8 @@ function crashCheck() {
   const fresh = Date.now() - (lastLife?.at ?? 0) < 60_000;
   if (!lastLife?.previews || !fresh || !previewsOn) return;
   setPreviews(false);
-  showMessage("Negs ran out of memory and reloaded. Film and paper previews are now off to save memory.", false, 20_000,
-    { label: "Settings", run: () => openSettings() });
+  showMessage(tr("Negs ran out of memory and reloaded. Film and paper previews are now off to save memory."), false, 20_000,
+    { label: tr("Settings"), run: () => openSettings() });
 }
 
 // ---- Settings ------------------------------------------------------------------
@@ -1917,6 +1918,7 @@ function openSettings() {
   $("previews").checked = previewsOn;
   $("match-new-raws").checked = matchNewRaws();
   $("advanced").checked = advanced;
+  $("lang").value = lang;
   $("settings-dialog").showModal();
 }
 $("advanced").addEventListener("change", () => {
@@ -1926,6 +1928,13 @@ $("advanced").addEventListener("change", () => {
 });
 $("settings").addEventListener("click", openSettings);
 $("match-new-raws").addEventListener("change", () => remember("matchNewRaws", $("match-new-raws").checked));
+// The interface language (web/i18n.js): a new one is a reload away, its
+// dictionary loading before the page renders.
+$("lang").addEventListener("change", () => {
+  if ($("lang").value === lang) return;
+  remember("lang", $("lang").value);
+  location.reload();
+});
 
 // What tile `id` of `which` renders: the edit with that stock chosen.
 function tileRequest(which, id) {
@@ -1996,9 +2005,9 @@ async function tourWait(test, signal, failures = renderFailures) {
   const deadline = performance.now() + 120000;
   for (;;) {
     signal?.throwIfAborted();
-    if (renderFailures !== failures) throw new Error("The sample couldn't be rendered. Try again or return to the editor.");
+    if (renderFailures !== failures) throw new Error(tr("The sample couldn't be rendered. Try again or return to the editor."));
     if (test()) return;
-    if (performance.now() > deadline) throw new Error("The photo took too long to develop. Try again or return to the editor.");
+    if (performance.now() > deadline) throw new Error(tr("The photo took too long to develop. Try again or return to the editor."));
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
 }
@@ -2054,8 +2063,8 @@ function tutorialAdapter() {
     remember: (value) => remember("tutorial", value),
     hasPhoto: () => !!photo,
     launchIntent: () => new URLSearchParams(location.hash.slice(1)).has("preset") || query.has("image") || query.has("film") || query.has("paper"),
-    unavailable: () => cropSession ? "Finish or cancel your crop before starting the tutorial."
-      : loading || exporting || presets.busy() || dialogOpen() ? "Finish the current operation before starting the tutorial." : null,
+    unavailable: () => cropSession ? tr("Finish or cancel your crop before starting the tutorial.")
+      : loading || exporting || presets.busy() || dialogOpen() ? tr("Finish the current operation before starting the tutorial.") : null,
     message: showMessage,
     resize: () => setSheet(sheet),
     capture() {
@@ -2077,10 +2086,10 @@ function tutorialAdapter() {
       samplePicker.cancel();
       setBadge("Downloading");
       const first = renders.length;
-      const data = download(DEFAULT_SAMPLE.url, signal, (fraction) => !signal.aborted && setBadge(`Downloading ${Math.floor(fraction * 100)}%`));
+      const data = download(DEFAULT_SAMPLE.url, signal, (fraction) => !signal.aborted && setBadge(tr("Downloading {percent}", { percent: `${Math.floor(fraction * 100)}%` })));
       const opened = await open("Sample 1.dng", data, DEFAULT_SAMPLE.id);
       signal.throwIfAborted();
-      if (!opened) throw new Error("Couldn't open the sample. Check your connection, or save Sample 1 for offline use.");
+      if (!opened) throw new Error(tr("Couldn't open the sample. Check your connection, or save Sample 1 for offline use."));
       await tourWait(() => developed && renders.length > first && tourIdle(), signal);
       sampleShown = true;
     },
@@ -2124,7 +2133,7 @@ function tutorialAdapter() {
       if (saved.photo) {
         Object.assign(state, structuredClone(saved.edit));
         const first = renders.length;
-        if (!await open(saved.photo.name, Promise.resolve(saved.photo.bytes), saved.photo.sampleId)) throw new Error("Couldn't reopen your photograph. Please retry.");
+        if (!await open(saved.photo.name, Promise.resolve(saved.photo.bytes), saved.photo.sampleId)) throw new Error(tr("Couldn't reopen your photograph. Please retry."));
         await tourWait(() => developed && renders.length > first && tourIdle());
         // open() resets finishing geometry; put the user's geometry back.
         Object.assign(state, structuredClone(saved.edit));
@@ -2168,7 +2177,7 @@ function tutorialAdapter() {
       samplePicker.sync();
       presets.sync();
     },
-    completed: () => showMessage("You’re ready. Film and paper shape the look; Prep’s Exposure sets the brightness. Reopen Tutorial whenever you like.", false, 8000),
+    completed: () => showMessage(tr("You’re ready. Film and paper shape the look; Prep’s Exposure sets the brightness. Reopen Tutorial whenever you like."), false, 8000),
   };
 }
 
@@ -2176,8 +2185,8 @@ function tutorialAdapter() {
 
 // What an export of the photograph develops.
 const exportNote = () => photo.exportWidth < photo.width
-  ? `Exports here develop ${photo.exportWidth} × ${photo.exportHeight}; a desktop browser exports all of them`
-  : "Exports develop all of them";
+  ? tr("Exports here develop {width} × {height}; a desktop browser exports all of them", { width: photo.exportWidth, height: photo.exportHeight })
+  : tr("Exports develop all of them");
 
 // Opens `name`, whose bytes `data` resolves to. Until its first frame, a
 // placeholder from the bytes shows.
@@ -2265,7 +2274,7 @@ async function open(name, data, sampleId = null) {
     // The engine let the last photograph go before this one's decode.
     if (photo) await reloadPhoto().catch(() => {});
     $("empty").hidden = !!photo;
-    await failed(e, `Couldn't open ${name}`);
+    await failed(e, tr("Couldn't open {name}", { name }));
     return false;
   } finally {
     if (opening === opens) loading = false;
@@ -2303,12 +2312,12 @@ async function openFile(file) {
 const samplePicker = createSamplePicker({
   container: $("samples"), select: $("sample-select"), next: $("sample-next"), note: $("sample-offline"),
   current: () => photo?.sampleId,
-  onError: (e) => showMessage(`Couldn't load sample choices: ${e.message}`, true),
+  onError: (e) => showMessage(tr("Couldn't load sample choices: {message}", { message: e.message }), true),
   load: (entry, number, signal) => {
     setBadge("Downloading");
     $("empty").hidden = true;
     const opening = opens + 1;
-    const data = download(entry.url, signal, (f) => opens === opening && setBadge(`Downloading ${Math.floor(f * 100)}%`));
+    const data = download(entry.url, signal, (f) => opens === opening && setBadge(tr("Downloading {percent}", { percent: `${Math.floor(f * 100)}%` })));
     return open(`Sample ${number}.dng`, data, entry.id);
   },
 });
@@ -2388,7 +2397,7 @@ async function failed(e, what) {
     dropEarly();
     paint();
   }
-  showMessage(`${what}: ${e.message}`, true);
+  showMessage(tr("{what}: {message}", { what, message: e.message }), true);
   if (e.crashed) {
     // A WebGPU engine that crashed usually lost its device (out of GPU
     // memory, the GPU process restarting), and a new one the same way tends
@@ -2405,7 +2414,7 @@ async function failed(e, what) {
       next = "cpu";
       note = " Switched to the CPU engine.";
     }
-    const message = note ? `${what}: ${e.message}.${note}` : $("message").textContent;
+    const message = note ? tr("{what}: {message}.{note}", { what, message: e.message, note: tr(note) }) : $("message").textContent;
     await startEngine(next).catch(() => {});
     showMessage(message, true);
     if (note) schedule("settled");
@@ -2417,7 +2426,7 @@ async function exportJpeg() {
   exporting = true;
   const edit = editKey();
   $("export").disabled = true;
-  showMessage(`Rendering ${photo.exportWidth}×${photo.exportHeight} for export…`);
+  showMessage(tr("Rendering {width}×{height} for export…", { width: photo.exportWidth, height: photo.exportHeight }));
   $("busy").classList.add("on");
   try {
     while (running || previewing) await new Promise((r) => setTimeout(r, 20));
@@ -2438,7 +2447,7 @@ async function exportJpeg() {
     // A home-screen app on iOS has no downloads; the share sheet saves to
     // Photos or Files. Sharing needs a fresh tap, which the render outlasted.
     if (IOS && standalone() && navigator.canShare?.({ files: [file] })) {
-      showMessage("Exported.", false, 60_000, { label: "Save or share…", run: () => navigator.share({ files: [file] }).catch(() => {}) });
+      showMessage(tr("Exported."), false, 60_000, { label: tr("Save or share…"), run: () => navigator.share({ files: [file] }).catch(() => {}) });
     } else {
       const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
       a.click();
@@ -2447,7 +2456,7 @@ async function exportJpeg() {
     }
     exportedEdit = edit;
   } catch (e) {
-    await failed(e, "Export failed");
+    await failed(e, tr("Export failed"));
   } finally {
     exporting = false;
     $("export").disabled = !photo;
@@ -2460,7 +2469,7 @@ async function exportJpeg() {
 // and includes it, as the CLI adds it (`addBorder`: spektrafilm-io's
 // add_border on the bytes, in the engine's worker).
 async function exportRender() {
-  if (cropSession) throw new Error("Apply or cancel the crop before exporting");
+  if (cropSession) throw new Error(tr("Apply or cancel the crop before exporting"));
   // Never the last development's pixels with a newly chosen RAW white
   // balance: wait for the matching one. The render is asked for in the same
   // turn as the check, so the engine renders it before any later change.
@@ -2526,10 +2535,10 @@ async function balancePrint() {
     console.log(`balance print: magenta ${r.m}, yellow ${r.y} in ${r.elapsedMs.toFixed(0)} ms`);
     set("enlarger.m_filter_shift", r.m);
     set("enlarger.y_filter_shift", r.y);
-    showMessage(`Print balanced: magenta ${r.m.toFixed(2)}, yellow ${r.y.toFixed(2)}`, false, 4000);
+    showMessage(tr("Print balanced: magenta {m}, yellow {y}", { m: r.m.toFixed(2), y: r.y.toFixed(2) }), false, 4000);
     schedule("settled");
   } catch (e) {
-    await failed(e, "Balance Print failed");
+    await failed(e, tr("Balance Print failed"));
   } finally {
     balancing = false;
     sync();
@@ -2570,14 +2579,14 @@ async function startOffline() {
   });
   new BroadcastChannel("negs-offline").onmessage = ({ data }) => {
     if (data.type === "failed") {
-      $("offline-text").textContent = controlled ? "The new version couldn't be downloaded" : "Couldn't save Negs for offline use";
+      $("offline-text").textContent = controlled ? tr("The new version couldn't be downloaded") : tr("Couldn't save Negs for offline use");
       $("offline-all").hidden = $("offline-clear").hidden = true;
       $("offline").hidden = false;
-      return showMessage(`${$("offline-text").textContent} (${data.error}). It tries again the next time Negs opens.`, true, 8000);
+      return showMessage(tr("{text} ({error}). It tries again the next time Negs opens.", { text: $("offline-text").textContent, error: data.error }), true, 8000);
     }
     if (data.type !== "progress") return offlineStatus();
-    const what = data.task === "save-all" ? "Saving everything for offline use" : controlled ? "Downloading a new version" : "Saving Negs for offline use";
-    $("offline-text").textContent = `${what}… ${data.total ? Math.floor((data.done / data.total) * 100) : 100}%`;
+    const what = data.task === "save-all" ? tr("Saving everything for offline use") : controlled ? tr("Downloading a new version") : tr("Saving Negs for offline use");
+    $("offline-text").textContent = tr("{what}… {percent}", { what, percent: `${data.total ? Math.floor((data.done / data.total) * 100) : 100}%` });
     $("offline-all").hidden = $("offline-clear").hidden = true;
     $("offline").hidden = false;
   };
@@ -2590,7 +2599,7 @@ async function startOffline() {
     $("offline-all").disabled = true;
     const r = await ask("save-all");
     $("offline-all").disabled = false;
-    if (r?.error) showMessage(`Not everything could be saved for offline use: ${r.error}`, true, 6000);
+    if (r?.error) showMessage(tr("Not everything could be saved for offline use: {error}", { error: r.error }), true, 6000);
     offlineStatus();
   });
   $("offline-clear").addEventListener("click", clearOffline);
@@ -2628,13 +2637,13 @@ async function offlineStatus() {
   const s = await ask("status");
   if (!s) return;
   if (s.shellMissing) {
-    $("offline-text").textContent = "Saving Negs for offline use…";
+    $("offline-text").textContent = tr("Saving Negs for offline use…");
     $("offline-all").hidden = $("offline-clear").hidden = true;
   } else {
-    $("offline-text").textContent = `Offline · ${mb(s.saved)} saved`;
+    $("offline-text").textContent = tr("Offline · {size} saved", { size: mb(s.saved) });
     const rest = s.total - s.saved;
-    $("offline-all").textContent = `Save all (${mb(rest)})`;
-    $("offline-all").title = "Every border and spectral table, and the sample photo, for use offline";
+    $("offline-all").textContent = tr("Save all ({size})", { size: mb(rest) });
+    $("offline-all").title = tr("Every border and spectral table, and the sample photo, for use offline");
     $("offline-all").hidden = rest <= 0;
     $("offline-clear").hidden = false;
   }
@@ -2645,14 +2654,15 @@ async function clearOffline() {
   for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
   for (const name of await caches.keys()) if (name.startsWith("negs-")) await caches.delete(name);
   $("offline").hidden = $("update").hidden = true;
-  showMessage("Removed what Negs saved for offline use. It's saved again the next time Negs opens.", false, 6000);
+  showMessage(tr("Removed what Negs saved for offline use. It's saved again the next time Negs opens."), false, 6000);
 }
 
 let announced = false;
 function updateReady(text = "A new version of Negs is ready.") {
+  text = tr(text);
   $("update-text").textContent = text;
   $("update").hidden = false;
-  if (!announced) showMessage(`${text} Reload to use it.`, false, 6000, { label: "Reload", run: () => $("update-reload").click() });
+  if (!announced) showMessage(tr("{text} Reload to use it.", { text }), false, 6000, { label: tr("Reload"), run: () => $("update-reload").click() });
   announced = true;
 }
 
@@ -2672,9 +2682,9 @@ addEventListener("appinstalled", () => {
 function showInstall() {
   if (standalone() || remembered("install-dismissed", false)) return;
   const macSafari = SAFARI && !IOS && /Macintosh/.test(ua) && Number(ua.match(/Version\/(\d+)/)?.[1]) >= 17;
-  const text = installPrompt ? "Use Negs as an app, offline too."
-    : IOS && SAFARI ? "Use Negs as an app: in Safari's Share menu, choose Add to Home Screen."
-    : macSafari ? "Use Negs as an app: File → Add to Dock."
+  const text = installPrompt ? tr("Use Negs as an app, offline too.")
+    : IOS && SAFARI ? tr("Use Negs as an app: in Safari's Share menu, choose Add to Home Screen.")
+    : macSafari ? tr("Use Negs as an app: File → Add to Dock.")
     : null;
   if (!text) return;
   $("install-text").textContent = text;
@@ -2724,7 +2734,7 @@ addEventListener("pagehide", () => {
   decoder = null;
 });
 addEventListener("pageshow", (e) => {
-  if (e.persisted) starting = startEngine(kind).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
+  if (e.persisted) starting = startEngine(kind).catch((e) => showMessage(tr("The engine didn't start: {message}", { message: e.message }), true));
 });
 $("brand").addEventListener("click", (e) => {
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0 || !unexported()) return;
@@ -2874,7 +2884,7 @@ const dialogOpen = () => !!document.querySelector("dialog[open]");
 // typing in a field.
 {
   const button = $("original");
-  if (matchMedia("(pointer: coarse)").matches) button.title = "Tap to show the original; tap again to go back";
+  if (matchMedia("(pointer: coarse)").matches) button.title = tr("Tap to show the original; tap again to go back");
   let held = null, pointer = "";
   button.addEventListener("pointerenter", () => prepareOriginal());
   button.addEventListener("pointerdown", (ev) => {
@@ -2947,7 +2957,7 @@ if (adapter) {
   console.info(`WebGPU adapter: ${[vendor, architecture, device, description].filter(Boolean).join(" · ") || "unknown"}${adapter.info?.isFallbackAdapter ? " (fallback)" : ""}`);
 }
 const gpu = query.get("backend") ?? (adapter ? "gpu" : "cpu");
-starting = startEngine(gpu).catch((e) => showMessage(`The engine didn't start: ${e.message}`, true));
+starting = startEngine(gpu).catch((e) => showMessage(tr("The engine didn't start: {message}", { message: e.message }), true));
 starting.then(() => presets.sync());
 tutorial = createTutorial(tutorialAdapter());
 presets.sync();

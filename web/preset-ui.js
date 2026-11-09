@@ -5,6 +5,7 @@
 // exporter (the engine's importPreset, exportPreset) read and write the
 // files; app.js owns the edit and passes what this needs.
 import { MAX_FILE_BYTES, LinkError, decodeLink, encodeLink, linkUrl, linkValue, nameFrom, nameProblem, stem } from "./presets.js";
+import { tr } from "./i18n.mjs";
 
 export function createPresets(app) {
   const $ = (id) => document.getElementById(id);
@@ -111,14 +112,14 @@ export function createPresets(app) {
         try {
           await app.developed();
         } catch (e) {
-          app.message(`Applied “${name}”, but its RAW white balance couldn’t be applied: ${e.message}. The white balance is back to the photograph’s.`, true);
+          app.message(tr("Applied “{name}”, but its RAW white balance couldn’t be applied: {message}. The white balance is back to the photograph’s.", { name, message: e.message }), true);
           return true;
         }
       }
-      app.message(`Applied “${name}”.`, false, 4000);
+      app.message(tr("Applied “{name}”.", { name }), false, 4000);
       return true;
     } catch (e) {
-      app.message(`Couldn’t apply “${name}”: ${e.message}`, true);
+      app.message(tr("Couldn’t apply “{name}”: {message}", { name, message: e.message }), true);
       return false;
     } finally {
       applying = null;
@@ -132,14 +133,14 @@ export function createPresets(app) {
     if (!file) return;
     const name = nameFrom(stem(file.name));
     if (file.size > MAX_FILE_BYTES) {
-      app.message(`Couldn’t apply “${name}”: the file is too large to be a preset.`, true);
+      app.message(tr("Couldn’t apply “{name}”: the file is too large to be a preset.", { name }), true);
       return;
     }
     let text;
     try {
       text = await file.text();
     } catch (e) {
-      app.message(`Couldn’t read “${file.name}”: ${e.message}`, true);
+      app.message(tr("Couldn’t read “{file}”: {message}", { file: file.name, message: e.message }), true);
       return;
     }
     await apply(text, name);
@@ -153,7 +154,7 @@ export function createPresets(app) {
   function save(name, text, { filename = `${name}.json`, type = "application/json", what = "the preset" } = {}) {
     const file = new File([text], filename, { type });
     if (app.shareFiles() && navigator.canShare?.({ files: [file] })) {
-      navigator.share({ files: [file] }).catch((e) => e.name !== "AbortError" && app.message(`Couldn’t save ${what}: ${e.message}`, true));
+      navigator.share({ files: [file] }).catch((e) => e.name !== "AbortError" && app.message(tr("Couldn’t save {what}: {message}", { what: tr(what), message: e.message }), true));
       return;
     }
     const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(file), download: file.name });
@@ -173,13 +174,13 @@ export function createPresets(app) {
     const filename = `${film}_${params.io?.scan_film ? "direct_scan" : paper}.cube`;
     lutting = true;
     sync();
-    app.message("Exporting LUT…");
+    app.message(tr("Exporting LUT…"));
     try {
       const text = await app.call("exportLut", film, paper, JSON.stringify(params), 33);
       save(filename, text, { filename, type: "application/octet-stream", what: "the LUT" });
-      app.message(`Exported ${filename}.`, false, 4000);
+      app.message(tr("Exported {filename}.", { filename }), false, 4000);
     } catch (e) {
-      app.message(`Couldn’t export the LUT: ${e.message}`, true);
+      app.message(tr("Couldn’t export the LUT: {message}", { message: e.message }), true);
     } finally {
       lutting = false;
       sync();
@@ -202,7 +203,7 @@ export function createPresets(app) {
     linkField.value = "";
     $("copy-link").disabled = true;
     $("download-preset").disabled = true;
-    linkStatus.textContent = "Preparing link…";
+    linkStatus.textContent = tr("Preparing link…");
     showName();
     exportDialog.showModal();
     nameField.select();
@@ -215,7 +216,7 @@ export function createPresets(app) {
     } catch (e) {
       if (opened !== exports) return;
       linkStatus.textContent = "";
-      showProblem(`Couldn’t export the preset: ${e.message}`);
+      showProblem(tr("Couldn’t export the preset: {message}", { message: e.message }));
     }
   }
   function showProblem(text) {
@@ -235,10 +236,10 @@ export function createPresets(app) {
     $("copy-link").disabled = true;
     if (!exportText) return;
     if (nameProblem(nameField.value)) {
-      linkStatus.textContent = "Enter a valid name for a link.";
+      linkStatus.textContent = tr("Enter a valid name for a link.");
       return;
     }
-    linkStatus.textContent = "Preparing link…";
+    linkStatus.textContent = tr("Preparing link…");
     const name = nameField.value, text = exportText;
     linkTimer = setTimeout(async () => {
       try {
@@ -249,7 +250,7 @@ export function createPresets(app) {
         $("copy-link").disabled = false;
       } catch (e) {
         if (made !== links) return;
-        linkStatus.textContent = e instanceof LinkError ? e.message : `Couldn’t make a link: ${e.message}`;
+        linkStatus.textContent = e instanceof LinkError ? e.message : tr("Couldn’t make a link: {message}", { message: e.message });
       }
     }, 120);
   }
@@ -268,12 +269,12 @@ export function createPresets(app) {
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
-      linkStatus.textContent = "Link copied.";
+      linkStatus.textContent = tr("Link copied.");
     } catch {
       // Without clipboard access, select it to copy by hand.
       linkField.focus();
       linkField.select();
-      linkStatus.textContent = document.execCommand?.("copy") ? "Link copied." : "Select the link and copy it.";
+      linkStatus.textContent = document.execCommand?.("copy") ? tr("Link copied.") : tr("Select the link and copy it.");
     }
   });
   linkField.addEventListener("focus", () => linkField.select());
@@ -311,17 +312,17 @@ export function createPresets(app) {
       if (arrival !== arrivals) return;
       incoming = { name, text, arrival };
       const film = app.stockName(r.film) ?? r.film, paper = app.stockName(r.paper) ?? r.paper;
-      showIncoming({ name, stocks: JSON.parse(r.params).io.scan_film ? `${film} · scanned directly` : `${film} · ${paper}` });
+      showIncoming({ name, stocks: JSON.parse(r.params).io.scan_film ? tr("{film} · scanned directly", { film }) : `${film} · ${paper}` });
     } catch (e) {
       if (arrival !== arrivals) return;
-      showIncoming({ problem: e instanceof LinkError ? e.message : `This preset can’t be used: ${e.message}` });
+      showIncoming({ problem: e instanceof LinkError ? e.message : tr("This preset can’t be used: {message}", { message: e.message }) });
     }
   }
   function showIncoming({ loading = false, name = "", stocks = "", problem = null }) {
     $("incoming-preset").hidden = !!problem;
     $("incoming-problem").hidden = !problem;
     $("incoming-reason").textContent = problem ?? "";
-    $("incoming-name").textContent = loading ? "Reading the preset…" : name;
+    $("incoming-name").textContent = loading ? tr("Reading the preset…") : name;
     $("incoming-stocks").textContent = stocks;
     $("incoming-try").disabled = loading;
     $("incoming-download").disabled = loading;
