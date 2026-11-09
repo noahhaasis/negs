@@ -485,7 +485,7 @@ impl Session {
             Command::BalancePrint { film, paper, params } => {
                 let started = Instant::now();
                 let (m, y) = spektrafilm_core::print_balance::solve_neutral_filter_shifts(
-                    profile::load_profile_by_name(data, &film)?,
+                    profile::load_profile_by_name(data, spektrafilm_core::negative_scan::film_stock(&film, &params))?,
                     profile::load_profile_by_name(data, &paper)?,
                     &params,
                     data,
@@ -942,6 +942,7 @@ fn write_display(
 
 /// A calibrated pipeline for `film` printed on `paper` (or scanned).
 fn build_pipeline(data: &Path, film: &str, paper: &str, params: &RuntimeParams) -> Result<Pipeline> {
+    let film = spektrafilm_core::negative_scan::film_stock(film, params);
     let film_profile = profile::load_profile_by_name(data, film)?;
     let print_profile = profile::load_profile_by_name(data, if params.io.scan_film { film } else { paper })?;
     Pipeline::new_with_spectral(film_profile, print_profile, params.clone(), data).map_err(anyhow::Error::msg)

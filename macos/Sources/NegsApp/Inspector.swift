@@ -29,6 +29,11 @@ enum InspectorTab: String, CaseIterable {
     case prep = "Prep", lab = "Lab", output = "Output"
 }
 
+let negativeScanControls: [Adjustment] = [
+    .slider("Auto colour", "io.negative_scan.auto_color", 0...1, 0.01),
+    .slider("Auto density", "io.negative_scan.auto_density", 0...1, 0.01),
+    .slider("Dye unmixing", "io.negative_scan.unmix", 0...1, 0.01)
+]
 let prepToneControls: [Adjustment] = [
     .slider("Highlights", "prep.highlights", -180...100, 1),
     .slider("Shadows", "prep.shadows", -100...100, 1),
@@ -628,7 +633,14 @@ struct AdjustmentInspector: View {
             Divider()
             Form {
                 switch tab {
-                case .prep: prep
+                case .prep:
+                    if model.value(EditorModel.negativeScanPath).bool {
+                        Section {
+                            Text("Prep shapes the scene before the film. A negative scan is already film, so Prep is skipped; use the Lab’s Negative Scan and Print controls.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    prep.disabled(model.value(EditorModel.negativeScanPath).bool)
                 case .lab: lab
                 case .output: output
                 }
@@ -700,7 +712,28 @@ struct AdjustmentInspector: View {
     /// Above the tabs: the stocks shape everything the tabs adjust.
     @ViewBuilder private var filmAndPaper: some View {
         let scanning = model.value("io.scan_film").bool
+        let negative = model.value(EditorModel.negativeScanPath).bool
         Section {
+            // First: is the photograph a scene to film, or a real negative?
+            Toggle("Negative scan", isOn: model.negativeScan)
+                .help(ControlHelp.negativeScan)
+            if negative {
+                let stock = model.films.first { $0.id == model.film }
+                let colourNegative = !(stock?.positive ?? false) && !(stock?.bw ?? false)
+                Toggle("Match film stock", isOn: model.toggle(EditorModel.matchStockPath))
+                    .disabled(!colourNegative && !model.value(EditorModel.matchStockPath).bool)
+                    .help(colourNegative ? ControlHelp.matchStock
+                          : "Only a colour negative stock can be matched. Turn off Negative scan, choose the roll’s stock, then turn it back on.")
+            }
+            if model.usesGenericNegative {
+                // The negative has its own film; no simulated stock is chosen.
+                LabeledContent {
+                    Text(EditorModel.genericNegativeName).foregroundStyle(.secondary)
+                } label: {
+                    Text("Film").foregroundStyle(.secondary)
+                }
+                .help("The negative is read with a typical C-41 colour negative’s dyes. Turn on Match film stock to use the roll’s own stock.")
+            } else {
             // Preview grids, or the plain menus when Settings turns them off.
             if model.previews.enabled {
                 StockFoldout(model: model, paper: false)
@@ -718,8 +751,11 @@ struct AdjustmentInspector: View {
                 }
                 .help(ControlHelp.film)
             }
-            developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development",
-                            help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
+            if !negative {
+                developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development",
+                                help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
+            }
+            }
             if !scanning {
                 if model.previews.enabled {
                     StockFoldout(model: model, paper: true)
@@ -743,29 +779,51 @@ struct AdjustmentInspector: View {
                 } label: {
                     Text("Paper").foregroundStyle(.secondary)
                 }
-                .help("Scan film directly is on in the Lab’s Print section.")
+                .help("Bypass print is on in the Lab’s Print section.")
             }
         }
     }
 
+    /// The negative scan's balance and where it is measured.
+    @ViewBuilder private var negativeScanSettings: some View {
+        ForEach(negativeScanControls) { control($0) }
+        Picker("Analysis area", selection: model.negativeAnalysisArea) {
+            ForEach(NegativeAnalysisArea.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .help(ControlHelp.negativeAnalysisArea)
+        if model.negativeAnalysisArea.wrappedValue == .crop && !model.crop.cropped {
+            Text("Crop the photograph to choose the area: the base and balance are measured inside the crop.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        control(.slider("Analysis margin", "io.negative_scan.analysis_margin", 0...0.45, 0.01))
+    }
+
     @ViewBuilder private var lab: some View {
         let scanning = model.value("io.scan_film").bool
+        let negative = model.value(EditorModel.negativeScanPath).bool
+        if negative {
+            Section {
+                negativeScanSettings
+            } header: { Text("Negative Scan") } footer: {
+                Text("The photograph is read as a scan of a real \(model.usesGenericNegative ? "colour" : model.filmName) negative and its dyes are printed on the paper. Camera and Film are skipped.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
         Section("Camera") {
             control(.slider("Negative exposure (EV)", "camera.exposure_compensation_ev", -5...5, 0.1))
             FilmFormatPicker(model: model)
             if shows("camera.lens_blur_um") { control(.slider("Lens blur (µm)", "camera.lens_blur_um", 0...100, 0.1)) }
             groups(.camera)
         }
+        .disabled(negative)
         Section("Film") { groups(.film) }
+            .disabled(negative)
         Section {
-            // Here rather than beside the stocks: few photographs want it.
-            if allControls || scanning {
-                Toggle("Scan film directly", isOn: model.toggle("io.scan_film"))
-                    .help("Skip printing and scan the developed film, as for slides.")
-            }
+            Toggle("Bypass print", isOn: model.bypassPrint)
+                .help("Skip printing and scan the developed film directly, as for slides.")
             groups(.print).disabled(scanning)
         } header: { Text("Print") } footer: {
-            if scanning { Text("Printing and the paper are skipped while scanning film directly.").font(.caption).foregroundStyle(.secondary) }
+            if scanning { Text("Printing and the paper are skipped while Bypass print is on.").font(.caption).foregroundStyle(.secondary) }
         }
         let outputChanged = model.previewSpace != SaveSettings.colorSpaces[0] || model.isModified("io.output_cctf_encoding")
         if allControls || outputChanged || adjustmentGroups.contains(where: { $0.section == .scan && shows($0) }) {
