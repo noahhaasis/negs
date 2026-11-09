@@ -245,12 +245,12 @@ final class LibraryFormatTests: XCTestCase {
     private func model(store: SidecarStore) async throws -> EditorModel {
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build the release helper first") }
         let defaults = UserDefaults.standard
-        let saved = ["autoPlaceNewImages", "sidecars", "advanceAfterRating", LibraryFilter.defaultsKey].map { ($0, defaults.object(forKey: $0)) }
+        let cleared = ["advanceAfterRating", LibraryFilter.defaultsKey, EditorModel.newPhotoFilmKey, EditorModel.newPhotoPaperKey]
+        let saved = (["autoPlaceNewImages", "sidecars"] + cleared).map { ($0, defaults.object(forKey: $0)) }
         addTeardownBlock { for (key, value) in saved { defaults.set(value, forKey: key) } }
         defaults.set(false, forKey: "autoPlaceNewImages")
         defaults.set(true, forKey: "sidecars")
-        defaults.removeObject(forKey: "advanceAfterRating")
-        defaults.removeObject(forKey: LibraryFilter.defaultsKey)
+        for key in cleared { defaults.removeObject(forKey: key) }
         let model = EditorModel(sidecars: store)
         addTeardownBlock { @MainActor in model.shutdown() }
         await model.start(paths: paths, restoration: Task { nil })
@@ -821,7 +821,9 @@ final class LibraryFormatTests: XCTestCase {
         options.format = OutputFormat.png.rawValue
         let started = await model.exportBatch(model.exportTargets, to: out, options: options)
         let run = try XCTUnwrap(started)
-        XCTAssertEqual(run.items.map(\.fileName), ["a_\(film).png", "b_kodak_portra_400.png", "c_\(film).png"], "c follows the open photograph's film")
+        let newFilm = model.newPhotoFilm
+        XCTAssertNotEqual(newFilm, film)
+        XCTAssertEqual(run.items.map(\.fileName), ["a_\(film).png", "b_kodak_portra_400.png", "c_\(newFilm).png"], "c has the default film, not the open photograph's")
         XCTAssertEqual(run.items.map(\.needsMatch), [false, true, true])
         XCTAssertTrue(model.batchRunning)
         XCTAssertFalse(model.canExport, "one batch at a time")
@@ -831,7 +833,7 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path), "the journal goes when the batch ends")
         XCTAssertNil(model.batch, "a batch without failures is forgotten")
 
-        let files = ["a_\(film).png", "b_kodak_portra_400.png", "c_\(film).png"].map { out.appendingPathComponent($0) }
+        let files = ["a_\(film).png", "b_kodak_portra_400.png", "c_\(newFilm).png"].map { out.appendingPathComponent($0) }
         XCTAssertEqual(files.map(ExportRating.read), [3, 4, nil])
         // b's match solved and stored with its edits; c gets no sidecar.
         let match = try store.read(photo: b)?.variants.first?.edits?["brightnessMatch"]
@@ -839,13 +841,13 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(try store.read(photo: b)?.variants.first?.edits?["params.prep.lift"], .number(5))
         XCTAssertFalse(FileManager.default.fileExists(atPath: PhotoSidecar.url(for: c).path))
         // Each exported alone, as today, gives the same bytes: a open as it
-        // was, and c opened after it, so with a's film and its match solved.
+        // was, and c opened after it, with the default film and its match solved.
         // (Not c against a: a kept an exposure solved before its film
         // changed, as a change under 0.05 EV does.)
         for (photo, file) in [(a, files[0]), (c, files[2])] {
             model.open(photo)
             try await waitUntil { model.previewCurrent && !model.brightnessMatchPending && !model.matchingBrightness }
-            XCTAssertEqual(model.state.film, film)
+            XCTAssertEqual(model.state.film, photo == a ? film : newFilm)
             let single = alone.appendingPathComponent(file.lastPathComponent)
             await model.export(to: single, engine: .reference, size: options.size, save: options.save)
             XCTAssertEqual(try Data(contentsOf: single), try Data(contentsOf: file), file.lastPathComponent)

@@ -108,6 +108,11 @@ import UserNotifications
     var autoPlaceNewImages = UserDefaults.standard.object(forKey: "autoPlaceNewImages") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages") }
     }
+    static let newPhotoFilmKey = "newPhotoFilm"
+    static let newPhotoPaperKey = "newPhotoPaper"
+    /// Settings › New photographs, as chosen: nil until a choice is made.
+    private var chosenNewPhotoFilm = UserDefaults.standard.string(forKey: EditorModel.newPhotoFilmKey)
+    private var chosenNewPhotoPaper = UserDefaults.standard.string(forKey: EditorModel.newPhotoPaperKey)
     /// Settings › Save ratings and edits next to photos: each photograph's
     /// edits in its sidecar (`Sidecar.swift`). Off, nothing is remembered per
     /// photograph; sidecars already there stay untouched until it's on again.
@@ -975,14 +980,63 @@ import UserNotifications
 
     // MARK: Edits per photograph
 
-    /// The state a photograph without saved edits opens with. Film, paper,
-    /// Image Size and the output colour follow the previous photograph, as
-    /// a workflow's choices; its Prep, Lab, border, crop, rotation and how
-    /// its file was read do not.
+    /// Settings › New photographs › Film: what a photograph without edits
+    /// opens with. Until one is chosen, or if this version lacks the one
+    /// chosen, the newest defaults table's.
+    var newPhotoFilm: String { newPhotoStock(chosenNewPhotoFilm, table: \.film, in: films, fallback: EditState().film) }
+    /// Settings › New photographs › Paper, as `newPhotoFilm`.
+    var newPhotoPaper: String { newPhotoStock(chosenNewPhotoPaper, table: \.paper, in: papers, fallback: EditState().paper) }
+
+    private func newPhotoStock(_ chosen: String?, table: KeyPath<SidecarDefaults, String>, in stocks: [Stock], fallback: String) -> String {
+        let tabled = engine.flatMap { try? SidecarDefaults.load(version: SidecarDefaults.latest, data: $0.paths.data)[keyPath: table] }
+        let candidates = [chosen, tabled].compactMap { $0 }
+        // Before the catalog, nothing can be checked.
+        guard !stocks.isEmpty else { return candidates.first ?? fallback }
+        return candidates.first { id in stocks.contains { $0.id == id } } ?? stocks.first?.id ?? fallback
+    }
+
+    /// Chooses the film new photographs open with. Its own paper comes with
+    /// it unless Settings › Keep paper when changing film, as in the inspector.
+    func setNewPhotoFilm(_ film: String) {
+        var choice = EditState(); choice.film = newPhotoFilm; choice.paper = newPhotoPaper
+        let chosen = PreviewRules.choosing(film, paper: false, keepPaper: previews.keepPaper, in: choice, stocks: stocks)
+        setNewPhotoStocks(film: chosen.film, paper: chosen.paper)
+    }
+    func setNewPhotoPaper(_ paper: String) { setNewPhotoStocks(film: newPhotoFilm, paper: paper) }
+
+    private func setNewPhotoStocks(film: String, paper: String) {
+        let before = (newPhotoFilm, newPhotoPaper)
+        chosenNewPhotoFilm = film; chosenNewPhotoPaper = paper
+        UserDefaults.standard.set(film, forKey: Self.newPhotoFilmKey)
+        UserDefaults.standard.set(paper, forKey: Self.newPhotoPaperKey)
+        if before != (newPhotoFilm, newPhotoPaper) { followNewPhotoStocks() }
+    }
+
+    /// The open photograph takes a new default film and paper while it has no
+    /// edits of its own, so it shows what its thumbnail does. Not an edit: no
+    /// undo step, and nothing is written beside it.
+    private func followNewPhotoStocks() {
+        guard source != nil, !closing, !cropping, !interacting, var context = photoSidecar, context.photo == source,
+              !context.editedAtOpen, context.blocked == nil, Self.userEdits(state) == context.opened else { return }
+        var next = state
+        next.film = newPhotoFilm; next.paper = newPhotoPaper
+        next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        guard next != state else { return }
+        replaceState(next)
+        context.opened = Self.userEdits(state)
+        photoSidecar = context
+    }
+
+    /// The state a photograph without saved edits opens with: the defaults,
+    /// with the film and paper of Settings › New photographs. Image Size and
+    /// the output colour follow the previous photograph, as a workflow's
+    /// choices; its Prep, Lab, border, crop, rotation and how its file was
+    /// read do not.
     private func newPhotoState(after previous: EditState) -> EditState {
         var next = previous
         let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"]
         let retained = retainedPaths.map { ($0, previous.params[$0]) }
+        next.film = newPhotoFilm; next.paper = newPhotoPaper
         next.params = defaults
         for (path, value) in retained where value != .null { next.params[path] = value }
         next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
@@ -1088,8 +1142,7 @@ import UserNotifications
         if legacy != nil {
             // Written once launch settles, if it holds anything a new
             // photograph wouldn't have; it wins over a sidecar already there.
-            var plain = state; plain.film = EditState().film; plain.paper = EditState().paper
-            context.opened = Self.userEdits(newPhotoState(after: plain))
+            context.opened = Self.userEdits(newPhotoState(after: state))
             context.written = nil
             context.migrating = true
         }
@@ -1476,8 +1529,8 @@ import UserNotifications
 
     /// Removes the photographs' edits, crop and rotation included: they are
     /// as if never edited. The open one shows what a new photograph would
-    /// get after it, keeping its film, paper, Image Size and output colour.
-    /// Ratings and flags stay.
+    /// get after it: the default film and paper, keeping its Image Size and
+    /// output colour. Ratings and flags stay.
     func resetEdits(of items: [URL]? = nil) {
         changeEdits(items ?? editTargets, action: "Reset Edits", note: "Edits Reset", reset: true) { $0 }
     }

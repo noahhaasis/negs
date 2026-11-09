@@ -159,8 +159,28 @@ struct UpdateSettings: View {
                 get: { model.sidecarsEnabled }, set: { model.sidecarsEnabled = $0 }))
                 .padding(.top, 8)
             Text(model.sidecarsEnabled
-                 ? "Each photo remembers its own edits in a small file beside it, such as IMG_0412.CR3.negs, which travels with the folder. A photo you haven’t edited starts with default Prep and Lab settings and no border; the film, paper, Image Size and output colour stay."
+                 ? "Each photo remembers its own edits in a small file beside it, such as IMG_0412.CR3.negs, which travels with the folder. A photo you haven’t edited starts with the film and paper below, default Prep and Lab settings and no border; the Image Size and output colour stay."
                  : "Ratings and edits won’t be saved. Reopening a photo starts from the defaults.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            // The form's label column is too narrow for "New photographs: Film".
+            Text("New photographs")
+                .padding(.top, 8)
+            Picker("Film", selection: Binding(get: { model.newPhotoFilm }, set: { model.setNewPhotoFilm($0) })) {
+                ForEach(model.filmGroups) { group in
+                    Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                }
+            }
+            .disabled(model.films.isEmpty)
+            // A slide is scanned, without a paper.
+            if !(model.films.first { $0.id == model.newPhotoFilm }?.positive ?? false) {
+                Picker("Paper", selection: Binding(get: { model.newPhotoPaper }, set: { model.setNewPhotoPaper($0) })) {
+                    ForEach(model.paperGroups) { group in
+                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
+                    }
+                }
+                .disabled(model.papers.isEmpty)
+            }
+            Text("A photo you haven’t edited opens with this film and paper, and its thumbnail shows them. Photos you’ve edited keep their own.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Match new photographs to camera brightness", isOn: Binding(
                 get: { model.autoPlaceNewImages }, set: { model.autoPlaceNewImages = $0 }))

@@ -41,8 +41,12 @@ least recently used go first) and are safe to delete.
 ## Edits per photograph
 
 Opening a photograph shows its own edits. One you have never edited starts from
-the defaults, with the film, paper, Image Size and output colour of the
-photograph before it. Its Match camera brightness is solved when it opens and
+the defaults, with the film and paper of Settings › New photographs (until you
+choose, the defaults table's Kodak Gold 200 on Portra Endura) and the Image Size
+and output colour of the photograph before it. Changing that film or paper
+changes the open photograph too while it has no edits of its own, without an
+undo step; edited photographs keep theirs, since a sidecar always names its film
+and paper. Its Match camera brightness is solved when it opens and
 written nowhere beside it; the session keeps the open photograph's, so
 relaunching on it doesn't solve it again, unless the file or the settings the
 match depends on changed.
@@ -111,8 +115,8 @@ as from the edit view, another through the same Save dialog.
 Each photograph exports with its own edits as they were when you chose Export,
 so editing meanwhile changes nothing queued, and each file is the same, byte for
 byte, as exporting that photograph alone. A photograph you never edited
-exports as opening it would show it: the defaults, with the open photograph's
-film, paper, image size and output colour. If that includes *Match camera
+exports as opening it would show it: the defaults, with the default film and
+paper and the open photograph's image size and output colour. If that includes *Match camera
 brightness*, it's solved just before the photograph exports. Photographs are
 exported one at a time, in the background, while you keep working, and the Mac
 doesn't sleep while idle meanwhile.
