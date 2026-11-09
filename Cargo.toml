@@ -7,7 +7,6 @@ members = [
     "crates/spektrafilm-model",
     "crates/spektrafilm-io",
     "crates/spektrafilm-cli",
-    "crates/spektrafilm-gui",
     "crates/spektrafilm-native",
     "crates/spektrafilm-wasm",
 ]
@@ -36,8 +35,6 @@ exr = "1.73"
 # No DX12 (Vulkan or Metal only, see WgpuBackend::new); the dependents pick features.
 wgpu = { version = "24", default-features = false }
 clap = { version = "4", features = ["derive"] }
-eframe = { version = "0.31", default-features = false, features = ["wgpu", "glow", "default_fonts", "wayland", "x11"] }
-egui = "0.31"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"

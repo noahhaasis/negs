@@ -82,11 +82,6 @@ old menus, with the current one outlined in the accent colour. A click is the sa
 Film" / "Change Paper" undo step as the menu. Settings has "Film and paper previews" (on by
 default); off brings back the menus at once.
 
-Screenshots: [grids open](stock-previews-macos/grids-open.jpg),
-[tiles following a 50 % crop](stock-previews-macos/cropped-50.jpg),
-[collapsed](stock-previews-macos/collapsed.png),
-[setting off](stock-previews-macos/setting-off.png).
-
 ### In the app
 
 | | macOS | Linux (for comparison) |
@@ -162,8 +157,6 @@ builds, on AC power.
 | Helper memory on that DNG | **3.8 GB vs 2.1 GB** with previews off: the extra decodes' freed buffers stay with the allocator; the kept copies are ~20 MB |
 | Pixels vs a full-resolution reduction | within 1/255 (0.3 % of values differ by 1) |
 | Lab edit | preset tiles untouched (they depend only on the kept settings) |
-
-Screenshot: [presets on a RAW](stock-previews-macos/presets-raw.jpg).
 
 Decided with Noah (2026-11-02): keep exact thumbnails for presets with another white
 balance, but render them last and don't decode again after a crop. While such a decode

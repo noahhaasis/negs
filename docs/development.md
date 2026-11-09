@@ -26,9 +26,6 @@ bash scripts/package_macos_app.sh
 open dist/negs-macos/Negs.app
 # Installer and app-only update ZIP: dist/releases/
 
-# Cross-platform GUI (wgpu preview, eframe; Windows/Linux or legacy macOS)
-cargo build --release -p spektrafilm-gui
-
 # f32 CLI — fast batch processor, defaults to GPU backend
 cargo build --release -p spektrafilm-cli
 
@@ -42,8 +39,6 @@ cargo build --release -p spektrafilm-cli --bin spektrafilm-f64 --features precis
 # (EXIF orientation applied; pass --no-orient to skip it)
 cargo build --release -p spektrafilm-cli --bin decode_raw_gui
 ```
-
-Build the GUI and f64 companion separately when updating: building only `spektrafilm-gui` does not rebuild the export executable. The GUI auto-detects the f64 binary via `$SPEKTRAFILM_F64_CLI`, then next to its own executable, then `spektrafilm-f64` on `PATH`, then `target/release/spektrafilm-f64`.
 
 Windows builds use the WGSL/wgpu backend by default. The CPU fallback path avoids requiring a system OpenBLAS install on Windows, while macOS and Unix-like targets still use native BLAS providers.
 
@@ -107,24 +102,6 @@ lost to a crash are not restored. Local builds without a feed/key disable update
 The app is ad-hoc signed, without paid Apple signing or notarization; downloaded
 builds may need **System Settings → Privacy & Security → Open Anyway** on first
 launch. See [macOS installation, versioning, and releases](macos-distribution.md).
-The cross-platform egui UI is **unmaintained**: it still builds and is the only
-UI on Windows and Linux for now, but it gets no new work or fixes. Development
-focuses on the macOS app, which will later be ported to other platforms. It
-runs with:
-
-```bash
-./target/release/spektrafilm-gui [optional/path/to/image.orf]
-```
-
-- **Open…** — load a TIFF, PNG, or camera RAW (DNG/CR2/CR3/NEF/ARW/ORF/RW2/etc.). macOS uses Apple's RAW decoder, including supported Nikon HE/HE★ files; unsupported formats fall back to [`rawler`](https://github.com/dnglab/dnglab). Other platforms use rawler. See [decoder architecture and quality](apple-raw-decoder.md).
-- **RAW white balance** — As shot (default), Daylight, Tungsten, or Custom temperature/tint. Edits re-develop the RAW for preview and final export. Disabled for non-RAW inputs; independent of Scanner → White correction. See [controls and decoder differences](raw-white-balance.md).
-- **Sliders** — exposure, film format, halation, DIR couplers, grain, glare, scanner, enlarger, output. All live-updating against the GPU preview.
-- **Profiles** — film stock and print paper combo boxes; picking a film auto-selects its paired paper (`target_print` in the profile).
-- **Zoom** — scroll wheel or trackpad pinch over the preview (cursor-anchored), click-drag to pan, double-click to reset.
-- **Export…** — re-runs the pipeline at full resolution and writes a PNG/TIFF/JPEG. The engine box next to the format picks **Reference (CPU, 64-bit)** (default; `spektrafilm-f64` with the enlarger and scanner LUTs on) or **Fast (GPU)** (`spektrafilm` on wgpu, like the preview; located via `$SPEKTRAFILM_F32_CLI`, next to the GUI, on `PATH`, or `target/release`; not bundled in the embedded Windows build). Status bar shows elapsed time and reports a Fast export that fell back to the CPU; **Cancel** kills the child cleanly. Closing the GUI mid-export also kills the child (no orphans).
-- **Serial grain for export (less RAM)** — optional checkbox under Output, off by default. Processes grain channels one at a time during CPU export: less peak memory, identical output, but slower. Previews keep parallel grain. CLI users can set `settings.serial_grain: true` in their params JSON.
-- **Save…** — write the f32 GPU preview directly (instant, less precise).
-- **Limit preview to 12 MP** — optional checkbox under Output, off by default. Caps the image before preview processing to reduce memory and rendering time while preserving aspect ratio. Smaller images are not enlarged. Export still develops the full working frame; Save writes the reduced preview. Disable the cap to inspect fine grain and detail at full working resolution. The full decoded source remains in memory, and RAW loading and full-resolution export peaks are unaffected. The native macOS and Windows apps replace the legacy GUI's working-resolution slider with [Image Size](image-size.md).
 
 ### CLI
 
@@ -236,7 +213,6 @@ crates/
   spektrafilm-io/      image + camera RAW loading (rawler) and PNG/JPEG/TIFF saving
                        with the source's camera EXIF, shared by the CLI and GUI
   spektrafilm-cli/     `spektrafilm` (process, list-profiles, gen-lut) + `decode_raw_gui`
-  spektrafilm-gui/     egui/eframe preview, unmaintained (wgpu renderer, Metal-backed on macOS)
   spektrafilm-native/  persistent image-engine helper for the native macOS app
 macos/                SwiftUI interface, AppKit image canvas, and Swift tests
 data/

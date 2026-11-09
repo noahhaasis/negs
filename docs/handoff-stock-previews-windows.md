@@ -157,13 +157,6 @@ Settings… is now a real dialog (OK / Cancel) with "Film, paper and preset prev
 default) and, in builds that have them, the update settings. Off brings back the menus and the
 plain preset list at once and frees the thumbnails here and in the helper.
 
-Screenshots: [grids open](stock-previews-windows/grids-open.jpg),
-[paper grid](stock-previews-windows/paper-grid.jpg),
-[dimmed after an exposure edit](stock-previews-windows/dimmed-after-edit.jpg),
-[presets on a RAW](stock-previews-windows/presets-raw.jpg),
-[Settings](stock-previews-windows/settings.png),
-[setting off](stock-previews-windows/setting-off.jpg).
-
 ### In the app
 
 | | Windows | macOS / Linux (for comparison) |

@@ -254,12 +254,6 @@ Post, Start fresh and the Highlights range.
   a favourite or under the pointer; a click on it, or the tile's context menu, stars or
   unstars. Favourites lead the grid and the plain menus.
 
-![Prep](windows-prep-port/prep.png) ![Lab basics](windows-prep-port/lab-basics.png)
-![Lab, all controls](windows-prep-port/lab-all-controls.png)
-![Film grid and waveform](windows-prep-port/film-grid-waveform.png)
-![Matching after a paper change](windows-prep-port/rematching.png)
-![Output](windows-prep-port/output.png) ![Settings](windows-prep-port/settings.png)
-
 **Matching.** As in `EditorModel`: `prep.exposure_ev` holds the total, and
 `EditState.brightnessMatch` holds the solved part and the inputs it was solved for
 (`state::match_inputs`: everything except Prep, print exposure, grain, rotation, crop and
@@ -522,21 +516,6 @@ paint buffer, drawn combo boxes and message-loop hover, measured the adjustments
 column at +7.9 and +10.5 ms. Those three changes took out per-control DIB sections,
 per-combo dark themes (about 3.6 ms in dark) and per-control subclasses (about 1.7 ms).
 
-**Screenshots** (window only, `docs/windows-ui-polish/`): before is `origin/main`,
-which has no dark mode; it was captured with the system in dark and looks the same in
-light. These predate the Prep port's column (scope, pinned film and paper, three tabs);
-see [Prep in the polished look](#prep-in-the-polished-look) for the column as it is now.
-
-| | before | after, light | after, dark |
-|---|---|---|---|
-| Empty state | [before](windows-ui-polish/before-empty.png) | [light](windows-ui-polish/after-light-empty.png) | [dark](windows-ui-polish/after-dark-empty.png) |
-| Lab, film foldout open | [before](windows-ui-polish/before-lab.jpg) | [light](windows-ui-polish/after-light-lab.jpg) | [dark](windows-ui-polish/after-dark-lab.jpg) |
-| Lab, groups open | [before](windows-ui-polish/before-groups.jpg) | [light](windows-ui-polish/after-light-groups.jpg) | [dark](windows-ui-polish/after-dark-groups.jpg) |
-| Post, border on | [before](windows-ui-polish/before-post.jpg) | [light](windows-ui-polish/after-light-post.jpg) | [dark](windows-ui-polish/after-dark-post.jpg) |
-| Presets with thumbnails | [before](windows-ui-polish/before-presets.jpg) | [light](windows-ui-polish/after-light-presets.jpg) | [dark](windows-ui-polish/after-dark-presets.jpg) |
-| Crop | [before](windows-ui-polish/before-crop.jpg) | [light](windows-ui-polish/after-light-crop.jpg) | [dark](windows-ui-polish/after-dark-crop.jpg) |
-| Settings | [before](windows-ui-polish/before-settings.png) | [light](windows-ui-polish/after-light-settings.png) | [dark](windows-ui-polish/after-dark-settings.png) |
-
 **Behaviour**, checked in the release build:
 - **Window management** (real pointer and keys): maximise and restore by the caption
   button and by double-clicking the band (a maximised client starts at the monitor's
@@ -625,13 +604,7 @@ the 10 ms allowed and of the size of the run-to-run noise. The graph isn't on sc
 startup with the default profile (Print Curves is closed), so its painting isn't in these
 numbers.
 
-**Screenshots** (window only, Print Curves open on Lab with all controls, `docs/card.jpg`,
-retaken after the Prep merge below):
-[light](windows-ui-polish/after-light-tone-graph.jpg),
-[dark](windows-ui-polish/after-dark-tone-graph.jpg),
-[dark, R layer](windows-ui-polish/after-dark-tone-graph-red.jpg),
-[light, scanning film directly (disabled)](windows-ui-polish/after-light-tone-graph-scanning.jpg).
-Main's look, for comparison: [windows-tone-graph.png](windows-tone-graph.png).
+Main's look before the restyle: [windows-tone-graph.png](windows-tone-graph.png).
 
 **Behaviour**, through posted messages in the release build: hovering the middle handle
 names it ("Print exposure 1.00 · drag sideways"); dragging it 30 px set Print exposure to
@@ -688,17 +661,6 @@ only Prep's rows first). Against the Prep port the polish is no slower on any st
 at most). Some runs had the fast GPU start: 3 of the branch's in the first comparison, 3 of
 the Prep port's and 4 of the branch's in the second. With slow-start runs only, the
 photograph was on screen at 972.2 against 959.5 ms and at 961.0 against 953.9 ms.
-
-**Screenshots** (window only, `docs/card.jpg`):
-
-| | light | dark |
-|---|---|---|
-| Prep | [light](windows-ui-polish/after-light-prep.jpg) | [dark](windows-ui-polish/after-dark-prep.jpg) |
-| Lab | [all controls](windows-ui-polish/after-light-lab-all.jpg) | [basics](windows-ui-polish/after-dark-lab-basics.jpg) |
-| Output | [light](windows-ui-polish/after-light-output.jpg) | |
-| Film grid, Portra 400 starred | [light](windows-ui-polish/after-light-film-grid.jpg) | [dark](windows-ui-polish/after-dark-film-grid.jpg) |
-| Waveform at 168 DIP | | [dark](windows-ui-polish/after-dark-waveform.jpg) |
-| Settings | [light](windows-ui-polish/after-light-settings-prep.png) | [dark](windows-ui-polish/after-dark-settings-prep.png) |
 
 **Behaviour**, through posted messages in the release build: the grabber's Down key twice
 made the scope 40 DIP taller and a double-click returned it to 88 (saved as `scopeHeight`);
