@@ -22,9 +22,11 @@ import XCTest
                                 data: root.appendingPathComponent("data"))
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build the release helper first") }
         let defaults = UserDefaults.standard
-        let saved = ["expandedAdjustments", "inspectorTab", "imageSizeLongestSide", "limitPreview"].map { ($0, defaults.object(forKey: $0)) }
+        let saved = ["expandedAdjustments", "inspectorTab", "inspectorPane", "imageSizeLongestSide", "limitPreview"].map { ($0, defaults.object(forKey: $0)) }
         defaults.set("Enlarger", forKey: "expandedAdjustments")
         defaults.set("Lab", forKey: "inspectorTab")
+        // The Presets pane, if a run left it chosen, has no form to scroll.
+        defaults.set(InspectorPane.adjustments.rawValue, forKey: "inspectorPane")
         defer { for (key, value) in saved { defaults.set(value, forKey: key) } }
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("negs-layout-\(UUID().uuidString)")
