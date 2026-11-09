@@ -249,8 +249,12 @@ final class EngineClient: @unchecked Sendable {
     /// Counts helper launches: a relaunched helper keeps nothing of the last one.
     private var launches = 0
 
-    init(paths: EnginePaths) throws {
+    /// The helper's priority; nil leaves the system's default.
+    private let quality: QualityOfService?
+
+    init(paths: EnginePaths, quality: QualityOfService? = nil) throws {
         self.paths = paths
+        self.quality = quality
         scratch = try ScratchSpace()
     }
 
@@ -323,6 +327,7 @@ final class EngineClient: @unchecked Sendable {
         child.executableURL = paths.helper
         child.arguments = ["--data-dir", paths.data.path]
         child.standardInput = stdin; child.standardOutput = stdout; child.standardError = log
+        if let quality { child.qualityOfService = quality }
         try child.run()
         launches += 1
         process = child; input = stdin.fileHandleForWriting; output = stdout.fileHandleForReading
@@ -356,9 +361,10 @@ final class EngineClient: @unchecked Sendable {
 
     /// Develops `source` at full resolution with `state`, cropping and
     /// straightening to `crop`, adding `border`, fitting to `size`, and
-    /// encoding with `save`, with `engine`.
+    /// encoding with `save`, with `engine`. A `rating` is embedded as
+    /// `xmp:Rating` afterwards, leaving the pixels as the exporter wrote them.
     @discardableResult
-    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderSettings?, size: ExportSize = .full, save: SaveSettings = SaveSettings(), engine: ExportEngine = .reference) async throws -> ExportOutcome {
+    func run(paths: EnginePaths, scratch: ScratchSpace, source: URL, destination: URL, state: EditState, crop: CropSettings? = nil, border: BorderSettings?, size: ExportSize = .full, save: SaveSettings = SaveSettings(), engine: ExportEngine = .reference, rating: Int? = nil) async throws -> ExportOutcome {
         let fm = FileManager.default
         let executable = try engine.executable(in: paths)
         let work = scratch.directory.appendingPathComponent("export-\(UUID().uuidString)")
@@ -402,6 +408,7 @@ final class EngineClient: @unchecked Sendable {
             let hint = engine == .fast ? " If the GPU ran out of memory, export with Reference (CPU, 64-bit) instead." : ""
             throw EngineError(message: "Export failed.\(hint)\n\(diagnostic.isEmpty ? "Unknown exporter error" : String(diagnostic.suffix(4000)))")
         }
+        if let rating { try ExportRating.embed(rating, in: staging) }
         guard rename(staging.path, destination.path) == 0 else { throw EngineError(message: "Could not move the completed export to \(destination.path): \(String(cString: strerror(errno)))") }
         return ExportOutcome(fellBackToCPU: engine == .fast && !ExportEngine.ranOnGPU(log: diagnostic))
     }

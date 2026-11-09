@@ -18,7 +18,9 @@ final class SessionTests: XCTestCase {
         let session = EditorSession(source: photo, state: state, inspectorVisible: false, fitImage: false)
         try await store.save(session)
         let loaded = try await store.load()
-        XCTAssertEqual(loaded?.state, state)
+        // The edits live in the photograph's sidecar from schema 3 on.
+        XCTAssertEqual(loaded?.schema, 3)
+        XCTAssertNil(loaded?.state)
         XCTAssertEqual(loaded?.inspectorVisible, false)
         XCTAssertEqual(loaded?.fitImage, false)
         XCTAssertNotNil(loaded?.bookmark)
@@ -43,7 +45,7 @@ final class SessionTests: XCTestCase {
         do { _ = try await store.load(); XCTFail("Unavailable photograph accepted") } catch {}
         var future = missing; future.schema = 99
         XCTAssertThrowsError(try future.validate())
-        var invalid = missing; invalid.state.crop.rect = CGRect(x: 0, y: 0, width: -1, height: 1)
+        var invalid = missing; invalid.state?.crop.rect = CGRect(x: 0, y: 0, width: -1, height: 1)
         XCTAssertThrowsError(try invalid.validate())
     }
 
@@ -105,19 +107,22 @@ final class SessionTests: XCTestCase {
         try JSONEncoder().encode(old).write(to: file)
         let loaded = try await SessionStore(file: file).load()
         XCTAssertEqual(loaded?.schema, 2)
-        XCTAssertEqual(loaded?.state.params["film_render.dir_couplers.gamma_samelayer_rgb"], .null)
-        XCTAssertEqual(loaded?.state.params["film_render.halation.halation_strength"], .null)
+        XCTAssertEqual(loaded?.state?.params["film_render.dir_couplers.gamma_samelayer_rgb"], .null)
+        XCTAssertEqual(loaded?.state?.params["film_render.halation.halation_strength"], .null)
         // Values that did apply in schema 1 stay.
-        XCTAssertEqual(loaded?.state.params["film_render.dir_couplers.amount"], .number(0.8))
-        XCTAssertEqual(loaded?.state.params["film_render.grain.rms_granularity"],
+        XCTAssertEqual(loaded?.state?.params["film_render.dir_couplers.amount"], .number(0.8))
+        XCTAssertEqual(loaded?.state?.params["film_render.grain.rms_granularity"],
                        .array([.number(12), .number(13), .number(12)]))
-        // A schema-2 session keeps set values.
+        // A schema-2 session keeps set values, for the launch to move into the sidecar.
         var current = EditorSession(source: photo, state: state)
-        current.state.params["film_render.dir_couplers.gamma_samelayer_rgb"] = .array([.number(0.52), .number(0.51), .number(0.26)])
-        try await SessionStore(file: file).save(current)
+        current.state?.params["film_render.dir_couplers.gamma_samelayer_rgb"] = .array([.number(0.52), .number(0.51), .number(0.26)])
+        try JSONEncoder().encode(current).write(to: file)
         let kept = try await SessionStore(file: file).load()
-        XCTAssertEqual(kept?.state.params["film_render.dir_couplers.gamma_samelayer_rgb"],
+        XCTAssertEqual(kept?.state?.params["film_render.dir_couplers.gamma_samelayer_rgb"],
                        .array([.number(0.52), .number(0.51), .number(0.26)]))
+        // Schema 3 never carries edits.
+        var mixed = current; mixed.schema = 3
+        XCTAssertThrowsError(try mixed.validate())
     }
 
     func testUpdaterRequiresBothHTTPSFeedAndValidPublicKey() {
@@ -271,6 +276,61 @@ final class SessionTests: XCTestCase {
         return EditorSession(source: photo, state: saved, inspectorVisible: false)
     }
 
+    /// A photograph without edits keeps its solved match nowhere but the
+    /// session, so the next launch neither solves it again nor misses its
+    /// saved frame; another file at the same path is solved again.
+    func testSessionKeepsTheSolvedMatchOfAPhotographWithoutEdits() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let photo = dir.appendingPathComponent("photo.png")
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false,
+                                      isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 96 * 3, bitsPerPixel: 24)!
+        for i in 0..<(96 * 64 * 3) { bitmap.bitmapData![i] = UInt8(i % 251) }
+        try bitmap.representation(using: .png, properties: [:])!.write(to: photo)
+
+        let first = EditorModel(previewCache: scratchCache())
+        first.autoPlaceNewImages = true
+        await first.start(paths: paths)
+        first.open(photo)
+        let deadline = Date().addingTimeInterval(30)
+        while !(first.previewCurrent && !first.brightnessMatchPending && !first.matchingBrightness) && first.error == nil && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(first.error)
+        let session = try XCTUnwrap(first.session)
+        let match = try XCTUnwrap(session.match, "solved for the current settings")
+        XCTAssertEqual(match.ev, first.state.brightnessMatch?.ev)
+        let exposure = first.value("prep.exposure_ev")
+        first.shutdown()
+
+        let store = SessionStore(file: dir.appendingPathComponent("session.json"))
+        try await store.save(session)
+        let loaded = try await store.load()
+        let saved = try XCTUnwrap(loaded)
+        XCTAssertEqual(saved.match, match)
+
+        let second = EditorModel(previewCache: scratchCache())
+        defer { second.shutdown() }
+        second.autoPlaceNewImages = true
+        second.launch(paths: paths)
+        XCTAssertTrue(second.restoreAtLaunch(saved))
+        XCTAssertTrue(second.brightnessMatchActive)
+        XCTAssertFalse(second.brightnessMatchPending, "not solved again")
+        XCTAssertEqual(second.state.brightnessMatch?.ev, match.ev)
+        XCTAssertEqual(second.value("prep.exposure_ev"), exposure)
+
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: photo.path)
+        let third = EditorModel(previewCache: scratchCache())
+        defer { third.shutdown() }
+        third.autoPlaceNewImages = true
+        third.launch(paths: paths)
+        XCTAssertTrue(third.restoreAtLaunch(saved))
+        XCTAssertTrue(third.brightnessMatchPending, "the file changed")
+    }
+
     func testRestoresAtLaunchFromCachedCatalogBeforeHelperAnswers() async throws {
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
         try await cacheCatalog()
@@ -283,7 +343,7 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(model.restoreAtLaunch(session))
         // Restored at once, before the helper is asked anything else.
         XCTAssertEqual(model.source, photo)
-        XCTAssertEqual(model.film, session.state.film)
+        XCTAssertEqual(model.film, session.state?.film)
         XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
         XCTAssertFalse(model.inspectorVisible)
         model.finishLaunching(waitingUpTo: 0)
@@ -292,7 +352,7 @@ final class SessionTests: XCTestCase {
         while !model.previewCurrent && model.error == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertNil(model.error)
         XCTAssertTrue(model.previewCurrent)
-        XCTAssertEqual(model.film, session.state.film)
+        XCTAssertEqual(model.film, session.state?.film)
         XCTAssertEqual(model.value("camera.exposure_compensation_ev"), .number(1.5))
         XCTAssertEqual(model.session?.source, photo)
     }

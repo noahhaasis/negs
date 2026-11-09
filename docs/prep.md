@@ -21,13 +21,15 @@ controls. Product spec: ticket 26. Linux implementation and validation:
   See [exposure placement](exposure-placement.md).
 - **Default marker:** on macOS 26 each slider's track fills from its default
   (`NSSlider.neutralValue`), so a moved slider shows where it started.
-- **New photograph:** Settings › New photographs. *Keep the previous edits*
-  carries adjustments over as earlier versions did; *Start fresh* (the default)
-  resets Prep, Lab and Post adjustments, white balance and the border,
-  keeping film/paper, Image Size and output colour. Crop, rotation and lens
-  corrections reset either way. Relaunching restores the current session's
-  edits, including Prep. Fresh RAW opens are then matched to the camera's
-  brightness when that's on.
+- **New photograph:** on macOS each photo keeps its own edits in a sidecar
+  beside it ([format](sidecar-format.md)); a photo without one resets Prep,
+  Lab and Post adjustments, white balance, the border, crop, rotation and
+  lens corrections, keeping film/paper, Image Size and output colour from
+  the previous photo. Windows and Linux: Settings › New photographs. *Keep
+  the previous edits* carries adjustments over as earlier versions did;
+  *Start fresh* (the default) resets them as above. Relaunching restores the
+  current photo's edits, including Prep. Fresh RAW opens are then matched to
+  the camera's brightness when that's on.
 - **Scopes:** the RGB histogram and waveform share bounded sampling; drag the
   handle below it to resize it (88–420 pt, remembered). The dropdown switches
   to RGB waveform and remembers the choice. Both use the

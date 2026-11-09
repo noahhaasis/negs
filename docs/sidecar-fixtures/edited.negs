@@ -1,0 +1,51 @@
+{
+  "app": "0.15.0",
+  "defaultsVersion": 1,
+  "negs": 1,
+  "variants": [
+    {
+      "edits": {
+        "border": {
+          "color": "#f4efe6",
+          "enabled": true,
+          "style": "keyline"
+        },
+        "brightnessMatch": {
+          "ev": 0.45,
+          "highlightLimited": false
+        },
+        "crop": {
+          "aspect": "freeform",
+          "rect": [
+            [
+              0.1,
+              0.05
+            ],
+            [
+              0.8,
+              0.9
+            ]
+          ]
+        },
+        "film": "kodak_portra_400",
+        "paper": "kodak_portra_endura",
+        "params": {
+          "enlarger": {
+            "print_exposure": 1.2
+          },
+          "io": {
+            "photo_long_side_px": 4000,
+            "rotate_cw": 1
+          },
+          "prep": {
+            "exposure_ev": 0.65,
+            "highlights": -40
+          }
+        }
+      },
+      "flag": "pick",
+      "id": "9b1e44c0",
+      "rating": 3
+    }
+  ]
+}

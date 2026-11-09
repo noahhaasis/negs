@@ -155,15 +155,12 @@ struct UpdateSettings: View {
                 .padding(.top, 8)
             Text("Leave the paper as it is when you choose another film, instead of switching to the paper made for that film.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Picker("New photographs", selection: Binding(
-                get: { model.freshEditsForNewPhotos }, set: { model.freshEditsForNewPhotos = $0 })) {
-                Text("Keep the previous edits").tag(false)
-                Text("Start fresh").tag(true)
-            }
-            .padding(.top, 8)
-            Text(model.freshEditsForNewPhotos
-                 ? "Each photograph you open starts with default Prep and Lab settings and no border. The film, paper, Image Size and output colour stay."
-                 : "The photograph you open takes the edits of the one before it, apart from crop, rotation and lens corrections.")
+            Toggle("Save ratings and edits next to photos", isOn: Binding(
+                get: { model.sidecarsEnabled }, set: { model.sidecarsEnabled = $0 }))
+                .padding(.top, 8)
+            Text(model.sidecarsEnabled
+                 ? "Each photo remembers its own edits in a small file beside it, such as IMG_0412.CR3.negs, which travels with the folder. A photo you haven’t edited starts with default Prep and Lab settings and no border; the film, paper, Image Size and output colour stay."
+                 : "Ratings and edits won’t be saved. Reopening a photo starts from the defaults.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Match new photographs to camera brightness", isOn: Binding(
                 get: { model.autoPlaceNewImages }, set: { model.autoPlaceNewImages = $0 }))

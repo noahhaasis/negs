@@ -6,6 +6,7 @@ import IOSurface
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 /// Observation tracks each property separately, so a finished render only
 /// updates the canvas and status bar, and an edit doesn't redraw the canvas.
@@ -43,6 +44,11 @@ import UniformTypeIdentifiers
     private(set) var filmStrip: FilmStrip?
     private(set) var stocks: [Stock] = []
     private(set) var source: URL?
+    /// The duplicate of `source` open (its sidecar variant); nil for the
+    /// photograph itself.
+    private(set) var sourceVariant: String?
+    /// The open library item: `source`, or its duplicate (`URL.variant`).
+    var sourceItem: URL? { source.map { file in sourceVariant.map(file.variant) ?? file } }
     /// The developed preview. Nil until the first render of `source` completes.
     private(set) var image: IOSurface?
     /// The unprocessed photograph, shown while the first render develops.
@@ -102,21 +108,50 @@ import UniformTypeIdentifiers
     var autoPlaceNewImages = UserDefaults.standard.object(forKey: "autoPlaceNewImages") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoPlaceNewImages, forKey: "autoPlaceNewImages") }
     }
-    /// Settings › New photographs: Start fresh (true, the default) or keep the
-    /// previous photograph's edits (false, as earlier versions did). A
-    /// restored session keeps its own edits either way.
-    var freshEditsForNewPhotos = UserDefaults.standard.object(forKey: "freshEditsForNewPhotos") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(freshEditsForNewPhotos, forKey: "freshEditsForNewPhotos") }
+    /// Settings › Save ratings and edits next to photos: each photograph's
+    /// edits in its sidecar (`Sidecar.swift`). Off, nothing is remembered per
+    /// photograph; sidecars already there stay untouched until it's on again.
+    var sidecarsEnabled = UserDefaults.standard.object(forKey: "sidecars") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(sidecarsEnabled, forKey: "sidecars")
+            sidecarWrite?.cancel(); sidecarWrite = nil
+            library.store = sidecarsEnabled ? sidecars : nil
+            // The photograph shown is saved from its next edit on.
+            if sidecarsEnabled, let source, let restore = readSidecar(source, variant: sourceVariant) {
+                photoSidecar = sidecarContext(for: source, restore: restore)
+            } else if !sidecarsEnabled { photoSidecar = nil }
+        }
     }
     /// Lab › Film format › Custom picked while the value is still a format's,
-    /// so the slider stays. Start fresh and Reset Adjustments clear it, as
-    /// they do the edits.
+    /// so the slider stays. Opening a photograph and Reset Adjustments clear it.
     var customFilmFormat = false
     var error: String?
     var status = "Starting…"
     var filmstripVisible = UserDefaults.standard.object(forKey: "filmstripVisible") as? Bool ?? true {
         didSet { UserDefaults.standard.set(filmstripVisible, forKey: "filmstripVisible") }
     }
+    /// Photo › Advance After Rating: a rating or flag key moves on to the
+    /// next photograph, as in Lightroom. Off until chosen.
+    var advanceAfterRating = UserDefaults.standard.bool(forKey: "advanceAfterRating") {
+        didSet { UserDefaults.standard.set(advanceAfterRating, forKey: "advanceAfterRating") }
+    }
+    /// The brief note over the canvas after a rating or flag key.
+    private(set) var libraryNote: LibraryNote?
+    /// The edit view or the grid. Every launch starts in the edit view.
+    private(set) var mode = LibraryMode.photo
+    /// The selected photographs and the current one, which in the edit view
+    /// is `source`. In the grid it moves without developing anything.
+    private(set) var selection = LibrarySelection()
+    /// The width of the grid's photographs, in points.
+    var gridCellSize = UserDefaults.standard.object(forKey: "gridThumbnailSize") as? Double ?? GridMetrics.defaultSize {
+        didSet {
+            let clamped = min(max(gridCellSize, GridMetrics.sizes.lowerBound), GridMetrics.sizes.upperBound)
+            if clamped != gridCellSize { gridCellSize = clamped; return }
+            UserDefaults.standard.set(gridCellSize, forKey: "gridThumbnailSize")
+        }
+    }
+    /// How many columns the grid shows now, for moving up and down a row.
+    @ObservationIgnored var gridColumns = 1
     var inspectorVisible = true
     /// Which panel the inspector column shows, remembered across launches.
     var inspectorPane = InspectorPane(rawValue: UserDefaults.standard.string(forKey: "inspectorPane") ?? "") ?? .adjustments {
@@ -258,11 +293,64 @@ import UniformTypeIdentifiers
     @ObservationIgnored let presetLibrary: PresetLibrary
     /// Film and paper preview grids (`Previews.swift`).
     @ObservationIgnored let previews = Previews()
+    /// Where photographs' sidecars are read and written; nil, none are.
+    @ObservationIgnored let sidecars: SidecarStore?
+    /// The open photograph's folder, with its photographs' ratings.
+    @ObservationIgnored let library: PhotoLibrary
+    /// The open photograph's sidecar; nil when it has none and gets none
+    /// (sidecars off, no store).
+    @ObservationIgnored private var photoSidecar: PhotoSidecarContext?
+    /// The write 1 s after the last edit.
+    @ObservationIgnored private var sidecarWrite: Task<Void, Never>?
+    /// Folders whose sidecars couldn't be written, said once each.
+    @ObservationIgnored private var unwritableFolders: Set<URL> = []
+    /// The edits of the last photograph left with edits, for Paste from Previous.
+    @ObservationIgnored private(set) var previousEdits: EditState?
+    /// What Copy Edits took, for Paste Edits.
+    private(set) var copiedEdits: CopiedEdits?
+    /// The undo target of changes to several photographs' sidecars, so that
+    /// opening another photograph, which clears the per-photograph undo,
+    /// keeps them.
+    @ObservationIgnored private let libraryUndo = LibraryUndoTarget()
 
-    init(previewCache: RenderedPreviewCache = RenderedPreviewCache(), presetLibrary: PresetLibrary = PresetLibrary()) {
+    private struct PhotoSidecarContext {
+        var photo: URL
+        var variant: String
+        var defaultsVersion: Int
+        /// `variant` was made up when it opened: the file's first variant
+        /// is written, should another app have made one since.
+        var variantIsNew: Bool
+        /// The user's edits as the photograph opened (`userEdits`). One without
+        /// saved edits gets them only once they change.
+        var opened: EditState
+        var editedAtOpen: Bool
+        var exists: Bool
+        /// The stored edits last read or sent; the same edits aren't written again.
+        var written: JSONValue?
+        /// Why it isn't written: unreadable, from a newer Negs, unwritable.
+        var blocked: String?
+        /// Its edits are read again once the catalog arrives; until then
+        /// they aren't written. Ratings and flags are.
+        var awaitingCatalog = false
+        /// The film and paper it names that this version lacks, with what is
+        /// shown instead; written back while that stays chosen.
+        var missingFilm: (saved: String, shown: String)?
+        var missingPaper: (saved: String, shown: String)?
+        /// A schema 2 session's edits, written once launch has settled.
+        var migrating = false
+    }
+
+    init(previewCache: RenderedPreviewCache = RenderedPreviewCache(), presetLibrary: PresetLibrary = PresetLibrary(),
+         sidecars: SidecarStore? = SidecarStore.forApp) {
         self.previewCache = previewCache
         self.presetLibrary = presetLibrary
+        self.sidecars = sidecars
+        let enabled = UserDefaults.standard.object(forKey: "sidecars") as? Bool ?? true
+        library = PhotoLibrary(store: enabled ? sidecars : nil)
         recentFiles = (UserDefaults.standard.stringArray(forKey: "recentFiles") ?? []).map { URL(fileURLWithPath: $0) }
+        library.sidecarChanged = { [weak self] photo in self?.sidecarChangedOnDisk(photo) }
+        library.filterChanged = { [weak self] in self?.filterChanged() }
+        library.looksChanged = { [weak self] in self?.pumpThumbnails() }
     }
 
     /// Starts the helper and asks for its catalog at once, so both load while
@@ -302,18 +390,25 @@ import UniformTypeIdentifiers
     private func discardLaunchRestore() {
         guard let (_, before) = launchRestore else { return }
         launchRestore = nil; launchFrame = nil
-        sourceGeneration += 1
-        source = nil; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
-        imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
-        showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
+        // Nothing of the undone restore is written to its sidecar.
         // A different catalog can arrive once the window is shown and the
         // restored photograph is being cropped, compared or edited.
-        interactionStart = nil; cropSession = nil
-        original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
-        undoManager?.removeAllActions()
+        forgetPhotograph()
         state = withPreferences(before.state); inspectorVisible = before.inspectorVisible; fitImage = before.fitImage; status = before.status
         if recentFiles != before.recentFiles { recentFiles = before.recentFiles; saveRecents() }
         updateHistogram()
+    }
+
+    /// No photograph open, and nothing of the last one written to its sidecar.
+    private func forgetPhotograph() {
+        photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
+        sourceGeneration += 1
+        source = nil; sourceVariant = nil; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
+        showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
+        interactionStart = nil; cropSession = nil
+        original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
+        undoManager?.removeAllActions(withTarget: self)
     }
 
     func start(paths: EnginePaths? = nil, restoration: Task<EditorSession?, Error>? = nil) async {
@@ -336,6 +431,8 @@ import UniformTypeIdentifiers
                 }
                 apply(catalog: catalog)
                 CatalogCache.save(catalog, for: engine.paths)
+                // A photograph opened before this catalog: its edits under it.
+                readoptSidecarEdits()
             }
             // The restore at launch stands: its open skipped the system's
             // recent documents while it could still be undone.
@@ -358,10 +455,15 @@ import UniformTypeIdentifiers
             ready = true
             if source == nil, status == "Starting…" { status = "" }
             if source != nil { changed(invalidateCache: false) }
+            // A schema 2 session's edits move to the photograph's sidecar now,
+            // off the launch path.
+            if photoSidecar?.migrating == true { flushSidecar() }
         } catch { if !closing { report(error) } }
     }
 
     private func apply(catalog: JSONValue) {
+        // The reset below is no edit: a write still waiting must not save it.
+        sidecarWrite?.cancel(); sidecarWrite = nil
         self.catalog = catalog
         stocks = catalog["profiles"].array.map(Stock.init)
         defaults = catalog["defaults"]
@@ -598,6 +700,7 @@ import UniformTypeIdentifiers
         // A crop doesn't re-render the preview, but it changes the thumbnails.
         if render { changed() } else { pumpPreviews() }
         reconcileBrightnessMatch()
+        scheduleSidecarWrite()
     }
     private func registerUndo(restoring previous: EditState, action: String) {
         undoManager?.registerUndo(withTarget: self) { model in
@@ -657,19 +760,25 @@ import UniformTypeIdentifiers
         return nil
     }
 
+    /// The photograph and window to reopen at the next launch; the edits are
+    /// in the photograph's sidecar (`flushSidecars`). A match solved for the
+    /// current settings comes along: without edits nothing else keeps it.
     var session: EditorSession? {
         guard !closing, ready, let source else { return nil }
-        var saved = state
-        // Include a crop being drawn, without forcing the user to press Done.
-        if let cropSession { saved.crop = cropSession.settings }
-        return EditorSession(source: source, state: saved, inspectorVisible: inspectorVisible, fitImage: fitImage)
+        var session = EditorSession(source: source, inspectorVisible: inspectorVisible, fitImage: fitImage)
+        session.variant = sourceVariant
+        if brightnessMatchActive, !brightnessMatchPending, !matchingBrightness {
+            session.match = SessionMatch(state.brightnessMatch, file: source)
+        }
+        return session
     }
 
     private func restore(_ session: EditorSession) throws {
         try session.validate()
-        guard films.contains(where: { $0.id == session.state.film }),
-              papers.contains(where: { $0.id == session.state.paper }) else {
-            throw EngineError(message: "The previous session uses an unavailable film or paper. Open a photograph to continue.")
+        if let state = session.state {
+            guard films.contains(where: { $0.id == state.film }), papers.contains(where: { $0.id == state.paper }) else {
+                throw EngineError(message: "The previous session uses an unavailable film or paper. Open a photograph to continue.")
+            }
         }
         open(session.source, restoring: session)
     }
@@ -721,20 +830,34 @@ import UniformTypeIdentifiers
 
     func open(_ url: URL) {
         explicitOpenRequested = true
+        mode = .photo
         // During launch it undoes a restore at launch; later it supersedes it.
         if launching { discardLaunchRestore() } else { launchRestore = nil }
         open(url, restoring: nil)
     }
 
-    private func open(_ url: URL, restoring session: EditorSession?) {
+    /// Opens a library item: a photograph, or a duplicate of one.
+    private func open(_ item: URL, restoring session: EditorSession?) {
+        let item = session?.variant.map { item.photoFile.variant($0) } ?? item
+        let url = item.photoFile
         guard !closing, url.isFileURL else { return }
         guard FileManager.default.isReadableFile(atPath: url.path) else {
             recentFiles.removeAll { $0 == url }; saveRecents()
             error = "“\(url.lastPathComponent)” can’t be opened. It may have been moved or deleted."
             return
         }
+        // The previous photograph's last edits go to its sidecar first, and
+        // the preview on screen becomes its edited thumbnail.
+        flushSidecar()
+        saveOpenThumbnail()
+        // Paste from Previous: the last photograph left with edits.
+        if photoSidecar?.written != nil, photoSidecar?.photo == source { previousEdits = Self.userEdits(state) }
+        let previous = state
         cancelBrightnessMatch(); brightnessMatchFailure = nil
-        source = url; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        sourceDeleted = false
+        source = url; sourceVariant = item.variantID; image = nil; placeholder = nil; previewCurrent = false; renderFailed = false
+        // Leaving the grid opens its current photograph and keeps the selection.
+        if selection.current != item { selection.select(item) }
         sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false
         updateHistogram()
@@ -742,50 +865,15 @@ import UniformTypeIdentifiers
         original = nil; originalCache = nil; originalLoad?.cancel(); originalLoad = nil; holdingOriginal = false
         sourceGeneration += 1
         let generation = sourceGeneration
-        if freshEditsForNewPhotos { customFilmFormat = false }
-        if let session {
-            var restored = session.state
-            let lensCorrection = restored.params[Self.lensCorrectionPath]
-            restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
-            // A session from before lens correction was developed without it.
-            if lensCorrection == .null { restored.params[Self.lensCorrectionPath] = .bool(false) }
-            // Sessions from before Image Size may carry the old working-resolution factor.
-            let factor = defaults[ImageSize.factorPath]
-            if factor != .null { restored.params[ImageSize.factorPath] = factor }
-            // The inspector no longer edits Post tone or colour; an older session's
-            // Post edits would otherwise stay applied with no control to undo them.
-            if defaults["post"] != .null { restored.params["post"] = defaults["post"] }
-            // Sessions from before it was a preference carried it per photograph.
-            if UserDefaults.standard.object(forKey: "limitPreview") == nil, restored.limitPreview {
-                adoptingPreference = true; limitsPreview = true; adoptingPreference = false
-            }
-            state = withPreferences(restored)
-            inspectorVisible = session.inspectorVisible
-        } else {
-            // The exposure the user set above the previous photograph's match
-            // carries with Keep the previous edits; the match is solved anew.
-            let previousOffset = state.params["prep.exposure_ev"].double - (state.brightnessMatch?.ev ?? 0)
-            if freshEditsForNewPhotos {
-                // Film/paper and output preferences belong to the workflow;
-                // the previous photograph's Prep, Lab and Post edits do not.
-                let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"]
-                let retained = retainedPaths.map { ($0, state.params[$0]) }
-                state.params = defaults
-                for (path, value) in retained where value != .null { state.params[path] = value }
-                state.params["io.scan_film"] = .bool(films.first(where: { $0.id == state.film })?.positive ?? false)
-                state.border = BorderSettings()
-            }
-            state.params["io.rotate_cw"] = .number(0)
-            // How one file's colours are read never carries over to the next.
-            let interpretation = defaults["io.input_interpretation"]
-            if interpretation != .null { state.params["io.input_interpretation"] = interpretation }
-            state.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
-            state.crop = CropSettings()
-            state.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
-            if !freshEditsForNewPhotos { state.params["prep.exposure_ev"] = .number(min(3, max(-3, previousOffset))) }
-        }
+        customFilmFormat = false
+        // A schema 2 session restores its edits as before; otherwise the
+        // photograph's sidecar has them, read at launch with the session.
+        adoptEdits(for: url, restore: session?.sidecar ?? readSidecar(url, variant: item.variantID), legacy: session?.state, previous: previous,
+                   match: session?.match)
+        if let session { inspectorVisible = session.inspectorVisible }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
-        undoManager?.removeAllActions()
+        // Changes to several photographs (Paste Edits, Duplicate) stay undoable.
+        undoManager?.removeAllActions(withTarget: self)
         zoom(fit: session?.fitImage ?? true)
         recentFiles.removeAll { $0 == url }; recentFiles.insert(url, at: 0)
         recentFiles = Array(recentFiles.prefix(10)); saveRecents()
@@ -876,6 +964,1132 @@ import UniformTypeIdentifiers
             size = turned ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
         }
         return (image, size)
+    }
+
+    // MARK: Edits per photograph
+
+    /// The state a photograph without saved edits opens with. Film, paper,
+    /// Image Size and the output colour follow the previous photograph, as
+    /// a workflow's choices; its Prep, Lab, border, crop, rotation and how
+    /// its file was read do not.
+    private func newPhotoState(after previous: EditState) -> EditState {
+        var next = previous
+        let retainedPaths = [ImageSize.targetPath, "io.output_color_space", "io.output_cctf_encoding"]
+        let retained = retainedPaths.map { ($0, previous.params[$0]) }
+        next.params = defaults
+        for (path, value) in retained where value != .null { next.params[path] = value }
+        next.params["io.scan_film"] = .bool(films.first(where: { $0.id == next.film })?.positive ?? false)
+        next.border = BorderSettings()
+        next.params["io.rotate_cw"] = .number(0)
+        let interpretation = defaults["io.input_interpretation"]
+        if interpretation != .null { next.params["io.input_interpretation"] = interpretation }
+        next.params[Self.lensCorrectionPath] = defaults[Self.lensCorrectionPath]
+        next.crop = CropSettings()
+        next.brightnessMatch = autoPlaceNewImages ? BrightnessMatch() : nil
+        return withPreferences(next)
+    }
+
+    /// Saved edits under the engine's current defaults. `legacy`: a schema 2
+    /// session's, which may predate lens correction and the preview limit.
+    func restoredState(_ saved: EditState, legacy: Bool, matchSolved: Bool = false) -> EditState {
+        var restored = saved
+        let lensCorrection = restored.params[Self.lensCorrectionPath]
+        restored.params = defaults.restoring(restored.params, nullable: Set(catalog["nullable_paths"].array.map(\.string)))
+        // A session from before lens correction was developed without it.
+        if legacy, lensCorrection == .null { restored.params[Self.lensCorrectionPath] = .bool(false) }
+        // Sessions from before Image Size may carry the old working-resolution factor.
+        let factor = defaults[ImageSize.factorPath]
+        if factor != .null { restored.params[ImageSize.factorPath] = factor }
+        // The inspector no longer edits Post tone or colour; an older session's
+        // Post edits would otherwise stay applied with no control to undo them.
+        if defaults["post"] != .null { restored.params["post"] = defaults["post"] }
+        // Sessions from before it was a preference carried it per photograph.
+        if legacy, UserDefaults.standard.object(forKey: "limitPreview") == nil, restored.limitPreview {
+            adoptingPreference = true; limitsPreview = true; adoptingPreference = false
+        }
+        restored = withPreferences(restored)
+        // A match stored as solved was solved for these very edits.
+        if matchSolved, restored.brightnessMatch != nil {
+            let inputs = matchInputs(restored)
+            restored.brightnessMatch?.inputs = inputs
+        }
+        return restored
+    }
+
+    /// The user's own edits in `state`: without the brightness match's solved
+    /// exposure, which isn't one, and the preview limit, a preference.
+    nonisolated static func userEdits(_ state: EditState) -> EditState {
+        var edits = state
+        edits.limitPreview = false
+        if let match = edits.brightnessMatch {
+            let offset = edits.params["prep.exposure_ev"].double - (match.ev ?? 0)
+            edits.params["prep.exposure_ev"] = .number((offset * 1e9).rounded() / 1e9)
+            edits.brightnessMatch = BrightnessMatch()
+        }
+        return edits
+    }
+
+    /// `photo`'s sidecar, or nil when sidecars aren't used.
+    private func readSidecar(_ photo: URL, variant: String?) -> SidecarRestore? {
+        guard let sidecarLookup else { return nil }
+        return SidecarRestore.read(photo: photo, variant: variant, store: sidecarLookup.store, data: sidecarLookup.data)
+    }
+    /// Where the launch reads the last photograph's sidecar; nil with sidecars off.
+    var sidecarLookup: SidecarLookup? {
+        guard sidecarsEnabled, let sidecars, let data = engine?.paths.data else { return nil }
+        return SidecarLookup(store: sidecars, data: data)
+    }
+
+    /// Sets the state of the photograph being opened: its saved edits, a
+    /// schema 2 session's, or a new photograph's, with the session's `match`
+    /// if it was solved on this file for these settings. Then remembers its
+    /// sidecar.
+    private func adoptEdits(for url: URL, restore: SidecarRestore?, legacy: EditState?, previous: EditState, match: SessionMatch? = nil) {
+        var missingFilm: (saved: String, shown: String)?, missingPaper: (saved: String, shown: String)?
+        if let legacy {
+            state = restoredState(legacy, legacy: true)
+        } else if let saved = restore?.edits, restore?.problem == nil, hasCatalog {
+            var restored = restoredState(saved.state, legacy: false, matchSolved: saved.matchSolved)
+            // A film or paper this version lacks (another fork's, a newer
+            // release's) falls back to the defaults table's; the photograph opens.
+            let table = sidecarLookup.flatMap { try? SidecarDefaults.load(version: restore?.defaultsVersion ?? 1, data: $0.data) }
+            if !films.contains(where: { $0.id == restored.film }), let shown = films.first(where: { $0.id == table?.film })?.id ?? films.first?.id {
+                missingFilm = (restored.film, shown)
+                restored.film = shown
+                restored.params["io.scan_film"] = .bool(films.first { $0.id == shown }?.positive ?? false)
+            }
+            if !papers.contains(where: { $0.id == restored.paper }), let shown = papers.first(where: { $0.id == table?.paper })?.id ?? papers.first?.id {
+                missingPaper = (restored.paper, shown)
+                restored.paper = shown
+            }
+            if missingFilm != nil || missingPaper != nil {
+                let names = [missingFilm.map { "the film “\($0.saved)”" }, missingPaper.map { "the paper “\($0.saved)”" }].compactMap { $0 }
+                error = "\(url.lastPathComponent) was edited with \(names.joined(separator: " and ")), which this version of Negs doesn’t have. It shows \([missingFilm.map { _ in filmName(restored.film) }, missingPaper.map { _ in paperName(restored.paper) }].compactMap { $0 }.joined(separator: " and ")) instead, and keeps the saved choice unless you pick another."
+            }
+            state = restored
+        } else {
+            state = newPhotoState(after: previous)
+            if let match, state.brightnessMatch != nil, matchInputs(state) == match.inputs, match.solved(on: url),
+               let solved = Self.matching(state, ev: match.ev, limited: match.highlightLimited, inputs: match.inputs) {
+                state = solved
+            }
+        }
+        guard let restore else { photoSidecar = nil; return }
+        library.opened(sourceItem ?? url, summary: LibrarySummary(rating: restore.rating, flag: restore.flag, edited: restore.edits != nil, problem: restore.problem))
+        var context = sidecarContext(for: url, restore: restore)
+        context.missingFilm = missingFilm; context.missingPaper = missingPaper
+        if legacy != nil {
+            // Written once launch settles, if it holds anything a new
+            // photograph wouldn't have; it wins over a sidecar already there.
+            var plain = state; plain.film = EditState().film; plain.paper = EditState().paper
+            context.opened = Self.userEdits(newPhotoState(after: plain))
+            context.written = nil
+            context.migrating = true
+        }
+        // Before the catalog the edits can't be shown; `readoptSidecarEdits` reads them again.
+        if !hasCatalog { context.awaitingCatalog = true }
+        photoSidecar = context
+        if let problem = restore.problem { error = problem }
+    }
+
+    private func filmName(_ id: String) -> String { films.first { $0.id == id }?.name ?? id }
+    private func paperName(_ id: String) -> String { papers.first { $0.id == id }?.name ?? id }
+
+    /// The open photograph's sidecar as it stands, with its current state as
+    /// the one it opened with.
+    private func sidecarContext(for url: URL, restore: SidecarRestore) -> PhotoSidecarContext {
+        var context = PhotoSidecarContext(photo: url, variant: restore.variant, defaultsVersion: restore.defaultsVersion,
+                                          variantIsNew: restore.newVariant, opened: Self.userEdits(state),
+                                          editedAtOpen: restore.edits != nil, exists: restore.exists, blocked: restore.problem)
+        if restore.edits != nil, context.blocked == nil { context.written = storedEdits(state, context) }
+        return context
+    }
+
+    /// The catalog changed under an open photograph: shows its saved edits
+    /// under the new defaults, or the new photograph state, as opening it does.
+    private func readoptSidecarEdits() {
+        guard let source, let context = photoSidecar, context.photo == source else { return }
+        adoptEdits(for: source, restore: readSidecar(source, variant: sourceVariant), legacy: nil, previous: state)
+    }
+
+    /// `state` as its sidecar stores it.
+    private func storedEdits(_ current: EditState, _ context: PhotoSidecarContext) -> JSONValue? {
+        guard let data = sidecarLookup?.data, let table = try? SidecarDefaults.load(version: context.defaultsVersion, data: data) else { return nil }
+        var saved = current
+        if let missing = context.missingFilm, saved.film == missing.shown { saved.film = missing.saved }
+        if let missing = context.missingPaper, saved.paper == missing.shown { saved.paper = missing.saved }
+        let solved = current.brightnessMatch.map { $0.ev != nil && $0.inputs == matchInputs(current) } ?? false
+        return PhotoSidecar.encodeEdits(saved, matchSolved: solved, table: table)
+    }
+
+    /// Writes the open photograph's sidecar 1 s after the last edit.
+    private func scheduleSidecarWrite() {
+        guard photoSidecar != nil, !closing else { return }
+        sidecarWrite?.cancel()
+        sidecarWrite = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.flushSidecar()
+        }
+    }
+
+    /// The edits the open photograph's sidecar would be sent now: once the
+    /// user has edited it, or always if it had edits (nil inside removes
+    /// them). Nil when nothing changed.
+    private func sidecarEditsToSend(_ context: PhotoSidecarContext) -> JSONValue?? {
+        var current = state
+        // Include a crop being drawn, without forcing the user to press Done.
+        if let cropSession { current.crop = cropSession.settings }
+        let edited = Self.userEdits(current) != context.opened
+        let edits: JSONValue?
+        if edited || context.editedAtOpen {
+            guard let stored = storedEdits(current, context) else { return nil }
+            edits = stored
+        } else {
+            edits = nil
+        }
+        return edits == context.written ? nil : .some(edits)
+    }
+
+    /// Sends the open photograph's edits to its sidecar now, if they changed.
+    /// Back where it started, edits this visit saved are removed again.
+    @discardableResult private func flushSidecar() -> Task<Void, Never>? {
+        sidecarWrite?.cancel(); sidecarWrite = nil
+        guard sidecarsEnabled, let sidecars, sidecars.writes, var context = photoSidecar, context.blocked == nil, !context.awaitingCatalog,
+              context.photo == source, hasCatalog, !closing, let edits = sidecarEditsToSend(context) else { return nil }
+        let photo = context.photo
+        let known: [String: [JSONValue]]
+        if let data = sidecarLookup?.data, let table = try? SidecarDefaults.load(version: context.defaultsVersion, data: data) {
+            known = ["params": [table.params, defaults], "crop": [table.crop], "border": [table.border]]
+        } else { return nil }
+        sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, edits: edits, known: known,
+                                      defaultsVersion: context.defaultsVersion, app: Self.appVersion), for: photo)
+        var summary = library.summary(for: photo)
+        summary.edited = edits != nil
+        library.set(summary, for: photo)
+        // Its look too, which names its edited thumbnail.
+        library.reload(photo)
+        context.written = edits; context.migrating = false
+        context.exists = edits != nil || summary.rating > 0 || summary.flag != nil
+        photoSidecar = context
+        return Task { [weak self] in
+            let failures = await sidecars.flush()
+            for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+        }
+    }
+
+    /// Writes the open photograph's last edits and everything still waiting,
+    /// at quit.
+    func flushSidecars() async {
+        flushSidecar()
+        if let failures = await sidecars?.flush() {
+            for (failed, reason) in failures { sidecarFailed(failed, reason) }
+        }
+    }
+
+    private func sidecarFailed(_ photo: URL, _ reason: String) {
+        if photoSidecar?.photo.standardizedFileURL == photo.standardizedFileURL { photoSidecar?.blocked = reason }
+        let folder = photo.deletingLastPathComponent().standardizedFileURL
+        guard !closing, unwritableFolders.insert(folder).inserted else { return }
+        error = "Edits to photographs in “\(folder.lastPathComponent)” can’t be saved beside them: \(reason)"
+    }
+
+    nonisolated static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+
+    /// Another app or Mac changed `photo`'s sidecar. For the open photograph
+    /// a newer rating or flag shows at once (the library read it); newer
+    /// edits replace these only if they're all saved, and otherwise these
+    /// are written over them.
+    func sidecarChangedOnDisk(_ photo: URL) {
+        guard photo == source, !closing, var context = photoSidecar, context.photo == photo, context.blocked == nil,
+              let lookup = sidecarLookup else { return }
+        let restore = SidecarRestore.read(photo: photo, variant: sourceVariant, store: lookup.store, data: lookup.data)
+        if let problem = restore.problem {
+            // Never written over now; it opens with its edits shown as they are.
+            photoSidecar?.blocked = problem
+            return
+        }
+        context.exists = restore.exists
+        if !restore.newVariant, context.variantIsNew { context.variant = restore.variant; context.variantIsNew = false }
+        let table = try? SidecarDefaults.load(version: context.defaultsVersion, data: lookup.data)
+        let ours = context.written.flatMap { written in table.flatMap { try? PhotoSidecar.decodeEdits(written, table: $0) } }
+        guard restore.edits != ours || restore.defaultsVersion != context.defaultsVersion, !context.awaitingCatalog, hasCatalog,
+              sidecarWrite == nil, !interacting, !cropping, sidecarEditsToSend(context) == nil else {
+            photoSidecar = context
+            return
+        }
+        cancelBrightnessMatch(); brightnessMatchFailure = nil
+        customFilmFormat = false
+        adoptEdits(for: photo, restore: restore, legacy: nil, previous: state)
+        undoManager?.removeAllActions(withTarget: self)
+        changed()
+    }
+
+    // MARK: Ratings and flags
+
+    /// What a rating or flag key did, shown briefly over the canvas.
+    struct LibraryNote: Equatable {
+        var text: String
+        /// Why it wasn't saved, if it wasn't.
+        var detail: String?
+        /// How many photographs it changed: several in the grid.
+        var count = 1
+        var serial: Int
+    }
+
+    /// The open photograph's rating and flag.
+    var currentSummary: LibrarySummary? { sourceItem.map { library.summary(for: $0) } }
+
+    /// What rating and flag commands act on: in the grid, every selected
+    /// photograph it shows; in the edit view the current one only, so a
+    /// forgotten selection in the strip never rates twenty photographs.
+    var ratingTargets: [URL] {
+        guard mode == .grid else { return sourceItem.map { [$0] } ?? [] }
+        return selection.ordered(shownPhotos.map(\.url))
+    }
+
+    /// Rates what rating commands act on, 0 (none) to 5 stars.
+    func setRating(_ stars: Int, targets: [URL]? = nil) {
+        changeLibrary(targets: targets) { $0.rating = max(0, min(5, stars)) } note: { Self.ratingText($0.rating) }
+    }
+    func changeRating(by offset: Int) {
+        changeLibrary(many: offset > 0 ? "Rating Raised" : "Rating Lowered") {
+            $0.rating = max(0, min(5, $0.rating + offset))
+        } note: { Self.ratingText($0.rating) }
+    }
+    func setFlag(_ flag: PhotoSidecar.Flag?, targets: [URL]? = nil) {
+        changeLibrary(targets: targets) { $0.flag = flag } note: { Self.flagText($0.flag) }
+    }
+
+    func hideLibraryNote(_ serial: Int) { if libraryNote?.serial == serial { libraryNote = nil } }
+
+    nonisolated static func ratingText(_ stars: Int) -> String { stars == 0 ? "No Rating" : String(repeating: "★", count: stars) }
+    nonisolated static func flagText(_ flag: PhotoSidecar.Flag?) -> String {
+        switch flag { case .pick: "Pick"; case .reject: "Rejected"; case nil: "Unflagged" }
+    }
+
+    /// `many` is the note for several photographs, when `note` would differ
+    /// between them.
+    private func changeLibrary(many: String? = nil, targets: [URL]? = nil, _ change: (inout LibrarySummary) -> Void, note: (LibrarySummary) -> String) {
+        let targets = targets ?? ratingTargets
+        guard !targets.isEmpty, !closing else { return }
+        var unsaved: String?, last = LibrarySummary(), queued = false
+        for photo in targets {
+            let before = library.summary(for: photo)
+            var after = before
+            change(&after)
+            last = after
+            guard after != before else { continue }
+            let reason = saveLibraryChange(from: before, to: after, photo: photo)
+            if reason == nil { queued = true } else if unsaved == nil { unsaved = reason }
+            library.set(after, for: photo)
+        }
+        if queued, let sidecars {
+            Task { [weak self] in
+                let failures = await sidecars.flush()
+                for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+            }
+        }
+        // They stay shown until the selection moves, whatever the filter.
+        selection.keep(targets)
+        let text = targets.count == 1 ? note(last) : many ?? note(last)
+        libraryNote = LibraryNote(text: text, detail: unsaved, count: targets.count, serial: (libraryNote?.serial ?? 0) + 1)
+        guard advanceAfterRating else { return }
+        if mode == .photo { step(by: 1) } else if targets.count == 1 { move(by: 1, extending: false) }
+    }
+
+    /// Queues a rating or flag change to `photo`'s sidecar; why it can't, if
+    /// it can't. The open photograph's goes to its variant; another's to its
+    /// file's first variant, or a new one if it has no file.
+    private func saveLibraryChange(from before: LibrarySummary, to after: LibrarySummary, photo: URL) -> String? {
+        guard sidecarsEnabled else { return "Not saved: Settings › Save ratings and edits is off" }
+        guard let sidecars else { return "Not saved" }
+        // Benchmarks keep ratings for the session without a note.
+        guard sidecars.writes else { return nil }
+        let rating = after.rating != before.rating ? after.rating : nil
+        let flag: PhotoSidecar.Flag?? = after.flag != before.flag ? .some(after.flag) : nil
+        if photo == sourceItem {
+            guard var context = photoSidecar, context.photo == source else { return "Not saved" }
+            guard context.blocked == nil else { return "Not saved: its .negs file can’t be changed" }
+            guard PhotoLibrary.canWrite(beside: photo) else { return "Not saved: the folder is read-only" }
+            sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, rating: rating, flag: flag,
+                                          defaultsVersion: context.defaultsVersion, app: Self.appVersion), for: context.photo)
+            context.exists = context.written != nil || after.rating > 0 || after.flag != nil
+            photoSidecar = context
+        } else {
+            guard before.problem == nil else { return "Not saved: its .negs file can’t be changed" }
+            guard PhotoLibrary.canWrite(beside: photo.photoFile) else { return "Not saved: the folder is read-only" }
+            // A duplicate's own variant; a photograph's first, or a new one if it has no file.
+            sidecars.enqueue(SidecarPatch(variant: photo.variantID ?? SidecarRestore.newVariantID(), primary: photo.variantID == nil,
+                                          rating: rating, flag: flag, defaultsVersion: SidecarDefaults.latest, app: Self.appVersion),
+                             for: photo.photoFile)
+        }
+        return nil
+    }
+
+    /// Opens the photograph `offset` places on in the film strip, as it's
+    /// filtered.
+    func step(by offset: Int) {
+        guard !cropping, let source = sourceItem else { return }
+        let shown = shownPhotos
+        guard let index = shown.firstIndex(where: { $0.url == source }), shown.indices.contains(index + offset) else { return }
+        open(shown[index + offset].url)
+    }
+
+    // MARK: Selection and grid
+
+    /// The photographs the strip and grid show: those the filter lets
+    /// through, the current one, and those just rated.
+    var shownPhotos: [PhotoFile] { library.shown(keeping: selection.visible) }
+
+    /// A click on a photograph in the strip or the grid. ⌘ adds or removes
+    /// it and ⇧ selects a range, changing only the selection; a plain click
+    /// makes it current, which in the edit view opens it.
+    func click(_ photo: URL, command: Bool = false, shift: Bool = false) {
+        guard !cropping else { return }
+        if command { selection.toggle(photo) }
+        else if shift { selection.extend(to: photo, in: shownPhotos.map(\.url)) }
+        else if mode == .photo, photo != sourceItem { open(photo) }
+        else { selection.select(photo) }
+    }
+
+    /// The arrow keys. In the edit view ← and → open the next photograph; in
+    /// the grid the current photograph moves without developing, a row at a
+    /// time up and down (`offset` ± `gridColumns`). With ⇧ the selection
+    /// grows or shrinks instead and the current photograph stays.
+    func move(by offset: Int, extending: Bool) {
+        guard !cropping else { return }
+        let order = shownPhotos.map(\.url)
+        if extending { return selection.extend(by: offset, in: order) }
+        guard mode == .grid else { return step(by: offset) }
+        guard let current = selection.current, let index = order.firstIndex(of: current) else {
+            if let first = order.first { selection.select(first) }
+            return
+        }
+        var to = index + offset
+        // Down from the row above a short last row lands on its last photograph, as in Finder.
+        if to >= order.count, offset > 1, index / offset < (order.count - 1) / offset { to = order.count - 1 }
+        guard order.indices.contains(to) else { return }
+        selection.select(order[to])
+    }
+
+    /// ⌘A: every photograph shown.
+    func selectAll() { selection.selectAll(shownPhotos.map(\.url)) }
+    /// ⌥⌘A: all but the current photograph.
+    func deselectAll() { selection.deselectAll() }
+    /// The grid's rubber band: `photos` inside it, added to `base`.
+    func band(_ photos: [URL], adding base: Set<URL>) { selection.band(photos, adding: base) }
+
+    func showGrid() {
+        guard let source = sourceItem, !cropping, mode != .grid else { return }
+        holdOriginal(false)
+        // The grid shows the open photograph as edited.
+        flushSidecar()
+        saveOpenThumbnail()
+        if selection.current == nil { selection.select(source) }
+        mode = .grid
+    }
+
+    /// Back to the edit view, on the grid's current photograph.
+    func editCurrent() {
+        guard mode == .grid else { return }
+        if let current = selection.current, current != sourceItem || sourceDeleted { open(current) } else { mode = .photo }
+    }
+
+    func changeGridCellSize(larger: Bool) { gridCellSize += larger ? 40 : -40 }
+
+    private func filterChanged() {
+        guard !library.filtering else { return }
+        selection.prune(to: Set(library.shown(current: selection.current).map(\.url)))
+    }
+
+    // MARK: Edits per photograph
+
+    struct CopiedEdits: Equatable {
+        /// The user's edits (`userEdits`), without a solved brightness match.
+        var state: EditState
+        var groups: Set<EditGroup>
+    }
+
+    /// Copy Edits…'s choice, remembered for the next time.
+    var copyGroups: Set<EditGroup> {
+        get {
+            let names = UserDefaults.standard.stringArray(forKey: "copyEditGroups")
+            return names.map { Set($0.compactMap(EditGroup.init(rawValue:))) } ?? EditGroup.standard
+        }
+        set { UserDefaults.standard.set(EditGroup.allCases.filter(newValue.contains).map(\.rawValue), forKey: "copyEditGroups") }
+    }
+
+    /// Edits can be copied, pasted and reset: the catalog has arrived and no
+    /// crop is being drawn.
+    var canChangeEdits: Bool { source != nil && hasCatalog && !cropping && !closing }
+
+    /// What Copy Edits copies: the grid's current photograph, or the open one.
+    var copySource: URL? { mode == .grid ? selection.current : sourceItem }
+
+    /// What Paste Edits, Reset Edits and Duplicate act on: the selection in
+    /// the grid, or in the film strip while it shows; else the open photograph.
+    var editTargets: [URL] {
+        guard mode == .grid || filmstripVisible else { return sourceItem.map { [$0] } ?? [] }
+        return selection.ordered(shownPhotos.map(\.url))
+    }
+
+    /// A context menu's: the selection if `item` is in it, else `item`
+    /// alone, as in Finder.
+    func contextTargets(_ item: URL) -> [URL] {
+        selection.selected.contains(item) ? selection.ordered(shownPhotos.map(\.url)) : [item]
+    }
+
+    func copyEdits(from item: URL? = nil, groups: Set<EditGroup> = EditGroup.standard) {
+        guard canChangeEdits, let item = item ?? copySource else { return }
+        guard let edits = userEdits(of: item) else {
+            libraryNote = LibraryNote(text: "Edits Not Copied", detail: "Its .negs file can’t be read", serial: (libraryNote?.serial ?? 0) + 1)
+            return
+        }
+        copiedEdits = CopiedEdits(state: edits, groups: groups)
+        libraryNote = LibraryNote(text: "Edits Copied", serial: (libraryNote?.serial ?? 0) + 1)
+    }
+
+    func pasteEdits(onto items: [URL]? = nil) {
+        guard let copied = copiedEdits else { return }
+        changeEdits(items ?? editTargets, action: "Paste Edits", note: "Edits Pasted") { EditGroup.merge(copied.groups, from: copied.state, into: $0) }
+    }
+
+    /// Applies the last photograph left with edits, no copy step.
+    func pasteFromPrevious(onto items: [URL]? = nil) {
+        guard let previous = previousEdits else { return }
+        changeEdits(items ?? editTargets, action: "Paste from Previous", note: "Edits Pasted") {
+            EditGroup.merge(EditGroup.standard, from: previous, into: $0)
+        }
+    }
+
+    /// Removes the photographs' edits, crop and rotation included: they are
+    /// as if never edited. The open one shows what a new photograph would
+    /// get after it, keeping its film, paper, Image Size and output colour.
+    /// Ratings and flags stay.
+    func resetEdits(of items: [URL]? = nil) {
+        changeEdits(items ?? editTargets, action: "Reset Edits", note: "Edits Reset", reset: true) { $0 }
+    }
+
+    /// `item`'s edits as `userEdits` gives them; nil if its sidecar can't be read.
+    private func userEdits(of item: URL) -> EditState? {
+        if item == sourceItem { return Self.userEdits(state) }
+        guard let lookup = sidecarLookup else { return Self.userEdits(plainState) }
+        let restore = SidecarRestore.read(photo: item.photoFile, variant: item.variantID, store: lookup.store, data: lookup.data)
+        guard restore.problem == nil else { return nil }
+        return Self.userEdits(restore.edits.map { restoredState($0.state, legacy: false) } ?? plainState)
+    }
+
+    /// A photograph without edits, not following any other.
+    private var plainState: EditState { newPhotoState(after: EditState()) }
+
+    /// What a photograph's edits are stored against: `params` with the
+    /// engine's defaults too, so values from a newer version stay.
+    private func known(_ table: SidecarDefaults) -> [String: [JSONValue]] {
+        ["params": [table.params, defaults], "crop": [table.crop], "border": [table.border]]
+    }
+
+    /// Changes the edits of `items` as one undo step: the open one in place,
+    /// the others in their sidecars. Each sidecar is kept as it was first, so
+    /// undo can put it back.
+    private func changeEdits(_ items: [URL], action: String, note: String, reset: Bool = false, _ transform: (EditState) -> EditState) {
+        guard canChangeEdits, !items.isEmpty else { return }
+        let open = sourceItem
+        guard sidecarsEnabled, let sidecars, sidecars.writes, let lookup = sidecarLookup else {
+            // Nothing is saved per photograph: only the open one changes, as any edit would.
+            if let open, items.contains(open) { apply(reset ? newPhotoState(after: state) : transform(state), action: action) }
+            let unsaved = items.contains { $0 != open } ? (sidecarsEnabled ? "Not saved" : "Not saved: Settings › Save ratings and edits is off") : nil
+            libraryNote = LibraryNote(text: note, detail: unsaved, count: items.count, serial: (libraryNote?.serial ?? 0) + 1)
+            return
+        }
+        // The open photograph's own edits are in its sidecar before it's kept.
+        flushSidecar()
+        var before: [URL: JSONValue?] = [:], unsaved: String?, openChanged = false
+        for item in items {
+            let photo = item.photoFile
+            guard PhotoLibrary.canWrite(beside: photo) else { unsaved = unsaved ?? "Not saved: the folder is read-only"; continue }
+            do {
+                let raw = try sidecars.readPending(photo: photo)
+                if item == open {
+                    guard var context = photoSidecar, context.photo == photo, context.blocked == nil, !context.awaitingCatalog else {
+                        unsaved = unsaved ?? "Not saved: its .negs file can’t be changed"; continue
+                    }
+                    if before[photo] == nil { before[photo] = .some(raw) }
+                    openChanged = true
+                    if reset {
+                        replaceState(newPhotoState(after: state))
+                        // Unedited from here on: a later edit is measured from this.
+                        sidecarWrite?.cancel(); sidecarWrite = nil
+                        sidecars.enqueue(SidecarPatch(variant: context.variant, primary: context.variantIsNew, edits: .some(nil),
+                                                      defaultsVersion: context.defaultsVersion, app: Self.appVersion), for: photo)
+                        context.written = nil; context.editedAtOpen = false; context.opened = Self.userEdits(state)
+                        photoSidecar = context
+                    } else {
+                        replaceState(transform(state))
+                        flushSidecar()
+                    }
+                    continue
+                }
+                let sidecar = try raw.map(PhotoSidecar.init(raw:))
+                let variant = item.variantID.map { id in sidecar?.variants.first { $0.id == id } } ?? sidecar?.variants.first
+                // A duplicate removed meanwhile.
+                if item.variantID != nil, variant == nil { continue }
+                if before[photo] == nil { before[photo] = .some(raw) }
+                let version = sidecar?.defaultsVersion ?? SidecarDefaults.latest
+                let table = try SidecarDefaults.load(version: version, data: lookup.data)
+                var edits: JSONValue?
+                if !reset {
+                    let saved = try variant?.edits.map { try PhotoSidecar.decodeEdits($0, table: table) }
+                    let base = saved.map { restoredState($0.state, legacy: false) } ?? plainState
+                    // Its match, if on, is solved again when it opens: the edits it was solved for changed.
+                    edits = PhotoSidecar.encodeEdits(transform(base), matchSolved: false, table: table)
+                }
+                sidecars.enqueue(SidecarPatch(variant: variant?.id ?? SidecarRestore.newVariantID(), primary: item.variantID == nil,
+                                              edits: .some(edits), known: known(table), defaultsVersion: version, app: Self.appVersion), for: photo)
+            } catch {
+                unsaved = unsaved ?? "Not saved: its .negs file can’t be changed"
+            }
+        }
+        finishSidecarChange(before, action: action, openChanged: openChanged)
+        libraryNote = LibraryNote(text: note, detail: unsaved, count: items.count, serial: (libraryNote?.serial ?? 0) + 1)
+    }
+
+    /// Duplicate: a virtual copy of each item, a new variant in its sidecar
+    /// with the same edits, rating and flag, listed after the others.
+    /// The grid selects the copies; the edit view opens the first.
+    func duplicate(_ items: [URL]? = nil) {
+        let items = items ?? editTargets
+        guard canChangeEdits, !items.isEmpty else { return }
+        guard sidecarsEnabled, let sidecars, sidecars.writes else {
+            libraryNote = LibraryNote(text: "Not Duplicated", detail: "Duplicates are kept in .negs files, which Settings › Save ratings and edits turns off",
+                                      serial: (libraryNote?.serial ?? 0) + 1)
+            return
+        }
+        flushSidecar()
+        var before: [URL: JSONValue?] = [:], made: [URL] = [], unsaved: String?
+        for item in items {
+            let photo = item.photoFile
+            guard PhotoLibrary.canWrite(beside: photo) else { unsaved = unsaved ?? "Not saved: the folder is read-only"; continue }
+            do {
+                let raw = try sidecars.readPending(photo: photo)
+                // Checks the schema: a newer file is never written over.
+                if let raw { _ = try PhotoSidecar(raw: raw) }
+                if before[photo] == nil { before[photo] = .some(raw) }
+                var top = raw?.object ?? ["negs": .number(Double(PhotoSidecar.schema)), "defaultsVersion": .number(Double(SidecarDefaults.latest))]
+                var variants = top["variants"]?.array ?? []
+                if variants.isEmpty {
+                    // The photograph's own variant first, with the id the open one already uses.
+                    let id = item == sourceItem ? photoSidecar?.variant ?? SidecarRestore.newVariantID() : SidecarRestore.newVariantID()
+                    variants.append(.object(["id": .string(id)]))
+                }
+                let original = item.variantID.flatMap { id in variants.firstIndex { $0["id"] == .string(id) } } ?? 0
+                let id = SidecarRestore.newVariantID()
+                var copy: [String: JSONValue] = ["id": .string(id)]
+                // Edits, rating and flag, as Lightroom's virtual copies; from here on its own.
+                for key in ["edits", "rating", "flag"] { if let value = variants[original].object?[key] { copy[key] = value } }
+                variants.append(.object(copy))
+                top["variants"] = .array(variants)
+                top["app"] = .string(Self.appVersion)
+                sidecars.enqueue(SidecarPatch(variant: id, replacement: .some(.object(top)), defaultsVersion: SidecarDefaults.latest,
+                                              app: Self.appVersion), for: photo)
+                made.append(photo.variant(id))
+            } catch {
+                unsaved = unsaved ?? "Not saved: its .negs file can’t be changed"
+            }
+        }
+        finishSidecarChange(before, action: made.count > 1 ? "Duplicate Photographs" : "Duplicate", openChanged: false)
+        if let first = made.first {
+            if mode == .grid { selection.select(made) } else { open(first) }
+        }
+        libraryNote = LibraryNote(text: made.isEmpty ? "Not Duplicated" : "Duplicated", detail: unsaved, count: max(made.count, 1),
+                                  serial: (libraryNote?.serial ?? 0) + 1)
+    }
+
+    /// The batch exporting now, or the last one until its failures are seen.
+    private(set) var batch: BatchRun?
+    @ObservationIgnored var batchJournalURL = BatchJournal.url
+    /// The batch's helper, for Match camera brightness; quit when it ends.
+    @ObservationIgnored private var batchEngine: EngineClient?
+    @ObservationIgnored private var batchGeneration = 0
+
+    // MARK: Edited thumbnails
+
+    /// Where edited thumbnails are kept; tests use their own.
+    @ObservationIgnored var editedThumbnails = EditedThumbnailStore.shared
+    /// The engine's identity, once read: until then only embedded previews show.
+    private(set) var thumbnailStamp: String?
+    /// Moves when an item's edited thumbnail is made, so its cells read it.
+    private(set) var thumbnailVersions: [URL: Int] = [:]
+    /// Edited items in the strip or grid now: developed first.
+    @ObservationIgnored private var thumbnailsOnScreen: Set<URL> = []
+    /// Each item's look last checked for a thumbnail, and whether it had one.
+    @ObservationIgnored private var thumbnailsChecked: [URL: (look: String, present: Bool)] = [:]
+    /// Looks that failed to develop this session, not tried again.
+    @ObservationIgnored private var thumbnailFailures: [URL: String] = [:]
+    /// The background helper, started while there's work, and its job.
+    @ObservationIgnored private var thumbnailEngine: EngineClient?
+    @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
+    @ObservationIgnored private var thumbnailIdle: Task<Void, Never>?
+    @ObservationIgnored private var thumbnailGeneration = 0
+    @ObservationIgnored private var readingThumbnailStamp = false
+
+    func editedThumbnail(for item: URL) -> EditedThumbnail? {
+        guard let stamp = thumbnailStamp, let look = library.looks[item] else { return nil }
+        return EditedThumbnail(look: look, version: thumbnailVersions[item] ?? 0, stamp: stamp, store: editedThumbnails)
+    }
+
+    /// A strip or grid cell came on screen or left it.
+    func thumbnailShown(_ file: PhotoFile, _ visible: Bool) {
+        guard visible else { thumbnailsOnScreen.remove(file.url); return }
+        thumbnailsOnScreen.insert(file.url)
+        if library.looks[file.url] != nil { pumpThumbnails() }
+    }
+
+    /// Reads the engine's identity once, off the main actor, after launch.
+    private func readThumbnailStamp() {
+        guard thumbnailStamp == nil, !readingThumbnailStamp, let paths = engine?.paths else { return }
+        readingThumbnailStamp = true
+        let store = editedThumbnails
+        Task { [weak self] in
+            let stamp = await Task.detached(priority: .utility) { () -> String? in
+                let stamp = EditedThumbnailStore.stamp(paths)
+                store.engineStamp = stamp
+                // The oldest go once a session.
+                store.prune()
+                return stamp
+            }.value
+            guard let self, !self.closing else { return }
+            self.thumbnailStamp = stamp
+            self.pumpThumbnails()
+        }
+    }
+
+    private func thumbnailMade(_ item: URL, look: String) {
+        thumbnailsChecked[item] = (look, true)
+        thumbnailVersions[item, default: 0] += 1
+    }
+
+    /// The open photograph's edited thumbnail, made from the preview on
+    /// screen, so it costs no render: on leaving it for another photograph
+    /// or the grid.
+    private func saveOpenThumbnail() {
+        guard let item = sourceItem, let surface = image, previewCurrent, !showingInteractiveFrame, heldPreview == nil, cropSession == nil,
+              !brightnessMatchPending, let look = library.looks[item], thumbnailsChecked[item].map({ $0.look != look || !$0.present }) ?? true,
+              let file = library.items.first(where: { $0.url == item }), let key = editedThumbnails.key(for: file, look: look) else { return }
+        let size = imageSize, crop = crop, rotation = imageRotation, border = state.border, texture = filmTexture, strip = filmStrip
+        let store = editedThumbnails
+        let shown = surface
+        Task { [weak self] in
+            guard let photo = await Task.detached(priority: .utility, operation: { ThumbnailComposer.image(of: shown) }).value,
+                  let composed = ThumbnailComposer.compose(photo, size: size, crop: crop, cut: false, rotation: rotation, border: border, texture: texture,
+                                                           strip: strip, space: photo.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!) else { return }
+            let saved = await Task.detached(priority: .utility) { (try? store.save(composed, as: key)) != nil }.value
+            if saved { self?.thumbnailMade(item, look: look) }
+        }
+    }
+
+    /// The background renderer can use the machine: nothing is being edited,
+    /// developed, exported or saved in the window.
+    private var thumbnailsMayRun: Bool {
+        !closing && !interacting && !rendering && pendingRender == nil && !exporting && !batchRunning && !saving && !cropping && matchTask == nil
+            && (mode == .grid || source == nil || previewCurrent || renderFailed)
+    }
+
+    /// Develops the next edited item without a current thumbnail in a helper
+    /// of its own, at utility priority: those on screen first, then the
+    /// folder in order. One at a time, waiting while the open photograph is
+    /// edited or developed. The helper quits when there's nothing left.
+    func pumpThumbnails() {
+        guard thumbnailTask == nil, !closing, hasCatalog, let paths = engine?.paths, let lookup = sidecarLookup else { return }
+        if thumbnailStamp == nil { return readThumbnailStamp() }
+        let store = editedThumbnails
+        let items = library.items, looks = library.looks, open = sourceItem
+        let onScreen = thumbnailsOnScreen
+        // Each edited item but the open one, whose thumbnail comes from its preview.
+        var wanted: [(file: PhotoFile, look: String)] = []
+        for file in items where file.url != open {
+            guard let look = looks[file.url], thumbnailFailures[file.url] != look else { continue }
+            if let checked = thumbnailsChecked[file.url], checked.look == look, checked.present { continue }
+            wanted.append((file, look))
+        }
+        guard !wanted.isEmpty else { return stopThumbnailEngineSoon() }
+        wanted = wanted.filter { onScreen.contains($0.file.url) } + wanted.filter { !onScreen.contains($0.file.url) }
+        thumbnailIdle?.cancel(); thumbnailIdle = nil
+        thumbnailTask = Task { [weak self] in
+            // The first without a thumbnail on disk; those with one are noted.
+            let found = await Task.detached(priority: .utility) { () -> (present: [(URL, String)], next: (file: PhotoFile, look: String)?) in
+                var present: [(URL, String)] = []
+                for (file, look) in wanted {
+                    guard let key = store.key(for: file, look: look) else { continue }
+                    if store.contains(key) { present.append((file.url, look)) } else { return (present, (file, look)) }
+                }
+                return (present, nil)
+            }.value
+            guard let self, !self.closing else { return }
+            for (item, look) in found.present { self.thumbnailsChecked[item] = (look, true) }
+            if let (file, look) = found.next {
+                self.thumbnailsChecked[file.url] = (look, false)
+                if await !self.developThumbnail(file, look: look, lookup: lookup, paths: paths) { self.thumbnailFailures[file.url] = look }
+            }
+            self.thumbnailTask = nil
+            if found.next != nil { self.pumpThumbnails() } else { self.stopThumbnailEngineSoon() }
+        }
+    }
+
+    /// Quits the background helper after a while without work, so its memory goes.
+    private func stopThumbnailEngineSoon() {
+        guard thumbnailEngine != nil, thumbnailIdle == nil else { return }
+        thumbnailIdle = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            guard let self, !Task.isCancelled, self.thumbnailTask == nil, let engine = self.thumbnailEngine else { return }
+            self.thumbnailEngine = nil; self.thumbnailIdle = nil
+            await Task.detached(priority: .utility) { engine.stop() }.value
+        }
+    }
+
+    /// Waits until the background renderer may use the machine.
+    private func waitForThumbnailTurn() async -> Bool {
+        while !thumbnailsMayRun {
+            guard !closing, !Task.isCancelled else { return false }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return !closing
+    }
+
+    /// Develops `file`'s thumbnail with its stored edits, as opening it
+    /// would. A match not yet solved for them is solved first and stored,
+    /// unless its edits changed meanwhile. False when it can't be made.
+    private func developThumbnail(_ file: PhotoFile, look: String, lookup: SidecarLookup, paths: EnginePaths) async -> Bool {
+        let item = file.url, photo = item.photoFile
+        guard let sidecar = try? lookup.store.read(photo: photo),
+              let variant = item.variantID.map({ id in sidecar.variants.first { $0.id == id } }) ?? sidecar.variants.first,
+              let stored = variant.edits, PhotoSidecar.look(of: stored, defaultsVersion: sidecar.defaultsVersion) == look,
+              let table = try? SidecarDefaults.load(version: sidecar.defaultsVersion, data: lookup.data),
+              let saved = try? PhotoSidecar.decodeEdits(stored, table: table) else { return false }
+        var state = restoredState(saved.state, legacy: false, matchSolved: saved.matchSolved)
+        let raw = Self.rawExtensions.contains(photo.pathExtension.lowercased())
+        let engine: EngineClient
+        do {
+            if let running = thumbnailEngine { engine = running } else {
+                engine = try EngineClient(paths: paths, quality: .utility); thumbnailEngine = engine
+            }
+        } catch { return false }
+        thumbnailGeneration += 1
+        let generation = thumbnailGeneration, space = previewSpace
+        let buffer = engine.directory.appendingPathComponent("library-thumbnail.rgba")
+        defer { try? FileManager.default.removeItem(at: buffer) }
+        func command(_ state: EditState, longSide: Int) -> [String: JSONValue] {
+            var params = state.params
+            params["io.output_color_space"] = .string(space)
+            var command: [String: JSONValue] = [
+                "command": .string("thumbnail"), "input": .string(photo.path), "source_generation": .number(Double(generation)),
+                "film": .string(state.film), "paper": .string(state.paper), "params": params,
+                "long_side": .number(Double(longSide)), "preview_path": .string(buffer.path),
+            ]
+            if let crop = Self.cropJSON(state.crop) { command["crop"] = crop }
+            return command
+        }
+        var finalLook = look
+        do {
+            let matchable = raw || state.params["io.input_interpretation.mode"].string == "auto"
+            if state.brightnessMatch != nil, !saved.matchSolved, matchable {
+                // The decode first, which the match is solved on.
+                guard await waitForThumbnailTurn() else { return false }
+                let (_, decoded) = try await engine.request(command(state, longSide: 16))
+                let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
+                guard await waitForThumbnailTurn() else { return false }
+                let reference = engine.directory.appendingPathComponent("library-brightness.png")
+                defer { try? FileManager.default.removeItem(at: reference) }
+                if let solved = try? await Self.solveBrightnessMatch(engine: engine, source: photo, generation: generation, size: size, raw: raw,
+                                                                    request: matchSolveState(state), reference: reference),
+                   let matched = Self.matching(state, ev: solved.exposure, limited: solved.limited, inputs: matchInputs(state)) {
+                    state = matched
+                    finalLook = storeSolvedMatch(state, item: item, variant: variant.id, stored: stored, sidecar: sidecar, table: table) ?? look
+                }
+            }
+            guard await waitForThumbnailTurn() else { return false }
+            let (_, result) = try await engine.request(command(state, longSide: Int(EditedThumbnailStore.longSide)))
+            let (width, height) = (Int(result["width"].double), Int(result["height"].double))
+            let display = result["display_color_space"].string
+            let size = CGSize(width: result["source_width"].double, height: result["source_height"].double)
+            let developed = try await Task.detached(priority: .utility) {
+                try Self.thumbnailImage(Data(contentsOf: buffer), width: width, height: height, displaySpace: display)
+            }.value
+            guard !closing else { return false }
+            let strip = state.border.style == .film35 ? FilmFormat(state.crop.size(of: size)).flatMap { FilmStrip.load(data: paths.data, film: state.film, format: $0) } : nil
+            guard let composed = ThumbnailComposer.compose(developed, size: size, crop: state.crop, cut: true, rotation: Int(state.params["io.rotate_cw"].double),
+                                                           border: state.border, texture: filmTexture, strip: strip,
+                                                           space: developed.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!),
+                  let key = editedThumbnails.key(for: file, look: finalLook) else { return false }
+            let store = editedThumbnails
+            try await Task.detached(priority: .utility) { try store.save(composed, as: key) }.value
+            thumbnailMade(item, look: finalLook)
+            if finalLook != look { library.reload(photo) }
+            return true
+        } catch {
+            FileHandle.standardError.write(Data("library thumbnail \(file.name): \(error.localizedDescription)\n".utf8))
+            return false
+        }
+    }
+
+    /// Stores a match solved in the background, unless the item's edits
+    /// changed since they were read. Its new look, or nil if not stored.
+    private func storeSolvedMatch(_ state: EditState, item: URL, variant: String, stored: JSONValue, sidecar: PhotoSidecar, table: SidecarDefaults) -> String? {
+        let photo = item.photoFile
+        guard sidecarsEnabled, let sidecars, sidecars.writes, PhotoLibrary.canWrite(beside: photo) else { return nil }
+        let edits = PhotoSidecar.encodeEdits(state, matchSolved: true, table: table)
+        sidecars.enqueue(SidecarPatch(variant: variant, edits: .some(edits), known: known(table), onlyIfEdits: .some(stored),
+                                      defaultsVersion: sidecar.defaultsVersion, app: Self.appVersion), for: photo)
+        writeSidecars()
+        guard let now = try? sidecars.read(photo: photo), let written = now.variants.first(where: { $0.id == variant }),
+              written.edits != stored else { return nil }
+        return PhotoSidecar.look(of: written.edits, defaultsVersion: now.defaultsVersion)
+    }
+
+    // MARK: Delete
+
+    /// Where deleted photographs go.
+    @ObservationIgnored var trash = PhotoTrash.system
+    /// The open photograph was deleted while the grid showed. Leaving the
+    /// grid opens its current photograph again, even if Undo put it back.
+    private var sourceDeleted = false
+
+    /// What Delete acts on: as the rating keys, the grid's selection, or in
+    /// the edit view the open photograph only.
+    var deleteTargets: [URL] { ratingTargets }
+
+    /// Nothing is cropped, exported or saved from a file that might go.
+    var canDelete: Bool { !closing && !cropping && !exporting && !saving }
+
+    /// The folder's rejected photographs and duplicates, filtered out or not.
+    var rejected: [URL] { library.items.map(\.url).filter { library.summary(for: $0).flag == .reject } }
+
+    func deletePlan(_ items: [URL]) -> DeletePlan { DeletePlan(items) { library.duplicates[$0] ?? [] } }
+
+    /// ⌫ asks first and ⌘⌫ doesn't. Without a Trash it always asks, as
+    /// nothing could be put back.
+    func requestDelete(_ items: [URL]? = nil, asking: Bool) {
+        let plan = deletePlan(items ?? deleteTargets)
+        guard canDelete, let first = plan.items.first else { return }
+        let folder = first.photoFile.deletingLastPathComponent()
+        guard PhotoLibrary.canWrite(in: folder) else {
+            error = "Nothing was deleted: the folder “\(folder.lastPathComponent)” is read-only."
+            return
+        }
+        let permanent = !plan.files.isEmpty && !trash.available(folder)
+        guard asking || permanent else { return delete(plan) }
+        let question = plan.question(name: library.name(of:), permanent: permanent)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = question.message
+        alert.informativeText = question.information
+        alert.addButton(withTitle: question.button).hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        let answered = { [weak self] (response: NSApplication.ModalResponse) in
+            if response == .alertFirstButtonReturn { self?.delete(plan, permanent: permanent) }
+        }
+        if let window = NSApp.keyWindow as? EditorWindow {
+            alert.beginSheetModal(for: window) { response in MainActor.assumeIsolated { answered(response) } }
+        } else {
+            answered(alert.runModal())
+        }
+    }
+
+    /// Moves `plan`'s photographs to the Trash with their sidecars, and
+    /// removes its duplicates from theirs, as one undo step. If what was
+    /// current goes, the next photograph shown becomes current.
+    func delete(_ plan: DeletePlan, permanent: Bool = false) {
+        guard canDelete, !plan.isEmpty else { return }
+        // The open photograph's last edits go to its sidecar first, and so
+        // to the Trash with it, or into the snapshot Undo puts back.
+        flushSidecar()
+        var gone = Set(plan.items)
+        for file in plan.files { for id in library.duplicates[file] ?? [] { gone.insert(file.variant(id)) } }
+        let current = mode == .grid ? selection.current : sourceItem
+        let next = current.flatMap { current -> URL?? in
+            guard gone.contains(current) else { return nil }
+            return .some(Self.next(after: current, in: shownPhotos.map(\.url), skipping: gone)
+                ?? Self.next(after: current, in: library.items.map(\.url), skipping: gone))
+        }
+        let open = sourceItem, openGone = sourceItem.map(gone.contains) ?? false
+        // Nothing more is written for it.
+        if openGone { sidecarWrite?.cancel(); sidecarWrite = nil; photoSidecar = nil }
+
+        // A duplicate of a photograph that stays leaves its sidecar.
+        var before: [URL: JSONValue?] = [:], failure: String?
+        if let sidecars, sidecars.writes {
+            for item in plan.duplicates {
+                guard let id = item.variantID else { continue }
+                let photo = item.photoFile
+                do {
+                    guard let raw = try sidecars.readPending(photo: photo) else { continue }
+                    let removed = try PhotoSidecar.removing(variant: id, from: raw)
+                    if before[photo] == nil { before[photo] = .some(raw) }
+                    sidecars.enqueue(SidecarPatch(variant: id, replacement: .some(removed), defaultsVersion: SidecarDefaults.latest,
+                                                  app: Self.appVersion), for: photo)
+                } catch {
+                    failure = failure ?? "“\(library.name(of: item))” couldn’t be removed: its .negs file can’t be changed."
+                }
+            }
+            for photo in before.keys { library.reload(photo) }
+        }
+        library.remove(plan.files)
+
+        // The selection moves on.
+        switch next {
+        case .some(.some(let next)):
+            if mode == .grid { selection.select(next) } else { self.open(next, restoring: nil) }
+        case .some(.none):
+            // Nothing is left to show.
+            forgetPhotograph()
+            selection = LibrarySelection(); mode = .photo
+        case .none:
+            selection.prune(to: Set(library.items.map(\.url)))
+        }
+        if openGone, mode == .grid { sourceDeleted = true }
+
+        let record = TrashRecord()
+        if !permanent || !before.isEmpty {
+            let reopen = openGone ? open : nil
+            undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in
+                MainActor.assumeIsolated { self?.undoDelete(permanent ? plan.withoutFiles : plan, record: record, sidecars: before, reopen: reopen) }
+            }
+            undoManager?.setActionName(plan.actionName)
+        }
+        let files = plan.files, trash = self.trash, sidecars = self.sidecars, removing = failure
+        record.task = Task { [weak self] in
+            // Everything queued is written first, so nothing writes a sidecar
+            // beside a photograph that's gone.
+            if let failures = await sidecars?.flush() { for (failed, reason) in failures { self?.sidecarFailed(failed, reason) } }
+            let moved = await Task.detached(priority: .userInitiated) { () -> (moves: [(original: URL, trashed: URL)], failure: String?) in
+                var moves: [(original: URL, trashed: URL)] = [], failure: String?
+                for file in files {
+                    let sidecar = PhotoSidecar.url(for: file)
+                    for item in [file, sidecar] where item == file || FileManager.default.fileExists(atPath: item.path) {
+                        do {
+                            if permanent { try trash.remove(item) } else { moves.append((item, try trash.trash(item))) }
+                        } catch {
+                            failure = failure ?? "“\(file.lastPathComponent)” couldn’t be deleted. \(error.localizedDescription)"
+                            break
+                        }
+                    }
+                }
+                return (moves, failure)
+            }.value
+            record.moves = moved.moves
+            guard let self else { return }
+            if let reason = moved.failure ?? removing { self.error = reason }
+            self.library.unhide(files)
+        }
+        if files.isEmpty, let failure { error = failure }
+    }
+
+    /// The first photograph after `item` in `order` that isn't `gone`, or
+    /// else the last one before it.
+    nonisolated static func next(after item: URL, in order: [URL], skipping gone: Set<URL>) -> URL? {
+        guard let index = order.firstIndex(of: item) else { return order.first { !gone.contains($0) } }
+        return order[index...].first { !gone.contains($0) } ?? order[..<index].last { !gone.contains($0) }
+    }
+
+    /// Puts back what `plan` deleted: the files from the Trash and the
+    /// duplicates' sidecars as they were. What comes back is selected; the
+    /// edit view opens the photograph it showed.
+    private func undoDelete(_ plan: DeletePlan, record: TrashRecord, sidecars before: [URL: JSONValue?], reopen: URL?) {
+        guard !closing else { return }
+        // Redo deletes them again, without asking.
+        undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in MainActor.assumeIsolated { self?.delete(plan) } }
+        undoManager?.setActionName(plan.actionName)
+        let sidecars = self.sidecars
+        for (photo, raw) in before {
+            sidecars?.enqueue(SidecarPatch(variant: "", replacement: .some(raw), defaultsVersion: SidecarDefaults.latest, app: Self.appVersion), for: photo)
+            library.reload(photo)
+        }
+        Task { [weak self] in
+            await record.task?.value
+            let moves = record.moves
+            record.moves = []
+            let failure = await Task.detached(priority: .userInitiated) { () -> String? in
+                var failure: String?
+                for move in moves.reversed() {
+                    do { try FileManager.default.moveItem(at: move.trashed, to: move.original) } catch {
+                        failure = failure ?? "“\(move.original.lastPathComponent)” couldn’t be put back. \(error.localizedDescription)"
+                    }
+                }
+                return failure
+            }.value
+            if let failures = await sidecars?.flush() { for (failed, reason) in failures { self?.sidecarFailed(failed, reason) } }
+            guard let self, !self.closing else { return }
+            if let failure { self.error = failure }
+            self.library.unhide(plan.files)
+            let restored = plan.items.filter { FileManager.default.fileExists(atPath: $0.photoFile.path) }
+            if self.mode == .photo, let reopen, restored.contains(reopen) || restored.contains(reopen.photoFile) {
+                self.open(reopen, restoring: nil)
+            } else if self.source == nil, let first = restored.first {
+                self.open(first, restoring: nil)
+            }
+            if self.mode == .grid, !restored.isEmpty { self.selection.select(restored) }
+        }
+    }
+
+    /// After changing several sidecars: the library shows them, one undo
+    /// step puts back `before`, and they're written.
+    private func finishSidecarChange(_ before: [URL: JSONValue?], action: String, openChanged: Bool) {
+        guard !before.isEmpty else { return }
+        for photo in before.keys { library.reload(photo) }
+        // The open photograph's own history is of edits that are gone.
+        if openChanged { undoManager?.removeAllActions(withTarget: self) }
+        registerSidecarUndo(before, action: action)
+        writeSidecars()
+    }
+
+    private func registerSidecarUndo(_ files: [URL: JSONValue?], action: String) {
+        undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restoreSidecars(files, action: action) }
+        }
+        undoManager?.setActionName(action)
+    }
+
+    /// Puts `files` back as they were (undo), keeping them as they are now
+    /// for redo. The open photograph shows its edits as restored; a
+    /// duplicate that's gone gives way to its photograph.
+    private func restoreSidecars(_ files: [URL: JSONValue?], action: String) {
+        guard let sidecars, !closing else { return }
+        sidecarWrite?.cancel(); sidecarWrite = nil
+        var now: [URL: JSONValue?] = [:]
+        for (photo, raw) in files {
+            let current: JSONValue?
+            do { current = try sidecars.readPending(photo: photo) } catch { continue }
+            now[photo] = .some(current)
+            sidecars.enqueue(SidecarPatch(variant: "", replacement: .some(raw), defaultsVersion: SidecarDefaults.latest, app: Self.appVersion), for: photo)
+            library.reload(photo)
+        }
+        registerSidecarUndo(now, action: action)
+        if let current = selection.current, let id = current.variantID, library.duplicates[current.photoFile]?.contains(id) != true {
+            selection.select(current.photoFile)
+        }
+        if let source, files.keys.contains(source) {
+            if let id = sourceVariant, library.duplicates[source]?.contains(id) != true {
+                open(source, restoring: nil)
+            } else {
+                cancelBrightnessMatch(); brightnessMatchFailure = nil
+                customFilmFormat = false
+                adoptEdits(for: source, restore: readSidecar(source, variant: sourceVariant), legacy: nil, previous: state)
+                undoManager?.removeAllActions(withTarget: self)
+                changed()
+            }
+        }
+        writeSidecars()
+    }
+
+    /// Writes every queued sidecar change.
+    private func writeSidecars() {
+        guard let sidecars else { return }
+        Task { [weak self] in
+            let failures = await sidecars.flush()
+            for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+        }
     }
 
     // MARK: Original
@@ -987,6 +2201,7 @@ import UniformTypeIdentifiers
             await self.render()
             // The main preview goes first; thumbnails follow once it's current.
             self.pumpPreviews()
+            self.pumpThumbnails()
         }
     }
     /// What a render develops: the export-size frame, or as many pixels as
@@ -1481,9 +2696,7 @@ import UniformTypeIdentifiers
               let engine, let source, brightnessMatchPending else { return }
         let inputs = matchInputs(state)
         let id = UUID(), generation = sourceGeneration, size = sourceSize, raw = isRaw
-        var request = renderState
-        request.params["prep"] = defaults["prep"]
-        request.params["enlarger.print_exposure"] = defaults["enlarger.print_exposure"]
+        let request = matchSolveState(renderState)
         let reference = engine.directory.appendingPathComponent("camera-brightness-\(id.uuidString).png")
         matchRequest = id; matchingBrightness = true
         matchTask = Task { [weak self] in
@@ -1496,31 +2709,12 @@ import UniformTypeIdentifiers
                 }
             }
             do {
-                // What the RAW says its preview is in, read by the engine as
-                // on the web and Windows.
-                let declared = raw ? PreviewColourSpace(rawValue: try await engine.request([
-                    "command": .string("preview_colour_space"), "input": .string(source.path)
-                ]).1["colour_space"].string) : nil
-                try Task.checkCancellation()
-                let data = try await Task.detached(priority: .userInitiated) {
-                    raw ? try CameraBrightnessReference.png(from: source, expectedSize: size, declared: declared)
-                        : try CameraBrightnessReference.filePNG(from: source, expectedSize: size)
-                }.value
-                try Task.checkCancellation()
-                guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
-                try data.write(to: reference, options: .atomic)
-                let (_, result) = try await engine.request([
-                    "command": .string("place_exposure"), "input": .string(source.path),
-                    "source_generation": .number(Double(generation)), "film": .string(request.film),
-                    "paper": .string(request.paper), "params": request.params,
-                    "reference_path": .string(reference.path)
-                ])
-                try Task.checkCancellation()
-                guard !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
-                guard case .number(let exposure) = result["exposure_ev"], exposure.isFinite, (-3...3).contains(exposure) else {
-                    throw EngineError(message: "No reliable brightness match with these settings.")
+                let solved = try await Self.solveBrightnessMatch(engine: engine, source: source, generation: generation, size: size, raw: raw,
+                                                                 request: request, reference: reference) {
+                    guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { throw CancellationError() }
                 }
-                self.applyBrightnessMatch(exposure, limited: result["highlight_limited"].bool, inputs: inputs)
+                guard let self, !self.closing, self.sourceGeneration == generation, self.matchRequest == id else { return }
+                self.applyBrightnessMatch(solved.exposure, limited: solved.limited, inputs: inputs)
             } catch is CancellationError {
                 // A different photograph or shutdown supersedes this request.
             } catch {
@@ -1530,6 +2724,48 @@ import UniformTypeIdentifiers
                 self.brightnessMatchFailure = (generation, failure.forPhoto ? nil : inputs, failure.message)
             }
         }
+    }
+
+    /// What the match is solved with: `state` as rendered, without the
+    /// brightness edits that are the user's own.
+    func matchSolveState(_ state: EditState) -> EditState {
+        var request = state
+        request.params["prep"] = defaults["prep"]
+        request.params["enlarger.print_exposure"] = defaults["enlarger.print_exposure"]
+        return request
+    }
+
+    /// Solves Match camera brightness for `source`, which `engine` holds
+    /// decoded as `generation` (`size` pixels): the exposure that develops it
+    /// as bright as the camera's preview, and whether highlights limited it.
+    /// `stillWanted` throws to stop before the helper is asked.
+    nonisolated static func solveBrightnessMatch(engine: EngineClient, source: URL, generation: Int, size: CGSize, raw: Bool, request: EditState,
+                                                 reference: URL, stillWanted: @MainActor () throws -> Void = {}) async throws -> (exposure: Double, limited: Bool) {
+        // What the RAW says its preview is in, read by the engine as on the
+        // web and Windows.
+        let declared = raw ? PreviewColourSpace(rawValue: try await engine.request([
+            "command": .string("preview_colour_space"), "input": .string(source.path)
+        ]).1["colour_space"].string) : nil
+        try Task.checkCancellation()
+        let data = try await Task.detached(priority: .userInitiated) {
+            raw ? try CameraBrightnessReference.png(from: source, expectedSize: size, declared: declared)
+                : try CameraBrightnessReference.filePNG(from: source, expectedSize: size)
+        }.value
+        try Task.checkCancellation()
+        try await stillWanted()
+        try data.write(to: reference, options: .atomic)
+        let (_, result) = try await engine.request([
+            "command": .string("place_exposure"), "input": .string(source.path),
+            "source_generation": .number(Double(generation)), "film": .string(request.film),
+            "paper": .string(request.paper), "params": request.params,
+            "reference_path": .string(reference.path)
+        ])
+        try Task.checkCancellation()
+        try await stillWanted()
+        guard case .number(let exposure) = result["exposure_ev"], exposure.isFinite, (-3...3).contains(exposure) else {
+            throw EngineError(message: "No reliable brightness match with these settings.")
+        }
+        return (exposure, result["highlight_limited"].bool)
     }
 
     /// The match is in, or failed, without changing the render: the held
@@ -1548,7 +2784,13 @@ import UniformTypeIdentifiers
     /// Moves the total with the match, keeping the user's exposure above it.
     /// A change under 0.05 EV keeps the values and only marks them current.
     private func applyBrightnessMatch(_ ev: Double, limited: Bool, inputs: JSONValue) {
-        guard var match = state.brightnessMatch, matchInputs(state) == inputs else { return }
+        guard matchInputs(state) == inputs, let next = Self.matching(state, ev: ev, limited: limited, inputs: inputs) else { return }
+        replaceState(next)
+    }
+
+    /// `state` with its match solved as `ev`, for `inputs`.
+    nonisolated static func matching(_ state: EditState, ev: Double, limited: Bool, inputs: JSONValue) -> EditState? {
+        guard var match = state.brightnessMatch else { return nil }
         var next = state
         let offset = next.params["prep.exposure_ev"].double - (match.ev ?? 0)
         if match.ev.map({ abs(ev - $0) >= 0.05 }) ?? true {
@@ -1557,7 +2799,7 @@ import UniformTypeIdentifiers
         }
         match.inputs = inputs; match.highlightLimited = limited
         next.brightnessMatch = match
-        replaceState(next)
+        return next
     }
 
     // MARK: Print balance
@@ -1751,6 +2993,9 @@ import UniformTypeIdentifiers
         let staging = url.deletingLastPathComponent().appendingPathComponent(".negs-\(UUID().uuidString).\(url.pathExtension)")
         defer { try? FileManager.default.removeItem(at: staging) }
         guard (try? await engine.request(saveCommand(to: staging, size: size, save: save))) != nil else { return false }
+        if let rating = currentSummary.flatMap(ExportRating.value) {
+            do { try ExportRating.embed(rating, in: staging) } catch { report(error); return true }
+        }
         guard rename(staging.path, url.path) == 0 else {
             report(EngineError(message: "Could not move the completed export to \(url.path): \(String(cString: strerror(errno)))"))
             return true
@@ -1772,7 +3017,8 @@ import UniformTypeIdentifiers
         defer { exporting = false; exportJob = nil }
         do {
             let outcome = try await job.run(paths: engine.paths, scratch: engine.scratch, source: source, destination: url, state: exportState,
-                                            crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: photoSize), size: size, save: save, engine: exportEngine)
+                                            crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: photoSize), size: size, save: save,
+                                            engine: exportEngine, rating: currentSummary.flatMap(ExportRating.value))
             status = outcome.fellBackToCPU
                 ? "Exported \(url.lastPathComponent) on the CPU (32-bit): no GPU was available for Fast export"
                 : "Exported \(url.lastPathComponent)"
@@ -1781,6 +3027,380 @@ import UniformTypeIdentifiers
     }
     func cancelExport() { exportJob?.cancel() }
     func flushPreviewCache() async { await previewCache.flush() }
+
+    // MARK: Batch export
+
+    /// What Export acts on: the open photograph in the edit view, the selection in the grid.
+    var exportTargets: [URL] { ratingTargets }
+    /// Export is a single export: the edit view's photograph, or the open one alone selected in the grid.
+    private var exportsSingle: Bool {
+        mode == .photo || (!sourceDeleted && sourceItem.map { exportTargets == [$0] } ?? false)
+    }
+    /// The menu also needs no crop being drawn; the toolbar shows crop's own items then.
+    var canExport: Bool {
+        guard ready, !exporting, !saving, !batchRunning else { return false }
+        return exportsSingle ? source != nil : !exportTargets.isEmpty && hasCatalog && engine != nil
+    }
+    /// "Export Photograph…", or "Export 12 Photographs…" for a grid selection.
+    var exportTitle: String {
+        let count = exportsSingle ? 1 : exportTargets.count
+        return count > 1 ? "Export \(count) Photographs…" : "Export Photograph…"
+    }
+    var batchRunning: Bool { batch?.running == true }
+
+    /// Export: a single export, or a batch of the grid's selection.
+    func exportPanel() {
+        guard canExport, !cropping else { return }
+        if exportsSingle { return savePanel(export: true) }
+        batchPanel(exportTargets)
+    }
+
+    /// Picks a folder for `targets`, or for a single photograph that isn't
+    /// open a file as today's single export does, then starts the batch.
+    private func batchPanel(_ targets: [URL]) {
+        let single = targets.count == 1
+        let panel: NSSavePanel
+        if single { panel = NSSavePanel() } else {
+            let open = NSOpenPanel()
+            open.canChooseFiles = false; open.canChooseDirectories = true; open.allowsMultipleSelection = false
+            open.prompt = "Export"
+            panel = open
+        }
+        panel.title = single ? "Export Photograph" : "Export \(targets.count) Photographs"
+        panel.canCreateDirectories = true
+        if let folder = Self.lastSaveFolder { panel.directoryURL = folder }
+        // The first photograph's name, to show what the naming does.
+        var named = BatchOptions()
+        named.format = OutputFormat.last.rawValue
+        let first = batchItems([targets[0]], options: named)[0]
+        var chosenFormat = OutputFormat.last
+        let rows = single ? nil : BatchRows { naming, custom in
+            var options = BatchOptions(); options.naming = naming; options.custom = custom
+            options.format = chosenFormat.rawValue
+            return options.fileName(name: Self.batchName(first.item, title: first.title), film: first.state.film)
+        }
+        let previewSpace = previewSpace
+        let count = targets.count
+        let picker = FormatPicker(panel: panel, selected: OutputFormat.last, engine: ExportEngine.selected, size: ExportSize.last,
+                                  restrictsType: single, extraRows: rows?.views ?? []) { engine, size, save in
+            let extras = (size.summary.map { " \($0)." } ?? "") + (save.summary(export: true, previewSpace: previewSpace).map { " \($0)." } ?? "")
+            let what = count == 1 ? "With its own edits, crop and border." : "Each of the \(count) photographs with its own edits, crop and border, one after another."
+            return switch engine {
+            case .fast?: "\(what) Fast looks the same as Reference, in a fraction of the time.\(extras)"
+            default: "\(what) Reference is the most precise; about half a minute for each large photo.\(extras)"
+            }
+        }
+        rows?.changed = { [weak picker] in picker?.refreshMessage() }
+        picker.formatChanged = { [weak picker, weak rows] in
+            if let picker { chosenFormat = picker.format }
+            rows?.refresh()
+        }
+        if single { panel.nameFieldStringValue = first.fileName }
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            let folder = single ? url.deletingLastPathComponent() : url
+            if single, Self.sameFile(url, targets[0].photoFile) {
+                self.error = "Choose a different filename to preserve the original photograph."; return
+            }
+            OutputFormat.last = picker.format
+            ExportSize.last = picker.size
+            picker.remember(); rows?.remember()
+            Self.lastSaveFolder = folder
+            let engine = picker.engine ?? .reference
+            ExportEngine.selected = engine
+            let save = picker.settings, size = picker.size
+            var options = BatchOptions(format: picker.format.rawValue, engine: engine.rawValue, edge: size.edge.rawValue, pixels: size.pixels,
+                                       bitDepth: save.bitDepth, colorSpace: save.colorSpace, jpegQuality: save.jpegQuality,
+                                       lowMemory: self.lowMemoryExport)
+            // The save panel asked before replacing.
+            if let rows { options.naming = rows.naming; options.custom = rows.custom; options.existing = rows.existing } else { options.existing = .replace }
+            Task { await self.exportBatch(targets, to: folder, options: options, named: single ? url.lastPathComponent : nil) }
+        }
+    }
+
+    /// The name `{name}` stands for: the file's without its extension, a
+    /// duplicate's number after it (`IMG_0412 (2)`).
+    nonisolated static func batchName(_ item: URL, title: String) -> String {
+        let photo = item.photoFile
+        let suffix = title.hasPrefix(photo.lastPathComponent) ? String(title.dropFirst(photo.lastPathComponent.count)) : ""
+        return photo.deletingPathExtension().lastPathComponent + suffix
+    }
+
+    /// Starts exporting `targets` to `folder`, with their edits as they are
+    /// now; `named` names a batch of one. Nil if it couldn't start.
+    @discardableResult
+    func exportBatch(_ targets: [URL], to folder: URL, options: BatchOptions, named: String? = nil) async -> BatchRun? {
+        if let open = sourceItem, targets.contains(open) { await settleBrightnessMatch() }
+        guard canStartBatch else { return nil }
+        var items = batchItems(targets, options: options)
+        if let named, items.count == 1 { items[0].fileName = named }
+        // Replacing a photograph's own file is refused, as for a single export.
+        if options.existing == .replace, items.contains(where: { Self.sameFile(folder.appendingPathComponent($0.fileName), $0.item.photoFile) }) {
+            error = "Choose a different folder or file name to preserve the original photographs."
+            return nil
+        }
+        let journal = BatchJournal(destination: folder, bookmark: try? folder.bookmarkData(), options: options, items: items)
+        return startBatch(journal)
+    }
+
+    /// One exporter at a time: not during a single export either.
+    private var canStartBatch: Bool { !closing && !batchRunning && !exporting && hasCatalog && engine != nil }
+
+    /// Each target's edits as they are now, and the name it gets.
+    func batchItems(_ targets: [URL], options: BatchOptions) -> [BatchItem] {
+        let lookup = sidecarLookup
+        let open = sourceDeleted ? nil : sourceItem
+        let current = state
+        var items = targets.map { target -> BatchItem in
+            let photo = target.photoFile
+            let raw = Self.rawExtensions.contains(photo.pathExtension.lowercased())
+            let title = library.name(of: target)
+            var item = BatchItem(item: target, title: title, state: current, needsMatch: false, storesMatch: false,
+                                 rating: ExportRating.value(library.summary(for: target)), fileName: "")
+            func matchable(_ state: EditState) -> Bool {
+                state.brightnessMatch != nil && (raw || state.params["io.input_interpretation.mode"].string == "auto")
+            }
+            if target == open, source != nil {
+                // As on screen, its match settled.
+                let size = image != nil ? imageSize : placeholderSize
+                item.size = size == .zero ? nil : size
+            } else if let lookup, case let restore = SidecarRestore.read(photo: photo, variant: target.variantID, store: lookup.store, data: lookup.data),
+                      let saved = restore.edits, restore.problem == nil {
+                item.state = restoredState(saved.state, legacy: false, matchSolved: saved.matchSolved)
+                item.needsMatch = !saved.matchSolved && matchable(item.state)
+                item.storesMatch = true
+                item.look = library.looks[target]
+                let film = item.state.film, paper = item.state.paper
+                let missing = [films.contains { $0.id == film } ? nil : "the film “\(film)”", papers.contains { $0.id == paper } ? nil : "the paper “\(paper)”"].compactMap { $0 }
+                if !missing.isEmpty {
+                    item.status = .failed
+                    item.reason = "Edited with \(missing.joined(separator: " and ")), which this version of Negs doesn’t have."
+                }
+            } else {
+                // Never edited: as opening it now would show it.
+                item.state = newPhotoState(after: current)
+                item.needsMatch = matchable(item.state)
+            }
+            item.fileName = options.fileName(name: Self.batchName(target, title: title), film: item.state.film)
+            return item
+        }
+        let names = BatchNames.unique(items.map(\.fileName))
+        for index in items.indices { items[index].fileName = names[index] }
+        return items
+    }
+
+    @discardableResult
+    private func startBatch(_ journal: BatchJournal) -> BatchRun? {
+        guard canStartBatch else { return nil }
+        let run = BatchRun(journal: journal, journalURL: batchJournalURL)
+        batch = run
+        requestNotificationPermission()
+        launchBatch(run)
+        return run
+    }
+
+    private func launchBatch(_ run: BatchRun) {
+        run.running = true; run.cancelled = false
+        run.task = Task { [weak self] in await self?.runBatch(run) }
+    }
+
+    /// Exports what's waiting, one photograph at a time, writing the journal
+    /// after each. At quit the journal stays for the next launch.
+    private func runBatch(_ run: BatchRun) async {
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Exporting photographs")
+        defer { ProcessInfo.processInfo.endActivity(activity) }
+        try? run.journal.write(to: run.journalURL)
+        while !run.cancelled, !closing, let index = run.journal.items.firstIndex(where: { $0.status == .waiting }) {
+            run.current = index
+            run.journal.items[index] = await exportBatchItem(run.journal.items[index], of: run)
+            if run.journal.items[index].status == .waiting { break }
+            try? run.journal.write(to: run.journalURL)
+        }
+        run.current = nil
+        guard !closing else { return }
+        run.running = false
+        BatchJournal.remove(at: run.journalURL)
+        if let engine = batchEngine {
+            batchEngine = nil
+            await Task.detached(priority: .utility) { engine.stop() }.value
+        }
+        batchFinished(run)
+        pumpThumbnails()
+    }
+
+    /// One photograph: its match solved if it needs one, then today's
+    /// exporter. Still waiting if it was cancelled.
+    private func exportBatchItem(_ item: BatchItem, of run: BatchRun) async -> BatchItem {
+        var item = item
+        func failed(_ reason: String) -> BatchItem { item.status = .failed; item.reason = reason; return item }
+        let photo = item.item.photoFile, folder = run.journal.destination, options = run.journal.options
+        let fm = FileManager.default
+        var isFolder: ObjCBool = false
+        guard fm.fileExists(atPath: folder.path, isDirectory: &isFolder), isFolder.boolValue else {
+            return failed("The folder “\(folder.lastPathComponent)” is missing.")
+        }
+        guard fm.fileExists(atPath: photo.path) else { return failed("The photograph is missing.") }
+        guard let paths = engine?.paths, let scratch = engine?.scratch else { return failed("The engine isn’t running.") }
+        var name = item.fileName
+        func taken(_ name: String) -> Bool { fm.fileExists(atPath: folder.appendingPathComponent(name).path) }
+        if taken(name) {
+            switch options.existing {
+            case .skip:
+                item.status = .skipped; item.reason = "\(name) already exists."
+                return item
+            case .number: name = BatchNames.numbered(name, taken: taken)
+            case .replace: break
+            }
+        }
+        let destination = folder.appendingPathComponent(name)
+        guard !Self.sameFile(destination, photo) else { return failed("It would replace the photograph’s own file.") }
+        var state = item.state, size = item.size
+        let border = state.border
+        let needsSize = size == nil && border.enabled && border.export && border.style == .film35
+        if item.needsMatch || needsSize {
+            do {
+                let solved = try await solveBatchMatch(item, paths: paths)
+                state = solved.state; size = solved.size
+            } catch is CancellationError {
+                return item
+            } catch {
+                // Unmatched, as the photograph would open; a 35mm border needs the size.
+                if needsSize { return failed(error.localizedDescription) }
+            }
+            if run.cancelled || closing { return item }
+        }
+        var exportState = state
+        exportState.params["settings.serial_grain"] = .bool(options.lowMemory)
+        let job = ExportJob()
+        run.job = job
+        defer { run.job = nil }
+        do {
+            try await job.run(paths: paths, scratch: scratch, source: photo, destination: destination, state: exportState,
+                              crop: state.crop.cropped ? state.crop : nil, border: state.border.exported(for: state.crop.size(of: size ?? .zero)),
+                              size: options.size, save: options.save, engine: options.exportEngine, rating: item.rating)
+            item.status = .done; item.written = destination; item.reason = nil
+        } catch is CancellationError {
+            return item
+        } catch {
+            return failed(error.localizedDescription)
+        }
+        return item
+    }
+
+    /// Solves Match camera brightness for a batch photograph in the batch's
+    /// own helper, and stores it if its edits are unchanged. Also gives its
+    /// size, which the helper reads with the decode.
+    private func solveBatchMatch(_ item: BatchItem, paths: EnginePaths) async throws -> (state: EditState, size: CGSize) {
+        let photo = item.item.photoFile
+        let raw = Self.rawExtensions.contains(photo.pathExtension.lowercased())
+        let engine: EngineClient
+        if let running = batchEngine { engine = running } else { engine = try EngineClient(paths: paths); batchEngine = engine }
+        batchGeneration += 1
+        let generation = batchGeneration
+        let buffer = engine.directory.appendingPathComponent("batch-decode.rgba")
+        defer { try? FileManager.default.removeItem(at: buffer) }
+        var state = item.state
+        let (_, decoded) = try await engine.request([
+            "command": .string("thumbnail"), "input": .string(photo.path), "source_generation": .number(Double(generation)),
+            "film": .string(state.film), "paper": .string(state.paper), "params": state.params,
+            "long_side": .number(16), "preview_path": .string(buffer.path),
+        ])
+        let size = CGSize(width: decoded["source_width"].double, height: decoded["source_height"].double)
+        guard item.needsMatch else { return (state, size) }
+        let reference = engine.directory.appendingPathComponent("batch-brightness.png")
+        defer { try? FileManager.default.removeItem(at: reference) }
+        let solved = try await Self.solveBrightnessMatch(engine: engine, source: photo, generation: generation, size: size, raw: raw,
+                                                         request: matchSolveState(state), reference: reference)
+        guard let matched = Self.matching(state, ev: solved.exposure, limited: solved.limited, inputs: matchInputs(state)) else { return (state, size) }
+        state = matched
+        // Stored as opening it would, unless it was edited since Export.
+        if item.storesMatch, let lookup = sidecarLookup, let sidecar = try? lookup.store.read(photo: photo),
+           let variant = item.item.variantID.map({ id in sidecar.variants.first { $0.id == id } }) ?? sidecar.variants.first,
+           let stored = variant.edits, PhotoSidecar.look(of: stored, defaultsVersion: sidecar.defaultsVersion) == item.look,
+           let table = try? SidecarDefaults.load(version: sidecar.defaultsVersion, data: lookup.data),
+           storeSolvedMatch(state, item: item.item, variant: variant.id, stored: stored, sidecar: sidecar, table: table) != nil {
+            library.reload(photo)
+        }
+        return (state, size)
+    }
+
+    /// The failed photographs again.
+    func retryBatch() {
+        guard let run = batch, !run.running, !closing else { return }
+        for index in run.journal.items.indices where run.journal.items[index].status == .failed {
+            run.journal.items[index].status = .waiting; run.journal.items[index].reason = nil
+        }
+        guard run.journal.remaining > 0 else { return }
+        launchBatch(run)
+    }
+
+    /// Forgets a finished batch, once its popover is closed.
+    func clearBatch() {
+        guard let run = batch, !run.running else { return }
+        batch = nil
+    }
+
+    /// The batch's files selected in the Finder, or its folder.
+    func showBatchInFinder() {
+        guard let run = batch else { return }
+        let written = run.items.compactMap(\.written).filter { FileManager.default.fileExists(atPath: $0.path) }
+        if written.isEmpty { NSWorkspace.shared.open(run.journal.destination) } else { NSWorkspace.shared.activateFileViewerSelecting(written) }
+    }
+
+    private func batchFinished(_ run: BatchRun) {
+        let exported = run.exported.count, failed = run.failures.count
+        let folder = run.journal.destination.lastPathComponent
+        let text = (exported == 1 ? "Exported 1 photograph" : "Exported \(exported) photographs") + " to “\(folder)”"
+            + (failed > 0 ? "; \(failed) failed" : "") + (run.skipped.isEmpty ? "" : "; \(run.skipped.count) skipped")
+        status = run.cancelled ? "Export cancelled. " + text : text
+        if !run.needsAttention, !batchPopoverShown { batch = nil }
+        if Self.notificationsAvailable, NSApp?.isActive == false, !run.cancelled { notifyBatchFinished(exported: exported, failed: failed, folder: folder) }
+    }
+
+    /// Whether the popover is open: it clears a finished batch when it closes.
+    @ObservationIgnored var batchPopoverShown = false
+
+    /// A batch the last session didn't finish, offered once launch has settled.
+    func offerBatchResume(in window: NSWindow?) {
+        guard batch == nil, !closing else { return }
+        let url = batchJournalURL
+        Task { [weak self] in
+            guard let journal = await Task.detached(priority: .utility, operation: { BatchJournal.read(from: url) }).value else { return }
+            guard let self, !self.closing, self.batch == nil else { return }
+            guard journal.remaining > 0 else { return BatchJournal.remove(at: url) }
+            let alert = NSAlert()
+            let count = journal.remaining
+            alert.messageText = "Resume exporting \(count == 1 ? "1 photograph" : "\(count) photographs") to “\(journal.destination.lastPathComponent)”?"
+            alert.informativeText = "Negs quit before the export finished. Each photograph exports with its edits as they were when you chose Export."
+            alert.addButton(withTitle: "Resume")
+            alert.addButton(withTitle: "Discard")
+            let answer: NSApplication.ModalResponse
+            if let window { answer = await alert.beginSheetModal(for: window) } else { answer = alert.runModal() }
+            guard answer == .alertFirstButtonReturn else { return BatchJournal.remove(at: url) }
+            // Started now, without the open photograph's state.
+            if self.startBatch(journal) == nil { self.error = "The export couldn’t resume yet. Try again once Negs has started." }
+        }
+    }
+
+    // MARK: Notifications
+
+    /// Only an app bundle can post them; never under XCTest.
+    private static var notificationsAvailable: Bool {
+        NSClassFromString("XCTestCase") == nil && Bundle.main.bundleURL.pathExtension == "app" && Bundle.main.bundleIdentifier != nil
+    }
+
+    private func requestNotificationPermission() {
+        guard Self.notificationsAvailable else { return }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func notifyBatchFinished(exported: Int, failed: Int, folder: String) {
+        guard Self.notificationsAvailable else { return }
+        let content = UNMutableNotificationContent()
+        content.title = failed > 0 ? "Export finished with failures" : "Export finished"
+        content.body = (exported == 1 ? "1 photograph" : "\(exported) photographs") + " exported to “\(folder)”" + (failed > 0 ? "; \(failed) failed." : ".")
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
     // MARK: Presets
 
     /// The toolbar's Adjustments and Presets buttons: show that panel, or
@@ -2003,7 +3623,8 @@ import UniformTypeIdentifiers
         cancelBrightnessMatch()
 
         closing = true; pendingRender?.cancel(); activityTimer?.cancel()
-        exportJob?.cancel(); engine?.stop()
+        thumbnailTask?.cancel(); thumbnailIdle?.cancel(); thumbnailEngine?.stop()
+        exportJob?.cancel(); batch?.job?.cancel(); batchEngine?.stop(); engine?.stop()
     }
     private func report(_ error: Error) { self.error = error.localizedDescription; status = "Could not complete the operation" }
 }
@@ -2175,7 +3796,7 @@ struct ExportSize: Equatable {
 /// only, the quality. ProPhoto RGB needs 16 bits: at 8 it is disabled and
 /// Adobe RGB stands in until 16 bits bring it back. Changing anything
 /// updates the message.
-@MainActor private final class FormatPicker: NSObject, NSTextFieldDelegate {
+@MainActor final class FormatPicker: NSObject, NSTextFieldDelegate {
     private let popup = NSPopUpButton()
     private let enginePopup: NSPopUpButton?
     private let depthPopup = NSPopUpButton()
@@ -2189,6 +3810,10 @@ struct ExportSize: Equatable {
     private let pixelsField = NSTextField()
     private let message: (ExportEngine?, ExportSize, SaveSettings) -> String
     private weak var panel: NSSavePanel?
+    /// A folder chooser picks no file type.
+    private let restrictsType: Bool
+    /// Called when the format changes.
+    var formatChanged: () -> Void = {}
     /// The colour space picked, and each lossless format's bit depth.
     private var chosenSpace = SaveSettings.chosenSpace
     private var depths: [OutputFormat: Int] = [.png: SaveSettings.bitDepth(for: .png), .tiff: SaveSettings.bitDepth(for: .tiff)]
@@ -2205,9 +3830,12 @@ struct ExportSize: Equatable {
                             jpegQuality: Int(qualitySlider.doubleValue.rounded()))
     }
 
-    init(panel: NSSavePanel, selected: OutputFormat, engine: ExportEngine?, size: ExportSize, message: @escaping (ExportEngine?, ExportSize, SaveSettings) -> String) {
+    /// `extraRows` go below the size: a batch's naming rows.
+    init(panel: NSSavePanel, selected: OutputFormat, engine: ExportEngine?, size: ExportSize, restrictsType: Bool = true, extraRows: [NSView] = [],
+         message: @escaping (ExportEngine?, ExportSize, SaveSettings) -> String) {
         self.panel = panel
         self.message = message
+        self.restrictsType = restrictsType
         enginePopup = engine.map { _ in NSPopUpButton() }
         super.init()
         popup.addItems(withTitles: OutputFormat.allCases.map(\.title))
@@ -2257,10 +3885,11 @@ struct ExportSize: Equatable {
         pixelsField.isEnabled = size.edge != .full
         rows.append(NSStackView(views: [NSTextField(labelWithString: "Size:"), edgePopup, pixelsField, NSTextField(labelWithString: "px")]))
         rows.forEach(stack.addArrangedSubview)
+        extraRows.forEach(stack.addArrangedSubview)
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
         panel.accessoryView = stack
-        panel.allowedContentTypes = [selected.type]
+        if restrictsType { panel.allowedContentTypes = [selected.type] }
         sync()
     }
 
@@ -2287,8 +3916,9 @@ struct ExportSize: Equatable {
     }
 
     @objc private func changed() {
-        panel?.allowedContentTypes = [format.type]
+        if restrictsType { panel?.allowedContentTypes = [format.type] }
         sync()
+        formatChanged()
     }
     @objc private func depthChanged() {
         if format != .jpeg { depths[format] = depthPopup.indexOfSelectedItem == 1 ? 16 : 8 }
@@ -2308,6 +3938,8 @@ struct ExportSize: Equatable {
         panel?.message = message(engine, size, settings)
     }
     func controlTextDidChange(_ notification: Notification) { panel?.message = message(engine, size, settings) }
+    /// The message again, after a row of the caller's changed.
+    func refreshMessage() { panel?.message = message(engine, size, settings) }
     /// Leaving the field writes back the clamped value, so a blank or
     /// out-of-range entry never sits beside a different export size.
     func controlTextDidEndEditing(_ notification: Notification) {
@@ -2316,3 +3948,6 @@ struct ExportSize: Equatable {
         panel?.message = message(engine, size, settings)
     }
 }
+
+/// The undo target of changes to several photographs (`EditorModel.libraryUndo`).
+final class LibraryUndoTarget: NSObject {}

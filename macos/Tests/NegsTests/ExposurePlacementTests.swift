@@ -170,12 +170,11 @@ final class ExposurePlacementTests: XCTestCase {
         return EnginePaths(helper: root.appendingPathComponent("target/release/spektrafilm-native"), exporter: root.appendingPathComponent("target/release/spektrafilm-f64"), data: root.appendingPathComponent("data"))
     }
 
-    /// Settings for a test: auto-match on, fresh edits, restored afterwards.
+    /// Settings for a test: auto-match on, restored afterwards.
     private func preferences(_ model: EditorModel, match: Bool = true) -> () -> Void {
         let defaults = UserDefaults.standard
-        let saved = ["autoPlaceNewImages", "freshEditsForNewPhotos"].map { ($0, defaults.object(forKey: $0)) }
+        let saved = ["autoPlaceNewImages"].map { ($0, defaults.object(forKey: $0)) }
         model.autoPlaceNewImages = match
-        model.freshEditsForNewPhotos = true
         return { for (key, value) in saved { defaults.set(value, forKey: key) } }
     }
     private func settled(_ model: EditorModel) async throws {
@@ -189,13 +188,20 @@ final class ExposurePlacementTests: XCTestCase {
 
     func testNewRawIsMatchedAndTheMatchIsSavedWithTheSession() async throws {
         guard let path = ProcessInfo.processInfo.environment["NEGS_TEST_RAW"] else { throw XCTSkip("Set NEGS_TEST_RAW") }
-        let model = EditorModel()
+        // A copy, so its sidecar isn't written beside the sample.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let raw = dir.appendingPathComponent(URL(fileURLWithPath: path).lastPathComponent)
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: path), to: raw)
+        let sidecars = SidecarStore()
+        let model = EditorModel(sidecars: sidecars)
         defer { model.shutdown() }
         let restore = preferences(model)
         defer { restore() }
         await model.start(paths: paths(), restoration: Task { nil })
         model.setLongestSide(512)
-        model.open(URL(fileURLWithPath: path))
+        model.open(raw)
         XCTAssertTrue(model.matchesBrightness)
         try await settled(model)
         let ev = try XCTUnwrap(model.state.brightnessMatch?.ev)
@@ -211,8 +217,9 @@ final class ExposurePlacementTests: XCTestCase {
         XCTAssertEqual(offset(model), 0.5, accuracy: 1e-9)
         XCTAssertTrue(model.exposureOffsetModified)
 
-        let session = try XCTUnwrap(model.session)
-        let restored = EditorModel()
+        let sessionRead = await relaunchSession(of: model, store: sidecars, data: paths().data)
+        let session = try XCTUnwrap(sessionRead)
+        let restored = EditorModel(sidecars: sidecars)
         defer { restored.shutdown() }
         await restored.start(paths: paths(), restoration: Task { session })
         try await settled(restored)

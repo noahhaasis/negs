@@ -189,17 +189,31 @@ final class PhotographView: NSView {
     override func layout() {
         super.layout()
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        Self.layout(clip: clip, photo: photo, size: size, crop: crop, rotation: rotation, center: CGPoint(x: bounds.midX, y: bounds.midY))
+        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
+        CATransaction.commit()
+    }
+
+    /// Places a photograph of `size` in `clip`, cropped, straightened and
+    /// turned as the exporter does, centred on `center`. The edited
+    /// thumbnails use it too. `cut`: the photograph's image is the crop
+    /// already, straightened.
+    static func layout(clip: CALayer, photo: CALayer, size: CGSize, crop: CropSettings, rotation: Int, center: CGPoint, cut: Bool = false) {
         // The crop's pixels, as the exporter cuts them. Layers are y-up, so
         // the rectangle's top-left origin flips, and clockwise is negative.
         let pixels = crop.pixels(in: size)
         clip.bounds = CGRect(origin: .zero, size: pixels.size)
-        clip.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        clip.position = center
         clip.setAffineTransform(CGAffineTransform(rotationAngle: -.pi / 2 * CGFloat(rotation)))
+        if cut {
+            photo.bounds = clip.bounds
+            photo.position = CGPoint(x: pixels.width / 2, y: pixels.height / 2)
+            photo.setAffineTransform(.identity)
+            return
+        }
         photo.bounds = CGRect(origin: .zero, size: size)
         photo.position = CGPoint(x: size.width / 2 - pixels.minX, y: pixels.height - (size.height / 2 - pixels.minY))
         photo.setAffineTransform(CGAffineTransform(rotationAngle: -crop.angle * .pi / 180))
-        borderLayers.layout(border, photo: displaySize, host: layer!, texture: filmTexture, filmStrip: filmStrip)
-        CATransaction.commit()
     }
 
     private var grabbing = false

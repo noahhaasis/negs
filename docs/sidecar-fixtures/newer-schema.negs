@@ -1,0 +1,11 @@
+{
+  "app": "9.0.0",
+  "defaultsVersion": 1,
+  "negs": 2,
+  "variants": [
+    {
+      "id": "x",
+      "rating": 1
+    }
+  ]
+}

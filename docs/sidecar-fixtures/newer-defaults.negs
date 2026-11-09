@@ -1,0 +1,15 @@
+{
+  "app": "9.0.0",
+  "defaultsVersion": 99,
+  "negs": 1,
+  "variants": [
+    {
+      "edits": {
+        "film": "kodak_gold_200",
+        "paper": "kodak_portra_endura"
+      },
+      "id": "x",
+      "rating": 1
+    }
+  ]
+}

@@ -97,10 +97,9 @@ final class QuickFrameStepTests: XCTestCase {
         let model = EditorModel()
         models.append(model)
         let defaults = UserDefaults.standard
-        let saved = ["autoPlaceNewImages", "freshEditsForNewPhotos"].map { ($0, defaults.object(forKey: $0)) }
+        let saved = ["autoPlaceNewImages"].map { ($0, defaults.object(forKey: $0)) }
         restoreDefaults.append { for (key, value) in saved { defaults.set(value, forKey: key) } }
         model.autoPlaceNewImages = match
-        model.freshEditsForNewPhotos = true
         model.canvasScale.fixed = scale
         await model.start(paths: paths(), restoration: Task { nil })
         model.open(try testPhoto())

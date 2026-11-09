@@ -472,6 +472,8 @@ impl Session {
         Ok(json!({
             "width": width, "height": height, "backend": used_backend,
             "display_color_space": DisplaySpace::of(encoding).name(),
+            // The decoded photograph's size, for a camera brightness match.
+            "source_width": full.0, "source_height": full.1,
             "elapsed_ms": ms(started.elapsed()), "cached_pipeline": cached,
             "timing_ms": {"decode": ms(decoded), "resample": ms(resampled - decoded),
                 "pipeline": ms(built - resampled), "process": ms(processed - built),

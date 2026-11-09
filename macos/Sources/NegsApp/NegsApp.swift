@@ -35,6 +35,9 @@ import SwiftUI
         // if the session isn't read within 0.1 s, it restores once the helper
         // answers and reports any error then. Benchmarks and explicit
         // launches must not reopen a previous photograph.
+        #if SPEKTRAFILM_BENCHMARK
+        LaunchBenchmark.begin(model)
+        #endif
         model.launch()
         let benchmark = ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] != nil
         var store: SessionStore? = benchmark ? nil : sessions
@@ -44,8 +47,10 @@ import SwiftUI
         }
         #endif
         var restoration: Task<EditorSession?, Error>?
-        if let store, Self.pathArgument != nil || !(Self.readSession(store, timeout: 0.1).map(model.restoreAtLaunch) ?? false) {
-            restoration = Task { try await store.load() }
+        // The last photograph's sidecar is read with the session, a few kilobytes more.
+        let sidecars = model.sidecarLookup
+        if let store, Self.pathArgument != nil || !(Self.readSession(store, sidecars: sidecars, timeout: 0.1).map(model.restoreAtLaunch) ?? false) {
+            restoration = Task { try await store.load(sidecars: sidecars) }
         }
         Task { await model.start(restoration: restoration) }
         menu = MainMenu(model: model, updates: updates) { [weak self] in self?.removeAllAppData() }
@@ -60,22 +65,43 @@ import SwiftUI
         model.finishLaunching(waitingUpTo: 0.15)
         editor?.refresh()
         editor?.showWindow(nil)
+        #if SPEKTRAFILM_BENCHMARK
+        LaunchBenchmark.windowShown()
+        #endif
         NSApp.activate(ignoringOtherApps: true)
         // Finder opens arrive through application(_:open:); a path argument is for `swift run`.
         if let path = Self.pathArgument { model.open(URL(fileURLWithPath: path)) }
         #if SPEKTRAFILM_BENCHMARK
         InteractionBenchmark.start(model)
+        GridBenchmark.start(model)
         #endif
         updates.schedule(afterStartupOf: model)
+        offerBatchResume()
+    }
+
+    /// An export the last session didn't finish is offered once launch has
+    /// settled, as updates are: never on the launch path.
+    private func offerBatchResume() {
+        guard ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] == nil else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            while let self, !Task.isCancelled {
+                let model = self.model
+                if model.ready && (model.source == nil || model.previewCurrent || model.renderFailed) || model.error != nil {
+                    return model.offerBatchResume(in: self.editor?.window)
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
     }
     /// The session, read on another thread and waited for at most `timeout`,
     /// so a photograph on an unresponsive volume never holds up launch. Nil
     /// if there's none, it can't be read, or it takes longer.
-    private static func readSession(_ store: SessionStore, timeout: TimeInterval) -> EditorSession? {
+    private static func readSession(_ store: SessionStore, sidecars: SidecarLookup?, timeout: TimeInterval) -> EditorSession? {
         final class Result: @unchecked Sendable { var session: EditorSession? }
         let result = Result(), done = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
-            result.session = try? store.read()
+            result.session = try? store.read(sidecars: sidecars)
             done.signal()
         }
         // The semaphore orders the write before this read.
@@ -93,6 +119,15 @@ import SwiftUI
         if removingAppData { return appDataRemovalFinished ? .terminateNow : .terminateCancel }
         guard !terminating else { return .terminateLater }
         if model.saving || (updates.installing && model.exporting) { return .terminateCancel }
+        if model.batchRunning, let remaining = model.batch?.journal.remaining, !updates.installing {
+            // Kept in the journal: the next launch offers to resume.
+            let alert = NSAlert()
+            alert.messageText = "Export \(remaining == 1 ? "the remaining photograph" : "\(remaining) remaining photographs") next time?"
+            alert.informativeText = "Quitting stops the export. Files already exported stay; Negs offers to export the rest when it opens again."
+            alert.addButton(withTitle: "Quit")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+        }
         if model.exporting {
             let alert = NSAlert()
             alert.messageText = "An export is still in progress."
@@ -102,12 +137,15 @@ import SwiftUI
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
         }
         // Save once at quit/relaunch, not on slider changes or the rendering path.
-        // A failed write cancels termination instead of silently losing the edit.
+        // A failed write cancels termination instead of silently losing the
+        // session. The photograph's edits go to its sidecar first; one that
+        // can't be written was already reported and doesn't keep Negs open.
         guard let session = model.session,
               ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_PHOTO"] == nil else { return .terminateNow }
         terminating = true
         Task {
             do {
+                await model.flushSidecars()
                 try await sessions.save(session)
                 await model.flushPreviewCache()
                 sender.reply(toApplicationShouldTerminate: true)
@@ -121,7 +159,7 @@ import SwiftUI
     }
 
     private func removeAllAppData() {
-        guard !removingAppData, !terminating, !model.saving, !model.exporting, !updates.installing, !updates.sessionInProgress else { return }
+        guard !removingAppData, !terminating, !model.saving, !model.exporting, !model.batchRunning, !updates.installing, !updates.sessionInProgress else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Remove all Negs app data and quit?"
@@ -167,8 +205,14 @@ struct EditorCanvas: View {
     @State private var dropTargeted = false
 
     var body: some View {
+        let grid = model.mode == .grid
         VStack(spacing: 0) {
-            CanvasArea(model: model)
+            ZStack {
+                // The canvas stays under the grid, so coming back to the
+                // same photograph is instant and keeps its zoom.
+                CanvasArea(model: model).accessibilityHidden(grid)
+                if grid { LibraryGrid(model: model) }
+            }
                 .dropDestination(for: URL.self) { urls, _ in
                     guard let url = urls.first, url.isFileURL else { return false }
                     model.open(url); return true
@@ -176,9 +220,11 @@ struct EditorCanvas: View {
                 .overlay {
                     if dropTargeted { RoundedRectangle(cornerRadius: 12).strokeBorder(.tint, lineWidth: 3).padding(8).allowsHitTesting(false) }
                 }
-            if model.filmstripVisible, let source = model.source {
+                .overlay { LibraryNoteView(model: model) }
+            // The grid takes the strip's place; it comes back as it was.
+            if model.filmstripVisible, model.source != nil, !grid {
                 Divider()
-                PhotoBrowser(model: model, directory: source.deletingLastPathComponent())
+                PhotoBrowser(model: model)
             }
             if model.source != nil || model.exporting || (!model.status.isEmpty && model.status != "Starting…") {
                 Divider()
@@ -188,6 +234,41 @@ struct EditorCanvas: View {
         .alert("Negs", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        // The open photograph's folder is the library, listed once the
+        // window is up and kept current while it stays open.
+        .task(id: model.source?.deletingLastPathComponent()) {
+            guard let folder = model.source?.deletingLastPathComponent() else { return }
+            await model.library.watch(folder)
+        }
+    }
+}
+
+/// What a rating or flag key did ("★★★", "Rejected"), briefly over the
+/// canvas. There is no permanent rating widget, so the canvas stays clean.
+struct LibraryNoteView: View {
+    let model: EditorModel
+
+    var body: some View {
+        ZStack {
+            if let note = model.libraryNote {
+                VStack(spacing: 4) {
+                    Text(note.text).font(.title2.weight(.semibold))
+                    if note.count > 1 { Text("\(note.count) photographs").font(.callout) }
+                    if let detail = note.detail { Text(detail).font(.callout).foregroundStyle(.secondary) }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 14)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .transition(.opacity)
+                .task(id: note.serial) {
+                    try? await Task.sleep(for: .seconds(note.detail == nil ? 1 : 2.5))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: 0.25)) { model.hideLibraryNote(note.serial) }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -304,7 +385,7 @@ struct StatusBar: View {
                 }
                 Button("Cancel", action: model.cancelExport).controlSize(.small)
             }
-            if model.source != nil { OriginalButton(model: model) }
+            if model.source != nil, model.mode == .photo { OriginalButton(model: model) }
         }
         .font(.caption).foregroundStyle(.secondary)
         .padding(.horizontal, 14).frame(height: 28)

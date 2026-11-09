@@ -284,6 +284,32 @@ drags Exposure instead of print exposure (its 0.1 EV steps repeat values, so
 fewer frames are requested), and `SPEKTRAFILM_BENCHMARK_SHOTS=/tmp/negs-drag`
 saves window screenshots during the drag and after letting go.
 
+The same build has three more benchmarks, each with its own variable. Give
+each run a home of its own (`HOME` and `CFFIXED_USER_HOME`); the app's
+`NegsApp` defaults still land in your own domain, so export them first and
+afterwards delete the keys the run added and import them back.
+
+- `SPEKTRAFILM_BENCHMARK_LAUNCH=1` times launch from the process's exec: the
+  window's first frame, the photograph in it, the first current preview, and
+  when the main thread settles. It reopens the photograph in the home's
+  `session.json`, or in `SPEKTRAFILM_BENCHMARK_SESSION`. With a photograph open it
+  also reports when its folder is listed, when every sidecar's rating is in
+  ("stars"), and the longest main run-loop pass after the window appeared. Run each build a few times and compare sorted runs: launch times
+  often fall into two groups a few hundred milliseconds apart.
+- `SPEKTRAFILM_BENCHMARK_GRID=600:8,1500:8,4000:8` opens the grid on the
+  session's folder in a 1400 × 900 window and scrolls it on the display's clock
+  at each speed in points per second, for the given number of seconds, turning
+  at either end. It reports missed frames, how long the main run loop stayed
+  busy, and the app's memory. `SPEKTRAFILM_BENCHMARK_SHOTS` saves a screenshot
+  halfway through each speed.
+- `SPEKTRAFILM_BENCHMARK_GRID_FILL=1` waits for the first edited thumbnail the
+  background helper makes, copies it under every other edited photograph's
+  name and quits, so a later grid run scrolls with every edited thumbnail on
+  disk without developing them all.
+
+The phase 8 numbers for the library (ticket 30) are in
+[library.md](library.md#large-folders).
+
 While a slider moves, the helper renders at the canvas's resolution
 (`interactive_scale`: screen pixels per photo pixel at the current zoom), with
 every effect on, from an area-averaged copy of the source. The status line says
@@ -317,18 +343,23 @@ wide-gamut display matching, and large camera RAWs interactively on target Macs;
 automated fixture tests do not establish those qualities or a 60 fps guarantee.
 
 The film strip below the canvas lists JPEG, PNG, TIFF and supported RAW files
-from the current photograph's folder in Finder-style filename order. Click a
-thumbnail to open it with the current adjustments (crop and rotation reset,
-as with Open). The toolbar's bottom-panel button and View > Show/Hide Film
-Strip (⌥⌘F) toggle it; visibility is remembered between launches. During crop
-editing the strip is disabled until Done or Cancel.
+from the current photograph's folder in Finder-style filename order, as the
+filter lets through. Click a thumbnail to open it with its own edits (from its
+sidecar, see [sidecar-format.md](sidecar-format.md)); ⌘- and ⇧-clicks only
+select. The toolbar's bottom-panel button and View > Show/Hide Film Strip (⌥⌘F)
+toggle it; visibility is remembered between launches. During crop editing the
+strip is disabled until Done or Cancel. The grid (G) shows the same photographs
+in place of the canvas. Ratings, flags, the filter, the grid and selection are
+described for users in [library.md](library.md).
 
 Folder enumeration runs off the main thread when the strip appears, the
 folder changes, or FSEvents reports external additions, removals, renames or
 writes. Notifications are batched with 200 ms latency and a one-event buffer;
 there is no idle polling. The watch stops when the strip disappears. Live
 refreshes preserve the selection and scroll position. A lazy horizontal row requests 192-pixel thumbnails only as
-cells appear, through a serial background decoder and a 16 MiB cache. RAW
+cells appear, through a serial background decoder and a 16 MiB cache. The grid
+asks the same decoder for 384- or 768-pixel thumbnails by cell size, cached
+separately (48 and 96 MiB). RAW
 files use embedded previews only, with a generic photo icon when unavailable.
 Offscreen cells release their images; hiding the strip cancels queued work.
 File size and modification time invalidate only changed thumbnails, allowing

@@ -17,6 +17,18 @@ struct PhotoFile: Hashable, Sendable {
         modified = values?.contentModificationDate
         size = values?.fileSize
     }
+
+    private init(url: URL, name: String, modified: Date?, size: Int?) {
+        self.url = url; self.name = name; self.modified = modified; self.size = size
+    }
+
+    /// The photograph's `number`th variant, a duplicate: `IMG_0412.CR3 (2)`.
+    func duplicate(_ id: String, number: Int) -> PhotoFile {
+        PhotoFile(url: url.variant(id), name: "\(name) (\(number))", modified: modified, size: size)
+    }
+
+    /// The photograph a duplicate shows.
+    var photo: PhotoFile { url.variantID == nil ? self : PhotoFile(url: url.photoFile, name: url.lastPathComponent, modified: modified, size: size) }
 }
 
 /// Folder browsing stays separate from the renderer.
@@ -28,17 +40,28 @@ enum PhotoFolder {
     }
 
     static func snapshot(in directory: URL) throws -> [PhotoFile] {
+        try listing(in: directory).photos
+    }
+
+    /// The folder's photographs in name order, and the sidecars beside them
+    /// (by the photograph's file name), from one directory listing.
+    static func listing(in directory: URL) throws -> (photos: [PhotoFile], sidecars: [String: PhotoFile]) {
         let files = try FileManager.default.contentsOfDirectory(at: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles])
-        return try files.compactMap { url -> PhotoFile? in
+        var photos: [PhotoFile] = [], sidecars: [String: PhotoFile] = [:]
+        for url in files {
             try Task.checkCancellation()
-            guard extensions.contains(url.pathExtension.lowercased()),
+            let ext = url.pathExtension.lowercased()
+            let sidecar = ext == PhotoSidecar.fileExtension
+            guard sidecar || extensions.contains(ext),
                   let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]),
-                  values.isRegularFile == true else { return nil }
+                  values.isRegularFile == true else { continue }
             // Preserve the opened folder's spelling through symlinks.
-            return PhotoFile(url: directory.appendingPathComponent(url.lastPathComponent), values: values)
+            let file = PhotoFile(url: directory.appendingPathComponent(url.lastPathComponent), values: values)
+            if sidecar { sidecars[url.deletingPathExtension().lastPathComponent] = file } else { photos.append(file) }
         }
-        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        photos.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return (photos, sidecars)
     }
 }
 
@@ -48,30 +71,53 @@ actor PhotoThumbnails {
     static let shared = PhotoThumbnails()
     private final class Cached {
         let file: PhotoFile
+        /// The edited thumbnail's name, or nil for the embedded preview.
+        let look: String?
         let image: CGImage
-        init(file: PhotoFile, image: CGImage) { self.file = file; self.image = image }
+        init(file: PhotoFile, look: String?, image: CGImage) { self.file = file; self.look = look; self.image = image }
     }
-    private let cache: NSCache<NSURL, Cached> = {
-        let cache = NSCache<NSURL, Cached>()
-        cache.totalCostLimit = 16 * 1024 * 1024
-        cache.countLimit = 160
-        return cache
+    /// The film strip's size, and the grid's two (for cells up to about 190
+    /// and 380 points on a Retina screen).
+    enum Size: Int, CaseIterable, Sendable {
+        case strip = 192, medium = 384, large = 768
+        static func grid(points: CGFloat, scale: CGFloat) -> Size { points * scale <= 384 ? .medium : .large }
+    }
+    private let caches: [Size: NSCache<NSURL, Cached>] = {
+        var caches: [Size: NSCache<NSURL, Cached>] = [:]
+        for (size, megabytes, count) in [(Size.strip, 16, 160), (.medium, 48, 400), (.large, 96, 200)] {
+            let cache = NSCache<NSURL, Cached>()
+            cache.totalCostLimit = megabytes * 1024 * 1024
+            cache.countLimit = count
+            caches[size] = cache
+        }
+        return caches
     }()
 
     func image(for url: URL) -> CGImage? {
         image(for: PhotoFile(url: url))
     }
 
-    func image(for file: PhotoFile) -> CGImage? {
+    /// An edited photograph's thumbnail when `edited` has one for `look`
+    /// (its stored edits), else the embedded preview.
+    func image(for item: PhotoFile, size: Size = .strip, look: String? = nil, edited: EditedThumbnailStore? = nil) -> CGImage? {
+        guard !Task.isCancelled, let cache = caches[size] else { return nil }
+        if let look, let edited, let key = edited.key(for: item, look: look) {
+            if let cached = cache.object(forKey: item.url as NSURL), cached.file == item, cached.look == key { return cached.image }
+            if let image = edited.image(key, maxPixels: size.rawValue) {
+                cache.setObject(Cached(file: item, look: key, image: image), forKey: item.url as NSURL, cost: image.bytesPerRow * image.height)
+                return image
+            }
+        }
+        // A duplicate shows its photograph's embedded preview.
+        let file = item.photo
         let url = file.url
-        guard !Task.isCancelled else { return nil }
-        if let cached = cache.object(forKey: url as NSURL), cached.file == file { return cached.image }
+        if let cached = cache.object(forKey: url as NSURL), cached.file == file, cached.look == nil { return cached.image }
         let image: CGImage? = autoreleasepool {
             guard let source = CGImageSourceCreateWithURL(url as CFURL,
                 [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
             var options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 192,
+                kCGImageSourceThumbnailMaxPixelSize: size.rawValue,
                 kCGImageSourceShouldCacheImmediately: true
             ]
             if !EditorModel.rawExtensions.contains(url.pathExtension.lowercased()) {
@@ -80,26 +126,37 @@ actor PhotoThumbnails {
             return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
         }
         guard !Task.isCancelled else { return nil }
-        if let image { cache.setObject(Cached(file: file, image: image), forKey: url as NSURL, cost: image.bytesPerRow * image.height) }
+        if let image { cache.setObject(Cached(file: file, look: nil, image: image), forKey: url as NSURL, cost: image.bytesPerRow * image.height) }
         return image
     }
 }
 
+/// The film strip: the library's photographs, as filtered. The library
+/// lists the folder (`EditorCanvas` keeps it current); thumbnails never wait
+/// for the ratings.
 struct PhotoBrowser: View {
     let model: EditorModel
-    let directory: URL
-    @State private var files: [PhotoFile] = []
-    @State private var loading = true
-    @State private var failed = false
     @State private var scrollTarget: URL?
+    /// A click takes the keys, so ← and → move on from there.
+    @FocusState private var focused: Bool
 
     var body: some View {
+        let library = model.library
+        let shown = library.filtering ? [] : model.shownPhotos
+        let selected = model.selection.selected
         ScrollView(.horizontal) {
             LazyHStack(spacing: 8) {
-                ForEach(files, id: \.url) { file in
-                    PhotoThumbnail(file: file, selected: file.url == model.source) {
-                        if file.url != model.source { model.open(file.url) }
+                ForEach(shown, id: \.url) { file in
+                    PhotoThumbnail(file: file, current: file.url == model.sourceItem, selected: selected.contains(file.url),
+                                   summary: library.summary(for: file.url), readOnly: library.readOnly,
+                                   edited: model.editedThumbnail(for: file.url)) { visible in
+                        model.thumbnailShown(file, visible)
+                    } open: {
+                        let modifiers = NSEvent.modifierFlags
+                        focused = true
+                        model.click(file.url, command: modifiers.contains(.command), shift: modifiers.contains(.shift))
                     }
+                    .contextMenu { LibraryContextMenu(model: model, item: file.url) }
                     .id(file.url)
                 }
             }
@@ -109,99 +166,197 @@ struct PhotoBrowser: View {
         }
         .scrollIndicators(.automatic)
         .scrollPosition(id: $scrollTarget, anchor: .center)
-        .onChange(of: model.source) { _, source in scrollTarget = source }
-        .onMoveCommand { direction in
-            guard !model.cropping, let source = model.source,
-                  let index = files.firstIndex(where: { $0.url == source }) else { return }
-            let next = direction == .left ? index - 1 : direction == .right ? index + 1 : index
-            if next != index, files.indices.contains(next) { model.open(files[next].url) }
+        .onChange(of: model.sourceItem) { _, source in scrollTarget = source }
+        .onChange(of: library.loading) { _, loading in if !loading { scrollTarget = model.sourceItem } }
+        .onChange(of: library.filtering) { _, filtering in if !filtering { scrollTarget = model.sourceItem } }
+        .onAppear { scrollTarget = model.sourceItem }
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        // ← and → open the previous and next photograph; with ⇧ they select
+        // a range and the current photograph stays.
+        .onKeyPress(keys: [.leftArrow, .rightArrow], phases: [.down, .repeat]) { press in
+            // Arrow keys also carry the numeric pad and function flags.
+            guard press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
+            model.move(by: press.key == .leftArrow ? -1 : 1, extending: press.modifiers.contains(.shift))
+            return .handled
         }
         .frame(height: 112)
         .background(Color(nsColor: .controlBackgroundColor))
         .overlay {
-            if loading { ProgressView().controlSize(.small) }
-            else if failed { Text("This folder couldn’t be read.").foregroundStyle(.secondary) }
-            else if files.isEmpty { Text("No supported photographs in this folder.").foregroundStyle(.secondary) }
+            // Only an active filter waits for the ratings.
+            if library.loading || library.filtering { ProgressView().controlSize(.small) }
+            else if library.failed { Text("This folder couldn’t be read.").foregroundStyle(.secondary) }
+            else if library.files.isEmpty { Text("No supported photographs in this folder.").foregroundStyle(.secondary) }
         }
         .disabled(model.cropping)
         .accessibilityLabel("Film Strip")
-        .task(id: directory) {
-            loading = true; failed = false; files = []
-            // Arm before the initial scan so arrivals during enumeration are
-            // not missed. Cancellation on hide/folder switch releases the watch.
-            let watcher = PhotoFolderWatcher(directory: directory)
-            defer { watcher?.stop() }
-            await refresh(initial: true)
-            if let watcher {
-                for await _ in watcher.changes {
-                    guard !Task.isCancelled else { return }
-                    await refresh(initial: false)
-                }
-            }
-        }
-    }
-
-    private func refresh(initial: Bool) async {
-        let scan = Task.detached(priority: .utility) { try PhotoFolder.snapshot(in: directory) }
-        do {
-            let result = try await withTaskCancellationHandler {
-                try await scan.value
-            } onCancel: { scan.cancel() }
-            try Task.checkCancellation()
-            if files != result { files = result }
-            failed = false; loading = false
-            if initial { scrollTarget = model.source }
-        } catch {
-            guard !Task.isCancelled else { return }
-            failed = true; loading = false
-        }
     }
 }
 
 private struct PhotoThumbnail: View {
     let file: PhotoFile
     private var url: URL { file.url }
+    /// The open photograph, outlined thickly; others selected, thinly.
+    let current: Bool
     let selected: Bool
+    let summary: LibrarySummary
+    let readOnly: Bool
+    let edited: EditedThumbnail?
+    /// On and off screen: what's shown is developed first.
+    let shown: (Bool) -> Void
     let open: () -> Void
     @State private var image: CGImage?
     @State private var visible = false
+
+    private struct Load: Hashable { let file: PhotoFile; let edited: EditedThumbnail? }
+
+    private var rejected: Bool { summary.flag == .reject }
 
     var body: some View {
         Button(action: open) {
             VStack(spacing: 5) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(0.04))
-                    if let image {
-                        Image(decorative: image, scale: 2).resizable().scaledToFit().padding(3)
-                    } else {
-                        Image(systemName: "photo").foregroundStyle(.tertiary)
+                    Group {
+                        if let image {
+                            Image(decorative: image, scale: 2).resizable().scaledToFit().padding(3)
+                        } else {
+                            Image(systemName: "photo").foregroundStyle(.tertiary)
+                        }
                     }
+                    // Rejects are greyed; their name stays readable.
+                    .opacity(rejected ? 0.4 : 1)
                 }
                 .frame(width: 96, height: 68)
-                .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 2) }
+                .overlay { PhotoBadges(summary: summary) }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(current || selected ? Color.accentColor : .clear, lineWidth: current ? 2 : 1)
+                }
                 Text(file.name)
                     .font(.caption2)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .foregroundStyle(selected ? .primary : .secondary)
+                    .foregroundStyle(current || selected ? .primary : .secondary)
             }
             .frame(width: 96)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(url.lastPathComponent)
-        .accessibilityLabel(url.lastPathComponent)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-        .onAppear { visible = true }
-        .onDisappear { visible = false; image = nil }
-        .task(id: visible ? file : nil) {
+        .help(PhotoBadges.help(file.name, summary: summary, readOnly: readOnly))
+        .accessibilityLabel(PhotoBadges.accessibilityLabel(file.name, summary: summary))
+        .accessibilityAddTraits(current || selected ? [.isSelected] : [])
+        .onAppear { visible = true; shown(true) }
+        .onDisappear { visible = false; image = nil; shown(false) }
+        .task(id: visible ? Load(file: file, edited: edited) : nil) {
             guard visible else { return }
-            let request = Task.detached(priority: .utility) { await PhotoThumbnails.shared.image(for: file) }
+            let file = file, edited = edited
+            let request = Task.detached(priority: .utility) {
+                await PhotoThumbnails.shared.image(for: file, look: edited?.look, edited: edited?.store)
+            }
             let result = await withTaskCancellationHandler {
                 await request.value
             } onCancel: { request.cancel() }
             guard !Task.isCancelled else { return }
-            image = result
+            // An edited thumbnail on its way keeps the last one shown.
+            if let result { image = result }
         }
+    }
+}
+
+/// A thumbnail's flag (top left), edited mark (top right) and stars
+/// (bottom). Unrated, unflagged, unedited photographs show none of them.
+struct PhotoBadges: View {
+    let summary: LibrarySummary
+
+    var body: some View {
+        ZStack {
+            if let flag = summary.flag {
+                badge(flag == .pick ? "flag.fill" : "xmark").frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            if summary.edited {
+                badge("slider.horizontal.3").frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
+            if summary.rating > 0 {
+                HStack(spacing: 1) {
+                    ForEach(0..<summary.rating, id: \.self) { _ in Image(systemName: "star.fill") }
+                }
+                .font(.system(size: 7))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(.black.opacity(0.55)))
+                .padding(.bottom, 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+    }
+
+    private func badge(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 15, height: 15)
+            .background(Circle().fill(.black.opacity(0.55)))
+            .padding(4)
+    }
+
+    static func help(_ name: String, summary: LibrarySummary, readOnly: Bool) -> String {
+        var lines = [name]
+        if let problem = summary.problem { lines.append(problem) }
+        if readOnly { lines.append("Ratings and edits can’t be saved in this folder: it’s read-only.") }
+        return lines.joined(separator: "\n")
+    }
+
+    static func accessibilityLabel(_ name: String, summary: LibrarySummary) -> String {
+        var parts = [name]
+        if summary.rating > 0 { parts.append(summary.rating == 1 ? "1 star" : "\(summary.rating) stars") }
+        if let flag = summary.flag { parts.append(flag == .pick ? "Pick" : "Rejected") }
+        if summary.edited { parts.append("Edited") }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// The film strip's and grid's context menu. It acts on the selection if the
+/// clicked photograph is in it, otherwise on that photograph alone, as in
+/// Finder.
+struct LibraryContextMenu: View {
+    let model: EditorModel
+    let item: URL
+
+    var body: some View {
+        let targets = model.contextTargets(item)
+        let several = targets.count > 1 ? " to \(targets.count) Photographs" : ""
+        let editing = model.canChangeEdits
+        if model.mode == .grid {
+            Button("Edit Photograph") { model.click(item); model.editCurrent() }
+            Divider()
+        }
+        Menu("Rating") {
+            ForEach(0...5, id: \.self) { stars in
+                Button(stars == 0 ? "None" : String(repeating: "★", count: stars)) { model.setRating(stars, targets: targets) }
+            }
+        }
+        Menu("Flag") {
+            Button("Pick") { model.setFlag(.pick, targets: targets) }
+            Button("Reject") { model.setFlag(.reject, targets: targets) }
+            Button("Unflagged") { model.setFlag(nil, targets: targets) }
+        }
+        Divider()
+        Button("Copy Edits") { model.copyEdits(from: item) }.disabled(!editing)
+        Button("Paste Edits" + several) { model.pasteEdits(onto: targets) }.disabled(!editing || model.copiedEdits == nil)
+        Button("Paste from Previous" + several) { model.pasteFromPrevious(onto: targets) }.disabled(!editing || model.previousEdits == nil)
+        Divider()
+        Button(targets.count > 1 ? "Duplicate \(targets.count) Photographs" : "Duplicate") { model.duplicate(targets) }.disabled(!editing)
+        Button(targets.count > 1 ? "Reset Edits of \(targets.count) Photographs" : "Reset Edits") { model.resetEdits(of: targets) }.disabled(!editing)
+        Divider()
+        Button(targets.count > 1 ? "Move \(targets.count) Photographs to Trash…" : "Move to Trash…") {
+            model.requestDelete(targets, asking: true)
+        }.disabled(!model.canDelete)
+        Divider()
+        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(Array(Set(targets.map(\.photoFile)))) }
     }
 }
