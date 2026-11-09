@@ -597,6 +597,80 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertNil(try variants(a).first?.edits)
     }
 
+    /// ⌘C and ⌘V reach the window controller at the end of the responder
+    /// chain and copy and paste edits as ⇧⌘C and ⇧⌘V do, one undo step;
+    /// a text field or view being edited takes them first.
+    func testCommandCAndVCopyAndPasteEditsUnlessTextTakesThem() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png"), b = try fixture(in: dir, "b.png"), c = try fixture(in: dir, "c.png")
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let strip = UserDefaults.standard.object(forKey: "filmstripVisible")
+        addTeardownBlock { UserDefaults.standard.set(strip, forKey: "filmstripVisible") }
+        model.filmstripVisible = true
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
+
+        let controller = EditorWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        defer { window.orderOut(nil) }
+        // The grid collapses the inspector; don't save that for later tests' windows.
+        let split = try XCTUnwrap(window.contentViewController as? NSSplitViewController)
+        split.splitView.autosaveName = nil
+        window.setFrameAutosaveName("")
+        // After the controller, which gives the model the window's.
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        func step(_ body: () -> Void) { undo.beginUndoGrouping(); body(); undo.endUndoGrouping() }
+        func lift(_ photo: URL) throws -> JSONValue? { try store.read(photo: photo)?.variants.first?.edits?["params.prep.lift"] }
+        let copy = #selector(NSText.copy(_:)), paste = #selector(NSText.paste(_:))
+        /// Who the menu's Copy or Paste goes to: the first responder that has it.
+        func target(_ action: Selector) -> NSResponder? {
+            var responder = window.firstResponder
+            while let next = responder, !next.responds(to: action) { responder = next.nextResponder }
+            return responder
+        }
+
+        window.makeFirstResponder(nil)
+        XCTAssertTrue(target(copy) === controller)
+        XCTAssertTrue(target(paste) === controller)
+        XCTAssertTrue(model.canCopyEdits)
+        XCTAssertFalse(model.canPasteEdits, "nothing copied yet")
+
+        step { model.set("prep.lift", .number(30)) }
+        controller.copy(nil)
+        XCTAssertEqual(model.copiedEdits?.groups, EditGroup.standard, "as Copy Edits, not Copy Edits…")
+        XCTAssertEqual(model.copiedEdits?.state.params["prep.lift"], .number(30))
+        model.showGrid()
+        model.click(b); model.click(c, shift: true)
+        XCTAssertTrue(model.canPasteEdits)
+        step { controller.paste(nil) }
+        XCTAssertEqual(model.libraryNote?.count, 2)
+        await model.flushSidecars()
+        XCTAssertEqual(try lift(b), .number(30))
+        XCTAssertEqual(try lift(c), .number(30))
+        undo.undo()
+        await model.flushSidecars()
+        XCTAssertNil(try lift(b), "one undo step takes back both")
+        XCTAssertNil(try lift(c))
+        XCTAssertTrue(undo.canRedo)
+
+        // Text being edited keeps its own copy and paste.
+        let canvas = split.splitViewItems[0].viewController.view
+        let field = NSTextField(string: "Text")
+        canvas.addSubview(field)
+        XCTAssertTrue(window.makeFirstResponder(field))
+        XCTAssertTrue(target(copy) is NSTextView, "the field editor")
+        XCTAssertTrue(target(paste) is NSTextView)
+        let text = NSTextView()
+        canvas.addSubview(text)
+        XCTAssertTrue(window.makeFirstResponder(text))
+        XCTAssertTrue(target(copy) === text)
+        XCTAssertTrue(target(paste) === text)
+    }
+
     /// Delete moves the photograph and its sidecar to the Trash, a duplicate
     /// leaves its sidecar, and one undo step puts either back.
     func testDeleteMovesToTheTrashAndUndoPutsItBack() async throws {

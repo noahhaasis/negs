@@ -548,9 +548,21 @@ import SwiftUI
         model.source != nil && !model.cropping && (model.mode == .grid || model.filmstripVisible)
     }
 
+    // MARK: Edits
+
+    // Edit › Copy and Paste (⌘C, ⌘V) copy and paste the photograph's edits,
+    // like Photo › Copy Edits and Paste Edits (⇧⌘C, ⇧⌘V). They reach here,
+    // the end of the responder chain, only when no text field or view takes
+    // them first, so typed text keeps its own copy and paste.
+    @objc func copy(_ sender: Any?) { model.copyEdits() }
+    @objc func paste(_ sender: Any?) { model.pasteEdits() }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(selectAll(_:)), #selector(deselectAll(_:)): selecting
+        // Not while a sheet or another window has the keys, as for Photo › Copy Edits.
+        case #selector(copy(_:)): model.canCopyEdits && MainMenu.takesRatingKeys(NSApp.keyWindow)
+        case #selector(paste(_:)): model.canPasteEdits && MainMenu.takesRatingKeys(NSApp.keyWindow)
         default: true
         }
     }

@@ -58,6 +58,8 @@ import SwiftUI
         edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z").keyEquivalentModifierMask = [.command, .shift]
         edit.addItem(.separator())
         edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        // Without a text field or view taking them, ⌘C and ⌘V copy and paste
+        // the photograph's edits: `EditorWindowController.copy(_:)`.
         edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
@@ -297,9 +299,9 @@ import SwiftUI
         case #selector(largerThumbnails): return model.mode == .grid && model.gridCellSize < GridMetrics.sizes.upperBound
         case #selector(smallerThumbnails): return model.mode == .grid && model.gridCellSize > GridMetrics.sizes.lowerBound
         case #selector(copyEdits), #selector(copyEditsChoosing):
-            return model.canChangeEdits && model.copySource != nil && Self.takesRatingKeys(NSApp.keyWindow)
+            return model.canCopyEdits && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(pasteEdits):
-            return model.copiedEdits != nil && model.canChangeEdits && !model.editTargets.isEmpty && Self.takesRatingKeys(NSApp.keyWindow)
+            return model.canPasteEdits && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(pasteFromPrevious):
             return model.previousEdits != nil && model.canChangeEdits && !model.editTargets.isEmpty && Self.takesRatingKeys(NSApp.keyWindow)
         case #selector(duplicate), #selector(resetEdits):

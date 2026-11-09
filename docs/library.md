@@ -49,17 +49,18 @@ match depends on changed.
 
 | Command | Shortcut | Does |
 | --- | --- | --- |
-| Copy Edits | ⇧⌘C | Copies the photograph's edits |
+| Copy Edits | ⇧⌘C or ⌘C | Copies the photograph's edits |
 | Copy Edits… | ⌥⇧⌘C | The same, after choosing which; the choice is remembered |
-| Paste Edits | ⇧⌘V | Applies them to the selected photographs |
+| Paste Edits | ⇧⌘V or ⌘V | Applies them to the selected photographs |
 | Paste from Previous | ⌥⇧⌘V | Applies the edits of the last photograph you left edited |
 | Duplicate | ⌘D | A copy, `IMG_0412.CR3 (2)`, that starts with the photograph's rating, flag and edits and then keeps its own |
 | Reset Edits | ⇧⌘R | Back to how an unedited photograph opens; rating and flag stay |
 
 These are in the Photo menu and in the context menu of the film strip and the
-grid. A plain Copy Edits takes the film and paper, Prep, Lab, the border, Image
-Size and output colour; not the crop and rotation, nor lens correction and
-input interpretation, which belong to each file. Match camera brightness is
+grid. ⌘C and ⌘V are Edit › Copy and Paste: in a text field they copy and paste
+text, as everywhere. A plain Copy Edits takes the film and paper, Prep, Lab,
+the border, Image Size and output colour; not the crop and rotation, nor lens
+correction and input interpretation, which belong to each file. Match camera brightness is
 solved again for each photograph it's pasted onto, when that photograph opens.
 
 In the grid these act on every selected photograph, and so do they in the edit

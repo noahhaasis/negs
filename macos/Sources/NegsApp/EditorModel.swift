@@ -1435,6 +1435,8 @@ import UserNotifications
 
     /// What Copy Edits copies: the grid's current photograph, or the open one.
     var copySource: URL? { mode == .grid ? selection.current : sourceItem }
+    var canCopyEdits: Bool { canChangeEdits && copySource != nil }
+    var canPasteEdits: Bool { copiedEdits != nil && canChangeEdits && !editTargets.isEmpty }
 
     /// What Paste Edits, Reset Edits and Duplicate act on: the selection in
     /// the grid, or in the film strip while it shows; else the open photograph.
