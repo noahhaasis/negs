@@ -26,10 +26,14 @@ struct EditorSession: Codable, Equatable, Sendable {
     var state: EditState?
     var inspectorVisible = true
     var fitImage = true
+    /// The photograph's solved Match camera brightness, which a photograph
+    /// without edits of its own keeps nowhere else: the next launch then
+    /// shows its saved frame and develops it without solving it again.
+    var match: SessionMatch?
     /// Not saved: the photograph's sidecar, read with the session at launch.
     var sidecar: SidecarRestore?
 
-    private enum CodingKeys: String, CodingKey { case schema, source, variant, bookmark, state, inspectorVisible, fitImage }
+    private enum CodingKeys: String, CodingKey { case schema, source, variant, bookmark, state, inspectorVisible, fitImage, match }
 
     /// With `state`, a schema 2 session, as earlier versions saved.
     init(source: URL, state: EditState? = nil, inspectorVisible: Bool = true, fitImage: Bool = true) {
@@ -42,6 +46,36 @@ struct EditorSession: Codable, Equatable, Sendable {
             throw EngineError(message: "The previous editing session could not be restored.")
         }
         try state?.validate()
+        if let match, !match.ev.isFinite || !(-3...3).contains(match.ev) {
+            throw EngineError(message: "The previous editing session could not be restored.")
+        }
+    }
+}
+
+/// A solved Match camera brightness, for the file it was solved on (as
+/// listed: size and modification date) and the match inputs it was solved
+/// for (`EditorModel.matchInputs`). Used for nothing else.
+struct SessionMatch: Codable, Equatable, Sendable {
+    var ev: Double
+    var highlightLimited: Bool
+    var inputs: JSONValue
+    var size: Int
+    var modified: Double
+
+    init?(_ match: BrightnessMatch?, file: URL) {
+        guard let match, let ev = match.ev, let inputs = match.inputs, let identity = Self.identity(of: file) else { return nil }
+        self.ev = ev; highlightLimited = match.highlightLimited; self.inputs = inputs
+        (size, modified) = identity
+    }
+
+    /// Whether this was solved on `file` as it is now.
+    func solved(on file: URL) -> Bool { Self.identity(of: file).map { $0 == (size, modified) } ?? false }
+
+    /// Read afresh: a URL's resource values are cached with it.
+    private static func identity(of file: URL) -> (Int, Double)? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let size = (attributes[.size] as? NSNumber)?.intValue, let modified = attributes[.modificationDate] as? Date else { return nil }
+        return (size, modified.timeIntervalSince1970)
     }
 }
 

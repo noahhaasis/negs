@@ -83,10 +83,12 @@ import AppKit
 /// the photograph was in that first frame, else the first timer tick with it
 /// on the canvas. Preview: the first current render. Settled: the end of the
 /// last main run-loop pass busy for more than 4 ms before the main thread
-/// stays quiet for a second.
+/// stays quiet for a second. With a photograph open it also waits for the
+/// folder's listing and every sidecar's rating ("stars"), reported on a
+/// line of their own.
 @MainActor enum LaunchBenchmark {
     static var enabled: Bool { ProcessInfo.processInfo.environment["SPEKTRAFILM_BENCHMARK_LAUNCH"] != nil }
-    private static var started = 0.0, window = 0.0, photo = 0.0, preview = 0.0, lastBusy = 0.0
+    private static var started = 0.0, window = 0.0, photo = 0.0, preview = 0.0, lastBusy = 0.0, listed = 0.0, stars = 0.0, longest = 0.0
     private static weak var model: EditorModel?
 
     /// Seconds since 1970 when this process was exec'd.
@@ -108,6 +110,8 @@ import AppKit
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeWaiting.rawValue, true, 0) { _, activity in
             let time = now()
             if activity == .afterWaiting { awake = time } else if time - awake > 4 { lastBusy = time }
+            // The longest a click or scroll could wait once the window is up.
+            if activity == .beforeWaiting, window > 0, awake > window { longest = max(longest, time - awake) }
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { timer in
@@ -115,8 +119,16 @@ import AppKit
                 let time = now()
                 if photo == 0, window > 0, model.image != nil || model.placeholder != nil { photo = time }
                 if preview == 0, model.previewCurrent { preview = time }
+                let library = model.library
+                if listed == 0, library.directory != nil, !library.loading { listed = time }
+                if stars == 0, listed > 0, library.summariesLoaded { stars = time }
                 guard window > 0, preview > 0 || time > 8000, time - lastBusy > 1000 else { return }
+                guard library.directory == nil || stars > 0 || time > 60000 else { return }
                 timer.invalidate()
+                if library.directory != nil {
+                    FileHandle.standardError.write(Data(String(format: "benchmark: library %d photographs, %d summaries, listed %.0f ms, stars %.0f ms from exec; longest main run-loop pass after the window %.0f ms\n",
+                                                               library.files.count, library.summaries.count, listed, stars, longest).utf8))
+                }
                 FileHandle.standardError.write(Data(String(format: "benchmark: launch window %.0f ms, photo %.0f ms, preview %.0f ms, settled %.0f ms from exec · %@%@\n",
                                                            window, photo, preview, lastBusy, model.status, model.error.map { " · error: \($0)" } ?? "").utf8))
                 NSApp.terminate(nil)

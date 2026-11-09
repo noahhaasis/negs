@@ -284,6 +284,32 @@ drags Exposure instead of print exposure (its 0.1 EV steps repeat values, so
 fewer frames are requested), and `SPEKTRAFILM_BENCHMARK_SHOTS=/tmp/negs-drag`
 saves window screenshots during the drag and after letting go.
 
+The same build has three more benchmarks, each with its own variable. Give
+each run a home of its own (`HOME` and `CFFIXED_USER_HOME`); the app's
+`NegsApp` defaults still land in your own domain, so export them first and
+afterwards delete the keys the run added and import them back.
+
+- `SPEKTRAFILM_BENCHMARK_LAUNCH=1` times launch from the process's exec: the
+  window's first frame, the photograph in it, the first current preview, and
+  when the main thread settles. It reopens the photograph in the home's
+  `session.json`, or in `SPEKTRAFILM_BENCHMARK_SESSION`. With a photograph open it
+  also reports when its folder is listed, when every sidecar's rating is in
+  ("stars"), and the longest main run-loop pass after the window appeared. Run each build a few times and compare sorted runs: launch times
+  often fall into two groups a few hundred milliseconds apart.
+- `SPEKTRAFILM_BENCHMARK_GRID=600:8,1500:8,4000:8` opens the grid on the
+  session's folder in a 1400 × 900 window and scrolls it on the display's clock
+  at each speed in points per second, for the given number of seconds, turning
+  at either end. It reports missed frames, how long the main run loop stayed
+  busy, and the app's memory. `SPEKTRAFILM_BENCHMARK_SHOTS` saves a screenshot
+  halfway through each speed.
+- `SPEKTRAFILM_BENCHMARK_GRID_FILL=1` waits for the first edited thumbnail the
+  background helper makes, copies it under every other edited photograph's
+  name and quits, so a later grid run scrolls with every edited thumbnail on
+  disk without developing them all.
+
+The phase 8 numbers for the library (ticket 30) are in
+[library.md](library.md#large-folders).
+
 While a slider moves, the helper renders at the canvas's resolution
 (`interactive_scale`: screen pixels per photo pixel at the current zoom), with
 every effect on, from an area-averaged copy of the source. The status line says

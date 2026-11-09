@@ -761,11 +761,15 @@ import UserNotifications
     }
 
     /// The photograph and window to reopen at the next launch; the edits are
-    /// in the photograph's sidecar (`flushSidecars`).
+    /// in the photograph's sidecar (`flushSidecars`). A match solved for the
+    /// current settings comes along: without edits nothing else keeps it.
     var session: EditorSession? {
         guard !closing, ready, let source else { return nil }
         var session = EditorSession(source: source, inspectorVisible: inspectorVisible, fitImage: fitImage)
         session.variant = sourceVariant
+        if brightnessMatchActive, !brightnessMatchPending, !matchingBrightness {
+            session.match = SessionMatch(state.brightnessMatch, file: source)
+        }
         return session
     }
 
@@ -864,7 +868,8 @@ import UserNotifications
         customFilmFormat = false
         // A schema 2 session restores its edits as before; otherwise the
         // photograph's sidecar has them, read at launch with the session.
-        adoptEdits(for: url, restore: session?.sidecar ?? readSidecar(url, variant: item.variantID), legacy: session?.state, previous: previous)
+        adoptEdits(for: url, restore: session?.sidecar ?? readSidecar(url, variant: item.variantID), legacy: session?.state, previous: previous,
+                   match: session?.match)
         if let session { inspectorVisible = session.inspectorVisible }
         isRaw = Self.rawExtensions.contains(url.pathExtension.lowercased())
         // Changes to several photographs (Paste Edits, Duplicate) stay undoable.
@@ -1036,8 +1041,10 @@ import UserNotifications
     }
 
     /// Sets the state of the photograph being opened: its saved edits, a
-    /// schema 2 session's, or a new photograph's. Then remembers its sidecar.
-    private func adoptEdits(for url: URL, restore: SidecarRestore?, legacy: EditState?, previous: EditState) {
+    /// schema 2 session's, or a new photograph's, with the session's `match`
+    /// if it was solved on this file for these settings. Then remembers its
+    /// sidecar.
+    private func adoptEdits(for url: URL, restore: SidecarRestore?, legacy: EditState?, previous: EditState, match: SessionMatch? = nil) {
         var missingFilm: (saved: String, shown: String)?, missingPaper: (saved: String, shown: String)?
         if let legacy {
             state = restoredState(legacy, legacy: true)
@@ -1062,6 +1069,10 @@ import UserNotifications
             state = restored
         } else {
             state = newPhotoState(after: previous)
+            if let match, state.brightnessMatch != nil, matchInputs(state) == match.inputs, match.solved(on: url),
+               let solved = Self.matching(state, ev: match.ev, limited: match.highlightLimited, inputs: match.inputs) {
+                state = solved
+            }
         }
         guard let restore else { photoSidecar = nil; return }
         library.opened(sourceItem ?? url, summary: LibrarySummary(rating: restore.rating, flag: restore.flag, edited: restore.edits != nil, problem: restore.problem))

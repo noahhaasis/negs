@@ -73,6 +73,7 @@ import SwiftUI
         if let path = Self.pathArgument { model.open(URL(fileURLWithPath: path)) }
         #if SPEKTRAFILM_BENCHMARK
         InteractionBenchmark.start(model)
+        GridBenchmark.start(model)
         #endif
         updates.schedule(afterStartupOf: model)
         offerBatchResume()

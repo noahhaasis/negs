@@ -276,6 +276,61 @@ final class SessionTests: XCTestCase {
         return EditorSession(source: photo, state: saved, inspectorVisible: false)
     }
 
+    /// A photograph without edits keeps its solved match nowhere but the
+    /// session, so the next launch neither solves it again nor misses its
+    /// saved frame; another file at the same path is solved again.
+    func testSessionKeepsTheSolvedMatchOfAPhotographWithoutEdits() async throws {
+        guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
+        try await cacheCatalog()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let photo = dir.appendingPathComponent("photo.png")
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false,
+                                      isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 96 * 3, bitsPerPixel: 24)!
+        for i in 0..<(96 * 64 * 3) { bitmap.bitmapData![i] = UInt8(i % 251) }
+        try bitmap.representation(using: .png, properties: [:])!.write(to: photo)
+
+        let first = EditorModel(previewCache: scratchCache())
+        first.autoPlaceNewImages = true
+        await first.start(paths: paths)
+        first.open(photo)
+        let deadline = Date().addingTimeInterval(30)
+        while !(first.previewCurrent && !first.brightnessMatchPending && !first.matchingBrightness) && first.error == nil && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(first.error)
+        let session = try XCTUnwrap(first.session)
+        let match = try XCTUnwrap(session.match, "solved for the current settings")
+        XCTAssertEqual(match.ev, first.state.brightnessMatch?.ev)
+        let exposure = first.value("prep.exposure_ev")
+        first.shutdown()
+
+        let store = SessionStore(file: dir.appendingPathComponent("session.json"))
+        try await store.save(session)
+        let loaded = try await store.load()
+        let saved = try XCTUnwrap(loaded)
+        XCTAssertEqual(saved.match, match)
+
+        let second = EditorModel(previewCache: scratchCache())
+        defer { second.shutdown() }
+        second.autoPlaceNewImages = true
+        second.launch(paths: paths)
+        XCTAssertTrue(second.restoreAtLaunch(saved))
+        XCTAssertTrue(second.brightnessMatchActive)
+        XCTAssertFalse(second.brightnessMatchPending, "not solved again")
+        XCTAssertEqual(second.state.brightnessMatch?.ev, match.ev)
+        XCTAssertEqual(second.value("prep.exposure_ev"), exposure)
+
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: photo.path)
+        let third = EditorModel(previewCache: scratchCache())
+        defer { third.shutdown() }
+        third.autoPlaceNewImages = true
+        third.launch(paths: paths)
+        XCTAssertTrue(third.restoreAtLaunch(saved))
+        XCTAssertTrue(third.brightnessMatchPending, "the file changed")
+    }
+
     func testRestoresAtLaunchFromCachedCatalogBeforeHelperAnswers() async throws {
         guard FileManager.default.isExecutableFile(atPath: paths.helper.path) else { throw XCTSkip("Build release helper first") }
         try await cacheCatalog()

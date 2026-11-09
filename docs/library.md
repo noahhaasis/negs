@@ -42,7 +42,10 @@ least recently used go first) and are safe to delete.
 
 Opening a photograph shows its own edits. One you have never edited starts from
 the defaults, with the film, paper, Image Size and output colour of the
-photograph before it.
+photograph before it. Its Match camera brightness is solved when it opens and
+written nowhere beside it; the session keeps the open photograph's, so
+relaunching on it doesn't solve it again, unless the file or the settings the
+match depends on changed.
 
 | Command | Shortcut | Does |
 | --- | --- | --- |
@@ -151,6 +154,46 @@ one photograph and seeing the whole folder:
 
 The grid opens on the photograph you were editing. Moving around it never
 develops a RAW; only leaving it opens the current photograph.
+
+## Large folders
+
+Measured on 2026-11-09 (ticket 30, phase 8) on an M1 Pro with a 120 Hz display,
+on mains power, with the benchmarks in [native-macos-ui.md](native-macos-ui.md#validation).
+The folders are APFS clones of one 24 MP NEF, 30% of them with a sidecar and
+half of those edited, read with a warm file cache.
+
+**Launch** doesn't get slower. Twelve alternating launches of each build
+against main's, each reopening the photograph its own last launch left open:
+
+| Photograph | Window and photograph, sorted runs (ms) | Developed preview, median (ms) |
+| --- | --- | --- |
+| Never edited, alone | main 440–482 or 674–723; library 448–478 or 684–711 | 2466 / 2472 |
+| With a sidecar | main 462–482 or 665–721; library 440–484 or 670–728 | 2685 / 2704 |
+| In a folder of 1,000 | main 435–476 or 673–710; library 438–471 or 696–727 | 2495 / 2496 |
+| In a folder of 5,000 | main 466–478 or 674–709; library 438–480 or 671–705 | 2488 / 2499 |
+
+Launch times fall into two groups a few hundred milliseconds apart in both
+builds, so the sorted runs are compared rather than medians. The photograph is
+in the window's first frame in every run.
+
+**Stars** (every sidecar's rating in) arrive 840 ms after the process starts
+with 1,000 photographs (90 ms after the folder is listed) and 1.25–1.45 s with
+5,000 (about 0.5 s after the listing). Applying them is one main-thread pass of
+about 45 ms with 5,000, and about 20 ms with 1,000.
+
+**Scrolling the grid** of 5,000 (1400 × 900 window, 7 columns, three runs each;
+missed frames at 120 Hz):
+
+| Speed | Ratings only | Edited thumbnails on disk | Edited thumbnails being made |
+| --- | --- | --- | --- |
+| 600 pt/s | 0–0.1% | 0.2–0.4% | 0.1% |
+| 1,500 pt/s | 0% | 1.4–2.1% | 0.1% |
+| 4,000 pt/s | 0.4–0.7% | 8.5–10.2% | 1.8–2.5% |
+
+No frame took longer than 26 ms (three refreshes); the main run loop's longest
+pass was 42 ms. At 1,500 pt/s and faster the cells show their placeholder while
+they pass and fill in within about a second of stopping. Memory goes from about
+430 MB to a peak of 555–575 MB while scrolling.
 
 ## Selecting
 
