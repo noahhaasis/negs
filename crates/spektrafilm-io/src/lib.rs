@@ -119,6 +119,9 @@ pub struct LoadedImage {
     pub colour: InputColour,
     /// A RAW whose decoder can apply [`LensCorrection`]; false for other files.
     pub lens_correction_supported: bool,
+    /// The size of the whole photograph: `image`'s, unless a reduced read
+    /// ([`load_image_colour_limited`]) returned less.
+    pub full_size: (u32, u32),
 }
 
 /// Shared preview/export loader. RAW WB applies to RAW files only, and the
@@ -132,17 +135,33 @@ pub fn load_image_colour(
     lens: LensCorrection,
     interpretation: &InputInterpretation,
 ) -> Result<LoadedImage> {
+    load_image_colour_limited(path, formats, wb, lens, interpretation, 0)
+}
+
+/// As [`load_image_colour`], with a RAW developed no larger than `max_long_side`
+/// on the long side where the decoder can do that, for small copies; 0 is all of
+/// it. Other files, and RAWs the decoder can't reduce, are read whole.
+pub fn load_image_colour_limited(
+    path: &Path,
+    formats: Formats,
+    wb: RawWhiteBalance,
+    lens: LensCorrection,
+    interpretation: &InputInterpretation,
+    max_long_side: u32,
+) -> Result<LoadedImage> {
     let ext = extension(path);
     if is_raw_extension(&ext) {
         let decoded = raw::decode_raw(
             path,
-            raw::RawDecodeOptions { white_balance: wb, apply_orientation: true, lens_correction: lens },
+            raw::RawDecodeOptions { white_balance: wb, apply_orientation: true, lens_correction: lens, max_long_side },
             raw::RawDecoderPreference::Auto,
         )?;
+        let full_size = decoded.reduced_from.unwrap_or((decoded.image.width, decoded.image.height));
         return Ok(LoadedImage {
             image: decoded.image,
             colour: InputColour::raw(decoded.decoder),
             lens_correction_supported: decoded.lens_correction_supported,
+            full_size,
         });
     }
     if formats == Formats::TiffPngRaw && !matches!(ext.as_str(), "tif" | "tiff" | "png") {
@@ -150,7 +169,8 @@ pub fn load_image_colour(
     }
     let (img, info, format) = decode_no_limits(path)?;
     let (image, colour) = colour::convert(img, &info, interpretation, format == image::ImageFormat::Png)?;
-    Ok(LoadedImage { image, colour, lens_correction_supported: false })
+    let full_size = (image.width, image.height);
+    Ok(LoadedImage { image, colour, lens_correction_supported: false, full_size })
 }
 
 /// Decode with the `image` crate's memory limits disabled and apply the

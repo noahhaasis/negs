@@ -14,6 +14,9 @@ typedef struct {
     uint32_t width, height, monochrome, lens_correction_supported;
     // The file's EXIF orientation (1-8), and whether the pixels have it applied.
     uint32_t orientation, oriented;
+    // The size a whole read would have, in the pixels' own orientation; the
+    // same as width and height unless the read was reduced.
+    uint32_t full_width, full_height;
     char version[32];
     char error[768];
 } SFAppleRaw;
@@ -21,6 +24,22 @@ typedef struct {
 static int fail(SFAppleRaw *out, int code, NSString *message) {
     snprintf(out->error, sizeof(out->error), "%s", message.UTF8String ?: "Unknown Apple RAW error");
     return code;
+}
+
+// Some valid tiny/custom DNGs initialize a filter but expose no supported
+// sensor image (1: let the portable backend handle them). Bounds are checked
+// before conversion, arithmetic, or allocation.
+static int check_bounds(CGRect bounds, SFAppleRaw *out) {
+    if (CGRectIsEmpty(bounds))
+        return fail(out, 1, @"Apple RAW does not support this sensor image geometry");
+    if (!isfinite(bounds.origin.x) || !isfinite(bounds.origin.y)
+        || !isfinite(bounds.size.width) || !isfinite(bounds.size.height)
+        || bounds.size.width < 1 || bounds.size.height < 1
+        || bounds.size.width != floor(bounds.size.width) || bounds.size.height != floor(bounds.size.height)
+        || bounds.size.width > 100000 || bounds.size.height > 100000
+        || bounds.size.width * bounds.size.height > 200000000)
+        return fail(out, 2, @"Invalid or excessive Apple RAW output dimensions (maximum 200 MP)");
+    return 0;
 }
 
 // Core Image's identifiers for one decoder generation. Version 9's constants
@@ -45,8 +64,13 @@ static NSArray<CIRAWDecoderVersion> *decoder_versions(int major) {
 // `defer_orientation` leaves a file Apple cannot lens-correct unoriented, so the
 // caller can correct it in sensor coordinates first and orient it afterwards.
 // `decoder_major` (9 or 8) selects that Core Image decoder generation.
+// `max_long_side`, when not 0, has Apple develop no larger than that on the long
+// side, through the same processing, which is far quicker for a small copy. A file
+// Apple can't lens-correct while Negs has a profile for it (`own_lens_profile`) is
+// read whole, since Negs corrects it in sensor pixels.
 int sf_apple_raw_decode(const char *path, int decoder_major, int orient, int as_shot,
-                        int lens_correction, int defer_orientation, SFAppleRaw *out) {
+                        int lens_correction, int defer_orientation, uint32_t max_long_side,
+                        int own_lens_profile, SFAppleRaw *out) {
     @autoreleasepool {
         @try {
             NSURL *url = CFBridgingRelease(CFURLCreateFromFileSystemRepresentation(
@@ -118,18 +142,20 @@ int sf_apple_raw_decode(const char *path, int decoder_major, int orient, int as_
             CIImage *image = raw.outputImage;
             if (!image) return fail(out, 1, @"Apple RAW produced no image for this file");
             CGRect bounds = image.extent;
-            // Some valid tiny/custom DNGs initialize a filter but expose no
-            // supported sensor image. Let the portable backend handle them.
-            if (CGRectIsEmpty(bounds))
-                return fail(out, 1, @"Apple RAW does not support this sensor image geometry");
-            // Bounds are checked before conversion, arithmetic, or allocation.
-            if (!isfinite(bounds.origin.x) || !isfinite(bounds.origin.y)
-                || !isfinite(bounds.size.width) || !isfinite(bounds.size.height)
-                || bounds.size.width < 1 || bounds.size.height < 1
-                || bounds.size.width != floor(bounds.size.width) || bounds.size.height != floor(bounds.size.height)
-                || bounds.size.width > 100000 || bounds.size.height > 100000
-                || bounds.size.width * bounds.size.height > 200000000)
-                return fail(out, 2, @"Invalid or excessive Apple RAW output dimensions (maximum 200 MP)");
+            int status = check_bounds(bounds, out);
+            if (status) return status;
+            out->full_width = (uint32_t)bounds.size.width;
+            out->full_height = (uint32_t)bounds.size.height;
+            uint32_t long_side = MAX(out->full_width, out->full_height);
+            if (max_long_side > 0 && long_side > max_long_side
+                && !(own_lens_profile && !raw.isLensCorrectionSupported)) {
+                raw.scaleFactor = (double)max_long_side / long_side;
+                image = raw.outputImage;
+                if (!image) return fail(out, 1, @"Apple RAW produced no reduced image for this file");
+                // A scaled extent can fall between pixels.
+                bounds = CGRectIntegral(image.extent);
+                if ((status = check_bounds(bounds, out))) return status;
+            }
             out->width = (uint32_t)bounds.size.width;
             out->height = (uint32_t)bounds.size.height;
             size_t row_bytes = (size_t)out->width * 4 * sizeof(float);
