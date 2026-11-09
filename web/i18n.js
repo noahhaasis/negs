@@ -10,8 +10,16 @@
 window.NEGS_I18N = (function () {
   // Languages with a dictionary in web/locales/, and their fallbacks.
   const LANGS = { "zh-CN": "en" };
+  // The Settings switch keeps its choice as remember() writes it (JSON); a
+  // hand-set raw string works too.
   let saved = null;
-  try { saved = localStorage.getItem("negs.lang"); } catch {}
+  try {
+    const raw = localStorage.getItem("negs.lang");
+    if (raw != null) {
+      try { saved = JSON.parse(raw); } catch { saved = raw; }
+      if (typeof saved !== "string") saved = null;
+    }
+  } catch {}
   const query = new URLSearchParams(location.search).get("lang");
   const nav = (navigator.languages?.[0] ?? navigator.language ?? "en").toLowerCase();
   const wanted = query ?? saved ?? (nav.startsWith("zh") ? "zh-CN" : "en");
