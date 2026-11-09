@@ -1,6 +1,6 @@
 // The interface language (docs in web/i18n.mjs): this script runs before the
-// page parses, picks the viewer's language (the Settings choice in
-// localStorage, else the browser's), and loads its dictionary —
+// page parses, picks the viewer's language (a ?lang= link or the Settings
+// choice, kept in localStorage, else the browser's), and loads its dictionary —
 // locales/<lang>.js, a plain script so it blocks parsing and the page never
 // flashes English — before index.html renders. Once the body has parsed, the
 // call at its end translates the static page; strings the modules build go
@@ -20,11 +20,26 @@ window.NEGS_I18N = (function () {
       if (typeof saved !== "string") saved = null;
     }
   } catch {}
-  const query = new URLSearchParams(location.search).get("lang");
+  const known = (l) => l === "en" || LANGS[l] !== undefined;
+  // A ?lang= link (the Chinese site's links to /try/) chooses as Settings
+  // does, from then on, and leaves the address: a reload or a later Settings
+  // switch must not choose it again. The other parameters and the hash stay.
+  const url = new URL(location.href);
+  const query = url.searchParams.get("lang");
+  if (query != null) {
+    if (known(query)) {
+      saved = query;
+      try { localStorage.setItem("negs.lang", JSON.stringify(query)); } catch {}
+    }
+    url.searchParams.delete("lang");
+    try { history.replaceState(history.state, "", url.pathname + url.search + url.hash); } catch {}
+  }
   const nav = (navigator.languages?.[0] ?? navigator.language ?? "en").toLowerCase();
-  const wanted = query ?? saved ?? (nav.startsWith("zh") ? "zh-CN" : "en");
-  const lang = LANGS[wanted] !== undefined || wanted === "en" ? wanted : "en";
+  const wanted = saved ?? (nav.startsWith("zh") ? "zh-CN" : "en");
+  const lang = known(wanted) ? wanted : "en";
   const state = { lang, dict: null };
+  // The website in each language, for the wordmark's link back to it.
+  const HOME = { "zh-CN": "/zh/" };
 
   // The dictionary's value for `text`, or the text itself (English): what
   // every string passes through, here and in the modules' tr(). `params`
@@ -58,6 +73,10 @@ window.NEGS_I18N = (function () {
       }
     }
     if (state.dict[document.title]) document.title = state.dict[document.title];
+    // The wordmark goes back to the website in the same language (app.js's
+    // leave confirmation follows its href too).
+    const brand = document.getElementById("brand");
+    if (brand && HOME[lang]) brand.setAttribute("href", HOME[lang]);
     // The CSS content label (index.html .view.dragging::after) reads this.
     const drop = state.dict["Drop to open"];
     if (drop) document.documentElement.style.setProperty("--drop", JSON.stringify(drop));
