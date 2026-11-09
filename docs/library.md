@@ -147,7 +147,7 @@ one photograph and seeing the whole folder:
 
 | Action | Key |
 | --- | --- |
-| Show the grid | G or Esc (not while cropping) |
+| Show the grid | G, Esc, or double-click the photograph; a zoomed-in one fits the window first (not while cropping) |
 | Edit the current photograph | E, Return, or double-click it |
 | Larger / smaller thumbnails | ⌘+ / ⌘−, or the Size slider |
 | Move | Arrow keys |

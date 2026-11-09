@@ -16,6 +16,8 @@ struct PreviewCanvas: NSViewRepresentable {
     let zoomCommand: UUID
     let fit: Bool
     var scale: CanvasScale?
+    /// A double-click on the photograph; true if it's zoomed from fitting.
+    var doubleClick: ((_ zoomed: Bool) -> Void)?
 
     func makeNSView(context: Context) -> ImageScrollView {
         let scroll = ImageScrollView()
@@ -26,12 +28,13 @@ struct PreviewCanvas: NSViewRepresentable {
         scroll.allowsMagnification = true; scroll.minMagnification = 0.005; scroll.maxMagnification = 16
         scroll.documentView = PhotographView()
         scroll.setAccessibilityLabel("Photograph preview")
-        scroll.setAccessibilityHelp("Pinch to zoom, scroll or drag to pan, double-click to fit.")
+        scroll.setAccessibilityHelp("Pinch to zoom, scroll or drag to pan, double-click to fit or, when fitted, to show the grid.")
         return scroll
     }
 
     func updateNSView(_ scroll: ImageScrollView, context: Context) {
         scale?.view = scroll
+        scroll.doubleClick = doubleClick
         let photo = scroll.documentView as! PhotographView
         let cropped = crop.size(of: size)
         let displaySize = rotation % 2 != 0 ? CGSize(width: cropped.height, height: cropped.width) : cropped
@@ -88,6 +91,7 @@ final class CenteringClipView: NSClipView {
 final class ImageScrollView: NSScrollView {
     var lastCommand: UUID?
     var fitting = true
+    var doubleClick: ((_ zoomed: Bool) -> Void)?
     private var lastViewport = CGSize.zero
     override func layout() {
         super.layout()
@@ -108,6 +112,21 @@ final class ImageScrollView: NSScrollView {
         let oneToOne = 1 / backingScale
         guard fitting else { return oneToOne }
         return min(viewport.width / document.width, viewport.height / document.height, oneToOne)
+    }
+    /// Zoomed in or out from fitting the window. A zoom that happens to
+    /// match the fit, such as 1:1 on a small photograph, isn't.
+    var zoomedFromFit: Bool {
+        guard !fitting, let documentView else { return false }
+        return Self.zoomed(magnification, minimum: minMagnification, maximum: maxMagnification, document: documentView.frame.size,
+                           viewport: contentSize, backingScale: window?.backingScaleFactor ?? 2)
+    }
+    static func zoomed(_ magnification: CGFloat, minimum: CGFloat, maximum: CGFloat, document: CGSize, viewport: CGSize, backingScale: CGFloat) -> Bool {
+        guard document.width > 0, document.height > 0, viewport.width > 0, viewport.height > 0 else { return false }
+        let fit = min(max(Self.magnification(fitting: true, document: document, viewport: viewport, backingScale: backingScale), minimum), maximum)
+        return abs(magnification / fit - 1) > 0.005
+    }
+    func doubleClicked() {
+        if let doubleClick { doubleClick(zoomedFromFit) } else { fitting = true; applyZoom() }
     }
     /// A higher-resolution render of the same photograph replaces the shown
     /// one; keep the same region on screen at the same apparent scale.
@@ -220,7 +239,7 @@ final class PhotographView: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2, let scroll = enclosingScrollView as? ImageScrollView {
-            scroll.fitting = true; scroll.applyZoom()
+            scroll.doubleClicked()
         } else if !grabbing { grabbing = true; NSCursor.closedHand.push() }
     }
     override func mouseDragged(with event: NSEvent) {

@@ -723,6 +723,13 @@ import UserNotifications
     }
     func zoom(fit: Bool) { fitImage = fit; zoomCommand = UUID() }
 
+    /// Double-clicking the photograph, as in Lightroom: a zoomed one fits
+    /// the window, a fitted one shows the grid. Cropping has its own.
+    func doubleClickPhotograph(zoomed: Bool) {
+        guard mode == .photo, !cropping else { return }
+        if zoomed { zoom(fit: true) } else { showGrid() }
+    }
+
     // MARK: Image Size
 
     /// Original develops the source's own pixels; Longest side resizes the

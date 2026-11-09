@@ -80,7 +80,8 @@ worktree is finished, review its status and merge ancestry, then retire it with
 The macOS package uses a native **SwiftUI and AppKit interface** with a standard
 toolbar, adjustment inspector, menus, undo/redo, native file dialogs, and
 color-managed image display. Pinch to zoom, scroll or drag to pan, and double-click
-to fit. Use **⌘O** to open, **⌘S** to save the preview, **⇧⌘E** to export,
+to fit (a fitted photograph's double-click shows the grid). Use **⌘O** to open,
+**⌘S** to save the preview, **⇧⌘E** to export,
 **⌘R** to rotate, **⌘0 / ⌘1** for fit / actual size, and **⌥⌘I** to toggle adjustments.
 Export remains cancellable and uses the original image at the selected working
 resolution. The export panel's **Engine** pop-up chooses **Fast (GPU)**, the

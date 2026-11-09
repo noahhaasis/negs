@@ -388,6 +388,40 @@ final class LibraryFormatTests: XCTestCase {
     /// In the grid clicks and keys move the current photograph without
     /// opening it, ratings apply to the whole selection, and leaving opens
     /// the current one. In the edit view ratings stay on the open photograph.
+    /// Double-clicking the photograph fits a zoomed one, else shows the
+    /// grid, as in Lightroom; never while cropping.
+    func testDoubleClickingThePhotographFitsItOrShowsTheGrid() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = try fixture(in: dir, "a.png")
+        let model = try await model(store: SidecarStore())
+        model.open(a)
+        try await waitUntil { model.image != nil }
+
+        model.zoom(fit: false)
+        let command = model.zoomCommand
+        model.doubleClickPhotograph(zoomed: true)
+        XCTAssertEqual(model.mode, .photo, "a zoomed photograph fits first")
+        XCTAssertTrue(model.fitImage)
+        XCTAssertNotEqual(model.zoomCommand, command)
+
+        model.beginCrop()
+        XCTAssertTrue(model.cropping)
+        model.doubleClickPhotograph(zoomed: false)
+        model.doubleClickPhotograph(zoomed: true)
+        XCTAssertEqual(model.mode, .photo, "cropping has its own double-click")
+        XCTAssertTrue(model.cropping)
+        model.endCrop(apply: false)
+
+        model.doubleClickPhotograph(zoomed: false)
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertEqual(model.selection.current, a)
+        let shown = model.zoomCommand
+        model.doubleClickPhotograph(zoomed: true)
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertEqual(model.zoomCommand, shown, "the grid has no photograph to zoom")
+    }
+
     func testTheGridSelectsWithoutDevelopingAndRatesTheSelection() async throws {
         let dir = try folder()
         defer { try? FileManager.default.removeItem(at: dir) }
