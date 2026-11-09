@@ -121,3 +121,23 @@ test("placeholders match their English source", () => {
     assert.deepEqual(wrong, [], `${name}: ${wrong.length} mismatched`);
   }
 });
+
+// A locale's manifest (locales/<lang>.webmanifest) replaces the English one
+// in its language: the same app, so once each URL is resolved against its
+// own manifest's location, everything but the description matches.
+test("each locale's manifest is the English one but for its description", () => {
+  const site = new URL("https://negs.test/try/");
+  const resolved = (file) => {
+    const at = new URL(file, site);
+    const walk = (value, key) => Array.isArray(value) ? value.map((v) => walk(v))
+      : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v, k)]))
+      : ["start_url", "scope", "src", "action", "url"].includes(key) ? new URL(value, at).href : value;
+    const { description, ...manifest } = walk(JSON.parse(read(file)));
+    assert.ok(description, `${file} has a description`);
+    return manifest;
+  };
+  const english = resolved("manifest.webmanifest");
+  const manifests = readdirSync(new URL("../locales", import.meta.url)).filter((f) => f.endsWith(".webmanifest"));
+  assert.ok(manifests.length, "a locale manifest exists");
+  for (const name of manifests) assert.deepEqual(resolved(`locales/${name}`), english, name);
+});
