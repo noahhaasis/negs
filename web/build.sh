@@ -28,8 +28,10 @@ if [[ ${1-} == --threads ]]; then
   # RUSTFLAGS replaces .cargo/config.toml's flags, so repeat getrandom's.
   # Shared, imported memory and the TLS exports are what wasm-bindgen's
   # threads need; a 4 GiB ceiling, as the default 1 GiB holds little more
-  # than a 12 MP render.
-  link='--shared-memory --import-memory --max-memory=4294967296 --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base'
+  # than a 12 MP render. --export=__heap_base: rustc (1.9x) no longer
+  # exports it with --import-memory, and wasm-bindgen's thread-id
+  # injection looks for it.
+  link='--shared-memory --import-memory --max-memory=4294967296 --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base --export=__heap_base'
   RUSTC_BOOTSTRAP=1 RUSTFLAGS="--cfg getrandom_backend=\"wasm_js\" -C target-feature=+atomics,+bulk-memory,+mutable-globals $(printf -- '-C link-arg=%s ' $link)" \
     cargo build --release --target wasm32-unknown-unknown -p spektrafilm-wasm --features threads \
     -Z build-std=panic_abort,std --target-dir target/wasm-threads
