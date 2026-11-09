@@ -1,10 +1,11 @@
 // Crop interaction and inspector. Geometry and export share crop.js; the
 // overlay is independent of the CPU/GPU image underneath it.
 import * as Crop from "./crop.js";
+import { tr } from "./i18n.mjs";
 const $ = (id) => document.getElementById(id);
 export function createCropEditor({ session, view, changed, exportSize }) {
   const overlay = $("crop-overlay"), aspect = $("crop-aspect"), angle = $("crop-angle"), dial = $("crop-dial");
-  for (const [id, title] of Crop.ASPECTS) aspect.add(new Option(title, id));
+  for (const [id, title] of Crop.ASPECTS) aspect.add(new Option(tr(title), id));
   const update = () => changed();
   aspect.addEventListener("change", () => { session().choose(aspect.value); update(); });
   for (const [id, portrait] of [["crop-landscape", false], ["crop-portrait", true]]) $(id).addEventListener("click", () => { session().orient(portrait); update(); });

@@ -2,6 +2,7 @@
 // foldouts, collapsed by default, of tiles grouped as the menus are, each
 // the photograph through that stock. app.js asks for the tiles' pictures one
 // at a time while the photograph has nothing else to render (`pumpPreviews`).
+import { tr } from "./i18n.mjs";
 
 const el = (tag, props = {}, ...children) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -18,7 +19,7 @@ const el = (tag, props = {}, ...children) => {
 // a search field over the grid (macOS StockFoldout, Film only), or none.
 export function foldout(title, groups, choose, shown, open = false, starred = [], starredChanged = () => {}, search = null) {
   const current = el("span", { className: "stock-current" });
-  const summary = el("summary", {}, el("span", { className: "stock-title", textContent: title }), current);
+  const summary = el("summary", {}, el("span", { className: "stock-title", textContent: tr(title) }), current);
   // In the sidebar a fixed window onto the grid keeps the tabs below in
   // reach (macOS StockFoldout.gridHeight); on the sheet the panel scrolls.
   const body = el("div", { className: "stock-scroll" });
@@ -48,13 +49,13 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
   const sections = [];
   for (const g of groups) {
     const grid = el("div", { className: "stock-grid" });
-    const heading = el("h3", { textContent: g.title });
+    const heading = el("h3", { textContent: tr(g.title) });
     const section = { heading, grid, tiles: [] };
     for (const s of g.stocks) {
       // key: what the picture shows; photo: whose; failed: the key it failed at.
       // text: what a search looks in (macOS StockGroup.matching).
       const tile = { id: s.id, name: s.name, key: null, photo: null, failed: null, copy: null,
-        text: `${s.name} ${s.id.replaceAll("_", " ")} ${g.title}`.toLocaleLowerCase() };
+        text: `${s.name} ${s.id.replaceAll("_", " ")} ${g.title} ${tr(g.title)}`.toLocaleLowerCase() };
       Object.assign(tile, cell(tile));
       grid.append(tile.root);
       tiles.set(s.id, tile);
@@ -71,8 +72,8 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
       const on = favorites.includes(t.id);
       for (const view of [t, t.copy].filter(Boolean)) {
         view.root.classList.toggle("favorite", on);
-        view.star.title = on ? "Remove from favorites" : "Add to favorites";
-        view.star.setAttribute("aria-label", `${on ? "Remove" : "Add"} ${t.name} ${on ? "from" : "to"} favorites`);
+        view.star.title = on ? tr("Remove from favorites") : tr("Add to favorites");
+        view.star.setAttribute("aria-label", tr(on ? "Remove {name} from favorites" : "Add {name} to favorites", { name: t.name }));
         view.star.setAttribute("aria-pressed", on);
       }
     }
@@ -141,13 +142,13 @@ export function foldout(title, groups, choose, shown, open = false, starred = []
     }
     favoriteGrid.hidden = searching || !favoriteGrid.childElementCount;
     empty.hidden = !searching || hits.size > 0;
-    empty.textContent = `No ${title.toLowerCase()}s match “${query.trim()}”`;
+    empty.textContent = tr("No {what} match “{query}”", { what: tr(`${title.toLowerCase()}s`), query: query.trim() });
     if (searching) body.scrollTop = 0; else center();
     shown();
   };
   if (search) {
-    const field = el("input", { type: "search", className: "stock-search", placeholder: search, spellcheck: false, autocomplete: "off" });
-    field.setAttribute("aria-label", search);
+    const field = el("input", { type: "search", className: "stock-search", placeholder: tr(search), spellcheck: false, autocomplete: "off" });
+    field.setAttribute("aria-label", tr(search));
     field.addEventListener("input", () => filter(field.value));
     field.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {

@@ -1,5 +1,7 @@
 // Optional, local-only film walkthrough. The adapter owns photographs and
 // rendering; this module owns copy, session transitions and accessible UI.
+import { tr } from "./i18n.mjs";
+
 export const TUTORIAL_VERSION = 2;
 export const STEPS = [
   { id: "film", tab: "stock", target: "film", title: "Choose your film", text: "Each film responds differently to light and colour. Your choice shapes the photo’s colours, contrast, and grain. Start here to find a character you like—then use the other controls to fine-tune it." },
@@ -80,7 +82,7 @@ export function createTutorialSession(adapter, changed = () => {}) {
         phase = "idle";
         if (completed) adapter.completed?.();
       } catch (e) {
-        error = `Couldn't restore the editor: ${e.message || e}`;
+        error = tr("Couldn't restore the editor: {message}", { message: e.message || e });
         phase = "restore-error";
       } finally { ending = null; notify(); }
     })();
@@ -126,20 +128,20 @@ export function createTutorial(adapter) {
     $("tutorial-heading").hidden = !active;
     $("tutorial-nav").hidden = !active;
     $("tutorial").hidden = active;
-    $("tour-progress").textContent = `Tutorial · ${s.index + 1} of ${STEPS.length}`;
+    $("tour-progress").textContent = tr("Tutorial · {index} of {total}", { index: s.index + 1, total: STEPS.length });
     const step = STEPS[s.index];
-    $("tour-title").textContent = s.phase === "preparing" ? "Loading sample…" : s.phase === "restoring" ? "Returning to the editor…" : s.phase.endsWith("error") ? "Something went wrong" : step.title;
-    $("tour-copy").textContent = s.error || (s.phase === "preparing" ? "Uses a sample photo. About 2 minutes, or take your time. Try the controls as you go. Each step starts fresh." : s.phase === "restoring" ? "Restoring your photo, edits and layout." : step.text);
-    $("tour-hint").textContent = step.hint || "";
+    $("tour-title").textContent = s.phase === "preparing" ? tr("Loading sample…") : s.phase === "restoring" ? tr("Returning to the editor…") : s.phase.endsWith("error") ? tr("Something went wrong") : tr(step.title);
+    $("tour-copy").textContent = s.error || (s.phase === "preparing" ? tr("Uses a sample photo. About 2 minutes, or take your time. Try the controls as you go. Each step starts fresh.") : s.phase === "restoring" ? tr("Restoring your photo, edits and layout.") : tr(step.text));
+    $("tour-hint").textContent = step.hint ? tr(step.hint) : "";
     $("tour-hint").hidden = !step.hint || s.phase !== "active";
-    $("tour-next").textContent = s.index === STEPS.length - 1 ? "Finish" : "Next";
+    $("tour-next").textContent = s.index === STEPS.length - 1 ? tr("Finish") : tr("Next");
     for (const id of ["tour-next", "tour-back", "tour-reset"]) $(id).disabled = s.phase !== "active";
     $("tour-back").disabled ||= s.index === 0;
     $("tour-reset").hidden = s.index === STEPS.length - 1;
     $("tour-end").disabled = s.phase === "restoring";
-    $("tour-end").textContent = s.phase === "preparing" ? "Cancel" : "End tour";
+    $("tour-end").textContent = s.phase === "preparing" ? tr("Cancel") : tr("End tour");
     $("tour-retry").hidden = !s.phase.endsWith("error");
-    $("tour-status").textContent = s.phase === "active" ? `Step ${s.index + 1} of ${STEPS.length}: ${step.title}` : $("tour-title").textContent;
+    $("tour-status").textContent = s.phase === "active" ? tr("Step {index} of {total}: {title}", { index: s.index + 1, total: STEPS.length, title: tr(step.title) }) : $("tour-title").textContent;
     if (s.phase === "active" && previous !== "active") $("tour-title").focus({ preventScroll: true });
     if (!active && previous !== "idle") $("tutorial").focus({ preventScroll: true });
     previous = s.phase;

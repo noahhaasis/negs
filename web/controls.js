@@ -217,7 +217,7 @@ export const OUTPUT_SECTIONS = [
 ];
 
 // Human-readable names for engine option identifiers (macOS optionTitle).
-const TITLES = {
+export const TITLES = {
   average: "Average", median: "Median", center_weighted: "Center-Weighted", partial: "Partial",
   matrix: "Matrix", multi_zone: "Multi-Zone", highlight_weighted: "Highlight-Weighted",
   as_shot: "As Shot", daylight: "Daylight", tungsten: "Tungsten (2850 K)", custom: "Custom",

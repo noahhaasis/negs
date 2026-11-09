@@ -1,5 +1,7 @@
 // A one-click start, then numbered samples and Next. Only metadata is kept
 // here: the app owns one photograph's bytes, and aborts superseded downloads.
+import { tr } from "./i18n.mjs";
+
 export const DEFAULT_SAMPLE = { id: "DSC_6377", url: "sample/DSC_6377.dng" };
 
 export function createSamplePicker({ container, select, next, note, current, load, onError,
@@ -15,7 +17,7 @@ export function createSamplePicker({ container, select, next, note, current, loa
 
   function fill() {
     select.replaceChildren(...entries.map((entry, i) => Object.assign(select.ownerDocument.createElement("option"), {
-      value: entry.id, textContent: `Sample ${i + 1}`,
+      value: entry.id, textContent: tr("Sample {n}", { n: i + 1 }),
     })));
     sync();
   }
@@ -28,7 +30,7 @@ export function createSamplePicker({ container, select, next, note, current, loa
     select.value = id ?? DEFAULT_SAMPLE.id;
     select.setAttribute("aria-describedby", online() ? "" : note.id);
     next.disabled = !online() || fetching;
-    next.title = online() ? "Open the next sample photo" : "Connect to switch to another sample";
+    next.title = online() ? tr("Open the next sample photo") : tr("Connect to switch to another sample");
     note.hidden = online();
   }
 
