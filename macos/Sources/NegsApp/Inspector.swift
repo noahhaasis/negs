@@ -585,11 +585,21 @@ extension AdjustmentInspector {
         var count = adjustmentGroups.filter { $0.section == section }.map { Self.count($0, model) }.reduce(0, +)
         switch section {
         case .camera: count += ["camera.exposure_compensation_ev", FilmFormatPicker.path, "camera.lens_blur_um"].filter(model.isModified).count
-        case .film: break
-        case .print: count += scanFilmModified(model) ? 1 : 0
+        case .film: count += model.isModified(filmDevelopmentPath) ? 1 : 0
+        case .print: count += (scanFilmModified(model) ? 1 : 0) + (model.isModified(printDevelopmentPath) ? 1 : 0)
         case .scan: count += outputCount(model)
         }
         return count
+    }
+    static let filmDevelopmentPath = "film_render.development_time", printDevelopmentPath = "print_render.development_time"
+    /// "Profile default", then each time the stock was measured at.
+    static func developmentItems(_ stock: Stock) -> [ChoiceItem] {
+        [.option("Profile default", tag: "")] + stock.times.map { .option("\($0.formatted()) min", tag: "\($0)") }
+    }
+    /// The menu tag for a development time: empty for the profile's default (null or 0).
+    static func developmentTag(_ value: JSONValue) -> String {
+        let minutes = value.double
+        return value == .null || minutes == 0 ? "" : "\(minutes)"
     }
     static func scanFilmModified(_ model: EditorModel) -> Bool {
         model.value("io.scan_film").bool != (model.films.first { $0.id == model.film }?.positive ?? false)
@@ -747,12 +757,6 @@ struct AdjustmentInspector: View {
             ScopePanelView(histogram: model.histogram, waveform: model.waveform)
                 .padding(.horizontal, Theme.Size.gutter)
                 .padding(.bottom, 10)
-            // Until the label under the photograph takes them (step 3).
-            Form { filmAndPaper }
-                .formStyle(.grouped)
-                .scrollDisabled(true)
-                .scrollContentBackground(.hidden)
-                .fixedSize(horizontal: false, vertical: true)
             InspectorTabs(model: model, tab: $tab)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -833,64 +837,15 @@ struct AdjustmentInspector: View {
         }
     }
 
-    /// Above the tabs until step 3: the stocks shape everything the tabs adjust.
-    @ViewBuilder private var filmAndPaper: some View {
-        let scanning = model.value("io.scan_film").bool
-        Section {
-            // Preview grids, or the plain menus when Settings turns them off.
-            if model.previews.enabled {
-                StockFoldout(model: model, paper: false)
-            } else {
-                Picker("Film", selection: Binding(get: { model.film }, set: { model.chooseFilm(StockFoldout.stockID(tag: $0)) })) {
-                    // The favourites first, starred; each stays in its group too. Their
-                    // own tags leave the selection on the group's entry, so the closed
-                    // menu shows the plain name.
-                    Section {
-                        ForEach(model.previews.favorites(in: model.films, paper: false)) { Label($0.name, systemImage: "star.fill").tag(StockFoldout.favoriteID($0.id)) }
-                    }
-                    ForEach(model.filmGroups) { group in
-                        Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
-                    }
-                }
-                .help(ControlHelp.film)
-            }
-            developmentTime(stock: model.films.first { $0.id == model.film }, path: "film_render.development_time", label: "Development",
-                            help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
-            if !scanning {
-                if model.previews.enabled {
-                    StockFoldout(model: model, paper: true)
-                } else {
-                    Picker("Paper", selection: Binding(get: { model.paper }, set: { model.choosePaper(StockFoldout.stockID(tag: $0)) })) {
-                        Section {
-                            ForEach(model.previews.favorites(in: model.papers, paper: true)) { Label($0.name, systemImage: "star.fill").tag(StockFoldout.favoriteID($0.id)) }
-                        }
-                        ForEach(model.paperGroups) { group in
-                            Section(group.title) { ForEach(group.stocks) { Text($0.name).tag($0.id) } }
-                        }
-                    }
-                    .help(ControlHelp.paper)
-                }
-                developmentTime(stock: model.papers.first { $0.id == model.paper }, path: "print_render.development_time", label: "Print development",
-                                help: "How long the paper develops, from the times it was measured at. Longer gives deeper blacks and more contrast.")
-            } else {
-                // The switch lives in the Lab's Print section; say why the paper went.
-                LabeledContent {
-                    Text("Skipped – scanning film").foregroundStyle(.secondary)
-                } label: {
-                    Text("Paper").foregroundStyle(.secondary)
-                }
-                .help("Scan film directly is on in the Lab’s Print section.")
-            }
-        }
-    }
-
+    /// How long the film or paper develops, for stocks measured at several
+    /// times. The stocks themselves are chosen from the label under the photograph.
     @ViewBuilder private func developmentTime(stock: Stock?, path: String, label: String, help: String) -> some View {
         if let stock, stock.times.count > 1 {
-            Picker(label, selection: Binding(get: { model.value(path).double }, set: { model.set(path, $0 == 0 ? .null : .number($0)) })) {
-                Text("Profile default").tag(0.0)
-                ForEach(stock.times, id: \.self) { Text("\($0.formatted()) min").tag($0) }
+            let current = model.value(path)
+            ChoiceRow(title: label, items: InspectorEdits.developmentItems(stock), selection: InspectorEdits.developmentTag(current),
+                      changed: model.isModified(path), help: help) { tag in
+                model.set(path, Double(tag).map { .number($0) } ?? .null)
             }
-            .help(help)
         }
     }
 
@@ -906,19 +861,26 @@ struct AdjustmentInspector: View {
             modules(.camera, ruledFirst: true)
             moreLine(.camera, loose: lensBlur ? [] : ["Lens blur"])
         }
+        let filmStock = model.films.first { $0.id == model.film }
         InkSection(title: "Film", edited: InspectorEdits.count(.film, model) > 0) {
-            modules(.film, ruledFirst: false)
+            developmentTime(stock: filmStock, path: InspectorEdits.filmDevelopmentPath, label: "Development",
+                            help: "How long the film develops, from the times the stock was measured at. Longer gives more density and contrast.")
+            modules(.film, ruledFirst: (filmStock?.times.count ?? 0) > 1)
             moreLine(.film)
         }
         let scanSwitch = scanning || shows(section: .print)
+        let paperStock = scanning ? nil : model.papers.first { $0.id == model.paper }
+        let printTime = (paperStock?.times.count ?? 0) > 1
         InkSection(title: "Print", edited: InspectorEdits.count(.print, model) > 0, skipped: scanning ? "skipped" : nil) {
+            developmentTime(stock: paperStock, path: InspectorEdits.printDevelopmentPath, label: "Print development",
+                            help: "How long the paper develops, from the times it was measured at. Longer gives deeper blacks and more contrast.")
             // Here rather than beside the stocks: few photographs want it.
             if scanSwitch {
                 TickRow(title: "Scan film directly", isOn: model.toggle("io.scan_film"), changed: InspectorEdits.scanFilmModified(model),
                         help: "Skip printing and scan the developed film, as for slides.")
             }
             if scanning { HintText("Printing and the paper are skipped while scanning film directly.") }
-            modules(.print, ruledFirst: scanSwitch, skipped: scanning)
+            modules(.print, ruledFirst: scanSwitch || printTime, skipped: scanning)
             if !scanning { moreLine(.print, loose: scanSwitch ? [] : ["Scan film directly"]) }
         }
         let outputChanged = InspectorEdits.outputCount(model) > 0

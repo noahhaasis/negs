@@ -212,7 +212,7 @@ struct EditorCanvas: View {
             ZStack {
                 // The canvas stays under the grid, so coming back to the
                 // same photograph is instant and keeps its zoom.
-                CanvasArea(model: model).accessibilityHidden(grid)
+                CanvasArea(model: model, marksHidden: dropTargeted).accessibilityHidden(grid)
                 if grid { LibraryGrid(model: model) }
             }
                 .dropDestination(for: URL.self) { urls, _ in
@@ -317,29 +317,71 @@ struct InspectorEmptyLine: View {
 /// Reads only the preview state, so edits don't re-evaluate the canvas.
 struct CanvasArea: View {
     let model: EditorModel
+    /// While a file is dragged over the window, the caption and label step aside.
+    var marksHidden = false
     /// Settings › Custom viewer background.
     @AppStorage(ViewerBackground.customKey) private var customBackground = false
     @AppStorage(ViewerBackground.colorKey) private var backgroundHex = ViewerBackground.defaultHex
+    @State private var geometry = CanvasGeometry()
+
+    /// Above the photograph, for the caption; below it, for the label's two rows (§2.3).
+    static let captionBand: CGFloat = 54
+    static let labelBand = PrintLabelLayout.band
 
     var body: some View {
         ZStack {
             ViewerBackground.canvas(custom: customBackground, hex: backgroundHex)
             if let session = model.cropSession, let image = model.image {
                 CropEditor(session: session, image: image)
-            } else if let image = model.image {
-                canvas(model.original ?? image, size: model.imageSize, rotation: model.imageRotation)
-            } else if let standIn = model.standIn {
-                // Finished already: drawn as it is, the size the photograph will be.
-                PreviewCanvas(image: standIn, size: Self.standInSize(standIn, photo: model.placeholderSize), rotation: 0, crop: CropSettings(),
-                              border: nil, filmTexture: nil, filmStrip: nil, zoomCommand: model.zoomCommand, fit: model.fitImage,
-                              scale: model.canvasScale, doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
-            } else if let placeholder = model.placeholder {
-                canvas(placeholder, size: model.placeholderSize, rotation: model.imageRotation)
-            } else if model.source == nil {
+            } else if model.source == nil, model.image == nil, model.standIn == nil, model.placeholder == nil {
                 EmptyState(model: model)
+            } else {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: Self.captionBand)
+                    photograph
+                    Color.clear.frame(height: Self.labelBand)
+                }
+                .overlay(alignment: .topLeading) {
+                    if !marksHidden, model.image != nil || model.standIn != nil || model.placeholder != nil {
+                        GeometryReader { proxy in marks(in: proxy.size) }
+                    }
+                }
             }
         }
         .overlay(alignment: .top) { ActivityBadge(model: model) }
+    }
+
+    @ViewBuilder private var photograph: some View {
+        if let image = model.image {
+            canvas(model.original ?? image, size: model.imageSize, rotation: model.imageRotation)
+        } else if let standIn = model.standIn {
+            // Finished already: drawn as it is, the size the photograph will be.
+            PreviewCanvas(image: standIn, size: Self.standInSize(standIn, photo: model.placeholderSize), rotation: 0, crop: CropSettings(),
+                          border: nil, filmTexture: nil, filmStrip: nil, zoomCommand: model.zoomCommand, fit: model.fitImage,
+                          scale: model.canvasScale, geometry: geometry, doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
+        } else if let placeholder = model.placeholder {
+            canvas(placeholder, size: model.placeholderSize, rotation: model.imageRotation)
+        } else {
+            Color.clear
+        }
+    }
+
+    /// The caption 10 pt over the print and the label under it, kept within
+    /// the canvas's margins; zoomed in, they stay in their bands.
+    @ViewBuilder private func marks(in size: CGSize) -> some View {
+        let print = geometry.print.offsetBy(dx: 0, dy: Self.captionBand)
+        if print.width > 0 {
+            let margin = ImageScrollView.fitInset
+            let left = max(print.minX, margin)
+            let right = min(print.maxX, size.width - margin)
+            let width = max(right - left, 1)
+            let portrait = !geometry.zoomed && print.height > print.width
+            PhotoCaption(facts: model.photoFacts, fileName: model.sourceItem.map { model.library.name(of: $0) } ?? "", portrait: portrait)
+                .frame(width: width, height: 40, alignment: .bottom)
+                .offset(x: left, y: print.minY - 10 - 40)
+            PrintLabel(model: model, photoWidth: width, canvasWidth: max(size.width - margin - left, width))
+                .offset(x: left, y: print.maxY)
+        }
     }
 
     /// The stand-in's layout size: its own shape (fitted, only that shows),
@@ -353,7 +395,7 @@ struct CanvasArea: View {
 
     private func canvas(_ image: AnyObject, size: CGSize, rotation: Int) -> some View {
         PreviewCanvas(image: image, size: size, rotation: rotation, crop: model.crop, border: model.border.shown(for: model.crop.size(of: size)), filmTexture: model.filmTexture,
-                      filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale,
+                      filmStrip: model.filmStrip, zoomCommand: model.zoomCommand, fit: model.fitImage, scale: model.canvasScale, geometry: geometry,
                       doubleClick: { [model] in model.doubleClickPhotograph(zoomed: $0) })
     }
 }

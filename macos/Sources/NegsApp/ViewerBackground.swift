@@ -34,9 +34,9 @@ enum ViewerBackground {
         return hex(red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent)
     }
 
-    /// The viewer's backdrop: the system colour unless a custom one is on.
+    /// The viewer's backdrop: the sheet the photograph lies on (`bg`) unless a custom one is on.
     static func canvas(custom: Bool, hex: String) -> Color {
-        guard custom, let customColor = color(hex: hex) else { return Color(nsColor: .underPageBackgroundColor) }
+        guard custom, let customColor = color(hex: hex) else { return Theme.bg }
         return customColor
     }
 }

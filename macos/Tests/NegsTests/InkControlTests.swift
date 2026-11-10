@@ -268,6 +268,13 @@ import XCTest
         model.set("prep.shadows", .number(20))
         XCTAssertEqual(InspectorEdits.count(.prep, model), baseline[0] + 2)
 
+        // Development time sits at the top of the Film and Print sections.
+        let film = InspectorEdits.count(.film, model)
+        model.set(InspectorEdits.filmDevelopmentPath, .number(5))
+        XCTAssertEqual(InspectorEdits.count(.film, model), film + 1)
+        model.resetValue(InspectorEdits.filmDevelopmentPath)
+        XCTAssertEqual(InspectorEdits.count(.film, model), film)
+
         model.border(\.enabled).wrappedValue = true
         XCTAssertEqual(InspectorEdits.count(.output, model), baseline[2] + 1)
 

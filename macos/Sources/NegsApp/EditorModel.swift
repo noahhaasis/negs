@@ -45,6 +45,8 @@ import UserNotifications
     private(set) var filmStrip: FilmStrip?
     private(set) var stocks: [Stock] = []
     private(set) var source: URL?
+    /// The camera's facts for the caption over the photograph, read off the main actor.
+    private(set) var photoFacts: PhotoFacts?
     /// The duplicate of `source` open (its sidecar variant); nil for the
     /// photograph itself.
     private(set) var sourceVariant: String?
@@ -422,6 +424,7 @@ import UserNotifications
     private func forgetPhotograph() {
         photoSidecar = nil; sidecarWrite?.cancel(); sidecarWrite = nil
         sourceGeneration += 1
+        photoFacts = nil
         source = nil; sourceVariant = nil; image = nil; placeholder = nil; standIn = nil; previewCurrent = false; renderFailed = false
         imageSize = .zero; placeholderSize = .zero; sourceSize = .zero; workingSize = .zero; previewScale = 1
         showingCachedPreview = false; isRaw = false; inputColour = .null; lensCorrectionSupported = false
@@ -918,6 +921,11 @@ import UserNotifications
         sourceGeneration += 1
         let generation = sourceGeneration
         customFilmFormat = false
+        photoFacts = nil
+        Task.detached(priority: .utility) { [weak self] in
+            let facts = PhotoFacts.read(url)
+            await self?.adopt(facts, generation: generation)
+        }
         // A schema 2 session restores its edits as before; otherwise the
         // photograph's sidecar has them, read at launch with the session.
         adoptEdits(for: url, restore: session?.sidecar ?? readSidecar(url, variant: item.variantID), legacy: session?.state, previous: previous,
@@ -1029,6 +1037,10 @@ import UserNotifications
         placeholderSize = size; placeholder = render; standIn = nil
         updateFilmStrip()
         return true
+    }
+
+    private func adopt(_ facts: PhotoFacts?, generation: Int) {
+        if generation == sourceGeneration { photoFacts = facts }
     }
 
     private func showStandIn(_ thumbnail: CGImage, generation: Int) {

@@ -258,12 +258,14 @@ struct StockEntry {
 /// A Film or Paper foldout: the current stock's name on the header, a
 /// two-column grid of tiles under the menu's headings inside. Film, the
 /// long list, has a search field over its grid.
+/// The stocks as developed tiles, with search for films: opened from a
+/// name in the label under the photograph. Until the tray (step 4) it's a
+/// popover there.
 struct StockFoldout: View {
     let model: EditorModel
     let paper: Bool
     @State private var query = ""
-    /// About two and a half rows of tiles, so the cut-off row shows it scrolls.
-    static let gridHeight: CGFloat = 290
+    static let size = CGSize(width: 460, height: 400)
     static func favoriteID(_ id: String) -> String { "favorite:\(id)" }
     /// The stock a tile or menu tag stands for.
     static func stockID(tag: String) -> String { tag.hasPrefix("favorite:") ? String(tag.dropFirst("favorite:".count)) : tag }
@@ -273,19 +275,16 @@ struct StockFoldout: View {
         return model.previews.isFavorite(id, paper: paper) ? Self.favoriteID(id) : id
     }
 
+    /// Opens or closes the picker, which starts or stops its tiles developing.
+    static func setOpen(_ open: Bool, paper: Bool, model: EditorModel) {
+        if paper { model.previews.paperOpen = open } else { model.previews.filmOpen = open }
+        model.pumpPreviews()
+    }
+
     var body: some View {
-        let previews = model.previews
-        let isExpanded = Binding(
-            get: { paper ? previews.paperOpen : previews.filmOpen },
-            set: { open in
-                if paper { previews.paperOpen = open } else { previews.filmOpen = open }
-                model.pumpPreviews()
-            })
-        DisclosureGroup(isExpanded: isExpanded) {
-            // A fixed window onto the grid keeps the header, and the tab
-            // switch below, in reach however far down the stocks go. It
-            // opens on the current stock.
-            ScrollViewReader { proxy in
+        // It opens on the current stock.
+        ScrollViewReader { proxy in
+            VStack(spacing: 8) {
                 if !paper {
                     StockSearchField(text: $query, prompt: "Search films") {
                         // Return takes the first match, as listed.
@@ -293,13 +292,10 @@ struct StockFoldout: View {
                             model.chooseFilm(first.id)
                         }
                     }
-                    .padding(.top, 4)
                 }
                 ScrollView {
                     StockGrid(model: model, paper: paper, query: query)
                 }
-                .scrollDisabled(false)
-                .frame(height: StockFoldout.gridHeight)
                 .onAppear { proxy.scrollTo(scrollID, anchor: .center) }
                 // Each search starts at the top of its matches; clearing it
                 // goes back to the current stock.
@@ -307,17 +303,9 @@ struct StockFoldout: View {
                     if query.isEmpty { proxy.scrollTo(scrollID, anchor: .center) } else { proxy.scrollTo(StockGrid.topID, anchor: .top) }
                 }
             }
-        } label: {
-            HStack {
-                Text(paper ? "Paper" : "Film")
-                Spacer()
-                Text(paper ? model.paperName : model.filmName)
-                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-            }
-            .help(paper ? ControlHelp.paper : ControlHelp.film)
-            .contentShape(Rectangle())
-            .onTapGesture { withAnimation { isExpanded.wrappedValue.toggle() } }
+            .padding(12)
         }
+        .frame(width: Self.size.width, height: Self.size.height)
     }
 }
 
@@ -396,6 +384,8 @@ private struct StockSearchField: NSViewRepresentable {
         field.placeholderString = prompt
         field.setAccessibilityLabel(prompt)
         field.sendsSearchStringImmediately = true
+        // Never the system blue (§1): no focus ring; the caret is `paper`.
+        field.focusRingType = .none
         field.target = context.coordinator
         field.action = #selector(Coordinator.changed(_:))
         field.delegate = context.coordinator
@@ -416,6 +406,10 @@ private struct StockSearchField: NSViewRepresentable {
 
         @objc func changed(_ field: NSSearchField) {
             if parent.text != field.stringValue { parent.text = field.stringValue }
+        }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            if let editor = (notification.object as? NSTextField)?.currentEditor() as? NSTextView { InkTextField.style(editor) }
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -451,7 +445,7 @@ private struct StockTileView: View {
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay {
-                    if selected { RoundedRectangle(cornerRadius: 5).strokeBorder(Color.accentColor, lineWidth: 2) }
+                    if selected { RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.accent, lineWidth: 2) }
                 }
                 Text(stock.name).font(.caption).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(selected ? .primary : .secondary)

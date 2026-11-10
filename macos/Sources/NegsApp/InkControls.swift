@@ -246,7 +246,7 @@ enum ChoiceItem: Hashable {
     weak var view: NSView?
 }
 
-private struct AnchorView: NSViewRepresentable {
+struct AnchorView: NSViewRepresentable {
     let anchor: MenuAnchor
     func makeNSView(context: Context) -> NSView {
         let view = NSView()

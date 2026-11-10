@@ -16,6 +16,8 @@ struct PreviewCanvas: NSViewRepresentable {
     let zoomCommand: UUID
     let fit: Bool
     var scale: CanvasScale?
+    /// Where the print is on screen, for the caption and label (§4.1, §4.2).
+    var geometry: CanvasGeometry?
     /// A double-click on the photograph; true if it's zoomed from fitting.
     var doubleClick: ((_ zoomed: Bool) -> Void)?
 
@@ -34,6 +36,7 @@ struct PreviewCanvas: NSViewRepresentable {
 
     func updateNSView(_ scroll: ImageScrollView, context: Context) {
         scale?.view = scroll
+        scroll.geometry = geometry
         scroll.doubleClick = doubleClick
         let photo = scroll.documentView as! PhotographView
         let cropped = crop.size(of: size)
@@ -88,10 +91,32 @@ final class CenteringClipView: NSClipView {
     }
 }
 
+/// The print's rectangle on the canvas, cut to what's on screen, in the
+/// scroll view's top-left coordinates. Zoomed in, it's the whole viewport,
+/// so scrolling doesn't move the caption or the label.
+@MainActor @Observable final class CanvasGeometry {
+    private(set) var print = CGRect.zero
+    /// The scroll view's size.
+    private(set) var viewport = CGSize.zero
+    private(set) var zoomed = false
+
+    func update(print: CGRect, viewport: CGSize, zoomed: Bool) {
+        // Whole points: sub-point scroll jitter never reaches SwiftUI.
+        let print = print.integral
+        if print != self.print { self.print = print }
+        if viewport != self.viewport { self.viewport = viewport }
+        if zoomed != self.zoomed { self.zoomed = zoomed }
+    }
+}
+
 final class ImageScrollView: NSScrollView {
     var lastCommand: UUID?
     var fitting = true
     var doubleClick: ((_ zoomed: Bool) -> Void)?
+    var geometry: CanvasGeometry? { didSet { if geometry !== oldValue { observeBounds(); reportGeometry() } } }
+    /// Space left and right of a fitted photograph (§2.3). The caption and
+    /// label bands above and below are outside the scroll view.
+    static let fitInset: CGFloat = 48
     private var lastViewport = CGSize.zero
     override func layout() {
         super.layout()
@@ -99,12 +124,36 @@ final class ImageScrollView: NSScrollView {
             lastViewport = contentSize
             if fitting { applyZoom() }
         }
+        reportGeometry()
     }
+    /// The viewport a fitted photograph fills.
+    var fitViewport: CGSize { Self.fitViewport(contentSize) }
+    static func fitViewport(_ size: CGSize) -> CGSize { CGSize(width: max(size.width - fitInset * 2, 1), height: size.height) }
     func applyZoom() {
         guard let documentView, documentView.frame.width > 0, contentSize.width > 0 else { return }
         let size = documentView.frame.size
-        let amount = Self.magnification(fitting: fitting, document: size, viewport: contentSize, backingScale: window?.backingScaleFactor ?? 2)
+        let amount = Self.magnification(fitting: fitting, document: size, viewport: fitViewport, backingScale: window?.backingScaleFactor ?? 2)
         setMagnification(min(max(amount, minMagnification), maxMagnification), centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
+        reportGeometry()
+    }
+
+    private var boundsObserver: NSObjectProtocol?
+    private func observeBounds() {
+        if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
+        boundsObserver = nil
+        guard geometry != nil else { return }
+        contentView.postsBoundsChangedNotifications = true
+        boundsObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: contentView, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reportGeometry() }
+        }
+    }
+    deinit { if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) } }
+
+    func reportGeometry() {
+        guard let geometry, let documentView, documentView.frame.width > 0 else { return }
+        var print = documentView.convert(documentView.bounds, to: self)
+        if !isFlipped { print.origin.y = bounds.height - print.maxY }
+        geometry.update(print: print.intersection(CGRect(origin: .zero, size: bounds.size)), viewport: bounds.size, zoomed: zoomedFromFit)
     }
     /// 1:1 is one photograph pixel per screen pixel. Fitting shows the whole
     /// photograph, but never enlarges a small one past 1:1.
@@ -118,7 +167,7 @@ final class ImageScrollView: NSScrollView {
     var zoomedFromFit: Bool {
         guard !fitting, let documentView else { return false }
         return Self.zoomed(magnification, minimum: minMagnification, maximum: maxMagnification, document: documentView.frame.size,
-                           viewport: contentSize, backingScale: window?.backingScaleFactor ?? 2)
+                           viewport: fitViewport, backingScale: window?.backingScaleFactor ?? 2)
     }
     static func zoomed(_ magnification: CGFloat, minimum: CGFloat, maximum: CGFloat, document: CGSize, viewport: CGSize, backingScale: CGFloat) -> Bool {
         guard document.width > 0, document.height > 0, viewport.width > 0, viewport.height > 0 else { return false }
