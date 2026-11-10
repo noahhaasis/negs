@@ -715,17 +715,28 @@ struct InspectorTabs: View {
     @Binding var tab: InspectorTab
 
     var body: some View {
-        // Top-aligned: each word is laid out alike (title, then its marks'
-        // room), so the titles share one baseline whatever the counts say.
-        // The marks' room is part of each word, hence the smaller gap.
+        TabRow(counts: Dictionary(uniqueKeysWithValues: InspectorTab.allCases.map { ($0, InspectorEdits.count($0, model)) }), tab: $tab)
+    }
+}
+
+/// The tabs' row, from their edit counts: the words one gap apart (from
+/// the last ink of one, its count if it has one, to the next), on one
+/// baseline, their capitals centred between the rules.
+struct TabRow: View {
+    let counts: [InspectorTab: Int]
+    @Binding var tab: InspectorTab
+
+    var body: some View {
+        // Top-aligned: every title starts at its word's top and nothing in
+        // a word reaches above it, so the titles share one baseline.
         HStack(alignment: .top, spacing: TabWord.gap) {
             ForEach(InspectorTab.allCases, id: \.self) { item in
-                TabWord(title: item.rawValue, chosen: tab == item, count: InspectorEdits.count(item, model)) { tab = item }
+                TabWord(title: item.rawValue, chosen: tab == item, count: counts[item] ?? 0) { tab = item }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, Theme.Size.gutter)
-        .padding(.top, 8)
+        .padding(.top, TabWord.topInset(row: Theme.Size.tabRow))
         .frame(height: Theme.Size.tabRow, alignment: .top)
         .overlay(alignment: .top) { InkRule() }
         .overlay(alignment: .bottom) { InkRule() }
@@ -743,33 +754,55 @@ struct TabWord: View {
     let choose: () -> Void
     @State private var hovered = false
 
-    /// The space between one word's marks and the next word.
-    static let gap: CGFloat = 10
+    /// The space between one word (its count, if any) and the next.
+    static let gap: CGFloat = 24
+    static let size: CGFloat = 21
+
+    /// How far below the row's top a title's line starts so that its
+    /// capitals sit in the middle of the row: as much room over the
+    /// capitals as under the baseline. The weights share these metrics.
+    static func topInset(row: CGFloat) -> CGFloat {
+        let font = Theme.serifFont(size, weight: 700)
+        let ascent = CTFontGetAscent(font), cap = CTFontGetCapHeight(font)
+        return ((row - cap) / 2 - (ascent - cap)).rounded()
+    }
+
+    /// The title's width set in `weight`, without tracking.
+    static func width(_ title: String, weight: CGFloat) -> CGFloat {
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: title, attributes: [.font: Theme.serifFont(size, weight: weight)]))
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
+    /// The tracking that sets a title as wide in 500 as in 700: the 700
+    /// closes up and the 500 opens out by the same fraction of a point
+    /// (0.2 to 0.5 pt between letters), so choosing a tab neither moves
+    /// the others nor leaves a chosen word's gaps wider than the rest.
+    static func tracking(_ title: String, chosen: Bool) -> CGFloat {
+        guard title.count > 1 else { return 0 }
+        let half = (width(title, weight: 700) - width(title, weight: 500)) / CGFloat(title.count - 1) / 2
+        return chosen ? -half : half
+    }
 
     var body: some View {
         Button(action: choose) {
             HStack(alignment: .top, spacing: 0) {
-                // As wide as the title in 700 whether chosen or not, so
-                // choosing a tab doesn't nudge the ones after it.
+                // Both weights' widths, so the word is the same size chosen or not.
                 ZStack(alignment: .leading) {
-                    Text(title).font(Theme.serif(21, weight: 700)).hidden()
-                    Text(title).font(Theme.serif(21, weight: chosen ? 700 : 500))
+                    Text(title).font(Theme.serif(Self.size, weight: 700)).tracking(Self.tracking(title, chosen: true)).hidden()
+                    Text(title).font(Theme.serif(Self.size, weight: 500)).tracking(Self.tracking(title, chosen: false)).hidden()
+                    Text(title).font(Theme.serif(Self.size, weight: chosen ? 700 : 500)).tracking(Self.tracking(title, chosen: chosen))
                         .foregroundStyle(chosen ? Theme.paper : hovered ? Theme.label : Theme.dim)
-                        .padding(.bottom, 5)
-                        .pencilUnderline(chosen, height: 6, offset: 0)
                 }
-                // The dot and count always keep their room, a two-digit
-                // count's, so a first edit doesn't push the next tabs along.
-                HStack(alignment: .top, spacing: 0) {
-                    EditDot().padding(.leading, 5).padding(.trailing, 3).padding(.top, 6)
-                    ZStack(alignment: .leading) {
-                        Text("88").hidden()
-                        Text("\(count)")
+                .padding(.bottom, 5)
+                .pencilUnderline(chosen, height: 6, offset: 0)
+                // In the flow, so the gap after a tab with edits starts at its
+                // count. Hangs from the title's top, never above it.
+                if count > 0 {
+                    HStack(alignment: .top, spacing: 0) {
+                        EditDot().padding(.leading, 5).padding(.trailing, 3).padding(.top, 6)
+                        Text("\(count)").font(Theme.ui(10.5, weight: .semibold)).foregroundStyle(Theme.label).padding(.top, 1)
                     }
-                    .font(Theme.ui(10.5, weight: .semibold)).foregroundStyle(Theme.label).padding(.top, 1)
+                    .accessibilityHidden(true)
                 }
-                .opacity(count > 0 ? 1 : 0)
-                .accessibilityHidden(true)
             }
         }
         .buttonStyle(InkPressStyle())
