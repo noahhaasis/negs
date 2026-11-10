@@ -308,3 +308,65 @@ fn camera_raw_smoke() {
         }
     }
 }
+
+/// An X-Trans DNG, 72 × 72 pixels of a varying mosaic.
+fn write_xtrans_fixture() -> TempFile {
+    let mut camera = Camera::new();
+    camera.clean_make = "Spektrafilm".into();
+    camera.clean_model = "X-Trans test".into();
+    camera.cfa = rawler::cfa::CFA::new("GGRGGBGGBGGRBRGRBGGGBGGRGGRGGBRBGBRG");
+    camera.color_matrix.insert(Illuminant::D65, vec![0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.75]);
+    let (width, height) = (72, 72);
+    let data = (0..width * height).map(|i| (2000 + (i * 7919) % 50000) as u16).collect();
+    let raw = RawImage::new(
+        camera.clone(),
+        PixU16::new_with(data, width, height),
+        1,
+        [2.2, 1.0, 1.4, 1.0],
+        RawPhotometricInterpretation::Cfa(rawler::rawimage::CFAConfig::new_from_camera(&camera)),
+        Some(BlackLevel::zero(1, 1, 1)),
+        Some(WhiteLevel::new_bits(16, 1)),
+        false,
+    );
+    let file = TempFile::new("DNG");
+    let mut writer = DngWriter::new(std::fs::File::create(&file.0).unwrap(), [1, 4, 0, 0]).unwrap();
+    writer.load_base_tags(&raw).unwrap();
+    let mut frame = writer.subframe_on_root(0);
+    frame
+        .raw_image(&raw, CropMode::None, DngCompression::Uncompressed, DngPhotometricConversion::Original, 1)
+        .unwrap();
+    frame.finalize().unwrap();
+    writer.close().unwrap();
+    file
+}
+
+/// X-Trans develops with Markesteijn unless the byte loader's caller asks
+/// for bilinear (the web's reduced copy of a large sensor), which it asks
+/// knowing the whole sensor's pixel count.
+#[test]
+fn xtrans_demosaic_is_markesteijn_unless_asked() {
+    let file = write_xtrans_fixture();
+    let bytes = std::fs::read(&file.0).unwrap();
+    let (default, _) = load_raw_bytes_unoriented(&bytes, RawWhiteBalance::default()).unwrap();
+    let mut asked = 0;
+    let (markesteijn, _) = load_raw_bytes_unoriented_with(&bytes, RawWhiteBalance::default(), |pixels| {
+        asked = pixels;
+        XTransDemosaic::Markesteijn
+    })
+    .unwrap();
+    assert_eq!(asked, 72 * 72);
+    assert_eq!(markesteijn.data, default.data);
+    assert_eq!(load_raw_bytes(&bytes, RawWhiteBalance::default()).unwrap().data, default.data);
+    let (bilinear, _) = load_raw_bytes_unoriented_with(&bytes, RawWhiteBalance::default(), |_| XTransDemosaic::Bilinear).unwrap();
+    assert_eq!((bilinear.width, bilinear.height), (default.width, default.height));
+    assert_ne!(bilinear.data, default.data);
+
+    // The same develop with rawler's own two demosaics, directly.
+    let raw = rawler::decode(&rawler::rawsource::RawSource::new_from_slice(&bytes), &Default::default()).unwrap();
+    let rgb = |xtrans| match (RawDevelop { xtrans, ..RawDevelop::default() }).develop_intermediate(&raw).unwrap() {
+        rawler::imgop::develop::Intermediate::ThreeColor(rgb) => rgb.data,
+        _ => panic!("not RGB"),
+    };
+    assert_ne!(rgb(XTransDemosaic::Markesteijn), rgb(XTransDemosaic::Bilinear));
+    assert_eq!(rgb(XTransDemosaic::Markesteijn), rgb(XTransDemosaic::default()));
+}

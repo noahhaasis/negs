@@ -287,8 +287,11 @@ fn build_hex_lut(cfa: &CFA) -> HexLut {
         // g=1 if center is green, 0 otherwise → selects which PATT row to use
         let g: usize = if cfa.color_at(row as usize, col as usize) == CFA_COLOR_G { 1 } else { 0 };
 
-        // Probe neighbor in current cardinal direction using ORTH rotation
-        if cfa.color_at((row + ORTH[d]) as usize, (col + ORTH[d + 2]) as usize) == CFA_COLOR_G {
+        // Probe neighbor in current cardinal direction using ORTH rotation.
+        // Negs: + 48 (a whole CFA repeat) keeps a row or column of -1 from
+        // wrapping in `as usize`, which overflowed in color_at in debug
+        // builds; release builds wrapped to the same cell.
+        if cfa.color_at((row + ORTH[d] + 48) as usize, (col + ORTH[d + 2] + 48) as usize) == CFA_COLOR_G {
           ng = 0; // green neighbor resets the counter
         } else {
           ng += 1; // non-green neighbor increments
