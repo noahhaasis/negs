@@ -13,6 +13,11 @@ import SwiftUI
     }
     var strip: [URL: Place] = [:]
     var sheet: [URL: Place] = [:]
+    /// The coordinate space the places are measured in, named at the root of
+    /// the canvas's and the sheet's hosting views. Not `.global`: that's the
+    /// window's, which takes in the title bar above them, so the flights
+    /// landed 38 pt low and the frames jumped up as they took over.
+    static let space = "thumbnailPlaces"
 }
 
 /// Reports a thumbnail's rect and picture as they change, and nil once it's gone.
@@ -23,7 +28,7 @@ struct PlaceReport: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { rect in
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ThumbnailPlaces.space)) } action: { rect in
                 self.rect = rect
                 placed(ThumbnailPlaces.Place(rect: rect, image: image))
             }
