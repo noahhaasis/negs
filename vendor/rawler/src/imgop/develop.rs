@@ -14,7 +14,10 @@ use crate::{
     chromatic_adaption::adapt_bradford,
     fuji_rotate::fuji_normalize_rotation,
     matrix::{IDENTITY_MATRIX_3, transform_1d},
-    sensor::{Demosaic, SensorType, xtrans::markesteijn::XTransMarkesteijnDemosaic},
+    sensor::{
+      Demosaic, SensorType,
+      xtrans::{bilinear::XTransBilinearDemosaic, markesteijn::XTransMarkesteijnDemosaic},
+    },
   },
   pixarray::{Color2D, PixF32},
   rawimage::{RawImageData, RawPhotometricInterpretation},
@@ -120,9 +123,22 @@ impl Intermediate {
   }
 }
 
+/// How [`RawDevelop`] demosaics a Fuji X-Trans sensor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum XTransDemosaic {
+  /// Markesteijn, one pass: sharp, the default.
+  #[default]
+  Markesteijn,
+  /// The average of every same-colour sample in a 5x5 window: blurred by
+  /// about 1 to 1.5 px, but faster, and without Markesteijn's two extra
+  /// sensor-sized buffers (about 12 bytes a pixel more at its peak).
+  Bilinear,
+}
+
 #[derive(Clone)]
 pub struct RawDevelop {
   pub steps: Vec<ProcessingStep>,
+  pub xtrans: XTransDemosaic,
 }
 
 impl Default for RawDevelop {
@@ -138,13 +154,17 @@ impl Default for RawDevelop {
         ProcessingStep::CropDefault,
         ProcessingStep::SRgb,
       ],
+      xtrans: XTransDemosaic::default(),
     }
   }
 }
 
 impl RawDevelop {
   pub fn new_with(steps: &[ProcessingStep]) -> Self {
-    Self { steps: Vec::from(steps) }
+    Self {
+      steps: Vec::from(steps),
+      xtrans: XTransDemosaic::default(),
+    }
   }
 
   /*
@@ -226,8 +246,10 @@ impl RawDevelop {
               let linear = Bilinear4Channel::new();
               Intermediate::FourColor(linear.demosaic(&pixels, &config.cfa, &config.colors, roi))
             } else if config.cfa.is_rgb() && config.sensor == SensorType::Xtrans {
-              let xtrans_demosaic = XTransMarkesteijnDemosaic::new_pass_1();
-              Intermediate::ThreeColor(xtrans_demosaic.demosaic(&pixels, &config.cfa, &config.colors, roi))
+              Intermediate::ThreeColor(match self.xtrans {
+                XTransDemosaic::Markesteijn => XTransMarkesteijnDemosaic::new_pass_1().demosaic(&pixels, &config.cfa, &config.colors, roi),
+                XTransDemosaic::Bilinear => XTransBilinearDemosaic::new().demosaic(&pixels, &config.cfa, &config.colors, roi),
+              })
             } else {
               todo!()
             }

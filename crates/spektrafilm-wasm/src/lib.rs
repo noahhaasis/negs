@@ -1098,6 +1098,23 @@ fn decode_photo(
     Ok((image, colour, full))
 }
 
+/// The X-Trans sensors, in pixels, past which a reduced copy (`max_pixels`
+/// above 0: phones and tablets) demosaics with rawler's bilinear X-Trans
+/// demosaic instead of Markesteijn 1-pass. Markesteijn holds two more
+/// sensor-sized buffers (a cropped copy of the mosaic and its green bounds,
+/// 12 bytes a pixel), which an iPhone 13 Pro Max (iOS 26, Safari, threaded)
+/// did not survive at 40 MP: an X-T5 RAF peaked at about 1321 MiB in the
+/// decoder worker and got the tab killed 4 times out of 4, where bilinear
+/// peaks at 849 MiB and opens it every time. 26 MP (X-T3, 844 MiB) and 16 MP
+/// (X-T1, 536 MiB) open fine with Markesteijn. No X-Trans sensor lies
+/// between 26 MP and 40 MP, so 30 MP parts them with a margin both ways.
+/// Those files are reduced to about 4.4 MP afterwards, 3× smaller each way
+/// at 40 MP, which shrinks bilinear's 1 to 1.5 px blur to under half a kept
+/// pixel; and the phone previews and exports that same copy, so preview
+/// still equals export. Uncapped decodes (the desktop) always use
+/// Markesteijn.
+const REDUCED_XTRANS_BILINEAR_ABOVE: usize = 30_000_000;
+
 fn decode_photo_mode(
     bytes: &[u8],
     max_dim: u32,
@@ -1124,7 +1141,14 @@ fn decode_photo_mode(
             }
             // A camera RAW the decoder knows but can't read says so;
             // anything else may have been a damaged image.
-            let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented(bytes, wb).map_err(|raw| {
+            let xtrans = |sensor_pixels| {
+                if max_pixels > 0.0 && sensor_pixels > REDUCED_XTRANS_BILINEAR_ABOVE {
+                    spektrafilm_io::XTransDemosaic::Bilinear
+                } else {
+                    spektrafilm_io::XTransDemosaic::Markesteijn
+                }
+            };
+            let (image, exif) = spektrafilm_io::load_raw_bytes_unoriented_with(bytes, wb, xtrans).map_err(|raw| {
                 let raw = format!("{raw:#}");
                 match raw.split_once("DecoderFailed(\"") {
                     Some((_, reason)) => JsError::new(reason.split('"').next().unwrap_or(&raw)),
