@@ -1580,15 +1580,15 @@ import UserNotifications
 
     /// Rates what rating commands act on, 0 (none) to 5 stars.
     func setRating(_ stars: Int, targets: [URL]? = nil) {
-        changeLibrary(targets: targets) { $0.rating = max(0, min(5, stars)) } note: { Self.ratingText($0.rating) }
+        changeLibrary(action: "Rating", targets: targets) { $0.rating = max(0, min(5, stars)) } note: { Self.ratingText($0.rating) }
     }
     func changeRating(by offset: Int) {
-        changeLibrary(many: offset > 0 ? "Rating Raised" : "Rating Lowered") {
+        changeLibrary(action: "Rating", many: offset > 0 ? "Rating Raised" : "Rating Lowered") {
             $0.rating = max(0, min(5, $0.rating + offset))
         } note: { Self.ratingText($0.rating) }
     }
     func setFlag(_ flag: PhotoSidecar.Flag?, targets: [URL]? = nil) {
-        changeLibrary(targets: targets) { $0.flag = flag } note: { Self.flagText($0.flag) }
+        changeLibrary(action: "Flag", targets: targets) { $0.flag = flag } note: { Self.flagText($0.flag) }
     }
 
     func hideLibraryNote(_ serial: Int) { if libraryNote?.serial == serial { libraryNote = nil } }
@@ -1600,44 +1600,113 @@ import UserNotifications
 
     /// `many` is the note for several photographs, when `note` would differ
     /// between them.
-    private func changeLibrary(many: String? = nil, targets: [URL]? = nil, _ change: (inout LibrarySummary) -> Void, note: (LibrarySummary) -> String) {
+    private func changeLibrary(action: String, many: String? = nil, targets: [URL]? = nil, _ change: (inout LibrarySummary) -> Void,
+                               note: (LibrarySummary) -> String) {
         let targets = targets ?? ratingTargets
         guard !targets.isEmpty, !closing else { return }
-        let order = shownPhotos.map(\.url)
-        var unsaved: String?, last = LibrarySummary(), queued = false
+        let order = shownPhotos.map(\.url), view = libraryView
+        var unsaved: String?, last = LibrarySummary(), queued = false, befores: [URL: LibrarySummary] = [:]
         for photo in targets {
             let before = library.summary(for: photo)
             var after = before
             change(&after)
             last = after
             guard after != before else { continue }
+            befores[photo] = before
             let reason = saveLibraryChange(from: before, to: after, photo: photo)
             if reason == nil { queued = true } else if unsaved == nil { unsaved = reason }
             library.set(after, for: photo)
         }
-        if queued, let sidecars {
-            Task { [weak self] in
-                let failures = await sidecars.flush()
-                for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
-            }
-        }
+        if queued { flushLibraryChanges() }
         let text = targets.count == 1 ? note(last) : many ?? note(last)
         libraryNote = LibraryNote(text: text, detail: unsaved, count: targets.count, serial: (libraryNote?.serial ?? 0) + 1)
-        // Those the filter now leaves out go from the strip and the grid at
-        // once, the current photograph too: the next one shown becomes
-        // current (in the edit view it opens), or the one before at the end.
-        // With nothing else left it stays, as the current one always does.
+        moveOn(after: targets, order: order)
+        registerLibraryUndo(befores, from: libraryView, to: view, action: action)
+    }
+
+    /// After rating or flagging `targets`: those the filter now leaves out
+    /// go from the strip and the grid at once, the current photograph too.
+    /// The next one shown becomes current (in the edit view it opens), or
+    /// the one before at the end. With none left the grid shows that
+    /// nothing matches, as it does for a filter nothing passes.
+    private func moveOn(after targets: [URL], order: [URL]) {
         let dropped = library.filter.active ? Set(targets.filter { !library.filter.includes(library.summary(for: $0)) }) : []
         if !dropped.isEmpty {
             let current = mode == .photo ? sourceItem : selection.current
-            if let current, dropped.contains(current), let next = Self.next(after: current, in: order, skipping: dropped) {
-                if mode == .photo { open(next) } else { selection.select(next) }
+            if let current, dropped.contains(current) {
+                if let next = Self.next(after: current, in: order, skipping: dropped) {
+                    if mode == .photo { open(next) } else { selection.select(next) }
+                } else {
+                    // The edit view has nothing to show, so the grid opens
+                    // on its empty sheet; the open photograph stays loaded
+                    // behind it for Undo or another filter to bring back.
+                    if mode == .photo { showGrid() }
+                    if mode == .grid { selection = LibrarySelection() }
+                }
                 return
             }
             selection.prune(to: Set(shownPhotos.map(\.url)))
         }
         guard advanceAfterRating else { return }
         if mode == .photo { step(by: 1) } else if targets.count == 1 { move(by: 1, extending: false) }
+    }
+
+    private func flushLibraryChanges() {
+        guard let sidecars else { return }
+        Task { [weak self] in
+            let failures = await sidecars.flush()
+            for (failed, reason) in failures { self?.sidecarFailed(failed, reason) }
+        }
+    }
+
+    /// Where the library stood: the view, its selection and the open photograph.
+    private struct LibraryView: Equatable {
+        var mode: LibraryMode
+        var selection: LibrarySelection
+        var open: URL?
+    }
+
+    private var libraryView: LibraryView { LibraryView(mode: mode, selection: selection, open: sourceItem) }
+
+    /// One undo step puts the ratings and flags in `summaries` back. If
+    /// nothing has moved since (`now`), the view goes back to `then` too, so
+    /// a photograph the filter dropped comes back as the current one.
+    private func registerLibraryUndo(_ summaries: [URL: LibrarySummary], from now: LibraryView, to then: LibraryView, action: String) {
+        guard !summaries.isEmpty else { return }
+        undoManager?.registerUndo(withTarget: libraryUndo) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restoreLibrary(summaries, from: now, to: then, action: action) }
+        }
+        undoManager?.setActionName(action)
+    }
+
+    /// Undo and redo of a rating or flag change.
+    private func restoreLibrary(_ summaries: [URL: LibrarySummary], from now: LibraryView, to then: LibraryView, action: String) {
+        guard !closing else { return }
+        let view = libraryView, items = Set(library.items.map(\.url))
+        var befores: [URL: LibrarySummary] = [:], queued = false
+        for (photo, summary) in summaries where items.contains(photo) {
+            let before = library.summary(for: photo)
+            var after = before
+            after.rating = summary.rating; after.flag = summary.flag
+            guard after != before else { continue }
+            befores[photo] = before
+            if saveLibraryChange(from: before, to: after, photo: photo) == nil { queued = true }
+            library.set(after, for: photo)
+        }
+        if queued { flushLibraryChanges() }
+        if view == now, !cropping {
+            if then.mode == .photo, let open = then.open, items.contains(open) {
+                if open == sourceItem, !sourceDeleted { selection.select(open); mode = .photo } else { self.open(open) }
+            } else if then.mode == .grid {
+                if mode == .photo { showGrid() }
+                if mode == .grid { selection = then.selection }
+                selection.prune(to: Set(shownPhotos.map(\.url)))
+            }
+        } else {
+            selection.prune(to: Set(shownPhotos.map(\.url)))
+        }
+        // Redo takes it back to where it is now, and changes them again.
+        registerLibraryUndo(befores, from: libraryView, to: view, action: action)
     }
 
     /// Queues a rating or flag change to `photo`'s sidecar; why it can't, if
@@ -1750,16 +1819,21 @@ import UserNotifications
         mode = .grid
     }
 
-    /// Back to the edit view, on the grid's current photograph.
+    /// Back to the edit view, on the grid's current photograph. With none,
+    /// as when a rating left nothing the filter passes, there's nothing to edit.
     func editCurrent() {
-        guard mode == .grid else { return }
-        if let current = selection.current, current != sourceItem || sourceDeleted { open(current) } else { mode = .photo }
+        guard mode == .grid, let current = selection.current else { return }
+        if current != sourceItem || sourceDeleted { open(current) } else { mode = .photo }
     }
 
     func changeGridCellSize(larger: Bool) { gridCellSize += larger ? 40 : -40 }
 
     private func filterChanged() {
         guard !library.filtering else { return }
+        // A grid left empty by a rating finds the open photograph again
+        // once a filter shows it.
+        if mode == .grid, selection.current == nil, let open = sourceItem, !sourceDeleted,
+           library.shown(current: nil).contains(where: { $0.url == open }) { selection.select(open) }
         selection.prune(to: Set(library.shown(current: selection.current).map(\.url)))
     }
 

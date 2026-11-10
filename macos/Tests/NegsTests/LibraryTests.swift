@@ -445,7 +445,7 @@ final class LibraryFormatTests: XCTestCase {
         model.setFlag(nil)
         XCTAssertEqual(model.selection.current, d)
         XCTAssertEqual(model.shownPhotos.map(\.url), [d])
-        // Several at once; with nothing else left the current one stays.
+        // Several at once.
         model.library.filter = LibraryFilter(flags: [.unflagged])
         model.click(a)
         model.click(c, shift: true)
@@ -455,8 +455,83 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.selection.selected, [a, c], "b left the selection with the grid")
         XCTAssertEqual(model.shownPhotos.map(\.url), [a, c])
         model.setFlag(.reject)
-        XCTAssertEqual(model.shownPhotos.map(\.url), [a])
-        XCTAssertEqual(model.selection.current, a)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [], "none left, the grid is empty")
+        XCTAssertNil(model.selection.current)
+        await model.flushSidecars()
+    }
+
+    /// The last photograph a rating takes out of the filter goes too: the
+    /// grid is left empty, from the edit view as well, with nothing to act
+    /// on. Undo brings it back as it was, and so does another filter.
+    func testRelabellingTheLastOutEmptiesTheView() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var photos: [URL] = []
+        for name in ["a", "b", "c"] {
+            let photo = try fixture(in: dir, name + ".png")
+            if name != "c" { try write(#"{"negs": 1, "defaultsVersion": 1, "variants": [{"id": "1", "flag": "pick"}]}"#, sidecarOf: photo) }
+            photos.append(photo)
+        }
+        let (a, b) = (photos[0], photos[1])
+        let store = SidecarStore()
+        let model = try await model(store: store)
+        let undo = UndoManager(); undo.groupsByEvent = false; model.undoManager = undo
+        func step(_ body: () -> Void) { undo.beginUndoGrouping(); body(); undo.endUndoGrouping() }
+        model.open(a)
+        let watching = Task { await model.library.watch(dir) }
+        defer { watching.cancel() }
+        try await waitUntil { model.library.summariesLoaded && model.library.files.count == 3 }
+        model.advanceAfterRating = false
+        model.library.filter = LibraryFilter(flags: [.pick])
+
+        // The edit view: a goes and b opens; b goes and the grid opens, empty.
+        step { model.setFlag(nil) }
+        XCTAssertEqual(model.source, b)
+        step { model.setFlag(nil) }
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertNil(model.selection.current)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [])
+        // Nothing to rate, edit, copy, paste, export or step to.
+        XCTAssertEqual(model.ratingTargets, [])
+        XCTAssertEqual(model.editTargets, [])
+        XCTAssertNil(model.copySource)
+        XCTAssertFalse(model.canExport)
+        model.setRating(5)
+        model.move(by: 1, extending: false)
+        model.moveRow(by: 1, extending: false)
+        model.selectAll()
+        model.editCurrent()
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertNil(model.selection.current)
+        XCTAssertEqual(model.library.summary(for: b).rating, 0)
+
+        // Undo: b is a pick again, open in the edit view.
+        undo.undo()
+        XCTAssertEqual(model.library.summary(for: b).flag, .pick)
+        XCTAssertEqual(model.mode, .photo)
+        XCTAssertEqual(model.source, b)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [b])
+        // Redo empties it again; another filter finds b.
+        undo.redo()
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertNil(model.selection.current)
+        model.library.filter = LibraryFilter(flags: [.unflagged])
+        XCTAssertEqual(model.selection.current, b)
+        XCTAssertEqual(model.shownPhotos.map(\.url), photos)
+
+        // The grid: b, the last pick again, goes; undo puts it back current.
+        model.library.filter = LibraryFilter(flags: [.pick])
+        undo.undo()
+        XCTAssertEqual(model.library.summary(for: b).flag, .pick)
+        model.showGrid()
+        model.click(b)
+        step { model.setFlag(.reject) }
+        XCTAssertNil(model.selection.current)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [])
+        undo.undo()
+        XCTAssertEqual(model.mode, .grid)
+        XCTAssertEqual(model.selection.current, b)
+        XCTAssertEqual(model.shownPhotos.map(\.url), [b])
         await model.flushSidecars()
     }
 
@@ -528,13 +603,14 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertNil(try store.read(photo: a), "the open photograph wasn't selected")
 
         // Rated out of the filter, they go at once; with nothing else
-        // left, the current one stays.
+        // left, the grid is empty until another filter shows the open one.
         model.library.filter = LibraryFilter(rating: .atLeast(4))
         XCTAssertEqual(model.selection.selected, [b, c])
         model.setRating(0)
-        XCTAssertEqual(model.shownPhotos.map(\.url), [b])
-        XCTAssertEqual(model.selection.selected, [b])
+        XCTAssertEqual(model.shownPhotos.map(\.url), [])
+        XCTAssertEqual(model.selection.selected, [])
         model.library.filter = LibraryFilter()
+        XCTAssertEqual(model.selection.current, a)
 
         // Arrows: two to a row here (as the sheet lays them out); up and
         // down land on the nearest across, onto a short row too.
@@ -640,7 +716,7 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(model.library.summary(for: b), LibrarySummary(rating: 2))
 
         // A duplicate is a second variant with the same edits, rating and flag, listed and selected after its photograph.
-        model.setFlag(.pick, targets: [c])
+        step { model.setFlag(.pick, targets: [c]) }
         step { model.duplicate([c]) }
         await model.flushSidecars()
         let copy = try XCTUnwrap(model.selection.current)
@@ -650,7 +726,7 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(try variants(c)[1].edits, try variants(c)[0].edits)
         XCTAssertEqual(try variants(c).map(\.flag), [.pick, .pick])
         XCTAssertEqual(model.library.items.map(\.name), ["a.png", "b.png", "c.png", "c.png (2)"])
-        model.setRating(4)
+        step { model.setRating(4) }
         await model.flushSidecars()
         XCTAssertEqual(try variants(c).map(\.rating), [0, 4], "only the duplicate is rated")
 
@@ -665,11 +741,13 @@ final class LibraryFormatTests: XCTestCase {
         XCTAssertEqual(try variants(c).map { $0.edits?["params.prep.lift"] }, [.number(30), .number(-10)])
         XCTAssertEqual(model.previousEdits?.params["prep.lift"], .number(-10), "the last photograph left with edits")
 
-        // Paste from Previous onto the open photograph, then undo it and the duplicate.
+        // Paste from Previous onto the open photograph, then undo it, the duplicate's rating and the duplicate.
         step { model.pasteFromPrevious() }
         XCTAssertEqual(model.value("prep.lift"), .number(-10))
         undo.undo()
         XCTAssertEqual(model.value("prep.lift"), .number(30))
+        XCTAssertEqual(undo.undoActionName, "Rating")
+        undo.undo()
         undo.undo()
         await model.flushSidecars()
         XCTAssertEqual(try variants(c).count, 1, "the duplicate is gone")
