@@ -70,6 +70,11 @@ cp -R data "$APP_BUNDLE/Contents/Resources/data"
 mkdir -p "$APP_BUNDLE/Contents/Resources/Fonts"
 cp macos/Fonts/Newsreader-Negs.ttf macos/Fonts/Newsreader-Negs-Italic.ttf macos/Fonts/OFL-Newsreader.txt "$APP_BUNDLE/Contents/Resources/Fonts/"
 cp LICENSE "$APP_BUNDLE/Contents/Resources/LICENSE.txt"
+# The app's accent colour, the warm grey of its outlines: menus, default
+# buttons and focus take it instead of the system blue (Info.plist names it).
+xcrun actool macos/Assets.xcassets --compile "$APP_BUNDLE/Contents/Resources" \
+    --platform macosx --minimum-deployment-target 14.0 --accent-color AccentColor \
+    --output-partial-info-plist "$BUILD_TARGET_DIR/assets-partial.plist" >/dev/null
 chmod +x "$APP_BUNDLE/Contents/MacOS/NegsApp" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm-native" \
     "$APP_BUNDLE/Contents/MacOS/spektrafilm" \

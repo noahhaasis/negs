@@ -80,6 +80,8 @@ def main():
     for name in ["Newsreader-Negs.ttf", "Newsreader-Negs-Italic.ttf", "OFL-Newsreader.txt"]:
         require((fonts / name).is_file(), f"bundled font file missing: {name}")
         require(sha(fonts / name) == sha(ROOT / "macos/Fonts" / name), f"stale bundled font file: {name}")
+    require(plist.get("NSAccentColorName") == "AccentColor", "the accent colour isn't named in Info.plist")
+    require((app / "Contents/Resources/Assets.car").is_file(), "Assets.car (the accent colour) missing")
     data = app / "Contents/Resources/data"
     expected_paths = {p.relative_to(ROOT / "data") for p in (ROOT / "data").rglob("*") if p.is_file()}
     actual_paths = {p.relative_to(data) for p in data.rglob("*") if p.is_file()}
