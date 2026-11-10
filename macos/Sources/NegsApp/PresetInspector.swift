@@ -15,9 +15,9 @@ struct PresetInspector: View {
     @State private var dropTargeted = false
 
     var body: some View {
+        // New and Import… sit in the pane header; the folder is in the File menu.
         VStack(spacing: 0) {
-            header
-            Divider()
+            InkRule()
             if model.presets.isEmpty { empty } else { list }
         }
         .dropDestination(for: URL.self) { urls, _ in

@@ -64,11 +64,11 @@ import XCTest
         try await Task.sleep(for: .milliseconds(700))
         let inspector = split.splitViewItems[1].viewController.view
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-        // The tab's form, below the pinned Film & Paper form.
+        // The tab's scrolling sections, below the pinned scope, stocks and tabs.
         let scroll = try XCTUnwrap(descendants(inspector).compactMap { $0 as? NSScrollView }.max { $0.frame.height < $1.frame.height })
         let document = try XCTUnwrap(scroll.documentView)
         // Only Enlarger is expanded; its last slider is Preflash yellow.
-        let slider = try XCTUnwrap(descendants(inspector).compactMap { $0 as? NSSlider }.last)
+        let slider = try XCTUnwrap(descendants(inspector).compactMap { $0 as? InkSliderView }.last)
         func sliderY() -> CGFloat { slider.convert(slider.bounds, to: inspector).midY }
         func capture(_ name: String) throws {
             guard let folder = ProcessInfo.processInfo.environment["NEGS_INSPECTOR_LAYOUT_SNAPSHOTS"] else { return }

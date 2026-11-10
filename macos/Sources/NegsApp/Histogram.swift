@@ -146,7 +146,7 @@ struct HistogramView: View {
             }
         }
         .padding(.horizontal, 4).padding(.top, 6)
-        .background(Color(white: 0.075), in: RoundedRectangle(cornerRadius: 6))
+        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 3))
         .accessibilityElement()
         .accessibilityLabel("Histogram")
         .accessibilityValue(histogram == nil ? "No developed photograph" : "Red, green, and blue tones of the developed photograph")
@@ -160,7 +160,7 @@ struct WaveformView: View {
         HStack(spacing: 4) {
             VStack {
                 ForEach([100, 75, 50, 25, 0], id: \.self) { level in
-                    Text("\(level)").font(.system(size: 9, design: .monospaced)).foregroundStyle(Color.white.opacity(0.6))
+                    Text("\(level)").font(.system(size: 9, design: .monospaced)).foregroundStyle(Theme.dim)
                     if level != 0 { Spacer(minLength: 0) }
                 }
             }
@@ -173,7 +173,7 @@ struct WaveformView: View {
             }
         }
         .padding(6)
-        .background(Color(white: 0.075), in: RoundedRectangle(cornerRadius: 6))
+        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 3))
         .accessibilityElement()
         .accessibilityLabel("RGB waveform")
         .accessibilityValue(waveform == nil ? "No developed photograph" : "Red, green, and blue signal levels from zero to one hundred percent across the developed photograph")
@@ -186,7 +186,7 @@ private func scopeGrid(context: inout GraphicsContext, size: CGSize) {
         grid.move(to: CGPoint(x: 0, y: size.height * fraction))
         grid.addLine(to: CGPoint(x: size.width, y: size.height * fraction))
     }
-    context.stroke(grid, with: .color(.white.opacity(0.09)), lineWidth: 0.5)
+    context.stroke(grid, with: .color(Theme.line), lineWidth: 0.5)
 }
 
 enum ScopeMode: String, CaseIterable {
@@ -206,15 +206,21 @@ struct ScopePanelView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            HStack {
-                Picker("Scope", selection: $mode) {
-                    ForEach(ScopeMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            // The two views as words, like the pane header's.
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                ForEach(ScopeMode.allCases, id: \.self) { item in
+                    Button { mode = item } label: {
+                        Text(item.rawValue).font(Theme.ui(11, weight: .medium)).foregroundStyle(mode == item ? Theme.paper : Theme.dim)
+                    }
+                    .buttonStyle(InkPressStyle())
+                    .inkFocus { mode = item }
+                    .accessibilityAddTraits(mode == item ? [.isButton, .isSelected] : .isButton)
                 }
-                .pickerStyle(.menu).labelsHidden().fixedSize().controlSize(.small)
-                .accessibilityLabel("Scope view")
                 Spacer()
-                Text("RGB").font(.caption2).foregroundStyle(.secondary)
+                Text("RGB").font(Theme.ui(10)).foregroundStyle(Theme.dim)
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Scope view")
             Group {
                 switch mode {
                 case .histogram: HistogramView(histogram: histogram)
@@ -224,7 +230,7 @@ struct ScopePanelView: View {
             .frame(height: Self.clamped(dragHeight ?? height))
             .overlay {
                 if histogram == nil {
-                    Text("No developed photograph").font(.caption).foregroundStyle(Color.white.opacity(0.6))
+                    Text("No developed photograph").font(Theme.serif(13, italic: true)).foregroundStyle(Theme.dim)
                 }
             }
             resizeHandle
@@ -233,7 +239,7 @@ struct ScopePanelView: View {
 
     /// A grabber under the scope: drag to resize, double-click for the default height.
     private var resizeHandle: some View {
-        Capsule().fill(.tertiary).frame(width: 32, height: 4)
+        Capsule().fill(Theme.track).frame(width: 32, height: 3)
             .frame(maxWidth: .infinity, minHeight: 8)
             .contentShape(Rectangle())
             .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }

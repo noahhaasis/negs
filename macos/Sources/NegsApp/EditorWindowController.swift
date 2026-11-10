@@ -5,6 +5,7 @@ import SwiftUI
 /// End field editing even when the clicked view doesn't take keyboard focus.
 @MainActor final class EditorWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
+        InputMode.shared.note(event)
         if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type),
            let editor = firstResponder as? NSTextView, editor.isFieldEditor,
            let field = editor.delegate as? NSTextField,
@@ -65,10 +66,12 @@ import SwiftUI
         panel = NSHostingController(rootView: InspectorPanel(model: model, built: false))
         panel.sizingOptions = []
         panel.view.frame.size = NSSize(width: 340, height: 860)
+        panel.view.identifier = InkKeyLoop.inspectorIdentifier
         let canvasItem = NSSplitViewItem(viewController: canvas)
         canvasItem.minimumThickness = 680
         inspector = NSSplitViewItem(inspectorWithViewController: panel)
-        inspector.minimumThickness = 300
+        // The rows keep a usable slider track down to 340 (§2.3).
+        inspector.minimumThickness = Theme.Size.inspectorSmallest
         inspector.maximumThickness = 440
         inspector.isCollapsed = !model.inspectorVisible
         let split = NSSplitViewController()
@@ -122,7 +125,7 @@ import SwiftUI
             MainActor.assumeIsolated { self?.windowChangedOcclusion() }
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            MainActor.assumeIsolated { self?.holdOriginal(event) == true || self?.escapeToGrid(event) == true } ? nil : event
+            MainActor.assumeIsolated { self?.holdOriginal(event) == true || self?.enterInspector(event) == true || self?.escapeToGrid(event) == true } ? nil : event
         }
         resigning = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -174,6 +177,18 @@ import SwiftUI
     /// Esc shows the grid, as in Lightroom, unless text is being typed or a
     /// crop drawn (whose Cancel takes it). The canvas's hosting view claims
     /// Escape before the menu would see it, so it's caught here.
+    /// Tab from outside the inspector (nothing, the canvas, the strip) moves
+    /// to its first control, ⇧Tab to its last; inside it the controls step
+    /// through themselves (`InkKeyLoop`). Text fields keep Tab.
+    private func enterInspector(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.keyCode == 48, event.window === window, model.mode == .photo,
+              event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+              !inspector.isCollapsed, !(window?.firstResponder is NSText) else { return false }
+        let root = panel.view
+        if let current = window?.firstResponder as? NSView, InkKeyLoop.root(of: current) != nil { return false }
+        return InkKeyLoop.advance(in: root, from: nil, forward: !event.modifierFlags.contains(.shift))
+    }
+
     private func escapeToGrid(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, event.keyCode == 53, event.window === window,
               event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),

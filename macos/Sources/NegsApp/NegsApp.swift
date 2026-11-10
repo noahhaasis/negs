@@ -281,10 +281,36 @@ struct InspectorPanel: View {
     var built = true
 
     var body: some View {
-        if !built { Color.clear }
-        else if let session = model.cropSession { CropInspector(model: model, session: session) }
-        else if model.inspectorPane == .presets { PresetInspector(model: model) }
-        else { AdjustmentInspector(model: model) }
+        ZStack(alignment: .top) {
+            Theme.panel
+            if !built { Color.clear }
+            else if let session = model.cropSession { CropInspector(model: model, session: session) }
+            else {
+                VStack(spacing: 0) {
+                    PaneHeader(model: model)
+                    if model.inspectorPane == .presets { PresetInspector(model: model) }
+                    // The sections aren't built until a photograph opens.
+                    else if model.source == nil { InspectorEmptyLine() }
+                    else { AdjustmentInspector(model: model) }
+                }
+            }
+        }
+        .tint(Theme.paper)
+    }
+}
+
+/// The panel with no photograph: one line instead of its tabs (§4.14).
+struct InspectorEmptyLine: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            InkRule()
+            Text("The film, the paper and every setting appear here once a photograph is open.")
+                .font(Theme.serif(14, italic: true)).foregroundStyle(Theme.dim)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Theme.Size.gutter)
+                .padding(.top, 18)
+            Spacer(minLength: 0)
+        }
     }
 }
 

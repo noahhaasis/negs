@@ -52,6 +52,7 @@ import SwiftUI
         file.addItem(.separator())
         command(file, "New Preset", #selector(newPreset), "s", [.command, .shift])
         command(file, "Import Presets…", #selector(importPresets), "o", [.command, .shift])
+        command(file, "Show Presets Folder", #selector(showPresetsFolder), "")
 
         let edit = submenu("Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -81,6 +82,8 @@ import SwiftUI
         command(view, "Hide Film Strip", #selector(toggleFilmstrip), "f", [.command, .option])
         command(view, "Show Adjustments", #selector(toggleAdjustments), "i", [.command, .option])
         command(view, "Show Presets", #selector(togglePresets), "p", [.command, .option])
+        // Every control in every module, as the Lab's Advanced controls switch did.
+        command(view, "Show All Controls", #selector(toggleAllControls), "")
         view.addItem(.separator())
         command(view, "Fit Photograph", #selector(fitPhotograph), "0")
         command(view, "Actual Size", #selector(actualSize), "1")
@@ -186,6 +189,8 @@ import SwiftUI
     @objc private func togglePresets() { model.togglePane(.presets) }
     @objc private func newPreset() { model.newPreset() }
     @objc private func importPresets() { model.importPresetsPanel() }
+    @objc private func showPresetsFolder() { model.showPresetsFolder() }
+    @objc private func toggleAllControls() { AdjustmentInspector.toggleAllControls() }
     @objc private func fitPhotograph() { model.zoom(fit: true) }
     @objc private func actualSize() { model.zoom(fit: false) }
     @objc private func rotate() { model.rotate() }
@@ -288,6 +293,10 @@ import SwiftUI
             item.state = model.inspectorVisible && model.inspectorPane == .presets ? .on : .off; return model.mode == .photo
         case #selector(newPreset): return model.canChangePresets && model.mode == .photo
         case #selector(importPresets): return model.canChangePresets
+        case #selector(showPresetsFolder): return true
+        case #selector(toggleAllControls):
+            item.state = UserDefaults.standard.bool(forKey: AdjustmentInspector.allControlsKey) ? .on : .off
+            return model.mode == .photo
         case #selector(fitPhotograph), #selector(actualSize): return editing && !model.cropping
         case #selector(rotate): return editing
         case #selector(crop):

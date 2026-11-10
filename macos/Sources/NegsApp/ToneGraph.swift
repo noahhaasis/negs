@@ -223,15 +223,30 @@ struct ToneGraphView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            // The channels as words; the chosen one 600 and underlined in pencil.
+            HStack(spacing: 0) {
                 Spacer()
-                Picker("Channel", selection: $channelTag) {
-                    Text("RGB").tag("rgb"); Text("R").tag("r"); Text("G").tag("g"); Text("B").tag("b")
+                ForEach(Array(["rgb", "r", "g", "b"].enumerated()), id: \.element) { index, tag in
+                    if index > 0 { Text(" · ").font(Theme.ui(11)).foregroundStyle(Theme.track) }
+                    let chosen = channelTag == tag
+                    Button { channelTag = tag } label: {
+                        Text(tag.uppercased()).font(Theme.ui(11, weight: chosen ? .semibold : .regular))
+                            .foregroundStyle(chosen ? Theme.paper : Theme.dim)
+                            .pencilUnderline(chosen, height: 4, offset: 3)
+                    }
+                    .buttonStyle(InkPressStyle())
+                    .inkFocus { channelTag = tag }
+                    .accessibilityLabel(["rgb": "All channels", "r": "Red", "g": "Green", "b": "Blue"][tag] ?? tag)
+                    .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
                 }
-                .pickerStyle(.segmented).labelsHidden().controlSize(.mini).fixedSize()
             }
             graph.frame(height: 170)
+            HStack {
+                Text("shadows"); Spacer(); Text("midtones"); Spacer(); Text("highlights")
+            }
+            .font(Theme.serif(12, italic: true)).foregroundStyle(Theme.dim)
+            .accessibilityHidden(true)
+            Text(label).font(Theme.serif(13, italic: true)).foregroundStyle(drag == nil && hovered == nil ? Theme.dim : Theme.paper).lineLimit(1)
         }
         .onAppear { model.toneGraphAppeared(true) }
         .onDisappear { model.toneGraphAppeared(false) }
@@ -270,7 +285,7 @@ struct ToneGraphView: View {
                 model.resetValue(handle.path)
             }
         }
-        .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 6))
+        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 3))
         .accessibilityElement()
         .accessibilityLabel("Tone graph")
         .accessibilityValue("The print's brightness for each film exposure. Drag the middle handle sideways for print exposure, the side handles or the curve up or down for contrast.")
@@ -378,15 +393,18 @@ struct ToneGraphView: View {
 
     private func draw(_ context: inout GraphicsContext, size: CGSize, display: ToneDisplay?, histogram: FilmHistogram?, channel: Int?) {
         let colors: [Color] = [Color(red: 1, green: 0.35, blue: 0.35), Color(red: 0.35, green: 0.9, blue: 0.35), Color(red: 0.4, green: 0.55, blue: 1)]
-        // Grid: every 2 stops, mid-grey dashed; brightness quarters.
+        // Grid in `line`: every 2 stops (0 stronger), brightness quarters;
+        // a dashed `track` diagonal for reference (§4.9).
         for stop in stride(from: -4.0, through: 4.0, by: 2.0) {
             var line = Path(); line.move(to: CGPoint(x: x(stop, size), y: 0)); line.addLine(to: CGPoint(x: x(stop, size), y: size.height))
-            context.stroke(line, with: .color(.white.opacity(stop == 0 ? 0.18 : 0.07)), style: StrokeStyle(lineWidth: 1, dash: stop == 0 ? [3, 3] : []))
+            context.stroke(line, with: .color(stop == 0 ? Theme.track : Theme.line), lineWidth: 1)
         }
         for level in [0.25, 0.5, 0.75] {
             var line = Path(); line.move(to: CGPoint(x: 0, y: y(level, size))); line.addLine(to: CGPoint(x: size.width, y: y(level, size)))
-            context.stroke(line, with: .color(.white.opacity(0.07)), lineWidth: 1)
+            context.stroke(line, with: .color(Theme.line), lineWidth: 1)
         }
+        var diagonal = Path(); diagonal.move(to: CGPoint(x: 0, y: y(0, size))); diagonal.addLine(to: CGPoint(x: size.width, y: y(1, size)))
+        context.stroke(diagonal, with: .color(Theme.track), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         // Histogram of the photograph's film exposure, behind the curve.
         if let histogram {
             let bins = histogram.bins(channel), peak = bins.max() ?? 0
@@ -414,22 +432,23 @@ struct ToneGraphView: View {
         }
         for c in 0..<3 {
             let strong = channel == c
-            context.stroke(path(display.rgb[c]), with: .color(colors[c].opacity(strong ? 1 : 0.35)), lineWidth: strong ? 2 : 1)
+            context.stroke(path(display.rgb[c]), with: .color(colors[c].opacity(strong ? 1 : 0.3)), lineWidth: strong ? 1.6 : 1)
         }
         if channel == nil {
-            context.stroke(path(display.brightness(nil)), with: .color(.white), lineWidth: 2)
+            context.stroke(path(display.brightness(nil)), with: .color(Theme.paper), lineWidth: 1.6)
         }
         if case .curve(let t) = drag?.handle ?? hovered {
             let point = CGPoint(x: x(t, size), y: y(display.value(display.brightness(channel), atStops: drag?.tone ?? t), size))
-            context.fill(Path(ellipseIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)), with: .color(.white.opacity(0.6)))
+            context.fill(Path(ellipseIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)), with: .color(Theme.paper.opacity(0.6)))
         }
         for (handle, point) in handlePoints(display, channel: channel) {
-            let active = handle == (drag?.handle ?? hovered)
-            let r: CGFloat = active ? 6 : 4.5
-            let rect = CGRect(x: point.x - r, y: point.y - r, width: 2 * r, height: 2 * r)
-            let shape = handle == .middle ? Path(roundedRect: rect, cornerRadius: 1.5) : Path(ellipseIn: rect)
-            context.fill(shape, with: .color(handle == .middle ? .yellow : .white))
-            context.stroke(shape, with: .color(.black.opacity(0.8)), lineWidth: 1)
+            // Drawn as the sliders' knobs: a moved one fills yellow, the one
+            // pointed at or dragged turns `paper` and grows.
+            let active = handle == (drag?.handle ?? hovered), moved = model.isModified(handle.path)
+            let r: CGFloat = active ? 5.4 : 4.5
+            let shape = Path(ellipseIn: CGRect(x: point.x - r, y: point.y - r, width: 2 * r, height: 2 * r))
+            context.fill(shape, with: .color(drag?.handle == handle ? Theme.paper : moved ? Theme.accent : Theme.panel))
+            context.stroke(shape, with: .color(active ? Theme.paper : moved ? Theme.accent : Theme.label), lineWidth: 1.5)
         }
     }
 }

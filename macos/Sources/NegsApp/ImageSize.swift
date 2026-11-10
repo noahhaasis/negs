@@ -18,7 +18,7 @@ enum ImageSize {
     /// The largest working frame an enlargement may request, in pixels.
     static let maxWorkingPixels = 128_000_000.0
 
-    enum Mode { case original, longestSide }
+    enum Mode: String { case original, longestSide }
 
     static func mode(of params: JSONValue) -> Mode { target(of: params) == nil ? .original : .longestSide }
 
