@@ -234,8 +234,11 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         window.orderFront(nil)
         defer { window.orderOut(nil) }
         XCTAssertTrue(window.makeFirstResponder(before))
-
         let presenter = AlertPresenter(model: model, window: window, root: content)
+        // The window isn't key (here nothing is; in the app, Settings may
+        // be, when it asks): it's given the keys, so Return and Esc answer.
+        var keyed: [NSWindow] = []
+        presenter.takeKeys = { keyed.append($0) }
         let asking = Task { await model.ask(question) }
         try await waitUntil { model.alert != nil }
         presenter.show(model.alert)
@@ -250,6 +253,8 @@ private let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().d
         XCTAssertEqual(sheet.frame.midX, cover.bounds.midX, accuracy: 1)
         XCTAssertEqual(sheet.frame.width, AlertSheet.width + AlertSheet.margin.leading + AlertSheet.margin.trailing, accuracy: 0.5)
         XCTAssertTrue(window.firstResponder === sheet, "the keys go to the sheet")
+        XCTAssertEqual(keyed.count, 1)
+        XCTAssertTrue(keyed.first === window, "asked from another window, it takes the keys")
         // A click under it lands on the cover, not what's below.
         XCTAssertTrue(content.hitTest(NSPoint(x: 20, y: 20)) === cover)
 

@@ -288,6 +288,9 @@ final class AlertPanel: NSPanel {
     private var shown: AlertRequest?
     /// What had the keys before the sheet.
     private weak var returnFocus: NSResponder?
+    /// Gives the window the keys when the sheet comes up while another
+    /// window has them; tests watch it, as no window is key under XCTest.
+    var takeKeys: (NSWindow) -> Void = { $0.makeKeyAndOrderFront(nil) }
 
     init(model: EditorModel, window: NSWindow, root: NSView) {
         self.model = model
@@ -335,6 +338,9 @@ final class AlertPanel: NSPanel {
             // Over everything, the grid's sheet too.
             root.addSubview(cover, positioned: .above, relativeTo: nil)
             returnFocus = window.firstResponder
+            // Asked from another window (Settings' Remove All App Data):
+            // this one takes the keys, so Return and Esc answer the sheet.
+            if !window.isKeyWindow { takeKeys(window) }
         }
         // The cover is the columns' container, which starts under the title band.
         let below = cover.bounds
